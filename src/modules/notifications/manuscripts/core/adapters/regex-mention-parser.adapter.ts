@@ -6,7 +6,8 @@ import { MentionToken } from '../domain/value-objects/mention-token.vo';
 export class RegexMentionParserAdapter implements IMentionParserPort {
   // Matches @email (e.g. @user@domain.com) or standard @handle (e.g. @alice)
   // Negative lookbehind ensures the leading @ isn't part of an existing email address
-  private readonly mentionRegex = /(?<![a-zA-Z0-9_.+-])@([a-zA-Z0-9_.+-]+(?:@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)?)/g;
+  private readonly mentionRegex =
+    /(?<![a-zA-Z0-9_.+-])@([a-zA-Z0-9_.+-]+(?:@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)?)/g;
 
   extractMentions(text: string): MentionToken[] {
     if (!text || typeof text !== 'string') {
@@ -36,7 +37,8 @@ export class RegexMentionParserAdapter implements IMentionParserPort {
       }
       seenHandles.add(lowerHandle);
 
-      const isEmail = handle.includes('@') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(handle);
+      const isEmail =
+        handle.includes('@') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(handle);
       tokens.push(MentionToken.create(rawMatch, handle, match.index, isEmail));
     }
 

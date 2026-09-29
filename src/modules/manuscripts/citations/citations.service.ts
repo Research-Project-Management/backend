@@ -8,7 +8,10 @@ import { SearchCitationKeysUseCase } from './core/use-cases/search-citation-keys
 import { ResolveIdentifierToBibUseCase } from './core/use-cases/resolve-identifier-to-bib.use-case';
 import { ValidateProjectBibtexUseCase } from './core/use-cases/validate-project-bibtex.use-case';
 import { SyncLibraryCollectionUseCase } from './core/use-cases/sync-library-collection.use-case';
-import { IBibtexParserPort, BIBTEX_PARSER_PORT } from './core/ports/bibtex-parser.port';
+import {
+  IBibtexParserPort,
+  BIBTEX_PARSER_PORT,
+} from './core/ports/bibtex-parser.port';
 import {
   CitationQueryDto,
   ResolveIdentifierDto,
@@ -28,7 +31,7 @@ export class CitationsService {
     private readonly validateBibtexUseCase: ValidateProjectBibtexUseCase,
     private readonly syncLibraryUseCase: SyncLibraryCollectionUseCase,
     @Inject(BIBTEX_PARSER_PORT)
-    private readonly bibParser: IBibtexParserPort
+    private readonly bibParser: IBibtexParserPort,
   ) {}
 
   /**
@@ -36,7 +39,7 @@ export class CitationsService {
    */
   public async searchCitationKeys(
     projectId: string,
-    queryDto: CitationQueryDto
+    queryDto: CitationQueryDto,
   ): Promise<BibEntryDto[]> {
     const entries = await this.searchKeysUseCase.execute({
       projectId,
@@ -52,7 +55,7 @@ export class CitationsService {
    */
   public async resolveIdentifier(
     projectId: string,
-    dto: ResolveIdentifierDto
+    dto: ResolveIdentifierDto,
   ): Promise<{ entry: BibEntryDto; filePath: string; identifierType: string }> {
     const res = await this.resolveIdentifierUseCase.execute({
       projectId,
@@ -61,7 +64,7 @@ export class CitationsService {
     });
 
     return {
-      entry: res.entry.toJSON() as BibEntryDto,
+      entry: res.entry.toJSON(),
       filePath: res.filePath,
       identifierType: res.identifierType,
     };
@@ -70,7 +73,9 @@ export class CitationsService {
   /**
    * Validate all .bib files in project for duplicates or syntax issues.
    */
-  public async validateProjectBibtex(projectId: string): Promise<CitationValidationDto> {
+  public async validateProjectBibtex(
+    projectId: string,
+  ): Promise<CitationValidationDto> {
     return this.validateBibtexUseCase.execute(projectId);
   }
 
@@ -80,7 +85,7 @@ export class CitationsService {
   public async syncLibraryCollection(
     projectId: string,
     userId: string,
-    dto: SyncLibraryDto
+    dto: SyncLibraryDto,
   ): Promise<SyncLibraryResultDto> {
     return this.syncLibraryUseCase.execute({
       projectId,

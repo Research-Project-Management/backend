@@ -9,8 +9,17 @@ import { ZoteroProvider } from './providers/zotero.provider';
 import { MendeleyProvider } from './providers/mendeley.provider';
 import { GithubProvider } from './providers/github.provider';
 
+import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
+import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
+
 @Module({
-  imports: [PrismaModule, FilestoreModule, ExportImportModule],
+  imports: [
+    PrismaModule,
+    FilestoreModule,
+    ExportImportModule,
+    DocstoreModule,
+    StructureModule,
+  ],
   controllers: [IntegrationsController],
   providers: [
     IntegrationsService,
@@ -19,7 +28,11 @@ import { GithubProvider } from './providers/github.provider';
     MendeleyProvider,
     GithubProvider,
   ],
-  exports: [IntegrationsService],
+  exports: [
+    IntegrationsService,
+    IntegrationsRepository,
+    ZoteroProvider,
+    MendeleyProvider,
+  ],
 })
 export class IntegrationsModule {}
-

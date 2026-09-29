@@ -17,7 +17,10 @@ export abstract class IDiffEnginePort {
   /**
    * Compares two project snapshots and returns an array of FileDiffVo for each added, deleted, or modified file.
    */
-  abstract compareSnapshots(baseSnapshot: Snapshot, targetSnapshot: Snapshot): FileDiffVo[];
+  abstract compareSnapshots(
+    baseSnapshot: Snapshot,
+    targetSnapshot: Snapshot,
+  ): FileDiffVo[];
 
   /**
    * Calculates Myers line diffs and word-level highlighting for two text line arrays.

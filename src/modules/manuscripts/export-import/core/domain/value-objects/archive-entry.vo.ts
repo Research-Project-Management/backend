@@ -91,7 +91,11 @@ export class ArchiveEntryVo {
     this.sizeBytes = data.length;
   }
 
-  public static create(rawPath: string, data: Buffer = Buffer.alloc(0), isDirectory = false): ArchiveEntryVo {
+  public static create(
+    rawPath: string,
+    data: Buffer = Buffer.alloc(0),
+    isDirectory = false,
+  ): ArchiveEntryVo {
     // 1. Normalize POSIX path separators
     const normalized = rawPath.replace(/\\/g, '/');
 
@@ -100,13 +104,15 @@ export class ArchiveEntryVo {
     if (
       segments.includes('..') ||
       /^[a-zA-Z]:/.test(normalized) ||
-      /^\/+(etc|var|usr|bin|sbin|proc|sys|dev|root|home|boot|lib)\b/i.test(normalized)
+      /^\/+(etc|var|usr|bin|sbin|proc|sys|dev|root|home|boot|lib)\b/i.test(
+        normalized,
+      )
     ) {
       throw new ZipSlipSecurityException(rawPath);
     }
 
     // Remove leading slashes and dot prefixes like ./
-    let clean = normalized.replace(/^(\.\/)+/, '').replace(/^\/+/, '');
+    const clean = normalized.replace(/^(\.\/)+/, '').replace(/^\/+/, '');
 
     const isDir = isDirectory || clean.endsWith('/');
     const trimmedPath = clean.replace(/\/+$/, '');
@@ -168,7 +174,9 @@ export class ArchiveEntryVo {
       }
     }
     try {
-      new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, sampleSize));
+      new TextDecoder('utf-8', { fatal: true }).decode(
+        buffer.subarray(0, sampleSize),
+      );
       return true;
     } catch {
       return false;

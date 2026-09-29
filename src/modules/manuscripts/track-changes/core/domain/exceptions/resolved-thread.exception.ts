@@ -5,7 +5,9 @@
 
 export class ResolvedThreadException extends Error {
   constructor(public readonly threadId: string) {
-    super(`Cannot reply or mutate comment thread '${threadId}' because it has already been resolved.`);
+    super(
+      `Cannot reply or mutate comment thread '${threadId}' because it has already been resolved.`,
+    );
     this.name = 'ResolvedThreadException';
   }
 }

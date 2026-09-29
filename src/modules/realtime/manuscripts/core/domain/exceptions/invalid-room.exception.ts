@@ -4,7 +4,10 @@
  */
 
 export class InvalidRoomException extends Error {
-  constructor(public readonly roomId: string, message?: string) {
+  constructor(
+    public readonly roomId: string,
+    message?: string,
+  ) {
     super(message || `Room '${roomId}' is invalid or no longer active.`);
     this.name = 'InvalidRoomException';
   }

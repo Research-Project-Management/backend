@@ -44,7 +44,13 @@ export class AddCommentReplyUseCase {
     });
 
     const saved = await this.repository.addCommentReply(threadId, reply);
-    this.notifier.notifyCommentReplied(projectId, docId, threadId, saved, thread.createdById);
+    this.notifier.notifyCommentReplied(
+      projectId,
+      docId,
+      threadId,
+      saved,
+      thread.createdById,
+    );
 
     return saved;
   }

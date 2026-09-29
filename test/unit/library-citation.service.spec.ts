@@ -1,10 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
-import { CitationService } from '@/modules/library/citation/application/services/citation.service';
+import { CitationService } from '@/modules/library/citation/core/use-cases/citation.service';
 import {
   CslStyleRegistry,
   SUPPORTED_CITATION_STYLES,
-} from '@/modules/library/citation/application/formatters/csl-style-registry';
-import { CitationItemInput } from '@/modules/library/citation/domain/types/citation.types';
+} from '@/modules/library/citation/core/adapters/csl-style-registry';
+import { CitationItemInput } from '@/modules/library/citation/core/domain/citation.types';
 
 describe('Library Citation Service & CSL Style Registry', () => {
   let citationService: CitationService;
@@ -114,7 +114,7 @@ describe('Library Citation Service & CSL Style Registry', () => {
 
     it('should throw BadRequestException on unknown citation style', () => {
       expect(() => {
-        citationService.formatItem(mockItem, 'invalid-style-xyz' as any);
+        citationService.formatItem(mockItem, 'invalid-style-xyz');
       }).toThrow(BadRequestException);
     });
   });

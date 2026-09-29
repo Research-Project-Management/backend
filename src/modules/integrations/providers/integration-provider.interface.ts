@@ -1,4 +1,5 @@
-export type IntegrationProviderType = 'zotero' | 'mendeley' | 'orcid' | 'github';
+export type IntegrationProviderType =
+  'zotero' | 'mendeley' | 'orcid' | 'github';
 
 export const INTEGRATION_PROVIDERS: readonly IntegrationProviderType[] = [
   'zotero',
@@ -7,7 +8,9 @@ export const INTEGRATION_PROVIDERS: readonly IntegrationProviderType[] = [
   'github',
 ] as const;
 
-export function isValidProvider(provider: string): provider is IntegrationProviderType {
+export function isValidProvider(
+  provider: string,
+): provider is IntegrationProviderType {
   return INTEGRATION_PROVIDERS.includes(provider as IntegrationProviderType);
 }
 
@@ -36,7 +39,10 @@ export interface RemoteCollectionItem {
 
 export interface IIntegrationProvider {
   readonly provider: IntegrationProviderType;
-  initiateOAuth(userId: string, redirectUri: string): Promise<OAuthInitiationResult>;
+  initiateOAuth(
+    userId: string,
+    redirectUri: string,
+  ): Promise<OAuthInitiationResult>;
   handleCallback(params: {
     codeOrToken: string;
     verifier?: string;
@@ -44,7 +50,10 @@ export interface IIntegrationProvider {
     secret?: string;
     redirectUri: string;
   }): Promise<OAuthExchangeResult>;
-  fetchCollections(decryptedToken: string, providerUserId: string): Promise<RemoteCollectionItem[]>;
+  fetchCollections(
+    decryptedToken: string,
+    providerUserId: string,
+  ): Promise<RemoteCollectionItem[]>;
   fetchCollectionBibtex(
     decryptedToken: string,
     providerUserId: string,

@@ -12,17 +12,12 @@ import {
   Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import {
-  CompileManuscriptDto,
-  ClsiWordCountDto,
-} from './dto/clsi.dto';
-import {
-  ForwardSyncDto,
-  ReverseSyncDto,
-} from './dto/synctex.dto';
+import { CompileManuscriptDto, ClsiWordCountDto } from './dto/clsi.dto';
+import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 import {
   SyncPoint,
   ReverseSyncPoint,
@@ -43,12 +38,19 @@ import {
   CompilePipeline,
   CompilePipelineResult,
 } from './core/pipeline/compile-pipeline';
+import { CompileFairQueue } from './core/pipeline/compile-fair-queue';
 import { SyncTexUseCase } from './core/pipeline/synctex.use-case';
 import { WordCountUseCase } from './core/pipeline/word-count.use-case';
-import { DiskUsageCleaner, DiskUsageOptions } from './core/adapters/workspace/disk-usage.cleaner';
+import {
+  DiskUsageCleaner,
+  DiskUsageOptions,
+} from './core/adapters/workspace/disk-usage.cleaner';
 import { ClsiHealthCheck } from './core/adapters/engines/health-check';
 import { ClsiMetrics } from './core/adapters/telemetry/clsi.metrics';
-import { buildZipArchive, ZipFileEntry } from './core/adapters/artifacts/zip.util';
+import {
+  buildZipArchive,
+  ZipFileEntry,
+} from './core/adapters/artifacts/zip.util';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 
 export type ClsiCompileResult =
@@ -77,6 +79,7 @@ export class ClsiService {
   private readonly logger = new Logger(ClsiService.name);
   private readonly workspace: OverleafIncrementalWorkspace;
   private readonly pipeline: CompilePipeline;
+  private readonly fairQueue = new CompileFairQueue();
   private readonly synctexUseCase: SyncTexUseCase;
   private readonly wordCountUseCase: WordCountUseCase;
   private readonly diskUsageCleaner: DiskUsageCleaner;
@@ -95,15 +98,15 @@ export class ClsiService {
     const useDocker =
       this.configService.get<string>('USE_DOCKER_SANDBOX') === 'true';
     const dockerImage =
-      this.configService.get<string>('DOCKER_IMAGE') || 'sharelatex/clsi:latest';
+      this.configService.get<string>('DOCKER_IMAGE') ||
+      'sharelatex/clsi:latest';
     const latexmkBin =
       this.configService.get<string>('LATEXMK_BIN') || 'latexmk';
     const tectonicBin =
       this.configService.get<string>('TECTONIC_BIN') || 'tectonic';
 
     this.remoteClsiUrl =
-      this.configService.get<string>('CLSI_URL') ||
-      'http://localhost:3013';
+      this.configService.get<string>('CLSI_URL') || 'http://localhost:3013';
 
     // Initialize Hexagonal Adapters
     this.workspace = new OverleafIncrementalWorkspace(scratchDir);
@@ -126,19 +129,22 @@ export class ClsiService {
       this.workspace,
       latexmkEngine,
       tectonicEngine,
-      logParser
+      logParser,
     );
     this.synctexUseCase = new SyncTexUseCase(this.workspace, synctexProcessor);
     this.wordCountUseCase = new WordCountUseCase(wordCounter);
   }
 
   private hashSource(source: string): string {
-    return crypto.createHash('sha256').update(source || '').digest('hex');
+    return crypto
+      .createHash('sha256')
+      .update(source || '')
+      .digest('hex');
   }
 
   public async compile(
     dto: CompileManuscriptDto,
-    _userId?: string
+    _userId?: string,
   ): Promise<ClsiCompileResult> {
     const projectId = dto.projectId || dto.project_id || 'default';
     const mainFile = dto.main_file || 'main.tex';
@@ -158,13 +164,14 @@ export class ClsiService {
             ? (record.lines as string[]).join('\n')
             : String(record.lines);
         }
-      } catch (err: any) {
-        this.logger.debug(`Could not auto-fetch page ${pageId}: ${err.message}`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Could not auto-fetch page ${pageId}: ${msg}`);
       }
     }
 
     const sourceHash = this.hashSource(
-      `${source}:${JSON.stringify(files)}:${engine}:${dto.draft ?? false}`
+      `${source}:${JSON.stringify(files)}:${engine}:${dto.draft ?? false}`,
     );
     const cacheKey = `flux:clsi:compile:${sourceHash}`;
 
@@ -212,25 +219,26 @@ export class ClsiService {
                 source,
                 files,
               }),
-              signal: AbortSignal.timeout(dto.timeout_ms ?? dto.timeoutMs ?? 60000),
+              signal: AbortSignal.timeout(
+                dto.timeout_ms ?? dto.timeoutMs ?? 60000,
+              ),
             });
             if (res.status !== 404) {
               response = res;
               break;
             }
-          } catch (err: any) {
-            lastError = err;
+          } catch (err: unknown) {
+            lastError = err instanceof Error ? err : new Error(String(err));
           }
         }
 
         if (response && response.ok) {
-          const rawResult = (await response.json()) as any;
+          const rawResult = (await response.json()) as ClsiCompileResult & {
+            timing?: { totalMs?: number };
+          };
           const result: ClsiCompileResult = {
             ...rawResult,
-            durationMs:
-              rawResult.durationMs ??
-              rawResult.timing?.totalMs ??
-              0,
+            durationMs: rawResult.durationMs ?? rawResult.timing?.totalMs ?? 0,
           };
           if (
             result.success &&
@@ -243,58 +251,78 @@ export class ClsiService {
           return result;
         }
         if (response) {
-          this.logger.warn(`Remote CLSI responded with HTTP ${response.status}. Falling back to local pipeline.`);
+          this.logger.warn(
+            `Remote CLSI responded with HTTP ${response.status}. Falling back to local pipeline.`,
+          );
         } else if (lastError) {
-          this.logger.warn(`Remote CLSI compile failed: ${lastError.message}. Falling back to local pipeline.`);
+          this.logger.warn(
+            `Remote CLSI compile failed: ${lastError.message}. Falling back to local pipeline.`,
+          );
         }
-      } catch (err: any) {
-        this.logger.warn(`Remote CLSI compile failed: ${err.message}. Falling back to local pipeline.`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Remote CLSI compile failed: ${msg}. Falling back to local pipeline.`,
+        );
       }
     }
 
-    // 3. Execute compilation through Hexagonal Pipeline (Local)
-    this.realtimeService?.broadcastCompileProgress(projectId, { status: 'compiling' });
+    // 3. Execute compilation through Fair-Queue single-flight pipeline
     const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
-    const pipelineResult: CompilePipelineResult = await this.pipeline.execute({
+    return await this.fairQueue.schedule(
       projectId,
-      mainFile,
-      engine,
-      draft: dto.draft,
-      syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
-      stopOnFirstError: dto.stop_on_first_error,
-      timeoutMs: effectiveTimeoutMs,
-      source,
-      files,
-    });
+      _userId,
+      this.realtimeService,
+      async (signal, onLogChunk) => {
+        const pipelineResult: CompilePipelineResult =
+          await this.pipeline.execute({
+            projectId,
+            mainFile,
+            engine,
+            draft: dto.draft,
+            syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
+            stopOnFirstError: dto.stop_on_first_error,
+            timeoutMs: effectiveTimeoutMs,
+            source,
+            files,
+            signal,
+            onLogChunk,
+          });
 
-    this.metrics.record({
-      engine,
-      durationMs: pipelineResult.durationMs,
-      success: pipelineResult.success,
-      isCached: false,
-      isTimeout: pipelineResult.durationMs >= effectiveTimeoutMs,
-      pdfSizeBytes: pipelineResult.pdf
-        ? Buffer.from(pipelineResult.pdf, 'base64').length
-        : 0,
-    });
+        this.metrics.record({
+          engine,
+          durationMs: pipelineResult.durationMs,
+          success: pipelineResult.success,
+          isCached: false,
+          isTimeout: pipelineResult.durationMs >= effectiveTimeoutMs,
+          pdfSizeBytes: pipelineResult.pdf
+            ? Buffer.from(pipelineResult.pdf, 'base64').length
+            : 0,
+        });
 
-    // 4. Cache successful results (5 mins TTL, max 2MB base64)
-    if (
-      pipelineResult.success &&
-      this.cache &&
-      pipelineResult.pdf &&
-      pipelineResult.pdf.length <= 2 * 1024 * 1024
-    ) {
-      await this.cache.set(cacheKey, pipelineResult, 300);
-    }
+        // 4. Cache successful results (5 mins TTL, max 2MB base64)
+        if (
+          pipelineResult.success &&
+          this.cache &&
+          pipelineResult.pdf &&
+          pipelineResult.pdf.length <= 2 * 1024 * 1024
+        ) {
+          await this.cache.set(cacheKey, pipelineResult, 300);
+        }
 
-    // 5. Broadcast live compile completion status over WebSocket
-    this.realtimeService?.broadcastCompileProgress(projectId, {
-      status: pipelineResult.success ? 'success' : 'failed',
-      logs: pipelineResult.logs ? [pipelineResult.logs] : [],
-    });
+        // 5. Broadcast live compile completion status over WebSocket
+        this.realtimeService?.broadcastCompileProgress(projectId, {
+          status: pipelineResult.success ? 'success' : 'failed',
+          logs: pipelineResult.logs ? [pipelineResult.logs] : [],
+        });
 
-    return pipelineResult;
+        return pipelineResult;
+      },
+    );
+  }
+
+  public cancelCompile(projectId: string): boolean {
+    return this.fairQueue.cancel(projectId);
   }
 
   public async forwardSync(dto: ForwardSyncDto): Promise<{
@@ -314,8 +342,11 @@ export class ClsiService {
         if (response.ok) {
           return await response.json();
         }
-      } catch (err: any) {
-        this.logger.warn(`Remote CLSI forwardSync failed: ${err.message}. Falling back to local.`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Remote CLSI forwardSync failed: ${msg}. Falling back to local.`,
+        );
       }
     }
 
@@ -345,8 +376,11 @@ export class ClsiService {
         if (response.ok) {
           return await response.json();
         }
-      } catch (err: any) {
-        this.logger.warn(`Remote CLSI reverseSync failed: ${err.message}. Falling back to local.`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Remote CLSI reverseSync failed: ${msg}. Falling back to local.`,
+        );
       }
     }
 
@@ -371,24 +405,24 @@ export class ClsiService {
   public async downloadAuxFile(
     projectId: string,
     filename: string,
-    res: any
+    res: FastifyReply,
   ) {
     const buffer = await this.workspace.readAuxFile(projectId, filename);
     if (!buffer) {
       throw new NotFoundException(`Artifact file ${filename} not found`);
     }
 
-    res.setHeader(
+    res.header(
       'Content-Disposition',
-      `attachment; filename="${encodeURIComponent(filename)}"`
+      `attachment; filename="${encodeURIComponent(filename)}"`,
     );
-    res.setHeader('Content-Type', 'text/plain');
+    res.header('Content-Type', 'text/plain');
     res.send(buffer);
   }
 
   public async readAuxFileBuffer(
     projectId: string,
-    filename: string
+    filename: string,
   ): Promise<Buffer | null> {
     return await this.workspace.readAuxFile(projectId, filename);
   }
@@ -413,13 +447,18 @@ export class ClsiService {
     return this.diskUsageCleaner.enforceDiskQuota(options);
   }
 
-  public async downloadAllArtifactsZip(projectId: string, res: any): Promise<void> {
+  public async downloadAllArtifactsZip(
+    projectId: string,
+    res: FastifyReply,
+  ): Promise<void> {
     const scratchDir = this.workspace.getScratchDir(projectId);
     const entries: ZipFileEntry[] = [];
 
     const walk = async (currentDir: string, relDir: string) => {
       try {
-        const dirEntries = await fs.readdir(currentDir, { withFileTypes: true });
+        const dirEntries = await fs.readdir(currentDir, {
+          withFileTypes: true,
+        });
         for (const entry of dirEntries) {
           if (
             entry.name === '.project-lock' ||
@@ -446,15 +485,17 @@ export class ClsiService {
     await walk(scratchDir, '');
 
     if (entries.length === 0) {
-      throw new NotFoundException(`No output artifacts found for project ${projectId}`);
+      throw new NotFoundException(
+        `No output artifacts found for project ${projectId}`,
+      );
     }
 
     const zipBuffer = buildZipArchive(entries);
-    res.setHeader(
+    res.header(
       'Content-Disposition',
-      `attachment; filename="project-${encodeURIComponent(projectId)}-artifacts.zip"`
+      `attachment; filename="project-${encodeURIComponent(projectId)}-artifacts.zip"`,
     );
-    res.setHeader('Content-Type', 'application/zip');
+    res.header('Content-Type', 'application/zip');
     res.send(zipBuffer);
   }
 }

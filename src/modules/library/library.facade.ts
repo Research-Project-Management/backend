@@ -1,16 +1,17 @@
 import { Injectable, Optional } from '@nestjs/common';
-import {
-  BibliographyFacade,
-  CatalogFacade,
-} from './bibliography/bibliography.facade';
+import { BibliographyFacade, CatalogFacade } from './catalog/catalog.facade';
 import { SearchFacade } from './search/search.facade';
 import { CitationFacade } from './citation/citation.facade';
-import { ReaderFacade, ContentFacade } from './reader/reader.facade';
-import { CslJsonMapper } from './citation/application/mappers/csl-json.mapper';
+import {
+  ReaderFacade,
+  ContentFacade,
+  ExtractionFacade,
+} from './extraction/extraction.facade';
+import { CslJsonMapper } from './citation/core/adapters/csl-json.mapper';
 import { TransactionService } from './shared-kernel/outbox/transaction.service';
 import { LibraryChange, Tombstone } from '@prisma/client';
 
-import { ExtractedPdfDocument } from './reader/infrastructure/providers/pdf.provider';
+import { ExtractedPdfDocument } from './extraction/core/adapters/pdf.provider';
 
 export interface LibraryItemSummary {
   id: string;
@@ -187,8 +188,8 @@ export class LibraryFacade implements ILibraryFacade {
       this.contentFacade
         ? this.contentFacade.getItemAttachments(userId, itemId)
         : Promise.resolve({ attachments: [] }),
-      this.contentFacade
-        ? this.contentFacade.listNotes(userId, itemId, projectId)
+      this.catalogFacade.listNotes
+        ? this.catalogFacade.listNotes(userId, itemId, projectId)
         : Promise.resolve([]),
     ]);
 
@@ -198,15 +199,17 @@ export class LibraryFacade implements ILibraryFacade {
       ? attachmentsRes
       : attachmentsRes?.attachments || [];
 
-    const attachments: AttachmentSummaryDto[] = rawAttachments.map((a: any) => ({
-      id: a.id,
-      filename: a.filename || a.title || 'untitled',
-      mimeType: a.mimeType || 'application/octet-stream',
-      size: a.size !== undefined ? a.size : null,
-      url: a.url || (a.fileId ? `/api/files/${a.fileId}/content` : null),
-      linkMode: a.linkMode || 'imported_file',
-      attachmentType: a.attachmentType || null,
-    }));
+    const attachments: AttachmentSummaryDto[] = rawAttachments.map(
+      (a: any) => ({
+        id: a.id,
+        filename: a.filename || a.title || 'untitled',
+        mimeType: a.mimeType || 'application/octet-stream',
+        size: a.size !== undefined ? a.size : null,
+        url: a.url || (a.fileId ? `/api/files/${a.fileId}/content` : null),
+        linkMode: a.linkMode || 'imported_file',
+        attachmentType: a.attachmentType || null,
+      }),
+    );
 
     const rawNotes = Array.isArray(notes) ? notes : [];
     const noteSummaries: NoteSummaryDto[] = rawNotes.map((n: any) => ({
@@ -329,8 +332,11 @@ export class LibraryFacade implements ILibraryFacade {
     limit: number = 100,
   ): Promise<LibraryChange[]> {
     return (
-      (await this.transactionService?.getChangesSince(scope, sinceSeq, limit)) ??
-      []
+      (await this.transactionService?.getChangesSince(
+        scope,
+        sinceSeq,
+        limit,
+      )) ?? []
     );
   }
 

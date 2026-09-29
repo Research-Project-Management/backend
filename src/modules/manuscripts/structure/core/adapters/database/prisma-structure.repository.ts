@@ -5,8 +5,14 @@
 
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { IStructureRepository, CreateNodeParams } from '../../ports/structure-repository.port';
-import { ManuscriptNodeEntity, ManuscriptNodeType } from '../../domain/manuscript-node.entity';
+import {
+  IStructureRepository,
+  CreateNodeParams,
+} from '../../ports/structure-repository.port';
+import {
+  ManuscriptNodeEntity,
+  ManuscriptNodeType,
+} from '../../domain/manuscript-node.entity';
 import { NodePathVo } from '../../domain/node-path.vo';
 
 @Injectable()
@@ -33,7 +39,9 @@ export class PrismaStructureRepository implements IStructureRepository {
     });
   }
 
-  public async createNode(params: CreateNodeParams): Promise<ManuscriptNodeEntity> {
+  public async createNode(
+    params: CreateNodeParams,
+  ): Promise<ManuscriptNodeEntity> {
     const depth = NodePathVo.depth(params.path);
     const created = await this.prisma.manuscriptNode.create({
       data: {
@@ -55,14 +63,20 @@ export class PrismaStructureRepository implements IStructureRepository {
     return this.mapToEntity(created);
   }
 
-  public async findById(projectId: string, nodeId: string): Promise<ManuscriptNodeEntity | null> {
+  public async findById(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ManuscriptNodeEntity | null> {
     const raw = await this.prisma.manuscriptNode.findFirst({
       where: { id: nodeId, projectId },
     });
     return raw ? this.mapToEntity(raw) : null;
   }
 
-  public async findByPath(projectId: string, path: string): Promise<ManuscriptNodeEntity | null> {
+  public async findByPath(
+    projectId: string,
+    path: string,
+  ): Promise<ManuscriptNodeEntity | null> {
     const normalized = NodePathVo.normalize(path);
     const raw = await this.prisma.manuscriptNode.findUnique({
       where: {
@@ -83,7 +97,9 @@ export class PrismaStructureRepository implements IStructureRepository {
     return nodes.map((n: any) => this.mapToEntity(n));
   }
 
-  public async getRootDoc(projectId: string): Promise<ManuscriptNodeEntity | null> {
+  public async getRootDoc(
+    projectId: string,
+  ): Promise<ManuscriptNodeEntity | null> {
     const raw = await this.prisma.manuscriptNode.findFirst({
       where: { projectId, isRootDoc: true },
     });
@@ -116,7 +132,7 @@ export class PrismaStructureRepository implements IStructureRepository {
     projectId: string,
     sourcePath: string,
     destPath: string,
-    newParentId: string | null
+    newParentId: string | null,
   ): Promise<void> {
     const normSource = NodePathVo.normalize(sourcePath);
     const normDest = NodePathVo.normalize(destPath);
@@ -167,7 +183,7 @@ export class PrismaStructureRepository implements IStructureRepository {
     projectId: string,
     nodeId: string,
     newName: string,
-    newPath: string
+    newPath: string,
   ): Promise<ManuscriptNodeEntity> {
     const depth = NodePathVo.depth(newPath);
     const updated = await this.prisma.manuscriptNode.update({
@@ -181,7 +197,10 @@ export class PrismaStructureRepository implements IStructureRepository {
     return this.mapToEntity(updated);
   }
 
-  public async deleteSubtree(projectId: string, path: string): Promise<ManuscriptNodeEntity[]> {
+  public async deleteSubtree(
+    projectId: string,
+    path: string,
+  ): Promise<ManuscriptNodeEntity[]> {
     const normalized = NodePathVo.normalize(path);
     const prefix = normalized + '/';
 
@@ -207,7 +226,7 @@ export class PrismaStructureRepository implements IStructureRepository {
   public async updateSortOrder(
     projectId: string,
     nodeId: string,
-    sortOrder: number
+    sortOrder: number,
   ): Promise<void> {
     await this.prisma.manuscriptNode.update({
       where: { id: nodeId },

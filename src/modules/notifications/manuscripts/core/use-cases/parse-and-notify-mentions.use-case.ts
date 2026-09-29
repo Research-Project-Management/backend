@@ -30,10 +30,12 @@ export class ParseAndNotifyMentionsUseCase {
   constructor(
     @Inject(MENTION_PARSER_PORT)
     private readonly mentionParser: IMentionParserPort,
-    private readonly createNotificationUseCase: CreateNotificationUseCase
+    private readonly createNotificationUseCase: CreateNotificationUseCase,
   ) {}
 
-  async execute(command: ParseAndNotifyMentionsCommand): Promise<ParseMentionsResult> {
+  async execute(
+    command: ParseAndNotifyMentionsCommand,
+  ): Promise<ParseMentionsResult> {
     const tokens = this.mentionParser.extractMentions(command.text);
     const dispatched: NotificationEntity[] = [];
 
@@ -55,12 +57,18 @@ export class ParseAndNotifyMentionsUseCase {
       }
 
       // Avoid notifying self or duplicate recipients
-      if (recipientUserId === command.actorId || processedUserIds.has(recipientUserId)) {
+      if (
+        recipientUserId === command.actorId ||
+        processedUserIds.has(recipientUserId)
+      ) {
         continue;
       }
       processedUserIds.add(recipientUserId);
 
-      const snippet = command.text.length > 140 ? `${command.text.slice(0, 137)}...` : command.text;
+      const snippet =
+        command.text.length > 140
+          ? `${command.text.slice(0, 137)}...`
+          : command.text;
       const refId = command.commentId || command.threadId || 'general';
       const idempotencyKey = `comment-mention-${refId}-${recipientUserId}`;
 

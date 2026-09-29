@@ -11,7 +11,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { IContentHasherPort, StreamHashResult } from '../../ports/content-hasher.port';
+import {
+  IContentHasherPort,
+  StreamHashResult,
+} from '../../ports/content-hasher.port';
 import { ContentHash } from '../../domain/value-objects/content-hash.vo';
 import { StorageKey } from '../../domain/value-objects/storage-key.vo';
 
@@ -22,14 +25,18 @@ export class CryptoGitBlobHasherAdapter extends IContentHasherPort {
     // compute SHA-256, and preserve stream for subsequent S3/Disk storage upload.
     const tempDir = path.join(os.tmpdir(), 'flux-filestore-spool');
     await fs.promises.mkdir(tempDir, { recursive: true });
-    const tempFilePath = path.join(tempDir, `spool-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
+    const tempFilePath = path.join(
+      tempDir,
+      `spool-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
+    );
 
     const writeStream = fs.createWriteStream(tempFilePath);
     let sizeBytes = 0;
 
     const meterStream = new PassThrough();
     meterStream.on('data', (chunk: Buffer | string) => {
-      sizeBytes += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
+      sizeBytes +=
+        typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
     });
 
     await pipeline(stream, meterStream, writeStream);

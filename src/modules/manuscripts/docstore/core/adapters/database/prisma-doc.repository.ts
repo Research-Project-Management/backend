@@ -5,6 +5,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   IDocRepository,
@@ -27,8 +28,8 @@ export class PrismaDocRepository implements IDocRepository {
     const rawLines = Array.isArray(record.lines)
       ? (record.lines as string[])
       : typeof record.lines === 'string'
-      ? record.lines.split('\n')
-      : [];
+        ? record.lines.split('\n')
+        : [];
 
     return new TextDoc({
       id: record.id,
@@ -49,7 +50,10 @@ export class PrismaDocRepository implements IDocRepository {
     });
   }
 
-  public async getDoc(projectId: string, docId: string): Promise<TextDoc | null> {
+  public async getDoc(
+    projectId: string,
+    docId: string,
+  ): Promise<TextDoc | null> {
     const record = await this.prisma.manuscriptDoc.findFirst({
       where: {
         id: docId,
@@ -62,7 +66,10 @@ export class PrismaDocRepository implements IDocRepository {
     return this.mapToEntity(record);
   }
 
-  public async getDocByPath(projectId: string, path: string): Promise<TextDoc | null> {
+  public async getDocByPath(
+    projectId: string,
+    path: string,
+  ): Promise<TextDoc | null> {
     const cleanPath = path.replace(/\\/g, '/').replace(/^\/+/, '');
     const record = await this.prisma.manuscriptDoc.findFirst({
       where: {
@@ -116,10 +123,10 @@ export class PrismaDocRepository implements IDocRepository {
       data: {
         projectId: data.projectId,
         path: cleanPath,
-        lines: data.lines as any,
+        lines: data.lines,
         rev: 1,
         version: data.version ?? 0,
-        ranges: (data.ranges || { changes: [], comments: [] }) as any,
+        ranges: data.ranges || { changes: [], comments: [] },
         hash: data.hash || '',
         sizeBytes,
         inStorage: false,
@@ -134,7 +141,7 @@ export class PrismaDocRepository implements IDocRepository {
   public async updateDoc(
     projectId: string,
     docId: string,
-    data: UpdateDocData
+    data: UpdateDocData,
   ): Promise<{ doc: TextDoc; modified: boolean }> {
     // 1. Fetch current document state to check revision for OCC
     const current = await this.prisma.manuscriptDoc.findFirst({
@@ -142,7 +149,9 @@ export class PrismaDocRepository implements IDocRepository {
     });
 
     if (!current) {
-      throw new DocNotFoundError(`Document ${docId} not found in project ${projectId}`);
+      throw new DocNotFoundError(
+        `Document ${docId} not found in project ${projectId}`,
+      );
     }
 
     // 2. Optimistic Concurrency Control (OCC) check
@@ -154,7 +163,7 @@ export class PrismaDocRepository implements IDocRepository {
           docId,
           rev: data.expectedRev,
           currentRev: current.rev,
-        }
+        },
       );
     }
 
@@ -165,9 +174,10 @@ export class PrismaDocRepository implements IDocRepository {
     const updated = await this.prisma.manuscriptDoc.update({
       where: { id: docId },
       data: {
-        lines: data.lines as any,
+        lines: data.lines,
         version: data.version,
-        ranges: (data.ranges || current.ranges) as any,
+        ranges: (data.ranges ||
+          current.ranges) as unknown as Prisma.InputJsonValue,
         hash: data.hash || current.hash,
         sizeBytes,
         inStorage: false,
@@ -183,20 +193,24 @@ export class PrismaDocRepository implements IDocRepository {
   public async patchDoc(
     projectId: string,
     docId: string,
-    patch: PatchDocData
+    patch: PatchDocData,
   ): Promise<TextDoc> {
     const current = await this.prisma.manuscriptDoc.findFirst({
       where: { id: docId, projectId },
     });
 
     if (!current) {
-      throw new DocNotFoundError(`Document ${docId} not found in project ${projectId}`);
+      throw new DocNotFoundError(
+        `Document ${docId} not found in project ${projectId}`,
+      );
     }
 
     const updateData: any = {};
     if (patch.deleted !== undefined) {
       updateData.deleted = patch.deleted;
-      updateData.deletedAt = patch.deleted ? (patch.deletedAt || new Date()) : null;
+      updateData.deletedAt = patch.deleted
+        ? patch.deletedAt || new Date()
+        : null;
     }
     if (patch.name !== undefined) {
       updateData.path = patch.name.replace(/\\/g, '/').replace(/^\/+/, '');
@@ -214,7 +228,7 @@ export class PrismaDocRepository implements IDocRepository {
     projectId: string,
     docId: string,
     storageKey: string,
-    rev: number
+    rev: number,
   ): Promise<void> {
     await this.prisma.manuscriptDoc.updateMany({
       where: {
@@ -225,7 +239,7 @@ export class PrismaDocRepository implements IDocRepository {
       data: {
         inStorage: true,
         storageKey,
-        lines: [] as any,
+        lines: [],
       },
     });
   }
@@ -234,7 +248,7 @@ export class PrismaDocRepository implements IDocRepository {
     projectId: string,
     docId: string,
     lines: string[],
-    ranges?: DocRanges
+    ranges?: DocRanges,
   ): Promise<TextDoc> {
     const chars = lines.reduce((acc, l) => acc + l.length, 0);
     const sizeBytes = chars + Math.max(0, lines.length - 1);
@@ -244,8 +258,8 @@ export class PrismaDocRepository implements IDocRepository {
       data: {
         inStorage: false,
         storageKey: null,
-        lines: lines as any,
-        ranges: (ranges || {}) as any,
+        lines: lines,
+        ranges: ranges || {},
         sizeBytes,
         rev: { increment: 1 },
       },

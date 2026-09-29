@@ -100,7 +100,10 @@ export class ProjectResponseDto {
   @ApiPropertyOptional({ example: 'Investigating transformer architectures.' })
   description?: string | null;
 
-  @ApiPropertyOptional({ example: '01957c91-2345-7890-abcd-ef0123456789', nullable: true })
+  @ApiPropertyOptional({
+    example: '01957c91-2345-7890-abcd-ef0123456789',
+    nullable: true,
+  })
   stateId?: string | null;
 
   @ApiPropertyOptional({ nullable: true })

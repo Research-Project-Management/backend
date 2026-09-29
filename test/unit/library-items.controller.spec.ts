@@ -1,16 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { ItemsController } from '../../src/modules/library/bibliography/presentation/items.controller';
-import { CreateItemUseCase } from '../../src/modules/library/bibliography/application/commands/create-item/create-item.use-case';
-import { UpdateItemUseCase } from '../../src/modules/library/bibliography/application/commands/update-item/update-item.use-case';
-import { DeleteItemUseCase } from '../../src/modules/library/bibliography/application/commands/delete-item/delete-item.use-case';
-import { RestoreItemUseCase } from '../../src/modules/library/bibliography/application/commands/restore-item/restore-item.use-case';
-import { GetItemUseCase } from '../../src/modules/library/bibliography/application/queries/get-item/get-item.use-case';
-import { ListItemsUseCase } from '../../src/modules/library/bibliography/application/queries/list-items/list-items.use-case';
+import { ItemsController } from '@/modules/library/catalog/items.controller';
+import { CreateItemUseCase } from '@/modules/library/catalog/core/use-cases/create-item.use-case';
+import { UpdateItemUseCase } from '@/modules/library/catalog/core/use-cases/update-item.use-case';
+import { DeleteItemUseCase } from '@/modules/library/catalog/core/use-cases/delete-item.use-case';
+import { RestoreItemUseCase } from '@/modules/library/catalog/core/use-cases/restore-item.use-case';
+import { GetItemUseCase } from '@/modules/library/catalog/core/use-cases/get-item.use-case';
+import { ListItemsUseCase } from '@/modules/library/catalog/core/use-cases/list-items.use-case';
 import {
   ItemConcurrencyDomainException,
   ItemNotFoundDomainException,
-} from '../../src/modules/library/bibliography/domain/exceptions/item-domain.exception';
+} from '@/modules/library/catalog/core/domain/item-domain.exception';
 import { VersionMismatchException } from '../../src/modules/library/shared-kernel/core/errors/version-mismatch.exception';
 
 describe('ItemsController (Hexagonal Driver Adapter)', () => {
@@ -114,7 +114,7 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
       } as any,
       {
         execute: jest.fn().mockResolvedValue({ references: [], count: 0 }),
-      } as any,
+      },
       {
         execute: jest.fn().mockResolvedValue({
           success: true,
@@ -128,7 +128,9 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
           .mockResolvedValue({ success: true, item: {}, conversionReport: {} }),
       } as any,
       {
-        execute: jest.fn().mockResolvedValue({ success: true, importedCount: 0 }),
+        execute: jest
+          .fn()
+          .mockResolvedValue({ success: true, importedCount: 0 }),
       } as any,
       {
         execute: jest.fn().mockResolvedValue(true),
@@ -137,7 +139,9 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
         execute: jest.fn().mockResolvedValue({ id: validUuid }),
       } as any,
       {
-        getRelatedItems: jest.fn().mockResolvedValue({ relatedItems: [], total: 0 }),
+        getRelatedItems: jest
+          .fn()
+          .mockResolvedValue({ relatedItems: [], total: 0 }),
         linkItems: jest.fn().mockResolvedValue({ success: true }),
         unlinkItems: jest.fn().mockResolvedValue({ success: true }),
       } as any,

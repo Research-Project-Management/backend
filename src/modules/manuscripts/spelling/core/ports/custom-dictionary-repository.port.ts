@@ -3,7 +3,9 @@
  * Outbound SPI Port for storing and querying project and user custom dictionary words.
  */
 
-export const CUSTOM_DICTIONARY_REPOSITORY_PORT = Symbol('CUSTOM_DICTIONARY_REPOSITORY_PORT');
+export const CUSTOM_DICTIONARY_REPOSITORY_PORT = Symbol(
+  'CUSTOM_DICTIONARY_REPOSITORY_PORT',
+);
 
 export interface ICustomDictionaryRepositoryPort {
   /**
@@ -39,5 +41,9 @@ export interface ICustomDictionaryRepositoryPort {
   /**
    * Fast check if a word is registered as a custom word in either the project or user scope.
    */
-  isCustomWord(word: string, projectId?: string, userId?: string): Promise<boolean>;
+  isCustomWord(
+    word: string,
+    projectId?: string,
+    userId?: string,
+  ): Promise<boolean>;
 }

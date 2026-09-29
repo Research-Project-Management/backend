@@ -489,7 +489,9 @@ describe('Project Module Security & SSOT Suite', () => {
           'member-2',
         );
 
-        expect(result.message).toBe('Project ownership transferred successfully');
+        expect(result.message).toBe(
+          'Project ownership transferred successfully',
+        );
         expect(result.previousOwner.role).toBe(Role.coordinator);
         expect(result.newOwner.role).toBe(Role.owner);
         expect(mockMemberRepo.transferOwnership).toHaveBeenCalledWith(

@@ -5,7 +5,9 @@
 
 export class UnsupportedLanguageException extends Error {
   constructor(language: string) {
-    super(`Unsupported spelling language code '${language}'. Supported: en, en-US, en-GB, vi, vi-VN, fr, de, es.`);
+    super(
+      `Unsupported spelling language code '${language}'. Supported: en, en-US, en-GB, vi, vi-VN, fr, de, es.`,
+    );
     this.name = 'UnsupportedLanguageException';
   }
 }

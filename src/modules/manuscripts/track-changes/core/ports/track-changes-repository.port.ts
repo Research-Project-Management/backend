@@ -3,7 +3,10 @@
  * Outbound Port (SPI) for persisting and querying track changes and inline comments in PostgreSQL.
  */
 
-import { TrackChange, ChangeStatus } from '../domain/entities/track-change.entity';
+import {
+  TrackChange,
+  ChangeStatus,
+} from '../domain/entities/track-change.entity';
 import { CommentThread } from '../domain/entities/comment-thread.entity';
 import { CommentReply } from '../domain/entities/comment-reply.entity';
 
@@ -24,6 +27,12 @@ export abstract class ITrackChangesRepositoryPort {
     isResolved?: boolean,
   ): Promise<CommentThread[]>;
 
-  abstract addCommentReply(threadId: string, reply: CommentReply): Promise<CommentReply>;
-  abstract deleteCommentThread(projectId: string, threadId: string): Promise<void>;
+  abstract addCommentReply(
+    threadId: string,
+    reply: CommentReply,
+  ): Promise<CommentReply>;
+  abstract deleteCommentThread(
+    projectId: string,
+    threadId: string,
+  ): Promise<void>;
 }

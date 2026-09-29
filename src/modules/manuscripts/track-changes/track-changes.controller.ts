@@ -12,8 +12,16 @@ import {
   Body,
   NotFoundException,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { TrackChangesService } from './track-changes.service';
 import {
   RecordChangeDto,
@@ -31,16 +39,22 @@ import { ThreadNotFoundException } from './core/domain/exceptions/thread-not-fou
 import { ResolvedThreadException } from './core/domain/exceptions/resolved-thread.exception';
 
 @ApiTags('Manuscripts - Review Mode (Track Changes & Comments)')
+@ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/docs/:docId/review',
   'manuscripts/projects/:projectId/docs/:docId/review',
   'projects/:projectId/docs/:docId/review',
 ])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
 export class TrackChangesController {
   constructor(private readonly trackChangesService: TrackChangesService) {}
 
   private handleError(error: any): never {
-    if (error instanceof ChangeNotFoundException || error instanceof ThreadNotFoundException) {
+    if (
+      error instanceof ChangeNotFoundException ||
+      error instanceof ThreadNotFoundException
+    ) {
       throw new NotFoundException(error.message);
     }
     if (error instanceof ResolvedThreadException) {
@@ -50,7 +64,9 @@ export class TrackChangesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all track changes and comment threads for a document' })
+  @ApiOperation({
+    summary: 'Get all track changes and comment threads for a document',
+  })
   @ApiResponse({ status: 200, type: DocReviewsResponseDto })
   async getDocReviews(
     @Param('projectId') projectId: string,
@@ -64,7 +80,9 @@ export class TrackChangesController {
   }
 
   @Post('changes')
-  @ApiOperation({ summary: 'Record a new proposed inline text mutation (insert or delete)' })
+  @ApiOperation({
+    summary: 'Record a new proposed inline text mutation (insert or delete)',
+  })
   @ApiResponse({ status: 201, type: TrackChangeResponseDto })
   async recordChange(
     @Param('projectId') projectId: string,
@@ -79,7 +97,10 @@ export class TrackChangesController {
   }
 
   @Post('changes/:changeId/accept')
-  @ApiOperation({ summary: 'Accept a proposed change (merges text permanently into Docstore)' })
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary: 'Accept a proposed change (merges text permanently into Docstore)',
+  })
   @ApiResponse({ status: 200, type: TrackChangeResponseDto })
   async acceptChange(
     @Param('projectId') projectId: string,
@@ -87,14 +108,21 @@ export class TrackChangesController {
     @Param('changeId') changeId: string,
   ): Promise<TrackChangeResponseDto> {
     try {
-      return await this.trackChangesService.acceptChange(projectId, docId, changeId);
+      return await this.trackChangesService.acceptChange(
+        projectId,
+        docId,
+        changeId,
+      );
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Post('changes/:changeId/reject')
-  @ApiOperation({ summary: 'Reject a proposed change (reverts text in Docstore)' })
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary: 'Reject a proposed change (reverts text in Docstore)',
+  })
   @ApiResponse({ status: 200, type: TrackChangeResponseDto })
   async rejectChange(
     @Param('projectId') projectId: string,
@@ -102,14 +130,21 @@ export class TrackChangesController {
     @Param('changeId') changeId: string,
   ): Promise<TrackChangeResponseDto> {
     try {
-      return await this.trackChangesService.rejectChange(projectId, docId, changeId);
+      return await this.trackChangesService.rejectChange(
+        projectId,
+        docId,
+        changeId,
+      );
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Post('changes/batch')
-  @ApiOperation({ summary: 'Bulk accept or reject all pending changes in a document' })
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary: 'Bulk accept or reject all pending changes in a document',
+  })
   @ApiResponse({ status: 200 })
   async batchResolveChanges(
     @Param('projectId') projectId: string,
@@ -117,14 +152,20 @@ export class TrackChangesController {
     @Body() dto: BatchResolveDto,
   ) {
     try {
-      return await this.trackChangesService.batchResolveChanges(projectId, docId, dto.action);
+      return await this.trackChangesService.batchResolveChanges(
+        projectId,
+        docId,
+        dto.action,
+      );
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Post('threads')
-  @ApiOperation({ summary: 'Create an inline comment thread pinned to text coordinates' })
+  @ApiOperation({
+    summary: 'Create an inline comment thread pinned to text coordinates',
+  })
   @ApiResponse({ status: 201, type: CommentThreadResponseDto })
   async createCommentThread(
     @Param('projectId') projectId: string,
@@ -132,7 +173,11 @@ export class TrackChangesController {
     @Body() dto: CreateCommentThreadDto,
   ): Promise<CommentThreadResponseDto> {
     try {
-      return await this.trackChangesService.createCommentThread(projectId, docId, dto);
+      return await this.trackChangesService.createCommentThread(
+        projectId,
+        docId,
+        dto,
+      );
     } catch (err) {
       this.handleError(err);
     }
@@ -148,7 +193,12 @@ export class TrackChangesController {
     @Body() dto: AddCommentReplyDto,
   ): Promise<CommentReplyResponseDto> {
     try {
-      return await this.trackChangesService.addCommentReply(projectId, docId, threadId, dto);
+      return await this.trackChangesService.addCommentReply(
+        projectId,
+        docId,
+        threadId,
+        dto,
+      );
     } catch (err) {
       this.handleError(err);
     }

@@ -3,16 +3,28 @@
  * Data Transfer Objects for Manuscript Structure API.
  */
 
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsBoolean, IsInt, IsUUID } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsEnum,
+  IsBoolean,
+  IsInt,
+  IsUUID,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateNodeDto {
-  @ApiProperty({ description: 'Leaf name of file or folder (e.g. intro.tex or figures)' })
+  @ApiProperty({
+    description: 'Leaf name of file or folder (e.g. intro.tex or figures)',
+  })
   @IsString()
   @IsNotEmpty()
   name!: string;
 
-  @ApiPropertyOptional({ description: 'Explicit full path (e.g. /chapters/intro.tex)' })
+  @ApiPropertyOptional({
+    description: 'Explicit full path (e.g. /chapters/intro.tex)',
+  })
   @IsString()
   @IsOptional()
   path?: string;
@@ -36,7 +48,9 @@ export class CreateNodeDto {
   @IsOptional()
   fileId?: string | null;
 
-  @ApiPropertyOptional({ description: 'Set as primary compilation entrypoint (main.tex)' })
+  @ApiPropertyOptional({
+    description: 'Set as primary compilation entrypoint (main.tex)',
+  })
   @IsBoolean()
   @IsOptional()
   isRootDoc?: boolean;
@@ -48,7 +62,9 @@ export class MoveNodeDto {
   @IsOptional()
   destParentId?: string | null;
 
-  @ApiPropertyOptional({ description: 'Target destination virtual path (e.g. /archive/intro.tex)' })
+  @ApiPropertyOptional({
+    description: 'Target destination virtual path (e.g. /archive/intro.tex)',
+  })
   @IsString()
   @IsOptional()
   destPath?: string;

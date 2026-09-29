@@ -62,18 +62,42 @@ export class CommentThread {
     return new CommentThread(props);
   }
 
-  public get id(): string { return this._id; }
-  public get projectId(): string { return this._projectId; }
-  public get docId(): string { return this._docId; }
-  public get quote(): string | null { return this._quote; }
-  public get range(): TextRangeVo { return this._range; }
-  public get isResolved(): boolean { return this._isResolved; }
-  public get createdById(): string | null { return this._createdById; }
-  public get resolvedById(): string | null { return this._resolvedById; }
-  public get resolvedAt(): Date | null { return this._resolvedAt; }
-  public get replies(): CommentReply[] { return [...this._replies]; }
-  public get createdAt(): Date { return this._createdAt; }
-  public get updatedAt(): Date { return this._updatedAt; }
+  public get id(): string {
+    return this._id;
+  }
+  public get projectId(): string {
+    return this._projectId;
+  }
+  public get docId(): string {
+    return this._docId;
+  }
+  public get quote(): string | null {
+    return this._quote;
+  }
+  public get range(): TextRangeVo {
+    return this._range;
+  }
+  public get isResolved(): boolean {
+    return this._isResolved;
+  }
+  public get createdById(): string | null {
+    return this._createdById;
+  }
+  public get resolvedById(): string | null {
+    return this._resolvedById;
+  }
+  public get resolvedAt(): Date | null {
+    return this._resolvedAt;
+  }
+  public get replies(): CommentReply[] {
+    return [...this._replies];
+  }
+  public get createdAt(): Date {
+    return this._createdAt;
+  }
+  public get updatedAt(): Date {
+    return this._updatedAt;
+  }
 
   public addReply(reply: CommentReply): void {
     if (this._isResolved) {

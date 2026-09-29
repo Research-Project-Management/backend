@@ -24,7 +24,9 @@ export class ResolveCommentThreadUseCase {
     private readonly notifier: IRealtimeNotifierPort,
   ) {}
 
-  public async execute(input: ResolveCommentThreadInput): Promise<CommentThread> {
+  public async execute(
+    input: ResolveCommentThreadInput,
+  ): Promise<CommentThread> {
     const { projectId, docId, threadId, resolve, userId } = input;
 
     const thread = await this.repository.findThreadById(threadId);

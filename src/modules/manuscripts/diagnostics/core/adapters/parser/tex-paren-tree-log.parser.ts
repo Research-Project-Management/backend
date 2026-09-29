@@ -41,7 +41,7 @@ export class TexParenTreeLogParser implements ILatexLogParserPort {
       if (line.startsWith('!')) {
         const rawMessage = line.slice(1).trim();
         let errorLine: number | null = null;
-        let contextLines: string[] = [line];
+        const contextLines: string[] = [line];
 
         // Scan ahead for 'l.<number>' line number indicator
         for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
@@ -62,7 +62,8 @@ export class TexParenTreeLogParser implements ILatexLogParserPort {
         }
 
         const context = contextLines.join('\n');
-        const explanation = this.explainer?.explain(rawMessage, context) || undefined;
+        const explanation =
+          this.explainer?.explain(rawMessage, context) || undefined;
 
         diagnostics.push(
           new DiagnosticItem({
@@ -73,13 +74,15 @@ export class TexParenTreeLogParser implements ILatexLogParserPort {
             context,
             code: explanation?.code,
             explanation,
-          })
+          }),
         );
         continue;
       }
 
       // 3. LaTeX / Package Warnings
-      const warningMatch = line.match(TexParenTreeLogParser.LATEX_WARNING_REGEX);
+      const warningMatch = line.match(
+        TexParenTreeLogParser.LATEX_WARNING_REGEX,
+      );
       if (warningMatch && warningMatch[1]) {
         let warnMsg = warningMatch[1].trim();
         let warnLine: number | null = null;
@@ -94,12 +97,12 @@ export class TexParenTreeLogParser implements ILatexLogParserPort {
         while (
           j < lines.length &&
           lines[j] &&
-          !lines[j]!.startsWith('!') &&
-          !lines[j]!.match(TexParenTreeLogParser.LATEX_WARNING_REGEX) &&
-          !lines[j]!.match(TexParenTreeLogParser.BADBOX_REGEX) &&
-          !(lines[j]!.startsWith('(') && lines[j]!.includes('/'))
+          !lines[j].startsWith('!') &&
+          !lines[j].match(TexParenTreeLogParser.LATEX_WARNING_REGEX) &&
+          !lines[j].match(TexParenTreeLogParser.BADBOX_REGEX) &&
+          !(lines[j].startsWith('(') && lines[j].includes('/'))
         ) {
-          const nextL = lines[j]!.trim();
+          const nextL = lines[j].trim();
           const extraLineMatch = nextL.match(/on input line\s+(\d+)\./i);
           if (extraLineMatch && extraLineMatch[1]) {
             warnLine = parseInt(extraLineMatch[1], 10);
@@ -110,7 +113,8 @@ export class TexParenTreeLogParser implements ILatexLogParserPort {
           i = j - 1;
         }
 
-        const explanation = this.explainer?.explain(warnMsg, context) || undefined;
+        const explanation =
+          this.explainer?.explain(warnMsg, context) || undefined;
 
         diagnostics.push(
           new DiagnosticItem({
@@ -121,7 +125,7 @@ export class TexParenTreeLogParser implements ILatexLogParserPort {
             context,
             code: explanation?.code,
             explanation,
-          })
+          }),
         );
         continue;
       }
@@ -141,7 +145,7 @@ export class TexParenTreeLogParser implements ILatexLogParserPort {
             context: line,
             code: explanation?.code,
             explanation,
-          })
+          }),
         );
       }
     }
@@ -152,15 +156,23 @@ export class TexParenTreeLogParser implements ILatexLogParserPort {
   /**
    * Tracks parentheses in TeX logs to maintain a stack of active files.
    */
-  private updateFileStack(line: string, fileStack: string[], defaultFile: string): void {
+  private updateFileStack(
+    line: string,
+    fileStack: string[],
+    defaultFile: string,
+  ): void {
     // Look for file opening markers: (./file.tex or (/path/to/file.tex or (chapters/intro.tex
     // Avoid false positives from text parentheses like (see Figure 1)
-    const openFileRegex = /\((?:\.\/|\/|[a-zA-Z]:|[a-zA-Z0-9_-]+\/)?([^()\s"]+\.[a-zA-Z0-9]+)/g;
+    const openFileRegex =
+      /\((?:\.\/|\/|[a-zA-Z]:|[a-zA-Z0-9_-]+\/)?([^()\s"]+\.[a-zA-Z0-9]+)/g;
 
     let match: RegExpExecArray | null;
     while ((match = openFileRegex.exec(line)) !== null) {
       const candidatePath = match[0].slice(1).trim(); // remove leading '('
-      if (TexParenTreeLogParser.FILE_EXTENSION_REGEX.test(candidatePath) || candidatePath.includes('/')) {
+      if (
+        TexParenTreeLogParser.FILE_EXTENSION_REGEX.test(candidatePath) ||
+        candidatePath.includes('/')
+      ) {
         const cleanPath = this.normalizeFilePath(candidatePath, defaultFile);
         fileStack.push(cleanPath);
       }

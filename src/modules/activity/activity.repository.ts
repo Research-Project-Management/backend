@@ -201,7 +201,9 @@ export class ActivityRepository implements IActivityRepository {
       map.set(`work_item:${t.id}`, t.title);
     });
     papers.forEach((p) => map.set(`paper:${p.id}`, p.title));
-    pages.forEach((pg: any) => map.set(`page:${pg.id}`, pg.path || pg.title || 'Manuscript'));
+    pages.forEach((pg: any) =>
+      map.set(`page:${pg.id}`, pg.path || pg.title || 'Manuscript'),
+    );
     return map;
   }
 

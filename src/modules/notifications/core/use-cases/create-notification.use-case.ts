@@ -9,7 +9,10 @@ import {
   REALTIME_NOTIFIER_PORT,
 } from '../ports/realtime-notifier.port';
 import { NotificationEntity } from '../domain/entities/notification.entity';
-import { NotificationType, NotificationTypeString } from '../domain/value-objects/notification-type.vo';
+import {
+  NotificationType,
+  NotificationTypeString,
+} from '../domain/value-objects/notification-type.vo';
 import { InvalidNotificationException } from '../domain/exceptions/invalid-notification.exception';
 
 export interface CreateNotificationCommand {
@@ -31,10 +34,12 @@ export class CreateNotificationUseCase {
     @Inject(NOTIFICATION_REPOSITORY_PORT)
     private readonly repository: INotificationRepositoryPort,
     @Inject(REALTIME_NOTIFIER_PORT)
-    private readonly notifier: IRealtimeNotifierPort
+    private readonly notifier: IRealtimeNotifierPort,
   ) {}
 
-  async execute(command: CreateNotificationCommand): Promise<NotificationEntity> {
+  async execute(
+    command: CreateNotificationCommand,
+  ): Promise<NotificationEntity> {
     if (!command.userId || !command.userId.trim()) {
       throw new InvalidNotificationException('userId must not be empty');
     }
@@ -44,12 +49,17 @@ export class CreateNotificationUseCase {
 
     const type = command.type ?? 'mention';
     if (!NotificationType.isValid(type)) {
-      throw new InvalidNotificationException(`type '${type}' is invalid`);
+      throw new InvalidNotificationException(
+        `type '${String(type)}' is invalid`,
+      );
     }
 
     // Overleaf parity: If key is provided and forceCreate is false, check existing
     if (command.key && command.forceCreate === false) {
-      const existing = await this.repository.findByKey(command.key, command.userId);
+      const existing = await this.repository.findByKey(
+        command.key,
+        command.userId,
+      );
       if (existing) {
         return existing;
       }
@@ -58,9 +68,13 @@ export class CreateNotificationUseCase {
     let parsedExpiresAt: Date | null = null;
     if (command.expiresAt) {
       parsedExpiresAt =
-        command.expiresAt instanceof Date ? command.expiresAt : new Date(command.expiresAt);
+        command.expiresAt instanceof Date
+          ? command.expiresAt
+          : new Date(command.expiresAt);
       if (isNaN(parsedExpiresAt.getTime())) {
-        throw new InvalidNotificationException('expiresAt must be a valid date or ISO string');
+        throw new InvalidNotificationException(
+          'expiresAt must be a valid date or ISO string',
+        );
       }
     }
 

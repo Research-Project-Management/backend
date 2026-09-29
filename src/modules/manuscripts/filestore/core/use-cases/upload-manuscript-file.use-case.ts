@@ -28,17 +28,24 @@ export class UploadManuscriptFileUseCase {
     private readonly hasher: IContentHasherPort,
   ) {}
 
-  public async execute(input: UploadManuscriptFileInput): Promise<ManuscriptFile> {
+  public async execute(
+    input: UploadManuscriptFileInput,
+  ): Promise<ManuscriptFile> {
     const bucket = input.bucketName ?? 'manuscript-files';
 
     // 1. Zero-buffering stream hash (Git-blob format)
-    const { contentHash, sizeBytes, dataStream } = await this.hasher.hashStream(input.stream);
+    const { contentHash, sizeBytes, dataStream } = await this.hasher.hashStream(
+      input.stream,
+    );
 
     // 2. Compute partitioned storage key
     const storageKey = this.hasher.buildStorageKey(contentHash);
 
     // 3. Content-Addressable Storage (CAS) Deduplication check
-    const blobExists = await this.storage.checkObjectExists(bucket, storageKey.getValue());
+    const blobExists = await this.storage.checkObjectExists(
+      bucket,
+      storageKey.getValue(),
+    );
 
     if (blobExists) {
       this.logger.log(

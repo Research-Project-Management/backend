@@ -1,10 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { MessageRole, Prisma, AiChat, AiMessage } from '@prisma/client';
-import {
-  IChatRepository,
-  ChatWithMessages,
-} from './types/chat.type';
+import { IChatRepository, ChatWithMessages } from './types/chat.type';
 
 export type { ChatWithMessages };
 

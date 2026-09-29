@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OutboxWorker } from '@/modules/library/shared-kernel/outbox/outbox.worker';
-import { IdempotencyRepository } from '@/modules/library/ingestion/infrastructure/repositories/idempotency.repository';
+import { IdempotencyRepository } from '@/modules/library/ingestion/core/adapters/idempotency.repository';
 import { ChangeLogRepository } from '@/modules/library/shared-kernel/outbox/repositories/changelog.repository';
 import { PrismaService } from '@/core/database/prisma.service';
 import { OutboxStatus } from '@prisma/client';

@@ -39,13 +39,25 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     if (!this.prisma) return { collaboratorMap, projectName, actorName };
 
     try {
-      const project = await (this.prisma as any).project.findUnique({
+      const project = await this.prisma.project.findUnique({
         where: { id: projectId },
         include: {
-          owner: { select: { id: true, name: true, email: true } },
+          createdBy: {
+            select: {
+              id: true,
+              email: true,
+              profile: { select: { name: true } },
+            },
+          },
           members: {
             include: {
-              user: { select: { id: true, name: true, email: true } },
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  profile: { select: { name: true } },
+                },
+              },
             },
           },
         },
@@ -53,35 +65,47 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
 
       if (project) {
         projectName = project.name || projectName;
-        if (project.owner) {
-          collaboratorMap[project.owner.email.toLowerCase()] = project.owner.id;
-          if (project.owner.name) {
-            collaboratorMap[project.owner.name.toLowerCase().replace(/\s+/g, '')] = project.owner.id;
+        const owner = project.createdBy;
+        if (owner) {
+          collaboratorMap[owner.email.toLowerCase()] = owner.id;
+          const ownerName = owner.profile?.name;
+          if (ownerName) {
+            collaboratorMap[ownerName.toLowerCase().replace(/\s+/g, '')] =
+              owner.id;
           }
-          if (actorId && project.owner.id === actorId && project.owner.name) {
-            actorName = project.owner.name;
+          if (actorId && owner.id === actorId && ownerName) {
+            actorName = ownerName;
           }
         }
         for (const member of project.members || []) {
           if (member.user) {
             collaboratorMap[member.user.email.toLowerCase()] = member.user.id;
-            if (member.user.name) {
-              collaboratorMap[member.user.name.toLowerCase().replace(/\s+/g, '')] = member.user.id;
+            const memberName = member.user.profile?.name;
+            if (memberName) {
+              collaboratorMap[memberName.toLowerCase().replace(/\s+/g, '')] =
+                member.user.id;
             }
-            if (actorId && member.user.id === actorId && member.user.name) {
-              actorName = member.user.name;
+            if (actorId && member.user.id === actorId && memberName) {
+              actorName = memberName;
             }
           }
         }
       }
-    } catch (err: any) {
-      this.logger.debug(`Could not resolve project collaborator map for ${projectId}: ${err?.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(
+        `Could not resolve project collaborator map for ${projectId}: ${msg}`,
+      );
     }
 
     return { collaboratorMap, projectName, actorName };
   }
 
-  public notifyChangeRecorded(projectId: string, docId: string, change: TrackChange): void {
+  public notifyChangeRecorded(
+    projectId: string,
+    docId: string,
+    change: TrackChange,
+  ): void {
     if (!this.realtimeService) return;
     this.realtimeService.broadcastEvent(projectId, 'track-changes:recorded', {
       docId,
@@ -89,7 +113,11 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     });
   }
 
-  public notifyChangeResolved(projectId: string, docId: string, change: TrackChange): void {
+  public notifyChangeResolved(
+    projectId: string,
+    docId: string,
+    change: TrackChange,
+  ): void {
     if (!this.realtimeService) return;
     this.realtimeService.broadcastEvent(projectId, 'track-changes:resolved', {
       docId,
@@ -97,7 +125,11 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     });
   }
 
-  public notifyCommentCreated(projectId: string, docId: string, thread: CommentThread): void {
+  public notifyCommentCreated(
+    projectId: string,
+    docId: string,
+    thread: CommentThread,
+  ): void {
     if (this.realtimeService) {
       this.realtimeService.broadcastEvent(projectId, 'comment:created', {
         docId,
@@ -105,7 +137,11 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
       });
     }
 
-    if (this.notificationsService && thread.replies && thread.replies.length > 0) {
+    if (
+      this.notificationsService &&
+      thread.replies &&
+      thread.replies.length > 0
+    ) {
       const firstReply = thread.replies[0];
       this.getCollaboratorContext(projectId, thread.createdById)
         .then(async (ctx) => {
@@ -122,7 +158,9 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
           });
         })
         .catch((err) => {
-          this.logger.debug(`Failed to dispatch mention notifications: ${err?.message}`);
+          this.logger.debug(
+            `Failed to dispatch mention notifications: ${err?.message}`,
+          );
         });
     }
   }
@@ -181,12 +219,18 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
           });
         })
         .catch((err) => {
-          this.logger.debug(`Failed to dispatch reply notifications: ${err?.message}`);
+          this.logger.debug(
+            `Failed to dispatch reply notifications: ${err?.message}`,
+          );
         });
     }
   }
 
-  public notifyCommentResolved(projectId: string, docId: string, thread: CommentThread): void {
+  public notifyCommentResolved(
+    projectId: string,
+    docId: string,
+    thread: CommentThread,
+  ): void {
     if (this.realtimeService) {
       this.realtimeService.broadcastEvent(projectId, 'comment:resolved', {
         docId,
@@ -198,10 +242,15 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
       this.getCollaboratorContext(projectId, thread.resolvedById)
         .then(async (ctx) => {
           // 1. Overleaf Parity: Dismiss mention / reply notifications when thread is resolved
-          await this.notificationsService?.deleteByKey(`comment-mention-${thread.id}`);
+          await this.notificationsService?.deleteByKey(
+            `comment-mention-${thread.id}`,
+          );
 
           // 2. Notify thread owner if resolved by someone else
-          if (thread.createdById && thread.createdById !== thread.resolvedById) {
+          if (
+            thread.createdById &&
+            thread.createdById !== thread.resolvedById
+          ) {
             await this.notificationsService?.createNotification({
               userId: thread.createdById,
               key: `thread-resolved-${thread.id}-${thread.createdById}`,
@@ -222,7 +271,9 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
           }
         })
         .catch((err) => {
-          this.logger.debug(`Failed to dispatch thread-resolved notification: ${err?.message}`);
+          this.logger.debug(
+            `Failed to dispatch thread-resolved notification: ${err?.message}`,
+          );
         });
     }
   }

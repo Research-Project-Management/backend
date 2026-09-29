@@ -36,7 +36,10 @@ import { LocalDiskBinaryStorageAdapter } from '@/modules/manuscripts/filestore/c
 import { ContentHash } from '@/modules/manuscripts/filestore/core/domain/value-objects/content-hash.vo';
 import { StorageKey } from '@/modules/manuscripts/filestore/core/domain/value-objects/storage-key.vo';
 import { ByteRange } from '@/modules/manuscripts/filestore/core/domain/value-objects/byte-range.vo';
-import { ManuscriptFile, MAX_FILE_SIZE_BYTES } from '@/modules/manuscripts/filestore/core/domain/entities/manuscript-file.entity';
+import {
+  ManuscriptFile,
+  MAX_FILE_SIZE_BYTES,
+} from '@/modules/manuscripts/filestore/core/domain/entities/manuscript-file.entity';
 import { FileNotFoundException } from '@/modules/manuscripts/filestore/core/domain/exceptions/file-not-found.exception';
 import { InvalidByteRangeException } from '@/modules/manuscripts/filestore/core/domain/exceptions/invalid-byte-range.exception';
 import { StorageQuotaExceededException } from '@/modules/manuscripts/filestore/core/domain/exceptions/storage-quota-exceeded.exception';
@@ -69,13 +72,19 @@ class InMemoryManuscriptFileRepository implements IManuscriptFileRepository {
     return this.files.get(id) ?? null;
   }
 
-  public async findByProjectAndId(projectId: string, id: string): Promise<ManuscriptFile | null> {
+  public async findByProjectAndId(
+    projectId: string,
+    id: string,
+  ): Promise<ManuscriptFile | null> {
     const f = this.files.get(id);
     if (!f || f.projectId !== projectId) return null;
     return f;
   }
 
-  public async findByProjectAndName(projectId: string, name: string): Promise<ManuscriptFile | null> {
+  public async findByProjectAndName(
+    projectId: string,
+    name: string,
+  ): Promise<ManuscriptFile | null> {
     for (const f of this.files.values()) {
       if (f.projectId === projectId && f.name === name && !f.deleted) {
         return f;
@@ -94,7 +103,10 @@ class InMemoryManuscriptFileRepository implements IManuscriptFileRepository {
     return results;
   }
 
-  public async listByProject(projectId: string, includeDeleted = false): Promise<ManuscriptFile[]> {
+  public async listByProject(
+    projectId: string,
+    includeDeleted = false,
+  ): Promise<ManuscriptFile[]> {
     return Array.from(this.files.values()).filter(
       (f) => f.projectId === projectId && (includeDeleted || !f.deleted),
     );
@@ -132,7 +144,9 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
   let filestoreController: FilestoreController;
 
   beforeAll(async () => {
-    tempStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), 'filestore-test-'));
+    tempStorageDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'filestore-test-'),
+    );
   });
 
   afterAll(async () => {
@@ -148,11 +162,18 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
     hasher = new CryptoGitBlobHasherAdapter();
     localStorage = new LocalDiskBinaryStorageAdapter(tempStorageDir);
 
-    uploadUseCase = new UploadManuscriptFileUseCase(localStorage, inMemoryRepo, hasher);
+    uploadUseCase = new UploadManuscriptFileUseCase(
+      localStorage,
+      inMemoryRepo,
+      hasher,
+    );
     streamUseCase = new StreamManuscriptFileUseCase(localStorage, inMemoryRepo);
     headUseCase = new GetManuscriptFileHeadUseCase(localStorage, inMemoryRepo);
     deleteUseCase = new DeleteManuscriptFileUseCase(localStorage, inMemoryRepo);
-    signedUrlUseCase = new GetSignedDownloadUrlUseCase(localStorage, inMemoryRepo);
+    signedUrlUseCase = new GetSignedDownloadUrlUseCase(
+      localStorage,
+      inMemoryRepo,
+    );
 
     filestoreService = new FilestoreService(
       uploadUseCase,
@@ -185,7 +206,8 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       });
 
       it('should accept valid 64-char SHA-256 hex hash', () => {
-        const validSha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+        const validSha256 =
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
         const vo = ContentHash.create(validSha256);
         expect(vo.getValue()).toBe(validSha256);
       });
@@ -205,9 +227,15 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       });
 
       it('should correctly compare two ContentHash objects', () => {
-        const h1 = ContentHash.create('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391');
-        const h2 = ContentHash.create('E69DE29BB2D1D6434B8B29AE775AD8C2E48C5391');
-        const h3 = ContentHash.create('da39a3ee5e6b4b0d3255bfef95601890afd80709');
+        const h1 = ContentHash.create(
+          'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391',
+        );
+        const h2 = ContentHash.create(
+          'E69DE29BB2D1D6434B8B29AE775AD8C2E48C5391',
+        );
+        const h3 = ContentHash.create(
+          'da39a3ee5e6b4b0d3255bfef95601890afd80709',
+        );
 
         expect(h1.equals(h2)).toBe(true);
         expect(h1.equals(h3)).toBe(false);
@@ -224,8 +252,12 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       });
 
       it('should prevent directory traversal in raw keys', () => {
-        expect(() => StorageKey.fromRawKey('../etc/passwd')).toThrow('Insecure storage key');
-        expect(() => StorageKey.fromRawKey('/absolute/path')).toThrow('Insecure storage key');
+        expect(() => StorageKey.fromRawKey('../etc/passwd')).toThrow(
+          'Insecure storage key',
+        );
+        expect(() => StorageKey.fromRawKey('/absolute/path')).toThrow(
+          'Insecure storage key',
+        );
         expect(() => StorageKey.fromRawKey('')).toThrow('cannot be empty');
       });
     });
@@ -294,7 +326,9 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
   // 2. DOMAIN ENTITY (ManuscriptFile)
   // =========================================================================
   describe('ManuscriptFile Entity', () => {
-    const validHash = ContentHash.create('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391');
+    const validHash = ContentHash.create(
+      'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391',
+    );
 
     it('should create valid ManuscriptFile entity and sanitize filename', () => {
       const file = ManuscriptFile.create({
@@ -383,7 +417,9 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
         const emptyStream = Readable.from(Buffer.alloc(0));
         const result = await hasher.hashStream(emptyStream);
 
-        expect(result.contentHash.getValue()).toBe('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391');
+        expect(result.contentHash.getValue()).toBe(
+          'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391',
+        );
         expect(result.sizeBytes).toBe(0);
 
         // Verify replay stream is readable and matches original content
@@ -411,7 +447,9 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       });
 
       it('should support hashBuffer directly', () => {
-        const content = Buffer.from('\\documentclass{article}\n\\begin{document}\nFlux\\end{document}');
+        const content = Buffer.from(
+          '\\documentclass{article}\n\\begin{document}\nFlux\\end{document}',
+        );
         const result = hasher.hashBuffer(content);
 
         const expectedSha1 = crypto
@@ -427,24 +465,36 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
 
     describe('LocalDiskBinaryStorageAdapter', () => {
       it('should write stream atomically, check existence, and read back identical stream', async () => {
-        const payload = Buffer.from('Quantum Computing Simulation Dataset - Figure 1');
+        const payload = Buffer.from(
+          'Quantum Computing Simulation Dataset - Figure 1',
+        );
         const storageKey = 'blobs/test/fig1.bin';
 
         // 1. Write
-        await localStorage.sendStream(BUCKET, storageKey, Readable.from(payload));
+        await localStorage.sendStream(
+          BUCKET,
+          storageKey,
+          Readable.from(payload),
+        );
 
         // 2. Exists
         const exists = await localStorage.checkObjectExists(BUCKET, storageKey);
         expect(exists).toBe(true);
 
         // 3. Read
-        const readStream = await localStorage.getObjectStream(BUCKET, storageKey);
+        const readStream = await localStorage.getObjectStream(
+          BUCKET,
+          storageKey,
+        );
         const readBackBuffer = await streamToBuffer(readStream);
         expect(readBackBuffer.equals(payload)).toBe(true);
 
         // 4. Delete
         await localStorage.deleteObject(BUCKET, storageKey);
-        const existsAfterDelete = await localStorage.checkObjectExists(BUCKET, storageKey);
+        const existsAfterDelete = await localStorage.checkObjectExists(
+          BUCKET,
+          storageKey,
+        );
         expect(existsAfterDelete).toBe(false);
       });
 
@@ -452,10 +502,18 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
         const fullContent = Buffer.from('0123456789ABCDEF'); // 16 bytes
         const storageKey = 'blobs/test/slice.bin';
 
-        await localStorage.sendStream(BUCKET, storageKey, Readable.from(fullContent));
+        await localStorage.sendStream(
+          BUCKET,
+          storageKey,
+          Readable.from(fullContent),
+        );
 
         // Read bytes 4 to 9 ('456789')
-        const sliceStream = await localStorage.getObjectStream(BUCKET, storageKey, { start: 4, end: 9 });
+        const sliceStream = await localStorage.getObjectStream(
+          BUCKET,
+          storageKey,
+          { start: 4, end: 9 },
+        );
         const sliceBuffer = await streamToBuffer(sliceStream);
 
         expect(sliceBuffer.toString('utf8')).toBe('456789');
@@ -499,11 +557,15 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       });
 
       expect(uploadedFile2.hash.getValue()).toBe(uploadedFile1.hash.getValue());
-      expect(uploadedFile2.storageKey.getValue()).toBe(uploadedFile1.storageKey.getValue());
+      expect(uploadedFile2.storageKey.getValue()).toBe(
+        uploadedFile1.storageKey.getValue(),
+      );
     });
 
     it('StreamManuscriptFileUseCase: should stream full content when no range header is supplied', async () => {
-      const data = Buffer.from('Lorem ipsum dolor sit amet, consectetur adipiscing elit.');
+      const data = Buffer.from(
+        'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
+      );
       const file = await uploadUseCase.execute({
         projectId: PROJECT_ID,
         name: 'sample.txt',
@@ -593,10 +655,18 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
         purgePhysicalBlob: false,
       });
 
-      const deletedFile = await inMemoryRepo.findByProjectAndId(PROJECT_ID, file.id);
+      const deletedFile = await inMemoryRepo.findByProjectAndId(
+        PROJECT_ID,
+        file.id,
+      );
       expect(deletedFile?.deleted).toBe(true);
       // Physical blob must still exist in storage
-      expect(await localStorage.checkObjectExists(file.bucketName, file.storageKey.getValue())).toBe(true);
+      expect(
+        await localStorage.checkObjectExists(
+          file.bucketName,
+          file.storageKey.getValue(),
+        ),
+      ).toBe(true);
     });
 
     it('DeleteManuscriptFileUseCase: should purge physical blob when requested', async () => {
@@ -614,7 +684,12 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
         purgePhysicalBlob: true,
       });
 
-      expect(await localStorage.checkObjectExists(file.bucketName, file.storageKey.getValue())).toBe(false);
+      expect(
+        await localStorage.checkObjectExists(
+          file.bucketName,
+          file.storageKey.getValue(),
+        ),
+      ).toBe(false);
     });
   });
 
@@ -631,7 +706,10 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
         'application/postscript',
       );
 
-      const clsiFeed = await filestoreService.openReadStream(PROJECT_ID, file.id);
+      const clsiFeed = await filestoreService.openReadStream(
+        PROJECT_ID,
+        file.id,
+      );
       expect(clsiFeed.file.id).toBe(file.id);
 
       const streamBytes = await streamToBuffer(clsiFeed.stream);
@@ -639,8 +717,16 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
     });
 
     it('should list all active files in a manuscript project', async () => {
-      await filestoreService.uploadFileFromBuffer(PROJECT_ID, 'a.png', Buffer.from('a'));
-      await filestoreService.uploadFileFromBuffer(PROJECT_ID, 'b.png', Buffer.from('b'));
+      await filestoreService.uploadFileFromBuffer(
+        PROJECT_ID,
+        'a.png',
+        Buffer.from('a'),
+      );
+      await filestoreService.uploadFileFromBuffer(
+        PROJECT_ID,
+        'b.png',
+        Buffer.from('b'),
+      );
 
       const list = await filestoreService.listFiles(PROJECT_ID);
       expect(list.length).toBe(2);
@@ -662,7 +748,11 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
         },
       };
 
-      const resDto = await filestoreController.uploadFile(PROJECT_ID, mockReq, 'appendix.pdf');
+      const resDto = await filestoreController.uploadFile(
+        PROJECT_ID,
+        mockReq,
+        'appendix.pdf',
+      );
       expect(resDto.name).toBe('appendix.pdf');
       expect(resDto.sizeBytes).toBe(rawData.length);
       expect(resDto.mimeType).toBe('application/pdf');
@@ -689,7 +779,9 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
     it('should apply Mobile Safari HTML XSS defense (Overleaf Parity)', async () => {
       // Overleaf vulnerability guard: If user agent is Mobile Safari and file is .html,
       // force Content-Type to text/plain to prevent script execution on iOS Safari.
-      const htmlContent = Buffer.from('<html><body><script>alert("xss")</script></body></html>');
+      const htmlContent = Buffer.from(
+        '<html><body><script>alert("xss")</script></body></html>',
+      );
       const htmlFile = await filestoreService.uploadFileFromBuffer(
         PROJECT_ID,
         'index.html',
@@ -843,7 +935,10 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
         Buffer.from('test'),
       );
 
-      const result = await filestoreController.getSignedUrl(PROJECT_ID, file.id);
+      const result = await filestoreController.getSignedUrl(
+        PROJECT_ID,
+        file.id,
+      );
       expect(result).toHaveProperty('signedUrl');
     });
   });

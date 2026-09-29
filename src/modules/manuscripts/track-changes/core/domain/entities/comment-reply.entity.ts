@@ -38,12 +38,24 @@ export class CommentReply {
     return new CommentReply(props);
   }
 
-  public get id(): string { return this._id; }
-  public get threadId(): string { return this._threadId; }
-  public get content(): string { return this._content; }
-  public get createdById(): string | null { return this._createdById; }
-  public get createdAt(): Date { return this._createdAt; }
-  public get updatedAt(): Date { return this._updatedAt; }
+  public get id(): string {
+    return this._id;
+  }
+  public get threadId(): string {
+    return this._threadId;
+  }
+  public get content(): string {
+    return this._content;
+  }
+  public get createdById(): string | null {
+    return this._createdById;
+  }
+  public get createdAt(): Date {
+    return this._createdAt;
+  }
+  public get updatedAt(): Date {
+    return this._updatedAt;
+  }
 
   public updateContent(content: string): void {
     if (!content || !content.trim()) {

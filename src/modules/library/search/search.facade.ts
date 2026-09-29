@@ -1,11 +1,14 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { SearchService } from './application/services/search.service';
-import { SearchItemsQueryDto } from './application/dtos/search.dto';
+import { SearchService } from './core/use-cases/search.service';
+import { SearchItemsQueryDto } from './dto/search.dto';
 
 export const SEARCH_FACADE = 'SEARCH_FACADE';
 
 export interface ISearchFacade {
-  search(userId: string, queryDto: SearchItemsQueryDto): Promise<{
+  search(
+    userId: string,
+    queryDto: SearchItemsQueryDto,
+  ): Promise<{
     items: unknown[];
     facets?: unknown;
     meta?: {
@@ -23,11 +26,12 @@ export interface ISearchFacade {
 
 @Injectable()
 export class SearchFacade implements ISearchFacade {
-  constructor(
-    @Optional() private readonly searchService?: SearchService,
-  ) {}
+  constructor(@Optional() private readonly searchService?: SearchService) {}
 
-  async search(userId: string, queryDto: SearchItemsQueryDto): Promise<{
+  async search(
+    userId: string,
+    queryDto: SearchItemsQueryDto,
+  ): Promise<{
     items: unknown[];
     facets?: unknown;
     meta?: {
@@ -36,7 +40,8 @@ export class SearchFacade implements ISearchFacade {
       pageCount: number;
     };
   }> {
-    if (!this.searchService) return { items: [], meta: { hasNextPage: false, pageCount: 0 } };
+    if (!this.searchService)
+      return { items: [], meta: { hasNextPage: false, pageCount: 0 } };
     return this.searchService.search(userId, queryDto);
   }
 

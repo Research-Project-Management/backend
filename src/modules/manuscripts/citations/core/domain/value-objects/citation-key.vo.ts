@@ -19,7 +19,7 @@ export class CitationKeyVo {
     const trimmed = rawKey.trim();
     if (!CitationKeyVo.VALID_KEY_REGEX.test(trimmed)) {
       throw new InvalidBibtexException(
-        `Invalid citation key '${rawKey}'. Keys can only contain letters, numbers, underscores, colons, and hyphens.`
+        `Invalid citation key '${rawKey}'. Keys can only contain letters, numbers, underscores, colons, and hyphens.`,
       );
     }
 

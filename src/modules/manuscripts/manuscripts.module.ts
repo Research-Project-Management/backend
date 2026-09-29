@@ -16,6 +16,7 @@ import { DiagnosticsModule } from './diagnostics/diagnostics.module';
 import { CitationsModule } from './citations/citations.module';
 import { SpellingModule } from './spelling/spelling.module';
 import { TemplatesModule } from './templates/templates.module';
+import { LinkedFilesModule } from './linked-files/linked-files.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { TemplatesModule } from './templates/templates.module';
     CitationsModule,
     SpellingModule,
     TemplatesModule,
+    LinkedFilesModule,
   ],
   exports: [
     ClsiModule,
@@ -45,6 +47,7 @@ import { TemplatesModule } from './templates/templates.module';
     CitationsModule,
     SpellingModule,
     TemplatesModule,
+    LinkedFilesModule,
   ],
 })
 export class ManuscriptsModule {}

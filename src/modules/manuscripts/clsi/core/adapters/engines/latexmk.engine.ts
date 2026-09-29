@@ -18,7 +18,8 @@ export class LatexmkEngine implements ILatexEngine {
   constructor(
     private readonly runner: ISandboxRunner,
     private readonly binaryPath: string = 'latexmk',
-    private readonly defaultCompiler: 'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex'
+    private readonly defaultCompiler:
+      'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex',
   ) {}
 
   public async isAvailable(): Promise<boolean> {
@@ -35,7 +36,7 @@ export class LatexmkEngine implements ILatexEngine {
 
   public async compile(
     options: EngineRunOptions,
-    compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex'
+    compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex',
   ): Promise<EngineRunResult> {
     const startTime = Date.now();
     const compiler = compilerOverride || this.defaultCompiler;
@@ -64,6 +65,7 @@ export class LatexmkEngine implements ILatexEngine {
       cwd: options.cwd,
       timeoutMs: options.timeoutMs ?? 240000,
       signal: options.signal,
+      onLogChunk: options.onLogChunk,
     });
 
     const durationMs = Date.now() - startTime;

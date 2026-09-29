@@ -28,7 +28,11 @@ import { FlushSingleDocUseCase } from '@/modules/manuscripts/document-updater/co
 import { GetInFlightDocUseCase } from '@/modules/manuscripts/document-updater/core/use-cases/get-in-flight-doc.use-case';
 import { EvictDocBufferUseCase } from '@/modules/manuscripts/document-updater/core/use-cases/evict-doc-buffer.use-case';
 import { IInFlightStorePort } from '@/modules/manuscripts/document-updater/core/ports/in-flight-store.port';
-import { IDocstoreWriterPort, BaseDocData, CommitResult } from '@/modules/manuscripts/document-updater/core/ports/docstore-writer.port';
+import {
+  IDocstoreWriterPort,
+  BaseDocData,
+  CommitResult,
+} from '@/modules/manuscripts/document-updater/core/ports/docstore-writer.port';
 import { IUpdaterLockPort } from '@/modules/manuscripts/document-updater/core/ports/updater-lock.port';
 import { IDebounceTimerPort } from '@/modules/manuscripts/document-updater/core/ports/debounce-timer.port';
 import { InMemoryInFlightStoreAdapter } from '@/modules/manuscripts/document-updater/core/adapters/storage/in-memory-in-flight-store.adapter';
@@ -37,7 +41,10 @@ import { NodeTimeoutDebounceAdapter } from '@/modules/manuscripts/document-updat
 import { InFlightDoc } from '@/modules/manuscripts/document-updater/core/domain/entities/in-flight-doc.entity';
 import { DocumentVersionVo } from '@/modules/manuscripts/document-updater/core/domain/value-objects/document-version.vo';
 import { UpdateOpVo } from '@/modules/manuscripts/document-updater/core/domain/value-objects/update-op.vo';
-import { FlushStatusVo, FlushStatusEnum } from '@/modules/manuscripts/document-updater/core/domain/value-objects/flush-status.vo';
+import {
+  FlushStatusVo,
+  FlushStatusEnum,
+} from '@/modules/manuscripts/document-updater/core/domain/value-objects/flush-status.vo';
 import { DocumentLockedException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/document-locked.exception';
 import { DocUpdaterConflictException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/doc-updater-conflict.exception';
 import { InFlightNotFoundException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/in-flight-not-found.exception';
@@ -46,14 +53,20 @@ import { InFlightNotFoundException } from '@/modules/manuscripts/document-update
  * Mock Test Double for IDocstoreWriterPort simulating DocstoreService
  */
 class MockDocstoreWriter implements IDocstoreWriterPort {
-  public docs = new Map<string, { lines: string[]; rev: number; version: number }>();
+  public docs = new Map<
+    string,
+    { lines: string[]; rev: number; version: number }
+  >();
   public simulateConflict = false;
 
   private toKey(projectId: string, docId: string): string {
     return `${projectId}:${docId}`;
   }
 
-  public async fetchBaseDoc(projectId: string, docId: string): Promise<BaseDocData | null> {
+  public async fetchBaseDoc(
+    projectId: string,
+    docId: string,
+  ): Promise<BaseDocData | null> {
     const data = this.docs.get(this.toKey(projectId, docId));
     if (!data) return null;
     return {
@@ -75,7 +88,11 @@ class MockDocstoreWriter implements IDocstoreWriterPort {
     const existing = this.docs.get(key);
 
     if (this.simulateConflict) {
-      throw new DocUpdaterConflictException(docId, rev, (existing?.rev ?? 0) + 1);
+      throw new DocUpdaterConflictException(
+        docId,
+        rev,
+        (existing?.rev ?? 0) + 1,
+      );
     }
 
     if (existing && existing.rev !== rev) {
@@ -121,16 +138,43 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
 
     // Pre-populate mock docstore with a baseline LaTeX document
     docstoreWriter.docs.set(`${PROJECT_ID}:${DOC_ID}`, {
-      lines: ['\\documentclass{article}', '\\begin{document}', 'Hello World', '\\end{document}'],
+      lines: [
+        '\\documentclass{article}',
+        '\\begin{document}',
+        'Hello World',
+        '\\end{document}',
+      ],
       rev: 1,
       version: 1,
     });
 
-    flushSingleDocUseCase = new FlushSingleDocUseCase(inFlightStore, docstoreWriter, lock, debounceTimer);
-    queueUpdateUseCase = new QueueDocUpdateUseCase(inFlightStore, docstoreWriter, lock, debounceTimer);
-    flushProjectUseCase = new FlushProjectDocsUseCase(inFlightStore, lock, debounceTimer, flushSingleDocUseCase);
-    getInFlightDocUseCase = new GetInFlightDocUseCase(inFlightStore, docstoreWriter);
-    evictDocBufferUseCase = new EvictDocBufferUseCase(inFlightStore, debounceTimer, flushSingleDocUseCase);
+    flushSingleDocUseCase = new FlushSingleDocUseCase(
+      inFlightStore,
+      docstoreWriter,
+      lock,
+      debounceTimer,
+    );
+    queueUpdateUseCase = new QueueDocUpdateUseCase(
+      inFlightStore,
+      docstoreWriter,
+      lock,
+      debounceTimer,
+    );
+    flushProjectUseCase = new FlushProjectDocsUseCase(
+      inFlightStore,
+      lock,
+      debounceTimer,
+      flushSingleDocUseCase,
+    );
+    getInFlightDocUseCase = new GetInFlightDocUseCase(
+      inFlightStore,
+      docstoreWriter,
+    );
+    evictDocBufferUseCase = new EvictDocBufferUseCase(
+      inFlightStore,
+      debounceTimer,
+      flushSingleDocUseCase,
+    );
 
     service = new DocumentUpdaterService(
       queueUpdateUseCase,
@@ -196,7 +240,11 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
     describe('UpdateOpVo', () => {
       it('should replace entire lines array when created from lines', () => {
         const baseLines = ['line 1', 'line 2'];
-        const op = UpdateOpVo.fromLines(['new line 1', 'new line 2', 'new line 3']);
+        const op = UpdateOpVo.fromLines([
+          'new line 1',
+          'new line 2',
+          'new line 3',
+        ]);
 
         const result = op.applyTo(baseLines);
         expect(result).toEqual(['new line 1', 'new line 2', 'new line 3']);
@@ -351,7 +399,12 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
       const result = await queueUpdateUseCase.execute({
         projectId: PROJECT_ID,
         docId: DOC_ID,
-        lines: ['\\documentclass{article}', '\\begin{document}', 'Updated Text In-Memory', '\\end{document}'],
+        lines: [
+          '\\documentclass{article}',
+          '\\begin{document}',
+          'Updated Text In-Memory',
+          '\\end{document}',
+        ],
       });
 
       expect(result.docId).toBe(DOC_ID);
@@ -387,7 +440,11 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
       await queueUpdateUseCase.execute({
         projectId: PROJECT_ID,
         docId: DOC_ID,
-        lines: ['\\documentclass{article}', 'New Content Flushed', '\\end{document}'],
+        lines: [
+          '\\documentclass{article}',
+          'New Content Flushed',
+          '\\end{document}',
+        ],
       });
 
       // 2. Flush single doc
@@ -471,7 +528,10 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
 
     it('GetInFlightDocUseCase: should return buffered doc if active, or load baseline if not', async () => {
       // 1. Not in buffer yet -> loads baseline
-      const res1 = await getInFlightDocUseCase.execute({ projectId: PROJECT_ID, docId: DOC_ID });
+      const res1 = await getInFlightDocUseCase.execute({
+        projectId: PROJECT_ID,
+        docId: DOC_ID,
+      });
       expect(res1.isBuffered).toBe(false);
       expect(res1.doc.lines[0]).toBe('\\documentclass{article}');
 
@@ -482,7 +542,10 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
         lines: ['In memory active buffer'],
       });
 
-      const res2 = await getInFlightDocUseCase.execute({ projectId: PROJECT_ID, docId: DOC_ID });
+      const res2 = await getInFlightDocUseCase.execute({
+        projectId: PROJECT_ID,
+        docId: DOC_ID,
+      });
       expect(res2.isBuffered).toBe(true);
       expect(res2.doc.lines[0]).toBe('In memory active buffer');
     });

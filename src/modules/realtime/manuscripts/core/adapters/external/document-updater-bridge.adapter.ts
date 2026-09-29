@@ -19,7 +19,9 @@ export class DocumentUpdaterBridgeAdapter extends IDocumentUpdaterBridgePort {
     super();
   }
 
-  public async forwardUpdate(payload: ClientUpdatePayloadVo): Promise<BridgeUpdateResult> {
+  public async forwardUpdate(
+    payload: ClientUpdatePayloadVo,
+  ): Promise<BridgeUpdateResult> {
     const res = await this.documentUpdaterService.queueUpdate(
       payload.projectId,
       payload.docId,

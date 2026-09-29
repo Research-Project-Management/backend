@@ -8,7 +8,10 @@ import { IsString, IsNotEmpty, IsBoolean, IsOptional } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class ExportZipQueryDto {
-  @ApiPropertyOptional({ description: 'Include latest compiled output.pdf in the archive package', default: false })
+  @ApiPropertyOptional({
+    description: 'Include latest compiled output.pdf in the archive package',
+    default: false,
+  })
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
@@ -21,7 +24,10 @@ export class ExportZipQueryDto {
 }
 
 export class ScaffoldTemplateDto {
-  @ApiProperty({ description: 'Identifier of the academic template (e.g., ieee-transactions, acm-sigconf)' })
+  @ApiProperty({
+    description:
+      'Identifier of the academic template (e.g., ieee-transactions, acm-sigconf)',
+  })
   @IsString()
   @IsNotEmpty()
   templateId!: string;

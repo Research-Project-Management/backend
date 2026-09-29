@@ -39,7 +39,9 @@ export class DiskUsageCleaner {
    * Scans scratch directory and cleans projects that have been inactive
    * longer than maxAgeMs, skipping any project with an active .project-lock.
    */
-  public async cleanStaleProjects(options?: DiskUsageOptions): Promise<CleanStats> {
+  public async cleanStaleProjects(
+    options?: DiskUsageOptions,
+  ): Promise<CleanStats> {
     const maxAgeMs = options?.maxAgeMs ?? DiskUsageCleaner.DEFAULT_MAX_AGE_MS;
     const now = Date.now();
     const stats: CleanStats = {
@@ -77,9 +79,12 @@ export class DiskUsageCleaner {
    * Enforces disk quota by evicting oldest projects first (LRU order)
    * until total disk usage falls below targetBytes.
    */
-  public async enforceDiskQuota(options?: DiskUsageOptions): Promise<CleanStats> {
+  public async enforceDiskQuota(
+    options?: DiskUsageOptions,
+  ): Promise<CleanStats> {
     const maxBytes = options?.maxBytes ?? DiskUsageCleaner.DEFAULT_MAX_BYTES;
-    const targetBytes = options?.targetBytes ?? DiskUsageCleaner.DEFAULT_TARGET_BYTES;
+    const targetBytes =
+      options?.targetBytes ?? DiskUsageCleaner.DEFAULT_TARGET_BYTES;
 
     const stats: CleanStats = {
       scannedProjects: 0,
@@ -99,7 +104,7 @@ export class DiskUsageCleaner {
 
     // Sort projects by LRU (oldest lastModifiedMs first)
     const sortedProjects = [...projects].sort(
-      (a, b) => a.lastModifiedMs - b.lastModifiedMs
+      (a, b) => a.lastModifiedMs - b.lastModifiedMs,
     );
 
     for (const project of sortedProjects) {
@@ -130,7 +135,9 @@ export class DiskUsageCleaner {
    */
   private async listProjects(): Promise<ProjectDirInfo[]> {
     try {
-      const entries = await fs.readdir(this.baseScratchDir, { withFileTypes: true });
+      const entries = await fs.readdir(this.baseScratchDir, {
+        withFileTypes: true,
+      });
       const projects: ProjectDirInfo[] = [];
 
       for (const entry of entries) {
@@ -166,7 +173,7 @@ export class DiskUsageCleaner {
   }
 
   private async calcDirSize(
-    dirPath: string
+    dirPath: string,
   ): Promise<{ sizeBytes: number; latestMtime: number }> {
     let sizeBytes = 0;
     let latestMtime = 0;

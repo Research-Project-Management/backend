@@ -81,7 +81,7 @@ describe('SyncController (Library Distributed Sync API)', () => {
         },
       ];
 
-      transactionServiceMock.getChangesSince.mockResolvedValue(mockChanges as any);
+      transactionServiceMock.getChangesSince.mockResolvedValue(mockChanges);
 
       const query: SyncQueryDto = { since: '4', limit: 50 };
       const result = await controller.getChanges('user-123', query);
@@ -131,7 +131,7 @@ describe('SyncController (Library Distributed Sync API)', () => {
         createdAt: new Date(),
       }));
 
-      transactionServiceMock.getChangesSince.mockResolvedValue(mockItems as any);
+      transactionServiceMock.getChangesSince.mockResolvedValue(mockItems);
 
       const result = await controller.getChanges('user-123', { limit: 2 });
       expect(result.count).toBe(2);
@@ -156,7 +156,7 @@ describe('SyncController (Library Distributed Sync API)', () => {
       ];
 
       transactionServiceMock.getTombstonesSince.mockResolvedValue(
-        mockTombstones as any,
+        mockTombstones,
       );
 
       const query: SyncQueryDto = { since: '5', limit: 20 };
@@ -188,7 +188,7 @@ describe('SyncController (Library Distributed Sync API)', () => {
       }));
 
       transactionServiceMock.getTombstonesSince.mockResolvedValue(
-        mockTombstones as any,
+        mockTombstones,
       );
 
       const result = await controller.getTombstones('user-123', { limit: 2 });

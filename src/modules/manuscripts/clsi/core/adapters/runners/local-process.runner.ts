@@ -3,22 +3,46 @@
  * Executes commands on the host OS as child processes with Watchdog timeout control
  */
 
-import { spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import {
   ISandboxRunner,
   ProcessExecutionOptions,
   ProcessExecutionResult,
 } from '../../ports/runner.port';
-import { Watchdog } from './watchdog';
+import { Watchdog, killProcessGroup } from './watchdog';
 
 export class LocalProcessRunner implements ISandboxRunner {
   readonly name = 'local-process';
 
+  // Global registry of running compiler child processes to prevent orphaned zombie processes
+  private static readonly activeChildProcesses = new Set<ChildProcess>();
+  private static shutdownHooksRegistered = false;
+
+  private static registerShutdownHooks(): void {
+    if (this.shutdownHooksRegistered) return;
+    this.shutdownHooksRegistered = true;
+
+    const cleanup = () => {
+      for (const child of this.activeChildProcesses) {
+        if (child.pid && !child.killed) {
+          killProcessGroup(child.pid, true);
+        }
+      }
+      this.activeChildProcesses.clear();
+    };
+
+    process.once('SIGINT', cleanup);
+    process.once('SIGTERM', cleanup);
+    process.once('exit', cleanup);
+  }
+
   public async run(
     command: string,
     args: string[],
-    options: ProcessExecutionOptions
+    options: ProcessExecutionOptions,
   ): Promise<ProcessExecutionResult> {
+    LocalProcessRunner.registerShutdownHooks();
+
     return new Promise((resolve) => {
       let stdout = '';
       let stderr = '';
@@ -33,18 +57,25 @@ export class LocalProcessRunner implements ISandboxRunner {
         shell: false,
       });
 
+      LocalProcessRunner.activeChildProcesses.add(child);
+
       const watchdog = new Watchdog(child, options.timeoutMs ?? 240000);
       watchdog.arm(options.signal);
 
       child.stdout?.on('data', (data) => {
-        stdout += data.toString();
+        const str = data.toString();
+        stdout += str;
+        options.onLogChunk?.(str);
       });
 
       child.stderr?.on('data', (data) => {
-        stderr += data.toString();
+        const str = data.toString();
+        stderr += str;
+        options.onLogChunk?.(str);
       });
 
       child.on('error', (err) => {
+        LocalProcessRunner.activeChildProcesses.delete(child);
         watchdog.disarm();
         resolve({
           exitCode: 1,
@@ -54,6 +85,7 @@ export class LocalProcessRunner implements ISandboxRunner {
       });
 
       child.on('close', (code) => {
+        LocalProcessRunner.activeChildProcesses.delete(child);
         watchdog.disarm();
         if (watchdog.isAborted()) {
           resolve({

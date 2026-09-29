@@ -48,7 +48,10 @@ export class InMemoryCustomDictionaryAdapter implements ICustomDictionaryReposit
     set.add(clean);
   }
 
-  public async removeProjectWord(projectId: string, word: string): Promise<boolean> {
+  public async removeProjectWord(
+    projectId: string,
+    word: string,
+  ): Promise<boolean> {
     const clean = word.toLowerCase().trim();
     const set = this.projectWords.get(projectId);
     if (!set) return false;
@@ -62,7 +65,11 @@ export class InMemoryCustomDictionaryAdapter implements ICustomDictionaryReposit
     return set.delete(clean);
   }
 
-  public async isCustomWord(word: string, projectId?: string, userId?: string): Promise<boolean> {
+  public async isCustomWord(
+    word: string,
+    projectId?: string,
+    userId?: string,
+  ): Promise<boolean> {
     const clean = word.toLowerCase().trim();
     if (!clean) return false;
 

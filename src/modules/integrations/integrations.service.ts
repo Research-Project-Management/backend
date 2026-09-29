@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  Optional,
+  Logger,
+} from '@nestjs/common';
 import { IntegrationsRepository } from './integrations.repository';
 import {
   IIntegrationProvider,
@@ -12,6 +18,8 @@ import { MendeleyProvider } from './providers/mendeley.provider';
 import { GithubProvider } from './providers/github.provider';
 import { decryptToken, encryptToken } from './utils/integration-crypto.utils';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { SyncCollectionDto } from './dto/sync-collection.dto';
 import {
   CreateGithubRepoDto,
@@ -38,7 +46,11 @@ export interface ProviderStatusSummary {
 
 @Injectable()
 export class IntegrationsService {
-  private readonly providers = new Map<IntegrationProviderType, IIntegrationProvider>();
+  private readonly logger = new Logger(IntegrationsService.name);
+  private readonly providers = new Map<
+    IntegrationProviderType,
+    IIntegrationProvider
+  >();
 
   constructor(
     private readonly repo: IntegrationsRepository,
@@ -48,6 +60,8 @@ export class IntegrationsService {
     private readonly filestoreService: FilestoreService,
     private readonly aggregator: IManuscriptAggregatorPort,
     private readonly hydrator: IManuscriptHydratorPort,
+    @Optional() private readonly docstoreService?: DocstoreService,
+    @Optional() private readonly structureService?: StructureService,
   ) {
     this.providers.set(this.zoteroProvider.provider, this.zoteroProvider);
     this.providers.set(this.mendeleyProvider.provider, this.mendeleyProvider);
@@ -57,7 +71,9 @@ export class IntegrationsService {
   private getProvider(provider: IntegrationProviderType): IIntegrationProvider {
     const instance = this.providers.get(provider);
     if (!instance) {
-      throw new NotFoundException(`Unsupported integration provider: ${provider}`);
+      throw new NotFoundException(
+        `Unsupported integration provider: ${provider}`,
+      );
     }
     return instance;
   }
@@ -68,32 +84,40 @@ export class IntegrationsService {
 
     const metadata: Record<
       IntegrationProviderType,
-      { name: string; description: string; category: 'reference' | 'identity' | 'git' }
+      {
+        name: string;
+        description: string;
+        category: 'reference' | 'identity' | 'git';
+      }
     > = {
       zotero: {
         name: 'Zotero',
-        description: 'Sync collections, references, and PDF metadata from your personal or group library.',
+        description:
+          'Sync collections, references, and PDF metadata from your personal or group library.',
         category: 'reference',
       },
       mendeley: {
         name: 'Mendeley',
-        description: 'Connect your Elsevier Mendeley reference manager library directly to Flux.',
+        description:
+          'Connect your Elsevier Mendeley reference manager library directly to Flux.',
         category: 'reference',
       },
       orcid: {
         name: 'ORCID',
-        description: 'Connect your researcher profile to automatically sync your published works.',
+        description:
+          'Connect your researcher profile to automatically sync your published works.',
         category: 'identity',
       },
       github: {
         name: 'GitHub',
-        description: 'Two-way sync manuscripts with GitHub repositories, branches, and commits.',
+        description:
+          'Two-way sync manuscripts with GitHub repositories, branches, and commits.',
         category: 'git',
       },
     };
 
     return INTEGRATION_PROVIDERS.map((provider) => {
-      const conn = connectionMap.get(provider as any);
+      const conn = connectionMap.get(provider);
       const meta = metadata[provider];
 
       if (!conn) {
@@ -107,7 +131,9 @@ export class IntegrationsService {
         };
       }
 
-      const needsReconnect = Boolean(conn.authFailedAt || conn.status !== 'connected');
+      const needsReconnect = Boolean(
+        conn.authFailedAt || conn.status !== 'connected',
+      );
 
       return {
         provider,
@@ -152,7 +178,9 @@ export class IntegrationsService {
     });
 
     const encryptedAccess = encryptToken(exchange.accessToken);
-    const encryptedRefresh = exchange.refreshToken ? encryptToken(exchange.refreshToken) : null;
+    const encryptedRefresh = exchange.refreshToken
+      ? encryptToken(exchange.refreshToken)
+      : null;
     const tokenExpiresAt = exchange.expiresInSeconds
       ? new Date(Date.now() + exchange.expiresInSeconds * 1000)
       : null;
@@ -170,7 +198,10 @@ export class IntegrationsService {
     });
   }
 
-  async disconnect(userId: string, provider: IntegrationProviderType): Promise<void> {
+  async disconnect(
+    userId: string,
+    provider: IntegrationProviderType,
+  ): Promise<void> {
     await this.repo.deleteConnection(userId, provider);
   }
 
@@ -180,18 +211,25 @@ export class IntegrationsService {
   ): Promise<RemoteCollectionItem[]> {
     const conn = await this.repo.findConnection(userId, provider);
     if (!conn) {
-      throw new NotFoundException(`No active connection found for provider: ${provider}`);
+      throw new NotFoundException(
+        `No active connection found for provider: ${provider}`,
+      );
     }
 
     if (conn.authFailedAt || conn.status !== 'connected') {
-      throw new BadRequestException('Integration authentication is expired or invalid.');
+      throw new BadRequestException(
+        'Integration authentication is expired or invalid.',
+      );
     }
 
     const providerInstance = this.getProvider(provider);
     const decryptedToken = decryptToken(conn.accessToken);
 
     try {
-      return await providerInstance.fetchCollections(decryptedToken, conn.providerUserId);
+      return await providerInstance.fetchCollections(
+        decryptedToken,
+        conn.providerUserId,
+      );
     } catch (err: any) {
       if (err?.message?.includes('401') || err?.message?.includes('403')) {
         await this.repo.markAuthFailed(userId, provider);
@@ -200,14 +238,22 @@ export class IntegrationsService {
     }
   }
 
-  async syncProjectCollection(userId: string, provider: IntegrationProviderType, dto: SyncCollectionDto) {
+  async syncProjectCollection(
+    userId: string,
+    provider: IntegrationProviderType,
+    dto: SyncCollectionDto,
+  ) {
     const conn = await this.repo.findConnection(userId, provider);
     if (!conn) {
-      throw new NotFoundException(`No active connection found for provider: ${provider}`);
+      throw new NotFoundException(
+        `No active connection found for provider: ${provider}`,
+      );
     }
 
     if (conn.authFailedAt || conn.status !== 'connected') {
-      throw new BadRequestException('Integration authentication is expired or invalid.');
+      throw new BadRequestException(
+        'Integration authentication is expired or invalid.',
+      );
     }
 
     const providerInstance = this.getProvider(provider);
@@ -228,6 +274,41 @@ export class IntegrationsService {
       bibBuffer,
       'application/x-bibtex',
     );
+
+    // Also sync document into Docstore & Structure tree for instant editor availability
+    if (this.docstoreService && this.structureService) {
+      try {
+        const existingNode = await this.structureService.getNodeByPath(
+          dto.projectId,
+          targetBibFile,
+        );
+        if (existingNode && existingNode.docId) {
+          const lines = bibtexContent.split(/\r?\n/);
+          await this.docstoreService.updateDoc(
+            dto.projectId,
+            existingNode.docId,
+            {
+              lines,
+              version: 1,
+            },
+          );
+        } else {
+          const doc = await this.docstoreService.createDoc(dto.projectId, {
+            path: targetBibFile,
+            text: bibtexContent,
+          });
+          await this.structureService.createNode(dto.projectId, {
+            name: targetBibFile,
+            type: 'DOC',
+            docId: doc._id,
+          });
+        }
+      } catch (docErr: any) {
+        this.logger.warn(
+          `Could not sync docstore node for ${targetBibFile}: ${docErr.message}`,
+        );
+      }
+    }
 
     const link = await this.repo.upsertProjectLink({
       projectId: dto.projectId,
@@ -253,21 +334,30 @@ export class IntegrationsService {
   // GitHub-Specific Specialized Workflows
   // ============================================================================
 
-  private async getDecryptedGithubToken(userId: string): Promise<{ token: string; connId: string }> {
+  private async getDecryptedGithubToken(
+    userId: string,
+  ): Promise<{ token: string; connId: string }> {
     const conn = await this.repo.findConnection(userId, 'github');
     if (!conn) {
-      throw new NotFoundException('GitHub is not connected. Please connect your GitHub account first.');
+      throw new NotFoundException(
+        'GitHub is not connected. Please connect your GitHub account first.',
+      );
     }
 
     if (conn.authFailedAt || conn.status !== 'connected') {
-      throw new BadRequestException('GitHub authorization has expired. Please reconnect.');
+      throw new BadRequestException(
+        'GitHub authorization has expired. Please reconnect.',
+      );
     }
 
     const token = decryptToken(conn.accessToken);
     return { token, connId: conn.id };
   }
 
-  async listGithubBranches(userId: string, repoFullName: string): Promise<string[]> {
+  async listGithubBranches(
+    userId: string,
+    repoFullName: string,
+  ): Promise<string[]> {
     const { token } = await this.getDecryptedGithubToken(userId);
     return await this.githubProvider.listBranches(token, repoFullName);
   }
@@ -338,7 +428,10 @@ export class IntegrationsService {
     const branch = dto.branch || link.targetBibFile || 'main';
 
     // 1. Gather all project entries (text documents and binary assets)
-    const entries = await this.aggregator.collectProjectEntries(dto.projectId, false);
+    const entries = await this.aggregator.collectProjectEntries(
+      dto.projectId,
+      false,
+    );
     if (entries.length === 0) {
       throw new BadRequestException('Project has no files to commit.');
     }
@@ -387,7 +480,9 @@ export class IntegrationsService {
     });
 
     if (pulledFiles.length === 0) {
-      throw new BadRequestException(`No files found in ${repoFullName} on branch ${branch}.`);
+      throw new BadRequestException(
+        `No files found in ${repoFullName} on branch ${branch}.`,
+      );
     }
 
     // 2. Wrap into ArchiveEntryVo for safe reconstitution

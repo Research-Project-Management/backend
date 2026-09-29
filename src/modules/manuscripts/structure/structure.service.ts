@@ -10,10 +10,18 @@ import { MoveNodeUseCase } from './core/use-cases/move-node.use-case';
 import { RenameNodeUseCase } from './core/use-cases/rename-node.use-case';
 import { DeleteNodeUseCase } from './core/use-cases/delete-node.use-case';
 import { ResolveRootDocUseCase } from './core/use-cases/resolve-root-doc.use-case';
-import { BuildCompilerFilesUseCase, CompilationPayload } from './core/use-cases/build-compiler-files.use-case';
+import {
+  BuildCompilerFilesUseCase,
+  CompilationPayload,
+} from './core/use-cases/build-compiler-files.use-case';
 import { IStructureRepository } from './core/ports/structure-repository.port';
 import { ManuscriptNodeEntity } from './core/domain/manuscript-node.entity';
-import { CreateNodeDto, MoveNodeDto, RenameNodeDto, TreeNodeDto } from './dto/node.dto';
+import {
+  CreateNodeDto,
+  MoveNodeDto,
+  RenameNodeDto,
+  TreeNodeDto,
+} from './dto/node.dto';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 
 @Injectable()
@@ -40,69 +48,136 @@ export class StructureService {
     return await this.structureRepository.getAllNodes(projectId);
   }
 
-  public async getNodeById(projectId: string, nodeId: string): Promise<ManuscriptNodeEntity | null> {
+  public async getNodeById(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ManuscriptNodeEntity | null> {
     return await this.structureRepository.findById(projectId, nodeId);
   }
 
-  public async getNodeByPath(projectId: string, path: string): Promise<ManuscriptNodeEntity | null> {
+  public async getNodeByPath(
+    projectId: string,
+    path: string,
+  ): Promise<ManuscriptNodeEntity | null> {
     return await this.structureRepository.findByPath(projectId, path);
   }
 
-  public async createNode(projectId: string, dto: CreateNodeDto): Promise<ManuscriptNodeEntity> {
+  public async createNode(
+    projectId: string,
+    dto: CreateNodeDto,
+  ): Promise<ManuscriptNodeEntity> {
     const node = await this.createNodeUseCase.execute(projectId, dto);
-    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'create', node });
+    this.realtimeService?.broadcastFileTreeChange(projectId, {
+      action: 'create',
+      node,
+    });
     return node;
   }
 
-  public async mkdirp(projectId: string, dirPath: string): Promise<ManuscriptNodeEntity> {
+  public async mkdirp(
+    projectId: string,
+    dirPath: string,
+  ): Promise<ManuscriptNodeEntity> {
     const node = await this.createNodeUseCase.mkdirp(projectId, dirPath);
-    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'mkdirp', node });
+    this.realtimeService?.broadcastFileTreeChange(projectId, {
+      action: 'mkdirp',
+      node,
+    });
     return node;
   }
 
-  public async moveNode(projectId: string, nodeId: string, dto: MoveNodeDto): Promise<ManuscriptNodeEntity> {
+  public async moveNode(
+    projectId: string,
+    nodeId: string,
+    dto: MoveNodeDto,
+  ): Promise<ManuscriptNodeEntity> {
     const node = await this.moveNodeUseCase.execute(projectId, nodeId, dto);
-    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'move', node });
+    this.realtimeService?.broadcastFileTreeChange(projectId, {
+      action: 'move',
+      node,
+    });
     return node;
   }
 
-  public async renameNode(projectId: string, nodeId: string, dto: RenameNodeDto): Promise<ManuscriptNodeEntity> {
-    const node = await this.renameNodeUseCase.execute(projectId, nodeId, dto.name);
-    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'rename', node });
+  public async renameNode(
+    projectId: string,
+    nodeId: string,
+    dto: RenameNodeDto,
+  ): Promise<ManuscriptNodeEntity> {
+    const node = await this.renameNodeUseCase.execute(
+      projectId,
+      nodeId,
+      dto.name,
+    );
+    this.realtimeService?.broadcastFileTreeChange(projectId, {
+      action: 'rename',
+      node,
+    });
     return node;
   }
 
-  public async deleteNode(projectId: string, nodeId: string): Promise<ManuscriptNodeEntity[]> {
-    const deletedNodes = await this.deleteNodeUseCase.execute(projectId, nodeId);
-    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'delete', node: { id: nodeId } });
+  public async deleteNode(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ManuscriptNodeEntity[]> {
+    const deletedNodes = await this.deleteNodeUseCase.execute(
+      projectId,
+      nodeId,
+    );
+    this.realtimeService?.broadcastFileTreeChange(projectId, {
+      action: 'delete',
+      node: { id: nodeId },
+    });
     return deletedNodes;
   }
 
-  public async getRootDoc(projectId: string): Promise<ManuscriptNodeEntity | null> {
+  public async getRootDoc(
+    projectId: string,
+  ): Promise<ManuscriptNodeEntity | null> {
     return await this.resolveRootDocUseCase.getRootDoc(projectId);
   }
 
-  public async setRootDoc(projectId: string, nodeId: string): Promise<ManuscriptNodeEntity> {
+  public async setRootDoc(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ManuscriptNodeEntity> {
     const node = await this.resolveRootDocUseCase.setRootDoc(projectId, nodeId);
-    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'set-root', node });
+    this.realtimeService?.broadcastFileTreeChange(projectId, {
+      action: 'set-root',
+      node,
+    });
     return node;
   }
 
   public async autoDetectRootDoc(
     projectId: string,
-    docContents: Map<string, string[]>
+    docContents: Map<string, string[]>,
   ): Promise<ManuscriptNodeEntity | null> {
-    return await this.resolveRootDocUseCase.autoDetectAndSetRootDoc(projectId, docContents);
+    return await this.resolveRootDocUseCase.autoDetectAndSetRootDoc(
+      projectId,
+      docContents,
+    );
   }
 
   public async buildCompilerPayload(
     projectId: string,
-    docContentsMap: Map<string, { lines: string[]; hash?: string | null }>
+    docContentsMap: Map<string, { lines: string[]; hash?: string | null }>,
   ): Promise<CompilationPayload> {
-    return await this.buildCompilerFilesUseCase.execute(projectId, docContentsMap);
+    return await this.buildCompilerFilesUseCase.execute(
+      projectId,
+      docContentsMap,
+    );
   }
 
-  public async reorderNode(projectId: string, nodeId: string, sortOrder: number): Promise<void> {
-    await this.structureRepository.updateSortOrder(projectId, nodeId, sortOrder);
+  public async reorderNode(
+    projectId: string,
+    nodeId: string,
+    sortOrder: number,
+  ): Promise<void> {
+    await this.structureRepository.updateSortOrder(
+      projectId,
+      nodeId,
+      sortOrder,
+    );
   }
 }

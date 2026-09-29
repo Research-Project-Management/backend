@@ -22,7 +22,10 @@ export abstract class IDocstoreWriterPort {
   /**
    * Fetches the current persistent baseline document from docstore.
    */
-  abstract fetchBaseDoc(projectId: string, docId: string): Promise<BaseDocData | null>;
+  abstract fetchBaseDoc(
+    projectId: string,
+    docId: string,
+  ): Promise<BaseDocData | null>;
 
   /**
    * Commits the flushed lines array and OCC rev into docstore.

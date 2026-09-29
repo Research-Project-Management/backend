@@ -1,10 +1,10 @@
-import { ItemsService } from '@/modules/library/bibliography/application/services/items.service';
-import { QueryRepository } from '@/modules/library/bibliography/infrastructure/repositories/query.repository';
-import { CommandRepository } from '@/modules/library/bibliography/infrastructure/repositories/command.repository';
+import { ItemsService } from '@/modules/library/catalog/core/use-cases/items.service';
+import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
+import { CommandRepository } from '@/modules/library/catalog/core/adapters/command.repository';
 import { TransactionService } from '@/modules/library/shared-kernel/outbox/transaction.service';
-import { TagsService } from '@/modules/library/bibliography/application/services/tags.service';
-import { TypesService } from '@/modules/library/bibliography/application/services/types.service';
-import { ItemTransformer } from '@/modules/library/bibliography/infrastructure/mappers/item.transformer';
+import { TagsService } from '@/modules/library/catalog/core/use-cases/tags.service';
+import { TypesService } from '@/modules/library/catalog/core/use-cases/types.service';
+import { ItemTransformer } from '@/modules/library/catalog/core/adapters/item.transformer';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constant';
 
@@ -32,7 +32,12 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
     contributors: [
-      { firstName: 'Ashish', lastName: 'Vaswani', role: 'author', orderIndex: 0 },
+      {
+        firstName: 'Ashish',
+        lastName: 'Vaswani',
+        role: 'author',
+        orderIndex: 0,
+      },
     ],
     collectionItems: [],
     itemTags: [],
@@ -62,11 +67,19 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
 
     commandRepo = {
       create: jest.fn().mockResolvedValue(mockDbItem),
-      update: jest.fn().mockResolvedValue({ ...mockDbItem, version: 2, title: 'Updated Title' }),
+      update: jest.fn().mockResolvedValue({
+        ...mockDbItem,
+        version: 2,
+        title: 'Updated Title',
+      }),
       softDelete: jest.fn().mockResolvedValue(true),
       restore: jest.fn().mockResolvedValue({ ...mockDbItem, version: 3 }),
       purge: jest.fn().mockResolvedValue(true),
-      setMyPublication: jest.fn().mockResolvedValue({ ...mockDbItem, isMyPublication: true, version: 2 }),
+      setMyPublication: jest.fn().mockResolvedValue({
+        ...mockDbItem,
+        isMyPublication: true,
+        version: 2,
+      }),
     } as unknown as jest.Mocked<CommandRepository>;
 
     txService = {
@@ -88,7 +101,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       isValidItemType: jest.fn().mockReturnValue(true),
     } as unknown as jest.Mocked<TypesService>;
 
-    transformer = new ItemTransformer(typesService as any);
+    transformer = new ItemTransformer(typesService);
 
     cache = {
       get: jest.fn().mockResolvedValue(null),
@@ -117,11 +130,20 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
 
       const result = await service.getItem(mockUserId, mockItemId);
 
-      expect(cache.get).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.item(mockItemId));
-      expect(queryRepo.findById).toHaveBeenCalledWith(mockUserId, mockItemId, undefined);
+      expect(cache.get).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.item(mockItemId),
+      );
+      expect(queryRepo.findById).toHaveBeenCalledWith(
+        mockUserId,
+        mockItemId,
+        undefined,
+      );
       expect(cache.set).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.item(mockItemId),
-        expect.objectContaining({ id: mockItemId, title: 'Attention Is All You Need' }),
+        expect.objectContaining({
+          id: mockItemId,
+          title: 'Attention Is All You Need',
+        }),
         300,
       );
       expect(result).toBeDefined();
@@ -139,7 +161,9 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
 
       const result = await service.getItem(mockUserId, mockItemId);
 
-      expect(cache.get).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.item(mockItemId));
+      expect(cache.get).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.item(mockItemId),
+      );
       expect(queryRepo.findById).not.toHaveBeenCalled();
       expect(cache.set).not.toHaveBeenCalled();
       expect(result).toEqual(cachedItem);
@@ -157,7 +181,11 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       const result = await service.getItem(mockUserId, mockItemId);
 
       // Should bypass mismatched cached item and verify database access
-      expect(queryRepo.findById).toHaveBeenCalledWith(mockUserId, mockItemId, undefined);
+      expect(queryRepo.findById).toHaveBeenCalledWith(
+        mockUserId,
+        mockItemId,
+        undefined,
+      );
       expect(result).toBeDefined();
     });
   });
@@ -168,11 +196,19 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
 
       const result = await service.getFulltext(mockUserId, mockItemId);
 
-      expect(cache.get).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemFulltext(mockItemId));
-      expect(queryRepo.findMetadataSourceRecord).toHaveBeenCalledWith(mockItemId, 'grobid_fulltext');
+      expect(cache.get).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),
+      );
+      expect(queryRepo.findMetadataSourceRecord).toHaveBeenCalledWith(
+        mockItemId,
+        'grobid_fulltext',
+      );
       expect(cache.set).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),
-        expect.objectContaining({ title: 'Attention Is All You Need', sections: expect.any(Array) }),
+        expect.objectContaining({
+          title: 'Attention Is All You Need',
+          sections: expect.any(Array),
+        }),
         600,
       );
       expect(result.sections).toHaveLength(1);
@@ -192,7 +228,9 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
 
       const result = await service.getFulltext(mockUserId, mockItemId);
 
-      expect(cache.get).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemFulltext(mockItemId));
+      expect(cache.get).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),
+      );
       expect(queryRepo.findById).not.toHaveBeenCalled();
       expect(queryRepo.findMetadataSourceRecord).not.toHaveBeenCalled();
       expect(result).toEqual(cachedFulltext);
@@ -203,7 +241,10 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
     it('should cache clean list query result for 60s', async () => {
       cache.get.mockResolvedValueOnce(null);
 
-      const result = await service.listItems(mockUserId, { view: 'all', limit: 20 });
+      const result = await service.listItems(mockUserId, {
+        view: 'all',
+        limit: 20,
+      });
 
       expect(cache.get).toHaveBeenCalled();
       expect(queryRepo.findMany).toHaveBeenCalled();
@@ -224,36 +265,64 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
 
   describe('Mutation Invalidation (Cache Purging)', () => {
     it('should invalidate item and list caches on updateItem', async () => {
-      await service.updateItem(mockUserId, mockItemId, 1, { title: 'Updated Title' });
+      await service.updateItem(mockUserId, mockItemId, 1, {
+        title: 'Updated Title',
+      });
 
-      expect(cache.del).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.item(mockItemId));
-      expect(cache.del).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemDetails(mockItemId));
-      expect(cache.del).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemFulltext(mockItemId));
-      expect(cache.delPattern).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemsPattern(mockUserId));
+      expect(cache.del).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.item(mockItemId),
+      );
+      expect(cache.del).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemDetails(mockItemId),
+      );
+      expect(cache.del).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),
+      );
+      expect(cache.delPattern).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemsPattern(mockUserId),
+      );
     });
 
     it('should invalidate item and list caches on deleteItem', async () => {
       await service.deleteItem(mockUserId, mockItemId, 1);
 
-      expect(cache.del).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.item(mockItemId));
-      expect(cache.del).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemDetails(mockItemId));
-      expect(cache.del).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemFulltext(mockItemId));
-      expect(cache.delPattern).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemsPattern(mockUserId));
+      expect(cache.del).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.item(mockItemId),
+      );
+      expect(cache.del).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemDetails(mockItemId),
+      );
+      expect(cache.del).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),
+      );
+      expect(cache.delPattern).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemsPattern(mockUserId),
+      );
     });
 
     it('should invalidate item and list caches on restoreItem', async () => {
       await service.restoreItem(mockUserId, mockItemId, 2);
 
-      expect(cache.del).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.item(mockItemId));
-      expect(cache.del).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemDetails(mockItemId));
-      expect(cache.delPattern).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemsPattern(mockUserId));
+      expect(cache.del).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.item(mockItemId),
+      );
+      expect(cache.del).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemDetails(mockItemId),
+      );
+      expect(cache.delPattern).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemsPattern(mockUserId),
+      );
     });
 
     it('should invalidate item and list caches on purgeItem', async () => {
       await service.purgeItem(mockUserId, mockItemId);
 
-      expect(cache.del).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.item(mockItemId));
-      expect(cache.delPattern).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemsPattern(mockUserId));
+      expect(cache.del).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.item(mockItemId),
+      );
+      expect(cache.delPattern).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemsPattern(mockUserId),
+      );
     });
 
     it('should invalidate list cache on createItem', async () => {
@@ -261,9 +330,11 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
         title: 'New Paper',
         itemType: 'journalArticle',
         uploadedById: mockUserId,
-      } as any);
+      });
 
-      expect(cache.delPattern).toHaveBeenCalledWith(LIBRARY_REDIS_KEYS.itemsPattern(mockUserId));
+      expect(cache.delPattern).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemsPattern(mockUserId),
+      );
     });
   });
 

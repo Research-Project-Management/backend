@@ -1,8 +1,8 @@
-import { UrlCaptureService } from '../../src/modules/library/ingestion/application/services/url-capture.service';
-import { IngestionRepository } from '../../src/modules/library/ingestion/infrastructure/repositories/ingestion.repository';
+import { UrlCaptureService } from '@/modules/library/ingestion/core/use-cases/url-capture.service';
+import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
 
 jest.mock(
-  '../../src/modules/library/reader/application/services/web-snapshot.service',
+  '@/modules/library/extraction/core/adapters/web-snapshot.service',
   () => ({ WebSnapshotService: class WebSnapshotService {} }),
 );
 

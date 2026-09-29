@@ -2,7 +2,13 @@
  * document-updater/dto/queue-update.dto.ts
  */
 
-import { IsArray, IsInt, IsOptional, IsString, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsInt,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class SpliceUpdateDto {

@@ -1,4 +1,10 @@
-import { Injectable, Logger, Optional, forwardRef, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  forwardRef,
+  Inject,
+} from '@nestjs/common';
 import {
   IProjectInstantiatorPort,
   InstantiateProjectInput,
@@ -22,32 +28,43 @@ export class ManuscriptInstantiatorAdapter implements IProjectInstantiatorPort {
     private readonly docstoreService?: DocstoreService,
   ) {}
 
-  async instantiate(input: InstantiateProjectInput): Promise<InstantiatedProjectResult> {
+  async instantiate(
+    input: InstantiateProjectInput,
+  ): Promise<InstantiatedProjectResult> {
     const { template, projectName, userId } = input;
     const generatedProjectId = crypto.randomUUID();
     const cleanName = projectName.trim() || template.name;
-    const baseSlug = cleanName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 30) || 'manuscript';
+    const baseSlug =
+      cleanName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 30) || 'manuscript';
     const identifier = `${baseSlug}-${generatedProjectId.slice(0, 6)}`;
 
     const fileEntries = Object.entries(template.files);
     const filePaths = Object.keys(template.files);
 
-    let finalProjectId = generatedProjectId;
+    let finalProjectId: string = generatedProjectId;
 
     try {
       // 1. If Prisma is connected, create project record & assign ownership
-      const project = await (this.prisma as any).project.create({
+      const project = await this.prisma.project.create({
         data: {
           id: generatedProjectId,
           name: cleanName,
           identifier,
           description: `Created from template: ${template.name}`,
           createdById: userId,
-          modules: {
+          modules: [
+            'overview',
+            'work_items',
+            'cycles',
+            'views',
+            'pages',
+            'manuscript',
+          ],
+          settings: {
             manuscript: {
               compiler: template.compiler,
               mainFile: template.mainFile,
@@ -62,18 +79,23 @@ export class ManuscriptInstantiatorAdapter implements IProjectInstantiatorPort {
       if (project?.id) {
         finalProjectId = project.id;
         // Add user as project owner
-        await (this.prisma as any).projectMember.create({
-          data: {
-            projectId: finalProjectId,
-            userId,
-            role: 'owner',
-          },
-        }).catch(() => {
-          // ignore if already added or in mock
-        });
+        await this.prisma.projectMember
+          .create({
+            data: {
+              projectId: finalProjectId,
+              userId,
+              role: 'owner',
+            },
+          })
+          .catch(() => {
+            // ignore if already added or in mock
+          });
       }
-    } catch (err: any) {
-      this.logger.debug(`Prisma project creation skipped or failed (mock/fallback mode): ${err?.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(
+        `Prisma project creation skipped or failed (mock/fallback mode): ${msg}`,
+      );
     }
 
     // 2. If StructureService & DocstoreService are available, populate directory nodes & docs
@@ -86,7 +108,10 @@ export class ManuscriptInstantiatorAdapter implements IProjectInstantiatorPort {
 
           if (parts.length > 0) {
             const dirPath = parts.join('/');
-            const dirNode = await this.structureService.mkdirp(finalProjectId, dirPath);
+            const dirNode = await this.structureService.mkdirp(
+              finalProjectId,
+              dirPath,
+            );
             parentFolderId = dirNode.id;
           }
 
@@ -105,7 +130,9 @@ export class ManuscriptInstantiatorAdapter implements IProjectInstantiatorPort {
             });
           }
         } catch (err: any) {
-          this.logger.debug(`Could not write node/doc for ${filePath}: ${err?.message}`);
+          this.logger.debug(
+            `Could not write node/doc for ${filePath}: ${err?.message}`,
+          );
         }
       }
     }

@@ -4,8 +4,13 @@
  */
 
 export class DuplicateCitationKeyException extends Error {
-  constructor(public readonly key: string, public readonly files: string[]) {
-    super(`Duplicate citation key '${key}' detected across files: ${files.join(', ')}`);
+  constructor(
+    public readonly key: string,
+    public readonly files: string[],
+  ) {
+    super(
+      `Duplicate citation key '${key}' detected across files: ${files.join(', ')}`,
+    );
     this.name = 'DuplicateCitationKeyException';
     Object.setPrototypeOf(this, DuplicateCitationKeyException.prototype);
   }

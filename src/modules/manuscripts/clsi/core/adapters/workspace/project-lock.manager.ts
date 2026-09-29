@@ -26,7 +26,7 @@ export class ProjectLockManager {
     projectId: string,
     scratchDir: string,
     action: () => Promise<T>,
-    options?: LockOptions
+    options?: LockOptions,
   ): Promise<T> {
     const unlock = await this.acquire(projectId, scratchDir, options);
     try {
@@ -39,10 +39,12 @@ export class ProjectLockManager {
   public async acquire(
     projectId: string,
     scratchDir: string,
-    options?: LockOptions
+    options?: LockOptions,
   ): Promise<() => Promise<void>> {
-    const interval = options?.intervalMs ?? ProjectLockManager.DEFAULT_INTERVAL_MS;
-    const maxWait = options?.maxWaitMs ?? ProjectLockManager.DEFAULT_MAX_WAIT_MS;
+    const interval =
+      options?.intervalMs ?? ProjectLockManager.DEFAULT_INTERVAL_MS;
+    const maxWait =
+      options?.maxWaitMs ?? ProjectLockManager.DEFAULT_MAX_WAIT_MS;
     const staleMs = options?.staleMs ?? ProjectLockManager.DEFAULT_STALE_MS;
 
     const lockPath = path.join(scratchDir, ProjectLockManager.LOCK_FILENAME);
@@ -68,7 +70,11 @@ export class ProjectLockManager {
           }
         };
       } catch (err: any) {
-        if (err.code === 'EEXIST' || err.code === 'EPERM' || err.code === 'EBUSY') {
+        if (
+          err.code === 'EEXIST' ||
+          err.code === 'EPERM' ||
+          err.code === 'EBUSY'
+        ) {
           // Check if existing lockfile is stale (> staleMs)
           try {
             const stat = await fs.stat(lockPath);
@@ -95,7 +101,7 @@ export class ProjectLockManager {
     }
 
     throw new Error(
-      `Project compilation lock timed out after ${maxWait}ms for project "${projectId}". Another compilation is currently in progress.`
+      `Project compilation lock timed out after ${maxWait}ms for project "${projectId}". Another compilation is currently in progress.`,
     );
   }
 }

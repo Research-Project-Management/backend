@@ -8,7 +8,10 @@ import { PrismaService } from '@/core/database/prisma.service';
 import { IHistoryRepositoryPort } from '../../ports/history-repository.port';
 import { Snapshot } from '../../domain/entities/snapshot.entity';
 import { VersionLabel } from '../../domain/entities/version-label.entity';
-import { ManuscriptHistoryMapper, PrismaSnapshotWithLabels } from './manuscript-history.mapper';
+import {
+  ManuscriptHistoryMapper,
+  PrismaSnapshotWithLabels,
+} from './manuscript-history.mapper';
 
 @Injectable()
 export class PrismaHistoryRepository extends IHistoryRepositoryPort {
@@ -43,10 +46,13 @@ export class PrismaHistoryRepository extends IHistoryRepositoryPort {
       },
     });
 
-    return ManuscriptHistoryMapper.toDomainSnapshot(created as PrismaSnapshotWithLabels);
+    return ManuscriptHistoryMapper.toDomainSnapshot(created);
   }
 
-  public async findByVersion(projectId: string, version: number): Promise<Snapshot | null> {
+  public async findByVersion(
+    projectId: string,
+    version: number,
+  ): Promise<Snapshot | null> {
     const found = await this.prisma.manuscriptSnapshot.findUnique({
       where: {
         projectId_version: {
@@ -60,7 +66,7 @@ export class PrismaHistoryRepository extends IHistoryRepositoryPort {
     });
 
     if (!found) return null;
-    return ManuscriptHistoryMapper.toDomainSnapshot(found as PrismaSnapshotWithLabels);
+    return ManuscriptHistoryMapper.toDomainSnapshot(found);
   }
 
   public async getLatestVersion(projectId: string): Promise<number> {
@@ -82,7 +88,9 @@ export class PrismaHistoryRepository extends IHistoryRepositoryPort {
       },
     });
 
-    return records.map((r) => ManuscriptHistoryMapper.toDomainSnapshot(r as PrismaSnapshotWithLabels));
+    return records.map((r) =>
+      ManuscriptHistoryMapper.toDomainSnapshot(r as PrismaSnapshotWithLabels),
+    );
   }
 
   public async saveLabel(label: VersionLabel): Promise<VersionLabel> {
@@ -123,7 +131,10 @@ export class PrismaHistoryRepository extends IHistoryRepositoryPort {
     });
   }
 
-  public async findLabelByName(projectId: string, label: string): Promise<VersionLabel | null> {
+  public async findLabelByName(
+    projectId: string,
+    label: string,
+  ): Promise<VersionLabel | null> {
     const found = await this.prisma.manuscriptLabel.findUnique({
       where: {
         projectId_label: {

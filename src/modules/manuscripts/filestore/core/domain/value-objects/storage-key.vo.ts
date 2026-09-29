@@ -28,7 +28,9 @@ export class StorageKey {
     }
     // Prevent directory traversal
     if (rawKey.includes('..') || rawKey.startsWith('/')) {
-      throw new Error(`Insecure storage key: '${rawKey}'. Traversal sequences are prohibited.`);
+      throw new Error(
+        `Insecure storage key: '${rawKey}'. Traversal sequences are prohibited.`,
+      );
     }
     return new StorageKey(rawKey.trim());
   }

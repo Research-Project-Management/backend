@@ -1,5 +1,5 @@
 import { IdempotentConsumerService } from '../../src/modules/library/shared-kernel/outbox/services/idempotent-consumer.service';
-import { ExtractionHandler } from '../../src/modules/library/reader/application/handlers/extraction.handler';
+import { ExtractionHandler } from '@/modules/library/extraction/core/adapters/extraction.handler';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { OutboxEvent } from '@prisma/client';
 
@@ -356,7 +356,9 @@ describe('IdempotentConsumerService & Inbox Pattern', () => {
 
       await handler.handle(event);
 
-      expect(mockExtractionRepo.claimPendingOrRetryable).toHaveBeenCalledWith('att-1');
+      expect(mockExtractionRepo.claimPendingOrRetryable).toHaveBeenCalledWith(
+        'att-1',
+      );
       expect(mockPdf.extractDocumentFromBuffer).toHaveBeenCalledTimes(1);
       expect(mockExtractionRepo.markReady).toHaveBeenCalledWith('att-1');
 
@@ -379,14 +381,18 @@ describe('IdempotentConsumerService & Inbox Pattern', () => {
       // 1st arrival: executes
       await handler.handle(event);
       expect(mockPdf.extractDocumentFromBuffer).toHaveBeenCalledTimes(1);
-      expect(mockExtractionRepo.claimPendingOrRetryable).toHaveBeenCalledTimes(1);
+      expect(mockExtractionRepo.claimPendingOrRetryable).toHaveBeenCalledTimes(
+        1,
+      );
 
       // 2nd arrival (BullMQ duplicate redelivery): skipped by IdempotentConsumer
       await handler.handle(event);
 
       // Counts remain 1 (no duplicate PDF parsing or DB claim)
       expect(mockPdf.extractDocumentFromBuffer).toHaveBeenCalledTimes(1);
-      expect(mockExtractionRepo.claimPendingOrRetryable).toHaveBeenCalledTimes(1);
+      expect(mockExtractionRepo.claimPendingOrRetryable).toHaveBeenCalledTimes(
+        1,
+      );
     });
 
     it('should release lease upon extraction failure allowing BullMQ retry', async () => {

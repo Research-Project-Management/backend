@@ -5,7 +5,9 @@
 
 export class EmptyProjectException extends Error {
   constructor(public readonly projectId: string) {
-    super(`Cannot create history snapshot for project '${projectId}' because it contains no files.`);
+    super(
+      `Cannot create history snapshot for project '${projectId}' because it contains no files.`,
+    );
     this.name = 'EmptyProjectException';
   }
 }

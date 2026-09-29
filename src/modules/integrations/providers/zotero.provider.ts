@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHmac, randomBytes } from 'crypto';
 import {
   IIntegrationProvider,
@@ -7,6 +7,7 @@ import {
   OAuthInitiationResult,
   RemoteCollectionItem,
 } from './integration-provider.interface';
+import { RedisCacheService } from '@/core/cache/redis.service';
 
 @Injectable()
 export class ZoteroProvider implements IIntegrationProvider {
@@ -17,7 +18,7 @@ export class ZoteroProvider implements IIntegrationProvider {
   private readonly clientSecret: string;
   private readonly isMockMode: boolean;
 
-  constructor() {
+  constructor(@Optional() private readonly redis?: RedisCacheService) {
     this.clientKey = process.env.ZOTERO_CLIENT_KEY || '';
     this.clientSecret = process.env.ZOTERO_CLIENT_SECRET || '';
     this.isMockMode = !this.clientKey || !this.clientSecret;
@@ -29,7 +30,10 @@ export class ZoteroProvider implements IIntegrationProvider {
     }
   }
 
-  async initiateOAuth(userId: string, redirectUri: string): Promise<OAuthInitiationResult> {
+  async initiateOAuth(
+    userId: string,
+    redirectUri: string,
+  ): Promise<OAuthInitiationResult> {
     if (this.isMockMode) {
       const mockToken = `mock_req_${randomBytes(8).toString('hex')}`;
       const state = `state_${userId}_${randomBytes(8).toString('hex')}`;
@@ -66,11 +70,14 @@ export class ZoteroProvider implements IIntegrationProvider {
         headers: {
           Authorization: authHeader,
           'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'FluxResearchPlatform/1.0 (https://flux.study)',
         },
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to request Zotero token: ${response.statusText}`);
+        throw new Error(
+          `Failed to request Zotero token: ${response.status} ${response.statusText}`,
+        );
       }
 
       const body = await response.text();
@@ -82,6 +89,16 @@ export class ZoteroProvider implements IIntegrationProvider {
         throw new Error('Zotero did not return an oauth_token');
       }
 
+      // Preserve requestTokenSecret for OAuth 1.0a access exchange (15 min TTL)
+      if (this.redis) {
+        await this.redis.set(
+          `oauth:zotero:${requestToken}`,
+          requestTokenSecret || '',
+          900,
+        );
+      }
+
+      // Official Zotero OAuth authorize endpoint with scoped permissions
       const authUrl = `https://www.zotero.org/oauth/authorize?oauth_token=${encodeURIComponent(
         requestToken,
       )}&library_access=1&notes_access=1&write_access=1&all_groups=read`;
@@ -92,7 +109,10 @@ export class ZoteroProvider implements IIntegrationProvider {
         requestTokenSecret: requestTokenSecret || '',
       };
     } catch (err: any) {
-      this.logger.error(`Error initiating Zotero OAuth: ${err.message}`, err.stack);
+      this.logger.error(
+        `Error initiating Zotero OAuth: ${err.message}`,
+        err.stack,
+      );
       throw err;
     }
   }
@@ -115,6 +135,16 @@ export class ZoteroProvider implements IIntegrationProvider {
     }
 
     try {
+      let tokenSecret = params.secret || '';
+      if (!tokenSecret && this.redis) {
+        const storedSecret = await this.redis.get<string>(
+          `oauth:zotero:${params.codeOrToken}`,
+        );
+        if (storedSecret && typeof storedSecret === 'string') {
+          tokenSecret = storedSecret;
+        }
+      }
+
       const accessTokenUrl = 'https://www.zotero.org/oauth/access';
       const oauthParams = this.buildOAuthParams({
         oauth_consumer_key: this.clientKey,
@@ -127,7 +157,7 @@ export class ZoteroProvider implements IIntegrationProvider {
         accessTokenUrl,
         oauthParams,
         this.clientSecret,
-        params.secret || '',
+        tokenSecret,
       );
 
       oauthParams.oauth_signature = signature;
@@ -138,11 +168,14 @@ export class ZoteroProvider implements IIntegrationProvider {
         headers: {
           Authorization: authHeader,
           'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'FluxResearchPlatform/1.0 (https://flux.study)',
         },
       });
 
       if (!response.ok) {
-        throw new Error(`Zotero token exchange failed with status ${response.status}`);
+        throw new Error(
+          `Zotero token exchange failed with status ${response.status} ${response.statusText}`,
+        );
       }
 
       const body = await response.text();
@@ -153,6 +186,10 @@ export class ZoteroProvider implements IIntegrationProvider {
 
       if (!apiKey || !userID) {
         throw new Error('Zotero access response missing oauth_token or userID');
+      }
+
+      if (this.redis) {
+        await this.redis.del(`oauth:zotero:${params.codeOrToken}`);
       }
 
       return {
@@ -166,7 +203,10 @@ export class ZoteroProvider implements IIntegrationProvider {
         },
       };
     } catch (err: any) {
-      this.logger.error(`Error exchanging Zotero token: ${err.message}`, err.stack);
+      this.logger.error(
+        `Error exchanging Zotero token: ${err.message}`,
+        err.stack,
+      );
       throw err;
     }
   }
@@ -177,6 +217,7 @@ export class ZoteroProvider implements IIntegrationProvider {
   ): Promise<RemoteCollectionItem[]> {
     if (decryptedToken.includes('mock')) {
       return [
+        { id: 'all', name: 'My Library (All Items)', itemCount: 65 },
         { id: 'COLL_1', name: 'My Publications', itemCount: 12 },
         { id: 'COLL_2', name: 'Deep Learning & NLP', itemCount: 45 },
         { id: 'COLL_3', name: 'Quantum Information', itemCount: 8 },
@@ -184,27 +225,139 @@ export class ZoteroProvider implements IIntegrationProvider {
     }
 
     try {
-      const url = `https://api.zotero.org/users/${providerUserId}/collections?limit=100`;
-      const response = await fetch(url, {
-        headers: {
-          'Zotero-API-Key': decryptedToken,
-          'Zotero-API-Version': '3',
-        },
-      });
+      const results: RemoteCollectionItem[] = [];
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch Zotero collections: status ${response.status}`);
+      // 1. Probe total item count in user's root personal library
+      try {
+        const rootHeadRes = await fetch(
+          `https://api.zotero.org/users/${providerUserId}/items/top?limit=1`,
+          {
+            headers: {
+              'Zotero-API-Key': decryptedToken,
+              'Zotero-API-Version': '3',
+              'User-Agent': 'FluxResearchPlatform/1.0 (https://flux.study)',
+            },
+          },
+        );
+        const totalItemsHeader = rootHeadRes.headers.get('Total-Results');
+        const totalItems = totalItemsHeader
+          ? parseInt(totalItemsHeader, 10)
+          : 0;
+        results.push({
+          id: 'all',
+          name: 'My Library (Entire Library)',
+          itemCount: totalItems,
+        });
+      } catch (probeErr: any) {
+        this.logger.warn(
+          `Could not probe Zotero root library: ${probeErr.message}`,
+        );
+        results.push({
+          id: 'all',
+          name: 'My Library (Entire Library)',
+          itemCount: 0,
+        });
       }
 
-      const collections = (await response.json()) as any[];
-      return collections.map((col) => ({
-        id: col.key,
-        name: col.data.name || 'Untitled Collection',
-        itemCount: col.meta?.numItems || 0,
-        parentCollectionId: col.data.parentCollection || null,
-      }));
+      // 2. Fetch personal collections with pagination
+      let start = 0;
+      const limit = 100;
+      let totalCollections = 0;
+
+      do {
+        const url = `https://api.zotero.org/users/${providerUserId}/collections?limit=${limit}&start=${start}`;
+        const response = await fetch(url, {
+          headers: {
+            'Zotero-API-Key': decryptedToken,
+            'Zotero-API-Version': '3',
+            'User-Agent': 'FluxResearchPlatform/1.0 (https://flux.study)',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch Zotero collections: status ${response.status} ${response.statusText}`,
+          );
+        }
+
+        const collections = (await response.json()) as any[];
+        for (const col of collections) {
+          results.push({
+            id: col.key,
+            name: col.data.name || 'Untitled Collection',
+            itemCount: col.meta?.numItems || 0,
+            parentCollectionId: col.data.parentCollection || null,
+          });
+        }
+
+        const totalHeader = response.headers.get('Total-Results');
+        totalCollections = totalHeader
+          ? parseInt(totalHeader, 10)
+          : results.length;
+        start += limit;
+      } while (start < totalCollections && start < 500);
+
+      // 3. Fetch user's group libraries
+      try {
+        const groupsRes = await fetch(
+          `https://api.zotero.org/users/${providerUserId}/groups`,
+          {
+            headers: {
+              'Zotero-API-Key': decryptedToken,
+              'Zotero-API-Version': '3',
+              'User-Agent': 'FluxResearchPlatform/1.0 (https://flux.study)',
+            },
+          },
+        );
+
+        if (groupsRes.ok) {
+          const groups = (await groupsRes.json()) as any[];
+          for (const group of groups) {
+            const groupId = group.id;
+            const groupName = group.data?.name || `Group ${groupId}`;
+
+            results.push({
+              id: `group:${groupId}:all`,
+              name: `[Group: ${groupName}] Entire Group Library`,
+              itemCount: group.meta?.numItems || 0,
+            });
+
+            const groupColRes = await fetch(
+              `https://api.zotero.org/groups/${groupId}/collections?limit=100`,
+              {
+                headers: {
+                  'Zotero-API-Key': decryptedToken,
+                  'Zotero-API-Version': '3',
+                  'User-Agent': 'FluxResearchPlatform/1.0 (https://flux.study)',
+                },
+              },
+            );
+
+            if (groupColRes.ok) {
+              const groupCols = (await groupColRes.json()) as any[];
+              for (const col of groupCols) {
+                results.push({
+                  id: `group:${groupId}:${col.key}`,
+                  name: `[Group: ${groupName}] ${col.data?.name || 'Untitled'}`,
+                  itemCount: col.meta?.numItems || 0,
+                  parentCollectionId: col.data?.parentCollection
+                    ? `group:${groupId}:${col.data.parentCollection}`
+                    : null,
+                });
+              }
+            }
+          }
+        }
+      } catch (groupErr: any) {
+        this.logger.warn(`Could not probe Zotero groups: ${groupErr.message}`);
+      }
+
+      return results;
     } catch (err: any) {
-      this.logger.error(`Error fetching Zotero collections: ${err.message}`, err.stack);
+      this.logger.error(
+        `Error fetching Zotero collections: ${err.message}`,
+        err.stack,
+      );
       throw err;
     }
   }
@@ -232,28 +385,82 @@ export class ZoteroProvider implements IIntegrationProvider {
     }
 
     try {
-      const url = `https://api.zotero.org/users/${providerUserId}/collections/${collectionId}/items?format=bibtex&limit=100`;
-      const response = await fetch(url, {
-        headers: {
-          'Zotero-API-Key': decryptedToken,
-          'Zotero-API-Version': '3',
-        },
-      });
+      let baseUrl = '';
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch Zotero BibTeX: status ${response.status}`);
+      if (collectionId.startsWith('group:')) {
+        const parts = collectionId.split(':');
+        const groupId = parts[1];
+        const colKey = parts[2] || 'all';
+
+        if (colKey === 'all' || !colKey) {
+          baseUrl = `https://api.zotero.org/groups/${groupId}/items/top`;
+        } else {
+          baseUrl = `https://api.zotero.org/groups/${groupId}/collections/${colKey}/items/top`;
+        }
+      } else {
+        if (
+          !collectionId ||
+          collectionId === 'all' ||
+          collectionId === 'library' ||
+          collectionId === 'root'
+        ) {
+          baseUrl = `https://api.zotero.org/users/${providerUserId}/items/top`;
+        } else {
+          baseUrl = `https://api.zotero.org/users/${providerUserId}/collections/${collectionId}/items/top`;
+        }
       }
 
-      return await response.text();
+      let start = 0;
+      const limit = 100;
+      const bibtexChunks: string[] = [];
+      let totalResults = 0;
+
+      do {
+        const url = `${baseUrl}?format=bibtex&limit=${limit}&start=${start}`;
+        const response = await fetch(url, {
+          headers: {
+            'Zotero-API-Key': decryptedToken,
+            'Zotero-API-Version': '3',
+            'User-Agent': 'FluxResearchPlatform/1.0 (https://flux.study)',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch Zotero BibTeX: status ${response.status} ${response.statusText}`,
+          );
+        }
+
+        const chunk = await response.text();
+        if (chunk.trim()) {
+          bibtexChunks.push(chunk.trim());
+        }
+
+        const totalResultsHeader = response.headers.get('Total-Results');
+        if (totalResultsHeader) {
+          totalResults = parseInt(totalResultsHeader, 10) || 0;
+        } else {
+          totalResults = bibtexChunks.length * limit;
+        }
+
+        start += limit;
+      } while (start < totalResults && start < 2000); // 2000 items maximum safety limit
+
+      return bibtexChunks.join('\n\n');
     } catch (err: any) {
-      this.logger.error(`Error fetching Zotero BibTeX: ${err.message}`, err.stack);
+      this.logger.error(
+        `Error fetching Zotero BibTeX: ${err.message}`,
+        err.stack,
+      );
       throw err;
     }
   }
 
-  // --- OAuth 1.0a Helpers ---
+  // --- OAuth 1.0a Helpers (RFC 5849 compliant) ---
 
-  private buildOAuthParams(custom: Record<string, string>): Record<string, string> {
+  private buildOAuthParams(
+    custom: Record<string, string>,
+  ): Record<string, string> {
     return {
       oauth_nonce: randomBytes(16).toString('hex'),
       oauth_signature_method: 'HMAC-SHA1',
@@ -288,7 +495,9 @@ export class ZoteroProvider implements IIntegrationProvider {
   private buildAuthorizationHeader(params: Record<string, string>): string {
     const pairs = Object.keys(params)
       .sort()
-      .map((k) => `${encodeURIComponent(k)}="${encodeURIComponent(params[k])}"`);
+      .map(
+        (k) => `${encodeURIComponent(k)}="${encodeURIComponent(params[k])}"`,
+      );
     return `OAuth ${pairs.join(', ')}`;
   }
 }

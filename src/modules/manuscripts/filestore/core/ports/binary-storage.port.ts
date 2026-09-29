@@ -14,7 +14,7 @@ export interface StorageUploadOptions {
 
 export interface StorageRangeOptions {
   start?: number; // Inclusive start byte
-  end?: number;   // Inclusive end byte
+  end?: number; // Inclusive end byte
 }
 
 export interface StorageObjectMetadata {

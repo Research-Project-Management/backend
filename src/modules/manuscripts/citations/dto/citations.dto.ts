@@ -7,24 +7,35 @@ import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CitationQueryDto {
-  @ApiPropertyOptional({ description: 'Search term (matching key, author, title, year)' })
+  @ApiPropertyOptional({
+    description: 'Search term (matching key, author, title, year)',
+  })
   @IsString()
   @IsOptional()
   query?: string;
 
-  @ApiPropertyOptional({ description: 'Maximum number of results to return', default: 50 })
+  @ApiPropertyOptional({
+    description: 'Maximum number of results to return',
+    default: 50,
+  })
   @IsNumber()
   @IsOptional()
   limit?: number;
 }
 
 export class ResolveIdentifierDto {
-  @ApiProperty({ description: 'Academic identifier (DOI like 10.1145/... or arXiv like 1706.03762)' })
+  @ApiProperty({
+    description:
+      'Academic identifier (DOI like 10.1145/... or arXiv like 1706.03762)',
+  })
   @IsString()
   @IsNotEmpty({ message: 'identifier is required' })
   identifier!: string;
 
-  @ApiPropertyOptional({ description: 'Target .bib filename to append to', default: 'references.bib' })
+  @ApiPropertyOptional({
+    description: 'Target .bib filename to append to',
+    default: 'references.bib',
+  })
   @IsString()
   @IsOptional()
   targetBibFile?: string;
@@ -36,7 +47,10 @@ export class SyncLibraryDto {
   @IsNotEmpty({ message: 'collectionId is required' })
   collectionId!: string;
 
-  @ApiPropertyOptional({ description: 'Target .bib filename to sync into', default: 'references.bib' })
+  @ApiPropertyOptional({
+    description: 'Target .bib filename to sync into',
+    default: 'references.bib',
+  })
   @IsString()
   @IsOptional()
   targetFilename?: string;

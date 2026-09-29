@@ -4,7 +4,16 @@
  */
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsEnum, IsInt, Min, IsOptional, IsBoolean, ValidateNested } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsEnum,
+  IsInt,
+  Min,
+  IsOptional,
+  IsBoolean,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class TextRangeDto {
@@ -34,7 +43,9 @@ export class RecordChangeDto {
   @IsEnum(['insert', 'delete'])
   type!: 'insert' | 'delete';
 
-  @ApiProperty({ description: 'The text snippet proposed to be inserted or deleted' })
+  @ApiProperty({
+    description: 'The text snippet proposed to be inserted or deleted',
+  })
   @IsString()
   @IsNotEmpty()
   text!: string;

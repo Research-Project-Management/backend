@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   ExtractedPdfDocument,
   ExtractedPdfMetadata,
-} from '../../../library/reader/infrastructure/providers/pdf.provider';
+} from '../../../library/extraction/core/adapters/pdf.provider';
 
 export interface SemanticChunk {
   chunkIndex: number;

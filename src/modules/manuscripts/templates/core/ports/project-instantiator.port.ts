@@ -22,5 +22,7 @@ export interface InstantiatedProjectResult {
 export const PROJECT_INSTANTIATOR_PORT = Symbol('PROJECT_INSTANTIATOR_PORT');
 
 export interface IProjectInstantiatorPort {
-  instantiate(input: InstantiateProjectInput): Promise<InstantiatedProjectResult>;
+  instantiate(
+    input: InstantiateProjectInput,
+  ): Promise<InstantiatedProjectResult>;
 }

@@ -17,7 +17,7 @@ export class PatchDocUseCase {
   public async execute(
     projectId: string,
     docId: string,
-    patch: PatchDocData
+    patch: PatchDocData,
   ): Promise<TextDoc> {
     return await this.docRepository.patchDoc(projectId, docId, patch);
   }

@@ -60,8 +60,8 @@ export class PkzipEngineAdapter extends IZipEnginePort {
       // Local File Header (30 bytes)
       const localHeader = Buffer.alloc(30);
       localHeader.writeUInt32LE(0x04034b50, 0); // Local header signature
-      localHeader.writeUInt16LE(20, 4);         // Version needed to extract (2.0)
-      localHeader.writeUInt16LE(0x0800, 6);     // General purpose bit flag (UTF-8)
+      localHeader.writeUInt16LE(20, 4); // Version needed to extract (2.0)
+      localHeader.writeUInt16LE(0x0800, 6); // General purpose bit flag (UTF-8)
       localHeader.writeUInt16LE(compressionMethod, 8);
       localHeader.writeUInt16LE(dosTime, 10);
       localHeader.writeUInt16LE(dosDate, 12);
@@ -69,17 +69,17 @@ export class PkzipEngineAdapter extends IZipEnginePort {
       localHeader.writeUInt32LE(compressedData.length, 18);
       localHeader.writeUInt32LE(rawData.length, 22);
       localHeader.writeUInt16LE(nameBuf.length, 26);
-      localHeader.writeUInt16LE(0, 28);         // Extra field length
+      localHeader.writeUInt16LE(0, 28); // Extra field length
 
       const localEntry = Buffer.concat([localHeader, nameBuf, compressedData]);
       localChunks.push(localEntry);
 
       // Central Directory Header (46 bytes)
       const cdHeader = Buffer.alloc(46);
-      cdHeader.writeUInt32LE(0x02014b50, 0);     // Central directory file header signature
-      cdHeader.writeUInt16LE(0x0314, 4);         // Version made by (UNIX 2.0)
-      cdHeader.writeUInt16LE(20, 6);             // Version needed to extract (2.0)
-      cdHeader.writeUInt16LE(0x0800, 8);         // General purpose bit flag (UTF-8)
+      cdHeader.writeUInt32LE(0x02014b50, 0); // Central directory file header signature
+      cdHeader.writeUInt16LE(0x0314, 4); // Version made by (UNIX 2.0)
+      cdHeader.writeUInt16LE(20, 6); // Version needed to extract (2.0)
+      cdHeader.writeUInt16LE(0x0800, 8); // General purpose bit flag (UTF-8)
       cdHeader.writeUInt16LE(compressionMethod, 10);
       cdHeader.writeUInt16LE(dosTime, 12);
       cdHeader.writeUInt16LE(dosDate, 14);
@@ -87,12 +87,12 @@ export class PkzipEngineAdapter extends IZipEnginePort {
       cdHeader.writeUInt32LE(compressedData.length, 20);
       cdHeader.writeUInt32LE(rawData.length, 24);
       cdHeader.writeUInt16LE(nameBuf.length, 28);
-      cdHeader.writeUInt16LE(0, 30);             // Extra field length
-      cdHeader.writeUInt16LE(0, 32);             // File comment length
-      cdHeader.writeUInt16LE(0, 34);             // Disk number start
-      cdHeader.writeUInt16LE(0, 36);             // Internal file attributes
+      cdHeader.writeUInt16LE(0, 30); // Extra field length
+      cdHeader.writeUInt16LE(0, 32); // File comment length
+      cdHeader.writeUInt16LE(0, 34); // Disk number start
+      cdHeader.writeUInt16LE(0, 36); // Internal file attributes
       cdHeader.writeUInt32LE((0o100644 << 16) >>> 0, 38); // External file attributes (regular file)
-      cdHeader.writeUInt32LE(offset, 42);        // Relative offset of local header
+      cdHeader.writeUInt32LE(offset, 42); // Relative offset of local header
 
       cdChunks.push(Buffer.concat([cdHeader, nameBuf]));
       offset += localEntry.length;
@@ -105,14 +105,14 @@ export class PkzipEngineAdapter extends IZipEnginePort {
 
     // End of Central Directory (22 bytes)
     const eocd = Buffer.alloc(22);
-    eocd.writeUInt32LE(0x06054b50, 0);           // End of central directory signature
-    eocd.writeUInt16LE(0, 4);                   // Number of this disk
-    eocd.writeUInt16LE(0, 6);                   // Disk where central directory starts
-    eocd.writeUInt16LE(totalEntries, 8);        // Number of central directory records on this disk
-    eocd.writeUInt16LE(totalEntries, 10);       // Total number of central directory records
-    eocd.writeUInt32LE(cdSize, 12);             // Size of central directory
-    eocd.writeUInt32LE(cdStart, 16);            // Offset of start of central directory
-    eocd.writeUInt16LE(0, 20);                  // Comment length
+    eocd.writeUInt32LE(0x06054b50, 0); // End of central directory signature
+    eocd.writeUInt16LE(0, 4); // Number of this disk
+    eocd.writeUInt16LE(0, 6); // Disk where central directory starts
+    eocd.writeUInt16LE(totalEntries, 8); // Number of central directory records on this disk
+    eocd.writeUInt16LE(totalEntries, 10); // Total number of central directory records
+    eocd.writeUInt32LE(cdSize, 12); // Size of central directory
+    eocd.writeUInt32LE(cdStart, 16); // Offset of start of central directory
+    eocd.writeUInt16LE(0, 20); // Comment length
 
     return Buffer.concat([...localChunks, cdBuf, eocd]);
   }
@@ -122,7 +122,9 @@ export class PkzipEngineAdapter extends IZipEnginePort {
    */
   public extractZip(zipBuffer: Buffer): ArchiveEntryVo[] {
     if (!zipBuffer || zipBuffer.length < 22) {
-      throw new InvalidZipArchiveException('Provided buffer is too small to be a valid ZIP archive.');
+      throw new InvalidZipArchiveException(
+        'Provided buffer is too small to be a valid ZIP archive.',
+      );
     }
 
     // 1. Locate End of Central Directory record (0x06054b50) scanning backwards
@@ -139,7 +141,9 @@ export class PkzipEngineAdapter extends IZipEnginePort {
     }
 
     if (eocdOffset === -1) {
-      throw new InvalidZipArchiveException('Corrupted ZIP: End of Central Directory record not found.');
+      throw new InvalidZipArchiveException(
+        'Corrupted ZIP: End of Central Directory record not found.',
+      );
     }
 
     const totalRecords = zipBuffer.readUInt16LE(eocdOffset + 10);
@@ -147,11 +151,16 @@ export class PkzipEngineAdapter extends IZipEnginePort {
     const cdOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
 
     if (totalRecords > MAX_PROJECT_ENTRY_COUNT) {
-      throw new ArchiveSizeExceededException(totalRecords, MAX_PROJECT_ENTRY_COUNT);
+      throw new ArchiveSizeExceededException(
+        totalRecords,
+        MAX_PROJECT_ENTRY_COUNT,
+      );
     }
 
     if (cdOffset + cdSize > zipBuffer.length) {
-      throw new InvalidZipArchiveException('Corrupted ZIP: Central Directory bounds exceed file size.');
+      throw new InvalidZipArchiveException(
+        'Corrupted ZIP: Central Directory bounds exceed file size.',
+      );
     }
 
     const entries: ArchiveEntryVo[] = [];
@@ -163,7 +172,9 @@ export class PkzipEngineAdapter extends IZipEnginePort {
 
       const sig = zipBuffer.readUInt32LE(currentCdPtr);
       if (sig !== 0x02014b50) {
-        throw new InvalidZipArchiveException(`Corrupted ZIP: Invalid central directory entry signature at ${currentCdPtr}.`);
+        throw new InvalidZipArchiveException(
+          `Corrupted ZIP: Invalid central directory entry signature at ${currentCdPtr}.`,
+        );
       }
 
       const compressionMethod = zipBuffer.readUInt16LE(currentCdPtr + 10);
@@ -175,26 +186,37 @@ export class PkzipEngineAdapter extends IZipEnginePort {
       const localHeaderOffset = zipBuffer.readUInt32LE(currentCdPtr + 42);
 
       const nameStart = currentCdPtr + 46;
-      const fileName = zipBuffer.toString('utf8', nameStart, nameStart + nameLen);
+      const fileName = zipBuffer.toString(
+        'utf8',
+        nameStart,
+        nameStart + nameLen,
+      );
 
       currentCdPtr += 46 + nameLen + extraLen + commentLen;
 
       // Zip Bomb Guard: check uncompressed total size
       accumulatedUncompressedBytes += uncompressedSize;
       if (accumulatedUncompressedBytes > MAX_UNCOMPRESSED_PROJECT_BYTES) {
-        throw new ArchiveSizeExceededException(accumulatedUncompressedBytes, MAX_UNCOMPRESSED_PROJECT_BYTES);
+        throw new ArchiveSizeExceededException(
+          accumulatedUncompressedBytes,
+          MAX_UNCOMPRESSED_PROJECT_BYTES,
+        );
       }
 
       const isDirectory = fileName.endsWith('/') || fileName.endsWith('\\');
 
       // Navigate to Local File Header to read payload
       if (localHeaderOffset + 30 > zipBuffer.length) {
-        throw new InvalidZipArchiveException(`Corrupted ZIP: Local header offset out of bounds for '${fileName}'.`);
+        throw new InvalidZipArchiveException(
+          `Corrupted ZIP: Local header offset out of bounds for '${fileName}'.`,
+        );
       }
 
       const localSig = zipBuffer.readUInt32LE(localHeaderOffset);
       if (localSig !== 0x04034b50) {
-        throw new InvalidZipArchiveException(`Corrupted ZIP: Invalid local header signature for '${fileName}'.`);
+        throw new InvalidZipArchiveException(
+          `Corrupted ZIP: Invalid local header signature for '${fileName}'.`,
+        );
       }
 
       const localNameLen = zipBuffer.readUInt16LE(localHeaderOffset + 26);
@@ -204,7 +226,10 @@ export class PkzipEngineAdapter extends IZipEnginePort {
       let uncompressedData = Buffer.alloc(0);
 
       if (!isDirectory && compressedSize > 0) {
-        const compressedSlice = zipBuffer.subarray(dataOffset, dataOffset + compressedSize);
+        const compressedSlice = zipBuffer.subarray(
+          dataOffset,
+          dataOffset + compressedSize,
+        );
         if (compressionMethod === 0) {
           // Stored (no compression)
           uncompressedData = Buffer.from(compressedSlice);
@@ -213,17 +238,27 @@ export class PkzipEngineAdapter extends IZipEnginePort {
           try {
             uncompressedData = zlib.inflateRawSync(compressedSlice);
           } catch (inflateErr: any) {
-            this.logger.warn(`Failed to inflate entry '${fileName}': ${inflateErr.message}`);
-            throw new InvalidZipArchiveException(`Failed to decompress entry '${fileName}'.`);
+            this.logger.warn(
+              `Failed to inflate entry '${fileName}': ${inflateErr.message}`,
+            );
+            throw new InvalidZipArchiveException(
+              `Failed to decompress entry '${fileName}'.`,
+            );
           }
         } else {
-          this.logger.warn(`Unsupported ZIP compression method ${compressionMethod} for '${fileName}'. Skipping.`);
+          this.logger.warn(
+            `Unsupported ZIP compression method ${compressionMethod} for '${fileName}'. Skipping.`,
+          );
           continue;
         }
       }
 
       // Create ArchiveEntryVo (performs automatic Zip Slip detection & path sanitization)
-      const entryVo = ArchiveEntryVo.create(fileName, uncompressedData, isDirectory);
+      const entryVo = ArchiveEntryVo.create(
+        fileName,
+        uncompressedData,
+        isDirectory,
+      );
 
       // Skip ignored OS artifacts (__MACOSX/, .DS_Store, Thumbs.db)
       if (!entryVo.isIgnoredSystemArtifact()) {

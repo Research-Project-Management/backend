@@ -4,7 +4,10 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { IDocstorePatcherPort, PatcherResult } from '../../ports/docstore-patcher.port';
+import {
+  IDocstorePatcherPort,
+  PatcherResult,
+} from '../../ports/docstore-patcher.port';
 import { TrackChange } from '../../domain/entities/track-change.entity';
 import { TextRangeVo } from '../../domain/value-objects/text-range.vo';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
@@ -101,7 +104,11 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
     return lines;
   }
 
-  public insertRange(lines: string[], range: TextRangeVo, textToInsert: string): string[] {
+  public insertRange(
+    lines: string[],
+    range: TextRangeVo,
+    textToInsert: string,
+  ): string[] {
     const startLine = range.startLine;
     const startCol = range.startCol;
 

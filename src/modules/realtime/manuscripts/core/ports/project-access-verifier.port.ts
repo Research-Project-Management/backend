@@ -10,5 +10,8 @@ export interface ProjectAccessResult {
 }
 
 export abstract class IProjectAccessVerifierPort {
-  abstract verifyProjectAccess(userId: string, projectId: string): Promise<ProjectAccessResult>;
+  abstract verifyProjectAccess(
+    userId: string,
+    projectId: string,
+  ): Promise<ProjectAccessResult>;
 }

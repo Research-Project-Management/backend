@@ -12,6 +12,6 @@ export abstract class IRootDocDetector {
    */
   abstract detectRootDoc(
     nodes: ManuscriptNodeEntity[],
-    docContents: Map<string, string[]>
+    docContents: Map<string, string[]>,
   ): ManuscriptNodeEntity | null;
 }

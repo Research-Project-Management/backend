@@ -21,14 +21,19 @@ export class PeekDocUseCase {
 
   constructor(
     private readonly docRepository: IDocRepository,
-    private readonly docPersistor: IDocPersistor
+    private readonly docPersistor: IDocPersistor,
   ) {}
 
-  public async execute(projectId: string, docId: string): Promise<PeekDocResult> {
+  public async execute(
+    projectId: string,
+    docId: string,
+  ): Promise<PeekDocResult> {
     const doc = await this.docRepository.getDoc(projectId, docId);
 
     if (!doc) {
-      throw new DocNotFoundError(`Document ${docId} not found in project ${projectId}`);
+      throw new DocNotFoundError(
+        `Document ${docId} not found in project ${projectId}`,
+      );
     }
 
     if (!doc.inStorage) {

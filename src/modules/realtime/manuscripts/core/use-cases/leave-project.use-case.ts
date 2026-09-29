@@ -22,7 +22,10 @@ export class LeaveProjectUseCase {
   public async execute(input: LeaveProjectInput): Promise<void> {
     const { projectId, socketId } = input;
 
-    const removedSession = await this.roomManager.removeProjectSession(projectId, socketId);
+    const removedSession = await this.roomManager.removeProjectSession(
+      projectId,
+      socketId,
+    );
     if (!removedSession) {
       return;
     }
@@ -35,10 +38,15 @@ export class LeaveProjectUseCase {
 
     // If user was viewing a specific doc, also notify the doc room
     if (removedSession.activeDocId) {
-      this.broadcaster.broadcastToDoc(projectId, removedSession.activeDocId, 'doc:user-left', {
-        userId: removedSession.userId,
-        socketId,
-      });
+      this.broadcaster.broadcastToDoc(
+        projectId,
+        removedSession.activeDocId,
+        'doc:user-left',
+        {
+          userId: removedSession.userId,
+          socketId,
+        },
+      );
     }
   }
 }

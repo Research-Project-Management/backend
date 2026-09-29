@@ -21,7 +21,7 @@ export class DocModifiedError extends Error {
       docId: string;
       rev: number;
       currentRev: number;
-    }
+    },
   ) {
     super(message);
     this.name = 'DocModifiedError';
@@ -35,10 +35,10 @@ export class DocModifiedError extends Error {
 export class DocTooLargeError extends Error {
   constructor(
     public readonly currentSize: number,
-    public readonly maxSize: number
+    public readonly maxSize: number,
   ) {
     super(
-      `Document body length (${currentSize} bytes) exceeds maximum limit (${maxSize} bytes)`
+      `Document body length (${currentSize} bytes) exceeds maximum limit (${maxSize} bytes)`,
     );
     this.name = 'DocTooLargeError';
   }
@@ -49,7 +49,9 @@ export class DocTooLargeError extends Error {
  * preventing memory corruption and C-string truncation in databases/filesystems.
  */
 export class NullByteDetectedError extends Error {
-  constructor(message: string = 'Null byte (\\u0000) detected in document text') {
+  constructor(
+    message: string = 'Null byte (\\u0000) detected in document text',
+  ) {
     super(message);
     this.name = 'NullByteDetectedError';
   }
@@ -66,7 +68,7 @@ export class Md5MismatchError extends Error {
       key: string;
       sourceMd5: string;
       actualMd5: string;
-    }
+    },
   ) {
     super(message);
     this.name = 'Md5MismatchError';

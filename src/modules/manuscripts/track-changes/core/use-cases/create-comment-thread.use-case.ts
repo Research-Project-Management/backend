@@ -8,7 +8,10 @@ import { ITrackChangesRepositoryPort } from '../ports/track-changes-repository.p
 import { IRealtimeNotifierPort } from '../ports/realtime-notifier.port';
 import { CommentThread } from '../domain/entities/comment-thread.entity';
 import { CommentReply } from '../domain/entities/comment-reply.entity';
-import { TextRangeVo, TextRangeProps } from '../domain/value-objects/text-range.vo';
+import {
+  TextRangeVo,
+  TextRangeProps,
+} from '../domain/value-objects/text-range.vo';
 
 export interface CreateCommentThreadInput {
   projectId: string;
@@ -26,7 +29,9 @@ export class CreateCommentThreadUseCase {
     private readonly notifier: IRealtimeNotifierPort,
   ) {}
 
-  public async execute(input: CreateCommentThreadInput): Promise<CommentThread> {
+  public async execute(
+    input: CreateCommentThreadInput,
+  ): Promise<CommentThread> {
     const { projectId, docId, quote, range, content, userId } = input;
 
     const thread = CommentThread.create({

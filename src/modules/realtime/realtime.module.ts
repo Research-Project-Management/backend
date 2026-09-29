@@ -11,10 +11,7 @@ import { RealtimeService } from './realtime.service';
 
 @Global()
 @Module({
-  imports: [
-    ManuscriptsRealtimeModule,
-    NotificationsRealtimeModule,
-  ],
+  imports: [ManuscriptsRealtimeModule, NotificationsRealtimeModule],
   providers: [RealtimeService],
   exports: [
     RealtimeService,

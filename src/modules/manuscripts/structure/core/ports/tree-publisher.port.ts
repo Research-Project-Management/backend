@@ -6,7 +6,8 @@
 
 export interface TreeMutationPayload {
   projectId: string;
-  action: 'create' | 'move' | 'rename' | 'delete' | 'root_doc_changed' | 'reorder';
+  action:
+    'create' | 'move' | 'rename' | 'delete' | 'root_doc_changed' | 'reorder';
   nodeId: string;
   path?: string;
   oldPath?: string;

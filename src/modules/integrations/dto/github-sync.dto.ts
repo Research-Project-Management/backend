@@ -2,12 +2,18 @@ import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateGithubRepoDto {
-  @ApiProperty({ description: 'GitHub repository name', example: 'latex-manuscript' })
+  @ApiProperty({
+    description: 'GitHub repository name',
+    example: 'latex-manuscript',
+  })
   @IsString()
   @IsNotEmpty()
   name!: string;
 
-  @ApiPropertyOptional({ description: 'Make repository private', default: true })
+  @ApiPropertyOptional({
+    description: 'Make repository private',
+    default: true,
+  })
   @IsBoolean()
   @IsOptional()
   private?: boolean;
@@ -24,7 +30,10 @@ export class LinkGithubRepoDto {
   @IsNotEmpty()
   projectId!: string;
 
-  @ApiProperty({ description: 'GitHub repository full name (owner/repo)', example: 'octocat/paper-draft' })
+  @ApiProperty({
+    description: 'GitHub repository full name (owner/repo)',
+    example: 'octocat/paper-draft',
+  })
   @IsString()
   @IsNotEmpty()
   repoFullName!: string;
@@ -41,7 +50,10 @@ export class PushGithubDto {
   @IsNotEmpty()
   projectId!: string;
 
-  @ApiPropertyOptional({ description: 'Commit message', default: 'Update manuscript from Flux LaTeX Platform' })
+  @ApiPropertyOptional({
+    description: 'Commit message',
+    default: 'Update manuscript from Flux LaTeX Platform',
+  })
   @IsString()
   @IsOptional()
   commitMessage?: string;

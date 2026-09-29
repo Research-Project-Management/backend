@@ -16,20 +16,24 @@ export interface ParseCompileLogCommand {
 export class ParseCompileLogUseCase {
   constructor(
     private readonly defaultParser: ILatexLogParserPort,
-    private readonly tectonicParser?: ILatexLogParserPort
+    private readonly tectonicParser?: ILatexLogParserPort,
   ) {}
 
   public execute(command: ParseCompileLogCommand): DiagnosticReport {
-    if (typeof command.logText !== 'string' || command.logText.trim().length === 0) {
+    if (
+      typeof command.logText !== 'string' ||
+      command.logText.trim().length === 0
+    ) {
       throw new InvalidLogFormatException();
     }
 
     const defaultFile = command.defaultFile || 'main.tex';
     const isTectonic = command.engine?.toLowerCase() === 'tectonic';
 
-    let items = isTectonic && this.tectonicParser
-      ? this.tectonicParser.parse(command.logText, defaultFile)
-      : this.defaultParser.parse(command.logText, defaultFile);
+    let items =
+      isTectonic && this.tectonicParser
+        ? this.tectonicParser.parse(command.logText, defaultFile)
+        : this.defaultParser.parse(command.logText, defaultFile);
 
     // If tectonic parser found nothing but log has TeX errors (hybrid run), fallback to default
     if (items.length === 0 && isTectonic && this.defaultParser) {

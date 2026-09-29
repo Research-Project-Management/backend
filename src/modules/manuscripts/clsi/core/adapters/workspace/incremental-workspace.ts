@@ -91,7 +91,7 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
 
   private async writeManifest(
     scratchDir: string,
-    manifest: ProjectManifest
+    manifest: ProjectManifest,
   ): Promise<void> {
     const manifestPath = path.join(scratchDir, MANIFEST_FILENAME);
     manifest.lastUpdated = new Date().toISOString();
@@ -100,7 +100,7 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
 
   public async syncFiles(
     projectId: string,
-    files: WorkspaceFile[]
+    files: WorkspaceFile[],
   ): Promise<WorkspaceSyncStats> {
     const scratchDir = await this.ensureScratch(projectId);
     const manifest = await this.readManifest(scratchDir);
@@ -116,7 +116,10 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
       const sanitizedRelPath = SafePathUtil.sanitizeRelativePath(file.path);
       currentFileKeys.add(sanitizedRelPath);
 
-      const targetPath = SafePathUtil.resolveSafePath(scratchDir, sanitizedRelPath);
+      const targetPath = SafePathUtil.resolveSafePath(
+        scratchDir,
+        sanitizedRelPath,
+      );
       const contentBuffer = Buffer.isBuffer(file.content)
         ? file.content
         : Buffer.from(file.content, 'utf8');
@@ -149,7 +152,10 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
     for (const oldRelPath of Object.keys(manifest.files)) {
       if (!currentFileKeys.has(oldRelPath)) {
         try {
-          const oldFilePath = SafePathUtil.resolveSafePath(scratchDir, oldRelPath);
+          const oldFilePath = SafePathUtil.resolveSafePath(
+            scratchDir,
+            oldRelPath,
+          );
           await fs.unlink(oldFilePath);
           deleted++;
         } catch {
@@ -175,7 +181,7 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
 
   public async purgeExtraneousFiles(
     projectId: string,
-    inputFiles: string[]
+    inputFiles: string[],
   ): Promise<void> {
     const scratchDir = this.getScratchDir(projectId);
 
@@ -190,7 +196,7 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
 
     // 2. Scan workspace and remove extraneous files not in inputFiles and not in preserved whitelist
     const inputSet = new Set(
-      inputFiles.map((f) => f.replace(/\\/g, '/').replace(/^\/+/, ''))
+      inputFiles.map((f) => f.replace(/\\/g, '/').replace(/^\/+/, '')),
     );
 
     await this.cleanExtraneousDir(scratchDir, '', inputSet);
@@ -208,12 +214,20 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
     }
 
     // TikZ externalization: output-figure* or *.dpth / *.md5
-    if (fileName.startsWith('output-figure') || ext === '.dpth' || ext === '.md5') {
+    if (
+      fileName.startsWith('output-figure') ||
+      ext === '.dpth' ||
+      ext === '.md5'
+    ) {
       return true;
     }
 
     // Minted cache: _minted-* or *.pygstyle / *.pygtex
-    if (relPath.includes('_minted-') || ext === '.pygstyle' || ext === '.pygtex') {
+    if (
+      relPath.includes('_minted-') ||
+      ext === '.pygstyle' ||
+      ext === '.pygtex'
+    ) {
       return true;
     }
 
@@ -233,7 +247,7 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
   private async cleanExtraneousDir(
     baseDir: string,
     relDir: string,
-    inputSet: Set<string>
+    inputSet: Set<string>,
   ): Promise<void> {
     const currentDir = relDir ? path.join(baseDir, relDir) : baseDir;
     let entries;
@@ -265,7 +279,10 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
           // Ignored
         }
       } else if (entry.isFile()) {
-        if (!inputSet.has(entryRelPath) && !this.isPreservedArtifact(entryRelPath, entry.name)) {
+        if (
+          !inputSet.has(entryRelPath) &&
+          !this.isPreservedArtifact(entryRelPath, entry.name)
+        ) {
           try {
             await fs.unlink(fullPath);
           } catch {
@@ -304,7 +321,7 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
 
   public async readAuxFile(
     projectId: string,
-    filename: string
+    filename: string,
   ): Promise<Buffer | null> {
     const scratchDir = this.getScratchDir(projectId);
     try {
@@ -321,7 +338,7 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
 
   public async readArtifact(
     projectId: string,
-    filename: string
+    filename: string,
   ): Promise<Buffer | null> {
     const scratchDir = this.getScratchDir(projectId);
     try {

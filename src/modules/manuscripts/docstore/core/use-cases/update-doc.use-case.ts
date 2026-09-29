@@ -26,7 +26,7 @@ export class UpdateDocUseCase {
 
   constructor(
     private readonly docRepository: IDocRepository,
-    private readonly docHasher: IDocHasher
+    private readonly docHasher: IDocHasher,
   ) {}
 
   public async execute(
@@ -35,7 +35,7 @@ export class UpdateDocUseCase {
     lines: string[],
     version: number,
     ranges?: DocRanges,
-    expectedRev?: number
+    expectedRev?: number,
   ): Promise<UpdateDocResult> {
     // 1. Validate lines size and defensive null byte check
     LineArrayEngine.validateLinesSize(lines);
@@ -43,13 +43,17 @@ export class UpdateDocUseCase {
     // 2. Fetch current document state
     const currentDoc = await this.docRepository.getDoc(projectId, docId);
     if (!currentDoc) {
-      throw new DocNotFoundError(`Document ${docId} not found in project ${projectId}`);
+      throw new DocNotFoundError(
+        `Document ${docId} not found in project ${projectId}`,
+      );
     }
 
     // 3. Skip No-op updates (Overleaf optimization)
     const diff = NoopDiffChecker.checkDiff(currentDoc, lines, version, ranges);
     if (!diff.shouldUpdate) {
-      this.logger.debug(`Document ${docId} lines and ranges have not changed - skipping database write`);
+      this.logger.debug(
+        `Document ${docId} lines and ranges have not changed - skipping database write`,
+      );
       DocstoreMetrics.recordNoopSkip();
       return {
         doc: currentDoc,
@@ -62,13 +66,17 @@ export class UpdateDocUseCase {
     const hash = this.docHasher.computeHash(lines);
 
     // 5. Commit atomic update with OCC verification
-    const { doc, modified } = await this.docRepository.updateDoc(projectId, docId, {
-      lines,
-      version,
-      ranges,
-      hash,
-      expectedRev,
-    });
+    const { doc, modified } = await this.docRepository.updateDoc(
+      projectId,
+      docId,
+      {
+        lines,
+        version,
+        ranges,
+        hash,
+        expectedRev,
+      },
+    );
 
     return {
       doc,

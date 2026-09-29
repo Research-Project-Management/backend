@@ -36,25 +36,40 @@ export class FlushSingleDocUseCase {
     private readonly debounceTimer: IDebounceTimerPort,
   ) {}
 
-  public async execute(input: FlushSingleDocInput): Promise<FlushSingleDocOutput> {
+  public async execute(
+    input: FlushSingleDocInput,
+  ): Promise<FlushSingleDocOutput> {
     const { projectId, docId } = input;
     const lockKey = `doc:${docId}`;
 
     // 1. Acquire doc-level exclusive lock
     const acquired = await this.lock.acquire(lockKey, 10000);
     if (!acquired) {
-      throw new DocumentLockedException(docId, 'Document is currently being flushed by another worker.');
+      throw new DocumentLockedException(
+        docId,
+        'Document is currently being flushed by another worker.',
+      );
     }
 
     try {
       // 2. Fetch in-flight document buffer
       const doc = await this.inFlightStore.get(projectId, docId);
       if (!doc) {
-        return { docId, projectId, flushed: false, reason: 'Document is not active in memory buffer.' };
+        return {
+          docId,
+          projectId,
+          flushed: false,
+          reason: 'Document is not active in memory buffer.',
+        };
       }
 
       if (!doc.isDirty && !input.force) {
-        return { docId, projectId, flushed: false, reason: 'Document is already clean (0 uncommitted changes).' };
+        return {
+          docId,
+          projectId,
+          flushed: false,
+          reason: 'Document is already clean (0 uncommitted changes).',
+        };
       }
 
       // 3. Mark as flushing

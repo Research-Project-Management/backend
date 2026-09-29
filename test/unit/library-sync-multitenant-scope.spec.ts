@@ -1,19 +1,19 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma, TagType } from '@prisma/client';
-import { NotesService } from '@/modules/library/reader/application/services/notes.service';
-import { NotesRepository } from '@/modules/library/reader/infrastructure/repositories/notes.repository';
-import { AnnotationsService } from '@/modules/library/reader/application/services/annotations.service';
-import { AnnotationsRepository } from '@/modules/library/reader/infrastructure/repositories/annotations.repository';
-import { TagsService } from '@/modules/library/bibliography/application/services/tags.service';
-import { TagsRepository } from '@/modules/library/bibliography/infrastructure/repositories/tags.repository';
-import { AttachmentsService } from '@/modules/library/reader/application/services/attachments.service';
+import { NotesService } from '@/modules/library/catalog/core/use-cases/notes.service';
+import { NotesRepository } from '@/modules/library/catalog/core/adapters/notes.repository';
+import { AnnotationsService } from '@/modules/library/extraction/core/use-cases/annotations.service';
+import { AnnotationsRepository } from '@/modules/library/extraction/core/adapters/annotations.repository';
+import { TagsService } from '@/modules/library/catalog/core/use-cases/tags.service';
+import { TagsRepository } from '@/modules/library/catalog/core/adapters/tags.repository';
+import { AttachmentsService } from '@/modules/library/extraction/core/use-cases/attachments.service';
 import {
   TransactionService,
   TransactionHelpers,
 } from '@/modules/library/shared-kernel/outbox/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { BIBLIOGRAPHY_FACADE } from '@/modules/library/bibliography/bibliography.facade';
+import { BIBLIOGRAPHY_FACADE } from '@/modules/library/catalog/catalog.facade';
 
 describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';

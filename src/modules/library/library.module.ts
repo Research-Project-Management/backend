@@ -2,37 +2,43 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { CoreModule as AppCoreModule } from '../../core/core.module';
 
-// Bounded Context Modules
-import { SharedKernelModule } from './shared-kernel/shared-kernel.module';
-import { BibliographyModule } from './bibliography/bibliography.module';
-import { ReaderModule } from './reader/reader.module';
+// The 6 Canonical Symmetrical Microservices-Ready Modules
+import { SyncModule } from './sync/sync.module';
+import { CatalogModule } from './catalog/catalog.module';
+import { ExtractionModule } from './extraction/extraction.module';
 import { IngestionModule } from './ingestion/ingestion.module';
 import { SearchModule } from './search/search.module';
 import { CitationModule } from './citation/citation.module';
 
+// Shared Kernel (lean infrastructure & cross-cutting concerns)
+import { SharedKernelModule } from './shared-kernel/shared-kernel.module';
+
 import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
 
 /**
- * Macro Composition Root for the Library Module.
+ * Macro Composition Root for the Library Subsystem.
  *
- * Clean Architecture & Strategic DDD structure:
- * Consists of exactly 5 Bounded Contexts + 1 Shared Kernel + 1 Unified Facade:
- * 1. BibliographyModule (Core Domain — Items, Collections, Tags, Types, State, Saved Searches)
- * 2. ReaderModule (Supporting Domain — Attachments, Annotations, Notes, OCR)
- * 3. IngestionModule (Supporting Domain — Ingestion Pipeline, Metadata Resolution, Curation, Retraction)
- * 4. SearchModule (Generic Domain — Postgres FTS, Local Semantic Vector Search, RAG Retrieval)
- * 5. CitationModule (Supporting Domain — CSL Engine, Citation Formatting, DOI Negotiation, Exports, PDF Baker)
- * 6. SharedKernelModule (Shared Infrastructure, Outbox, Integration Event Bus)
+ * Microservices-Ready Architecture matching Manuscripts / Overleaf Scale (1M+ Users):
+ * Consists of exactly 6 Symmetrical Modules + 1 Shared Kernel + 1 Unified Facade:
+ *
+ * 1. SyncModule    — CDC, Outbox, Monotonic Sequence, TransactionService
+ * 2. CatalogModule — Metadata (37 CSL Types), OCC, Collections, Tags, Notes, Annotations
+ * 3. ExtractionModule — GROBID, Tesseract OCR, Sandwich PDF, Claim-Check S3
+ * 4. IngestionModule  — CrossRef/arXiv/PubMed Pipeline, Dedup, Retraction Watch
+ * 5. SearchModule     — Postgres FTS, Semantic Vector, Event-driven Indexing
+ * 6. CitationModule   — CSL Engine, 10k+ Styles, DOI Negotiation, Multi-format Exports
+ *
+ * Note: BibliographyModule and ReaderModule are no longer needed — consumers
+ * should import CatalogModule (or ExtractionModule) directly or use LibraryFacade.
  */
 @Module({
   imports: [
     ConfigModule,
     AppCoreModule,
-
-    // Bounded Contexts
     SharedKernelModule,
-    BibliographyModule,
-    ReaderModule,
+    SyncModule,
+    CatalogModule,
+    ExtractionModule,
     IngestionModule,
     SearchModule,
     CitationModule,
@@ -45,14 +51,12 @@ import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
     },
   ],
   exports: [
-    // Public Facades
     LibraryFacade,
     LIBRARY_FACADE,
-
-    // Bounded Context Modules
     SharedKernelModule,
-    BibliographyModule,
-    ReaderModule,
+    SyncModule,
+    CatalogModule,
+    ExtractionModule,
     IngestionModule,
     SearchModule,
     CitationModule,

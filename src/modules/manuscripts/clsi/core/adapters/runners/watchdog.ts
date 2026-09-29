@@ -8,10 +8,8 @@ import { ChildProcess, spawn } from 'child_process';
 export function killProcessGroup(pid: number, force = false): void {
   if (process.platform === 'win32') {
     try {
-      const args = ['/T', '/PID', pid.toString()];
-      if (force) {
-        args.unshift('/F');
-      }
+      // Windows console applications (latexmk, pdflatex) require /F to terminate the tree
+      const args = ['/F', '/T', '/PID', pid.toString()];
       spawn('taskkill', args, { stdio: 'ignore' });
     } catch {
       // Process might already be dead
@@ -41,7 +39,7 @@ export class Watchdog {
   constructor(
     private readonly child: ChildProcess,
     private readonly timeoutMs: number = 240000,
-    private readonly gracePeriodMs: number = 2000
+    private readonly gracePeriodMs: number = 2000,
   ) {}
 
   public arm(signal?: AbortSignal): void {
@@ -94,4 +92,3 @@ export class Watchdog {
     }, this.gracePeriodMs);
   }
 }
-

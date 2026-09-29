@@ -29,12 +29,12 @@ export interface ReverseSyncRequest {
 export class SyncTexUseCase {
   constructor(
     private readonly workspace: IWorkspaceManager,
-    private readonly processor: ISyncTexProcessor
+    private readonly processor: ISyncTexProcessor,
   ) {}
 
   private async getSynctexText(
     projectId: string,
-    providedSynctex?: string
+    providedSynctex?: string,
   ): Promise<string> {
     if (providedSynctex) {
       const buffer = Buffer.from(providedSynctex, 'base64');
@@ -43,7 +43,7 @@ export class SyncTexUseCase {
 
     const gzBuffer = await this.workspace.readArtifact(
       projectId,
-      'output.synctex.gz'
+      'output.synctex.gz',
     );
     if (gzBuffer) {
       return this.processor.decompress(gzBuffer);
@@ -51,7 +51,7 @@ export class SyncTexUseCase {
 
     const plainBuffer = await this.workspace.readArtifact(
       projectId,
-      'output.synctex'
+      'output.synctex',
     );
     if (plainBuffer) {
       return plainBuffer.toString('utf8');
@@ -79,7 +79,7 @@ export class SyncTexUseCase {
       synctexText,
       dto.file,
       dto.line,
-      dto.column
+      dto.column,
     );
 
     if (!result) {
@@ -111,7 +111,7 @@ export class SyncTexUseCase {
       synctexText,
       dto.page,
       dto.x,
-      dto.y
+      dto.y,
     );
 
     if (!result) {

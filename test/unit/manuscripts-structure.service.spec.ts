@@ -12,7 +12,10 @@ import { RenameNodeUseCase } from '@/modules/manuscripts/structure/core/use-case
 import { DeleteNodeUseCase } from '@/modules/manuscripts/structure/core/use-cases/delete-node.use-case';
 import { ResolveRootDocUseCase } from '@/modules/manuscripts/structure/core/use-cases/resolve-root-doc.use-case';
 import { BuildCompilerFilesUseCase } from '@/modules/manuscripts/structure/core/use-cases/build-compiler-files.use-case';
-import { IStructureRepository, CreateNodeParams } from '@/modules/manuscripts/structure/core/ports/structure-repository.port';
+import {
+  IStructureRepository,
+  CreateNodeParams,
+} from '@/modules/manuscripts/structure/core/ports/structure-repository.port';
 import { IRootDocDetector } from '@/modules/manuscripts/structure/core/ports/root-doc-detector.port';
 import { ITreePublisher } from '@/modules/manuscripts/structure/core/ports/tree-publisher.port';
 import { HeuristicRootDocDetector } from '@/modules/manuscripts/structure/core/adapters/engine/heuristic-root-doc.detector';
@@ -38,7 +41,9 @@ class InMemoryStructureRepository implements IStructureRepository {
     this.nodes.clear();
   }
 
-  public async createNode(params: CreateNodeParams): Promise<ManuscriptNodeEntity> {
+  public async createNode(
+    params: CreateNodeParams,
+  ): Promise<ManuscriptNodeEntity> {
     const id = `node-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     const depth = NodePathVo.depth(params.path);
 
@@ -64,12 +69,18 @@ class InMemoryStructureRepository implements IStructureRepository {
     return entity;
   }
 
-  public async findById(projectId: string, nodeId: string): Promise<ManuscriptNodeEntity | null> {
+  public async findById(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ManuscriptNodeEntity | null> {
     const node = this.nodes.get(nodeId);
     return node && node.projectId === projectId ? node : null;
   }
 
-  public async findByPath(projectId: string, path: string): Promise<ManuscriptNodeEntity | null> {
+  public async findByPath(
+    projectId: string,
+    path: string,
+  ): Promise<ManuscriptNodeEntity | null> {
     const normalized = NodePathVo.normalize(path);
     for (const node of this.nodes.values()) {
       if (node.projectId === projectId && node.path === normalized) {
@@ -85,7 +96,9 @@ class InMemoryStructureRepository implements IStructureRepository {
       .sort((a, b) => a.depth - b.depth);
   }
 
-  public async getRootDoc(projectId: string): Promise<ManuscriptNodeEntity | null> {
+  public async getRootDoc(
+    projectId: string,
+  ): Promise<ManuscriptNodeEntity | null> {
     for (const node of this.nodes.values()) {
       if (node.projectId === projectId && node.isRootDoc) {
         return node;
@@ -114,7 +127,7 @@ class InMemoryStructureRepository implements IStructureRepository {
     projectId: string,
     sourcePath: string,
     destPath: string,
-    newParentId: string | null
+    newParentId: string | null,
   ): Promise<void> {
     const normSource = NodePathVo.normalize(sourcePath);
     const normDest = NodePathVo.normalize(destPath);
@@ -137,7 +150,7 @@ class InMemoryStructureRepository implements IStructureRepository {
     projectId: string,
     nodeId: string,
     newName: string,
-    newPath: string
+    newPath: string,
   ): Promise<ManuscriptNodeEntity> {
     const node = this.nodes.get(nodeId);
     if (!node) throw new NodeNotFoundError(nodeId);
@@ -145,7 +158,10 @@ class InMemoryStructureRepository implements IStructureRepository {
     return node;
   }
 
-  public async deleteSubtree(projectId: string, path: string): Promise<ManuscriptNodeEntity[]> {
+  public async deleteSubtree(
+    projectId: string,
+    path: string,
+  ): Promise<ManuscriptNodeEntity[]> {
     const normalized = NodePathVo.normalize(path);
     const prefix = normalized + '/';
     const deleted: ManuscriptNodeEntity[] = [];
@@ -165,7 +181,7 @@ class InMemoryStructureRepository implements IStructureRepository {
   public async updateSortOrder(
     projectId: string,
     nodeId: string,
-    sortOrder: number
+    sortOrder: number,
   ): Promise<void> {
     const node = this.nodes.get(nodeId);
     if (node && node.projectId === projectId) {
@@ -174,7 +190,9 @@ class InMemoryStructureRepository implements IStructureRepository {
   }
 
   public async countNodes(projectId: string): Promise<number> {
-    return Array.from(this.nodes.values()).filter((n) => n.projectId === projectId).length;
+    return Array.from(this.nodes.values()).filter(
+      (n) => n.projectId === projectId,
+    ).length;
   }
 }
 
@@ -221,7 +239,9 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
   // =========================================================================
   describe('NodePathVo (Virtual Path Operations)', () => {
     it('should normalize paths properly', () => {
-      expect(NodePathVo.normalize('chapters\\intro.tex')).toBe('/chapters/intro.tex');
+      expect(NodePathVo.normalize('chapters\\intro.tex')).toBe(
+        '/chapters/intro.tex',
+      );
       expect(NodePathVo.normalize('//chapters///sec1/')).toBe('/chapters/sec1');
       expect(NodePathVo.normalize('/')).toBe('/');
       expect(NodePathVo.normalize('')).toBe('/');
@@ -236,17 +256,29 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
     });
 
     it('should correctly detect descendant relationships', () => {
-      expect(NodePathVo.isDescendant('/chapters', '/chapters/intro.tex')).toBe(true);
-      expect(NodePathVo.isDescendant('/chapters', '/chapters/sub/doc.tex')).toBe(true);
+      expect(NodePathVo.isDescendant('/chapters', '/chapters/intro.tex')).toBe(
+        true,
+      );
+      expect(
+        NodePathVo.isDescendant('/chapters', '/chapters/sub/doc.tex'),
+      ).toBe(true);
       expect(NodePathVo.isDescendant('/chapters', '/main.tex')).toBe(false);
       expect(NodePathVo.isDescendant('/chapters', '/chapters')).toBe(false);
     });
 
     it('should validate filenames and reject invalid characters', () => {
-      expect(() => NodePathVo.validateFilename('')).toThrow(InvalidNodeNameError);
-      expect(() => NodePathVo.validateFilename('bad/name')).toThrow(InvalidNodeNameError);
-      expect(() => NodePathVo.validateFilename('bad\0name')).toThrow(InvalidNodeNameError);
-      expect(() => NodePathVo.validateFilename('..')).toThrow(InvalidNodeNameError);
+      expect(() => NodePathVo.validateFilename('')).toThrow(
+        InvalidNodeNameError,
+      );
+      expect(() => NodePathVo.validateFilename('bad/name')).toThrow(
+        InvalidNodeNameError,
+      );
+      expect(() => NodePathVo.validateFilename('bad\0name')).toThrow(
+        InvalidNodeNameError,
+      );
+      expect(() => NodePathVo.validateFilename('..')).toThrow(
+        InvalidNodeNameError,
+      );
       expect(() => NodePathVo.validateFilename('valid-name.tex')).not.toThrow();
     });
   });
@@ -282,8 +314,14 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
 
       // Verify intermediate folders were automatically created
       const assetsFolder = await service.getNodeByPath(PROJECT_ID, '/assets');
-      const imagesFolder = await service.getNodeByPath(PROJECT_ID, '/assets/images');
-      const figuresFolder = await service.getNodeByPath(PROJECT_ID, '/assets/images/figures');
+      const imagesFolder = await service.getNodeByPath(
+        PROJECT_ID,
+        '/assets/images',
+      );
+      const figuresFolder = await service.getNodeByPath(
+        PROJECT_ID,
+        '/assets/images/figures',
+      );
 
       expect(assetsFolder).toBeDefined();
       expect(assetsFolder?.isFolder()).toBe(true);
@@ -304,7 +342,7 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
           name: 'intro.tex',
           path: '/intro.tex',
           type: 'DOC',
-        })
+        }),
       ).rejects.toThrow(DuplicateNodePathError);
     });
   });
@@ -315,11 +353,32 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
   describe('GetFileTreeUseCase (Hierarchical Structure)', () => {
     it('should return nested tree sorted with folders first and main.tex top', async () => {
       // Create root folders & files
-      await service.createNode(PROJECT_ID, { name: 'chapters', type: 'FOLDER', path: '/chapters' });
-      await service.createNode(PROJECT_ID, { name: 'appendix.tex', type: 'DOC', path: '/appendix.tex' });
-      await service.createNode(PROJECT_ID, { name: 'main.tex', type: 'DOC', path: '/main.tex', isRootDoc: true });
-      await service.createNode(PROJECT_ID, { name: 'c1.tex', type: 'DOC', path: '/chapters/c1.tex' });
-      await service.createNode(PROJECT_ID, { name: 'c2.tex', type: 'DOC', path: '/chapters/c2.tex' });
+      await service.createNode(PROJECT_ID, {
+        name: 'chapters',
+        type: 'FOLDER',
+        path: '/chapters',
+      });
+      await service.createNode(PROJECT_ID, {
+        name: 'appendix.tex',
+        type: 'DOC',
+        path: '/appendix.tex',
+      });
+      await service.createNode(PROJECT_ID, {
+        name: 'main.tex',
+        type: 'DOC',
+        path: '/main.tex',
+        isRootDoc: true,
+      });
+      await service.createNode(PROJECT_ID, {
+        name: 'c1.tex',
+        type: 'DOC',
+        path: '/chapters/c1.tex',
+      });
+      await service.createNode(PROJECT_ID, {
+        name: 'c2.tex',
+        type: 'DOC',
+        path: '/chapters/c2.tex',
+      });
 
       const tree = await service.getFileTree(PROJECT_ID);
 
@@ -346,7 +405,7 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
           name: 'overflow.tex',
           type: 'DOC',
           path: '/overflow.tex',
-        })
+        }),
       ).rejects.toThrow(MaxProjectFilesExceededError);
     });
   });
@@ -356,20 +415,44 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
   // =========================================================================
   describe('MoveNodeUseCase (Subtree & Cycle Protection)', () => {
     it('should move folder and cascade path updates to all child files', async () => {
-      const srcFolder = await service.createNode(PROJECT_ID, { name: 'src', type: 'FOLDER', path: '/src' });
-      await service.createNode(PROJECT_ID, { name: 'a.tex', type: 'DOC', path: '/src/a.tex' });
-      await service.createNode(PROJECT_ID, { name: 'b.tex', type: 'DOC', path: '/src/b.tex' });
+      const srcFolder = await service.createNode(PROJECT_ID, {
+        name: 'src',
+        type: 'FOLDER',
+        path: '/src',
+      });
+      await service.createNode(PROJECT_ID, {
+        name: 'a.tex',
+        type: 'DOC',
+        path: '/src/a.tex',
+      });
+      await service.createNode(PROJECT_ID, {
+        name: 'b.tex',
+        type: 'DOC',
+        path: '/src/b.tex',
+      });
 
-      const destFolder = await service.createNode(PROJECT_ID, { name: 'archive', type: 'FOLDER', path: '/archive' });
+      const destFolder = await service.createNode(PROJECT_ID, {
+        name: 'archive',
+        type: 'FOLDER',
+        path: '/archive',
+      });
 
       // Move /src into /archive
-      await service.moveNode(PROJECT_ID, srcFolder.id, { destParentId: destFolder.id });
+      await service.moveNode(PROJECT_ID, srcFolder.id, {
+        destParentId: destFolder.id,
+      });
 
       const movedFolder = await service.getNodeById(PROJECT_ID, srcFolder.id);
       expect(movedFolder?.path).toBe('/archive/src');
 
-      const childA = await service.getNodeByPath(PROJECT_ID, '/archive/src/a.tex');
-      const childB = await service.getNodeByPath(PROJECT_ID, '/archive/src/b.tex');
+      const childA = await service.getNodeByPath(
+        PROJECT_ID,
+        '/archive/src/a.tex',
+      );
+      const childB = await service.getNodeByPath(
+        PROJECT_ID,
+        '/archive/src/b.tex',
+      );
       expect(childA).toBeDefined();
       expect(childB).toBeDefined();
 
@@ -379,11 +462,19 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
     });
 
     it('should prevent cyclic moves (moving parent into its own descendant)', async () => {
-      const parent = await service.createNode(PROJECT_ID, { name: 'parent', type: 'FOLDER', path: '/parent' });
-      const child = await service.createNode(PROJECT_ID, { name: 'child', type: 'FOLDER', path: '/parent/child' });
+      const parent = await service.createNode(PROJECT_ID, {
+        name: 'parent',
+        type: 'FOLDER',
+        path: '/parent',
+      });
+      const child = await service.createNode(PROJECT_ID, {
+        name: 'child',
+        type: 'FOLDER',
+        path: '/parent/child',
+      });
 
       await expect(
-        service.moveNode(PROJECT_ID, parent.id, { destParentId: child.id })
+        service.moveNode(PROJECT_ID, parent.id, { destParentId: child.id }),
       ).rejects.toThrow(CyclicMoveError);
     });
   });
@@ -393,23 +484,40 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
   // =========================================================================
   describe('RenameNodeUseCase', () => {
     it('should rename file and update path', async () => {
-      const node = await service.createNode(PROJECT_ID, { name: 'draft.tex', type: 'DOC', path: '/draft.tex' });
-      const renamed = await service.renameNode(PROJECT_ID, node.id, { name: 'final.tex' });
+      const node = await service.createNode(PROJECT_ID, {
+        name: 'draft.tex',
+        type: 'DOC',
+        path: '/draft.tex',
+      });
+      const renamed = await service.renameNode(PROJECT_ID, node.id, {
+        name: 'final.tex',
+      });
 
       expect(renamed.name).toBe('final.tex');
       expect(renamed.path).toBe('/final.tex');
     });
 
     it('should rename folder and cascade updated prefix to children', async () => {
-      const folder = await service.createNode(PROJECT_ID, { name: 'docs', type: 'FOLDER', path: '/docs' });
-      await service.createNode(PROJECT_ID, { name: 'intro.tex', type: 'DOC', path: '/docs/intro.tex' });
+      const folder = await service.createNode(PROJECT_ID, {
+        name: 'docs',
+        type: 'FOLDER',
+        path: '/docs',
+      });
+      await service.createNode(PROJECT_ID, {
+        name: 'intro.tex',
+        type: 'DOC',
+        path: '/docs/intro.tex',
+      });
 
       await service.renameNode(PROJECT_ID, folder.id, { name: 'manuscripts' });
 
       const renamedFolder = await service.getNodeById(PROJECT_ID, folder.id);
       expect(renamedFolder?.path).toBe('/manuscripts');
 
-      const child = await service.getNodeByPath(PROJECT_ID, '/manuscripts/intro.tex');
+      const child = await service.getNodeByPath(
+        PROJECT_ID,
+        '/manuscripts/intro.tex',
+      );
       expect(child).toBeDefined();
       expect(child?.name).toBe('intro.tex');
     });
@@ -420,7 +528,11 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
   // =========================================================================
   describe('DeleteNodeUseCase', () => {
     it('should delete folder and all child nodes, resetting rootDoc if deleted', async () => {
-      const folder = await service.createNode(PROJECT_ID, { name: 'tex', type: 'FOLDER', path: '/tex' });
+      const folder = await service.createNode(PROJECT_ID, {
+        name: 'tex',
+        type: 'FOLDER',
+        path: '/tex',
+      });
       const mainDoc = await service.createNode(PROJECT_ID, {
         name: 'main.tex',
         type: 'DOC',
@@ -434,7 +546,9 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
       expect(deleted.length).toBe(2);
 
       expect(await service.getNodeByPath(PROJECT_ID, '/tex')).toBeNull();
-      expect(await service.getNodeByPath(PROJECT_ID, '/tex/main.tex')).toBeNull();
+      expect(
+        await service.getNodeByPath(PROJECT_ID, '/tex/main.tex'),
+      ).toBeNull();
 
       // rootDoc was deleted, should now be null
       const currentRoot = await service.getRootDoc(PROJECT_ID);
@@ -459,8 +573,17 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
       });
 
       const docContents = new Map<string, string[]>();
-      docContents.set(doc1.id, ['\\section{Chapter 1}', 'Detailed content line 1', 'Detailed content line 2']);
-      docContents.set(mainDoc.id, ['\\documentclass{article}', '\\begin{document}', '\\input{chapter1}', '\\end{document}']);
+      docContents.set(doc1.id, [
+        '\\section{Chapter 1}',
+        'Detailed content line 1',
+        'Detailed content line 2',
+      ]);
+      docContents.set(mainDoc.id, [
+        '\\documentclass{article}',
+        '\\begin{document}',
+        '\\input{chapter1}',
+        '\\end{document}',
+      ]);
 
       const detected = await service.autoDetectRootDoc(PROJECT_ID, docContents);
       expect(detected).toBeDefined();
@@ -483,7 +606,10 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
 
       const docContents = new Map<string, string[]>();
       docContents.set(deepDoc.id, ['\\documentclass{book}', 'Deep text']);
-      docContents.set(rootDocCandidate.id, ['\\documentclass{article}', 'Root text']);
+      docContents.set(rootDocCandidate.id, [
+        '\\documentclass{article}',
+        'Root text',
+      ]);
 
       const detected = await service.autoDetectRootDoc(PROJECT_ID, docContents);
       expect(detected?.id).toBe(rootDocCandidate.id);
@@ -513,15 +639,27 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
         path: '/images/figure.pdf',
       });
 
-      const contentsMap = new Map<string, { lines: string[]; hash?: string | null }>();
+      const contentsMap = new Map<
+        string,
+        { lines: string[]; hash?: string | null }
+      >();
       const allNodes = await service.getAllNodes(PROJECT_ID);
       const mainNode = allNodes.find((n) => n.name === 'main.tex')!;
       const introNode = allNodes.find((n) => n.name === 'intro.tex')!;
 
-      contentsMap.set(mainNode.id, { lines: ['\\documentclass{article}', '\\input{chapters/intro}'], hash: 'hash-main' });
-      contentsMap.set(introNode.id, { lines: ['\\section{Intro}', 'Content here.'], hash: 'hash-intro' });
+      contentsMap.set(mainNode.id, {
+        lines: ['\\documentclass{article}', '\\input{chapters/intro}'],
+        hash: 'hash-main',
+      });
+      contentsMap.set(introNode.id, {
+        lines: ['\\section{Intro}', 'Content here.'],
+        hash: 'hash-intro',
+      });
 
-      const payload = await service.buildCompilerPayload(PROJECT_ID, contentsMap);
+      const payload = await service.buildCompilerPayload(
+        PROJECT_ID,
+        contentsMap,
+      );
 
       expect(payload.rootDocPath).toBe('main.tex');
       expect(payload.files.length).toBe(3);

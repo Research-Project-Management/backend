@@ -50,7 +50,10 @@ export class GithubProvider implements IIntegrationProvider {
     }
   }
 
-  async initiateOAuth(userId: string, redirectUri: string): Promise<OAuthInitiationResult> {
+  async initiateOAuth(
+    userId: string,
+    redirectUri: string,
+  ): Promise<OAuthInitiationResult> {
     const state = `state_${userId}_${randomBytes(8).toString('hex')}`;
 
     if (this.isMockMode) {
@@ -99,24 +102,29 @@ export class GithubProvider implements IIntegrationProvider {
     }
 
     // Exchange authorization code for access token
-    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'FluxResearchPlatform/1.0',
+    const tokenRes = await fetch(
+      'https://github.com/login/oauth/access_token',
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'FluxResearchPlatform/1.0',
+        },
+        body: JSON.stringify({
+          client_id: this.clientId,
+          client_secret: this.clientSecret,
+          code: params.codeOrToken,
+          redirect_uri: params.redirectUri,
+        }),
       },
-      body: JSON.stringify({
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-        code: params.codeOrToken,
-        redirect_uri: params.redirectUri,
-      }),
-    });
+    );
 
     if (!tokenRes.ok) {
       const errText = await tokenRes.text();
-      throw new Error(`GitHub token exchange failed: HTTP ${tokenRes.status} ${errText}`);
+      throw new Error(
+        `GitHub token exchange failed: HTTP ${tokenRes.status} ${errText}`,
+      );
     }
 
     const tokenData = (await tokenRes.json()) as {
@@ -131,7 +139,9 @@ export class GithubProvider implements IIntegrationProvider {
 
     if (tokenData.error || !tokenData.access_token) {
       throw new Error(
-        tokenData.error_description || tokenData.error || 'Failed to obtain access token from GitHub',
+        tokenData.error_description ||
+          tokenData.error ||
+          'Failed to obtain access token from GitHub',
       );
     }
 
@@ -146,7 +156,9 @@ export class GithubProvider implements IIntegrationProvider {
 
     if (!profileRes.ok) {
       const errText = await profileRes.text();
-      throw new Error(`Failed to fetch GitHub profile: HTTP ${profileRes.status} ${errText}`);
+      throw new Error(
+        `Failed to fetch GitHub profile: HTTP ${profileRes.status} ${errText}`,
+      );
     }
 
     const profile = (await profileRes.json()) as {
@@ -169,14 +181,19 @@ export class GithubProvider implements IIntegrationProvider {
           },
         });
         if (emailsRes.ok) {
-          const emails = (await emailsRes.json()) as Array<{ email: string; primary: boolean }>;
+          const emails = (await emailsRes.json()) as Array<{
+            email: string;
+            primary: boolean;
+          }>;
           if (Array.isArray(emails) && emails.length > 0) {
             const primary = emails.find((e) => e.primary);
             userEmail = primary?.email || emails[0]?.email;
           }
         }
       } catch (err: any) {
-        this.logger.debug(`Could not retrieve private email list: ${err.message}`);
+        this.logger.debug(
+          `Could not retrieve private email list: ${err.message}`,
+        );
       }
     }
 
@@ -224,17 +241,22 @@ export class GithubProvider implements IIntegrationProvider {
       ];
     }
 
-    const reposRes = await fetch('https://api.github.com/user/repos?per_page=100&sort=updated&type=all', {
-      headers: {
-        Authorization: `Bearer ${decryptedToken}`,
-        Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'FluxResearchPlatform/1.0',
+    const reposRes = await fetch(
+      'https://api.github.com/user/repos?per_page=100&sort=updated&type=all',
+      {
+        headers: {
+          Authorization: `Bearer ${decryptedToken}`,
+          Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'FluxResearchPlatform/1.0',
+        },
       },
-    });
+    );
 
     if (!reposRes.ok) {
       const errText = await reposRes.text();
-      throw new Error(`Failed to list GitHub repositories: HTTP ${reposRes.status} ${errText}`);
+      throw new Error(
+        `Failed to list GitHub repositories: HTTP ${reposRes.status} ${errText}`,
+      );
     }
 
     const repos = (await reposRes.json()) as GitHubRepoItem[];
@@ -303,13 +325,18 @@ export class GithubProvider implements IIntegrationProvider {
         }
       }
     } catch (err: any) {
-      this.logger.warn(`Could not fetch bibtex from ${collectionId}: ${err.message}`);
+      this.logger.warn(
+        `Could not fetch bibtex from ${collectionId}: ${err.message}`,
+      );
     }
 
     return `% GitHub Repository: ${collectionId}\n% Synced with Flux LaTeX Platform\n`;
   }
 
-  async listBranches(decryptedToken: string, repoFullName: string): Promise<string[]> {
+  async listBranches(
+    decryptedToken: string,
+    repoFullName: string,
+  ): Promise<string[]> {
     if (this.isMockMode || decryptedToken.startsWith('github_mock_')) {
       return ['main', 'dev', 'paper-revisions'];
     }
@@ -327,7 +354,9 @@ export class GithubProvider implements IIntegrationProvider {
 
     if (!branchesRes.ok) {
       const errText = await branchesRes.text();
-      throw new Error(`Failed to list branches for ${repoFullName}: HTTP ${branchesRes.status} ${errText}`);
+      throw new Error(
+        `Failed to list branches for ${repoFullName}: HTTP ${branchesRes.status} ${errText}`,
+      );
     }
 
     const branches = (await branchesRes.json()) as Array<{ name: string }>;
@@ -359,14 +388,17 @@ export class GithubProvider implements IIntegrationProvider {
       body: JSON.stringify({
         name,
         private: isPrivate,
-        description: description || 'Created from Flux LaTeX Manuscript Platform',
+        description:
+          description || 'Created from Flux LaTeX Manuscript Platform',
         auto_init: true,
       }),
     });
 
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`Failed to create GitHub repository ${name}: HTTP ${res.status} ${errText}`);
+      throw new Error(
+        `Failed to create GitHub repository ${name}: HTTP ${res.status} ${errText}`,
+      );
     }
 
     const data = (await res.json()) as GitHubRepoItem;
@@ -387,7 +419,8 @@ export class GithubProvider implements IIntegrationProvider {
   }): Promise<{ commitSha: string; commitUrl: string }> {
     const { decryptedToken, repoFullName, files } = params;
     const branch = params.branch || 'main';
-    const commitMessage = params.commitMessage || 'Update manuscript from Flux LaTeX Platform';
+    const commitMessage =
+      params.commitMessage || 'Update manuscript from Flux LaTeX Platform';
 
     if (this.isMockMode || decryptedToken.startsWith('github_mock_')) {
       const mockSha = `commit_${randomBytes(10).toString('hex')}`;
@@ -405,7 +438,7 @@ export class GithubProvider implements IIntegrationProvider {
     };
 
     // 1. Get current branch reference
-    let refRes = await fetch(
+    const refRes = await fetch(
       `https://api.github.com/repos/${repoFullName}/git/ref/heads/${branch}`,
       { headers },
     );
@@ -416,9 +449,14 @@ export class GithubProvider implements IIntegrationProvider {
       latestCommitSha = refData.object.sha;
     } else {
       // Check repository default branch if target branch ref not found
-      const repoRes = await fetch(`https://api.github.com/repos/${repoFullName}`, { headers });
+      const repoRes = await fetch(
+        `https://api.github.com/repos/${repoFullName}`,
+        { headers },
+      );
       if (!repoRes.ok) {
-        throw new Error(`Failed to inspect repository ${repoFullName}: HTTP ${repoRes.status}`);
+        throw new Error(
+          `Failed to inspect repository ${repoFullName}: HTTP ${repoRes.status}`,
+        );
       }
       const repoData = (await repoRes.json()) as { default_branch: string };
       const defaultBranch = repoData.default_branch || 'main';
@@ -432,7 +470,9 @@ export class GithubProvider implements IIntegrationProvider {
           `Cannot determine base commit for ${repoFullName}. Ensure the repository is initialized with at least one commit.`,
         );
       }
-      const defaultRefData = (await defaultRefRes.json()) as { object: { sha: string } };
+      const defaultRefData = (await defaultRefRes.json()) as {
+        object: { sha: string };
+      };
       latestCommitSha = defaultRefData.object.sha;
 
       // Create new branch pointer from default branch
@@ -450,7 +490,9 @@ export class GithubProvider implements IIntegrationProvider {
         );
         if (!createRefRes.ok) {
           const errText = await createRefRes.text();
-          throw new Error(`Failed to create branch ${branch}: HTTP ${createRefRes.status} ${errText}`);
+          throw new Error(
+            `Failed to create branch ${branch}: HTTP ${createRefRes.status} ${errText}`,
+          );
         }
       }
     }
@@ -461,7 +503,9 @@ export class GithubProvider implements IIntegrationProvider {
       { headers },
     );
     if (!commitRes.ok) {
-      throw new Error(`Failed to fetch base commit ${latestCommitSha}: HTTP ${commitRes.status}`);
+      throw new Error(
+        `Failed to fetch base commit ${latestCommitSha}: HTTP ${commitRes.status}`,
+      );
     }
     const commitData = (await commitRes.json()) as { tree: { sha: string } };
     const baseTreeSha = commitData.tree.sha;
@@ -479,18 +523,23 @@ export class GithubProvider implements IIntegrationProvider {
       if (!cleanPath || cleanPath.startsWith('.git/')) continue;
 
       const base64Content = file.data.toString('base64');
-      const blobRes = await fetch(`https://api.github.com/repos/${repoFullName}/git/blobs`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          content: base64Content,
-          encoding: 'base64',
-        }),
-      });
+      const blobRes = await fetch(
+        `https://api.github.com/repos/${repoFullName}/git/blobs`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            content: base64Content,
+            encoding: 'base64',
+          }),
+        },
+      );
 
       if (!blobRes.ok) {
         const errText = await blobRes.text();
-        throw new Error(`Failed to upload blob for ${cleanPath}: HTTP ${blobRes.status} ${errText}`);
+        throw new Error(
+          `Failed to upload blob for ${cleanPath}: HTTP ${blobRes.status} ${errText}`,
+        );
       }
 
       const blobData = (await blobRes.json()) as { sha: string };
@@ -503,18 +552,23 @@ export class GithubProvider implements IIntegrationProvider {
     }
 
     // 4. Create new Git Tree
-    const treeRes = await fetch(`https://api.github.com/repos/${repoFullName}/git/trees`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        base_tree: baseTreeSha,
-        tree: treeEntries,
-      }),
-    });
+    const treeRes = await fetch(
+      `https://api.github.com/repos/${repoFullName}/git/trees`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          base_tree: baseTreeSha,
+          tree: treeEntries,
+        }),
+      },
+    );
 
     if (!treeRes.ok) {
       const errText = await treeRes.text();
-      throw new Error(`Failed to create Git tree for ${repoFullName}: HTTP ${treeRes.status} ${errText}`);
+      throw new Error(
+        `Failed to create Git tree for ${repoFullName}: HTTP ${treeRes.status} ${errText}`,
+      );
     }
     const newTreeData = (await treeRes.json()) as { sha: string };
 
@@ -543,9 +597,14 @@ export class GithubProvider implements IIntegrationProvider {
 
     if (!newCommitRes.ok) {
       const errText = await newCommitRes.text();
-      throw new Error(`Failed to create Git commit: HTTP ${newCommitRes.status} ${errText}`);
+      throw new Error(
+        `Failed to create Git commit: HTTP ${newCommitRes.status} ${errText}`,
+      );
     }
-    const newCommit = (await newCommitRes.json()) as { sha: string; html_url?: string };
+    const newCommit = (await newCommitRes.json()) as {
+      sha: string;
+      html_url?: string;
+    };
 
     // 6. Update reference heads to point to new commit
     const updateRefRes = await fetch(
@@ -562,12 +621,16 @@ export class GithubProvider implements IIntegrationProvider {
 
     if (!updateRefRes.ok) {
       const errText = await updateRefRes.text();
-      throw new Error(`Failed to advance branch ${branch} to ${newCommit.sha}: HTTP ${updateRefRes.status} ${errText}`);
+      throw new Error(
+        `Failed to advance branch ${branch} to ${newCommit.sha}: HTTP ${updateRefRes.status} ${errText}`,
+      );
     }
 
     return {
       commitSha: newCommit.sha,
-      commitUrl: newCommit.html_url || `https://github.com/${repoFullName}/commit/${newCommit.sha}`,
+      commitUrl:
+        newCommit.html_url ||
+        `https://github.com/${repoFullName}/commit/${newCommit.sha}`,
     };
   }
 
@@ -610,7 +673,9 @@ export class GithubProvider implements IIntegrationProvider {
       { headers },
     );
     if (!refRes.ok) {
-      throw new Error(`Failed to find branch ${branch} on ${repoFullName}: HTTP ${refRes.status}`);
+      throw new Error(
+        `Failed to find branch ${branch} on ${repoFullName}: HTTP ${refRes.status}`,
+      );
     }
     const refData = (await refRes.json()) as { object: { sha: string } };
     const latestCommitSha = refData.object.sha;
@@ -621,7 +686,9 @@ export class GithubProvider implements IIntegrationProvider {
       { headers },
     );
     if (!commitRes.ok) {
-      throw new Error(`Failed to inspect commit ${latestCommitSha}: HTTP ${commitRes.status}`);
+      throw new Error(
+        `Failed to inspect commit ${latestCommitSha}: HTTP ${commitRes.status}`,
+      );
     }
     const commitData = (await commitRes.json()) as { tree: { sha: string } };
 

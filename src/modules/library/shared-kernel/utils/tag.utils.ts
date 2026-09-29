@@ -257,6 +257,32 @@ export const SCIENTIFIC_ACRONYMS = new Set([
   'EEG',
   'ECG',
   'PET',
+  'GNN',
+  'DQN',
+  'PPO',
+  'DDPG',
+  'A3C',
+  'CLIP',
+  'VIT',
+  'DINO',
+  'LLAMA',
+  'MAMBA',
+  'MOE',
+  'LORA',
+  'QLORA',
+  'PEFT',
+  'RLHF',
+  'DPO',
+  'KTO',
+  'SVD',
+  'PCA',
+  'UMAP',
+  'AGI',
+  'TCP',
+  'IP',
+  'TCP/IP',
+  'I/O',
+  'OS',
 ]);
 
 // ── 3. Structural Document Noise Blacklist (Non-Keywords / Parsing Artifacts) ─
@@ -266,6 +292,9 @@ export const NOISE_TAG_WORDS = new Set([
   'null',
   'n/a',
   'na',
+  'n.a.',
+  'not available',
+  'not applicable',
   'none',
   'unknown',
   'nil',
@@ -325,6 +354,9 @@ export const NOISE_TAG_WORDS = new Set([
   'topic',
   'category',
   'categories',
+  'classification',
+  'descriptor',
+  'descriptors',
 
   // Publisher, copyright, repository noise
   'all rights reserved',
@@ -340,6 +372,8 @@ export const NOISE_TAG_WORDS = new Set([
   'science',
   'proceedings',
   'conference',
+  'symposium',
+  'workshop',
   'journal',
   'volume',
   'issue',
@@ -350,14 +384,47 @@ export const NOISE_TAG_WORDS = new Set([
   'vol',
   'pdf',
   'full text',
+  'full-text',
+  'fulltext',
   'available online',
   'downloaded',
+  'downloaded from',
+  'download',
   'preprint',
   'manuscript',
   'author',
   'authors',
   'editor',
   'editors',
+  'peer reviewed',
+  'peer-reviewed',
+  'original article',
+  'research article',
+  'review article',
+  'short communication',
+  'case report',
+  'editorial',
+  'erratum',
+  'corrigendum',
+  'author index',
+  'subject index',
+  'toc',
+  'in press',
+  'online first',
+  'accepted manuscript',
+  'author manuscript',
+  'version of record',
+  'unassigned',
+  'uncategorized',
+  'miscellaneous',
+  'misc',
+  'general',
+  'default',
+  'book review',
+  'letter to editor',
+  'announcement',
+  'preface',
+  'foreword',
 ]);
 
 // ── 4. String Sanitizers ───────────────────────────────────────────────────────
@@ -372,6 +439,25 @@ export function fixMojibake(str: string): string {
     .replace(/\s+/g, ' ');
 }
 
+/** Strips LaTeX macros, font commands, and escaped symbols common in BibTeX keywords */
+export function stripLatexMarkup(str: string): string {
+  return (
+    str
+      // Unescape common LaTeX characters: \&, \%, \$, \#, \_, \{, \}
+      .replace(/\\([&%$#_{}])/g, '$1')
+      // Remove formatting commands with arguments: \textbf{...}, \textit{...}, etc.
+      .replace(
+        /\\(?:textbf|textit|textsf|texttt|textsc|emph|text|mathrm|mathbf|mathit)\s*\{([^}]+)\}/gi,
+        '$1',
+      )
+      // Remove isolated font style switch macros: \bf, \it, \em, \rm, \sf, \tt, \large, etc.
+      .replace(/\\(?:bf|it|em|rm|sf|tt|large|Large|small|tiny)\b\s*/gi, '')
+      // Remove residual unescaped braces
+      .replace(/[{}]/g, '')
+      .trim()
+  );
+}
+
 /** Strips Wikipedia/Wikidata disambiguation suffixes like "(psychology)", "(mathematics)" */
 export function stripDisambiguationSuffix(str: string): string {
   // Only strip disambiguation at the END of a string that has preceding text
@@ -382,9 +468,8 @@ export function stripDisambiguationSuffix(str: string): string {
 export function stripTagPrefixes(str: string): string {
   return str
     .replace(/<[^>]+>/g, '')
-    .replace(/[{}]/g, '')
     .replace(
-      /^(?:tags?|keywords?|index terms?|categor(?:y|ies)|subject(?: areas?)?|topics?|terms?|arxiv)[:—\-\s]+/i,
+      /^(?:tags?|keywords?|index terms?|categor(?:y|ies)|subject(?: areas?)?|topics?|terms?|classification|descriptors?|field(?: of study)?)[:—\-\s]+/i,
       '',
     )
     .replace(/^[#"''`([{<•·*—\-\s]+/, '')
@@ -428,6 +513,21 @@ export function toTitleCaseWithAcronyms(str: string): string {
           })
           .join('-');
       }
+      // Handle slash-separated terms (e.g. TCP/IP, Client/Server)
+      if (word.includes('/')) {
+        const wordUpper = word.toUpperCase();
+        if (SCIENTIFIC_ACRONYMS.has(wordUpper)) {
+          return wordUpper;
+        }
+        return word
+          .split('/')
+          .map((part) => {
+            const partUpper = part.toUpperCase();
+            if (SCIENTIFIC_ACRONYMS.has(partUpper)) return partUpper;
+            return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+          })
+          .join('/');
+      }
       // Minor words in lowercase if not first word
       const lower = word.toLowerCase();
       if (
@@ -452,16 +552,15 @@ export function cleanSingleTag(rawTag: string): string | null {
   let tag = fixMojibake(rawTag.trim());
   if (!tag) return null;
 
-  // 0. Strip XML/HTML tags and braces
-  tag = tag
-    .replace(/<[^>]+>/g, '')
-    .replace(/[{}]/g, '')
-    .trim();
+  // 0. Strip LaTeX macros, protection braces, and XML/HTML tags
+  tag = stripLatexMarkup(tag);
+  tag = tag.replace(/<[^>]+>/g, '').trim();
+  if (!tag) return null;
 
   // 1. Strip Wikipedia disambiguation FIRST before edge quotes/brackets
   tag = stripDisambiguationSuffix(tag);
 
-  // 2. Strip prefixes (tag:, tags:, category:, arxiv:), quotes, brackets, dots, ellipses
+  // 2. Strip prefixes (tag:, tags:, category:, arxiv:, subject:), quotes, brackets, dots, ellipses
   tag = stripTagPrefixes(tag);
   if (!tag) return null;
 
@@ -475,33 +574,78 @@ export function cleanSingleTag(rawTag: string): string | null {
     return ARXIV_CATEGORY_MAP[withDot];
   }
 
-  // 4. Direct noise blacklist check
+  // 4. Reject metadata identifiers & web links (DOI, PMID, PMC, ISBN, ISSN, arXiv, CorpusID, HDL, URLs)
+  if (
+    /^(?:doi[:\s/]|https?:\/\/(?:dx\.)?doi\.org\/)/i.test(tag) ||
+    /^10\.\d{4,9}\//i.test(tag) ||
+    /(?:^|\s)10\.\d{4,9}\/[^\s]+/i.test(tag) ||
+    /^(?:pmid|pmcid|isbn|issn|arxiv|corpusid|hdl|urn|bibcode)[:\s/]/i.test(
+      tag,
+    ) ||
+    /^https?:\/\//i.test(tag) ||
+    /^ftp:\/\//i.test(tag) ||
+    /^www\./i.test(tag) ||
+    /@/.test(tag) ||
+    /\.(?:com|org|net|edu|gov|io|ai|dev|de|uk|fr|cn)\b/i.test(tag)
+  ) {
+    return null;
+  }
+
+  // 5. Direct noise blacklist check
   if (NOISE_TAG_WORDS.has(lower)) {
     return null;
   }
 
-  // 5. Sanity & garbage checks:
+  // 6. Sanity & garbage checks:
   // Must be 2 - 60 chars
   if (tag.length < 2 || tag.length > 60) return null;
 
   // Must contain at least one alphanumeric character
   if (!/[a-zA-Z0-9\u00C0-\u024F\u1EA0-\u1EF9]/.test(tag)) return null;
 
+  // Cannot be pure punctuation or symbols
+  if (/^[\p{P}\p{S}\s]+$/u.test(tag)) return null;
+
   // Cannot be pure numbers
   if (/^\d+$/.test(tag)) return null;
 
-  // Cannot be page numbers or volume indicators (e.g. "pp. 12-15", "vol. 4", "no. 2")
-  if (/^(?:p|pp|vol|no|v|issue)\.?\s*\d+(?:[-–—]\d+)?$/i.test(tag)) return null;
+  // Cannot be pure year or number range (e.g. "2020-2021", "10-25", "1990/1995")
+  if (/^\d{1,4}[-–—/]\d{1,4}$/.test(tag)) return null;
 
-  // Cannot be a pure year or number range (e.g. "2020-2021", "10-25")
-  if (/^\d{1,4}[-–—]\d{1,4}$/.test(tag)) return null;
+  // Cannot be dates (e.g. "2024-05-12", "2024/05/12", "12-05-2024")
+  if (/^\d{4}[-/.](?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])$/.test(tag))
+    return null;
+  if (/^(?:0?[1-9]|[12]\d|3[01])[-/.](?:0?[1-9]|1[0-2])[-/.]\d{4}$/.test(tag))
+    return null;
 
-  // Cannot be a URL, email, or DOI
+  // Cannot be month + year (e.g. "May 2021", "January 2020", "Sept 2022")
   if (
-    /^https?:\/\//i.test(tag) ||
-    /^www\./i.test(tag) ||
-    /@/.test(tag) ||
-    /^10\.\d{4,9}\//i.test(tag)
+    /^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{2,4}$/i.test(
+      tag,
+    )
+  ) {
+    return null;
+  }
+
+  // Cannot be page numbers or volume/issue indicators
+  // e.g. "pp. 12-15", "pages 10-20", "vol. 4", "no. 2", "issue 3", "v. 12"
+  if (
+    /^(?:p|pp|page|pages|vol|volume|no|number|v|issue)\.?\s*\d+(?:\s*[-–—]\s*\d+)?$/i.test(
+      tag,
+    )
+  ) {
+    return null;
+  }
+  // Combinations like "Vol. 4, No. 2" or "Vol 4 No 2"
+  if (/^vol(?:ume)?\.?\s*\d+[\s,]+(?:no|issue|number)\.?\s*\d+$/i.test(tag)) {
+    return null;
+  }
+  // Standalone Roman numerals (e.g. "iv", "ix", "xii" - volume/part indicators, not acronyms)
+  if (
+    !SCIENTIFIC_ACRONYMS.has(tag.toUpperCase()) &&
+    /^(?:i{1,3}|iv|vi{0,3}|ix|x{1,3}|xi{1,3}|xiv|xvi{0,3}|xix|xx{0,2})$/i.test(
+      tag,
+    )
   ) {
     return null;
   }
@@ -509,12 +653,12 @@ export function cleanSingleTag(rawTag: string): string | null {
   // Cannot be an ellipsis or dots sequence
   if (/^(\.{2,}|…)+$/.test(tag)) return null;
 
-  // 6. Generic noise check after prefix removal
+  // 7. Generic noise check after prefix removal
   if (NOISE_TAG_WORDS.has(tag.toLowerCase())) {
     return null;
   }
 
-  // 7. Format with proper Title Case & Acronyms
+  // 8. Format with proper Title Case & Acronyms
   const formatted = toTitleCaseWithAcronyms(tag);
   // Ensure the very first letter is capitalized even if a minor word
   let result = formatted.charAt(0).toUpperCase() + formatted.slice(1);
@@ -522,14 +666,17 @@ export function cleanSingleTag(rawTag: string): string | null {
   // Strip any trailing ellipsis or punctuation that might have survived TitleCase
   result = result.replace(/(?:\.{2,}|…|[.,;:—\-\s])+$/, '').trim();
 
-  return result.length >= 2 ? result : null;
+  if (result.length < 2) return null;
+  if (NOISE_TAG_WORDS.has(result.toLowerCase())) return null;
+
+  return result;
 }
 
 /**
  * Comprehensive normalizer for a list of tags.
  * Handles:
- * - Splitting compound strings (separated by commas, semicolons, pipe, bullets)
- * - Removing noise, mojibake, disambiguation brackets
+ * - Splitting compound strings (separated by commas, semicolons, pipe, bullets, or ' / ')
+ * - Removing noise, mojibake, disambiguation brackets, and LaTeX markup
  * - Mapping taxonomy codes
  * - Deduplication (case-insensitive)
  */
@@ -547,9 +694,9 @@ export function normalizeAcademicTags(
     const rawStr = typeof item === 'string' ? item : item.tag || item.name;
     if (!rawStr || typeof rawStr !== 'string') continue;
 
-    // Split compound tags by comma, semicolon, newline, pipe, or bullet
+    // Split compound tags by comma, semicolon, newline, pipe, bullet, or ' / '
     const parts = rawStr
-      .split(/[,;\n\r|•·]/)
+      .split(/[,;\n\r|•·]|\s+[/]\s+/)
       .map((p) => p.trim())
       .filter(Boolean);
 

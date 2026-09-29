@@ -64,18 +64,42 @@ export class TrackChange {
     return new TrackChange(props);
   }
 
-  public get id(): string { return this._id; }
-  public get projectId(): string { return this._projectId; }
-  public get docId(): string { return this._docId; }
-  public get type(): ChangeType { return this._type; }
-  public get status(): ChangeStatus { return this._status; }
-  public get text(): string { return this._text; }
-  public get range(): TextRangeVo { return this._range; }
-  public get createdById(): string | null { return this._createdById; }
-  public get resolvedById(): string | null { return this._resolvedById; }
-  public get resolvedAt(): Date | null { return this._resolvedAt; }
-  public get createdAt(): Date { return this._createdAt; }
-  public get updatedAt(): Date { return this._updatedAt; }
+  public get id(): string {
+    return this._id;
+  }
+  public get projectId(): string {
+    return this._projectId;
+  }
+  public get docId(): string {
+    return this._docId;
+  }
+  public get type(): ChangeType {
+    return this._type;
+  }
+  public get status(): ChangeStatus {
+    return this._status;
+  }
+  public get text(): string {
+    return this._text;
+  }
+  public get range(): TextRangeVo {
+    return this._range;
+  }
+  public get createdById(): string | null {
+    return this._createdById;
+  }
+  public get resolvedById(): string | null {
+    return this._resolvedById;
+  }
+  public get resolvedAt(): Date | null {
+    return this._resolvedAt;
+  }
+  public get createdAt(): Date {
+    return this._createdAt;
+  }
+  public get updatedAt(): Date {
+    return this._updatedAt;
+  }
 
   public isPending(): boolean {
     return this._status === 'pending';

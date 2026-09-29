@@ -11,4 +11,3 @@ export class UpdateProjectStateDto {
   @IsOptional()
   stateId?: string | null;
 }
-

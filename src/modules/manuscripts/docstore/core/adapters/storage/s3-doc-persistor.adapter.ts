@@ -15,10 +15,15 @@ import { Md5MismatchError } from '../../domain/doc-errors';
 export class S3DocPersistorAdapter implements IDocPersistor {
   private readonly logger = new Logger(S3DocPersistorAdapter.name);
   private readonly bucket: string;
-  private readonly inMemoryStore = new Map<string, { buffer: Buffer; md5: string }>();
+  private readonly inMemoryStore = new Map<
+    string,
+    { buffer: Buffer; md5: string }
+  >();
 
   constructor(private readonly configService: ConfigService) {
-    this.bucket = this.configService.get<string>('S3_BUCKET_NAME') || 'flux-docstore-archive';
+    this.bucket =
+      this.configService.get<string>('S3_BUCKET_NAME') ||
+      'flux-docstore-archive';
   }
 
   private async streamToBuffer(stream: Readable): Promise<Buffer> {
@@ -32,7 +37,7 @@ export class S3DocPersistorAdapter implements IDocPersistor {
   public async sendStream(
     key: string,
     stream: Readable,
-    options?: { sourceMd5?: string }
+    options?: { sourceMd5?: string },
   ): Promise<void> {
     const buffer = await this.streamToBuffer(stream);
     const actualMd5 = crypto.createHash('md5').update(buffer).digest('hex');
@@ -47,7 +52,9 @@ export class S3DocPersistorAdapter implements IDocPersistor {
 
     // Stores in memory / local store (fallback and development friendly)
     this.inMemoryStore.set(key, { buffer, md5: actualMd5 });
-    this.logger.debug(`Stored cold-tier archive for key ${key} (${buffer.length} bytes, md5: ${actualMd5})`);
+    this.logger.debug(
+      `Stored cold-tier archive for key ${key} (${buffer.length} bytes, md5: ${actualMd5})`,
+    );
   }
 
   public async getObjectStream(key: string): Promise<Readable> {

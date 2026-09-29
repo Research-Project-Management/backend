@@ -4,7 +4,7 @@ import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import {
   CONTENT_FACADE,
   IContentFacade,
-} from '@/modules/library/reader/reader.facade';
+} from '@/modules/library/extraction/extraction.facade';
 import { EngineService } from '../../engine/engine.service';
 import { ScientificChunkingService } from './scientific-chunking.service';
 import { FileUploadedEvent } from '@/modules/storage/domain/events/file-uploaded.event';

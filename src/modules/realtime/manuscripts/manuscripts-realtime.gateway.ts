@@ -32,7 +32,9 @@ import {
   LeaveDocDto,
   SendUpdateDto,
   CursorUpdateDto,
+  DocSyncDto,
 } from './dto/client-event.dto';
+import { YjsDocManagerAdapter } from './core/adapters/crdt/yjs-doc-manager.adapter';
 
 @Injectable()
 @WebSocketGateway({
@@ -58,6 +60,7 @@ export class ManuscriptRealtimeGateway
     private readonly sendDocUpdateUseCase: SendDocUpdateUseCase,
     private readonly broadcastCursorUseCase: BroadcastCursorUseCase,
     private readonly broadcasterAdapter: SocketIoBroadcasterAdapter,
+    @Optional() private readonly yjsDocManager?: YjsDocManagerAdapter,
     @Optional() private readonly jwtService?: JwtService,
     @Optional() private readonly configService?: ConfigService,
   ) {}
@@ -69,18 +72,26 @@ export class ManuscriptRealtimeGateway
 
   public async handleConnection(client: Socket): Promise<void> {
     const token = this.extractToken(client);
-    let userId = (client.handshake.auth?.userId as string) || (client.handshake.query?.userId as string);
-    let userName = (client.handshake.auth?.name as string) || (client.handshake.query?.name as string);
+    let userId =
+      (client.handshake.auth?.userId as string) ||
+      (client.handshake.query?.userId as string);
+    let userName =
+      (client.handshake.auth?.name as string) ||
+      (client.handshake.query?.name as string);
 
     if (token && this.jwtService) {
       try {
         const secret =
-          this.configService?.get<string>('JWT_SECRET') || process.env.JWT_SECRET || 'secret';
+          this.configService?.get<string>('JWT_SECRET') ||
+          process.env.JWT_SECRET ||
+          'secret';
         const payload = await this.jwtService.verifyAsync(token, { secret });
         userId = payload.sub || payload.id || userId;
         userName = payload.name || payload.email || userName;
       } catch (err) {
-        this.logger.debug(`Socket ${client.id} provided invalid token, falling back to handshake auth.`);
+        this.logger.debug(
+          `Socket ${client.id} provided invalid token, falling back to handshake auth.`,
+        );
       }
     }
 
@@ -103,6 +114,35 @@ export class ManuscriptRealtimeGateway
 
   public async handleDisconnect(client: Socket): Promise<void> {
     const projectId = client.data?.projectId;
+    const activeDocId = client.data?.activeDocId;
+
+    if (projectId && activeDocId) {
+      try {
+        await this.leaveDocUseCase
+          .execute({
+            projectId,
+            docId: activeDocId,
+            socketId: client.id,
+          })
+          .catch(() => {});
+
+        if (this.yjsDocManager) {
+          const room = this.server?.sockets?.adapter?.rooms?.get(
+            `doc:${projectId}:${activeDocId}`,
+          );
+          if (!room || room.size === 0) {
+            this.yjsDocManager.evictDoc(projectId, activeDocId).catch(() => {});
+          } else {
+            this.yjsDocManager.flushDoc(projectId, activeDocId).catch(() => {});
+          }
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Error on doc cleanup during disconnect ${client.id}: ${err}`,
+        );
+      }
+    }
+
     if (projectId) {
       try {
         await this.leaveProjectUseCase.execute({
@@ -141,7 +181,9 @@ export class ManuscriptRealtimeGateway
         access: result.access,
       };
     } catch (err: any) {
-      this.logger.warn(`Join project error for socket ${client.id}: ${err?.message}`);
+      this.logger.warn(
+        `Join project error for socket ${client.id}: ${err?.message}`,
+      );
       return { success: false, error: err?.message };
     }
   }
@@ -179,6 +221,12 @@ export class ManuscriptRealtimeGateway
       client.data.activeDocId = dto.docId;
       client.join(`doc:${dto.projectId}:${dto.docId}`);
 
+      if (this.yjsDocManager) {
+        this.yjsDocManager
+          .getOrCreateDoc(dto.projectId, dto.docId)
+          .catch(() => {});
+      }
+
       return {
         success: true,
         docPresence: result.docPresence.map((p) => p.toJSON()),
@@ -202,6 +250,17 @@ export class ManuscriptRealtimeGateway
 
       client.leave(`doc:${dto.projectId}:${dto.docId}`);
       client.data.activeDocId = null;
+
+      if (this.yjsDocManager) {
+        const room = this.server?.sockets?.adapter?.rooms?.get(
+          `doc:${dto.projectId}:${dto.docId}`,
+        );
+        if (!room || room.size === 0) {
+          this.yjsDocManager.evictDoc(dto.projectId, dto.docId).catch(() => {});
+        } else {
+          this.yjsDocManager.flushDoc(dto.projectId, dto.docId).catch(() => {});
+        }
+      }
 
       return { success: true };
     } catch (err: any) {
@@ -253,6 +312,125 @@ export class ManuscriptRealtimeGateway
       });
 
       return { success: true, presence: presence ? presence.toJSON() : null };
+    } catch (err: any) {
+      return { success: false, error: err?.message };
+    }
+  }
+
+  @SubscribeMessage('doc:sync')
+  public async handleDocSync(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() dto: DocSyncDto,
+  ) {
+    if (!this.yjsDocManager)
+      return { success: false, error: 'YjsDocManager not enabled' };
+    try {
+      const projectId = dto.projectId || client.data?.projectId;
+      const docId = dto.docId || client.data?.activeDocId;
+      const data = dto.data !== undefined ? dto.data : dto;
+
+      if (!projectId || !docId) {
+        return { success: false, error: 'Missing projectId or docId' };
+      }
+
+      const res = await this.yjsDocManager.handleSyncMessage(
+        projectId,
+        docId,
+        data,
+        client.id,
+      );
+
+      if (res.broadcastUpdate) {
+        client.to(`doc:${projectId}:${docId}`).emit('doc:sync-update', {
+          projectId,
+          docId,
+          data: res.broadcastUpdate,
+        });
+      }
+
+      return {
+        success: true,
+        data: res.reply || undefined,
+      };
+    } catch (err: any) {
+      this.logger.warn(`doc:sync error: ${err?.message}`);
+      return { success: false, error: err?.message };
+    }
+  }
+
+  @SubscribeMessage('doc:sync-step-1')
+  public async handleSyncStep1(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() dto: DocSyncDto,
+  ) {
+    if (!this.yjsDocManager)
+      return { success: false, error: 'YjsDocManager not enabled' };
+    try {
+      const projectId = dto.projectId || client.data?.projectId;
+      const docId = dto.docId || client.data?.activeDocId;
+      const data = dto.data !== undefined ? dto.data : dto;
+
+      const reply = await this.yjsDocManager.handleSyncStep1(
+        projectId,
+        docId,
+        data,
+      );
+      return { success: true, data: reply };
+    } catch (err: any) {
+      return { success: false, error: err?.message };
+    }
+  }
+
+  @SubscribeMessage('doc:sync-step-2')
+  public async handleSyncStep2(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() dto: DocSyncDto,
+  ) {
+    if (!this.yjsDocManager)
+      return { success: false, error: 'YjsDocManager not enabled' };
+    try {
+      const projectId = dto.projectId || client.data?.projectId;
+      const docId = dto.docId || client.data?.activeDocId;
+      const data = dto.data !== undefined ? dto.data : dto;
+
+      await this.yjsDocManager.handleSyncStep2(
+        projectId,
+        docId,
+        data,
+        client.id,
+      );
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message };
+    }
+  }
+
+  @SubscribeMessage('doc:sync-update')
+  public async handleSyncUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() dto: DocSyncDto,
+  ) {
+    if (!this.yjsDocManager)
+      return { success: false, error: 'YjsDocManager not enabled' };
+    try {
+      const projectId = dto.projectId || client.data?.projectId;
+      const docId = dto.docId || client.data?.activeDocId;
+      const data = dto.data !== undefined ? dto.data : dto;
+
+      const broadcastBuf = await this.yjsDocManager.handleSyncUpdate(
+        projectId,
+        docId,
+        data,
+        client.id,
+      );
+
+      client.to(`doc:${projectId}:${docId}`).emit('doc:sync-update', {
+        projectId,
+        docId,
+        data: broadcastBuf,
+      });
+
+      return { success: true };
     } catch (err: any) {
       return { success: false, error: err?.message };
     }

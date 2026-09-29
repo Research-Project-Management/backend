@@ -24,7 +24,10 @@ export interface AuxFileInfo {
 export interface IWorkspaceManager {
   ensureScratch(projectId: string): Promise<string>;
   getScratchDir(projectId: string): string;
-  syncFiles(projectId: string, files: WorkspaceFile[]): Promise<WorkspaceSyncStats>;
+  syncFiles(
+    projectId: string,
+    files: WorkspaceFile[],
+  ): Promise<WorkspaceSyncStats>;
   cleanScratch(projectId: string): Promise<void>;
   purgeExtraneousFiles(projectId: string, inputFiles: string[]): Promise<void>;
   listAuxFiles(projectId: string): Promise<AuxFileInfo[]>;

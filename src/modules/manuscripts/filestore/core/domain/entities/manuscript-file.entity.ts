@@ -42,7 +42,10 @@ export class ManuscriptFile {
 
   private constructor(props: CreateManuscriptFileProps) {
     if (props.sizeBytes > MAX_FILE_SIZE_BYTES) {
-      throw new StorageQuotaExceededException(props.sizeBytes, MAX_FILE_SIZE_BYTES);
+      throw new StorageQuotaExceededException(
+        props.sizeBytes,
+        MAX_FILE_SIZE_BYTES,
+      );
     }
 
     this._id = props.id ?? crypto.randomUUID();
@@ -81,19 +84,45 @@ export class ManuscriptFile {
     return sanitized;
   }
 
-  public get id(): string { return this._id; }
-  public get projectId(): string { return this._projectId; }
-  public get name(): string { return this._name; }
-  public get mimeType(): string { return this._mimeType; }
-  public get sizeBytes(): number { return this._sizeBytes; }
-  public get hash(): ContentHash { return this._hash; }
-  public get storageKey(): StorageKey { return this._storageKey; }
-  public get bucketName(): string { return this._bucketName; }
-  public get rev(): number { return this._rev; }
-  public get deleted(): boolean { return this._deleted; }
-  public get deletedAt(): Date | null { return this._deletedAt; }
-  public get createdAt(): Date { return this._createdAt; }
-  public get updatedAt(): Date { return this._updatedAt; }
+  public get id(): string {
+    return this._id;
+  }
+  public get projectId(): string {
+    return this._projectId;
+  }
+  public get name(): string {
+    return this._name;
+  }
+  public get mimeType(): string {
+    return this._mimeType;
+  }
+  public get sizeBytes(): number {
+    return this._sizeBytes;
+  }
+  public get hash(): ContentHash {
+    return this._hash;
+  }
+  public get storageKey(): StorageKey {
+    return this._storageKey;
+  }
+  public get bucketName(): string {
+    return this._bucketName;
+  }
+  public get rev(): number {
+    return this._rev;
+  }
+  public get deleted(): boolean {
+    return this._deleted;
+  }
+  public get deletedAt(): Date | null {
+    return this._deletedAt;
+  }
+  public get createdAt(): Date {
+    return this._createdAt;
+  }
+  public get updatedAt(): Date {
+    return this._updatedAt;
+  }
 
   public rename(newName: string): void {
     this._name = ManuscriptFile.sanitizeFilename(newName);

@@ -28,16 +28,24 @@ export class ExportProjectZipUseCase {
     private readonly zipEngine: IZipEnginePort,
   ) {}
 
-  public async execute(input: ExportProjectZipInput): Promise<ExportProjectZipOutput> {
+  public async execute(
+    input: ExportProjectZipInput,
+  ): Promise<ExportProjectZipOutput> {
     const { projectId, projectName, includePdf = false } = input;
 
-    const files = await this.aggregator.collectProjectEntries(projectId, includePdf);
+    const files = await this.aggregator.collectProjectEntries(
+      projectId,
+      includePdf,
+    );
 
     // If project is brand new and has no entries yet, supply a default main.tex
     if (files.length === 0) {
       files.push({
         path: 'main.tex',
-        data: Buffer.from('\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}', 'utf8'),
+        data: Buffer.from(
+          '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}',
+          'utf8',
+        ),
       });
     }
 

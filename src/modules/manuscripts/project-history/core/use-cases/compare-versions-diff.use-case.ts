@@ -30,17 +30,26 @@ export class CompareVersionsDiffUseCase {
     baseVersion: number,
     targetVersion: number,
   ): Promise<DiffComparisonResult> {
-    const baseSnapshot = await this.historyRepository.findByVersion(projectId, baseVersion);
+    const baseSnapshot = await this.historyRepository.findByVersion(
+      projectId,
+      baseVersion,
+    );
     if (!baseSnapshot) {
       throw new VersionNotFoundException(projectId, baseVersion);
     }
 
-    const targetSnapshot = await this.historyRepository.findByVersion(projectId, targetVersion);
+    const targetSnapshot = await this.historyRepository.findByVersion(
+      projectId,
+      targetVersion,
+    );
     if (!targetSnapshot) {
       throw new VersionNotFoundException(projectId, targetVersion);
     }
 
-    const fileDiffs = this.diffEngine.compareSnapshots(baseSnapshot, targetSnapshot);
+    const fileDiffs = this.diffEngine.compareSnapshots(
+      baseSnapshot,
+      targetSnapshot,
+    );
 
     let totalAdditions = 0;
     let totalDeletions = 0;

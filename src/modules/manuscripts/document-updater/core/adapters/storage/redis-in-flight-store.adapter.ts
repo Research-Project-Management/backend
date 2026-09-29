@@ -8,7 +8,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { IInFlightStorePort } from '../../ports/in-flight-store.port';
 import { InFlightDoc } from '../../domain/entities/in-flight-doc.entity';
 import { DocumentVersionVo } from '../../domain/value-objects/document-version.vo';
-import { FlushStatusVo, FlushStatusEnum } from '../../domain/value-objects/flush-status.vo';
+import {
+  FlushStatusVo,
+  FlushStatusEnum,
+} from '../../domain/value-objects/flush-status.vo';
 import { RedisCacheService } from '@/core/cache/redis.service';
 
 interface SerializedInFlightDoc {
@@ -42,9 +45,14 @@ export class RedisInFlightStoreAdapter extends IInFlightStorePort {
     return `docupdater:dirty:${projectId}`;
   }
 
-  public async get(projectId: string, docId: string): Promise<InFlightDoc | null> {
+  public async get(
+    projectId: string,
+    docId: string,
+  ): Promise<InFlightDoc | null> {
     try {
-      const data = await this.redisService.get<SerializedInFlightDoc>(this.docKey(projectId, docId));
+      const data = await this.redisService.get<SerializedInFlightDoc>(
+        this.docKey(projectId, docId),
+      );
       if (!data) return null;
 
       return InFlightDoc.create({
@@ -79,7 +87,11 @@ export class RedisInFlightStoreAdapter extends IInFlightStorePort {
 
     try {
       // Retain in Redis with 24 hours TTL
-      await this.redisService.set(this.docKey(doc.projectId, doc.docId), serialized, 86400);
+      await this.redisService.set(
+        this.docKey(doc.projectId, doc.docId),
+        serialized,
+        86400,
+      );
 
       const redisClient = this.redisService.getClient();
       if (redisClient) {

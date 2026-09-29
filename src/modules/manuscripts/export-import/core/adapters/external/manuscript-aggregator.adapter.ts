@@ -5,7 +5,10 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { IManuscriptAggregatorPort, ExportableFileEntry } from '../../ports/manuscript-aggregator.port';
+import {
+  IManuscriptAggregatorPort,
+  ExportableFileEntry,
+} from '../../ports/manuscript-aggregator.port';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
@@ -47,7 +50,10 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
             data: Buffer.from(textContent, 'utf8'),
           });
         } else if (node.type === 'FILE' && node.fileId) {
-          const streamResult = await this.filestoreService.openReadStream(projectId, node.fileId);
+          const streamResult = await this.filestoreService.openReadStream(
+            projectId,
+            node.fileId,
+          );
           const buffer = await this.streamToBuffer(streamResult.stream);
           results.push({
             path: relPath,
@@ -55,14 +61,19 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
           });
         }
       } catch (err: any) {
-        this.logger.warn(`Failed to collect entry for node ${node.id} (${node.path}): ${err.message}`);
+        this.logger.warn(
+          `Failed to collect entry for node ${node.id} (${node.path}): ${err.message}`,
+        );
       }
     }
 
     // Optionally include latest compiled PDF from CLSI build artifacts
     if (includePdf && this.clsiService) {
       try {
-        const buildArtifact = await this.clsiService.readAuxFileBuffer(projectId, 'output.pdf');
+        const buildArtifact = await this.clsiService.readAuxFileBuffer(
+          projectId,
+          'output.pdf',
+        );
         if (buildArtifact) {
           results.push({
             path: 'output.pdf',
@@ -80,7 +91,9 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
   private async streamToBuffer(stream: Readable): Promise<Buffer> {
     const chunks: Buffer[] = [];
     return new Promise((resolve, reject) => {
-      stream.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      stream.on('data', (chunk) =>
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
+      );
       stream.on('end', () => resolve(Buffer.concat(chunks)));
       stream.on('error', (err) => reject(err));
     });

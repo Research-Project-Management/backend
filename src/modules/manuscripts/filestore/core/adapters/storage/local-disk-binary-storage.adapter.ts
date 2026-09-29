@@ -23,11 +23,19 @@ export class LocalDiskBinaryStorageAdapter extends IBinaryStoragePort {
 
   constructor(@Optional() baseDir?: string) {
     super();
-    this.baseDir = baseDir ?? path.resolve(process.cwd(), '.tmp', 'storage', 'manuscripts');
+    this.baseDir =
+      baseDir ?? path.resolve(process.cwd(), '.tmp', 'storage', 'manuscripts');
   }
 
   private resolvePath(bucket: string, key: string): string {
-    return path.join(this.baseDir, bucket, ...key.split('/'));
+    const resolved = path.resolve(this.baseDir, bucket, ...key.split('/'));
+    const resolvedBase = path.resolve(this.baseDir);
+    if (!resolved.startsWith(resolvedBase)) {
+      throw new Error(
+        `Invalid storage path traversal attempt: bucket="${bucket}", key="${key}"`,
+      );
+    }
+    return resolved;
   }
 
   public async sendStream(
@@ -65,13 +73,19 @@ export class LocalDiskBinaryStorageAdapter extends IBinaryStoragePort {
     }
 
     if (range && range.start !== undefined && range.end !== undefined) {
-      return fs.createReadStream(filePath, { start: range.start, end: range.end });
+      return fs.createReadStream(filePath, {
+        start: range.start,
+        end: range.end,
+      });
     }
 
     return fs.createReadStream(filePath);
   }
 
-  public async getObjectMetadata(bucket: string, key: string): Promise<StorageObjectMetadata> {
+  public async getObjectMetadata(
+    bucket: string,
+    key: string,
+  ): Promise<StorageObjectMetadata> {
     const filePath = this.resolvePath(bucket, key);
     const stats = await fs.promises.stat(filePath);
     return {
@@ -90,7 +104,10 @@ export class LocalDiskBinaryStorageAdapter extends IBinaryStoragePort {
     return `/api/manuscripts/filestore/download/${bucket}/${key}`;
   }
 
-  public async checkObjectExists(bucket: string, key: string): Promise<boolean> {
+  public async checkObjectExists(
+    bucket: string,
+    key: string,
+  ): Promise<boolean> {
     const filePath = this.resolvePath(bucket, key);
     try {
       await fs.promises.access(filePath, fs.constants.F_OK);

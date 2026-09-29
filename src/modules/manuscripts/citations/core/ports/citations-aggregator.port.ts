@@ -22,6 +22,6 @@ export interface ICitationsAggregatorPort {
   appendEntryToBib(
     projectId: string,
     entry: BibEntry,
-    targetFilename?: string
+    targetFilename?: string,
   ): Promise<string>;
 }

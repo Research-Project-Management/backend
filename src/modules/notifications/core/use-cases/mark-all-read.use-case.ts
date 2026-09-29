@@ -14,7 +14,7 @@ export class MarkAllReadUseCase {
     @Inject(NOTIFICATION_REPOSITORY_PORT)
     private readonly repository: INotificationRepositoryPort,
     @Inject(REALTIME_NOTIFIER_PORT)
-    private readonly notifier: IRealtimeNotifierPort
+    private readonly notifier: IRealtimeNotifierPort,
   ) {}
 
   async execute(userId: string): Promise<number> {

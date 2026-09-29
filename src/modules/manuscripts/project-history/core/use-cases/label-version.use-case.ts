@@ -25,25 +25,33 @@ export class LabelVersionUseCase {
     const cleanLabel = label.trim();
 
     // 1. Verify that the target snapshot version exists
-    const snapshot = await this.historyRepository.findByVersion(projectId, version);
+    const snapshot = await this.historyRepository.findByVersion(
+      projectId,
+      version,
+    );
     if (!snapshot) {
       throw new VersionNotFoundException(projectId, version);
     }
 
     // 2. Check if a label with this name already exists in this project
-    const existing = await this.historyRepository.findLabelByName(projectId, cleanLabel);
+    const existing = await this.historyRepository.findLabelByName(
+      projectId,
+      cleanLabel,
+    );
     if (existing && existing.version !== version) {
       throw new DuplicateLabelException(projectId, cleanLabel);
     }
 
     // 3. Create or update the label entity
-    const versionLabel = existing ?? VersionLabel.create({
-      projectId,
-      snapshotId: snapshot.id,
-      version,
-      label: cleanLabel,
-      createdById: createdById || null,
-    });
+    const versionLabel =
+      existing ??
+      VersionLabel.create({
+        projectId,
+        snapshotId: snapshot.id,
+        version,
+        label: cleanLabel,
+        createdById: createdById || null,
+      });
 
     if (existing) {
       versionLabel.updateLabel(cleanLabel);

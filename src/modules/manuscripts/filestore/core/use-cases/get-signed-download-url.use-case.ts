@@ -22,12 +22,19 @@ export class GetSignedDownloadUrlUseCase {
   ) {}
 
   public async execute(input: GetSignedUrlInput): Promise<string | null> {
-    const file = await this.repository.findByProjectAndId(input.projectId, input.fileId);
+    const file = await this.repository.findByProjectAndId(
+      input.projectId,
+      input.fileId,
+    );
     if (!file || file.deleted) {
       throw new FileNotFoundException(input.fileId, input.projectId);
     }
 
     const ttl = input.expiresInSeconds ?? 3600;
-    return await this.storage.getSignedDownloadUrl(file.bucketName, file.storageKey.getValue(), ttl);
+    return await this.storage.getSignedDownloadUrl(
+      file.bucketName,
+      file.storageKey.getValue(),
+      ttl,
+    );
   }
 }

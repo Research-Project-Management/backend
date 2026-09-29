@@ -52,7 +52,9 @@ export class ProjectHistoryService {
     this.realtimeService?.broadcastSnapshotCreated(projectId, {
       version: snapshot.version,
       summary: snapshot.summary,
-      label: dto.label || (snapshot.labels.length > 0 ? snapshot.labels[0].label : null),
+      label:
+        dto.label ||
+        (snapshot.labels.length > 0 ? snapshot.labels[0].label : null),
     });
     return this.toDetailDto(snapshot);
   }
@@ -62,8 +64,14 @@ export class ProjectHistoryService {
     return snapshots.map((s) => this.toListItemDto(s));
   }
 
-  public async getSnapshot(projectId: string, version: number): Promise<SnapshotDetailDto> {
-    const snapshot = await this.getSnapshotByVersionUseCase.execute(projectId, version);
+  public async getSnapshot(
+    projectId: string,
+    version: number,
+  ): Promise<SnapshotDetailDto> {
+    const snapshot = await this.getSnapshotByVersionUseCase.execute(
+      projectId,
+      version,
+    );
     return this.toDetailDto(snapshot);
   }
 
@@ -72,7 +80,11 @@ export class ProjectHistoryService {
     baseVersion: number,
     targetVersion: number,
   ): Promise<DiffResponseDto> {
-    const result = await this.compareVersionsDiffUseCase.execute(projectId, baseVersion, targetVersion);
+    const result = await this.compareVersionsDiffUseCase.execute(
+      projectId,
+      baseVersion,
+      targetVersion,
+    );
     return {
       baseVersion: result.baseVersion,
       targetVersion: result.targetVersion,

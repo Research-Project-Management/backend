@@ -131,7 +131,7 @@ export class ClsiMetrics {
       lines.push(
         `# HELP clsi_compile_duration_ms_avg Average compilation duration in ms for ${engine}`,
         `# TYPE clsi_compile_duration_ms_avg gauge`,
-        `clsi_compile_duration_ms_avg{engine="${engine}"} ${Math.round(avg)}`
+        `clsi_compile_duration_ms_avg{engine="${engine}"} ${Math.round(avg)}`,
       );
     }
 

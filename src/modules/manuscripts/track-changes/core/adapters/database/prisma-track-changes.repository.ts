@@ -6,10 +6,16 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { ITrackChangesRepositoryPort } from '../../ports/track-changes-repository.port';
-import { TrackChange, ChangeStatus } from '../../domain/entities/track-change.entity';
+import {
+  TrackChange,
+  ChangeStatus,
+} from '../../domain/entities/track-change.entity';
 import { CommentThread } from '../../domain/entities/comment-thread.entity';
 import { CommentReply } from '../../domain/entities/comment-reply.entity';
-import { TrackChangesMapper, PrismaThreadWithReplies } from './track-changes.mapper';
+import {
+  TrackChangesMapper,
+  PrismaThreadWithReplies,
+} from './track-changes.mapper';
 
 @Injectable()
 export class PrismaTrackChangesRepository extends ITrackChangesRepositoryPort {
@@ -72,10 +78,12 @@ export class PrismaTrackChangesRepository extends ITrackChangesRepositoryPort {
       orderBy: { createdAt: 'asc' },
     });
 
-    return records.map(TrackChangesMapper.toDomainChange);
+    return records.map((r) => TrackChangesMapper.toDomainChange(r));
   }
 
-  public async saveCommentThread(thread: CommentThread): Promise<CommentThread> {
+  public async saveCommentThread(
+    thread: CommentThread,
+  ): Promise<CommentThread> {
     const range = thread.range;
     const record = await this.prisma.manuscriptCommentThread.upsert({
       where: { id: thread.id },
@@ -108,7 +116,7 @@ export class PrismaTrackChangesRepository extends ITrackChangesRepositoryPort {
       },
     });
 
-    return TrackChangesMapper.toDomainThread(record as PrismaThreadWithReplies);
+    return TrackChangesMapper.toDomainThread(record);
   }
 
   public async findThreadById(threadId: string): Promise<CommentThread | null> {
@@ -122,7 +130,7 @@ export class PrismaTrackChangesRepository extends ITrackChangesRepositoryPort {
     });
 
     if (!record) return null;
-    return TrackChangesMapper.toDomainThread(record as PrismaThreadWithReplies);
+    return TrackChangesMapper.toDomainThread(record);
   }
 
   public async listThreadsByDoc(
@@ -145,10 +153,15 @@ export class PrismaTrackChangesRepository extends ITrackChangesRepositoryPort {
       orderBy: { createdAt: 'asc' },
     });
 
-    return records.map((r) => TrackChangesMapper.toDomainThread(r as PrismaThreadWithReplies));
+    return records.map((r) =>
+      TrackChangesMapper.toDomainThread(r as PrismaThreadWithReplies),
+    );
   }
 
-  public async addCommentReply(threadId: string, reply: CommentReply): Promise<CommentReply> {
+  public async addCommentReply(
+    threadId: string,
+    reply: CommentReply,
+  ): Promise<CommentReply> {
     const record = await this.prisma.manuscriptCommentReply.create({
       data: {
         id: reply.id,
@@ -163,7 +176,10 @@ export class PrismaTrackChangesRepository extends ITrackChangesRepositoryPort {
     return TrackChangesMapper.toDomainReply(record);
   }
 
-  public async deleteCommentThread(projectId: string, threadId: string): Promise<void> {
+  public async deleteCommentThread(
+    projectId: string,
+    threadId: string,
+  ): Promise<void> {
     await this.prisma.manuscriptCommentThread.deleteMany({
       where: {
         id: threadId,

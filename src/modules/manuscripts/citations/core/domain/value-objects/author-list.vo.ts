@@ -58,11 +58,11 @@ export class AuthorListVo {
    */
   public toDisplayString(): string {
     if (this.authors.length === 0) return 'Unknown Author';
-    if (this.authors.length === 1) return this.authors[0]!.lastName;
+    if (this.authors.length === 1) return this.authors[0].lastName;
     if (this.authors.length === 2) {
-      return `${this.authors[0]!.lastName} and ${this.authors[1]!.lastName}`;
+      return `${this.authors[0].lastName} and ${this.authors[1].lastName}`;
     }
-    return `${this.authors[0]!.lastName} et al.`;
+    return `${this.authors[0].lastName} et al.`;
   }
 
   public toFullNameList(): string[] {

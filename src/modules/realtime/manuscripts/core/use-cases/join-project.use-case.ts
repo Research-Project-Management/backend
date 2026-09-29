@@ -5,7 +5,10 @@
 
 import { Injectable } from '@nestjs/common';
 import { IRoomManagerPort } from '../ports/room-manager.port';
-import { IProjectAccessVerifierPort, ProjectAccessResult } from '../ports/project-access-verifier.port';
+import {
+  IProjectAccessVerifierPort,
+  ProjectAccessResult,
+} from '../ports/project-access-verifier.port';
 import { IRealtimeBroadcasterPort } from '../ports/realtime-broadcaster.port';
 import { PresenceSession } from '../domain/entities/presence-session.entity';
 import { UserPresenceVo } from '../domain/value-objects/user-presence.vo';
@@ -38,7 +41,10 @@ export class JoinProjectUseCase {
     const { projectId, userId, socketId, name, color, avatar } = input;
 
     // 1. Verify user has at least read permission
-    const access = await this.accessVerifier.verifyProjectAccess(userId, projectId);
+    const access = await this.accessVerifier.verifyProjectAccess(
+      userId,
+      projectId,
+    );
     if (!access.canRead) {
       throw new UnauthorizedProjectException(userId, projectId);
     }
@@ -57,7 +63,8 @@ export class JoinProjectUseCase {
     await this.roomManager.addProjectSession(session);
 
     // 4. Retrieve all current active collaborators
-    const projectPresence = await this.roomManager.getProjectSessions(projectId);
+    const projectPresence =
+      await this.roomManager.getProjectSessions(projectId);
 
     // 5. Broadcast to existing collaborators in the project
     this.broadcaster.broadcastToProject(

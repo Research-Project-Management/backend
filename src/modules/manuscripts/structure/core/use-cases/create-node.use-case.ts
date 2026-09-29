@@ -6,19 +6,29 @@
 import { Injectable } from '@nestjs/common';
 import { IStructureRepository } from '../ports/structure-repository.port';
 import { ITreePublisher } from '../ports/tree-publisher.port';
-import { ManuscriptNodeEntity, ManuscriptNodeType } from '../domain/manuscript-node.entity';
+import {
+  ManuscriptNodeEntity,
+  ManuscriptNodeType,
+} from '../domain/manuscript-node.entity';
 import { NodePathVo } from '../domain/node-path.vo';
-import { DuplicateNodePathError, NodeNotFoundError, MaxProjectFilesExceededError } from '../domain/structure-errors';
+import {
+  DuplicateNodePathError,
+  NodeNotFoundError,
+  MaxProjectFilesExceededError,
+} from '../domain/structure-errors';
 import { CreateNodeDto } from '../../dto/node.dto';
 
 @Injectable()
 export class CreateNodeUseCase {
   constructor(
     private readonly structureRepository: IStructureRepository,
-    private readonly treePublisher: ITreePublisher
+    private readonly treePublisher: ITreePublisher,
   ) {}
 
-  public async execute(projectId: string, dto: CreateNodeDto): Promise<ManuscriptNodeEntity> {
+  public async execute(
+    projectId: string,
+    dto: CreateNodeDto,
+  ): Promise<ManuscriptNodeEntity> {
     NodePathVo.validateFilename(dto.name);
 
     // Enforce Overleaf parity project files limit (max 2,000 files/nodes)
@@ -32,7 +42,10 @@ export class CreateNodeUseCase {
     let computedPath: string;
 
     if (dto.parentId) {
-      parentNode = await this.structureRepository.findById(projectId, dto.parentId);
+      parentNode = await this.structureRepository.findById(
+        projectId,
+        dto.parentId,
+      );
       if (!parentNode) {
         throw new NodeNotFoundError(dto.parentId);
       }
@@ -48,7 +61,10 @@ export class CreateNodeUseCase {
     }
 
     // 2. Check if node already exists at computedPath
-    const existing = await this.structureRepository.findByPath(projectId, computedPath);
+    const existing = await this.structureRepository.findByPath(
+      projectId,
+      computedPath,
+    );
     if (existing) {
       throw new DuplicateNodePathError(computedPath);
     }
@@ -85,7 +101,10 @@ export class CreateNodeUseCase {
   /**
    * Recursively ensures parent directories exist, creating them as FOLDER nodes if missing.
    */
-  public async mkdirp(projectId: string, dirPath: string): Promise<ManuscriptNodeEntity> {
+  public async mkdirp(
+    projectId: string,
+    dirPath: string,
+  ): Promise<ManuscriptNodeEntity> {
     const normalized = NodePathVo.normalize(dirPath);
     if (normalized === '/') {
       throw new Error('Cannot mkdirp root directory');
@@ -97,7 +116,10 @@ export class CreateNodeUseCase {
 
     for (const segment of segments) {
       currentPath = NodePathVo.join(currentPath, segment);
-      let found = await this.structureRepository.findByPath(projectId, currentPath);
+      let found = await this.structureRepository.findByPath(
+        projectId,
+        currentPath,
+      );
 
       if (!found) {
         found = await this.structureRepository.createNode({

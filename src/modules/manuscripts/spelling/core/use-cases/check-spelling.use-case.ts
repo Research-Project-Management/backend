@@ -22,7 +22,7 @@ export class CheckSpellingUseCase {
   constructor(
     private readonly tokenizer: ILatexTokenizerPort,
     private readonly spellEngine: ISpellEnginePort,
-    private readonly customDictionary: ICustomDictionaryRepositoryPort
+    private readonly customDictionary: ICustomDictionaryRepositoryPort,
   ) {}
 
   public async execute(command: CheckSpellingCommand): Promise<SpellingReport> {
@@ -84,7 +84,7 @@ export class CheckSpellingUseCase {
           col: token.col,
           length: token.length,
           suggestions,
-        })
+        }),
       );
     }
 

@@ -82,32 +82,29 @@ export class StreamController {
         // Unauthenticated request: allow only if the file is explicitly marked public and not embargoed
         const node = await this.nodeRepo.findById(fileId);
         if (!node || node.isTrashed()) {
-          return res
-            .status(HttpStatus.NOT_FOUND)
-            .send({ statusCode: 404, message: 'File not found or has been trashed' });
+          return res.status(HttpStatus.NOT_FOUND).send({
+            statusCode: 404,
+            message: 'File not found or has been trashed',
+          });
         }
         const metadata = (node.metadata || {}) as {
           isPublic?: boolean;
           embargoUntil?: string;
         };
         if (!metadata.isPublic) {
-          return res
-            .status(HttpStatus.FORBIDDEN)
-            .send({
-              statusCode: 403,
-              message: 'Authentication required to access private research file',
-            });
+          return res.status(HttpStatus.FORBIDDEN).send({
+            statusCode: 403,
+            message: 'Authentication required to access private research file',
+          });
         }
         if (
           metadata.embargoUntil &&
           new Date(metadata.embargoUntil) > new Date()
         ) {
-          return res
-            .status(HttpStatus.FORBIDDEN)
-            .send({
-              statusCode: 403,
-              message: 'File is currently under academic embargo',
-            });
+          return res.status(HttpStatus.FORBIDDEN).send({
+            statusCode: 403,
+            message: 'File is currently under academic embargo',
+          });
         }
       }
 
@@ -214,12 +211,10 @@ export class StreamController {
       normalizedKey.startsWith('private/') ||
       normalizedKey.startsWith('config/')
     ) {
-      return res
-        .status(HttpStatus.FORBIDDEN)
-        .send({
-          statusCode: 403,
-          message: 'Access to restricted storage path is forbidden',
-        });
+      return res.status(HttpStatus.FORBIDDEN).send({
+        statusCode: 403,
+        message: 'Access to restricted storage path is forbidden',
+      });
     }
 
     const rangeHeader = req.headers?.range;

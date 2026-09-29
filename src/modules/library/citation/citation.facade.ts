@@ -1,6 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { CitationService } from './application/services/citation.service';
-import { ExportsService } from './application/services/exports.service';
+import { CitationService } from './core/use-cases/citation.service';
+import { ExportsService } from './core/use-cases/exports.service';
 
 export const CITATION_FACADE = 'CITATION_FACADE';
 
@@ -31,7 +31,7 @@ export class CitationFacade implements ICitationFacade {
     styleId = 'apa',
   ): Promise<any> {
     if (!this.citationService) return null;
-    return this.citationService.formatItemById(userId, itemId, styleId as any);
+    return this.citationService.formatItemById(userId, itemId, styleId);
   }
 
   async exportBibliography(

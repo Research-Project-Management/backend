@@ -1,7 +1,7 @@
 import { getDocumentProxy, getMeta } from 'unpdf';
-import { PdfProvider } from '../../src/modules/library/reader/infrastructure/providers/pdf.provider';
-import { OcrProvider } from '../../src/modules/library/reader/infrastructure/providers/ocr.provider';
-import { OcrSandwichPdfService } from '../../src/modules/library/reader/infrastructure/ocr/ocr-sandwich-pdf.service';
+import { PdfProvider } from '@/modules/library/extraction/core/adapters/pdf.provider';
+import { OcrProvider } from '@/modules/library/extraction/core/adapters/ocr.provider';
+import { OcrSandwichPdfService } from '@/modules/library/extraction/core/adapters/ocr-sandwich-pdf.service';
 import { PDFDocument } from 'pdf-lib';
 
 jest.mock('unpdf', () => ({

@@ -21,10 +21,10 @@ export class OverleafOutputFileFinder implements IOutputFileFinder {
 
   public async find(
     scratchDir: string,
-    inputFiles: string[]
+    inputFiles: string[],
   ): Promise<DiscoveredOutputFile[]> {
     const inputSet = new Set(
-      inputFiles.map((f) => f.replace(/\\/g, '/').replace(/^\/+/, ''))
+      inputFiles.map((f) => f.replace(/\\/g, '/').replace(/^\/+/, '')),
     );
 
     const discovered: DiscoveredOutputFile[] = [];
@@ -46,7 +46,7 @@ export class OverleafOutputFileFinder implements IOutputFileFinder {
     baseDir: string,
     relDir: string,
     inputSet: Set<string>,
-    results: DiscoveredOutputFile[]
+    results: DiscoveredOutputFile[],
   ): Promise<void> {
     const currentDir = relDir ? path.join(baseDir, relDir) : baseDir;
     let entries;

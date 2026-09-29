@@ -46,7 +46,9 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
 
   async findById(id: string): Promise<NotificationEntity | null> {
     try {
-      const record = await (this.prisma as any).manuscriptNotification.findUnique({
+      const record = await (
+        this.prisma as any
+      ).manuscriptNotification.findUnique({
         where: { id },
       });
       return record ? this.mapToEntity(record) : null;
@@ -55,12 +57,17 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
     }
   }
 
-  async findByKey(key: string, userId?: string): Promise<NotificationEntity | null> {
+  async findByKey(
+    key: string,
+    userId?: string,
+  ): Promise<NotificationEntity | null> {
     try {
       const where: any = { key };
       if (userId) where.userId = userId;
 
-      const record = await (this.prisma as any).manuscriptNotification.findFirst({
+      const record = await (
+        this.prisma as any
+      ).manuscriptNotification.findFirst({
         where,
         orderBy: { createdAt: 'desc' },
       });
@@ -72,7 +79,7 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
 
   async findByUser(
     userId: string,
-    options?: QueryNotificationsOptions
+    options?: QueryNotificationsOptions,
   ): Promise<NotificationEntity[]> {
     try {
       const now = new Date();
@@ -88,7 +95,9 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
         where.type = options.type;
       }
 
-      const records = await (this.prisma as any).manuscriptNotification.findMany({
+      const records = await (
+        this.prisma as any
+      ).manuscriptNotification.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip: options?.offset ?? 0,
@@ -121,7 +130,9 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
       const where: any = { id };
       if (userId) where.userId = userId;
 
-      const result = await (this.prisma as any).manuscriptNotification.updateMany({
+      const result = await (
+        this.prisma as any
+      ).manuscriptNotification.updateMany({
         where,
         data: {
           isRead: true,
@@ -136,7 +147,9 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
 
   async markAllAsRead(userId: string): Promise<number> {
     try {
-      const result = await (this.prisma as any).manuscriptNotification.updateMany({
+      const result = await (
+        this.prisma as any
+      ).manuscriptNotification.updateMany({
         where: {
           userId,
           isRead: false,
@@ -157,7 +170,9 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
       const where: any = { id };
       if (userId) where.userId = userId;
 
-      const result = await (this.prisma as any).manuscriptNotification.deleteMany({
+      const result = await (
+        this.prisma as any
+      ).manuscriptNotification.deleteMany({
         where,
       });
       return result.count > 0;
@@ -175,7 +190,9 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
       };
       if (userId) where.userId = userId;
 
-      const result = await (this.prisma as any).manuscriptNotification.deleteMany({
+      const result = await (
+        this.prisma as any
+      ).manuscriptNotification.deleteMany({
         where,
       });
       return result.count;
@@ -186,7 +203,9 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
 
   async deleteExpired(now: Date = new Date()): Promise<number> {
     try {
-      const result = await (this.prisma as any).manuscriptNotification.deleteMany({
+      const result = await (
+        this.prisma as any
+      ).manuscriptNotification.deleteMany({
         where: {
           expiresAt: {
             lte: now,
@@ -209,7 +228,8 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
       projectId: record.projectId,
       docId: record.docId,
       actorId: record.actorId,
-      messageOpts: typeof record.messageOpts === 'object' ? record.messageOpts : {},
+      messageOpts:
+        typeof record.messageOpts === 'object' ? record.messageOpts : {},
       isRead: record.isRead,
       expiresAt: record.expiresAt ? new Date(record.expiresAt) : null,
       createdAt: new Date(record.createdAt),

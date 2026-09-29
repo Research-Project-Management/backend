@@ -18,7 +18,10 @@ export class NoopDiffChecker {
   /**
    * Fast equality check between existing doc lines and incoming lines.
    */
-  public static areLinesEqual(currentLines: string[], newLines: string[]): boolean {
+  public static areLinesEqual(
+    currentLines: string[],
+    newLines: string[],
+  ): boolean {
     if (currentLines.length !== newLines.length) return false;
     for (let i = 0; i < currentLines.length; i++) {
       if (currentLines[i] !== newLines[i]) return false;
@@ -33,11 +36,13 @@ export class NoopDiffChecker {
     currentDoc: TextDoc,
     newLines: string[],
     newVersion: number,
-    newRanges?: DocRanges
+    newRanges?: DocRanges,
   ): DiffCheckResult {
     const updateLines = !this.areLinesEqual(currentDoc.lines, newLines);
     const updateVersion = currentDoc.version !== newVersion;
-    const updateRanges = newRanges !== undefined && !DocRangeVo.areEqual(currentDoc.ranges, newRanges);
+    const updateRanges =
+      newRanges !== undefined &&
+      !DocRangeVo.areEqual(currentDoc.ranges, newRanges);
 
     const shouldUpdate = updateLines || updateVersion || updateRanges;
 

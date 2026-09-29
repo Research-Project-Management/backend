@@ -19,7 +19,10 @@ export class InMemoryNotificationAdapter implements INotificationRepositoryPort 
     return item ?? null;
   }
 
-  async findByKey(key: string, userId?: string): Promise<NotificationEntity | null> {
+  async findByKey(
+    key: string,
+    userId?: string,
+  ): Promise<NotificationEntity | null> {
     for (const item of this.notifications.values()) {
       if (item.key === key && (!userId || item.userId === userId)) {
         return item;
@@ -30,11 +33,11 @@ export class InMemoryNotificationAdapter implements INotificationRepositoryPort 
 
   async findByUser(
     userId: string,
-    options?: QueryNotificationsOptions
+    options?: QueryNotificationsOptions,
   ): Promise<NotificationEntity[]> {
     const now = new Date();
     let items = Array.from(this.notifications.values()).filter(
-      (n) => n.userId === userId && !n.isExpired(now)
+      (n) => n.userId === userId && !n.isExpired(now),
     );
 
     if (options?.isRead !== undefined) {
@@ -101,7 +104,8 @@ export class InMemoryNotificationAdapter implements INotificationRepositoryPort 
   async deleteByKey(key: string, userId?: string): Promise<number> {
     let deleted = 0;
     for (const [id, item] of this.notifications.entries()) {
-      const matchesKey = item.key && (item.key === key || item.key.startsWith(key));
+      const matchesKey =
+        item.key && (item.key === key || item.key.startsWith(key));
       if (matchesKey && (!userId || item.userId === userId)) {
         this.notifications.delete(id);
         deleted++;

@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import { ConditionEvaluatorEngine } from '../../src/modules/library/bibliography/application/engines/condition-evaluator.engine';
-import { SavedSearchesService } from '../../src/modules/library/bibliography/application/services/saved-searches.service';
-import { SavedSearchesRepository } from '../../src/modules/library/bibliography/infrastructure/repositories/saved-searches.repository';
-import { SavedSearchConditionGroup } from '../../src/modules/library/bibliography/domain/types/saved-search.types';
+import { ConditionEvaluatorEngine } from '@/modules/library/catalog/core/adapters/condition-evaluator.engine';
+import { SavedSearchesService } from '@/modules/library/catalog/core/use-cases/saved-searches.service';
+import { SavedSearchesRepository } from '@/modules/library/catalog/core/adapters/saved-searches.repository';
+import { SavedSearchConditionGroup } from '@/modules/library/catalog/core/domain/saved-search.types';
 
 describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
   let engine: ConditionEvaluatorEngine;
@@ -393,8 +393,16 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
       const group: SavedSearchConditionGroup = {
         conjunction: 'AND',
         conditions: [
-          { field: 'attachmentContent', operator: 'contains', value: 'transformer' },
-          { field: 'attachmentContent', operator: 'doesNotContain', value: 'recurrent' },
+          {
+            field: 'attachmentContent',
+            operator: 'contains',
+            value: 'transformer',
+          },
+          {
+            field: 'attachmentContent',
+            operator: 'doesNotContain',
+            value: 'recurrent',
+          },
           { field: 'attachmentContent', operator: 'isPresent' },
           { field: 'attachmentContent', operator: 'isAbsent' },
         ],
@@ -407,7 +415,9 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
         attachments: {
           some: {
             fullTextIndexes: {
-              some: { textContent: { contains: 'transformer', mode: 'insensitive' } },
+              some: {
+                textContent: { contains: 'transformer', mode: 'insensitive' },
+              },
             },
           },
         },
@@ -417,7 +427,9 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
           attachments: {
             some: {
               fullTextIndexes: {
-                some: { textContent: { contains: 'recurrent', mode: 'insensitive' } },
+                some: {
+                  textContent: { contains: 'recurrent', mode: 'insensitive' },
+                },
               },
             },
           },

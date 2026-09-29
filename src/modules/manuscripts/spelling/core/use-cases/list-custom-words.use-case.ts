@@ -13,7 +13,9 @@ export interface ListCustomWordsQuery {
 }
 
 export class ListCustomWordsUseCase {
-  constructor(private readonly customDictionary: ICustomDictionaryRepositoryPort) {}
+  constructor(
+    private readonly customDictionary: ICustomDictionaryRepositoryPort,
+  ) {}
 
   public async execute(query: ListCustomWordsQuery): Promise<string[]> {
     const scopeVo = DictionaryScopeVo.fromString(query.scope);

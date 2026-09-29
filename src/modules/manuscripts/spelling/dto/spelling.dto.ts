@@ -12,12 +12,17 @@ export class CheckSpellingDto {
   @IsOptional()
   text?: string;
 
-  @ApiPropertyOptional({ description: 'Document ID in docstore to fetch content from' })
+  @ApiPropertyOptional({
+    description: 'Document ID in docstore to fetch content from',
+  })
   @IsString()
   @IsOptional()
   docId?: string;
 
-  @ApiPropertyOptional({ description: 'Language code (en-US, en-GB, vi-VN, etc.)', default: 'en-US' })
+  @ApiPropertyOptional({
+    description: 'Language code (en-US, en-GB, vi-VN, etc.)',
+    default: 'en-US',
+  })
   @IsString()
   @IsOptional()
   language?: string;
@@ -36,12 +41,18 @@ export class SuggestionQueryDto {
   @IsNotEmpty({ message: 'word is required' })
   word!: string;
 
-  @ApiPropertyOptional({ description: 'Language code (en-US, vi-VN)', default: 'en-US' })
+  @ApiPropertyOptional({
+    description: 'Language code (en-US, vi-VN)',
+    default: 'en-US',
+  })
   @IsString()
   @IsOptional()
   language?: string;
 
-  @ApiPropertyOptional({ description: 'Maximum suggestions to return', default: 5 })
+  @ApiPropertyOptional({
+    description: 'Maximum suggestions to return',
+    default: 5,
+  })
   @IsNumber()
   @IsOptional()
   maxSuggestions?: number;

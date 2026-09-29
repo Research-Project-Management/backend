@@ -17,7 +17,7 @@ export class TectonicEngine implements ILatexEngine {
 
   constructor(
     private readonly runner: ISandboxRunner,
-    private readonly binaryPath: string = 'tectonic'
+    private readonly binaryPath: string = 'tectonic',
   ) {}
 
   public async isAvailable(): Promise<boolean> {
@@ -48,6 +48,7 @@ export class TectonicEngine implements ILatexEngine {
       cwd: options.cwd,
       timeoutMs: options.timeoutMs ?? 240000,
       signal: options.signal,
+      onLogChunk: options.onLogChunk,
     });
 
     const durationMs = Date.now() - startTime;
@@ -57,7 +58,7 @@ export class TectonicEngine implements ILatexEngine {
     const generatedPdf = path.join(options.cwd, `${baseName}.pdf`);
     const targetPdf = path.join(options.cwd, 'output.pdf');
     try {
-      if (await this.fileExists(generatedPdf) && generatedPdf !== targetPdf) {
+      if ((await this.fileExists(generatedPdf)) && generatedPdf !== targetPdf) {
         await fs.copyFile(generatedPdf, targetPdf);
       }
     } catch {}
@@ -65,7 +66,10 @@ export class TectonicEngine implements ILatexEngine {
     const generatedSynctex = path.join(options.cwd, `${baseName}.synctex.gz`);
     const targetSynctex = path.join(options.cwd, 'output.synctex.gz');
     try {
-      if (await this.fileExists(generatedSynctex) && generatedSynctex !== targetSynctex) {
+      if (
+        (await this.fileExists(generatedSynctex)) &&
+        generatedSynctex !== targetSynctex
+      ) {
         await fs.copyFile(generatedSynctex, targetSynctex);
       }
     } catch {}

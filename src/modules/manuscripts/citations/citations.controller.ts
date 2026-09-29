@@ -17,8 +17,16 @@ import {
   Post,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { CitationsService } from './citations.service';
 import {
   CitationQueryDto,
@@ -34,11 +42,14 @@ import { DuplicateCitationKeyException } from './core/domain/exceptions/duplicat
 import { InvalidBibtexException } from './core/domain/exceptions/invalid-bibtex.exception';
 
 @ApiTags('Manuscripts - Citations & Bibliography')
+@ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/citations',
   'manuscripts/projects/:projectId/citations',
   'projects/:projectId/citations',
 ])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
 export class CitationsController {
   constructor(private readonly citationsService: CitationsService) {}
 
@@ -56,24 +67,40 @@ export class CitationsController {
   }
 
   @Get('search')
-  @ApiOperation({ summary: 'Search citation keys in the project to power \\cite{...} autocomplete' })
+  @ApiOperation({
+    summary:
+      'Search citation keys in the project to power \\cite{...} autocomplete',
+  })
   @ApiResponse({ status: 200, type: [BibEntryDto] })
   async searchCitationKeys(
     @Param('projectId') projectId: string,
     @Query() queryDto: CitationQueryDto,
   ): Promise<BibEntryDto[]> {
     try {
-      return await this.citationsService.searchCitationKeys(projectId, queryDto);
+      return await this.citationsService.searchCitationKeys(
+        projectId,
+        queryDto,
+      );
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Post('resolve')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Resolve academic DOI / arXiv identifier and append BibTeX to project' })
-  @ApiResponse({ status: 200, description: 'BibTeX entry resolved and appended' })
-  @ApiResponse({ status: 404, description: 'Academic identifier not found or unsupported' })
+  @ApiOperation({
+    summary:
+      'Resolve academic DOI / arXiv identifier and append BibTeX to project',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'BibTeX entry resolved and appended',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Academic identifier not found or unsupported',
+  })
   async resolveIdentifier(
     @Param('projectId') projectId: string,
     @Body() dto: ResolveIdentifierDto,
@@ -86,9 +113,14 @@ export class CitationsController {
   }
 
   @Get('validate')
-  @ApiOperation({ summary: 'Validate all project .bib files for duplicate keys or missing metadata' })
+  @ApiOperation({
+    summary:
+      'Validate all project .bib files for duplicate keys or missing metadata',
+  })
   @ApiResponse({ status: 200, type: CitationValidationDto })
-  async validateBibtex(@Param('projectId') projectId: string): Promise<CitationValidationDto> {
+  async validateBibtex(
+    @Param('projectId') projectId: string,
+  ): Promise<CitationValidationDto> {
     try {
       return await this.citationsService.validateProjectBibtex(projectId);
     } catch (err) {
@@ -97,8 +129,11 @@ export class CitationsController {
   }
 
   @Post('sync-library')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Sync bibliography collection from external library (Zotero/Flux)' })
+  @ApiOperation({
+    summary: 'Sync bibliography collection from external library (Zotero/Flux)',
+  })
   @ApiResponse({ status: 200, type: SyncLibraryResultDto })
   async syncLibrary(
     @Param('projectId') projectId: string,
@@ -106,8 +141,13 @@ export class CitationsController {
     @Req() req: any,
   ): Promise<SyncLibraryResultDto> {
     try {
-      const userId = req?.user?.id || req?.headers?.['x-user-id'] || 'user-default';
-      return await this.citationsService.syncLibraryCollection(projectId, userId, dto);
+      const userId =
+        req?.user?.id || req?.headers?.['x-user-id'] || 'user-default';
+      return await this.citationsService.syncLibraryCollection(
+        projectId,
+        userId,
+        dto,
+      );
     } catch (err) {
       this.handleError(err);
     }
@@ -115,14 +155,23 @@ export class CitationsController {
 }
 
 @ApiTags('Manuscripts - Citations & Bibliography')
-@Controller(['api/v1/manuscripts/citations', 'manuscripts/citations', 'citations'])
+@ApiBearerAuth('JWT-auth')
+@Controller([
+  'api/v1/manuscripts/citations',
+  'manuscripts/citations',
+  'citations',
+])
+@UseGuards(JwtAuthGuard)
 export class CitationsUtilityController {
   constructor(private readonly citationsService: CitationsService) {}
 
   @Get('library-collections')
-  @ApiOperation({ summary: 'List available bibliography collections from external library' })
+  @ApiOperation({
+    summary: 'List available bibliography collections from external library',
+  })
   async listLibraryCollections(@Req() req: any) {
-    const userId = req?.user?.id || req?.headers?.['x-user-id'] || 'user-default';
+    const userId =
+      req?.user?.id || req?.headers?.['x-user-id'] || 'user-default';
     return this.citationsService.listUserLibraryCollections(userId);
   }
 

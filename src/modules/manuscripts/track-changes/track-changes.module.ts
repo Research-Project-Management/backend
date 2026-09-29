@@ -32,11 +32,7 @@ import { DocstorePatcherAdapter } from './core/adapters/external/docstore-patche
 import { RealtimeNotifierAdapter } from './core/adapters/external/realtime-notifier.adapter';
 
 @Module({
-  imports: [
-    PrismaModule,
-    DocstoreModule,
-    RealtimeModule,
-  ],
+  imports: [PrismaModule, DocstoreModule, RealtimeModule],
   controllers: [TrackChangesController],
   providers: [
     TrackChangesService,

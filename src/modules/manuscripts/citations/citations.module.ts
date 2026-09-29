@@ -4,19 +4,36 @@
  * for Manuscripts Citations & Bibliography subsystem.
  */
 
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { StructureModule } from '../structure/structure.module';
 import { DocstoreModule } from '../docstore/docstore.module';
+import { PrismaModule } from '@/core/database/prisma.module';
+import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 
 // Controllers & Service
-import { CitationsController, CitationsUtilityController } from './citations.controller';
+import {
+  CitationsController,
+  CitationsUtilityController,
+} from './citations.controller';
 import { CitationsService } from './citations.service';
 
 // Ports
-import { BIBTEX_PARSER_PORT, IBibtexParserPort } from './core/ports/bibtex-parser.port';
-import { IDENTIFIER_RESOLVER_PORT, IIdentifierResolverPort } from './core/ports/identifier-resolver.port';
-import { CITATIONS_AGGREGATOR_PORT, ICitationsAggregatorPort } from './core/ports/citations-aggregator.port';
-import { LIBRARY_SYNC_PORT, ILibrarySyncPort } from './core/ports/library-sync.port';
+import {
+  BIBTEX_PARSER_PORT,
+  IBibtexParserPort,
+} from './core/ports/bibtex-parser.port';
+import {
+  IDENTIFIER_RESOLVER_PORT,
+  IIdentifierResolverPort,
+} from './core/ports/identifier-resolver.port';
+import {
+  CITATIONS_AGGREGATOR_PORT,
+  ICitationsAggregatorPort,
+} from './core/ports/citations-aggregator.port';
+import {
+  LIBRARY_SYNC_PORT,
+  ILibrarySyncPort,
+} from './core/ports/library-sync.port';
 
 // Adapters
 import { RegexAstBibtexParser } from './core/adapters/parser/regex-ast-bibtex.parser';
@@ -31,7 +48,12 @@ import { ValidateProjectBibtexUseCase } from './core/use-cases/validate-project-
 import { SyncLibraryCollectionUseCase } from './core/use-cases/sync-library-collection.use-case';
 
 @Module({
-  imports: [StructureModule, DocstoreModule],
+  imports: [
+    StructureModule,
+    DocstoreModule,
+    PrismaModule,
+    forwardRef(() => IntegrationsModule),
+  ],
   controllers: [CitationsController, CitationsUtilityController],
   providers: [
     // 1. Adapters bound to Ports
@@ -56,26 +78,34 @@ import { SyncLibraryCollectionUseCase } from './core/use-cases/sync-library-coll
     {
       provide: SearchCitationKeysUseCase,
       inject: [CITATIONS_AGGREGATOR_PORT],
-      useFactory: (aggregator: ICitationsAggregatorPort) => new SearchCitationKeysUseCase(aggregator),
+      useFactory: (aggregator: ICitationsAggregatorPort) =>
+        new SearchCitationKeysUseCase(aggregator),
     },
     {
       provide: ResolveIdentifierToBibUseCase,
       inject: [IDENTIFIER_RESOLVER_PORT, CITATIONS_AGGREGATOR_PORT],
-      useFactory: (resolver: IIdentifierResolverPort, aggregator: ICitationsAggregatorPort) =>
-        new ResolveIdentifierToBibUseCase(resolver, aggregator),
+      useFactory: (
+        resolver: IIdentifierResolverPort,
+        aggregator: ICitationsAggregatorPort,
+      ) => new ResolveIdentifierToBibUseCase(resolver, aggregator),
     },
     {
       provide: ValidateProjectBibtexUseCase,
       inject: [CITATIONS_AGGREGATOR_PORT],
-      useFactory: (aggregator: ICitationsAggregatorPort) => new ValidateProjectBibtexUseCase(aggregator),
+      useFactory: (aggregator: ICitationsAggregatorPort) =>
+        new ValidateProjectBibtexUseCase(aggregator),
     },
     {
       provide: SyncLibraryCollectionUseCase,
-      inject: [LIBRARY_SYNC_PORT, BIBTEX_PARSER_PORT, CITATIONS_AGGREGATOR_PORT],
+      inject: [
+        LIBRARY_SYNC_PORT,
+        BIBTEX_PARSER_PORT,
+        CITATIONS_AGGREGATOR_PORT,
+      ],
       useFactory: (
         librarySync: ILibrarySyncPort,
         bibParser: IBibtexParserPort,
-        aggregator: ICitationsAggregatorPort
+        aggregator: ICitationsAggregatorPort,
       ) => new SyncLibraryCollectionUseCase(librarySync, bibParser, aggregator),
     },
 

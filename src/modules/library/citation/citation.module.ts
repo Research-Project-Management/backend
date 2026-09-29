@@ -1,26 +1,28 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
-import { BibliographyModule } from '../bibliography/bibliography.module';
+import { CatalogModule } from '../catalog/catalog.module';
 import { CitationFacade, CITATION_FACADE } from './citation.facade';
 
 // Presentation
-import { CitationController } from './presentation/citation.controller';
-import { ExportsController } from './presentation/exports.controller';
+import { CitationController } from './citation.controller';
+import { ExportsController } from './exports.controller';
 
-import { CitationService } from './application/services/citation.service';
-import { DoiContentNegotiationService } from './application/services/doi-content-negotiation.service';
-import { CslEngineService } from './application/services/csl-engine.service';
-import { CslRepositoryService } from './application/services/csl-repository.service';
-import { CslStyleRegistry } from './application/formatters/csl-style-registry';
-import { ExportsService } from './application/services/exports.service';
-import { PdfBakerService } from './application/services/pdf-baker.service';
-import { FormatCitationUseCase } from './application/queries/format-citation.use-case';
-import { ExportLibraryUseCase } from './application/queries/export-library.use-case';
-import { ExportBibliographyUseCase } from './application/queries/export-bibliography.use-case';
-import { ExportAnnotatedPdfUseCase } from './application/queries/export-annotated-pdf.use-case';
-import { CslCitationEngineAdapter } from './infrastructure/adapters/csl-citation-engine.adapter';
-import { CITATION_ENGINE_PORT } from './domain/ports/citation-engine.port';
-import { ExportsRepository } from './infrastructure/repositories/exports.repository';
+import { CitationService } from './core/use-cases/citation.service';
+import { DoiContentNegotiationService } from './core/adapters/doi-content-negotiation.service';
+import { CslEngineService } from './core/adapters/csl-engine.service';
+import { CslRepositoryService } from './core/adapters/csl-repository.service';
+import { CslStyleRegistry } from './core/adapters/csl-style-registry';
+import { ExportsService } from './core/use-cases/exports.service';
+import { PdfBakerService } from './core/adapters/pdf-baker.service';
+import { FormatCitationUseCase } from './core/use-cases/format-citation.use-case';
+import { ExportLibraryUseCase } from './core/use-cases/export-library.use-case';
+import { ExportBibliographyUseCase } from './core/use-cases/export-bibliography.use-case';
+import { ExportAnnotatedPdfUseCase } from './core/use-cases/export-annotated-pdf.use-case';
+import { CslCitationEngineAdapter } from './core/adapters/csl-citation-engine.adapter';
+import { CITATION_ENGINE_PORT } from './core/ports/citation-engine.port';
+import { ExportsRepository } from './core/adapters/exports.repository';
+import { CATALOG_GATEWAY_PORT } from './core/ports/catalog-gateway.port';
+import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catalog-gateway.adapter';
 
 /**
  * Citation Bounded Context Unified Module (Supporting Domain).
@@ -34,7 +36,7 @@ import { ExportsRepository } from './infrastructure/repositories/exports.reposit
  * - PDF Annotation Baking
  */
 @Module({
-  imports: [CoreModule, BibliographyModule],
+  imports: [CoreModule, CatalogModule],
   controllers: [CitationController, ExportsController],
   providers: [
     CitationFacade,
@@ -54,6 +56,11 @@ import { ExportsRepository } from './infrastructure/repositories/exports.reposit
     {
       provide: CITATION_ENGINE_PORT,
       useClass: CslCitationEngineAdapter,
+    },
+    InProcessCatalogGatewayAdapter,
+    {
+      provide: CATALOG_GATEWAY_PORT,
+      useClass: InProcessCatalogGatewayAdapter,
     },
     FormatCitationUseCase,
     ExportLibraryUseCase,

@@ -28,7 +28,9 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
   let testTempDir: string;
 
   beforeAll(async () => {
-    testTempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'clsi-large-benchmark-'));
+    testTempDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'clsi-large-benchmark-'),
+    );
   });
 
   afterAll(async () => {
@@ -79,8 +81,8 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
         for (let r = 1; r <= RECORDS_PER_PAGE; r++) {
           const lineNum = (r % 250) + 1;
           const colNum = (r * 3) % 80;
-          const x = 5000000 + (r * 150000);
-          const y = 8000000 + (r * 120000);
+          const x = 5000000 + r * 150000;
+          const y = 8000000 + r * 120000;
           const w = 400000;
           const h = 600000;
           // Format: x<tag>,<line>,<col>:<x>,<y>:<w>,<h>
@@ -96,12 +98,15 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       lines.push('Post scriptum:');
 
       massiveSynctexText = lines.join('\n');
-      compressedSynctexGz = await gzipAsync(Buffer.from(massiveSynctexText, 'utf8'));
+      compressedSynctexGz = await gzipAsync(
+        Buffer.from(massiveSynctexText, 'utf8'),
+      );
     });
 
     it('should decompress large gzip SyncTeX stream in < 200ms', async () => {
       const start = performance.now();
-      const decompressed = await synctexProcessor.decompress(compressedSynctexGz);
+      const decompressed =
+        await synctexProcessor.decompress(compressedSynctexGz);
       const elapsed = performance.now() - start;
 
       expect(decompressed.length).toBe(massiveSynctexText.length);
@@ -110,7 +115,8 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
 
     it('should parse 50,000+ SyncTeX records and verify data structures', () => {
       const start = performance.now();
-      const { inputs, records, unit } = synctexProcessor.parseRecords(massiveSynctexText);
+      const { inputs, records, unit } =
+        synctexProcessor.parseRecords(massiveSynctexText);
       const elapsed = performance.now() - start;
 
       expect(inputs.length).toBe(10);
@@ -118,7 +124,9 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       expect(unit).toBe(1);
 
       const recordsPerSec = Math.round((TOTAL_RECORDS / elapsed) * 1000);
-      console.log(`\n  [SyncTeX Parse] Parsed ${TOTAL_RECORDS} records in ${elapsed.toFixed(1)}ms (${recordsPerSec.toLocaleString()} records/sec)`);
+      console.log(
+        `\n  [SyncTeX Parse] Parsed ${TOTAL_RECORDS} records in ${elapsed.toFixed(1)}ms (${recordsPerSec.toLocaleString()} records/sec)`,
+      );
       expect(elapsed).toBeLessThan(2500); // SLA: parsing 50k records within SLA buffer
     });
 
@@ -130,7 +138,11 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
         const file = 'chapters/methodology.tex';
         const line = (i % 200) + 1;
         const start = performance.now();
-        const pt = synctexProcessor.forwardLookup(massiveSynctexText, file, line);
+        const pt = synctexProcessor.forwardLookup(
+          massiveSynctexText,
+          file,
+          line,
+        );
         const elapsed = performance.now() - start;
         latencies.push(elapsed);
 
@@ -141,7 +153,9 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
 
       const avgMs = latencies.reduce((a, b) => a + b, 0) / latencies.length;
       const maxMs = Math.max(...latencies);
-      console.log(`  [SyncTeX Forward] 100 lookups: Avg = ${avgMs.toFixed(3)}ms, Max = ${maxMs.toFixed(3)}ms`);
+      console.log(
+        `  [SyncTeX Forward] 100 lookups: Avg = ${avgMs.toFixed(3)}ms, Max = ${maxMs.toFixed(3)}ms`,
+      );
       expect(avgMs).toBeLessThan(5); // Cache & index SLA: avg lookup < 5ms
     });
 
@@ -156,7 +170,12 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
         const y = 150 + (i % 100);
 
         const start = performance.now();
-        const rev = synctexProcessor.reverseLookup(massiveSynctexText, page, x, y);
+        const rev = synctexProcessor.reverseLookup(
+          massiveSynctexText,
+          page,
+          x,
+          y,
+        );
         const elapsed = performance.now() - start;
         latencies.push(elapsed);
 
@@ -166,7 +185,9 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       }
 
       const avgMs = latencies.reduce((a, b) => a + b, 0) / latencies.length;
-      console.log(`  [SyncTeX Reverse] 100 lookups: Avg = ${avgMs.toFixed(3)}ms`);
+      console.log(
+        `  [SyncTeX Reverse] 100 lookups: Avg = ${avgMs.toFixed(3)}ms`,
+      );
       expect(avgMs).toBeLessThan(5);
     });
   });
@@ -175,7 +196,10 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
   // BENCHMARK 2: Large Workspace Incremental Hashing & Sync (500 Files)
   // =========================================================================
   describe('Benchmark 2: Large Workspace Incremental Hashing (500 Files)', () => {
-    const workspaceScratch = path.join(os.tmpdir(), 'clsi-large-workspace-test');
+    const workspaceScratch = path.join(
+      os.tmpdir(),
+      'clsi-large-workspace-test',
+    );
     let workspaceManager: OverleafIncrementalWorkspace;
     const PROJECT_ID = 'project_stress_500';
     const testFiles: WorkspaceFile[] = [];
@@ -192,7 +216,8 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       // - 49 auxiliary files
       testFiles.push({
         path: 'main.tex',
-        content: '\\documentclass{book}\\begin{document}\\include{chap1}\\end{document}',
+        content:
+          '\\documentclass{book}\\begin{document}\\include{chap1}\\end{document}',
       });
 
       for (let i = 1; i <= 50; i++) {
@@ -237,7 +262,9 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       const stats = await workspaceManager.syncFiles(PROJECT_ID, testFiles);
       const elapsed = performance.now() - start;
 
-      console.log(`\n  [Workspace Cold Sync] 500 files written: ${elapsed.toFixed(1)}ms (Written: ${stats.written}, Unchanged: ${stats.unchanged})`);
+      console.log(
+        `\n  [Workspace Cold Sync] 500 files written: ${elapsed.toFixed(1)}ms (Written: ${stats.written}, Unchanged: ${stats.unchanged})`,
+      );
 
       expect(stats.written).toBe(testFiles.length);
       expect(stats.unchanged).toBe(0);
@@ -250,13 +277,15 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
         if (file.path === 'main.tex') {
           return {
             path: 'main.tex',
-            content: '\\documentclass{book}\\begin{document}\\include{chap1}\\textbf{Updated!}\\end{document}',
+            content:
+              '\\documentclass{book}\\begin{document}\\include{chap1}\\textbf{Updated!}\\end{document}',
           };
         }
         if (file.path === 'chapters/chap1.tex') {
           return {
             path: 'chapters/chap1.tex',
-            content: '\\chapter{Chapter 1}\nModified paragraph for incremental hash check.',
+            content:
+              '\\chapter{Chapter 1}\nModified paragraph for incremental hash check.',
           };
         }
         return file;
@@ -266,7 +295,9 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       const stats = await workspaceManager.syncFiles(PROJECT_ID, modifiedFiles);
       const elapsed = performance.now() - start;
 
-      console.log(`  [Workspace Warm Sync] 500 files incremental: ${elapsed.toFixed(1)}ms (Unchanged: ${stats.unchanged}, Written: ${stats.written})`);
+      console.log(
+        `  [Workspace Warm Sync] 500 files incremental: ${elapsed.toFixed(1)}ms (Unchanged: ${stats.unchanged}, Written: ${stats.written})`,
+      );
 
       expect(stats.unchanged).toBe(testFiles.length - 2);
       expect(stats.written).toBe(2);
@@ -280,24 +311,42 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       await fs.writeFile(path.join(scratchDir, 'output.pdf'), 'old pdf');
       await fs.writeFile(path.join(scratchDir, 'output.log'), 'old log');
       await fs.writeFile(path.join(scratchDir, 'main.aux'), '\\relax');
-      await fs.writeFile(path.join(scratchDir, 'main.bbl'), '\\begin{thebibliography}');
+      await fs.writeFile(
+        path.join(scratchDir, 'main.bbl'),
+        '\\begin{thebibliography}',
+      );
       await fs.writeFile(path.join(scratchDir, 'main.toc'), '\\contentsline');
 
       await workspaceManager.purgeExtraneousFiles(
         PROJECT_ID,
-        testFiles.map((f) => f.path)
+        testFiles.map((f) => f.path),
       );
 
       // Check outputs are purged
-      const pdfExists = await fs.access(path.join(scratchDir, 'output.pdf')).then(() => true).catch(() => false);
-      const logExists = await fs.access(path.join(scratchDir, 'output.log')).then(() => true).catch(() => false);
+      const pdfExists = await fs
+        .access(path.join(scratchDir, 'output.pdf'))
+        .then(() => true)
+        .catch(() => false);
+      const logExists = await fs
+        .access(path.join(scratchDir, 'output.log'))
+        .then(() => true)
+        .catch(() => false);
       expect(pdfExists).toBe(false);
       expect(logExists).toBe(false);
 
       // Check aux files are preserved!
-      const auxExists = await fs.access(path.join(scratchDir, 'main.aux')).then(() => true).catch(() => false);
-      const bblExists = await fs.access(path.join(scratchDir, 'main.bbl')).then(() => true).catch(() => false);
-      const tocExists = await fs.access(path.join(scratchDir, 'main.toc')).then(() => true).catch(() => false);
+      const auxExists = await fs
+        .access(path.join(scratchDir, 'main.aux'))
+        .then(() => true)
+        .catch(() => false);
+      const bblExists = await fs
+        .access(path.join(scratchDir, 'main.bbl'))
+        .then(() => true)
+        .catch(() => false);
+      const tocExists = await fs
+        .access(path.join(scratchDir, 'main.toc'))
+        .then(() => true)
+        .catch(() => false);
       expect(auxExists).toBe(true);
       expect(bblExists).toBe(true);
       expect(tocExists).toBe(true);
@@ -352,14 +401,16 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
             completedJobs++;
             return index;
           },
-          { intervalMs: 25, maxWaitMs: 30000, staleMs: 60000 }
+          { intervalMs: 25, maxWaitMs: 30000, staleMs: 60000 },
         );
       });
 
       const results = await Promise.all(tasks);
       const elapsed = performance.now() - start;
 
-      console.log(`\n  [Concurrency Mutex] 30 jobs completed in ${elapsed.toFixed(1)}ms. Max simultaneous locks: ${maxActiveLocks}`);
+      console.log(
+        `\n  [Concurrency Mutex] 30 jobs completed in ${elapsed.toFixed(1)}ms. Max simultaneous locks: ${maxActiveLocks}`,
+      );
 
       expect(completedJobs).toBe(CONCURRENT_JOBS);
       expect(maxActiveLocks).toBe(1); // STRICT MUTEX: Never more than 1 job in critical section
@@ -368,7 +419,10 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
 
       // Verify lock file is cleanly removed
       const lockPath = path.join(projectScratch, '.project-lock');
-      const lockRemaining = await fs.access(lockPath).then(() => true).catch(() => false);
+      const lockRemaining = await fs
+        .access(lockPath)
+        .then(() => true)
+        .catch(() => false);
       expect(lockRemaining).toBe(false);
     });
 
@@ -393,11 +447,13 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
         async () => {
           ranAction = true;
         },
-        { intervalMs: 20, maxWaitMs: 5000, staleMs: 300000 }
+        { intervalMs: 20, maxWaitMs: 5000, staleMs: 300000 },
       );
       const elapsed = performance.now() - start;
 
-      console.log(`  [Stale Lock Break] Stale lock broken and recovered in ${elapsed.toFixed(1)}ms`);
+      console.log(
+        `  [Stale Lock Break] Stale lock broken and recovered in ${elapsed.toFixed(1)}ms`,
+      );
       expect(ranAction).toBe(true);
       expect(elapsed).toBeLessThan(350);
     });
@@ -407,7 +463,10 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
   // BENCHMARK 4: High-Scale LRU Scratch Disk Cleaner (100 Projects)
   // =========================================================================
   describe('Benchmark 4: High-Scale LRU Disk Cleaner (100 Projects)', () => {
-    const cleanerScratch = path.join(os.tmpdir(), 'clsi-cleaner-benchmark-scratch');
+    const cleanerScratch = path.join(
+      os.tmpdir(),
+      'clsi-cleaner-benchmark-scratch',
+    );
     let cleaner: DiskUsageCleaner;
     const TOTAL_PROJECTS = 100;
     const LOCKED_COUNT = 10;
@@ -425,14 +484,20 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       // 10..49: Stale projects (> 10 days old)
       // 50..99: Recent projects (< 2 days old)
       for (let i = 0; i < TOTAL_PROJECTS; i++) {
-        const projDir = path.join(cleanerScratch, `project_${i.toString().padStart(3, '0')}`);
+        const projDir = path.join(
+          cleanerScratch,
+          `project_${i.toString().padStart(3, '0')}`,
+        );
         await fs.mkdir(projDir, { recursive: true });
         const mainFile = path.join(projDir, 'main.tex');
         await fs.writeFile(mainFile, 'x'.repeat(20480));
 
         if (i < LOCKED_COUNT) {
           // Add active lock
-          await fs.writeFile(path.join(projDir, '.project-lock'), JSON.stringify({ pid: 123 }));
+          await fs.writeFile(
+            path.join(projDir, '.project-lock'),
+            JSON.stringify({ pid: 123 }),
+          );
         }
 
         // Set simulated modified date
@@ -461,7 +526,9 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       });
       const elapsed = performance.now() - start;
 
-      console.log(`\n  [Disk Cleaner Scan] Scanned ${stats.scannedProjects} projects, cleaned ${stats.cleanedProjects} stale projects, freed ${stats.freedBytes} bytes in ${elapsed.toFixed(1)}ms`);
+      console.log(
+        `\n  [Disk Cleaner Scan] Scanned ${stats.scannedProjects} projects, cleaned ${stats.cleanedProjects} stale projects, freed ${stats.freedBytes} bytes in ${elapsed.toFixed(1)}ms`,
+      );
 
       expect(stats.scannedProjects).toBe(TOTAL_PROJECTS);
       expect(stats.skippedLocked).toBe(LOCKED_COUNT); // All 10 locked projects preserved
@@ -477,12 +544,20 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
         targetBytes: 20 * 1024,
       });
 
-      console.log(`  [Disk Quota Enforcement] Evicted ${stats.cleanedProjects} projects down to quota limit`);
+      console.log(
+        `  [Disk Quota Enforcement] Evicted ${stats.cleanedProjects} projects down to quota limit`,
+      );
 
       // Verify that all 10 locked projects still exist
       for (let i = 0; i < LOCKED_COUNT; i++) {
-        const projDir = path.join(cleanerScratch, `project_${i.toString().padStart(3, '0')}`);
-        const exists = await fs.access(projDir).then(() => true).catch(() => false);
+        const projDir = path.join(
+          cleanerScratch,
+          `project_${i.toString().padStart(3, '0')}`,
+        );
+        const exists = await fs
+          .access(projDir)
+          .then(() => true)
+          .catch(() => false);
         expect(exists).toBe(true);
       }
     });
@@ -521,7 +596,8 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       `;
 
       // Repeat paragraph ~1,000 times to create a ~100,000-word book manuscript
-      largeDocument = '\\documentclass{book}\\begin{document}\n' +
+      largeDocument =
+        '\\documentclass{book}\\begin{document}\n' +
         paragraph.repeat(1000) +
         '\n\\end{document}';
     });
@@ -531,7 +607,9 @@ describe('Manuscripts CLSI - Large-Scale Stress & Benchmark Suite', () => {
       const stats = wordCounter.count(largeDocument);
       const elapsed = performance.now() - start;
 
-      console.log(`\n  [Word Count Benchmark] Counted ${stats.wordsInText.toLocaleString()} words, ${stats.headers} headers, ${stats.mathDisplayed} equations in ${elapsed.toFixed(1)}ms`);
+      console.log(
+        `\n  [Word Count Benchmark] Counted ${stats.wordsInText.toLocaleString()} words, ${stats.headers} headers, ${stats.mathDisplayed} equations in ${elapsed.toFixed(1)}ms`,
+      );
 
       expect(stats.wordsInText).toBeGreaterThan(60000);
       expect(stats.headers).toBe(1000);

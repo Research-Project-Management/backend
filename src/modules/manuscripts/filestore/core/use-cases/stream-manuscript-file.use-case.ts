@@ -32,8 +32,13 @@ export class StreamManuscriptFileUseCase {
     private readonly repository: IManuscriptFileRepository,
   ) {}
 
-  public async execute(input: StreamManuscriptFileInput): Promise<StreamManuscriptFileOutput> {
-    const file = await this.repository.findByProjectAndId(input.projectId, input.fileId);
+  public async execute(
+    input: StreamManuscriptFileInput,
+  ): Promise<StreamManuscriptFileOutput> {
+    const file = await this.repository.findByProjectAndId(
+      input.projectId,
+      input.fileId,
+    );
     if (!file || file.deleted) {
       throw new FileNotFoundException(input.fileId, input.projectId);
     }
@@ -41,7 +46,9 @@ export class StreamManuscriptFileUseCase {
     // Parse byte range if present
     const byteRange = ByteRange.parse(input.rangeHeader, file.sizeBytes);
 
-    const rangeOpts = byteRange ? { start: byteRange.start, end: byteRange.end } : undefined;
+    const rangeOpts = byteRange
+      ? { start: byteRange.start, end: byteRange.end }
+      : undefined;
     const stream = await this.storage.getObjectStream(
       file.bucketName,
       file.storageKey.getValue(),

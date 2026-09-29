@@ -32,13 +32,22 @@ export class ImportProjectZipUseCase {
     const entries = this.zipEngine.extractZip(zipBuffer);
 
     if (entries.length === 0) {
-      throw new InvalidZipArchiveException('Provided ZIP archive contains no usable file entries.');
+      throw new InvalidZipArchiveException(
+        'Provided ZIP archive contains no usable file entries.',
+      );
     }
 
     if (entries.length > 2000) {
-      throw new BadRequestException('ZIP archive exceeds the maximum project file limit of 2,000 files.');
+      throw new BadRequestException(
+        'ZIP archive exceeds the maximum project file limit of 2,000 files.',
+      );
     }
 
-    return await this.hydrator.hydrateProjectEntries(projectId, entries, userId, preferredRootDoc);
+    return await this.hydrator.hydrateProjectEntries(
+      projectId,
+      entries,
+      userId,
+      preferredRootDoc,
+    );
   }
 }

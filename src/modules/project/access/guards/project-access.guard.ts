@@ -114,7 +114,9 @@ export class ProjectAccessGuard implements CanActivate {
         (url.includes('/library') ||
           url.includes('/attachments') ||
           url.includes('/files')) &&
-        (isParamProjectPersonal || isUrlPersonalProject || (!url.includes('/projects/') && !url.includes('/project/')));
+        (isParamProjectPersonal ||
+          isUrlPersonalProject ||
+          (!url.includes('/projects/') && !url.includes('/project/')));
 
       if (isDualContextLibraryRoute) {
         // Dual-context endpoint accessed in personal/user scope (e.g. personal library)

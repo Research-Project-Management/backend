@@ -5,10 +5,16 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IDocumentUpdaterBridgePort, BridgeUpdateResult } from '../ports/document-updater-bridge.port';
+import {
+  IDocumentUpdaterBridgePort,
+  BridgeUpdateResult,
+} from '../ports/document-updater-bridge.port';
 import { IRealtimeBroadcasterPort } from '../ports/realtime-broadcaster.port';
 import { IProjectAccessVerifierPort } from '../ports/project-access-verifier.port';
-import { ClientUpdatePayloadVo, LineSplice } from '../domain/value-objects/client-update-payload.vo';
+import {
+  ClientUpdatePayloadVo,
+  LineSplice,
+} from '../domain/value-objects/client-update-payload.vo';
 import { UnauthorizedProjectException } from '../domain/exceptions/unauthorized-project.exception';
 
 export interface SendDocUpdateInput {
@@ -31,10 +37,22 @@ export class SendDocUpdateUseCase {
   ) {}
 
   public async execute(input: SendDocUpdateInput): Promise<BridgeUpdateResult> {
-    const { projectId, docId, socketId, userId, clientRev, lines, splice, debounceMs } = input;
+    const {
+      projectId,
+      docId,
+      socketId,
+      userId,
+      clientRev,
+      lines,
+      splice,
+      debounceMs,
+    } = input;
 
     // 1. Verify user has write permissions
-    const access = await this.accessVerifier.verifyProjectAccess(userId, projectId);
+    const access = await this.accessVerifier.verifyProjectAccess(
+      userId,
+      projectId,
+    );
     if (!access.canWrite) {
       throw new UnauthorizedProjectException(userId, projectId);
     }

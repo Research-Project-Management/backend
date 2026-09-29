@@ -5,9 +5,18 @@
  */
 
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { QueueDocUpdateUseCase, QueueDocUpdateOutput } from './core/use-cases/queue-doc-update.use-case';
-import { FlushProjectDocsUseCase, FlushProjectDocsOutput } from './core/use-cases/flush-project-docs.use-case';
-import { FlushSingleDocUseCase, FlushSingleDocOutput } from './core/use-cases/flush-single-doc.use-case';
+import {
+  QueueDocUpdateUseCase,
+  QueueDocUpdateOutput,
+} from './core/use-cases/queue-doc-update.use-case';
+import {
+  FlushProjectDocsUseCase,
+  FlushProjectDocsOutput,
+} from './core/use-cases/flush-project-docs.use-case';
+import {
+  FlushSingleDocUseCase,
+  FlushSingleDocOutput,
+} from './core/use-cases/flush-single-doc.use-case';
 import { GetInFlightDocUseCase } from './core/use-cases/get-in-flight-doc.use-case';
 import { EvictDocBufferUseCase } from './core/use-cases/evict-doc-buffer.use-case';
 import { IInFlightStorePort } from './core/ports/in-flight-store.port';
@@ -27,7 +36,9 @@ export class DocumentUpdaterService implements OnModuleInit {
 
   public onModuleInit(): void {
     // Wire cyclic reference between queue and single doc flush for debouncing
-    this.queueUpdateUseCase.setFlushSingleDocUseCase(this.flushSingleDocUseCase);
+    this.queueUpdateUseCase.setFlushSingleDocUseCase(
+      this.flushSingleDocUseCase,
+    );
   }
 
   /**
@@ -53,7 +64,10 @@ export class DocumentUpdaterService implements OnModuleInit {
    * Primary "Flush-Before-Compile" integration hook.
    * Flushes all uncommitted changes for a project into docstore before CLSI compiles.
    */
-  public async flushProject(projectId: string, force = false): Promise<FlushProjectDocsOutput> {
+  public async flushProject(
+    projectId: string,
+    force = false,
+  ): Promise<FlushProjectDocsOutput> {
     return await this.flushProjectUseCase.execute({ projectId, force });
   }
 
@@ -65,14 +79,24 @@ export class DocumentUpdaterService implements OnModuleInit {
     docId: string,
     force = false,
   ): Promise<FlushSingleDocOutput> {
-    return await this.flushSingleDocUseCase.execute({ projectId, docId, force });
+    return await this.flushSingleDocUseCase.execute({
+      projectId,
+      docId,
+      force,
+    });
   }
 
   /**
    * Gets current in-flight state of a document (buffered vs persistent baseline).
    */
-  public async getDocState(projectId: string, docId: string): Promise<InFlightDocStateDto> {
-    const result = await this.getInFlightDocUseCase.execute({ projectId, docId });
+  public async getDocState(
+    projectId: string,
+    docId: string,
+  ): Promise<InFlightDocStateDto> {
+    const result = await this.getInFlightDocUseCase.execute({
+      projectId,
+      docId,
+    });
     return InFlightDocStateDto.fromEntity(result.doc, result.isBuffered);
   }
 

@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
+  Prisma,
+  ManuscriptTemplateCategory,
+  ManuscriptTemplate,
+} from '@prisma/client';
+import {
   ITemplateRepositoryPort,
   FindTemplatesFilter,
   SearchTemplatesFilter,
@@ -20,7 +25,7 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
 
   async findById(id: string): Promise<ManuscriptTemplateEntity | null> {
     try {
-      const record = await (this.prisma as any).manuscriptTemplate.findUnique({
+      const record = await this.prisma.manuscriptTemplate.findUnique({
         where: { id },
       });
       if (record) {
@@ -32,9 +37,11 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
     }
   }
 
-  async findByVersionId(versionId: string): Promise<ManuscriptTemplateEntity | null> {
+  async findByVersionId(
+    versionId: string,
+  ): Promise<ManuscriptTemplateEntity | null> {
     try {
-      const record = await (this.prisma as any).manuscriptTemplate.findUnique({
+      const record = await this.prisma.manuscriptTemplate.findUnique({
         where: { versionId },
       });
       if (record) {
@@ -48,9 +55,9 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
 
   async findAll(filter?: FindTemplatesFilter): Promise<FindTemplatesResult> {
     try {
-      const where: any = {};
+      const where: Prisma.ManuscriptTemplateWhereInput = {};
       if (filter?.category && filter.category !== 'all') {
-        where.category = filter.category;
+        where.category = filter.category as ManuscriptTemplateCategory;
       }
       if (filter?.isOfficial !== undefined) {
         where.isOfficial = filter.isOfficial;
@@ -59,13 +66,13 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
         where.tags = { has: filter.tag };
       }
 
-      const total = await (this.prisma as any).manuscriptTemplate.count({ where });
+      const total = await this.prisma.manuscriptTemplate.count({ where });
       if (total === 0) {
         // If DB table is empty or unpopulated, fallback to in-memory official templates
         return this.memoryFallback.findAll(filter);
       }
 
-      const records = await (this.prisma as any).manuscriptTemplate.findMany({
+      const records = await this.prisma.manuscriptTemplate.findMany({
         where,
         orderBy: [{ isOfficial: 'desc' }, { downloadCount: 'desc' }],
         skip: filter?.offset ?? 0,
@@ -73,7 +80,7 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
       });
 
       return {
-        templates: records.map((r: any) => this.mapToEntity(r)),
+        templates: records.map((r: ManuscriptTemplate) => this.mapToEntity(r)),
         total,
       };
     } catch {
@@ -84,9 +91,9 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
   async search(filter: SearchTemplatesFilter): Promise<FindTemplatesResult> {
     try {
       const q = filter.query.trim();
-      const where: any = {};
+      const where: Prisma.ManuscriptTemplateWhereInput = {};
       if (filter.category && filter.category !== 'all') {
-        where.category = filter.category;
+        where.category = filter.category as ManuscriptTemplateCategory;
       }
       if (q) {
         where.OR = [
@@ -97,12 +104,12 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
         ];
       }
 
-      const total = await (this.prisma as any).manuscriptTemplate.count({ where });
+      const total = await this.prisma.manuscriptTemplate.count({ where });
       if (total === 0) {
         return this.memoryFallback.search(filter);
       }
 
-      const records = await (this.prisma as any).manuscriptTemplate.findMany({
+      const records = await this.prisma.manuscriptTemplate.findMany({
         where,
         orderBy: { downloadCount: 'desc' },
         skip: filter.offset ?? 0,
@@ -110,7 +117,7 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
       });
 
       return {
-        templates: records.map((r: any) => this.mapToEntity(r)),
+        templates: records.map((r: ManuscriptTemplate) => this.mapToEntity(r)),
         total,
       };
     } catch {
@@ -118,13 +125,15 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
     }
   }
 
-  async save(template: ManuscriptTemplateEntity): Promise<ManuscriptTemplateEntity> {
+  async save(
+    template: ManuscriptTemplateEntity,
+  ): Promise<ManuscriptTemplateEntity> {
     try {
-      const data = {
+      const data: Prisma.ManuscriptTemplateCreateInput = {
         id: template.id,
         versionId: template.versionId,
         name: template.name,
-        category: template.category as any,
+        category: template.category,
         description: template.description,
         compiler: template.compiler,
         imageName: template.imageName,
@@ -139,7 +148,7 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
         updatedAt: template.updatedAt,
       };
 
-      const record = await (this.prisma as any).manuscriptTemplate.upsert({
+      const record = await this.prisma.manuscriptTemplate.upsert({
         where: { id: template.id },
         create: data,
         update: data,
@@ -153,7 +162,7 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
 
   async delete(id: string): Promise<boolean> {
     try {
-      const result = await (this.prisma as any).manuscriptTemplate.deleteMany({
+      const result = await this.prisma.manuscriptTemplate.deleteMany({
         where: { id },
       });
       this.memoryFallback.delete(id);
@@ -165,7 +174,7 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
 
   async incrementDownloadCount(id: string): Promise<void> {
     try {
-      await (this.prisma as any).manuscriptTemplate.update({
+      await this.prisma.manuscriptTemplate.update({
         where: { id },
         data: {
           downloadCount: { increment: 1 },
@@ -177,12 +186,12 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
     }
   }
 
-  private mapToEntity(record: any): ManuscriptTemplateEntity {
+  private mapToEntity(record: ManuscriptTemplate): ManuscriptTemplateEntity {
     return new ManuscriptTemplateEntity({
       id: record.id,
       versionId: record.versionId,
       name: record.name,
-      category: record.category as TemplateCategoryString,
+      category: record.category,
       description: record.description,
       compiler: record.compiler as CompilerType,
       imageName: record.imageName,
@@ -192,7 +201,10 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
       tags: Array.isArray(record.tags) ? record.tags : [],
       isOfficial: record.isOfficial,
       downloadCount: record.downloadCount,
-      files: typeof record.files === 'object' && record.files !== null ? record.files : {},
+      files:
+        typeof record.files === 'object' && record.files !== null
+          ? (record.files as Record<string, string>)
+          : {},
       createdAt: new Date(record.createdAt),
       updatedAt: new Date(record.updatedAt),
     });

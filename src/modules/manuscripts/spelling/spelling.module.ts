@@ -8,12 +8,21 @@ import { Module, forwardRef } from '@nestjs/common';
 import { DocstoreModule } from '../docstore/docstore.module';
 
 // Controllers & Service
-import { SpellingController, SpellingUtilityController } from './spelling.controller';
+import {
+  SpellingController,
+  SpellingUtilityController,
+} from './spelling.controller';
 import { SpellingService } from './spelling.service';
 
 // Ports
-import { LATEX_TOKENIZER_PORT, ILatexTokenizerPort } from './core/ports/latex-tokenizer.port';
-import { SPELL_ENGINE_PORT, ISpellEnginePort } from './core/ports/spell-engine.port';
+import {
+  LATEX_TOKENIZER_PORT,
+  ILatexTokenizerPort,
+} from './core/ports/latex-tokenizer.port';
+import {
+  SPELL_ENGINE_PORT,
+  ISpellEnginePort,
+} from './core/ports/spell-engine.port';
 import {
   CUSTOM_DICTIONARY_REPOSITORY_PORT,
   ICustomDictionaryRepositoryPort,
@@ -52,32 +61,40 @@ import { ListCustomWordsUseCase } from './core/use-cases/list-custom-words.use-c
     // 2. Inbound Use Cases
     {
       provide: CheckSpellingUseCase,
-      inject: [LATEX_TOKENIZER_PORT, SPELL_ENGINE_PORT, CUSTOM_DICTIONARY_REPOSITORY_PORT],
+      inject: [
+        LATEX_TOKENIZER_PORT,
+        SPELL_ENGINE_PORT,
+        CUSTOM_DICTIONARY_REPOSITORY_PORT,
+      ],
       useFactory: (
         tokenizer: ILatexTokenizerPort,
         spellEngine: ISpellEnginePort,
-        customDict: ICustomDictionaryRepositoryPort
+        customDict: ICustomDictionaryRepositoryPort,
       ) => new CheckSpellingUseCase(tokenizer, spellEngine, customDict),
     },
     {
       provide: GetSuggestionsUseCase,
       inject: [SPELL_ENGINE_PORT],
-      useFactory: (spellEngine: ISpellEnginePort) => new GetSuggestionsUseCase(spellEngine),
+      useFactory: (spellEngine: ISpellEnginePort) =>
+        new GetSuggestionsUseCase(spellEngine),
     },
     {
       provide: LearnWordUseCase,
       inject: [CUSTOM_DICTIONARY_REPOSITORY_PORT],
-      useFactory: (customDict: ICustomDictionaryRepositoryPort) => new LearnWordUseCase(customDict),
+      useFactory: (customDict: ICustomDictionaryRepositoryPort) =>
+        new LearnWordUseCase(customDict),
     },
     {
       provide: UnlearnWordUseCase,
       inject: [CUSTOM_DICTIONARY_REPOSITORY_PORT],
-      useFactory: (customDict: ICustomDictionaryRepositoryPort) => new UnlearnWordUseCase(customDict),
+      useFactory: (customDict: ICustomDictionaryRepositoryPort) =>
+        new UnlearnWordUseCase(customDict),
     },
     {
       provide: ListCustomWordsUseCase,
       inject: [CUSTOM_DICTIONARY_REPOSITORY_PORT],
-      useFactory: (customDict: ICustomDictionaryRepositoryPort) => new ListCustomWordsUseCase(customDict),
+      useFactory: (customDict: ICustomDictionaryRepositoryPort) =>
+        new ListCustomWordsUseCase(customDict),
     },
 
     // 3. Facade Service

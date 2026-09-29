@@ -47,7 +47,9 @@ describe('Manuscripts Templates Subsystem', () => {
 
       it('should normalize and fallback gracefully in fromString', () => {
         expect(TemplateCategoryVo.fromString('JOURNAL')).toBe('journal');
-        expect(TemplateCategoryVo.fromString('  Conference  ')).toBe('conference');
+        expect(TemplateCategoryVo.fromString('  Conference  ')).toBe(
+          'conference',
+        );
         expect(TemplateCategoryVo.fromString('invalid')).toBe('other');
         expect(TemplateCategoryVo.fromString(undefined)).toBe('other');
       });
@@ -187,17 +189,23 @@ describe('Manuscripts Templates Subsystem', () => {
       });
 
       it('should filter templates by category', async () => {
-        const { templates: journals } = await adapter.findAll({ category: 'journal' });
+        const { templates: journals } = await adapter.findAll({
+          category: 'journal',
+        });
         expect(journals.length).toBeGreaterThanOrEqual(2);
         journals.forEach((t) => expect(t.category).toBe('journal'));
 
-        const { templates: thesis } = await adapter.findAll({ category: 'thesis' });
+        const { templates: thesis } = await adapter.findAll({
+          category: 'thesis',
+        });
         expect(thesis.length).toBe(1);
         expect(thesis[0].name).toBe('Master & PhD Dissertation');
       });
 
       it('should filter templates by official status', async () => {
-        const { templates: officials } = await adapter.findAll({ isOfficial: true });
+        const { templates: officials } = await adapter.findAll({
+          isOfficial: true,
+        });
         expect(officials.length).toBe(7);
 
         // Add a non-official template
@@ -207,7 +215,9 @@ describe('Manuscripts Templates Subsystem', () => {
         });
         await adapter.save(custom);
 
-        const { templates: community } = await adapter.findAll({ isOfficial: false });
+        const { templates: community } = await adapter.findAll({
+          isOfficial: false,
+        });
         expect(community.length).toBe(1);
         expect(community[0].name).toBe('My Lab Notes');
       });
@@ -225,11 +235,14 @@ describe('Manuscripts Templates Subsystem', () => {
 
         const res2 = await adapter.search({ query: 'ACM' });
         expect(res2.templates.length).toBe(1);
-        expect(res2.templates[0].name).toBe('ACM Conference Proceedings (SIGCONF)');
+        expect(res2.templates[0].name).toBe(
+          'ACM Conference Proceedings (SIGCONF)',
+        );
       });
 
       it('should find template by id and versionId', async () => {
-        const foundByVersion = await adapter.findByVersionId('tmpl-ieee-tran-v1');
+        const foundByVersion =
+          await adapter.findByVersionId('tmpl-ieee-tran-v1');
         expect(foundByVersion).toBeDefined();
         expect(foundByVersion?.name).toBe('IEEE Transactions Article');
 
@@ -242,7 +255,9 @@ describe('Manuscripts Templates Subsystem', () => {
       });
 
       it('should delete a template', async () => {
-        const custom = ManuscriptTemplateEntity.create({ name: 'To Be Deleted' });
+        const custom = ManuscriptTemplateEntity.create({
+          name: 'To Be Deleted',
+        });
         await adapter.save(custom);
 
         const deleted = await adapter.delete(custom.id);
@@ -266,12 +281,24 @@ describe('Manuscripts Templates Subsystem', () => {
       it('should gracefully fallback to memory adapter when Prisma table is empty or unmigrated', async () => {
         const mockPrisma: any = {
           manuscriptTemplate: {
-            findUnique: jest.fn().mockRejectedValue(new Error('Table does not exist')),
-            findMany: jest.fn().mockRejectedValue(new Error('Table does not exist')),
-            count: jest.fn().mockRejectedValue(new Error('Table does not exist')),
-            upsert: jest.fn().mockRejectedValue(new Error('Table does not exist')),
-            deleteMany: jest.fn().mockRejectedValue(new Error('Table does not exist')),
-            update: jest.fn().mockRejectedValue(new Error('Table does not exist')),
+            findUnique: jest
+              .fn()
+              .mockRejectedValue(new Error('Table does not exist')),
+            findMany: jest
+              .fn()
+              .mockRejectedValue(new Error('Table does not exist')),
+            count: jest
+              .fn()
+              .mockRejectedValue(new Error('Table does not exist')),
+            upsert: jest
+              .fn()
+              .mockRejectedValue(new Error('Table does not exist')),
+            deleteMany: jest
+              .fn()
+              .mockRejectedValue(new Error('Table does not exist')),
+            update: jest
+              .fn()
+              .mockRejectedValue(new Error('Table does not exist')),
           },
         };
 
@@ -310,7 +337,9 @@ describe('Manuscripts Templates Subsystem', () => {
         };
 
         const adapter = new PrismaTemplateAdapter(mockPrisma);
-        const res = await adapter.findById('20000000-0000-0000-0000-000000000001');
+        const res = await adapter.findById(
+          '20000000-0000-0000-0000-000000000001',
+        );
         expect(res).not.toBeNull();
         expect(res?.name).toBe('Database Template');
         expect(res?.downloadCount).toBe(42);
@@ -377,8 +406,12 @@ describe('Manuscripts Templates Subsystem', () => {
 
     it('GetTemplateByIdUseCase should throw TemplateNotFoundException on non-existent template', async () => {
       const useCase = new GetTemplateByIdUseCase(memoryRepo);
-      await expect(useCase.execute('non-existent-id')).rejects.toThrow(TemplateNotFoundException);
-      await expect(useCase.execute('')).rejects.toThrow(TemplateNotFoundException);
+      await expect(useCase.execute('non-existent-id')).rejects.toThrow(
+        TemplateNotFoundException,
+      );
+      await expect(useCase.execute('')).rejects.toThrow(
+        TemplateNotFoundException,
+      );
     });
 
     it('GetTemplateByIdUseCase should resolve by ID or Version ID', async () => {
@@ -438,9 +471,9 @@ describe('Manuscripts Templates Subsystem', () => {
       const useCase = new CreateCustomTemplateUseCase(memoryRepo);
 
       // Should fail if name is empty
-      await expect(
-        useCase.execute({ name: '' }),
-      ).rejects.toThrow(InvalidTemplateException);
+      await expect(useCase.execute({ name: '' })).rejects.toThrow(
+        InvalidTemplateException,
+      );
 
       // Should fail if mainFile specified but not in files payload
       await expect(

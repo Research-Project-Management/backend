@@ -58,7 +58,7 @@ export class TextRangeVo {
     return startAfter && endBefore;
   }
 
-  public toJSON(): Record<string, any> {
+  public toJSON(): TextRangeProps {
     return {
       startLine: this.startLine,
       startCol: this.startCol,

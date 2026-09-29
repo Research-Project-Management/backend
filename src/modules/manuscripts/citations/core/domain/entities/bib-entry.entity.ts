@@ -27,8 +27,12 @@ export class BibEntry {
   public readonly rawBibtex: string;
 
   constructor(props: BibEntryProps) {
-    this.id = props.id || `entry-${Math.random().toString(36).substring(2, 10)}`;
-    this.key = props.key instanceof CitationKeyVo ? props.key : CitationKeyVo.create(props.key);
+    this.id =
+      props.id || `entry-${Math.random().toString(36).substring(2, 10)}`;
+    this.key =
+      props.key instanceof CitationKeyVo
+        ? props.key
+        : CitationKeyVo.create(props.key);
     this.entryType = props.entryType.trim().toLowerCase();
 
     const normalizedFields = new Map<string, string>();
@@ -37,13 +41,16 @@ export class BibEntry {
     }
     this.fields = normalizedFields;
 
-    const authorStr = this.fields.get('author') || this.fields.get('authors') || '';
+    const authorStr =
+      this.fields.get('author') || this.fields.get('authors') || '';
     this.authors = new AuthorListVo(authorStr);
 
     this.title = this.cleanField(this.fields.get('title'));
     this.year = this.cleanField(this.fields.get('year'));
     this.journal = this.cleanField(
-      this.fields.get('journal') || this.fields.get('booktitle') || this.fields.get('publisher')
+      this.fields.get('journal') ||
+        this.fields.get('booktitle') ||
+        this.fields.get('publisher'),
     );
     this.doi = this.cleanField(this.fields.get('doi'));
 
@@ -80,7 +87,10 @@ export class BibEntry {
 
   private cleanField(val?: string): string | undefined {
     if (!val) return undefined;
-    return val.replace(/^\{+|\}+$/g, '').replace(/^"+|"+$/g, '').trim();
+    return val
+      .replace(/^\{+|\}+$/g, '')
+      .replace(/^"+|"+$/g, '')
+      .trim();
   }
 
   public toJSON() {

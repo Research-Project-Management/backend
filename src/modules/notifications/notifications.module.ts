@@ -38,10 +38,7 @@ import { DeleteNotificationUseCase } from './core/use-cases/delete-notification.
     ManuscriptsNotificationsModule,
     ProjectsNotificationsModule,
   ],
-  controllers: [
-    NotificationsController,
-    OverleafNotificationsParityController,
-  ],
+  controllers: [NotificationsController, OverleafNotificationsParityController],
   providers: [
     // Core Ports & Adapters
     {

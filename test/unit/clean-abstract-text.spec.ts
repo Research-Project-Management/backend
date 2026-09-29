@@ -119,7 +119,9 @@ describe('cleanAbstractText - Comprehensive Academic Abstract Normalization', ()
         </jats:sec>
       `;
       const cleaned = cleanAbstractText(raw);
-      expect(cleaned).toContain('**Background:** The emergence of transformers');
+      expect(cleaned).toContain(
+        '**Background:** The emergence of transformers',
+      );
       expect(cleaned).toContain('**Findings:** Self-attention scales');
     });
 

@@ -31,14 +31,20 @@ export class NotificationsController {
   @Get()
   @ApiOperation({ summary: 'Get current user notifications inbox' })
   @ApiResponse({ status: 200, description: 'List of user notifications' })
-  async getNotifications(@Req() req: any, @Query() query: QueryNotificationsDto) {
+  async getNotifications(
+    @Req() req: any,
+    @Query() query: QueryNotificationsDto,
+  ) {
     const userId = this.extractUserId(req);
-    const notifications = await this.notificationsService.getUserNotifications(userId, {
-      isRead: query.isRead,
-      type: query.type,
-      limit: query.limit,
-      offset: query.offset,
-    });
+    const notifications = await this.notificationsService.getUserNotifications(
+      userId,
+      {
+        isRead: query.isRead,
+        type: query.type,
+        limit: query.limit,
+        offset: query.offset,
+      },
+    );
     return notifications.map((n) => n.toPlain());
   }
 
@@ -55,7 +61,10 @@ export class NotificationsController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new notification' })
   @ApiResponse({ status: 201, description: 'Notification created' })
-  async createNotification(@Body() dto: CreateNotificationDto, @Req() req: any) {
+  async createNotification(
+    @Body() dto: CreateNotificationDto,
+    @Req() req: any,
+  ) {
     const userId = dto.userId || this.extractUserId(req);
     const notification = await this.notificationsService.createNotification({
       ...dto,
@@ -67,13 +76,20 @@ export class NotificationsController {
 
   @Post('parse-mentions')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Extract @mentions from text and dispatch notifications' })
-  @ApiResponse({ status: 200, description: 'Parsed tokens and dispatched notifications' })
+  @ApiOperation({
+    summary: 'Extract @mentions from text and dispatch notifications',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Parsed tokens and dispatched notifications',
+  })
   async parseMentions(@Body() dto: ParseMentionsDto) {
     const result = await this.notificationsService.parseAndNotifyMentions(dto);
     return {
       tokens: result.tokens,
-      dispatchedNotifications: result.dispatchedNotifications.map((n) => n.toPlain()),
+      dispatchedNotifications: result.dispatchedNotifications.map((n) =>
+        n.toPlain(),
+      ),
     };
   }
 
@@ -90,7 +106,10 @@ export class NotificationsController {
   @Post('mark-all-read')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark all notifications as read for current user' })
-  @ApiResponse({ status: 200, description: 'Number of notifications marked as read' })
+  @ApiResponse({
+    status: 200,
+    description: 'Number of notifications marked as read',
+  })
   async markAllAsRead(@Req() req: any) {
     const userId = this.extractUserId(req);
     const count = await this.notificationsService.markAllAsRead(userId);
@@ -127,7 +146,11 @@ export class NotificationsController {
  * - DELETE /key/:key
  */
 @ApiTags('Notifications - Overleaf Parity')
-@Controller(['manuscripts/v1/notifications-compat', 'v1/notifications-compat', 'notifications/v1/compat'])
+@Controller([
+  'manuscripts/v1/notifications-compat',
+  'v1/notifications-compat',
+  'notifications/v1/compat',
+])
 export class OverleafNotificationsParityController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
@@ -156,7 +179,7 @@ export class OverleafNotificationsParityController {
   @HttpCode(HttpStatus.OK)
   async removeNotificationId(
     @Param('user_id') userId: string,
-    @Param('notification_id') notificationId: string
+    @Param('notification_id') notificationId: string,
   ) {
     await this.notificationsService.deleteById(notificationId, userId);
     return { status: 'ok' };
@@ -166,7 +189,7 @@ export class OverleafNotificationsParityController {
   @HttpCode(HttpStatus.OK)
   async removeNotificationKey(
     @Param('user_id') userId: string,
-    @Body('key') key: string
+    @Body('key') key: string,
   ) {
     if (key) {
       await this.notificationsService.deleteByKey(key, userId);

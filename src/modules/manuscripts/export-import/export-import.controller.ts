@@ -16,8 +16,16 @@ import {
   ForbiddenException,
   NotFoundException,
   PayloadTooLargeException,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { ExportImportService } from './export-import.service';
 import {
@@ -32,11 +40,9 @@ import { ArchiveSizeExceededException } from './core/domain/exceptions/archive-s
 import { TemplateNotFoundException } from './core/domain/exceptions/template-not-found.exception';
 
 @ApiTags('Manuscripts - Project Archive & Templates')
-@Controller([
-  'api/v1/manuscripts/projects',
-  'manuscripts/projects',
-  'projects',
-])
+@ApiBearerAuth('JWT-auth')
+@Controller(['api/v1/manuscripts/projects', 'manuscripts/projects', 'projects'])
+@UseGuards(JwtAuthGuard)
 export class ExportImportController {
   constructor(private readonly service: ExportImportService) {}
 
@@ -57,7 +63,11 @@ export class ExportImportController {
   }
 
   @Get(':projectId/export/zip')
-  @ApiOperation({ summary: 'Export complete manuscript project as a PKZIP archive' })
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary: 'Export complete manuscript project as a PKZIP archive',
+  })
   public async exportProjectZip(
     @Param('projectId') projectId: string,
     @Query() query: ExportZipQueryDto,
@@ -77,7 +87,11 @@ export class ExportImportController {
   }
 
   @Post(':projectId/import/zip')
-  @ApiOperation({ summary: 'Import an existing LaTeX project from an uploaded ZIP archive' })
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary: 'Import an existing LaTeX project from an uploaded ZIP archive',
+  })
   @ApiResponse({ status: 201, type: ImportSummaryResponseDto })
   public async importProjectZip(
     @Param('projectId') projectId: string,
@@ -87,33 +101,51 @@ export class ExportImportController {
     try {
       let zipBuffer: Buffer;
 
+      const multipartReq = req as FastifyRequest & {
+        isMultipart?: () => boolean;
+        file?: () => Promise<{ toBuffer: () => Promise<Buffer> } | undefined>;
+      };
       const isMultipart =
-        typeof (req as any).isMultipart === 'function'
-          ? (req as any).isMultipart()
-          : Boolean((req as any).isMultipart);
+        typeof multipartReq.isMultipart === 'function'
+          ? multipartReq.isMultipart()
+          : Boolean(multipartReq.isMultipart);
 
-      if (isMultipart && typeof (req as any).file === 'function') {
-        const part = await (req as any).file();
+      if (isMultipart && typeof multipartReq.file === 'function') {
+        const part = await multipartReq.file();
         if (!part) {
           throw new BadRequestException('No file found in multipart upload.');
         }
         zipBuffer = await part.toBuffer();
       } else if (Buffer.isBuffer(req.body)) {
         zipBuffer = req.body;
-      } else if (req.body && (req.body as any).buffer && Buffer.isBuffer((req.body as any).buffer)) {
-        zipBuffer = (req.body as any).buffer;
+      } else if (
+        typeof req.body === 'object' &&
+        req.body !== null &&
+        'buffer' in req.body &&
+        Buffer.isBuffer(req.body.buffer)
+      ) {
+        zipBuffer = (req.body as { buffer: Buffer }).buffer;
       } else {
-        throw new BadRequestException('Expected ZIP archive binary payload or multipart form data.');
+        throw new BadRequestException(
+          'Expected ZIP archive binary payload or multipart form data.',
+        );
       }
 
-      return await this.service.importProjectZip(projectId, zipBuffer, undefined, preferredRootDoc);
+      return await this.service.importProjectZip(
+        projectId,
+        zipBuffer,
+        undefined,
+        preferredRootDoc,
+      );
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Get('templates')
-  @ApiOperation({ summary: 'List all academic starter templates in the catalog' })
+  @ApiOperation({
+    summary: 'List all academic starter templates in the catalog',
+  })
   @ApiResponse({ status: 200, type: [TemplateResponseDto] })
   public async listTemplates(): Promise<TemplateResponseDto[]> {
     try {
@@ -124,7 +156,11 @@ export class ExportImportController {
   }
 
   @Post(':projectId/templates/:templateId/scaffold')
-  @ApiOperation({ summary: 'Initialize project structure and files from an academic template' })
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary: 'Initialize project structure and files from an academic template',
+  })
   @ApiResponse({ status: 201, type: ImportSummaryResponseDto })
   public async scaffoldFromTemplate(
     @Param('projectId') projectId: string,

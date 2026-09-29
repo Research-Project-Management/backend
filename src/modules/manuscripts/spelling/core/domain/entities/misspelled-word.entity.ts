@@ -23,7 +23,9 @@ export class MisspelledWord {
     this.line = props.line;
     this.col = props.col;
     this.length = props.length;
-    this.suggestions = Object.freeze(props.suggestions ? [...props.suggestions] : []);
+    this.suggestions = Object.freeze(
+      props.suggestions ? [...props.suggestions] : [],
+    );
   }
 
   public toJSON() {

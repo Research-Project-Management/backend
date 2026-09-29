@@ -7,7 +7,10 @@
 
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ICitationsAggregatorPort } from '../../ports/citations-aggregator.port';
-import { IBibtexParserPort, BIBTEX_PARSER_PORT } from '../../ports/bibtex-parser.port';
+import {
+  IBibtexParserPort,
+  BIBTEX_PARSER_PORT,
+} from '../../ports/bibtex-parser.port';
 import { BibliographyFile } from '../../domain/entities/bibliography-file.entity';
 import { BibEntry } from '../../domain/entities/bib-entry.entity';
 import { StructureService } from '../../../../structure/structure.service';
@@ -24,7 +27,7 @@ export class ManuscriptBibAggregatorAdapter implements ICitationsAggregatorPort 
     @Inject(forwardRef(() => DocstoreService))
     private readonly docstoreService: DocstoreService,
     @Inject(BIBTEX_PARSER_PORT)
-    private readonly bibParser: IBibtexParserPort
+    private readonly bibParser: IBibtexParserPort,
   ) {}
 
   public async collectBibFiles(projectId: string): Promise<BibliographyFile[]> {
@@ -33,7 +36,8 @@ export class ManuscriptBibAggregatorAdapter implements ICitationsAggregatorPort 
     try {
       const nodes = await this.structureService.getAllNodes(projectId);
       const bibNodes = nodes.filter(
-        (n: ManuscriptNodeEntity) => n.isDoc() && n.name.toLowerCase().endsWith('.bib')
+        (n: ManuscriptNodeEntity) =>
+          n.isDoc() && n.name.toLowerCase().endsWith('.bib'),
       );
 
       for (const node of bibNodes) {
@@ -46,14 +50,18 @@ export class ManuscriptBibAggregatorAdapter implements ICitationsAggregatorPort 
             new BibliographyFile({
               path: node.path,
               entries,
-            })
+            }),
           );
         } catch (err: any) {
-          this.logger.warn(`Failed to read doc ${node.docId} for ${node.path}: ${err.message}`);
+          this.logger.warn(
+            `Failed to read doc ${node.docId} for ${node.path}: ${err.message}`,
+          );
         }
       }
     } catch (err: any) {
-      this.logger.error(`Error scanning bib nodes for project ${projectId}: ${err.message}`);
+      this.logger.error(
+        `Error scanning bib nodes for project ${projectId}: ${err.message}`,
+      );
     }
 
     return bibFiles;
@@ -62,14 +70,17 @@ export class ManuscriptBibAggregatorAdapter implements ICitationsAggregatorPort 
   public async appendEntryToBib(
     projectId: string,
     entry: BibEntry,
-    targetFilename = 'references.bib'
+    targetFilename = 'references.bib',
   ): Promise<string> {
-    const cleanFilename = targetFilename.replace(/^(\.\/)+/, '').replace(/^\/+/, '');
+    const cleanFilename = targetFilename
+      .replace(/^(\.\/)+/, '')
+      .replace(/^\/+/, '');
     const cleanPath = `/${cleanFilename}`;
 
     const nodes = await this.structureService.getAllNodes(projectId);
     const targetNode = nodes.find(
-      (n: ManuscriptNodeEntity) => n.path === cleanPath || n.name === cleanFilename
+      (n: ManuscriptNodeEntity) =>
+        n.path === cleanPath || n.name === cleanFilename,
     );
 
     const bibString = entry.toBibtexString();
@@ -77,7 +88,10 @@ export class ManuscriptBibAggregatorAdapter implements ICitationsAggregatorPort 
 
     if (targetNode && targetNode.docId) {
       // Append to existing document
-      const doc = await this.docstoreService.getDoc(projectId, targetNode.docId);
+      const doc = await this.docstoreService.getDoc(
+        projectId,
+        targetNode.docId,
+      );
       const currentLines = doc.lines || [];
       const updatedLines = [...currentLines, '', ...entryLines];
 

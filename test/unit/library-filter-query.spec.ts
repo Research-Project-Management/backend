@@ -1,4 +1,4 @@
-import { QueryRepository } from '../../src/modules/library/bibliography/infrastructure/repositories/query.repository';
+import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
 
 describe('QueryRepository Filtering & Grounding Specification', () => {
   let queryRepo: QueryRepository;

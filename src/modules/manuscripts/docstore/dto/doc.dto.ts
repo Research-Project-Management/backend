@@ -5,20 +5,35 @@
  */
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsArray, IsOptional, IsNumber, IsBoolean, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsArray,
+  IsOptional,
+  IsNumber,
+  IsBoolean,
+  IsDateString,
+} from 'class-validator';
 import { DocRanges } from '../core/domain/doc-range.vo';
 
 export class CreateDocDto {
-  @ApiProperty({ description: 'Relative path of the document (e.g. main.tex, chapters/intro.tex)' })
+  @ApiProperty({
+    description:
+      'Relative path of the document (e.g. main.tex, chapters/intro.tex)',
+  })
   @IsString()
   path!: string;
 
-  @ApiPropertyOptional({ description: 'Lines array of document text', type: [String] })
+  @ApiPropertyOptional({
+    description: 'Lines array of document text',
+    type: [String],
+  })
   @IsOptional()
   @IsArray()
   lines?: string[];
 
-  @ApiPropertyOptional({ description: 'Raw document text (alternative to lines)' })
+  @ApiPropertyOptional({
+    description: 'Raw document text (alternative to lines)',
+  })
   @IsOptional()
   @IsString()
   text?: string;
@@ -34,7 +49,10 @@ export class CreateDocDto {
 }
 
 export class UpdateDocDto {
-  @ApiProperty({ description: 'Updated lines array of document text', type: [String] })
+  @ApiProperty({
+    description: 'Updated lines array of document text',
+    type: [String],
+  })
   @IsArray()
   lines!: string[];
 
@@ -42,11 +60,15 @@ export class UpdateDocDto {
   @IsNumber()
   version!: number;
 
-  @ApiPropertyOptional({ description: 'Updated track changes and inline comments ranges' })
+  @ApiPropertyOptional({
+    description: 'Updated track changes and inline comments ranges',
+  })
   @IsOptional()
   ranges?: DocRanges;
 
-  @ApiPropertyOptional({ description: 'Expected revision number for Optimistic Concurrency Control' })
+  @ApiPropertyOptional({
+    description: 'Expected revision number for Optimistic Concurrency Control',
+  })
   @IsOptional()
   @IsNumber()
   expectedRev?: number;
@@ -94,9 +116,13 @@ export class DocResponseDto {
   @ApiProperty({ description: 'Total byte length' })
   sizeBytes!: number;
 
-  @ApiProperty({ description: 'Indicates whether content is stored in S3 cold tier' })
+  @ApiProperty({
+    description: 'Indicates whether content is stored in S3 cold tier',
+  })
   inStorage!: boolean;
 
-  @ApiProperty({ description: 'Indicates whether document has been soft-deleted' })
+  @ApiProperty({
+    description: 'Indicates whether document has been soft-deleted',
+  })
   deleted!: boolean;
 }

@@ -21,14 +21,25 @@ export class ByteRange {
    * Returns null if no range header is supplied.
    * Throws InvalidByteRangeException if range is syntactically invalid or unsatisfiable.
    */
-  public static parse(rangeHeader: string | undefined | null, totalSizeBytes: number): ByteRange | null {
-    if (!rangeHeader || typeof rangeHeader !== 'string' || !rangeHeader.trim()) {
+  public static parse(
+    rangeHeader: string | undefined | null,
+    totalSizeBytes: number,
+  ): ByteRange | null {
+    if (
+      !rangeHeader ||
+      typeof rangeHeader !== 'string' ||
+      !rangeHeader.trim()
+    ) {
       return null;
     }
 
     const trimmed = rangeHeader.trim();
     if (!trimmed.startsWith('bytes=')) {
-      throw new InvalidByteRangeException(rangeHeader, totalSizeBytes, 'Range header must start with "bytes="');
+      throw new InvalidByteRangeException(
+        rangeHeader,
+        totalSizeBytes,
+        'Range header must start with "bytes="',
+      );
     }
 
     const rangePart = trimmed.slice(6).trim();
@@ -36,16 +47,28 @@ export class ByteRange {
     if (rangePart.includes(',')) {
       // Multipart ranges are not supported; fallback or pick first
       const firstRange = rangePart.split(',')[0].trim();
-      return ByteRange.parseSingleRange(firstRange, totalSizeBytes, rangeHeader);
+      return ByteRange.parseSingleRange(
+        firstRange,
+        totalSizeBytes,
+        rangeHeader,
+      );
     }
 
     return ByteRange.parseSingleRange(rangePart, totalSizeBytes, rangeHeader);
   }
 
-  private static parseSingleRange(rangeStr: string, totalSizeBytes: number, originalHeader: string): ByteRange {
+  private static parseSingleRange(
+    rangeStr: string,
+    totalSizeBytes: number,
+    originalHeader: string,
+  ): ByteRange {
     const parts = rangeStr.split('-');
     if (parts.length !== 2) {
-      throw new InvalidByteRangeException(originalHeader, totalSizeBytes, 'Invalid range format');
+      throw new InvalidByteRangeException(
+        originalHeader,
+        totalSizeBytes,
+        'Invalid range format',
+      );
     }
 
     let start: number;
@@ -55,14 +78,22 @@ export class ByteRange {
     const endStr = parts[1].trim();
 
     if (startStr === '' && endStr === '') {
-      throw new InvalidByteRangeException(originalHeader, totalSizeBytes, 'Range cannot be empty');
+      throw new InvalidByteRangeException(
+        originalHeader,
+        totalSizeBytes,
+        'Range cannot be empty',
+      );
     }
 
     if (startStr === '') {
       // Suffix byte range: e.g. "-500" means final 500 bytes
       const suffixLength = parseInt(endStr, 10);
       if (isNaN(suffixLength) || suffixLength <= 0) {
-        throw new InvalidByteRangeException(originalHeader, totalSizeBytes, 'Invalid suffix range length');
+        throw new InvalidByteRangeException(
+          originalHeader,
+          totalSizeBytes,
+          'Invalid suffix range length',
+        );
       }
       start = Math.max(0, totalSizeBytes - suffixLength);
       end = totalSizeBytes - 1;
@@ -70,7 +101,11 @@ export class ByteRange {
       // Open-ended range: e.g. "500-" means byte 500 to end
       start = parseInt(startStr, 10);
       if (isNaN(start) || start < 0) {
-        throw new InvalidByteRangeException(originalHeader, totalSizeBytes, 'Invalid start byte');
+        throw new InvalidByteRangeException(
+          originalHeader,
+          totalSizeBytes,
+          'Invalid start byte',
+        );
       }
       end = totalSizeBytes - 1;
     } else {
@@ -78,13 +113,21 @@ export class ByteRange {
       start = parseInt(startStr, 10);
       end = parseInt(endStr, 10);
       if (isNaN(start) || isNaN(end) || start < 0 || end < 0) {
-        throw new InvalidByteRangeException(originalHeader, totalSizeBytes, 'Range offsets must be non-negative integers');
+        throw new InvalidByteRangeException(
+          originalHeader,
+          totalSizeBytes,
+          'Range offsets must be non-negative integers',
+        );
       }
     }
 
     // Validation against total length
     if (totalSizeBytes === 0) {
-      throw new InvalidByteRangeException(originalHeader, totalSizeBytes, 'Cannot request range on 0-byte file');
+      throw new InvalidByteRangeException(
+        originalHeader,
+        totalSizeBytes,
+        'Cannot request range on 0-byte file',
+      );
     }
 
     if (start > end || start >= totalSizeBytes) {

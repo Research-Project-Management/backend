@@ -6,6 +6,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
+import { ManuscriptDictionaryScope } from '@prisma/client';
 import { ICustomDictionaryRepositoryPort } from '../../ports/custom-dictionary-repository.port';
 
 @Injectable()
@@ -17,12 +18,12 @@ export class PrismaCustomDictionaryAdapter implements ICustomDictionaryRepositor
 
   public async listProjectWords(projectId: string): Promise<string[]> {
     try {
-      const records = await (this.prisma as any).manuscriptCustomWord.findMany({
-        where: { projectId, scope: 'project' },
+      const records = await this.prisma.manuscriptCustomWord.findMany({
+        where: { projectId, scope: ManuscriptDictionaryScope.project },
         select: { word: true },
         orderBy: { word: 'asc' },
       });
-      return records.map((r: any) => r.word);
+      return records.map((r: { word: string }) => r.word);
     } catch {
       const set = this.memoryFallback.get(`p:${projectId}`);
       return set ? Array.from(set).sort() : [];
@@ -31,12 +32,12 @@ export class PrismaCustomDictionaryAdapter implements ICustomDictionaryRepositor
 
   public async listUserWords(userId: string): Promise<string[]> {
     try {
-      const records = await (this.prisma as any).manuscriptCustomWord.findMany({
-        where: { userId, scope: 'user' },
+      const records = await this.prisma.manuscriptCustomWord.findMany({
+        where: { userId, scope: ManuscriptDictionaryScope.user },
         select: { word: true },
         orderBy: { word: 'asc' },
       });
-      return records.map((r: any) => r.word);
+      return records.map((r: { word: string }) => r.word);
     } catch {
       const set = this.memoryFallback.get(`u:${userId}`);
       return set ? Array.from(set).sort() : [];
@@ -48,12 +49,12 @@ export class PrismaCustomDictionaryAdapter implements ICustomDictionaryRepositor
     if (!clean) return;
 
     try {
-      await (this.prisma as any).manuscriptCustomWord.upsert({
+      await this.prisma.manuscriptCustomWord.upsert({
         where: {
           projectId_word: { projectId, word: clean },
         },
         create: {
-          scope: 'project',
+          scope: ManuscriptDictionaryScope.project,
           projectId,
           word: clean,
         },
@@ -74,12 +75,12 @@ export class PrismaCustomDictionaryAdapter implements ICustomDictionaryRepositor
     if (!clean) return;
 
     try {
-      await (this.prisma as any).manuscriptCustomWord.upsert({
+      await this.prisma.manuscriptCustomWord.upsert({
         where: {
           userId_word: { userId, word: clean },
         },
         create: {
-          scope: 'user',
+          scope: ManuscriptDictionaryScope.user,
           userId,
           word: clean,
         },
@@ -95,11 +96,18 @@ export class PrismaCustomDictionaryAdapter implements ICustomDictionaryRepositor
     }
   }
 
-  public async removeProjectWord(projectId: string, word: string): Promise<boolean> {
+  public async removeProjectWord(
+    projectId: string,
+    word: string,
+  ): Promise<boolean> {
     const clean = word.toLowerCase().trim();
     try {
-      const res = await (this.prisma as any).manuscriptCustomWord.deleteMany({
-        where: { projectId, word: clean, scope: 'project' },
+      const res = await this.prisma.manuscriptCustomWord.deleteMany({
+        where: {
+          projectId,
+          word: clean,
+          scope: ManuscriptDictionaryScope.project,
+        },
       });
       return res.count > 0;
     } catch {
@@ -111,8 +119,8 @@ export class PrismaCustomDictionaryAdapter implements ICustomDictionaryRepositor
   public async removeUserWord(userId: string, word: string): Promise<boolean> {
     const clean = word.toLowerCase().trim();
     try {
-      const res = await (this.prisma as any).manuscriptCustomWord.deleteMany({
-        where: { userId, word: clean, scope: 'user' },
+      const res = await this.prisma.manuscriptCustomWord.deleteMany({
+        where: { userId, word: clean, scope: ManuscriptDictionaryScope.user },
       });
       return res.count > 0;
     } catch {
@@ -121,15 +129,23 @@ export class PrismaCustomDictionaryAdapter implements ICustomDictionaryRepositor
     }
   }
 
-  public async isCustomWord(word: string, projectId?: string, userId?: string): Promise<boolean> {
+  public async isCustomWord(
+    word: string,
+    projectId?: string,
+    userId?: string,
+  ): Promise<boolean> {
     const clean = word.toLowerCase().trim();
     if (!clean) return false;
 
     // Check project scope
     if (projectId) {
       try {
-        const count = await (this.prisma as any).manuscriptCustomWord.count({
-          where: { projectId, word: clean, scope: 'project' },
+        const count = await this.prisma.manuscriptCustomWord.count({
+          where: {
+            projectId,
+            word: clean,
+            scope: ManuscriptDictionaryScope.project,
+          },
         });
         if (count > 0) return true;
       } catch {
@@ -141,8 +157,8 @@ export class PrismaCustomDictionaryAdapter implements ICustomDictionaryRepositor
     // Check user scope
     if (userId) {
       try {
-        const count = await (this.prisma as any).manuscriptCustomWord.count({
-          where: { userId, word: clean, scope: 'user' },
+        const count = await this.prisma.manuscriptCustomWord.count({
+          where: { userId, word: clean, scope: ManuscriptDictionaryScope.user },
         });
         if (count > 0) return true;
       } catch {

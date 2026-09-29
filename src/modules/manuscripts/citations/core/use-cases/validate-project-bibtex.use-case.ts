@@ -16,7 +16,9 @@ export interface ValidateProjectBibtexResult {
 export class ValidateProjectBibtexUseCase {
   constructor(private readonly aggregator: ICitationsAggregatorPort) {}
 
-  public async execute(projectId: string): Promise<ValidateProjectBibtexResult> {
+  public async execute(
+    projectId: string,
+  ): Promise<ValidateProjectBibtexResult> {
     const bibFiles = await this.aggregator.collectBibFiles(projectId);
 
     const allKeysMap = new Map<string, string[]>(); // key -> [file1, file2, ...]
@@ -40,7 +42,9 @@ export class ValidateProjectBibtexUseCase {
           warnings.push(`Entry '${k}' in ${file.path} is missing an author.`);
         }
         if (!entry.year) {
-          warnings.push(`Entry '${k}' in ${file.path} is missing a publication year.`);
+          warnings.push(
+            `Entry '${k}' in ${file.path} is missing a publication year.`,
+          );
         }
       }
     }
@@ -50,7 +54,9 @@ export class ValidateProjectBibtexUseCase {
     for (const [k, files] of allKeysMap.entries()) {
       if (files.length > 1) {
         duplicateKeys.push(k);
-        warnings.push(`Duplicate citation key '${k}' appears ${files.length} times in: ${files.join(', ')}`);
+        warnings.push(
+          `Duplicate citation key '${k}' appears ${files.length} times in: ${files.join(', ')}`,
+        );
       }
     }
 

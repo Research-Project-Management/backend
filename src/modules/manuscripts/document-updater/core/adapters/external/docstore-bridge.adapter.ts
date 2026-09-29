@@ -4,9 +4,16 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { BaseDocData, CommitResult, IDocstoreWriterPort } from '../../ports/docstore-writer.port';
+import {
+  BaseDocData,
+  CommitResult,
+  IDocstoreWriterPort,
+} from '../../ports/docstore-writer.port';
 import { DocstoreService } from '../../../../docstore/docstore.service';
-import { DocModifiedError, DocNotFoundError } from '../../../../docstore/core/domain/doc-errors';
+import {
+  DocModifiedError,
+  DocNotFoundError,
+} from '../../../../docstore/core/domain/doc-errors';
 import { DocUpdaterConflictException } from '../../domain/exceptions/doc-updater-conflict.exception';
 
 @Injectable()
@@ -17,7 +24,10 @@ export class DocstoreBridgeAdapter extends IDocstoreWriterPort {
     super();
   }
 
-  public async fetchBaseDoc(projectId: string, docId: string): Promise<BaseDocData | null> {
+  public async fetchBaseDoc(
+    projectId: string,
+    docId: string,
+  ): Promise<BaseDocData | null> {
     try {
       const doc = await this.docstoreService.getDoc(projectId, docId);
       return {

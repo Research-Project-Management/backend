@@ -13,7 +13,10 @@ export class LogLineVo {
    * before parsing the TeX parentheses tree or error headers.
    */
   public static unwrap(rawLog: string): string[] {
-    const rawLines = rawLog.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    const rawLines = rawLog
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n');
     const unwrapped: string[] = [];
 
     for (let i = 0; i < rawLines.length; i++) {
@@ -23,13 +26,13 @@ export class LogLineVo {
       // Current line length is >= 79 and next line continues without marker
       while (
         rawLines[i] &&
-        rawLines[i]!.length >= this.TEX_LINE_MAX_LENGTH &&
+        rawLines[i].length >= this.TEX_LINE_MAX_LENGTH &&
         i + 1 < rawLines.length &&
         rawLines[i + 1] &&
-        !rawLines[i + 1]!.startsWith('!') &&
-        !rawLines[i + 1]!.startsWith('l.') &&
-        !rawLines[i + 1]!.startsWith('(') &&
-        !rawLines[i + 1]!.startsWith('LaTeX Warning:')
+        !rawLines[i + 1].startsWith('!') &&
+        !rawLines[i + 1].startsWith('l.') &&
+        !rawLines[i + 1].startsWith('(') &&
+        !rawLines[i + 1].startsWith('LaTeX Warning:')
       ) {
         i++;
         current += rawLines[i];

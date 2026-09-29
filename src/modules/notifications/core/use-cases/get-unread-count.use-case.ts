@@ -8,7 +8,7 @@ import {
 export class GetUnreadCountUseCase {
   constructor(
     @Inject(NOTIFICATION_REPOSITORY_PORT)
-    private readonly repository: INotificationRepositoryPort
+    private readonly repository: INotificationRepositoryPort,
   ) {}
 
   async execute(userId: string): Promise<number> {

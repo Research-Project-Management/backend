@@ -18,13 +18,13 @@ import {
 export class RenameNodeUseCase {
   constructor(
     private readonly structureRepository: IStructureRepository,
-    private readonly treePublisher: ITreePublisher
+    private readonly treePublisher: ITreePublisher,
   ) {}
 
   public async execute(
     projectId: string,
     nodeId: string,
-    newName: string
+    newName: string,
   ): Promise<ManuscriptNodeEntity> {
     NodePathVo.validateFilename(newName);
 
@@ -44,7 +44,10 @@ export class RenameNodeUseCase {
     const newPath = NodePathVo.join(parentPath, newName);
 
     // Check conflict
-    const existing = await this.structureRepository.findByPath(projectId, newPath);
+    const existing = await this.structureRepository.findByPath(
+      projectId,
+      newPath,
+    );
     if (existing && existing.id !== node.id) {
       throw new DuplicateNodePathError(newPath);
     }
@@ -54,10 +57,20 @@ export class RenameNodeUseCase {
 
     if (node.isFolder()) {
       // Moving folder to newPath with same parentId cascades descendants
-      await this.structureRepository.moveSubtree(projectId, oldPath, newPath, node.parentId);
+      await this.structureRepository.moveSubtree(
+        projectId,
+        oldPath,
+        newPath,
+        node.parentId,
+      );
       updated = (await this.structureRepository.findById(projectId, node.id))!;
     } else {
-      updated = await this.structureRepository.renameNode(projectId, node.id, newName, newPath);
+      updated = await this.structureRepository.renameNode(
+        projectId,
+        node.id,
+        newName,
+        newPath,
+      );
     }
 
     await this.treePublisher.publishTreeMutation({

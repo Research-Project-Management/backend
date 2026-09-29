@@ -55,7 +55,10 @@ export class MendeleyProvider implements IIntegrationProvider {
     }
   }
 
-  async initiateOAuth(userId: string, redirectUri: string): Promise<OAuthInitiationResult> {
+  async initiateOAuth(
+    userId: string,
+    redirectUri: string,
+  ): Promise<OAuthInitiationResult> {
     const state = `state_${userId}_${randomBytes(8).toString('hex')}`;
 
     if (this.isMockMode) {
@@ -100,7 +103,9 @@ export class MendeleyProvider implements IIntegrationProvider {
 
     try {
       const tokenUrl = 'https://api.mendeley.com/oauth/token';
-      const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+      const basicAuth = Buffer.from(
+        `${this.clientId}:${this.clientSecret}`,
+      ).toString('base64');
 
       const bodyParams = new URLSearchParams({
         grant_type: 'authorization_code',
@@ -136,12 +141,15 @@ export class MendeleyProvider implements IIntegrationProvider {
       let providerUserId = 'mendeley_profile';
 
       try {
-        const profileResponse = await fetch('https://api.mendeley.com/profiles/me', {
-          headers: {
-            Authorization: `Bearer ${tokenData.access_token}`,
-            Accept: 'application/vnd.mendeley-profiles.1+json',
+        const profileResponse = await fetch(
+          'https://api.mendeley.com/profiles/me',
+          {
+            headers: {
+              Authorization: `Bearer ${tokenData.access_token}`,
+              Accept: 'application/vnd.mendeley-profiles.1+json',
+            },
           },
-        });
+        );
 
         if (profileResponse.ok) {
           const profile = (await profileResponse.json()) as {
@@ -159,7 +167,9 @@ export class MendeleyProvider implements IIntegrationProvider {
           accountEmail = profile.email || accountEmail;
         }
       } catch (profileErr: any) {
-        this.logger.warn(`Could not retrieve Mendeley profile details: ${profileErr.message}`);
+        this.logger.warn(
+          `Could not retrieve Mendeley profile details: ${profileErr.message}`,
+        );
       }
 
       return {
@@ -175,7 +185,10 @@ export class MendeleyProvider implements IIntegrationProvider {
         },
       };
     } catch (err: any) {
-      this.logger.error(`Error exchanging Mendeley token: ${err.message}`, err.stack);
+      this.logger.error(
+        `Error exchanging Mendeley token: ${err.message}`,
+        err.stack,
+      );
       throw err;
     }
   }
@@ -187,7 +200,11 @@ export class MendeleyProvider implements IIntegrationProvider {
     if (decryptedToken.includes('mock')) {
       return [
         { id: 'mendeley_f1', name: 'Thesis Literature Review', itemCount: 18 },
-        { id: 'mendeley_f2', name: 'Biomedical Imaging & Deep Learning', itemCount: 32 },
+        {
+          id: 'mendeley_f2',
+          name: 'Biomedical Imaging & Deep Learning',
+          itemCount: 32,
+        },
         { id: 'mendeley_f3', name: 'Journal Draft 2026', itemCount: 7 },
       ];
     }
@@ -202,7 +219,9 @@ export class MendeleyProvider implements IIntegrationProvider {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch Mendeley folders: status ${response.status}`);
+        throw new Error(
+          `Failed to fetch Mendeley folders: status ${response.status}`,
+        );
       }
 
       const folders = (await response.json()) as Array<{
@@ -219,7 +238,10 @@ export class MendeleyProvider implements IIntegrationProvider {
         parentCollectionId: folder.parent_id || null,
       }));
     } catch (err: any) {
-      this.logger.error(`Error fetching Mendeley folders: ${err.message}`, err.stack);
+      this.logger.error(
+        `Error fetching Mendeley folders: ${err.message}`,
+        err.stack,
+      );
       throw err;
     }
   }
@@ -257,12 +279,15 @@ export class MendeleyProvider implements IIntegrationProvider {
       const response = await fetch(bibtexUrl, {
         headers: {
           Authorization: `Bearer ${decryptedToken}`,
-          Accept: 'application/x-bibtex, application/vnd.mendeley-document.1+json',
+          Accept:
+            'application/x-bibtex, application/vnd.mendeley-document.1+json',
         },
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch Mendeley documents: status ${response.status}`);
+        throw new Error(
+          `Failed to fetch Mendeley documents: status ${response.status}`,
+        );
       }
 
       const contentType = response.headers.get('content-type') || '';
@@ -275,7 +300,10 @@ export class MendeleyProvider implements IIntegrationProvider {
       const docs = (await response.json()) as MendeleyDocument[];
       return this.convertDocumentsToBibtex(docs);
     } catch (err: any) {
-      this.logger.error(`Error fetching Mendeley BibTeX: ${err.message}`, err.stack);
+      this.logger.error(
+        `Error fetching Mendeley BibTeX: ${err.message}`,
+        err.stack,
+      );
       throw err;
     }
   }
@@ -288,7 +316,10 @@ export class MendeleyProvider implements IIntegrationProvider {
     return docs
       .map((doc) => {
         const type = doc.type === 'book' ? 'book' : 'article';
-        const firstAuthor = doc.authors?.[0]?.last_name?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'author';
+        const firstAuthor =
+          doc.authors?.[0]?.last_name
+            ?.toLowerCase()
+            .replace(/[^a-z0-9]/g, '') || 'author';
         const year = doc.year || 'nodate';
         const titleWord = (doc.title || 'untitled')
           .split(/\s+/)[0]
@@ -310,7 +341,8 @@ export class MendeleyProvider implements IIntegrationProvider {
         if (doc.issue) lines.push(`  number = {${doc.issue}},`);
         if (doc.pages) lines.push(`  pages = {${doc.pages}},`);
         if (doc.publisher) lines.push(`  publisher = {${doc.publisher}},`);
-        if (doc.identifiers?.doi) lines.push(`  doi = {${doc.identifiers.doi}},`);
+        if (doc.identifiers?.doi)
+          lines.push(`  doi = {${doc.identifiers.doi}},`);
         lines.push('}');
 
         return lines.join('\n');

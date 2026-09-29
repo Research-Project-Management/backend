@@ -16,5 +16,7 @@ export abstract class IDocumentUpdaterBridgePort {
   /**
    * Forwards client edit operations to DocumentUpdaterService.queueUpdate().
    */
-  abstract forwardUpdate(payload: ClientUpdatePayloadVo): Promise<BridgeUpdateResult>;
+  abstract forwardUpdate(
+    payload: ClientUpdatePayloadVo,
+  ): Promise<BridgeUpdateResult>;
 }

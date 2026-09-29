@@ -1,11 +1,11 @@
-import { IngestionRunAggregate } from '../../src/modules/library/ingestion/domain/model/ingestion-run.aggregate';
-import { IngestionStatusVo } from '../../src/modules/library/ingestion/domain/value-objects/ingestion-status.vo';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/core/domain/ingestion-run.aggregate';
+import { IngestionStatusVo } from '@/modules/library/ingestion/core/domain/ingestion-status.vo';
 import {
   IngestionSagaOrchestrator,
   IngestionSagaSession,
-} from '../../src/modules/library/ingestion/application/services/ingestion-saga.orchestrator';
-import { IngestionRepository } from '../../src/modules/library/ingestion/infrastructure/repositories/ingestion.repository';
-import { ICatalogFacade } from '../../src/modules/library/bibliography/bibliography.facade';
+} from '@/modules/library/ingestion/core/use-cases/ingestion-saga.orchestrator';
+import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
+import { ICatalogFacade } from '@/modules/library/catalog/catalog.facade';
 import { IngestionStatus } from '@prisma/client';
 
 describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle', () => {
@@ -89,9 +89,23 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       expect(run.errorReason).toBe('Malformed metadata encoding');
 
       const compEvents = run.pullDomainEvents();
-      expect(compEvents.some((e) => e.eventType === 'processing.ingestion_run.compensation_started')).toBe(true);
-      expect(compEvents.some((e) => e.eventType === 'processing.ingestion_run.compensation_completed')).toBe(true);
-      expect(compEvents.some((e) => e.eventType === 'processing.ingestion_run.failed')).toBe(true);
+      expect(
+        compEvents.some(
+          (e) =>
+            e.eventType === 'processing.ingestion_run.compensation_started',
+        ),
+      ).toBe(true);
+      expect(
+        compEvents.some(
+          (e) =>
+            e.eventType === 'processing.ingestion_run.compensation_completed',
+        ),
+      ).toBe(true);
+      expect(
+        compEvents.some(
+          (e) => e.eventType === 'processing.ingestion_run.failed',
+        ),
+      ).toBe(true);
     });
 
     it('should disallow starting a step when not in RUNNING status', () => {
@@ -166,11 +180,9 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       const step2Compensate = jest.fn().mockResolvedValue(undefined);
 
       // Step 1: IDENTIFY with compensation
-      await session.executeStep(
-        'IDENTIFY',
-        async () => 'cand-data',
-        { compensate: step1Compensate },
-      );
+      await session.executeStep('IDENTIFY', async () => 'cand-data', {
+        compensate: step1Compensate,
+      });
 
       // Step 2: COMMIT with compensation
       await session.executeStep(
@@ -240,9 +252,8 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
     let PipelineServiceClass: any;
 
     beforeEach(async () => {
-      const imported = await import(
-        '../../src/modules/library/ingestion/application/services/pipeline.service'
-      );
+      const imported =
+        await import('@/modules/library/ingestion/core/use-cases/pipeline.service');
       PipelineServiceClass = imported.PipelineService;
       const PipelineService = PipelineServiceClass;
 
@@ -260,15 +271,22 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
             sourceName: 'doi',
             sourceRecordId: '10.1038/nature123',
             confidenceScore: 1.0,
-            normalizedMetadata: { title: 'Deep Learning', doi: '10.1038/nature123' },
+            normalizedMetadata: {
+              title: 'Deep Learning',
+              doi: '10.1038/nature123',
+            },
           },
         ]),
       };
       mockNormalize = {
-        execute: jest.fn().mockImplementation((cands) => Promise.resolve(cands)),
+        execute: jest
+          .fn()
+          .mockImplementation((cands) => Promise.resolve(cands)),
       };
       mockEnrich = {
-        execute: jest.fn().mockImplementation((_scope, cands) => Promise.resolve(cands)),
+        execute: jest
+          .fn()
+          .mockImplementation((_scope, cands) => Promise.resolve(cands)),
       };
       mockReconcile = {
         execute: jest.fn().mockResolvedValue({
@@ -296,10 +314,7 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         createNote: jest.fn().mockResolvedValue({ id: 'note-1' }),
       };
 
-      orchestrator = new IngestionSagaOrchestrator(
-        mockRepo,
-        mockCatalogFacade,
-      );
+      orchestrator = new IngestionSagaOrchestrator(mockRepo, mockCatalogFacade);
 
       pipelineService = new PipelineService(
         mockRepo,
@@ -395,7 +410,11 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         } as any,
       };
 
-      await svcWithScanner.executePipeline('run-retract-1', 'user-42', envelope);
+      await svcWithScanner.executePipeline(
+        'run-retract-1',
+        'user-42',
+        envelope,
+      );
 
       expect(mockScanner.scan).toHaveBeenCalled();
       expect(mockCommit.execute).toHaveBeenCalledWith(

@@ -1,17 +1,17 @@
-import { DoiVo } from '../../src/modules/library/bibliography/domain/value-objects/doi.vo';
-import { CitationKeyVo } from '../../src/modules/library/bibliography/domain/value-objects/citation-key.vo';
-import { ItemAggregate } from '../../src/modules/library/bibliography/domain/model/item.aggregate';
+import { DoiVo } from '@/modules/library/catalog/core/domain/doi.vo';
+import { CitationKeyVo } from '@/modules/library/catalog/core/domain/citation-key.vo';
+import { ItemAggregate } from '@/modules/library/catalog/core/domain/item.aggregate';
 import {
   ItemConcurrencyDomainException,
   ItemValidationDomainException,
-} from '../../src/modules/library/bibliography/domain/exceptions/item-domain.exception';
-import { CreateItemUseCase } from '../../src/modules/library/bibliography/application/commands/create-item/create-item.use-case';
-import { UpdateItemUseCase } from '../../src/modules/library/bibliography/application/commands/update-item/update-item.use-case';
-import { DeleteItemUseCase } from '../../src/modules/library/bibliography/application/commands/delete-item/delete-item.use-case';
-import { RestoreItemUseCase } from '../../src/modules/library/bibliography/application/commands/restore-item/restore-item.use-case';
-import { GetItemUseCase } from '../../src/modules/library/bibliography/application/queries/get-item/get-item.use-case';
-import { ListItemsUseCase } from '../../src/modules/library/bibliography/application/queries/list-items/list-items.use-case';
-import { IItemRepositoryPort } from '../../src/modules/library/bibliography/domain/ports/item-repository.port';
+} from '@/modules/library/catalog/core/domain/item-domain.exception';
+import { CreateItemUseCase } from '@/modules/library/catalog/core/use-cases/create-item.use-case';
+import { UpdateItemUseCase } from '@/modules/library/catalog/core/use-cases/update-item.use-case';
+import { DeleteItemUseCase } from '@/modules/library/catalog/core/use-cases/delete-item.use-case';
+import { RestoreItemUseCase } from '@/modules/library/catalog/core/use-cases/restore-item.use-case';
+import { GetItemUseCase } from '@/modules/library/catalog/core/use-cases/get-item.use-case';
+import { ListItemsUseCase } from '@/modules/library/catalog/core/use-cases/list-items.use-case';
+import { IItemRepositoryPort } from '@/modules/library/catalog/core/ports/item-repository.port';
 
 describe('Catalog Bounded Context - Clean Architecture & DDD', () => {
   describe('Value Objects', () => {

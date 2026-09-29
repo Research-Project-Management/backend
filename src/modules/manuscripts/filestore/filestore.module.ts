@@ -50,7 +50,8 @@ import { CryptoGitBlobHasherAdapter } from './core/adapters/engine/crypto-git-bl
       useFactory: (configService: ConfigService) => {
         const s3Key = configService.get<string>('AWS_ACCESS_KEY_ID');
         const s3Endpoint = configService.get<string>('AWS_ENDPOINT');
-        const forceLocal = configService.get<string>('MANUSCRIPTS_FILESTORE_DRIVER') === 'local';
+        const forceLocal =
+          configService.get<string>('MANUSCRIPTS_FILESTORE_DRIVER') === 'local';
 
         if (forceLocal || (!s3Key && !s3Endpoint)) {
           return new LocalDiskBinaryStorageAdapter();

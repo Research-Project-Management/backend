@@ -24,15 +24,15 @@ export class SyncLibraryCollectionUseCase {
   constructor(
     private readonly librarySync: ILibrarySyncPort,
     private readonly bibParser: IBibtexParserPort,
-    private readonly aggregator: ICitationsAggregatorPort
+    private readonly aggregator: ICitationsAggregatorPort,
   ) {}
 
   public async execute(
-    command: SyncLibraryCollectionCommand
+    command: SyncLibraryCollectionCommand,
   ): Promise<SyncLibraryCollectionResult> {
     const rawBibtex = await this.librarySync.fetchCollectionBibtex(
       command.userId,
-      command.collectionId
+      command.collectionId,
     );
 
     const entries = this.bibParser.parse(rawBibtex);
@@ -43,7 +43,7 @@ export class SyncLibraryCollectionUseCase {
       lastPath = await this.aggregator.appendEntryToBib(
         command.projectId,
         entry,
-        targetFile
+        targetFile,
       );
     }
 

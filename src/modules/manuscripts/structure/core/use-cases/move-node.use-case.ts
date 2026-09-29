@@ -20,13 +20,13 @@ import { MoveNodeDto } from '../../dto/node.dto';
 export class MoveNodeUseCase {
   constructor(
     private readonly structureRepository: IStructureRepository,
-    private readonly treePublisher: ITreePublisher
+    private readonly treePublisher: ITreePublisher,
   ) {}
 
   public async execute(
     projectId: string,
     nodeId: string,
-    dto: MoveNodeDto
+    dto: MoveNodeDto,
   ): Promise<ManuscriptNodeEntity> {
     const node = await this.structureRepository.findById(projectId, nodeId);
     if (!node) {
@@ -40,7 +40,10 @@ export class MoveNodeUseCase {
     let newParentId: string | null = null;
 
     if (dto.destParentId) {
-      const destParent = await this.structureRepository.findById(projectId, dto.destParentId);
+      const destParent = await this.structureRepository.findById(
+        projectId,
+        dto.destParentId,
+      );
       if (!destParent) {
         throw new NodeNotFoundError(dto.destParentId);
       }
@@ -53,7 +56,10 @@ export class MoveNodeUseCase {
       destPath = NodePathVo.normalize(dto.destPath);
       const parentPath = NodePathVo.dirname(destPath);
       if (parentPath !== '/') {
-        const parentNode = await this.structureRepository.findByPath(projectId, parentPath);
+        const parentNode = await this.structureRepository.findByPath(
+          projectId,
+          parentPath,
+        );
         newParentId = parentNode ? parentNode.id : null;
       }
     } else {
@@ -63,20 +69,34 @@ export class MoveNodeUseCase {
     }
 
     // Cycle detection: destination cannot be within source's subtree
-    if (node.isFolder() && (destPath === node.path || NodePathVo.isDescendant(node.path, destPath))) {
+    if (
+      node.isFolder() &&
+      (destPath === node.path || NodePathVo.isDescendant(node.path, destPath))
+    ) {
       throw new CyclicMoveError(node.path, destPath);
     }
 
     // Check if duplicate exists at target
-    const existing = await this.structureRepository.findByPath(projectId, destPath);
+    const existing = await this.structureRepository.findByPath(
+      projectId,
+      destPath,
+    );
     if (existing && existing.id !== node.id) {
       throw new DuplicateNodePathError(destPath);
     }
 
     const oldPath = node.path;
-    await this.structureRepository.moveSubtree(projectId, oldPath, destPath, newParentId);
+    await this.structureRepository.moveSubtree(
+      projectId,
+      oldPath,
+      destPath,
+      newParentId,
+    );
 
-    const updated = (await this.structureRepository.findById(projectId, node.id))!;
+    const updated = (await this.structureRepository.findById(
+      projectId,
+      node.id,
+    ))!;
 
     await this.treePublisher.publishTreeMutation({
       projectId,

@@ -3,8 +3,16 @@
  * Domain Entity modeling an individual compiler diagnostic, warning, or static lint issue.
  */
 
-import { DiagnosticSeverityVo, DiagnosticSeverityType } from '../value-objects/diagnostic-severity.vo';
+import {
+  DiagnosticSeverityVo,
+  DiagnosticSeverityType,
+} from '../value-objects/diagnostic-severity.vo';
 import { ErrorExplanationVo } from '../value-objects/error-explanation.vo';
+
+export interface QuickFixVo {
+  description: string;
+  replacementText: string;
+}
 
 export interface DiagnosticItemProps {
   id?: string;
@@ -16,6 +24,7 @@ export interface DiagnosticItemProps {
   context?: string;
   code?: string;
   explanation?: ErrorExplanationVo;
+  quickFix?: QuickFixVo;
 }
 
 export class DiagnosticItem {
@@ -28,12 +37,17 @@ export class DiagnosticItem {
   public readonly context?: string;
   public readonly code?: string;
   public readonly explanation?: ErrorExplanationVo;
+  public readonly quickFix?: QuickFixVo;
 
   constructor(props: DiagnosticItemProps) {
     this.id = props.id || `diag-${Math.random().toString(36).substring(2, 10)}`;
     this.file = props.file || 'main.tex';
-    this.line = typeof props.line === 'number' && !isNaN(props.line) ? props.line : null;
-    this.column = typeof props.column === 'number' && !isNaN(props.column) ? props.column : null;
+    this.line =
+      typeof props.line === 'number' && !isNaN(props.line) ? props.line : null;
+    this.column =
+      typeof props.column === 'number' && !isNaN(props.column)
+        ? props.column
+        : null;
     this.severity =
       props.severity instanceof DiagnosticSeverityVo
         ? props.severity
@@ -42,6 +56,7 @@ export class DiagnosticItem {
     this.context = props.context;
     this.code = props.code;
     this.explanation = props.explanation;
+    this.quickFix = props.quickFix;
   }
 
   public toJSON() {
@@ -55,6 +70,7 @@ export class DiagnosticItem {
       context: this.context,
       code: this.code,
       explanation: this.explanation?.toJSON(),
+      quickFix: this.quickFix,
     };
   }
 }

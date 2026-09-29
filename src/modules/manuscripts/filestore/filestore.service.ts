@@ -77,7 +77,10 @@ export class FilestoreService {
   /**
    * Fast metadata query.
    */
-  public async getFileMetadata(projectId: string, fileId: string): Promise<ManuscriptFile> {
+  public async getFileMetadata(
+    projectId: string,
+    fileId: string,
+  ): Promise<ManuscriptFile> {
     const result = await this.headUseCase.execute({ projectId, fileId });
     return result.file;
   }
@@ -85,21 +88,40 @@ export class FilestoreService {
   /**
    * List all files in a manuscript project.
    */
-  public async listFiles(projectId: string, includeDeleted = false): Promise<ManuscriptFile[]> {
+  public async listFiles(
+    projectId: string,
+    includeDeleted = false,
+  ): Promise<ManuscriptFile[]> {
     return await this.repository.listByProject(projectId, includeDeleted);
   }
 
   /**
    * Delete file.
    */
-  public async deleteFile(projectId: string, fileId: string, purgeBlob = false): Promise<void> {
-    await this.deleteUseCase.execute({ projectId, fileId, purgePhysicalBlob: purgeBlob });
+  public async deleteFile(
+    projectId: string,
+    fileId: string,
+    purgeBlob = false,
+  ): Promise<void> {
+    await this.deleteUseCase.execute({
+      projectId,
+      fileId,
+      purgePhysicalBlob: purgeBlob,
+    });
   }
 
   /**
    * Generate pre-signed URL.
    */
-  public async getSignedUrl(projectId: string, fileId: string, expiresIn = 3600): Promise<string | null> {
-    return await this.signedUrlUseCase.execute({ projectId, fileId, expiresInSeconds: expiresIn });
+  public async getSignedUrl(
+    projectId: string,
+    fileId: string,
+    expiresIn = 3600,
+  ): Promise<string | null> {
+    return await this.signedUrlUseCase.execute({
+      projectId,
+      fileId,
+      expiresInSeconds: expiresIn,
+    });
   }
 }

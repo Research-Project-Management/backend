@@ -1,5 +1,5 @@
-import { ItemsService } from '../../src/modules/library/bibliography/application/services/items.service';
-import { AttachmentsService } from '../../src/modules/library/reader/application/services/attachments.service';
+import { ItemsService } from '@/modules/library/catalog/core/use-cases/items.service';
+import { AttachmentsService } from '@/modules/library/extraction/core/use-cases/attachments.service';
 import { IdempotencyMiddleware } from '../../src/modules/library/shared-kernel/core/middlewares/idempotency.middleware';
 import { NotFoundException } from '@nestjs/common';
 import { RedisCacheService } from '../../src/core/cache/redis.service';
@@ -206,7 +206,9 @@ describe('Library Security Hardening & Performance Optimization', () => {
       });
 
       // Member check succeeds
-      mockRepo.checkProjectMember.mockResolvedValueOnce({ role: 'contributor' });
+      mockRepo.checkProjectMember.mockResolvedValueOnce({
+        role: 'contributor',
+      });
 
       await service.addRevision(
         memberId,

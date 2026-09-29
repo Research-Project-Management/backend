@@ -20,10 +20,20 @@ import {
   NotFoundException,
   ConflictException,
   PayloadTooLargeException,
+  Optional,
+  UseGuards,
 } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { DocstoreService } from './docstore.service';
+import { RealtimeService } from '@/modules/realtime/realtime.service';
 import { CreateDocDto, UpdateDocDto, PatchDocDto } from './dto/doc.dto';
 import {
   DocNotFoundError,
@@ -33,6 +43,7 @@ import {
 } from './core/domain/doc-errors';
 
 @ApiTags('Manuscripts - Docstore')
+@ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/docs',
   'api/manuscripts/projects/:projectId/docs',
@@ -41,8 +52,13 @@ import {
   'projects/:projectId/pages',
   'docstore/project/:projectId',
 ])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
 export class DocstoreController {
-  constructor(private readonly docstoreService: DocstoreService) {}
+  constructor(
+    private readonly docstoreService: DocstoreService,
+    @Optional() private readonly realtimeService?: RealtimeService,
+  ) {}
 
   private handleError(error: any): never {
     if (error instanceof DocNotFoundError) {
@@ -64,7 +80,9 @@ export class DocstoreController {
   }
 
   @Get('doc')
-  @ApiOperation({ summary: 'Get all non-deleted documents in project (Bulk query for CLSI)' })
+  @ApiOperation({
+    summary: 'Get all non-deleted documents in project (Bulk query for CLSI)',
+  })
   async getAllDocs(@Param('projectId') projectId: string) {
     try {
       return await this.docstoreService.getAllDocs(projectId);
@@ -84,7 +102,9 @@ export class DocstoreController {
   }
 
   @Get('ranges')
-  @ApiOperation({ summary: 'Get all document ranges (track changes / comments) in project' })
+  @ApiOperation({
+    summary: 'Get all document ranges (track changes / comments) in project',
+  })
   async getAllRanges(@Param('projectId') projectId: string) {
     try {
       return await this.docstoreService.getAllRanges(projectId);
@@ -98,7 +118,7 @@ export class DocstoreController {
   async getDoc(
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
-    @Query('include_deleted') includeDeleted?: string
+    @Query('include_deleted') includeDeleted?: string,
   ) {
     try {
       return await this.docstoreService.getDoc(projectId, docId, {
@@ -113,7 +133,7 @@ export class DocstoreController {
   @ApiOperation({ summary: 'Check if document is marked as deleted' })
   async isDocDeleted(
     @Param('projectId') projectId: string,
-    @Param('docId') docId: string
+    @Param('docId') docId: string,
   ) {
     try {
       const deleted = await this.docstoreService.isDocDeleted(projectId, docId);
@@ -128,7 +148,7 @@ export class DocstoreController {
   async getRawDoc(
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
-    @Res() reply: FastifyReply
+    @Res() reply: FastifyReply,
   ) {
     try {
       const rawText = await this.docstoreService.getRawDoc(projectId, docId);
@@ -143,21 +163,27 @@ export class DocstoreController {
   async peekDoc(
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
-    @Res() reply: FastifyReply
+    @Res() reply: FastifyReply,
   ) {
     try {
-      const { doc, status } = await this.docstoreService.peekDoc(projectId, docId);
-      reply.header('x-doc-status', status).send(this.docstoreService.mapToDto(doc));
+      const { doc, status } = await this.docstoreService.peekDoc(
+        projectId,
+        docId,
+      );
+      reply
+        .header('x-doc-status', status)
+        .send(this.docstoreService.mapToDto(doc));
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Post('doc')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Create new document' })
   async createDoc(
     @Param('projectId') projectId: string,
-    @Body() dto: CreateDocDto
+    @Body() dto: CreateDocDto,
   ) {
     try {
       return await this.docstoreService.createDoc(projectId, dto);
@@ -167,14 +193,38 @@ export class DocstoreController {
   }
 
   @Post('doc/:docId')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update document lines with OCC revision check' })
   async updateDoc(
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
-    @Body() dto: UpdateDocDto
+    @Body() dto: UpdateDocDto,
   ) {
     try {
-      const result = await this.docstoreService.updateDoc(projectId, docId, dto);
+      const result = await this.docstoreService.updateDoc(
+        projectId,
+        docId,
+        dto,
+      );
+      if (this.realtimeService) {
+        try {
+          this.realtimeService.broadcastEvent(
+            projectId,
+            'doc:content-updated',
+            {
+              docId,
+              rev: result.rev,
+              lines: dto.lines,
+              content: Array.isArray(dto.lines)
+                ? dto.lines.join('\n')
+                : undefined,
+              updatedAt: new Date().toISOString(),
+            },
+          );
+        } catch {
+          // ignore non-blocking error
+        }
+      }
       return {
         modified: result.modified,
         rev: result.rev,
@@ -185,11 +235,12 @@ export class DocstoreController {
   }
 
   @Patch('doc/:docId')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Patch document metadata or soft-delete' })
   async patchDoc(
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
-    @Body() dto: PatchDocDto
+    @Body() dto: PatchDocDto,
   ) {
     try {
       return await this.docstoreService.patchDoc(projectId, docId, dto);
@@ -199,14 +250,23 @@ export class DocstoreController {
   }
 
   @Delete('doc/:docId')
-  @ApiOperation({ summary: 'Delete document (Deprecated in Overleaf - returns error instructing PATCH)' })
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary:
+      'Delete document (Deprecated in Overleaf - returns error instructing PATCH)',
+  })
   deleteDoc() {
-    throw new BadRequestException('DELETE-ing a doc is DEPRECATED. PATCH the doc with deleted: true instead.');
+    throw new BadRequestException(
+      'DELETE-ing a doc is DEPRECATED. PATCH the doc with deleted: true instead.',
+    );
   }
 
   @Post('archive')
+  @ProjectRoles('owner', 'coordinator')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Archive all documents in project to Cold Tier (S3)' })
+  @ApiOperation({
+    summary: 'Archive all documents in project to Cold Tier (S3)',
+  })
   async archiveAllDocs(@Param('projectId') projectId: string) {
     try {
       await this.docstoreService.archiveAllDocs(projectId);
@@ -216,11 +276,12 @@ export class DocstoreController {
   }
 
   @Post('doc/:docId/archive')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Archive single document to Cold Tier (S3)' })
   async archiveDoc(
     @Param('projectId') projectId: string,
-    @Param('docId') docId: string
+    @Param('docId') docId: string,
   ) {
     try {
       await this.docstoreService.archiveDoc(projectId, docId);
@@ -230,7 +291,10 @@ export class DocstoreController {
   }
 
   @Post('unarchive')
-  @ApiOperation({ summary: 'Unarchive all documents in project from Cold Tier (S3)' })
+  @ProjectRoles('owner', 'coordinator')
+  @ApiOperation({
+    summary: 'Unarchive all documents in project from Cold Tier (S3)',
+  })
   async unArchiveAllDocs(@Param('projectId') projectId: string) {
     try {
       const count = await this.docstoreService.unArchiveAllDocs(projectId);
@@ -241,6 +305,7 @@ export class DocstoreController {
   }
 
   @Post('destroy')
+  @ProjectRoles('owner')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Permanently destroy all documents in project' })
   async destroyAllDocs(@Param('projectId') projectId: string) {

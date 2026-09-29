@@ -1,12 +1,11 @@
-import {
-  Injectable,
-  NotFoundException,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProjectState, EntityType } from '@prisma/client';
 import { StateRepository } from './state.repository';
-import { DEFAULT_PROJECT_STATES, DefaultProjectStateTemplate } from './state.constants';
+import {
+  DEFAULT_PROJECT_STATES,
+  DefaultProjectStateTemplate,
+} from './state.constants';
 import { ProjectCurrentStateResponseDto } from './dto/project-state-response.dto';
 import {
   CreateProjectStateDto,
@@ -105,12 +104,21 @@ export class StateService {
     dto: UpdateProjectStateItemDto,
     actorId?: string,
   ): Promise<ProjectState> {
-    const existing = await this.stateRepo.findProjectStateById(projectId, stateId);
+    const existing = await this.stateRepo.findProjectStateById(
+      projectId,
+      stateId,
+    );
     if (!existing) {
-      throw new NotFoundException(`Trạng thái với ID "${stateId}" không tồn tại trong dự án`);
+      throw new NotFoundException(
+        `Trạng thái với ID "${stateId}" không tồn tại trong dự án`,
+      );
     }
 
-    const updated = await this.stateRepo.updateProjectStateItem(projectId, stateId, dto);
+    const updated = await this.stateRepo.updateProjectStateItem(
+      projectId,
+      stateId,
+      dto,
+    );
     await this.invalidateProjectCache(projectId);
 
     this.eventEmitter?.emit(
@@ -138,7 +146,10 @@ export class StateService {
     dto: ReorderProjectStatesDto,
     actorId?: string,
   ): Promise<ProjectState[]> {
-    const reordered = await this.stateRepo.reorderProjectStates(projectId, dto.states);
+    const reordered = await this.stateRepo.reorderProjectStates(
+      projectId,
+      dto.states,
+    );
     await this.invalidateProjectCache(projectId);
 
     this.eventEmitter?.emit(
@@ -168,10 +179,16 @@ export class StateService {
   ): Promise<{ success: boolean; message: string }> {
     const state = await this.stateRepo.findProjectStateById(projectId, stateId);
     if (!state) {
-      throw new NotFoundException(`Trạng thái với ID "${stateId}" không tồn tại`);
+      throw new NotFoundException(
+        `Trạng thái với ID "${stateId}" không tồn tại`,
+      );
     }
 
-    await this.stateRepo.deleteProjectState(projectId, stateId, fallbackStateId);
+    await this.stateRepo.deleteProjectState(
+      projectId,
+      stateId,
+      fallbackStateId,
+    );
     await this.invalidateProjectCache(projectId);
 
     this.eventEmitter?.emit(
@@ -187,7 +204,10 @@ export class StateService {
       }),
     );
 
-    return { success: true, message: `Đã xóa trạng thái "${state.name}" thành công` };
+    return {
+      success: true,
+      message: `Đã xóa trạng thái "${state.name}" thành công`,
+    };
   }
 
   /**
@@ -214,9 +234,14 @@ export class StateService {
       };
     }
 
-    const targetState = await this.stateRepo.findProjectStateById(projectId, targetStateId);
+    const targetState = await this.stateRepo.findProjectStateById(
+      projectId,
+      targetStateId,
+    );
     if (!targetState) {
-      throw new NotFoundException(`Trạng thái mục tiêu với ID "${targetStateId}" không tồn tại trong dự án`);
+      throw new NotFoundException(
+        `Trạng thái mục tiêu với ID "${targetStateId}" không tồn tại trong dự án`,
+      );
     }
 
     await this.stateRepo.setCurrentProjectState(projectId, targetStateId);
@@ -259,4 +284,3 @@ export class StateService {
     }
   }
 }
-

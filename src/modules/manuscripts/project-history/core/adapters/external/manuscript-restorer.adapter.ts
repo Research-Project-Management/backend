@@ -5,7 +5,10 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import * as pathPosix from 'node:path/posix';
-import { IProjectRestorerPort, RestoreResult } from '../../ports/project-restorer.port';
+import {
+  IProjectRestorerPort,
+  RestoreResult,
+} from '../../ports/project-restorer.port';
 import { Snapshot } from '../../domain/entities/snapshot.entity';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
@@ -24,12 +27,17 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     super();
   }
 
-  public async restoreToState(projectId: string, snapshot: Snapshot): Promise<RestoreResult> {
+  public async restoreToState(
+    projectId: string,
+    snapshot: Snapshot,
+  ): Promise<RestoreResult> {
     // 1. Flush any active buffers first
     try {
       await this.documentUpdaterService.flushProject(projectId, true);
     } catch (err) {
-      this.logger.warn(`Failed to flush project ${projectId} prior to restore: ${err}`);
+      this.logger.warn(
+        `Failed to flush project ${projectId} prior to restore: ${err}`,
+      );
     }
 
     const currentNodes = await this.structureService.getAllNodes(projectId);
@@ -45,7 +53,9 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
         try {
           await this.structureService.deleteNode(projectId, node.id);
         } catch (err) {
-          this.logger.warn(`Could not delete post-snapshot node ${node.path} (${node.id}): ${err}`);
+          this.logger.warn(
+            `Could not delete post-snapshot node ${node.path} (${node.id}): ${err}`,
+          );
         }
       }
     }

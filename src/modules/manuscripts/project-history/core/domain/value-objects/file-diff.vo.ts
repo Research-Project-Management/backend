@@ -6,7 +6,8 @@
 import { DiffHunkVo } from './diff-hunk.vo';
 import { FileSnapshotType } from './file-snapshot.vo';
 
-export type FileDiffStatus = 'added' | 'deleted' | 'modified' | 'renamed' | 'unchanged';
+export type FileDiffStatus =
+  'added' | 'deleted' | 'modified' | 'renamed' | 'unchanged';
 
 export interface FileDiffProps {
   path: string;

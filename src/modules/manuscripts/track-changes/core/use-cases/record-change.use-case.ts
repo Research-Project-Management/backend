@@ -6,8 +6,14 @@
 import { Injectable } from '@nestjs/common';
 import { ITrackChangesRepositoryPort } from '../ports/track-changes-repository.port';
 import { IRealtimeNotifierPort } from '../ports/realtime-notifier.port';
-import { TrackChange, ChangeType } from '../domain/entities/track-change.entity';
-import { TextRangeVo, TextRangeProps } from '../domain/value-objects/text-range.vo';
+import {
+  TrackChange,
+  ChangeType,
+} from '../domain/entities/track-change.entity';
+import {
+  TextRangeVo,
+  TextRangeProps,
+} from '../domain/value-objects/text-range.vo';
 
 export interface RecordChangeInput {
   projectId: string;

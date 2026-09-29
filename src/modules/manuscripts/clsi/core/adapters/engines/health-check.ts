@@ -38,7 +38,7 @@ export class ClsiHealthCheck {
 
   constructor(
     private readonly runner: ISandboxRunner,
-    private readonly scratchDir: string = '/tmp/clsi-scratch'
+    private readonly scratchDir: string = '/tmp/clsi-scratch',
   ) {}
 
   public async checkHealth(): Promise<ClsiHealthReport> {
@@ -96,7 +96,7 @@ export class ClsiHealthCheck {
 
   private async probeBinary(
     binary: string,
-    versionArgs: string[]
+    versionArgs: string[],
   ): Promise<BinaryStatus> {
     try {
       const result = await this.runner.run(binary, versionArgs, {

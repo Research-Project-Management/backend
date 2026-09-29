@@ -620,7 +620,14 @@ export class CoreService {
     return deriveProjectPrefix(project.identifier, project.name);
   }
 
-  async duplicateProject(projectId: string, userId: string): Promise<{ project: EnrichedProject; yourRole: Role; permissions: ProjectPermissions }> {
+  async duplicateProject(
+    projectId: string,
+    userId: string,
+  ): Promise<{
+    project: EnrichedProject;
+    yourRole: Role;
+    permissions: ProjectPermissions;
+  }> {
     const source = await this.projectRepo.findProjectForDuplication(projectId);
     if (!source) throw new NotFoundException(`Project ${projectId} not found`);
 
@@ -642,7 +649,7 @@ export class CoreService {
         coverImage: source.coverImage ?? undefined,
         modules: source.modules ? (source.modules as any) : undefined,
         createdById: userId,
-      }
+      },
     });
 
     // 3. Add creator as owner member
@@ -709,7 +716,9 @@ export class CoreService {
     const nodeIdMap = new Map<string, string>();
     const manuscriptNodes = (source as any).manuscriptNodes || [];
     for (const node of manuscriptNodes) {
-      const newParentId = node.parentId ? nodeIdMap.get(node.parentId) || null : null;
+      const newParentId = node.parentId
+        ? nodeIdMap.get(node.parentId) || null
+        : null;
       const newDocId = node.docId ? docIdMap.get(node.docId) || null : null;
       const newFileId = node.fileId ? fileIdMap.get(node.fileId) || null : null;
 
@@ -736,19 +745,27 @@ export class CoreService {
 
     // Return enriched project
     const result = await this.findById(newProject.id, userId);
-    if (!result?.project) throw new NotFoundException('Duplicated project not found');
+    if (!result?.project)
+      throw new NotFoundException('Duplicated project not found');
     return result;
   }
 
-  async getTrashedProjects(userId: string): Promise<{ projects: EnrichedProject[] }> {
+  async getTrashedProjects(
+    userId: string,
+  ): Promise<{ projects: EnrichedProject[] }> {
     const projects = await this.projectRepo.findTrashedProjectsByUser(userId);
     const enriched: EnrichedProject[] = projects.map((p: any) => ({
       ...p,
-      yourRole: p.createdById === userId ? Role.owner
-        : p.members?.find((m: any) => m.userId === userId)?.role ?? Role.reviewer,
+      yourRole:
+        p.createdById === userId
+          ? Role.owner
+          : (p.members?.find((m: any) => m.userId === userId)?.role ??
+            Role.reviewer),
       permissions: calculateProjectPermissions(
-        p.createdById === userId ? Role.owner
-          : p.members?.find((m: any) => m.userId === userId)?.role ?? Role.reviewer,
+        p.createdById === userId
+          ? Role.owner
+          : (p.members?.find((m: any) => m.userId === userId)?.role ??
+              Role.reviewer),
         p.isActive,
       ),
       projectLabelsList: p.labels?.map((l: any) => l.label) || [],
@@ -756,11 +773,18 @@ export class CoreService {
     return { projects: enriched };
   }
 
-  async permanentDeleteProject(projectId: string, userId: string): Promise<{ message: string }> {
+  async permanentDeleteProject(
+    projectId: string,
+    userId: string,
+  ): Promise<{ message: string }> {
     const project = await this.projectRepo.findProjectById(projectId);
     if (!project) throw new NotFoundException(`Project ${projectId} not found`);
-    if (project.createdById !== userId) throw new ForbiddenException('Only project owner can permanently delete');
-    if (!project.deletedAt) throw new BadRequestException('Project must be soft-deleted before permanent deletion');
+    if (project.createdById !== userId)
+      throw new ForbiddenException('Only project owner can permanently delete');
+    if (!project.deletedAt)
+      throw new BadRequestException(
+        'Project must be soft-deleted before permanent deletion',
+      );
     await this.projectRepo.permanentDeleteProject(projectId);
     await this.invalidateProjectCache(projectId, [userId]);
     return { message: 'Project permanently deleted' };

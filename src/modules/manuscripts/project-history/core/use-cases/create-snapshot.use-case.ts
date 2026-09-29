@@ -26,18 +26,28 @@ export class CreateSnapshotUseCase {
   ) {}
 
   public async execute(input: CreateSnapshotInput): Promise<Snapshot> {
-    const { projectId, summary, createdById, isAutomatic = false, label } = input;
+    const {
+      projectId,
+      summary,
+      createdById,
+      isAutomatic = false,
+      label,
+    } = input;
 
     // Check duplicate label early if provided
     if (label && label.trim()) {
-      const existingLabel = await this.historyRepository.findLabelByName(projectId, label.trim());
+      const existingLabel = await this.historyRepository.findLabelByName(
+        projectId,
+        label.trim(),
+      );
       if (existingLabel) {
         throw new DuplicateLabelException(projectId, label.trim());
       }
     }
 
     // 1. Determine next version number
-    const latestVersion = await this.historyRepository.getLatestVersion(projectId);
+    const latestVersion =
+      await this.historyRepository.getLatestVersion(projectId);
     const nextVersion = latestVersion + 1;
 
     // 2. Collect current project files state

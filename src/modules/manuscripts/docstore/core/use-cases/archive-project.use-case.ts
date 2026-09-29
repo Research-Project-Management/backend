@@ -19,7 +19,7 @@ export class ArchiveProjectUseCase {
   constructor(
     private readonly docRepository: IDocRepository,
     private readonly docPersistor: IDocPersistor,
-    private readonly getDocUseCase: GetDocUseCase
+    private readonly getDocUseCase: GetDocUseCase,
   ) {}
 
   public async archiveDoc(projectId: string, docId: string): Promise<void> {
@@ -36,7 +36,9 @@ export class ArchiveProjectUseCase {
     });
 
     if (payload.indexOf('\u0000') !== -1) {
-      throw new NullByteDetectedError(`Null byte detected when archiving doc ${docId}`);
+      throw new NullByteDetectedError(
+        `Null byte detected when archiving doc ${docId}`,
+      );
     }
 
     const key = `${projectId}/${doc.id}.json`;
@@ -63,7 +65,9 @@ export class ArchiveProjectUseCase {
 
       // Defensive check for null bytes
       if (payload.indexOf('\u0000') !== -1) {
-        throw new NullByteDetectedError(`Null byte detected when archiving doc ${doc.id}`);
+        throw new NullByteDetectedError(
+          `Null byte detected when archiving doc ${doc.id}`,
+        );
       }
 
       const key = `${projectId}/${doc.id}.json`;
@@ -75,7 +79,9 @@ export class ArchiveProjectUseCase {
       count++;
     }
 
-    this.logger.log(`Archived ${count} documents for project ${projectId} to S3 cold tier`);
+    this.logger.log(
+      `Archived ${count} documents for project ${projectId} to S3 cold tier`,
+    );
     return count;
   }
 

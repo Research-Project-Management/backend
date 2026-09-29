@@ -54,7 +54,9 @@ describe('Manuscripts Spelling Subsystem (LaTeX Tokenizer, Engine & Custom Dicti
       });
 
       it('should throw UnsupportedLanguageException on unknown language', () => {
-        expect(() => LanguageCodeVo.create('klingon')).toThrow(UnsupportedLanguageException);
+        expect(() => LanguageCodeVo.create('klingon')).toThrow(
+          UnsupportedLanguageException,
+        );
       });
     });
 
@@ -74,7 +76,9 @@ describe('Manuscripts Spelling Subsystem (LaTeX Tokenizer, Engine & Custom Dicti
       });
 
       it('should throw InvalidWordException on empty word token', () => {
-        expect(() => new WordTokenVo({ word: '  ', line: 1, col: 1 })).toThrow(InvalidWordException);
+        expect(() => new WordTokenVo({ word: '  ', line: 1, col: 1 })).toThrow(
+          InvalidWordException,
+        );
       });
     });
 
@@ -114,8 +118,20 @@ describe('Manuscripts Spelling Subsystem (LaTeX Tokenizer, Engine & Custom Dicti
       });
 
       it('should create SpellingReport and calculate total errors', () => {
-        const err1 = new MisspelledWord({ word: 'teh', line: 1, col: 1, length: 3, suggestions: ['the'] });
-        const err2 = new MisspelledWord({ word: 'wrok', line: 1, col: 5, length: 4, suggestions: ['work'] });
+        const err1 = new MisspelledWord({
+          word: 'teh',
+          line: 1,
+          col: 1,
+          length: 3,
+          suggestions: ['the'],
+        });
+        const err2 = new MisspelledWord({
+          word: 'wrok',
+          line: 1,
+          col: 5,
+          length: 4,
+          suggestions: ['work'],
+        });
 
         const report = new SpellingReport({
           language: 'en-us',
@@ -145,10 +161,15 @@ describe('Manuscripts Spelling Subsystem (LaTeX Tokenizer, Engine & Custom Dicti
         const text = 'Hello world from LaTeX.';
         const tokens = tokenizer.tokenize(text);
 
-        expect(tokens.map((t) => t.word)).toEqual(['Hello', 'world', 'from', 'LaTeX']);
-        expect(tokens[0]!.line).toBe(1);
-        expect(tokens[0]!.col).toBe(1);
-        expect(tokens[1]!.col).toBe(7); // 'world' starts at index 6 -> col 7
+        expect(tokens.map((t) => t.word)).toEqual([
+          'Hello',
+          'world',
+          'from',
+          'LaTeX',
+        ]);
+        expect(tokens[0].line).toBe(1);
+        expect(tokens[0].col).toBe(1);
+        expect(tokens[1].col).toBe(7); // 'world' starts at index 6 -> col 7
       });
 
       it('should mask inline and display math without affecting coordinate alignment', () => {
@@ -172,7 +193,8 @@ describe('Manuscripts Spelling Subsystem (LaTeX Tokenizer, Engine & Custom Dicti
       });
 
       it('should mask LaTeX commands with technical arguments (cite, ref, label)', () => {
-        const text = 'As shown in \\cite{vaswani2017} and \\ref{sec:1}, attention works.';
+        const text =
+          'As shown in \\cite{vaswani2017} and \\ref{sec:1}, attention works.';
         const tokens = tokenizer.tokenize(text);
 
         const words = tokens.map((t) => t.word);
@@ -183,7 +205,8 @@ describe('Manuscripts Spelling Subsystem (LaTeX Tokenizer, Engine & Custom Dicti
       });
 
       it('should preserve prose words inside styling commands like textbf and textit', () => {
-        const text = 'This is a \\textbf{crucial} and \\textit{important} finding.';
+        const text =
+          'This is a \\textbf{crucial} and \\textit{important} finding.';
         const tokens = tokenizer.tokenize(text);
 
         const words = tokens.map((t) => t.word);
@@ -295,7 +318,9 @@ The result is valid.
         const list = await dict.listUserWords('user-1');
         expect(list).toEqual(['mycustomterm']);
 
-        expect(await dict.isCustomWord('mycustomterm', undefined, 'user-1')).toBe(true);
+        expect(
+          await dict.isCustomWord('mycustomterm', undefined, 'user-1'),
+        ).toBe(true);
       });
 
       it('should remove words from project and user scopes', async () => {
@@ -322,9 +347,14 @@ The result is valid.
 
     describe('CheckSpellingUseCase', () => {
       it('should check LaTeX document and report misspelled words with suggestions', async () => {
-        const useCase = new CheckSpellingUseCase(tokenizer, spellEngine, customDict);
+        const useCase = new CheckSpellingUseCase(
+          tokenizer,
+          spellEngine,
+          customDict,
+        );
 
-        const latex = 'This paper presents a novel neural netwrok architecture.';
+        const latex =
+          'This paper presents a novel neural netwrok architecture.';
         const report = await useCase.execute({
           text: latex,
           language: 'en-US',
@@ -332,15 +362,19 @@ The result is valid.
 
         expect(report.totalWordsChecked).toBe(8);
         expect(report.misspelledCount).toBe(1);
-        expect(report.errors[0]!.word).toBe('netwrok');
-        expect(report.errors[0]!.suggestions).toContain('network');
+        expect(report.errors[0].word).toBe('netwrok');
+        expect(report.errors[0].suggestions).toContain('network');
       });
 
       it('should ignore custom words learned in project or user dictionary', async () => {
         await customDict.addProjectWord('proj-1', 'FluxPlatform');
         await customDict.addUserWord('user-1', 'GigaBERT');
 
-        const useCase = new CheckSpellingUseCase(tokenizer, spellEngine, customDict);
+        const useCase = new CheckSpellingUseCase(
+          tokenizer,
+          spellEngine,
+          customDict,
+        );
         const text = 'Testing FluxPlatform and GigaBERT models.';
 
         const report = await useCase.execute({
@@ -353,7 +387,11 @@ The result is valid.
       });
 
       it('should return empty report on blank text', async () => {
-        const useCase = new CheckSpellingUseCase(tokenizer, spellEngine, customDict);
+        const useCase = new CheckSpellingUseCase(
+          tokenizer,
+          spellEngine,
+          customDict,
+        );
         const report = await useCase.execute({ text: '' });
         expect(report.totalWordsChecked).toBe(0);
         expect(report.misspelledCount).toBe(0);
@@ -378,22 +416,36 @@ The result is valid.
         const learnUseCase = new LearnWordUseCase(customDict);
         const unlearnUseCase = new UnlearnWordUseCase(customDict);
 
-        await learnUseCase.execute({ word: 'TransformerXL', scope: 'PROJECT', projectId: 'p1' });
+        await learnUseCase.execute({
+          word: 'TransformerXL',
+          scope: 'PROJECT',
+          projectId: 'p1',
+        });
         expect(await customDict.isCustomWord('transformerxl', 'p1')).toBe(true);
 
-        const removed = await unlearnUseCase.execute({ word: 'TransformerXL', scope: 'PROJECT', projectId: 'p1' });
+        const removed = await unlearnUseCase.execute({
+          word: 'TransformerXL',
+          scope: 'PROJECT',
+          projectId: 'p1',
+        });
         expect(removed).toBe(true);
-        expect(await customDict.isCustomWord('transformerxl', 'p1')).toBe(false);
+        expect(await customDict.isCustomWord('transformerxl', 'p1')).toBe(
+          false,
+        );
       });
 
       it('should reject invalid words containing spaces or illegal characters', async () => {
         const learnUseCase = new LearnWordUseCase(customDict);
         await expect(
-          learnUseCase.execute({ word: 'two words', scope: 'PROJECT', projectId: 'p1' })
+          learnUseCase.execute({
+            word: 'two words',
+            scope: 'PROJECT',
+            projectId: 'p1',
+          }),
         ).rejects.toThrow(InvalidWordException);
 
         await expect(
-          learnUseCase.execute({ word: '', scope: 'PROJECT', projectId: 'p1' })
+          learnUseCase.execute({ word: '', scope: 'PROJECT', projectId: 'p1' }),
         ).rejects.toThrow(InvalidWordException);
       });
     });
@@ -404,7 +456,10 @@ The result is valid.
         await customDict.addProjectWord('p1', 'BetaWord');
 
         const useCase = new ListCustomWordsUseCase(customDict);
-        const words = await useCase.execute({ scope: 'PROJECT', projectId: 'p1' });
+        const words = await useCase.execute({
+          scope: 'PROJECT',
+          projectId: 'p1',
+        });
         expect(words).toEqual(['alphaword', 'betaword']);
       });
     });
@@ -425,7 +480,11 @@ The result is valid.
       const spellEngine = new AcademicSpellEngineAdapter();
       customDict = new InMemoryCustomDictionaryAdapter();
 
-      const checkSpellingUseCase = new CheckSpellingUseCase(tokenizer, spellEngine, customDict);
+      const checkSpellingUseCase = new CheckSpellingUseCase(
+        tokenizer,
+        spellEngine,
+        customDict,
+      );
       const getSuggestionsUseCase = new GetSuggestionsUseCase(spellEngine);
       const learnWordUseCase = new LearnWordUseCase(customDict);
       const unlearnWordUseCase = new UnlearnWordUseCase(customDict);
@@ -441,7 +500,7 @@ The result is valid.
         learnWordUseCase,
         unlearnWordUseCase,
         listCustomWordsUseCase,
-        docstoreMock
+        docstoreMock,
       );
 
       controller = new SpellingController(service);
@@ -454,12 +513,12 @@ The result is valid.
         const res = await controller.checkSpelling(
           'p1',
           { text: 'An algorithim test.', language: 'en-US' },
-          req
+          req,
         );
 
         expect(res.totalWordsChecked).toBe(3);
         expect(res.misspelledCount).toBe(1);
-        expect(res.errors[0]!.word).toBe('algorithim');
+        expect(res.errors[0].word).toBe('algorithim');
       });
 
       it('POST /projects/:projectId/spelling/check should load doc from Docstore when docId provided', async () => {
@@ -468,11 +527,15 @@ The result is valid.
         });
 
         const req = { user: { id: 'u1' } };
-        const res = await controller.checkSpelling('p1', { docId: 'doc-1' }, req);
+        const res = await controller.checkSpelling(
+          'p1',
+          { docId: 'doc-1' },
+          req,
+        );
 
         expect(docstoreMock.getDoc).toHaveBeenCalledWith('p1', 'doc-1');
         expect(res.misspelledCount).toBe(1);
-        expect(res.errors[0]!.word).toBe('mistakke');
+        expect(res.errors[0].word).toBe('mistakke');
       });
 
       it('POST /projects/:projectId/spelling/dictionary/learn should learn word and GET /dictionary list it', async () => {
@@ -483,7 +546,10 @@ The result is valid.
         expect(list.words).toContain('specialjargon');
 
         // Delete word
-        const delRes = await controller.unlearnProjectWord('p1', 'SpecialJargon');
+        const delRes = await controller.unlearnProjectWord(
+          'p1',
+          'SpecialJargon',
+        );
         expect(delRes.removed).toBe(true);
 
         const listAfter = await controller.listProjectDictionary('p1');
@@ -493,7 +559,11 @@ The result is valid.
       it('should translate domain exceptions to HTTP 400 BadRequestException', async () => {
         const req = { user: { id: 'u1' } };
         await expect(
-          controller.checkSpelling('p1', { text: 'test', language: 'unsupported-lang' }, req)
+          controller.checkSpelling(
+            'p1',
+            { text: 'test', language: 'unsupported-lang' },
+            req,
+          ),
         ).rejects.toThrow(BadRequestException);
       });
     });
@@ -514,7 +584,10 @@ The result is valid.
         expect(list.scope).toBe('USER');
         expect(list.words).toContain('mypersonaltoken');
 
-        const del = await utilityController.unlearnUserWord('MyPersonalToken', req);
+        const del = await utilityController.unlearnUserWord(
+          'MyPersonalToken',
+          req,
+        );
         expect(del.removed).toBe(true);
       });
     });

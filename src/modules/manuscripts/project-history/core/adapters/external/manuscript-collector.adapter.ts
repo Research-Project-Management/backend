@@ -24,12 +24,16 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
     super();
   }
 
-  public async collectCurrentState(projectId: string): Promise<Map<string, FileSnapshotVo>> {
+  public async collectCurrentState(
+    projectId: string,
+  ): Promise<Map<string, FileSnapshotVo>> {
     // 1. Flush any uncommitted in-flight keystrokes to Docstore
     try {
       await this.documentUpdaterService.flushProject(projectId, true);
     } catch (err) {
-      this.logger.warn(`Failed to flush project ${projectId} prior to snapshot collection: ${err}`);
+      this.logger.warn(
+        `Failed to flush project ${projectId} prior to snapshot collection: ${err}`,
+      );
     }
 
     // 2. Fetch all structure nodes
@@ -53,12 +57,19 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
           );
           filesMap.set(vo.path, vo);
         } catch (error) {
-          this.logger.error(`Error collecting doc ${node.docId} at path ${node.path}: ${error}`);
+          this.logger.error(
+            `Error collecting doc ${node.docId} at path ${node.path}: ${error}`,
+          );
         }
       } else if (node.type === 'FILE' && node.fileId) {
         try {
-          const fileMeta = await this.filestoreService.getFileMetadata(projectId, node.fileId);
-          const hashString = fileMeta.hash ? fileMeta.hash.getValue() : (node.hash || '');
+          const fileMeta = await this.filestoreService.getFileMetadata(
+            projectId,
+            node.fileId,
+          );
+          const hashString = fileMeta.hash
+            ? fileMeta.hash.getValue()
+            : node.hash || '';
           const vo = FileSnapshotVo.createFile(
             node.path,
             node.fileId,
@@ -67,7 +78,9 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
           );
           filesMap.set(vo.path, vo);
         } catch (error) {
-          this.logger.error(`Error collecting file ${node.fileId} at path ${node.path}: ${error}`);
+          this.logger.error(
+            `Error collecting file ${node.fileId} at path ${node.path}: ${error}`,
+          );
         }
       }
     }

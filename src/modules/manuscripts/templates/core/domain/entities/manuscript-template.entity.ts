@@ -1,5 +1,11 @@
-import { TemplateCategoryString, TemplateCategoryVo } from '../value-objects/template-category.vo';
-import { CompilerType, CompilerTypeVo } from '../value-objects/compiler-type.vo';
+import {
+  TemplateCategoryString,
+  TemplateCategoryVo,
+} from '../value-objects/template-category.vo';
+import {
+  CompilerType,
+  CompilerTypeVo,
+} from '../value-objects/compiler-type.vo';
 
 export interface TemplateFileBlueprint {
   path: string;
@@ -80,13 +86,20 @@ export class ManuscriptTemplateEntity {
     this._updatedAt = props.updatedAt;
   }
 
-  static create(props: CreateManuscriptTemplateProps): ManuscriptTemplateEntity {
+  static create(
+    props: CreateManuscriptTemplateProps,
+  ): ManuscriptTemplateEntity {
     const id = props.id || crypto.randomUUID();
     const versionId = props.versionId || `v-${id.slice(0, 8)}`;
     const category = TemplateCategoryVo.fromString(props.category);
     const compiler = CompilerTypeVo.fromString(props.compiler);
     const mainFile = props.mainFile || 'main.tex';
-    const files = props.files ? { ...props.files } : { [mainFile]: '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}' };
+    const files = props.files
+      ? { ...props.files }
+      : {
+          [mainFile]:
+            '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}',
+        };
 
     return new ManuscriptTemplateEntity({
       id,
@@ -177,24 +190,27 @@ export class ManuscriptTemplateEntity {
     this._updatedAt = new Date();
   }
 
-  updateDetails(props: Partial<{
-    name: string;
-    description: string | null;
-    category: TemplateCategoryString;
-    compiler: CompilerType;
-    mainFile: string;
-    imageName: string | null;
-    thumbnailUrl: string | null;
-    tags: string[];
-    files: Record<string, string>;
-  }>): void {
+  updateDetails(
+    props: Partial<{
+      name: string;
+      description: string | null;
+      category: TemplateCategoryString;
+      compiler: CompilerType;
+      mainFile: string;
+      imageName: string | null;
+      thumbnailUrl: string | null;
+      tags: string[];
+      files: Record<string, string>;
+    }>,
+  ): void {
     if (props.name !== undefined) this._name = props.name.trim();
     if (props.description !== undefined) this._description = props.description;
     if (props.category !== undefined) this._category = props.category;
     if (props.compiler !== undefined) this._compiler = props.compiler;
     if (props.mainFile !== undefined) this._mainFile = props.mainFile;
     if (props.imageName !== undefined) this._imageName = props.imageName;
-    if (props.thumbnailUrl !== undefined) this._thumbnailUrl = props.thumbnailUrl;
+    if (props.thumbnailUrl !== undefined)
+      this._thumbnailUrl = props.thumbnailUrl;
     if (props.tags !== undefined) this._tags = [...props.tags];
     if (props.files !== undefined) this._files = { ...props.files };
     this._updatedAt = new Date();

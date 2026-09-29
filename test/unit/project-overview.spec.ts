@@ -89,7 +89,7 @@ describe('Project Overview Module', () => {
           _count: { workItems: 10 },
         },
         completedIssues: 6,
-      } as any);
+      });
       repo.getOverdueCount.mockResolvedValue(3);
       repo.getLatestStatusUpdate.mockResolvedValue({
         id: 'update-1',

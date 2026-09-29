@@ -348,7 +348,9 @@ export class DriveController {
     }
 
     if (!this.prisma) {
-      throw new NotFoundException('Storage sharing database service unavailable');
+      throw new NotFoundException(
+        'Storage sharing database service unavailable',
+      );
     }
 
     const permission =
@@ -467,7 +469,11 @@ export class DriveController {
     if (this.accessPolicy && userId) {
       await this.accessPolicy.assertCanAccess(userId, id, 'write');
       if (targetFolderId) {
-        await this.accessPolicy.assertCanAccess(userId, targetFolderId, 'write');
+        await this.accessPolicy.assertCanAccess(
+          userId,
+          targetFolderId,
+          'write',
+        );
       }
     }
     const updated = await this.moveNodeUseCase.execute(id, targetFolderId);

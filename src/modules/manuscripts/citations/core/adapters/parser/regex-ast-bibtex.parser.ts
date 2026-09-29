@@ -23,22 +23,32 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
 
     let match: RegExpExecArray | null;
     while ((match = entryStartRegex.exec(cleanSource)) !== null) {
-      const entryType = match[1]!.toLowerCase();
-      const rawKey = match[2]!;
+      const entryType = match[1].toLowerCase();
+      const rawKey = match[2];
 
       // Skip @comment or @preamble
-      if (entryType === 'comment' || entryType === 'preamble' || entryType === 'string') {
+      if (
+        entryType === 'comment' ||
+        entryType === 'preamble' ||
+        entryType === 'string'
+      ) {
         continue;
       }
 
       // Find the matching closing brace for this entry
       const bodyStartIndex = match.index + match[0].length;
-      const bodyEndIndex = this.findMatchingClosingBrace(cleanSource, match.index + match[0].indexOf('{'));
+      const bodyEndIndex = this.findMatchingClosingBrace(
+        cleanSource,
+        match.index + match[0].indexOf('{'),
+      );
 
       if (bodyEndIndex === -1) {
         // Unclosed entry: parse as much as possible up to next '@' or EOF
         const nextAt = cleanSource.indexOf('@', bodyStartIndex);
-        const bodyContent = nextAt !== -1 ? cleanSource.slice(bodyStartIndex, nextAt) : cleanSource.slice(bodyStartIndex);
+        const bodyContent =
+          nextAt !== -1
+            ? cleanSource.slice(bodyStartIndex, nextAt)
+            : cleanSource.slice(bodyStartIndex);
         const fields = this.parseFields(bodyContent);
         try {
           entries.push(new BibEntry({ key: rawKey, entryType, fields }));
@@ -60,7 +70,7 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
             entryType,
             fields,
             rawBibtex: rawSnippet,
-          })
+          }),
         );
       } catch {
         // Skip entry if key is hopelessly invalid
@@ -92,12 +102,15 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
       const eqIndex = body.indexOf('=', pos);
       if (eqIndex === -1) break;
 
-      const rawFieldName = body.slice(pos, eqIndex).trim().replace(/^[,;\s]+/, '');
+      const rawFieldName = body
+        .slice(pos, eqIndex)
+        .trim()
+        .replace(/^[,;\s]+/, '');
       const fieldName = rawFieldName.toLowerCase();
       pos = eqIndex + 1;
 
       // Skip whitespace
-      while (pos < body.length && /\s/.test(body[pos]!)) {
+      while (pos < body.length && /\s/.test(body[pos])) {
         pos++;
       }
 
@@ -144,13 +157,17 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
         }
       }
 
-      if (fieldName && fieldName.length > 0 && /^[a-zA-Z0-9_-]+$/.test(fieldName)) {
+      if (
+        fieldName &&
+        fieldName.length > 0 &&
+        /^[a-zA-Z0-9_-]+$/.test(fieldName)
+      ) {
         // Clean whitespace and linebreaks in values
         fields[fieldName] = value.replace(/\s+/g, ' ').trim();
       }
 
       // Skip optional comma or trailing spaces
-      while (pos < body.length && /[,\s]/.test(body[pos]!)) {
+      while (pos < body.length && /[,\s]/.test(body[pos])) {
         pos++;
       }
     }

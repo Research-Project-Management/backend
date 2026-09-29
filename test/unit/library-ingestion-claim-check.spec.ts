@@ -1,16 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { IngestionService } from '../../src/modules/library/ingestion/application/services/ingestion.service';
-import { IdentifyStage } from '../../src/modules/library/ingestion/infrastructure/stages/identify.stage';
-import { IngestionRepository } from '../../src/modules/library/ingestion/infrastructure/repositories/ingestion.repository';
-import { PipelineService } from '../../src/modules/library/ingestion/application/services/pipeline.service';
-import { QueueService } from '../../src/modules/library/ingestion/application/services/queue.service';
-import { UrlCaptureService } from '../../src/modules/library/ingestion/application/services/url-capture.service';
-import { DoiParser } from '../../src/modules/library/ingestion/infrastructure/parsers/doi.parser';
-import { BibtexParser } from '../../src/modules/library/ingestion/infrastructure/parsers/bibtex.parser';
-import { RisParser } from '../../src/modules/library/ingestion/infrastructure/parsers/ris.parser';
-import { NormalizationPolicy } from '../../src/modules/library/ingestion/domain/policies/normalization.policy';
+import { IngestionService } from '@/modules/library/ingestion/core/use-cases/ingestion.service';
+import { IdentifyStage } from '@/modules/library/ingestion/core/adapters/identify.stage';
+import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
+import { PipelineService } from '@/modules/library/ingestion/core/use-cases/pipeline.service';
+import { QueueService } from '@/modules/library/ingestion/core/use-cases/queue.service';
+import { UrlCaptureService } from '@/modules/library/ingestion/core/use-cases/url-capture.service';
+import { DoiParser } from '@/modules/library/ingestion/core/adapters/doi.parser';
+import { BibtexParser } from '@/modules/library/ingestion/core/adapters/bibtex.parser';
+import { RisParser } from '@/modules/library/ingestion/core/adapters/ris.parser';
+import { NormalizationPolicy } from '@/modules/library/ingestion/core/domain/normalization.policy';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { IngestionSubmissionEnvelope } from '../../src/modules/library/ingestion/domain/types/submission.types';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/core/domain/submission.types';
 import zlib from 'zlib';
 
 describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {

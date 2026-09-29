@@ -22,7 +22,7 @@ export class DraftModeManager {
    */
   public static apply(
     source: string,
-    options?: { draft?: boolean; syntaxOnly?: boolean }
+    options?: { draft?: boolean; syntaxOnly?: boolean },
   ): DraftModeApplication {
     if (!options?.draft && !options?.syntaxOnly) {
       return { source, isModified: false, engineFlags: [] };

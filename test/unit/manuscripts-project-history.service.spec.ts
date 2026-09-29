@@ -32,7 +32,11 @@
  *      - REST API endpoints and HTTP status code mappings (404, 409, 400)
  */
 
-import { NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ProjectHistoryService } from '@/modules/manuscripts/project-history/project-history.service';
 import { ProjectHistoryController } from '@/modules/manuscripts/project-history/project-history.controller';
 import { CreateSnapshotUseCase } from '@/modules/manuscripts/project-history/core/use-cases/create-snapshot.use-case';
@@ -45,7 +49,10 @@ import { RestoreVersionUseCase } from '@/modules/manuscripts/project-history/cor
 
 import { IHistoryRepositoryPort } from '@/modules/manuscripts/project-history/core/ports/history-repository.port';
 import { IProjectCollectorPort } from '@/modules/manuscripts/project-history/core/ports/project-collector.port';
-import { IProjectRestorerPort, RestoreResult } from '@/modules/manuscripts/project-history/core/ports/project-restorer.port';
+import {
+  IProjectRestorerPort,
+  RestoreResult,
+} from '@/modules/manuscripts/project-history/core/ports/project-restorer.port';
 import { MyersDiffEngineAdapter } from '@/modules/manuscripts/project-history/core/adapters/engine/myers-diff-engine.adapter';
 
 import { Snapshot } from '@/modules/manuscripts/project-history/core/domain/entities/snapshot.entity';
@@ -71,14 +78,20 @@ class InMemoryHistoryRepository extends IHistoryRepositoryPort {
   }
 
   public async saveSnapshot(snapshot: Snapshot): Promise<Snapshot> {
-    this.snapshots.set(this.snapKey(snapshot.projectId, snapshot.version), snapshot);
+    this.snapshots.set(
+      this.snapKey(snapshot.projectId, snapshot.version),
+      snapshot,
+    );
     for (const label of snapshot.labels) {
       this.labels.set(label.id, label);
     }
     return snapshot;
   }
 
-  public async findByVersion(projectId: string, version: number): Promise<Snapshot | null> {
+  public async findByVersion(
+    projectId: string,
+    version: number,
+  ): Promise<Snapshot | null> {
     const snap = this.snapshots.get(this.snapKey(projectId, version));
     return snap ?? null;
   }
@@ -105,7 +118,9 @@ class InMemoryHistoryRepository extends IHistoryRepositoryPort {
 
   public async saveLabel(label: VersionLabel): Promise<VersionLabel> {
     this.labels.set(label.id, label);
-    const snap = this.snapshots.get(this.snapKey(label.projectId, label.version));
+    const snap = this.snapshots.get(
+      this.snapKey(label.projectId, label.version),
+    );
     if (snap) {
       // replace or add
       snap.removeLabel(label.id);
@@ -118,16 +133,24 @@ class InMemoryHistoryRepository extends IHistoryRepositoryPort {
     const label = this.labels.get(labelId);
     if (label && label.projectId === projectId) {
       this.labels.delete(labelId);
-      const snap = this.snapshots.get(this.snapKey(label.projectId, label.version));
+      const snap = this.snapshots.get(
+        this.snapKey(label.projectId, label.version),
+      );
       if (snap) {
         snap.removeLabel(labelId);
       }
     }
   }
 
-  public async findLabelByName(projectId: string, label: string): Promise<VersionLabel | null> {
+  public async findLabelByName(
+    projectId: string,
+    label: string,
+  ): Promise<VersionLabel | null> {
     for (const l of this.labels.values()) {
-      if (l.projectId === projectId && l.label.toLowerCase() === label.toLowerCase()) {
+      if (
+        l.projectId === projectId &&
+        l.label.toLowerCase() === label.toLowerCase()
+      ) {
         return l;
       }
     }
@@ -143,7 +166,9 @@ class InMemoryHistoryRepository extends IHistoryRepositoryPort {
 class MockProjectCollector extends IProjectCollectorPort {
   public currentState = new Map<string, FileSnapshotVo>();
 
-  public async collectCurrentState(projectId: string): Promise<Map<string, FileSnapshotVo>> {
+  public async collectCurrentState(
+    projectId: string,
+  ): Promise<Map<string, FileSnapshotVo>> {
     return new Map(this.currentState);
   }
 }
@@ -153,7 +178,10 @@ class MockProjectRestorer extends IProjectRestorerPort {
   public lastRestoredSnapshot: Snapshot | null = null;
   public collectorToUpdate: MockProjectCollector | null = null;
 
-  public async restoreToState(projectId: string, snapshot: Snapshot): Promise<RestoreResult> {
+  public async restoreToState(
+    projectId: string,
+    snapshot: Snapshot,
+  ): Promise<RestoreResult> {
     this.lastRestoredProjectId = projectId;
     this.lastRestoredSnapshot = snapshot;
     if (this.collectorToUpdate) {
@@ -202,10 +230,17 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
     createSnapshotUseCase = new CreateSnapshotUseCase(historyRepo, collector);
     getVersionListUseCase = new GetVersionListUseCase(historyRepo);
     getSnapshotByVersionUseCase = new GetSnapshotByVersionUseCase(historyRepo);
-    compareVersionsDiffUseCase = new CompareVersionsDiffUseCase(historyRepo, diffEngine);
+    compareVersionsDiffUseCase = new CompareVersionsDiffUseCase(
+      historyRepo,
+      diffEngine,
+    );
     labelVersionUseCase = new LabelVersionUseCase(historyRepo);
     deleteLabelUseCase = new DeleteLabelUseCase(historyRepo);
-    restoreVersionUseCase = new RestoreVersionUseCase(historyRepo, restorer, createSnapshotUseCase);
+    restoreVersionUseCase = new RestoreVersionUseCase(
+      historyRepo,
+      restorer,
+      createSnapshotUseCase,
+    );
 
     historyService = new ProjectHistoryService(
       createSnapshotUseCase,
@@ -225,7 +260,18 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
   // =========================================================================
   describe('1. Domain Value Objects & Entities', () => {
     it('FileSnapshotVo: creates doc snapshot and calculates byte size and paths', () => {
-      const docVo = FileSnapshotVo.createDoc('main.tex', 'doc-123', ['\\documentclass{article}', '\\begin{document}', 'Hello', '\\end{document}'], 'hash-1', true);
+      const docVo = FileSnapshotVo.createDoc(
+        'main.tex',
+        'doc-123',
+        [
+          '\\documentclass{article}',
+          '\\begin{document}',
+          'Hello',
+          '\\end{document}',
+        ],
+        'hash-1',
+        true,
+      );
       expect(docVo.path).toBe('/main.tex');
       expect(docVo.type).toBe('doc');
       expect(docVo.docId).toBe('doc-123');
@@ -240,7 +286,12 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
     });
 
     it('FileSnapshotVo: creates binary file snapshot', () => {
-      const fileVo = FileSnapshotVo.createFile('/figures/diagram.png', 'file-456', 'hash-binary', 1048576);
+      const fileVo = FileSnapshotVo.createFile(
+        '/figures/diagram.png',
+        'file-456',
+        'hash-binary',
+        1048576,
+      );
       expect(fileVo.path).toBe('/figures/diagram.png');
       expect(fileVo.type).toBe('file');
       expect(fileVo.fileId).toBe('file-456');
@@ -287,7 +338,9 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
 
       label.updateLabel('v1.0-final');
       expect(label.label).toBe('v1.0-final');
-      expect(() => label.updateLabel('')).toThrow('Version label cannot be empty.');
+      expect(() => label.updateLabel('')).toThrow(
+        'Version label cannot be empty.',
+      );
     });
 
     it('Snapshot: throws EmptyProjectException if project files map is empty', () => {
@@ -302,8 +355,20 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
 
     it('Snapshot: manages file lookups and version labels', () => {
       const files = new Map<string, FileSnapshotVo>();
-      files.set('/main.tex', FileSnapshotVo.createDoc('main.tex', 'doc-1', ['Hello'], 'h1', true));
-      files.set('/ref.bib', FileSnapshotVo.createDoc('ref.bib', 'doc-2', ['@article{...}'], 'h2', false));
+      files.set(
+        '/main.tex',
+        FileSnapshotVo.createDoc('main.tex', 'doc-1', ['Hello'], 'h1', true),
+      );
+      files.set(
+        '/ref.bib',
+        FileSnapshotVo.createDoc(
+          'ref.bib',
+          'doc-2',
+          ['@article{...}'],
+          'h2',
+          false,
+        ),
+      );
 
       const snapshot = Snapshot.create({
         projectId,
@@ -352,7 +417,12 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
 
     it('diffText: calculates line additions, deletions, and hunks correctly', () => {
       const oldLines = ['Intro', 'This is paragraph 1.', 'Conclusion'];
-      const newLines = ['Intro', 'This is updated paragraph 1.', 'Extra paragraph.', 'Conclusion'];
+      const newLines = [
+        'Intro',
+        'This is updated paragraph 1.',
+        'Extra paragraph.',
+        'Conclusion',
+      ];
 
       const result = diffEngine.diffText(oldLines, newLines);
       expect(result.deletions).toBe(1); // 'This is paragraph 1.'
@@ -384,10 +454,37 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
     it('compareSnapshots: detects added, deleted, modified, and renamed files', () => {
       // Base snapshot
       const baseFiles = new Map<string, FileSnapshotVo>();
-      baseFiles.set('/main.tex', FileSnapshotVo.createDoc('main.tex', 'doc-1', ['Line 1', 'Line 2'], 'h-main-v1'));
-      baseFiles.set('/deleted.tex', FileSnapshotVo.createDoc('deleted.tex', 'doc-2', ['To be deleted'], 'h-del'));
-      baseFiles.set('/old-name.tex', FileSnapshotVo.createDoc('old-name.tex', 'doc-3', ['Renamed content'], 'h-rename'));
-      baseFiles.set('/image.png', FileSnapshotVo.createFile('/image.png', 'f-1', 'h-img-1', 100));
+      baseFiles.set(
+        '/main.tex',
+        FileSnapshotVo.createDoc(
+          'main.tex',
+          'doc-1',
+          ['Line 1', 'Line 2'],
+          'h-main-v1',
+        ),
+      );
+      baseFiles.set(
+        '/deleted.tex',
+        FileSnapshotVo.createDoc(
+          'deleted.tex',
+          'doc-2',
+          ['To be deleted'],
+          'h-del',
+        ),
+      );
+      baseFiles.set(
+        '/old-name.tex',
+        FileSnapshotVo.createDoc(
+          'old-name.tex',
+          'doc-3',
+          ['Renamed content'],
+          'h-rename',
+        ),
+      );
+      baseFiles.set(
+        '/image.png',
+        FileSnapshotVo.createFile('/image.png', 'f-1', 'h-img-1', 100),
+      );
 
       const baseSnapshot = Snapshot.create({
         projectId,
@@ -397,10 +494,37 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
 
       // Target snapshot
       const targetFiles = new Map<string, FileSnapshotVo>();
-      targetFiles.set('/main.tex', FileSnapshotVo.createDoc('main.tex', 'doc-1', ['Line 1', 'Line 2 modified'], 'h-main-v2'));
-      targetFiles.set('/new-name.tex', FileSnapshotVo.createDoc('new-name.tex', 'doc-3', ['Renamed content'], 'h-rename'));
-      targetFiles.set('/added.tex', FileSnapshotVo.createDoc('added.tex', 'doc-4', ['Newly added file'], 'h-added'));
-      targetFiles.set('/image.png', FileSnapshotVo.createFile('/image.png', 'f-1', 'h-img-2', 150));
+      targetFiles.set(
+        '/main.tex',
+        FileSnapshotVo.createDoc(
+          'main.tex',
+          'doc-1',
+          ['Line 1', 'Line 2 modified'],
+          'h-main-v2',
+        ),
+      );
+      targetFiles.set(
+        '/new-name.tex',
+        FileSnapshotVo.createDoc(
+          'new-name.tex',
+          'doc-3',
+          ['Renamed content'],
+          'h-rename',
+        ),
+      );
+      targetFiles.set(
+        '/added.tex',
+        FileSnapshotVo.createDoc(
+          'added.tex',
+          'doc-4',
+          ['Newly added file'],
+          'h-added',
+        ),
+      );
+      targetFiles.set(
+        '/image.png',
+        FileSnapshotVo.createFile('/image.png', 'f-1', 'h-img-2', 150),
+      );
 
       const targetSnapshot = Snapshot.create({
         projectId,
@@ -408,7 +532,10 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
         files: targetFiles,
       });
 
-      const fileDiffs = diffEngine.compareSnapshots(baseSnapshot, targetSnapshot);
+      const fileDiffs = diffEngine.compareSnapshots(
+        baseSnapshot,
+        targetSnapshot,
+      );
       expect(fileDiffs.length).toBeGreaterThanOrEqual(4);
 
       const modifiedDoc = fileDiffs.find((f) => f.path === '/main.tex');
@@ -446,7 +573,13 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
     beforeEach(() => {
       collector.currentState.set(
         '/main.tex',
-        FileSnapshotVo.createDoc('main.tex', 'd-1', ['\\begin{document}', 'Initial', '\\end{document}'], 'h-init', true),
+        FileSnapshotVo.createDoc(
+          'main.tex',
+          'd-1',
+          ['\\begin{document}', 'Initial', '\\end{document}'],
+          'h-init',
+          true,
+        ),
       );
     });
 
@@ -467,7 +600,13 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
         // Mutate collector state for version 2
         collector.currentState.set(
           '/main.tex',
-          FileSnapshotVo.createDoc('main.tex', 'd-1', ['\\begin{document}', 'Updated', '\\end{document}'], 'h-upd', true),
+          FileSnapshotVo.createDoc(
+            'main.tex',
+            'd-1',
+            ['\\begin{document}', 'Updated', '\\end{document}'],
+            'h-upd',
+            true,
+          ),
         );
 
         const snap2 = await createSnapshotUseCase.execute({
@@ -515,9 +654,9 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
       expect(snap.version).toBe(1);
       expect(snap.getFile('/main.tex')).toBeDefined();
 
-      await expect(getSnapshotByVersionUseCase.execute(projectId, 99)).rejects.toThrow(
-        VersionNotFoundException,
-      );
+      await expect(
+        getSnapshotByVersionUseCase.execute(projectId, 99),
+      ).rejects.toThrow(VersionNotFoundException);
     });
 
     it('CompareVersionsDiffUseCase: compares version 1 and version 2', async () => {
@@ -527,11 +666,20 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
       // V2 (add chapter.tex)
       collector.currentState.set(
         '/chapter.tex',
-        FileSnapshotVo.createDoc('chapter.tex', 'd-2', ['Chapter 1 content'], 'h-ch1'),
+        FileSnapshotVo.createDoc(
+          'chapter.tex',
+          'd-2',
+          ['Chapter 1 content'],
+          'h-ch1',
+        ),
       );
       await createSnapshotUseCase.execute({ projectId });
 
-      const diffResult = await compareVersionsDiffUseCase.execute(projectId, 1, 2);
+      const diffResult = await compareVersionsDiffUseCase.execute(
+        projectId,
+        1,
+        2,
+      );
       expect(diffResult.baseVersion).toBe(1);
       expect(diffResult.targetVersion).toBe(2);
       expect(diffResult.filesChanged).toBe(1);
@@ -575,7 +723,10 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
 
       // Delete label
       await deleteLabelUseCase.execute(projectId, label.id);
-      const retrievedSnap = await getSnapshotByVersionUseCase.execute(projectId, 1);
+      const retrievedSnap = await getSnapshotByVersionUseCase.execute(
+        projectId,
+        1,
+      );
       expect(retrievedSnap.labels).toHaveLength(0);
     });
 
@@ -586,13 +737,27 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
       // V2: modified main.tex + added bad.tex
       collector.currentState.set(
         '/main.tex',
-        FileSnapshotVo.createDoc('main.tex', 'd-1', ['Corrupted text'], 'h-bad', true),
+        FileSnapshotVo.createDoc(
+          'main.tex',
+          'd-1',
+          ['Corrupted text'],
+          'h-bad',
+          true,
+        ),
       );
       collector.currentState.set(
         '/bad.tex',
-        FileSnapshotVo.createDoc('bad.tex', 'd-bad', ['Do not want this'], 'h-bad2'),
+        FileSnapshotVo.createDoc(
+          'bad.tex',
+          'd-bad',
+          ['Do not want this'],
+          'h-bad2',
+        ),
       );
-      await createSnapshotUseCase.execute({ projectId, summary: 'V2 corrupted' });
+      await createSnapshotUseCase.execute({
+        projectId,
+        summary: 'V2 corrupted',
+      });
 
       // Restore to V1
       const restoreOutput = await restoreVersionUseCase.execute({
@@ -630,7 +795,13 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
     beforeEach(() => {
       collector.currentState.set(
         '/main.tex',
-        FileSnapshotVo.createDoc('main.tex', 'doc-main', ['\\documentclass{article}'], 'h-main', true),
+        FileSnapshotVo.createDoc(
+          'main.tex',
+          'doc-main',
+          ['\\documentclass{article}'],
+          'h-main',
+          true,
+        ),
       );
     });
 
@@ -659,7 +830,9 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
       const snap = await historyController.getSnapshot(projectId, 1);
       expect(snap.version).toBe(1);
 
-      await expect(historyController.getSnapshot(projectId, 999)).rejects.toThrow(NotFoundException);
+      await expect(
+        historyController.getSnapshot(projectId, 999),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('historyController.compareVersions: compares diff via controller query', async () => {
@@ -667,7 +840,13 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
 
       collector.currentState.set(
         '/main.tex',
-        FileSnapshotVo.createDoc('main.tex', 'doc-main', ['\\documentclass{article}', '% comment'], 'h-main-2', true),
+        FileSnapshotVo.createDoc(
+          'main.tex',
+          'doc-main',
+          ['\\documentclass{article}', '% comment'],
+          'h-main-2',
+          true,
+        ),
       );
       await historyService.createSnapshot(projectId, { summary: 'V2' });
 
@@ -685,7 +864,9 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
     it('historyController.labelVersion & deleteLabel: handles conflict and delete', async () => {
       await historyService.createSnapshot(projectId, { summary: 'V1' });
 
-      const labelDto = await historyController.labelVersion(projectId, 1, { label: 'Camera Ready' });
+      const labelDto = await historyController.labelVersion(projectId, 1, {
+        label: 'Camera Ready',
+      });
       expect(labelDto.label).toBe('Camera Ready');
       expect(labelDto.version).toBe(1);
 
@@ -704,15 +885,25 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
     });
 
     it('historyController.restoreVersion: rolls back and returns new version', async () => {
-      await historyService.createSnapshot(projectId, { summary: 'V1 baseline' });
+      await historyService.createSnapshot(projectId, {
+        summary: 'V1 baseline',
+      });
 
       collector.currentState.set(
         '/main.tex',
-        FileSnapshotVo.createDoc('main.tex', 'doc-main', ['Corrupt line'], 'h-corrupt', true),
+        FileSnapshotVo.createDoc(
+          'main.tex',
+          'doc-main',
+          ['Corrupt line'],
+          'h-corrupt',
+          true,
+        ),
       );
       await historyService.createSnapshot(projectId, { summary: 'V2 bad' });
 
-      const result = await historyController.restoreVersion(projectId, { targetVersion: 1 });
+      const result = await historyController.restoreVersion(projectId, {
+        targetVersion: 1,
+      });
       expect(result.restoredSnapshot.version).toBe(1);
       expect(result.newSnapshot.version).toBe(3);
       expect(result.newSnapshot.summary).toBe('Restored to version 1');

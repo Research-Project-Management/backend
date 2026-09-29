@@ -59,19 +59,16 @@ export class TexWordCounter implements IWordCounter {
 
     processed = processed.replace(
       /\\begin\{[^}]+\}(?:\[[^\]]*\])?|\\end\{[^}]+\}/g,
-      ' '
+      ' ',
     );
     processed = processed.replace(
       /\\documentclass(?:\[[^\]]*\])?\{[^}]+\}/g,
-      ' '
+      ' ',
     );
-    processed = processed.replace(
-      /\\usepackage(?:\[[^\]]*\])?\{[^}]+\}/g,
-      ' '
-    );
+    processed = processed.replace(/\\usepackage(?:\[[^\]]*\])?\{[^}]+\}/g, ' ');
     processed = processed.replace(
       /\\(?:includegraphics|cite|ref|label|pagestyle|thispagestyle|centering|maketitle)\*?(?:\[[^\]]*\])?(?:\{[^}]*\})?/g,
-      ' '
+      ' ',
     );
     processed = processed.replace(/\[[^\]]*\]/g, ' ');
     processed = processed.replace(/\\[a-zA-Z]+\*?/g, ' ');

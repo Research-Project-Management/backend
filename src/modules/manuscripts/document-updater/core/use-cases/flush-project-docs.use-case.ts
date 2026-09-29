@@ -36,7 +36,9 @@ export class FlushProjectDocsUseCase {
     private readonly flushSingleDocUseCase: FlushSingleDocUseCase,
   ) {}
 
-  public async execute(input: FlushProjectDocsInput): Promise<FlushProjectDocsOutput> {
+  public async execute(
+    input: FlushProjectDocsInput,
+  ): Promise<FlushProjectDocsOutput> {
     const { projectId } = input;
     const startTime = Date.now();
     const lockKey = `project:${projectId}`;

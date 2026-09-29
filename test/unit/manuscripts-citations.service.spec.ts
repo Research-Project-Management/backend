@@ -38,7 +38,9 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       it('should sanitize and normalize valid citation keys', () => {
         const key = CitationKeyVo.create('vaswani2017attention');
         expect(key.value).toBe('vaswani2017attention');
-        expect(key.equals(CitationKeyVo.create('vaswani2017attention'))).toBe(true);
+        expect(key.equals(CitationKeyVo.create('vaswani2017attention'))).toBe(
+          true,
+        );
       });
 
       it('should sanitize strings into valid citation keys', () => {
@@ -49,7 +51,9 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
 
       it('should throw InvalidBibtexException on empty citation key', () => {
-        expect(() => CitationKeyVo.create('   ')).toThrow(InvalidBibtexException);
+        expect(() => CitationKeyVo.create('   ')).toThrow(
+          InvalidBibtexException,
+        );
       });
     });
 
@@ -59,7 +63,9 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         expect(doi1.isDoi()).toBe(true);
         expect(doi1.clean).toBe('10.1145/3290605.3300244');
 
-        const doiUrl = AcademicIdentifierVo.parse('https://doi.org/10.1038/nature12373');
+        const doiUrl = AcademicIdentifierVo.parse(
+          'https://doi.org/10.1038/nature12373',
+        );
         expect(doiUrl.isDoi()).toBe(true);
         expect(doiUrl.clean).toBe('10.1038/nature12373');
 
@@ -77,7 +83,9 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         expect(arxiv2.isArxiv()).toBe(true);
         expect(arxiv2.clean).toBe('1706.03762v5');
 
-        const arxivUrl = AcademicIdentifierVo.parse('https://arxiv.org/abs/2103.00020');
+        const arxivUrl = AcademicIdentifierVo.parse(
+          'https://arxiv.org/abs/2103.00020',
+        );
         expect(arxivUrl.isArxiv()).toBe(true);
         expect(arxivUrl.clean).toBe('2103.00020');
       });
@@ -105,7 +113,7 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
 
       it('should format three or more authors with "et al."', () => {
         const multi = new AuthorListVo(
-          'Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob'
+          'Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob',
         );
         expect(multi.authors).toHaveLength(4);
         expect(multi.toDisplayString()).toBe('Vaswani et al.');
@@ -175,7 +183,10 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           fields: { title: 'Second Paper', author: 'Author Two', year: '2021' },
         });
 
-        const file = new BibliographyFile({ path: '/references.bib', entries: [e1, e2] });
+        const file = new BibliographyFile({
+          path: '/references.bib',
+          entries: [e1, e2],
+        });
 
         expect(file.totalCount).toBe(2);
         expect(file.getEntryByKey('e1')).toBe(e1);
@@ -188,10 +199,21 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
 
       it('should collect duplicate keys if duplicate keys exist', () => {
-        const e1 = new BibEntry({ key: 'dupKey', entryType: 'article', fields: { title: 'Paper A' } });
-        const e2 = new BibEntry({ key: 'dupKey', entryType: 'book', fields: { title: 'Paper B' } });
+        const e1 = new BibEntry({
+          key: 'dupKey',
+          entryType: 'article',
+          fields: { title: 'Paper A' },
+        });
+        const e2 = new BibEntry({
+          key: 'dupKey',
+          entryType: 'book',
+          fields: { title: 'Paper B' },
+        });
 
-        const file = new BibliographyFile({ path: '/references.bib', entries: [e1, e2] });
+        const file = new BibliographyFile({
+          path: '/references.bib',
+          entries: [e1, e2],
+        });
 
         expect(file.duplicateKeys.length).toBeGreaterThan(0);
         expect(file.duplicateKeys).toContain('dupKey');
@@ -236,7 +258,9 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
 
         const entries = parser.parse(raw);
         expect(entries).toHaveLength(1);
-        expect(entries[0].fields.get('title')).toBe('A Great \\textbf{Sample} Book');
+        expect(entries[0].fields.get('title')).toBe(
+          'A Great \\textbf{Sample} Book',
+        );
         expect(entries[0].fields.get('publisher')).toBe('MIT Press');
       });
 
@@ -256,8 +280,16 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
 
       it('should format entries into standard BibTeX string', () => {
-        const e1 = new BibEntry({ key: 'k1', entryType: 'article', fields: { title: 'T1' } });
-        const e2 = new BibEntry({ key: 'k2', entryType: 'book', fields: { title: 'T2' } });
+        const e1 = new BibEntry({
+          key: 'k1',
+          entryType: 'article',
+          fields: { title: 'T1' },
+        });
+        const e2 = new BibEntry({
+          key: 'k2',
+          entryType: 'book',
+          fields: { title: 'T2' },
+        });
 
         const formatted = parser.format([e1, e2]);
         expect(formatted).toContain('@article{k1,');
@@ -386,15 +418,18 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
 
       it('should fetch valid collection BibTeX', async () => {
-        const bib = await adapter.fetchCollectionBibtex('user-1', 'coll-default');
+        const bib = await adapter.fetchCollectionBibtex(
+          'user-1',
+          'coll-default',
+        );
         expect(bib).toContain('vaswani2017attention');
         expect(bib).toContain('goodfellow2016deep');
       });
 
       it('should throw error for non-existent collection', async () => {
-        await expect(adapter.fetchCollectionBibtex('user-1', 'non-existent')).rejects.toThrow(
-          'Collection non-existent not found'
-        );
+        await expect(
+          adapter.fetchCollectionBibtex('user-1', 'non-existent'),
+        ).rejects.toThrow('Collection non-existent not found');
       });
     });
 
@@ -422,23 +457,46 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         aggregator = new ManuscriptBibAggregatorAdapter(
           structureServiceMock,
           docstoreServiceMock,
-          parserMock
+          parserMock,
         );
       });
 
       it('should collect and parse all .bib files from project structure', async () => {
         structureServiceMock.getAllNodes.mockResolvedValue([
-          { isDoc: () => true, name: 'references.bib', path: '/references.bib', docId: 'doc-1' },
-          { isDoc: () => true, name: 'main.tex', path: '/main.tex', docId: 'doc-2' },
-          { isDoc: () => true, name: 'extra.bib', path: '/bib/extra.bib', docId: 'doc-3' },
+          {
+            isDoc: () => true,
+            name: 'references.bib',
+            path: '/references.bib',
+            docId: 'doc-1',
+          },
+          {
+            isDoc: () => true,
+            name: 'main.tex',
+            path: '/main.tex',
+            docId: 'doc-2',
+          },
+          {
+            isDoc: () => true,
+            name: 'extra.bib',
+            path: '/bib/extra.bib',
+            docId: 'doc-3',
+          },
         ]);
 
         docstoreServiceMock.getDoc
           .mockResolvedValueOnce({ lines: ['@article{k1, title={T1}}'] })
           .mockResolvedValueOnce({ lines: ['@book{k2, title={T2}}'] });
 
-        const dummyEntry1 = new BibEntry({ key: 'k1', entryType: 'article', fields: { title: 'T1' } });
-        const dummyEntry2 = new BibEntry({ key: 'k2', entryType: 'book', fields: { title: 'T2' } });
+        const dummyEntry1 = new BibEntry({
+          key: 'k1',
+          entryType: 'article',
+          fields: { title: 'T1' },
+        });
+        const dummyEntry2 = new BibEntry({
+          key: 'k2',
+          entryType: 'book',
+          fields: { title: 'T2' },
+        });
         parserMock.parse
           .mockReturnValueOnce([dummyEntry1])
           .mockReturnValueOnce([dummyEntry2]);
@@ -453,7 +511,12 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
 
       it('should append entry to existing .bib file in docstore', async () => {
         structureServiceMock.getAllNodes.mockResolvedValue([
-          { isDoc: () => true, name: 'references.bib', path: '/references.bib', docId: 'doc-1' },
+          {
+            isDoc: () => true,
+            name: 'references.bib',
+            path: '/references.bib',
+            docId: 'doc-1',
+          },
         ]);
 
         docstoreServiceMock.getDoc.mockResolvedValue({
@@ -468,22 +531,31 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           fields: { title: 'New Entry' },
         });
 
-        const targetPath = await aggregator.appendEntryToBib('proj-1', newEntry, 'references.bib');
+        const targetPath = await aggregator.appendEntryToBib(
+          'proj-1',
+          newEntry,
+          'references.bib',
+        );
 
         expect(targetPath).toBe('/references.bib');
         expect(docstoreServiceMock.updateDoc).toHaveBeenCalledWith(
           'proj-1',
           'doc-1',
           expect.objectContaining({
-            lines: expect.arrayContaining(['', expect.stringContaining('@article{newEntry,')]),
-          })
+            lines: expect.arrayContaining([
+              '',
+              expect.stringContaining('@article{newEntry,'),
+            ]),
+          }),
         );
       });
 
       it('should create new .bib file if it does not exist', async () => {
         structureServiceMock.getAllNodes.mockResolvedValue([]);
         docstoreServiceMock.createDoc.mockResolvedValue({ _id: 'new-doc-id' });
-        structureServiceMock.createNode.mockResolvedValue({ path: '/references.bib' });
+        structureServiceMock.createNode.mockResolvedValue({
+          path: '/references.bib',
+        });
 
         const newEntry = new BibEntry({
           key: 'brandNew',
@@ -491,7 +563,11 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           fields: { title: 'Brand New' },
         });
 
-        const path = await aggregator.appendEntryToBib('proj-1', newEntry, 'references.bib');
+        const path = await aggregator.appendEntryToBib(
+          'proj-1',
+          newEntry,
+          'references.bib',
+        );
 
         expect(path).toBe('/references.bib');
         expect(docstoreServiceMock.createDoc).toHaveBeenCalledWith('proj-1', {
@@ -527,32 +603,60 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         const file1 = new BibliographyFile({
           path: '/refs.bib',
           entries: [
-            new BibEntry({ key: 'vaswani2017', entryType: 'article', fields: { title: 'Attention' } }),
-            new BibEntry({ key: 'goodfellow2016', entryType: 'book', fields: { title: 'Deep Learning' } }),
+            new BibEntry({
+              key: 'vaswani2017',
+              entryType: 'article',
+              fields: { title: 'Attention' },
+            }),
+            new BibEntry({
+              key: 'goodfellow2016',
+              entryType: 'book',
+              fields: { title: 'Deep Learning' },
+            }),
           ],
         });
 
         const file2 = new BibliographyFile({
           path: '/other.bib',
           entries: [
-            new BibEntry({ key: 'vaswani2017', entryType: 'article', fields: { title: 'Attention Duplicate' } }),
-            new BibEntry({ key: 'lecun2015', entryType: 'article', fields: { title: 'Deep learning nature' } }),
+            new BibEntry({
+              key: 'vaswani2017',
+              entryType: 'article',
+              fields: { title: 'Attention Duplicate' },
+            }),
+            new BibEntry({
+              key: 'lecun2015',
+              entryType: 'article',
+              fields: { title: 'Deep learning nature' },
+            }),
           ],
         });
 
         mockAggregator.collectBibFiles.mockResolvedValue([file1, file2]);
 
         const useCase = new SearchCitationKeysUseCase(mockAggregator);
-        const results = await useCase.execute({ projectId: 'proj-1', query: 'deep' });
+        const results = await useCase.execute({
+          projectId: 'proj-1',
+          query: 'deep',
+        });
 
         expect(results).toHaveLength(2); // goodfellow2016 and lecun2015
-        expect(results.map((r: BibEntry) => r.key.value)).toEqual(['goodfellow2016', 'lecun2015']);
+        expect(results.map((r: BibEntry) => r.key.value)).toEqual([
+          'goodfellow2016',
+          'lecun2015',
+        ]);
       });
 
       it('should respect result limit parameter', async () => {
         const entries: BibEntry[] = [];
         for (let i = 0; i < 10; i++) {
-          entries.push(new BibEntry({ key: `entry${i}`, entryType: 'misc', fields: { title: `Paper ${i}` } }));
+          entries.push(
+            new BibEntry({
+              key: `entry${i}`,
+              entryType: 'misc',
+              fields: { title: `Paper ${i}` },
+            }),
+          );
         }
         const file = new BibliographyFile({ path: '/refs.bib', entries });
         mockAggregator.collectBibFiles.mockResolvedValue([file]);
@@ -580,7 +684,10 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         mockResolver.resolve.mockResolvedValue(dummyEntry);
         mockAggregator.appendEntryToBib.mockResolvedValue('/references.bib');
 
-        const useCase = new ResolveIdentifierToBibUseCase(mockResolver, mockAggregator);
+        const useCase = new ResolveIdentifierToBibUseCase(
+          mockResolver,
+          mockAggregator,
+        );
         const result = await useCase.execute({
           projectId: 'p1',
           identifier: '10.1145/12345',
@@ -592,15 +699,21 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
 
       it('should throw IdentifierNotFoundException on unknown identifier or null resolution', async () => {
-        const useCase = new ResolveIdentifierToBibUseCase(mockResolver, mockAggregator);
+        const useCase = new ResolveIdentifierToBibUseCase(
+          mockResolver,
+          mockAggregator,
+        );
 
         await expect(
-          useCase.execute({ projectId: 'p1', identifier: 'invalid-identifier' })
+          useCase.execute({
+            projectId: 'p1',
+            identifier: 'invalid-identifier',
+          }),
         ).rejects.toThrow(IdentifierNotFoundException);
 
         mockResolver.resolve.mockResolvedValue(null);
         await expect(
-          useCase.execute({ projectId: 'p1', identifier: '10.1145/notfound' })
+          useCase.execute({ projectId: 'p1', identifier: '10.1145/notfound' }),
         ).rejects.toThrow(IdentifierNotFoundException);
       });
     });
@@ -613,7 +726,11 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
             new BibEntry({
               key: 'k1',
               entryType: 'article',
-              fields: { title: 'Title One', author: 'Author One', year: '2020' },
+              fields: {
+                title: 'Title One',
+                author: 'Author One',
+                year: '2020',
+              },
             }),
           ],
         });
@@ -680,7 +797,11 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         `);
         mockAggregator.appendEntryToBib.mockResolvedValue('/references.bib');
 
-        const useCase = new SyncLibraryCollectionUseCase(mockLibrarySync, parser, mockAggregator);
+        const useCase = new SyncLibraryCollectionUseCase(
+          mockLibrarySync,
+          parser,
+          mockAggregator,
+        );
         const res = await useCase.execute({
           projectId: 'p1',
           userId: 'u1',
@@ -693,9 +814,15 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
 
       it('should list collections for user', async () => {
-        mockLibrarySync.listCollections.mockResolvedValue([{ id: 'c1', name: 'Zotero Folder', itemCount: 5 }]);
+        mockLibrarySync.listCollections.mockResolvedValue([
+          { id: 'c1', name: 'Zotero Folder', itemCount: 5 },
+        ]);
 
-        const useCase = new SyncLibraryCollectionUseCase(mockLibrarySync, parser, mockAggregator);
+        const useCase = new SyncLibraryCollectionUseCase(
+          mockLibrarySync,
+          parser,
+          mockAggregator,
+        );
         const colls = await useCase.listUserCollections('u1');
         expect(colls).toHaveLength(1);
         expect(colls[0].id).toBe('c1');
@@ -732,7 +859,7 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         mockResolveUseCase,
         mockValidateUseCase,
         mockSyncUseCase,
-        parser
+        parser,
       );
 
       controller = new CitationsController(service);
@@ -748,7 +875,9 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         });
         mockSearchUseCase.execute.mockResolvedValue([dummyEntry]);
 
-        const result = await controller.searchCitationKeys('p1', { query: 'attention' });
+        const result = await controller.searchCitationKeys('p1', {
+          query: 'attention',
+        });
         expect(result).toHaveLength(1);
         expect(result[0].key).toBe('vaswani2017');
       });
@@ -765,14 +894,18 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           identifierType: 'doi',
         });
 
-        const res = await controller.resolveIdentifier('p1', { identifier: '10.1145/123' });
+        const res = await controller.resolveIdentifier('p1', {
+          identifier: '10.1145/123',
+        });
         expect(res.entry.key).toBe('doiKey');
         expect(res.filePath).toBe('/references.bib');
 
         // Test not found exception
-        mockResolveUseCase.execute.mockRejectedValue(new IdentifierNotFoundException('10.9999/none'));
+        mockResolveUseCase.execute.mockRejectedValue(
+          new IdentifierNotFoundException('10.9999/none'),
+        );
         await expect(
-          controller.resolveIdentifier('p1', { identifier: '10.9999/none' })
+          controller.resolveIdentifier('p1', { identifier: '10.9999/none' }),
         ).rejects.toThrow(NotFoundException);
       });
 
@@ -798,10 +931,14 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         });
 
         const req = { user: { id: 'user-42' } };
-        const res = await controller.syncLibrary('p1', { collectionId: 'c1' }, req);
+        const res = await controller.syncLibrary(
+          'p1',
+          { collectionId: 'c1' },
+          req,
+        );
         expect(res.collectionId).toBe('c1');
         expect(mockSyncUseCase.execute).toHaveBeenCalledWith(
-          expect.objectContaining({ userId: 'user-42' })
+          expect.objectContaining({ userId: 'user-42' }),
         );
       });
     });
@@ -815,7 +952,9 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         const req = { headers: { 'x-user-id': 'u-custom' } };
         const list = await utilityController.listLibraryCollections(req);
         expect(list).toHaveLength(1);
-        expect(mockSyncUseCase.listUserCollections).toHaveBeenCalledWith('u-custom');
+        expect(mockSyncUseCase.listUserCollections).toHaveBeenCalledWith(
+          'u-custom',
+        );
       });
 
       it('POST /citations/parse-raw should parse BibTeX in memory', () => {

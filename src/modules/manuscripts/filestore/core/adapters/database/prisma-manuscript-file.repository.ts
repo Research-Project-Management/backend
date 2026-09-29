@@ -58,7 +58,10 @@ export class PrismaManuscriptFileRepository extends IManuscriptFileRepository {
     return record ? ManuscriptFileMapper.toDomain(record) : null;
   }
 
-  public async findByProjectAndId(projectId: string, id: string): Promise<ManuscriptFile | null> {
+  public async findByProjectAndId(
+    projectId: string,
+    id: string,
+  ): Promise<ManuscriptFile | null> {
     const record = await this.prisma.manuscriptFile.findFirst({
       where: {
         id,
@@ -68,7 +71,10 @@ export class PrismaManuscriptFileRepository extends IManuscriptFileRepository {
     return record ? ManuscriptFileMapper.toDomain(record) : null;
   }
 
-  public async findByProjectAndName(projectId: string, name: string): Promise<ManuscriptFile | null> {
+  public async findByProjectAndName(
+    projectId: string,
+    name: string,
+  ): Promise<ManuscriptFile | null> {
     const record = await this.prisma.manuscriptFile.findFirst({
       where: {
         projectId,
@@ -89,7 +95,10 @@ export class PrismaManuscriptFileRepository extends IManuscriptFileRepository {
     return records.map(ManuscriptFileMapper.toDomain);
   }
 
-  public async listByProject(projectId: string, includeDeleted = false): Promise<ManuscriptFile[]> {
+  public async listByProject(
+    projectId: string,
+    includeDeleted = false,
+  ): Promise<ManuscriptFile[]> {
     const records = await this.prisma.manuscriptFile.findMany({
       where: {
         projectId,

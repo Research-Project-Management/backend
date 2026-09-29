@@ -39,21 +39,29 @@ export class NotificationGateway
   ) {}
 
   public afterInit(server: Server): void {
-    this.logger.log('Global Notifications WebSocket Gateway initialized (/notifications).');
+    this.logger.log(
+      'Global Notifications WebSocket Gateway initialized (/notifications).',
+    );
   }
 
   public async handleConnection(client: Socket): Promise<void> {
     const token = this.extractToken(client);
-    let userId = (client.handshake.auth?.userId as string) || (client.handshake.query?.userId as string);
+    let userId =
+      (client.handshake.auth?.userId as string) ||
+      (client.handshake.query?.userId as string);
 
     if (token && this.jwtService) {
       try {
         const secret =
-          this.configService?.get<string>('JWT_SECRET') || process.env.JWT_SECRET || 'secret';
+          this.configService?.get<string>('JWT_SECRET') ||
+          process.env.JWT_SECRET ||
+          'secret';
         const payload = await this.jwtService.verifyAsync(token, { secret });
         userId = payload.sub || payload.id || userId;
       } catch (err: any) {
-        this.logger.debug(`Socket ${client.id} notification handshake token invalid: ${err.message}`);
+        this.logger.debug(
+          `Socket ${client.id} notification handshake token invalid: ${err.message}`,
+        );
       }
     }
 
@@ -66,7 +74,9 @@ export class NotificationGateway
     // Join personal user notification room
     const userRoom = `user:${userId}`;
     client.join(userRoom);
-    this.logger.debug(`Client ${client.id} joined notification room: ${userRoom}`);
+    this.logger.debug(
+      `Client ${client.id} joined notification room: ${userRoom}`,
+    );
   }
 
   public handleDisconnect(client: Socket): void {

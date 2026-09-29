@@ -17,24 +17,34 @@ export class ResolveRootDocUseCase {
   constructor(
     private readonly structureRepository: IStructureRepository,
     private readonly rootDocDetector: IRootDocDetector,
-    private readonly treePublisher: ITreePublisher
+    private readonly treePublisher: ITreePublisher,
   ) {}
 
-  public async getRootDoc(projectId: string): Promise<ManuscriptNodeEntity | null> {
+  public async getRootDoc(
+    projectId: string,
+  ): Promise<ManuscriptNodeEntity | null> {
     return await this.structureRepository.getRootDoc(projectId);
   }
 
-  public async setRootDoc(projectId: string, nodeId: string): Promise<ManuscriptNodeEntity> {
+  public async setRootDoc(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ManuscriptNodeEntity> {
     const node = await this.structureRepository.findById(projectId, nodeId);
     if (!node) {
       throw new NodeNotFoundError(nodeId);
     }
     if (!node.isDoc()) {
-      throw new Error(`Cannot set node of type ${node.type} as root document. Must be DOC.`);
+      throw new Error(
+        `Cannot set node of type ${node.type} as root document. Must be DOC.`,
+      );
     }
 
     await this.structureRepository.setRootDoc(projectId, node.id);
-    const updated = (await this.structureRepository.findById(projectId, node.id))!;
+    const updated = (await this.structureRepository.findById(
+      projectId,
+      node.id,
+    ))!;
 
     await this.treePublisher.publishTreeMutation({
       projectId,
@@ -49,7 +59,7 @@ export class ResolveRootDocUseCase {
 
   public async autoDetectAndSetRootDoc(
     projectId: string,
-    docContents: Map<string, string[]>
+    docContents: Map<string, string[]>,
   ): Promise<ManuscriptNodeEntity | null> {
     const existing = await this.structureRepository.getRootDoc(projectId);
     if (existing) {
@@ -61,7 +71,9 @@ export class ResolveRootDocUseCase {
 
     if (detected) {
       await this.structureRepository.setRootDoc(projectId, detected.id);
-      this.logger.log(`Auto-detected root document '${detected.path}' for project ${projectId}`);
+      this.logger.log(
+        `Auto-detected root document '${detected.path}' for project ${projectId}`,
+      );
 
       await this.treePublisher.publishTreeMutation({
         projectId,

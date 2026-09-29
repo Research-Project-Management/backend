@@ -1,8 +1,8 @@
 import { NotFoundException } from '@nestjs/common';
-import { ExportsService } from '@/modules/library/citation/application/services/exports.service';
-import { CitationService } from '@/modules/library/citation/application/services/citation.service';
-import { ExportsRepository } from '@/modules/library/citation/infrastructure/repositories/exports.repository';
-import { ExportBibliographyUseCase } from '@/modules/library/citation/application/queries/export-bibliography.use-case';
+import { ExportsService } from '@/modules/library/citation/core/use-cases/exports.service';
+import { CitationService } from '@/modules/library/citation/core/use-cases/citation.service';
+import { ExportsRepository } from '@/modules/library/citation/core/adapters/exports.repository';
+import { ExportBibliographyUseCase } from '@/modules/library/citation/core/use-cases/export-bibliography.use-case';
 import { CitationFacade } from '@/modules/library/citation/citation.facade';
 import { LibraryFacade } from '@/modules/library/library.facade';
 
@@ -29,7 +29,12 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     url: 'https://arxiv.org/abs/1706.03762',
     citationKey: 'vaswani2017attention',
     contributors: [
-      { firstName: 'Ashish', lastName: 'Vaswani', role: 'author', orderIndex: 0 },
+      {
+        firstName: 'Ashish',
+        lastName: 'Vaswani',
+        role: 'author',
+        orderIndex: 0,
+      },
       { firstName: 'Noam', lastName: 'Shazeer', role: 'author', orderIndex: 1 },
     ],
   };
@@ -42,7 +47,12 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     year: 2017,
     citationKey: 'martin2017clean',
     contributors: [
-      { firstName: 'Robert C.', lastName: 'Martin', role: 'author', orderIndex: 0 },
+      {
+        firstName: 'Robert C.',
+        lastName: 'Martin',
+        role: 'author',
+        orderIndex: 0,
+      },
     ],
   };
 
@@ -60,7 +70,9 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
 
   beforeEach(() => {
     exportsRepo = {
-      findItemsByScope: jest.fn().mockResolvedValue([mockItem1, mockItem2, mockItemWithoutCiteKey]),
+      findItemsByScope: jest
+        .fn()
+        .mockResolvedValue([mockItem1, mockItem2, mockItemWithoutCiteKey]),
       findProjectMember: jest.fn().mockResolvedValue({ role: 'member' }),
       findCollection: jest.fn(),
       findItems: jest.fn(),
@@ -83,7 +95,10 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
 
   describe('ExportsService.exportByCitationKeys', () => {
     it('should return empty result when keys array is empty or null', async () => {
-      const resultEmpty = await exportsService.exportByCitationKeys(mockUserId, []);
+      const resultEmpty = await exportsService.exportByCitationKeys(
+        mockUserId,
+        [],
+      );
       expect(resultEmpty).toEqual({
         content: '',
         count: 0,
@@ -91,19 +106,25 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
         missingKeys: [],
       });
 
-      const resultNull = await exportsService.exportByCitationKeys(mockUserId, null as any);
+      const resultNull = await exportsService.exportByCitationKeys(
+        mockUserId,
+        null as any,
+      );
       expect(resultNull.count).toBe(0);
       expect(exportsRepo.findItemsByScope).not.toHaveBeenCalled();
     });
 
     it('should normalize citation keys (case-insensitive & trimmed) and generate valid BibTeX', async () => {
-      const result = await exportsService.exportByCitationKeys(
-        mockUserId,
-        ['  VASWANI2017ATTENTION  ', 'martin2017clean'],
-      );
+      const result = await exportsService.exportByCitationKeys(mockUserId, [
+        '  VASWANI2017ATTENTION  ',
+        'martin2017clean',
+      ]);
 
       expect(result.count).toBe(2);
-      expect(result.foundKeys).toEqual(['vaswani2017attention', 'martin2017clean']);
+      expect(result.foundKeys).toEqual([
+        'vaswani2017attention',
+        'martin2017clean',
+      ]);
       expect(result.missingKeys).toHaveLength(0);
 
       // Verify BibTeX formatting
@@ -117,10 +138,10 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     });
 
     it('should correctly partition foundKeys and missingKeys for partial matches', async () => {
-      const result = await exportsService.exportByCitationKeys(
-        mockUserId,
-        ['vaswani2017attention', 'non_existent_key_999'],
-      );
+      const result = await exportsService.exportByCitationKeys(mockUserId, [
+        'vaswani2017attention',
+        'non_existent_key_999',
+      ]);
 
       expect(result.count).toBe(1);
       expect(result.foundKeys).toEqual(['vaswani2017attention']);
@@ -130,10 +151,9 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     });
 
     it('should fallback to matching by item id if citationKey is null/missing', async () => {
-      const result = await exportsService.exportByCitationKeys(
-        mockUserId,
-        ['raw-uuid-0003'],
-      );
+      const result = await exportsService.exportByCitationKeys(mockUserId, [
+        'raw-uuid-0003',
+      ]);
 
       expect(result.count).toBe(1);
       expect(result.foundKeys).toEqual(['raw-uuid-0003']);
@@ -144,7 +164,7 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     });
 
     it('should enforce project membership check when projectId is specified', async () => {
-      exportsRepo.findProjectMember.mockResolvedValueOnce(null as any);
+      exportsRepo.findProjectMember.mockResolvedValueOnce(null);
 
       await expect(
         exportsService.exportByCitationKeys(
@@ -174,10 +194,9 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     });
 
     it('should scope database query to user and user project memberships when projectId is absent', async () => {
-      await exportsService.exportByCitationKeys(
-        mockUserId,
-        ['vaswani2017attention'],
-      );
+      await exportsService.exportByCitationKeys(mockUserId, [
+        'vaswani2017attention',
+      ]);
 
       expect(exportsRepo.findItemsByScope).toHaveBeenCalledWith({
         deletedAt: null,
@@ -238,10 +257,9 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     });
 
     it('should return null when no bibliography entries are matched', async () => {
-      const result = await citationFacade.exportBibliography(
-        mockUserId,
-        ['non_existent_key'],
-      );
+      const result = await citationFacade.exportBibliography(mockUserId, [
+        'non_existent_key',
+      ]);
 
       expect(result).toBeNull();
     });

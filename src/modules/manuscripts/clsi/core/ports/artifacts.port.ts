@@ -50,13 +50,13 @@ export interface ISyncTexProcessor {
     synctexText: string,
     file: string,
     line: number,
-    col?: number
+    col?: number,
   ): SyncPoint | null;
   reverseLookup(
     synctexText: string,
     page: number,
     x: number,
-    y: number
+    y: number,
   ): ReverseSyncPoint | null;
 }
 
@@ -76,7 +76,6 @@ export interface DiscoveredOutputFile {
 export interface IOutputFileFinder {
   find(
     scratchDir: string,
-    inputFiles: string[]
+    inputFiles: string[],
   ): Promise<DiscoveredOutputFile[]>;
 }
-

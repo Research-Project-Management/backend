@@ -75,7 +75,9 @@ export class CoreController {
   }
 
   @Get('trash')
-  @ApiOperation({ summary: 'List soft-deleted (trashed) projects for current user' })
+  @ApiOperation({
+    summary: 'List soft-deleted (trashed) projects for current user',
+  })
   async getTrashedProjects(@CurrentUser('id') userId: string) {
     return this.projectService.getTrashedProjects(userId);
   }
@@ -143,11 +145,13 @@ export class CoreController {
     return this.projectService.restore(projectId, actorId);
   }
 
-  @Post(':projectId/duplicate')
+  @Post([':projectId/duplicate', ':projectId/clone'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Duplicate a project with all its pages and structure' })
+  @ApiOperation({
+    summary: 'Duplicate a project with all its pages and structure',
+  })
   async duplicateProject(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -158,7 +162,9 @@ export class CoreController {
   @Delete(':projectId/permanent')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
-  @ApiOperation({ summary: 'Permanently delete a soft-deleted project (irreversible)' })
+  @ApiOperation({
+    summary: 'Permanently delete a soft-deleted project (irreversible)',
+  })
   async permanentDeleteProject(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,

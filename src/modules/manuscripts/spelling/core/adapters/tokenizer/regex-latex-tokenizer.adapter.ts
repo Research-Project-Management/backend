@@ -43,16 +43,24 @@ export class RegexLatexTokenizerAdapter implements ILatexTokenizerPort {
     let inVerbatimOrMathEnv = false;
 
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-      const originalLine = lines[lineIdx]!;
+      const originalLine = lines[lineIdx];
       const lineNum = lineIdx + 1;
 
       // Check environment transition
-      if (/\\begin\{(equation|align|gather|verbatim|lstlisting|minted|multline|flalign)\*?\}/i.test(originalLine)) {
+      if (
+        /\\begin\{(equation|align|gather|verbatim|lstlisting|minted|multline|flalign)\*?\}/i.test(
+          originalLine,
+        )
+      ) {
         inVerbatimOrMathEnv = true;
       }
 
       if (inVerbatimOrMathEnv) {
-        if (/\\end\{(equation|align|gather|verbatim|lstlisting|minted|multline|flalign)\*?\}/i.test(originalLine)) {
+        if (
+          /\\end\{(equation|align|gather|verbatim|lstlisting|minted|multline|flalign)\*?\}/i.test(
+            originalLine,
+          )
+        ) {
           inVerbatimOrMathEnv = false;
         }
         continue; // Skip entire math/verbatim block lines
@@ -79,7 +87,7 @@ export class RegexLatexTokenizerAdapter implements ILatexTokenizerPort {
             line: lineNum,
             col,
             length: rawWord.length,
-          })
+          }),
         );
       }
     }
@@ -109,19 +117,29 @@ export class RegexLatexTokenizerAdapter implements ILatexTokenizerPort {
 
     // 4. Mask technical commands with arguments: \cite{key}, \label{sec:1}, \ref{eq:2}, \usepackage[opt]{pkg}
     for (const cmd of RegexLatexTokenizerAdapter.TECHNICAL_ARG_COMMANDS) {
-      const pattern = new RegExp(`\\\\${cmd}\\*?(?:\\[[^\\]]*\\])?\\{[^\\}]*\\}`, 'g');
+      const pattern = new RegExp(
+        `\\\\${cmd}\\*?(?:\\[[^\\]]*\\])?\\{[^\\}]*\\}`,
+        'g',
+      );
       result = result.replace(pattern, (m) => ' '.repeat(m.length));
     }
 
     // 5. Mask \begin{env} and \end{env} tags
-    result = result.replace(/\\(begin|end)\{[^\}]+\}/g, (m) => ' '.repeat(m.length));
+    result = result.replace(/\\(begin|end)\{[^}]+\}/g, (m) =>
+      ' '.repeat(m.length),
+    );
 
     // 6. Mask \href{url}{text} -> mask only the url parameter
-    result = result.replace(/\\href\{[^\}]+\}/g, (m) => ' '.repeat(m.length));
+    result = result.replace(/\\href\{[^}]+\}/g, (m) => ' '.repeat(m.length));
 
     // 7. Mask URLs & emails
-    result = result.replace(/https?:\/\/[^\s{}]+/g, (m) => ' '.repeat(m.length));
-    result = result.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, (m) => ' '.repeat(m.length));
+    result = result.replace(/https?:\/\/[^\s{}]+/g, (m) =>
+      ' '.repeat(m.length),
+    );
+    result = result.replace(
+      /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
+      (m) => ' '.repeat(m.length),
+    );
 
     // 8. Mask remaining LaTeX command names (\section, \textbf, etc.) but NOT their brace contents
     result = result.replace(/\\[a-zA-Z]+\*?/g, (m) => ' '.repeat(m.length));

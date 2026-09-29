@@ -23,7 +23,7 @@ export class BibBackendDetector {
   public static async detect(
     source: string,
     scratchDir?: string,
-    magicBibHint?: 'biber' | 'bibtex'
+    magicBibHint?: 'biber' | 'bibtex',
   ): Promise<BibBackend> {
     // 1. Honor explicit magic comment (% !BIB program = biber/bibtex)
     if (magicBibHint) {
@@ -48,7 +48,7 @@ export class BibBackendDetector {
 
     // 3. Inspect source for biblatex package declaration
     const biblatexMatch = source.match(
-      /\\usepackage(?:\[([^\]]*)\])?\{biblatex\}/i
+      /\\usepackage(?:\[([^\]]*)\])?\{biblatex\}/i,
     );
 
     if (biblatexMatch) {
@@ -109,7 +109,7 @@ export class BibBackendDetector {
    */
   public static async writeLatexmkrc(
     scratchDir: string,
-    options: LatexmkrcOptions
+    options: LatexmkrcOptions,
   ): Promise<string> {
     const filePath = path.join(scratchDir, '.latexmkrc');
     const content = this.generateLatexmkrc(options);

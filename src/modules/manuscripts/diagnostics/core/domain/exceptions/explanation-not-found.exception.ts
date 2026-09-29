@@ -5,7 +5,9 @@
 
 export class ExplanationNotFoundException extends Error {
   constructor(public readonly errorCode: string) {
-    super(`No explanation found in knowledge base for error code: '${errorCode}'`);
+    super(
+      `No explanation found in knowledge base for error code: '${errorCode}'`,
+    );
     this.name = 'ExplanationNotFoundException';
     Object.setPrototypeOf(this, ExplanationNotFoundException.prototype);
   }

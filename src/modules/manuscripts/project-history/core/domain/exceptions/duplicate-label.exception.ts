@@ -4,7 +4,10 @@
  */
 
 export class DuplicateLabelException extends Error {
-  constructor(public readonly projectId: string, public readonly label: string) {
+  constructor(
+    public readonly projectId: string,
+    public readonly label: string,
+  ) {
     super(`Label '${label}' already exists in project '${projectId}'.`);
     this.name = 'DuplicateLabelException';
   }

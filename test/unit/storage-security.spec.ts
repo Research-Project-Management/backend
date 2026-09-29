@@ -594,7 +594,10 @@ describe('Storage & File Security Suite', () => {
       await securedController.streamFile('public-doc-id', mockReq, mockRes);
 
       expect(mockRes.status).toHaveBeenCalledWith(200);
-      expect(mockStreamBinaryUseCase.execute).toHaveBeenCalledWith('public-doc-id', undefined);
+      expect(mockStreamBinaryUseCase.execute).toHaveBeenCalledWith(
+        'public-doc-id',
+        undefined,
+      );
     });
   });
 
@@ -706,4 +709,3 @@ describe('Storage & File Security Suite', () => {
     });
   });
 });
-

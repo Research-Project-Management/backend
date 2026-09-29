@@ -50,7 +50,10 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
     projectId: string,
     socketId: string,
   ): Promise<PresenceSession | null> {
-    const session = await this.fallbackMemory.removeProjectSession(projectId, socketId);
+    const session = await this.fallbackMemory.removeProjectSession(
+      projectId,
+      socketId,
+    );
 
     if (this.isRedisActive()) {
       try {
@@ -68,7 +71,9 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
     return session;
   }
 
-  public async getProjectSessions(projectId: string): Promise<UserPresenceVo[]> {
+  public async getProjectSessions(
+    projectId: string,
+  ): Promise<UserPresenceVo[]> {
     return await this.fallbackMemory.getProjectSessions(projectId);
   }
 
@@ -77,7 +82,11 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
     docId: string,
     socketId: string,
   ): Promise<UserPresenceVo[]> {
-    const presenceList = await this.fallbackMemory.joinDocRoom(projectId, docId, socketId);
+    const presenceList = await this.fallbackMemory.joinDocRoom(
+      projectId,
+      docId,
+      socketId,
+    );
 
     if (this.isRedisActive()) {
       try {
@@ -110,7 +119,10 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
     }
   }
 
-  public async getDocSessions(projectId: string, docId: string): Promise<UserPresenceVo[]> {
+  public async getDocSessions(
+    projectId: string,
+    docId: string,
+  ): Promise<UserPresenceVo[]> {
     return await this.fallbackMemory.getDocSessions(projectId, docId);
   }
 
@@ -120,7 +132,12 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
     socketId: string,
     cursor: CursorPositionVo,
   ): Promise<UserPresenceVo | null> {
-    return await this.fallbackMemory.updateSessionCursor(projectId, docId, socketId, cursor);
+    return await this.fallbackMemory.updateSessionCursor(
+      projectId,
+      docId,
+      socketId,
+      cursor,
+    );
   }
 
   public async getSession(socketId: string): Promise<PresenceSession | null> {

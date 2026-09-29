@@ -1,12 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CommandRepository } from '@/modules/library/bibliography/infrastructure/repositories/command.repository';
-import { PrismaItemRepositoryAdapter } from '@/modules/library/bibliography/infrastructure/adapters/prisma-item-repository.adapter';
+import { CommandRepository } from '@/modules/library/catalog/core/adapters/command.repository';
+import { PrismaItemRepositoryAdapter } from '@/modules/library/catalog/core/adapters/prisma-item-repository.adapter';
 import { PrismaService } from '@/core/database/prisma.service';
-import { QueryRepository } from '@/modules/library/bibliography/infrastructure/repositories/query.repository';
+import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
 import { TransactionService } from '@/modules/library/shared-kernel/outbox/transaction.service';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
-import { ItemConcurrencyDomainException } from '@/modules/library/bibliography/domain/exceptions/item-domain.exception';
-import { ItemAggregate } from '@/modules/library/bibliography/domain/model/item.aggregate';
+import { ItemConcurrencyDomainException } from '@/modules/library/catalog/core/domain/item-domain.exception';
+import { ItemAggregate } from '@/modules/library/catalog/core/domain/item.aggregate';
 import { fromPartial } from '@total-typescript/shoehorn';
 
 describe('Library OCC (Optimistic Concurrency Control) Pattern', () => {
@@ -187,7 +187,7 @@ describe('Library OCC (Optimistic Concurrency Control) Pattern', () => {
         fromPartial<QueryRepository>({}),
         fromPartial<CommandRepository>({}),
         fromPartial<PrismaService>({}),
-        mockLibraryTx as any,
+        mockLibraryTx,
       );
     });
 

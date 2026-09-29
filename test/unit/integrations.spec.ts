@@ -7,6 +7,7 @@ import { MendeleyProvider } from '@/modules/integrations/providers/mendeley.prov
 import { GithubProvider } from '@/modules/integrations/providers/github.provider';
 import { IntegrationsService } from '@/modules/integrations/integrations.service';
 import { IntegrationsRepository } from '@/modules/integrations/integrations.repository';
+import { PluggableLibrarySyncAdapter } from '@/modules/manuscripts/citations/core/adapters/library/pluggable-library-sync.adapter';
 
 describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
   describe('Crypto Utils (AES-256-GCM)', () => {
@@ -48,7 +49,10 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
     });
 
     it('should initiate OAuth and return authUrl with state', async () => {
-      const result = await provider.initiateOAuth('user_123', 'http://localhost:3000/callback');
+      const result = await provider.initiateOAuth(
+        'user_123',
+        'http://localhost:3000/callback',
+      );
       expect(result.authUrl).toBeDefined();
       expect(result.state).toContain('user_123');
     });
@@ -65,7 +69,10 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
     });
 
     it('should fetch remote collections', async () => {
-      const collections = await provider.fetchCollections('mock_key_xyz', '1234567');
+      const collections = await provider.fetchCollections(
+        'mock_key_xyz',
+        '1234567',
+      );
       expect(Array.isArray(collections)).toBe(true);
       expect(collections.length).toBeGreaterThan(0);
       expect(collections[0]).toHaveProperty('id');
@@ -73,7 +80,11 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
     });
 
     it('should fetch BibTeX content for collection', async () => {
-      const bibtex = await provider.fetchCollectionBibtex('mock_key_xyz', '1234567', 'COLL_1');
+      const bibtex = await provider.fetchCollectionBibtex(
+        'mock_key_xyz',
+        '1234567',
+        'COLL_1',
+      );
       expect(bibtex).toContain('@article');
       expect(bibtex).toContain('title');
     });
@@ -87,7 +98,10 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
     });
 
     it('should initiate OAuth 2.0 and return authUrl with state', async () => {
-      const result = await provider.initiateOAuth('user_456', 'http://localhost:3000/callback');
+      const result = await provider.initiateOAuth(
+        'user_456',
+        'http://localhost:3000/callback',
+      );
       expect(result.authUrl).toBeDefined();
       expect(result.state).toContain('user_456');
     });
@@ -104,7 +118,10 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
     });
 
     it('should fetch remote folders/collections', async () => {
-      const collections = await provider.fetchCollections('mock_token_abc', 'mendeley_user_883921');
+      const collections = await provider.fetchCollections(
+        'mock_token_abc',
+        'mendeley_user_883921',
+      );
       expect(Array.isArray(collections)).toBe(true);
       expect(collections.length).toBeGreaterThan(0);
       expect(collections[0]).toHaveProperty('id');
@@ -130,7 +147,10 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
     });
 
     it('should initiate OAuth with repo scope', async () => {
-      const result = await provider.initiateOAuth('user_github_1', 'http://localhost:3000/callback');
+      const result = await provider.initiateOAuth(
+        'user_github_1',
+        'http://localhost:3000/callback',
+      );
       expect(result.authUrl).toBeDefined();
       expect(result.state).toContain('user_github_1');
     });
@@ -147,7 +167,10 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
     });
 
     it('should list repositories as collections', async () => {
-      const repos = await provider.fetchCollections('github_mock_token', 'github_user_441928');
+      const repos = await provider.fetchCollections(
+        'github_mock_token',
+        'github_user_441928',
+      );
       expect(Array.isArray(repos)).toBe(true);
       expect(repos.length).toBeGreaterThan(0);
       expect(repos[0]).toHaveProperty('id');
@@ -155,7 +178,10 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
     });
 
     it('should list repository branches', async () => {
-      const branches = await provider.listBranches('github_mock_token', 'octocat/research-manuscript');
+      const branches = await provider.listBranches(
+        'github_mock_token',
+        'octocat/research-manuscript',
+      );
       expect(branches).toContain('main');
     });
 
@@ -165,7 +191,10 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
         repoFullName: 'octocat/research-manuscript',
         branch: 'main',
         files: [
-          { path: 'main.tex', data: Buffer.from('\\begin{document}Hello\\end{document}') },
+          {
+            path: 'main.tex',
+            data: Buffer.from('\\begin{document}Hello\\end{document}'),
+          },
         ],
         commitMessage: 'Initial manuscript commit',
       });
@@ -212,7 +241,10 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
       };
       mockAggregator = {
         collectProjectEntries: jest.fn().mockResolvedValue([
-          { path: 'main.tex', data: Buffer.from('\\begin{document}Paper\\end{document}') },
+          {
+            path: 'main.tex',
+            data: Buffer.from('\\begin{document}Paper\\end{document}'),
+          },
         ]),
       };
       mockHydrator = {
@@ -320,7 +352,9 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
         expect.any(Buffer),
         'application/x-bibtex',
       );
-      expect(mockRepo.updateProjectLinkLastSynced).toHaveBeenCalledWith('link_1');
+      expect(mockRepo.updateProjectLinkLastSynced).toHaveBeenCalledWith(
+        'link_1',
+      );
     });
 
     it('should push project to GitHub repository', async () => {
@@ -355,7 +389,9 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
 
       expect(pushRes.success).toBe(true);
       expect(pushRes.repoFullName).toBe('octocat/research-manuscript');
-      expect(mockRepo.updateProjectLinkLastSynced).toHaveBeenCalledWith('link_gh_1');
+      expect(mockRepo.updateProjectLinkLastSynced).toHaveBeenCalledWith(
+        'link_gh_1',
+      );
     });
 
     it('should pull project from GitHub repository', async () => {
@@ -390,7 +426,74 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
       expect(pullRes.success).toBe(true);
       expect(pullRes.filesImported).toBeGreaterThan(0);
       expect(mockHydrator.hydrateProjectEntries).toHaveBeenCalled();
-      expect(mockRepo.updateProjectLinkLastSynced).toHaveBeenCalledWith('link_gh_1');
+      expect(mockRepo.updateProjectLinkLastSynced).toHaveBeenCalledWith(
+        'link_gh_1',
+      );
+    });
+  });
+
+  describe('PluggableLibrarySyncAdapter (Zotero Official API Bridge)', () => {
+    let adapter: PluggableLibrarySyncAdapter;
+    let mockRepo: any;
+    let zoteroProvider: ZoteroProvider;
+
+    beforeEach(() => {
+      mockRepo = {
+        findConnection: jest.fn(),
+      };
+      zoteroProvider = new ZoteroProvider();
+      adapter = new PluggableLibrarySyncAdapter(
+        undefined,
+        mockRepo,
+        zoteroProvider,
+      );
+    });
+
+    it('should list remote Zotero collections when user has connected account', async () => {
+      const encryptedToken = encryptToken('zotero_mock_token');
+      mockRepo.findConnection.mockResolvedValue({
+        id: 'conn_1',
+        userId: 'user_zotero_1',
+        provider: 'zotero',
+        status: 'connected',
+        accessToken: encryptedToken,
+        providerUserId: '1234567',
+        authFailedAt: null,
+      });
+
+      const collections = await adapter.listCollections('user_zotero_1');
+      expect(collections.length).toBeGreaterThan(0);
+      const zoteroCol = collections.find((c) => c.id.startsWith('zotero:'));
+      expect(zoteroCol).toBeDefined();
+      expect(zoteroCol?.name).toContain('[Zotero]');
+    });
+
+    it('should fetch remote BibTeX when collectionId starts with zotero:', async () => {
+      const encryptedToken = encryptToken('zotero_mock_token');
+      mockRepo.findConnection.mockResolvedValue({
+        id: 'conn_1',
+        userId: 'user_zotero_1',
+        provider: 'zotero',
+        status: 'connected',
+        accessToken: encryptedToken,
+        providerUserId: '1234567',
+        authFailedAt: null,
+      });
+
+      const bibtex = await adapter.fetchCollectionBibtex(
+        'user_zotero_1',
+        'zotero:COLL_1',
+      );
+      expect(bibtex).toContain('@article');
+      expect(bibtex).toContain('title');
+    });
+
+    it('should fallback to local collections when user has no Zotero connection', async () => {
+      mockRepo.findConnection.mockResolvedValue(null);
+
+      const collections = await adapter.listCollections('user_no_zotero');
+      expect(collections.length).toBeGreaterThan(0);
+      expect(collections[0].id).toBe('coll-default');
     });
   });
 });

@@ -20,7 +20,7 @@ export class EventRealtimeNotifierAdapter implements IRealtimeNotifierPort {
   async notifyUser(
     userId: string,
     notification: NotificationEntity,
-    unreadCount: number
+    unreadCount: number,
   ): Promise<void> {
     const payload = {
       notification: notification.toPlain(),
@@ -39,11 +39,16 @@ export class EventRealtimeNotifierAdapter implements IRealtimeNotifierPort {
         this.realtimeService.notifyUser(userId, 'notification:new', payload);
       }
     } catch (err: any) {
-      this.logger.debug(`Could not push realtime websocket alert to user:${userId}: ${err?.message}`);
+      this.logger.debug(
+        `Could not push realtime websocket alert to user:${userId}: ${err?.message}`,
+      );
     }
   }
 
-  async broadcastUnreadCount(userId: string, unreadCount: number): Promise<void> {
+  async broadcastUnreadCount(
+    userId: string,
+    unreadCount: number,
+  ): Promise<void> {
     const payload = { unreadCount };
 
     this.dispatchedEvents.push({
@@ -58,7 +63,9 @@ export class EventRealtimeNotifierAdapter implements IRealtimeNotifierPort {
         this.realtimeService.notifyUser(userId, 'notification:count', payload);
       }
     } catch (err: any) {
-      this.logger.debug(`Could not broadcast unread count to user:${userId}: ${err?.message}`);
+      this.logger.debug(
+        `Could not broadcast unread count to user:${userId}: ${err?.message}`,
+      );
     }
   }
 

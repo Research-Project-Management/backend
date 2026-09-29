@@ -16,7 +16,7 @@ export abstract class IDocPersistor {
   abstract sendStream(
     key: string,
     stream: Readable,
-    options?: { sourceMd5?: string }
+    options?: { sourceMd5?: string },
   ): Promise<void>;
 
   abstract getObjectStream(key: string): Promise<Readable>;

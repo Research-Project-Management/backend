@@ -26,8 +26,12 @@ export class InstantiateTemplateUseCase {
     private readonly getTemplateByIdUseCase: GetTemplateByIdUseCase,
   ) {}
 
-  async execute(command: InstantiateTemplateCommand): Promise<InstantiatedProjectResult> {
-    const template = await this.getTemplateByIdUseCase.execute(command.templateIdOrVersionId);
+  async execute(
+    command: InstantiateTemplateCommand,
+  ): Promise<InstantiatedProjectResult> {
+    const template = await this.getTemplateByIdUseCase.execute(
+      command.templateIdOrVersionId,
+    );
 
     const result = await this.projectInstantiator.instantiate({
       template,

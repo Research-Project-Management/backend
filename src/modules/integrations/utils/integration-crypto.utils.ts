@@ -1,4 +1,9 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 
@@ -37,7 +42,9 @@ export function decryptToken(cipherPayload: string): string {
   }
   const parts = cipherPayload.split(':');
   if (parts.length !== 3) {
-    throw new Error('Invalid cipher payload format; expected iv:authTag:ciphertext');
+    throw new Error(
+      'Invalid cipher payload format; expected iv:authTag:ciphertext',
+    );
   }
 
   const [ivHex, authTagHex, encryptedHex] = parts;

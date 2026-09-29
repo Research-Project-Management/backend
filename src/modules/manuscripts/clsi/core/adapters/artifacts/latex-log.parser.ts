@@ -4,10 +4,7 @@
  * with precise file and line associations.
  */
 
-import {
-  CompilerDiagnostic,
-  ILogParser,
-} from '../../ports/artifacts.port';
+import { CompilerDiagnostic, ILogParser } from '../../ports/artifacts.port';
 
 export class OverleafLogParser implements ILogParser {
   private static readonly LATEX_WARNING_REGEX =
@@ -21,7 +18,7 @@ export class OverleafLogParser implements ILogParser {
 
   public parse(
     logText: string,
-    defaultFile = 'main.tex'
+    defaultFile = 'main.tex',
   ): CompilerDiagnostic[] {
     const diagnostics: CompilerDiagnostic[] = [];
     const lines = logText.split('\n');
@@ -34,7 +31,7 @@ export class OverleafLogParser implements ILogParser {
       const tectonicMatch = line.match(OverleafLogParser.TECTONIC_ERROR_REGEX);
       if (tectonicMatch && tectonicMatch[3]) {
         const errorFile = tectonicMatch[1]?.trim() || defaultFile;
-        const errorLine = parseInt(tectonicMatch[2]!, 10);
+        const errorLine = parseInt(tectonicMatch[2], 10);
         const message = tectonicMatch[3].trim();
         const context = lines
           .slice(i, Math.min(i + 3, lines.length))
@@ -71,7 +68,7 @@ export class OverleafLogParser implements ILogParser {
         const resolvedContext = context || lines.slice(i, i + 3).join('\n');
         const { code, suggestion } = this.generateSuggestion(
           message,
-          resolvedContext
+          resolvedContext,
         );
 
         diagnostics.push({
@@ -121,7 +118,7 @@ export class OverleafLogParser implements ILogParser {
 
   private generateSuggestion(
     message: string,
-    context: string
+    context: string,
   ): { code?: string; suggestion?: string } {
     const lowerMsg = message.toLowerCase();
 

@@ -3,7 +3,15 @@
  * Inbound WebSocket request payloads from collaborating editor clients.
  */
 
-import { IsString, IsNotEmpty, IsInt, IsOptional, IsArray, ValidateNested, Min } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsInt,
+  IsOptional,
+  IsArray,
+  ValidateNested,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class JoinProjectDto {
@@ -122,4 +130,20 @@ export class CursorUpdateDto {
   @ValidateNested()
   @Type(() => CursorPayloadDto)
   cursor!: CursorPayloadDto;
+}
+
+export class DocSyncDto {
+  @IsString()
+  @IsNotEmpty()
+  projectId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  docId!: string;
+
+  @IsOptional()
+  step?: string | number;
+
+  @IsNotEmpty()
+  data!: any;
 }

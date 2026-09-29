@@ -2,27 +2,27 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma } from '@prisma/client';
-import { DuplicateService } from '@/modules/library/ingestion/application/services/duplicate.service';
+import { DuplicateService } from '@/modules/library/ingestion/core/use-cases/duplicate.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   TransactionService,
   TransactionHelpers,
 } from '@/modules/library/shared-kernel/outbox/transaction.service';
 import {
-  BIBLIOGRAPHY_FACADE,
-  IBibliographyFacade,
-} from '@/modules/library/bibliography/bibliography.facade';
+  CATALOG_GATEWAY_PORT,
+  ICatalogGatewayPort,
+} from '@/modules/library/ingestion/core/ports/catalog-gateway.port';
 import {
-  READER_FACADE,
-  IReaderFacade,
-} from '@/modules/library/reader/reader.facade';
-import { IngestionRepository } from '@/modules/library/ingestion/infrastructure/repositories/ingestion.repository';
-import { ItemDetail } from '@/modules/library/bibliography/domain/ports/items.ports';
+  EXTRACTION_GATEWAY_PORT,
+  IExtractionGatewayPort,
+} from '@/modules/library/ingestion/core/ports/extraction-gateway.port';
+import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
+import { ItemDetail } from '@/modules/library/catalog/core/ports/items.ports';
 import {
   normalizeTitleForDedupe,
   extractFirstAuthorFamily,
   generateDedupeBucketKey,
-} from '@/modules/library/ingestion/application/utils/curation.utils';
+} from '@/modules/library/ingestion/core/adapters/curation.utils';
 
 describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';
@@ -58,8 +58,8 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     let service: DuplicateService;
     let mockPrisma: any;
     let mockLibraryTx: any;
-    let mockBibliographyFacade: jest.Mocked<IBibliographyFacade>;
-    let mockReaderFacade: jest.Mocked<IReaderFacade>;
+    let mockBibliographyFacade: jest.Mocked<ICatalogGatewayPort>;
+    let mockReaderFacade: jest.Mocked<IExtractionGatewayPort>;
     let mockTx: any;
     let mockHelpers: jest.Mocked<TransactionHelpers>;
     let mockIngestionRepo: any;
@@ -141,8 +141,8 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
           DuplicateService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: TransactionService, useValue: mockLibraryTx },
-          { provide: BIBLIOGRAPHY_FACADE, useValue: mockBibliographyFacade },
-          { provide: READER_FACADE, useValue: mockReaderFacade },
+          { provide: CATALOG_GATEWAY_PORT, useValue: mockBibliographyFacade },
+          { provide: EXTRACTION_GATEWAY_PORT, useValue: mockReaderFacade },
           { provide: IngestionRepository, useValue: mockIngestionRepo },
         ],
       }).compile();
@@ -497,7 +497,9 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     });
 
     it('should throw NotFoundException if clusterId does not exist during autoResolveCluster', async () => {
-      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValueOnce([]);
+      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValueOnce(
+        [],
+      );
 
       await expect(
         service.autoResolveCluster(mockUserId, 'non-existent-cluster'),

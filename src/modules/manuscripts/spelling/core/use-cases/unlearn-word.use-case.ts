@@ -14,7 +14,9 @@ export interface UnlearnWordCommand {
 }
 
 export class UnlearnWordUseCase {
-  constructor(private readonly customDictionary: ICustomDictionaryRepositoryPort) {}
+  constructor(
+    private readonly customDictionary: ICustomDictionaryRepositoryPort,
+  ) {}
 
   public async execute(command: UnlearnWordCommand): Promise<boolean> {
     const raw = (command.word || '').trim();

@@ -16,7 +16,10 @@ export class InFlightDocStateDto {
   lastUpdateTimestamp!: number;
   isBuffered!: boolean;
 
-  public static fromEntity(doc: InFlightDoc, isBuffered = true): InFlightDocStateDto {
+  public static fromEntity(
+    doc: InFlightDoc,
+    isBuffered = true,
+  ): InFlightDocStateDto {
     const dto = new InFlightDocStateDto();
     dto.docId = doc.docId;
     dto.projectId = doc.projectId;

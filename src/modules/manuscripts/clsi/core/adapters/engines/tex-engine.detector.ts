@@ -34,7 +34,7 @@ export class TexEngineDetector {
    */
   public static detect(
     source: string,
-    requestedEngine?: string
+    requestedEngine?: string,
   ): EngineDetectionResult {
     // 1. Explicit request takes priority unless set to 'auto' or empty
     if (requestedEngine && requestedEngine !== 'auto') {
@@ -46,7 +46,7 @@ export class TexEngineDetector {
         normalized === 'tectonic'
       ) {
         return {
-          engine: normalized as SupportedEngine,
+          engine: normalized,
           detectedFrom: 'explicit',
         };
       }
@@ -152,7 +152,13 @@ export class TexEngineDetector {
     }
 
     // Prefer common names if multiple candidates exist
-    const commonNames = ['main.tex', 'document.tex', 'paper.tex', 'thesis.tex', 'index.tex'];
+    const commonNames = [
+      'main.tex',
+      'document.tex',
+      'paper.tex',
+      'thesis.tex',
+      'index.tex',
+    ];
     for (const name of commonNames) {
       if (candidates.includes(name)) {
         return name;

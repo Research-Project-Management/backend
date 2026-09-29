@@ -15,7 +15,7 @@ export class MarkNotificationReadUseCase {
     @Inject(NOTIFICATION_REPOSITORY_PORT)
     private readonly repository: INotificationRepositoryPort,
     @Inject(REALTIME_NOTIFIER_PORT)
-    private readonly notifier: IRealtimeNotifierPort
+    private readonly notifier: IRealtimeNotifierPort,
   ) {}
 
   async execute(notificationId: string, userId?: string): Promise<boolean> {

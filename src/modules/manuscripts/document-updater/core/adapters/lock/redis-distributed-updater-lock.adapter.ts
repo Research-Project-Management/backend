@@ -24,7 +24,13 @@ export class RedisDistributedUpdaterLockAdapter extends IUpdaterLockPort {
       const client = this.redisService.getClient();
       if (client) {
         // Atomic SET lockKey "locked" NX PX ttlMs
-        const result = await client.set(this.lockKey(resourceKey), 'locked', 'PX', ttlMs, 'NX');
+        const result = await client.set(
+          this.lockKey(resourceKey),
+          'locked',
+          'PX',
+          ttlMs,
+          'NX',
+        );
         return result === 'OK';
       }
     } catch {

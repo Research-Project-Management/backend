@@ -32,10 +32,7 @@ import { CreateCustomTemplateUseCase } from './core/use-cases/create-custom-temp
     forwardRef(() => StructureModule),
     forwardRef(() => DocstoreModule),
   ],
-  controllers: [
-    TemplatesController,
-    OverleafTemplatesParityController,
-  ],
+  controllers: [TemplatesController, OverleafTemplatesParityController],
   providers: [
     // Ports & Adapters
     {

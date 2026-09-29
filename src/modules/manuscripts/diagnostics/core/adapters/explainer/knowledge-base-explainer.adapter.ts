@@ -4,7 +4,10 @@
  */
 
 import { IErrorExplainerPort } from '../../ports/error-explainer.port';
-import { ErrorExplanationVo, ErrorExplanationProps } from '../../domain/value-objects/error-explanation.vo';
+import {
+  ErrorExplanationVo,
+  ErrorExplanationProps,
+} from '../../domain/value-objects/error-explanation.vo';
 
 interface RuleDefinition extends ErrorExplanationProps {
   patterns: RegExp[];
@@ -25,7 +28,8 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       suggestedFix:
         'Kiểm tra lại chính tả của lệnh, hoặc thêm \\usepackage{<tên_package>} vào phần đầu tài liệu.',
       exampleSnippet: '\\usepackage{amsmath}\n\\usepackage{graphicx}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/Undefined_control_sequence',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/Undefined_control_sequence',
       patterns: [/undefined control sequence/i],
     },
     {
@@ -40,7 +44,8 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       suggestedFix:
         'Bao bọc công thức bằng dấu $...$ nếu là toán học, hoặc escape thêm dấu gạch chéo "\\_" nếu là ký tự gạch dưới văn bản thông thường.',
       exampleSnippet: 'Giá trị $x_1$ hoặc tên tệp my\\_file.tex',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/Missing_$_inserted',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/Missing_$_inserted',
       patterns: [/missing \$ inserted/i],
     },
     {
@@ -56,8 +61,12 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       suggestedFix:
         'Kiểm tra lại cây thư mục xem tệp đã được tải lên chưa và đường dẫn trong mã nguồn có khớp chính xác từng ký tự hay không.',
       exampleSnippet: '\\includegraphics[width=\\linewidth]{figures/plot.png}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/LaTeX_Error%3A_File_not_found',
-      patterns: [/file [`'](.+?)['] not found/i, /i can't find file [`'](.+?)[']/i],
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/LaTeX_Error%3A_File_not_found',
+      patterns: [
+        /file [`'](.+?)['] not found/i,
+        /i can't find file [`'](.+?)[']/i,
+      ],
     },
     {
       code: 'ENVIRONMENT_MISMATCH',
@@ -71,8 +80,11 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       suggestedFix:
         'Kiểm tra cặp \\begin{...} và \\end{...} tương ứng để đảm bảo chúng có cùng tên và được lồng ghép hợp lệ.',
       exampleSnippet: '\\begin{equation}\n  E = mc^2\n\\end{equation}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/%5Cbegin%7B...%7D_ended_by_%5Cend%7B...%7D',
-      patterns: [/\\begin\{([^}]+)\} (?:on input line \d+ )?ended by \\end\{([^}]+)\}/i],
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/%5Cbegin%7B...%7D_ended_by_%5Cend%7B...%7D',
+      patterns: [
+        /\\begin\{([^}]+)\} (?:on input line \d+ )?ended by \\end\{([^}]+)\}/i,
+      ],
     },
     {
       code: 'ENVIRONMENT_UNDEFINED',
@@ -83,9 +95,11 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
         'Gõ sai tên môi trường.',
         'Quên nạp package cung cấp môi trường này (ví dụ: dùng align mà chưa nạp amsmath, dùng figure/table mà thiếu gói hỗ trợ).',
       ],
-      suggestedFix: 'Khai báo package chứa môi trường này trong preamble bằng lệnh \\usepackage.',
+      suggestedFix:
+        'Khai báo package chứa môi trường này trong preamble bằng lệnh \\usepackage.',
       exampleSnippet: '\\usepackage{amsmath} % Cho \\begin{align}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/LaTeX_Error%3A_Environment_undefined',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/LaTeX_Error%3A_Environment_undefined',
       patterns: [/environment (.+?) undefined/i],
     },
     {
@@ -99,9 +113,14 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       ],
       suggestedFix:
         'Giảm bớt số lượng ký tự "&" cho khớp định dạng bảng, hoặc thay bằng "\\&" nếu là văn bản thường.',
-      exampleSnippet: 'AT\\&T Company hoặc \\begin{tabular}{cc} A & B \\\\ \\end{tabular}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/Extra_alignment_tab_has_been_changed_to_%5Ccr',
-      patterns: [/extra alignment tab has been changed to/i, /extra alignment tab/i],
+      exampleSnippet:
+        'AT\\&T Company hoặc \\begin{tabular}{cc} A & B \\\\ \\end{tabular}',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/Extra_alignment_tab_has_been_changed_to_%5Ccr',
+      patterns: [
+        /extra alignment tab has been changed to/i,
+        /extra alignment tab/i,
+      ],
     },
     {
       code: 'NO_LINE_HERE_TO_END',
@@ -115,7 +134,8 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       suggestedFix:
         'Xóa lệnh "\\\\" ở đầu đoạn. Để tách đoạn, hãy để một dòng trống trong mã nguồn hoặc dùng \\vspace{1em}.',
       exampleSnippet: '% Đúng:\nĐoạn văn một.\n\nĐoạn văn hai.',
-      documentationUrl: "https://www.overleaf.com/learn/latex/Errors/There's_no_line_here_to_end",
+      documentationUrl:
+        "https://www.overleaf.com/learn/latex/Errors/There's_no_line_here_to_end",
       patterns: [/there's no line here to end/i],
     },
     {
@@ -127,9 +147,12 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
         'Khai báo \\usepackage sau khi nội dung tài liệu đã bắt đầu.',
         'Copy nhầm toàn bộ file tài liệu khác vào giữa file hiện tại.',
       ],
-      suggestedFix: 'Di chuyển toàn bộ các lệnh \\usepackage lên trên dòng \\begin{document}.',
-      exampleSnippet: '\\documentclass{article}\n\\usepackage{amsmath} % Trước \\begin{document}\n\\begin{document}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/Can_be_used_only_in_preamble',
+      suggestedFix:
+        'Di chuyển toàn bộ các lệnh \\usepackage lên trên dòng \\begin{document}.',
+      exampleSnippet:
+        '\\documentclass{article}\n\\usepackage{amsmath} % Trước \\begin{document}\n\\begin{document}',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/Can_be_used_only_in_preamble',
       patterns: [/can be used only in preamble/i],
     },
     {
@@ -144,7 +167,8 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       suggestedFix:
         'Đổi tên lệnh mới, hoặc sử dụng \\renewcommand{\\foo}{...} nếu bạn thực sự muốn ghi đè lên lệnh cũ.',
       exampleSnippet: '\\renewcommand{\\mycmd}{nội dung mới}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/LaTeX_Error%3A_Command_..._already_defined',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/LaTeX_Error%3A_Command_..._already_defined',
       patterns: [/command (.+?) already defined/i],
     },
     {
@@ -159,8 +183,13 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       suggestedFix:
         'Rà soát các khối ngoặc nhọn tại dòng được báo lỗi và đóng/mở cân xứng các cặp ngoặc.',
       exampleSnippet: '\\textbf{chữ in đậm}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/Extra_%7D%2C_or_forgotten_%24',
-      patterns: [/extra \}, or forgotten \$/i, /too many \}'s/i, /missing \} inserted/i],
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/Extra_%7D%2C_or_forgotten_%24',
+      patterns: [
+        /extra \}, or forgotten \$/i,
+        /too many \}'s/i,
+        /missing \} inserted/i,
+      ],
     },
     {
       code: 'CORRUPTED_AUX_FILE',
@@ -174,7 +203,8 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       suggestedFix:
         'Bấm "Clear cached files" (Xóa tệp tạm) và tiến hành Recompile lại từ đầu.',
       exampleSnippet: 'Xóa tệp .aux, .bbl, .out trong cache và biên dịch lại.',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/File_ended_while_scanning_use_of',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/File_ended_while_scanning_use_of',
       patterns: [/file ended while scanning use of/i, /runaway argument/i],
     },
     {
@@ -189,8 +219,10 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       ],
       suggestedFix:
         'Xem xét các thông báo lỗi ngay trước dòng Emergency Stop trong log để tìm nguyên nhân gốc rễ.',
-      exampleSnippet: 'Kiểm tra lỗi chi tiết nằm ở các dòng phía trên thông báo Emergency stop.',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/Emergency_stop',
+      exampleSnippet:
+        'Kiểm tra lỗi chi tiết nằm ở các dòng phía trên thông báo Emergency stop.',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/Emergency_stop',
       patterns: [/! emergency stop/i, /emergency stop/i],
     },
     {
@@ -205,7 +237,8 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       suggestedFix:
         'Thêm gói \\usepackage{microtype} để cải thiện khoảng cách chữ, hoặc dùng \\resizebox{\\textwidth}{!}{...} cho bảng và hình ảnh.',
       exampleSnippet: '\\includegraphics[width=\\linewidth]{image.png}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/Overfull_%5Chbox',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/Overfull_%5Chbox',
       patterns: [/overfull \\hbox/i],
     },
     {
@@ -217,9 +250,11 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
         'Ép buộc ngắt dòng bằng lệnh "\\\\" trong văn bản thường.',
         'Đoạn văn quá ngắn hoặc có từ dài không thể hyphenate.',
       ],
-      suggestedFix: 'Tránh dùng "\\\\" để ngắt dòng tùy tiện; hãy để LaTeX tự động căn đều dòng.',
+      suggestedFix:
+        'Tránh dùng "\\\\" để ngắt dòng tùy tiện; hãy để LaTeX tự động căn đều dòng.',
       exampleSnippet: 'Sử dụng các đoạn văn bản liền mạch tự nhiên.',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/Underfull_%5Chbox',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/Underfull_%5Chbox',
       patterns: [/underfull \\hbox/i],
     },
     {
@@ -233,9 +268,14 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       ],
       suggestedFix:
         'Đảm bảo tên nhãn khớp nhau và chạy lại biên dịch để đồng bộ tệp .aux.',
-      exampleSnippet: '\\label{sec:intro}\n... Như trình bày ở Mục \\ref{sec:intro}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/LaTeX_Warning%3A_Reference_..._undefined',
-      patterns: [/reference [`'](.+?)['] on page \d+ undefined/i, /there were undefined references/i],
+      exampleSnippet:
+        '\\label{sec:intro}\n... Như trình bày ở Mục \\ref{sec:intro}',
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/LaTeX_Warning%3A_Reference_..._undefined',
+      patterns: [
+        /reference [`'](.+?)['] on page \d+ undefined/i,
+        /there were undefined references/i,
+      ],
     },
     {
       code: 'UNDEFINED_CITATION',
@@ -250,8 +290,12 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
       suggestedFix:
         'Kiểm tra lại citation key trong tệp .bib và đảm bảo tệp .bib đã được liên kết chính xác.',
       exampleSnippet: '\\cite{vaswani2017attention}',
-      documentationUrl: 'https://www.overleaf.com/learn/latex/Errors/LaTeX_Warning%3A_Citation_..._undefined',
-      patterns: [/citation [`'](.+?)['] on page \d+ undefined/i, /there were undefined citations/i],
+      documentationUrl:
+        'https://www.overleaf.com/learn/latex/Errors/LaTeX_Warning%3A_Citation_..._undefined',
+      patterns: [
+        /citation [`'](.+?)['] on page \d+ undefined/i,
+        /there were undefined citations/i,
+      ],
     },
   ];
 
@@ -269,8 +313,30 @@ export class KnowledgeBaseExplainerAdapter implements IErrorExplainerPort {
     return null;
   }
 
+  private static readonly CODE_ALIASES: Record<string, string> = {
+    UNMATCHED_CLOSING_BRACE: 'UNBALANCED_BRACES',
+    UNCLOSED_OPENING_BRACE: 'UNBALANCED_BRACES',
+    EXTRA_END_ENV: 'ENVIRONMENT_MISMATCH',
+    MISMATCHED_ENV: 'ENVIRONMENT_MISMATCH',
+    UNCLOSED_ENV: 'ENVIRONMENT_MISMATCH',
+    UNESCAPED_PERCENT: 'MISSING_MATH_DELIMITER',
+    UNESCAPED_AMPERSAND: 'EXTRA_ALIGNMENT_TAB',
+    UNESCAPED_UNDERSCORE: 'MISSING_MATH_DELIMITER',
+    UNCLOSED_INLINE_MATH: 'MISSING_MATH_DELIMITER',
+    COMMAND_TYPO: 'UNDEFINED_CONTROL_SEQUENCE',
+    DEPRECATED_COMMAND: 'UNDEFINED_CONTROL_SEQUENCE',
+    EMPTY_REFERENCE: 'UNDEFINED_REFERENCE',
+    RETRACTED_CITATION: 'UNDEFINED_CITATION',
+  };
+
   public getByCode(code: string): ErrorExplanationVo | null {
-    const rule = this.rules.find((r) => r.code.toUpperCase() === code.trim().toUpperCase());
+    const normalized = code.trim().toUpperCase();
+    const targetCode =
+      KnowledgeBaseExplainerAdapter.CODE_ALIASES[normalized] || normalized;
+    let rule = this.rules.find((r) => r.code.toUpperCase() === targetCode);
+    if (!rule) {
+      rule = this.rules.find((r) => r.patterns.some((p) => p.test(code)));
+    }
     return rule ? new ErrorExplanationVo(rule) : null;
   }
 

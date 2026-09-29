@@ -54,13 +54,18 @@ export class QueueDocUpdateUseCase {
     this.flushSingleDocUseCase = useCase;
   }
 
-  public async execute(input: QueueDocUpdateInput): Promise<QueueDocUpdateOutput> {
+  public async execute(
+    input: QueueDocUpdateInput,
+  ): Promise<QueueDocUpdateOutput> {
     const { projectId, docId, debounceMs = 1500 } = input;
 
     // 1. Concurrency guard: check if project or doc is locked
     const isProjectLocked = await this.lock.isLocked(`project:${projectId}`);
     if (isProjectLocked) {
-      throw new DocumentLockedException(projectId, 'Project is locked for compilation or batch flush.');
+      throw new DocumentLockedException(
+        projectId,
+        'Project is locked for compilation or batch flush.',
+      );
     }
 
     // 2. Fetch or load in-flight document
@@ -94,7 +99,9 @@ export class QueueDocUpdateUseCase {
         input.clientRev,
       );
     } else {
-      throw new Error('Update must provide either full lines array or splice parameters.');
+      throw new Error(
+        'Update must provide either full lines array or splice parameters.',
+      );
     }
 
     inFlightDoc.applyUpdate(op);

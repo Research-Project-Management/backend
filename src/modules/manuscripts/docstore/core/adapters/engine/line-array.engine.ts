@@ -5,7 +5,10 @@
  * Matches Overleaf DocManager and HttpController line processing.
  */
 
-import { DocTooLargeError, NullByteDetectedError } from '../../domain/doc-errors';
+import {
+  DocTooLargeError,
+  NullByteDetectedError,
+} from '../../domain/doc-errors';
 
 export class LineArrayEngine {
   public static readonly DEFAULT_MAX_DOC_LENGTH = 2 * 1024 * 1024; // 2MB default text limit (Overleaf parity)
@@ -17,15 +20,21 @@ export class LineArrayEngine {
    * 3. Normalizes all CRLF (\r\n) and CR (\r) line breaks to Unix LF (\n).
    * 4. Enforces maximum document size.
    */
-  public static textToLines(rawText: string, maxDocLength: number = LineArrayEngine.DEFAULT_MAX_DOC_LENGTH): string[] {
+  public static textToLines(
+    rawText: string,
+    maxDocLength: number = LineArrayEngine.DEFAULT_MAX_DOC_LENGTH,
+  ): string[] {
     if (!rawText) return [''];
 
     // 1. Strip UTF-8 BOM if present
-    const cleanText = rawText.charCodeAt(0) === 0xfeff ? rawText.slice(1) : rawText;
+    const cleanText =
+      rawText.charCodeAt(0) === 0xfeff ? rawText.slice(1) : rawText;
 
     // 2. Defensive check for null bytes
     if (cleanText.indexOf('\u0000') !== -1) {
-      throw new NullByteDetectedError('Null byte (\\u0000) detected in document text');
+      throw new NullByteDetectedError(
+        'Null byte (\\u0000) detected in document text',
+      );
     }
 
     // 3. Size check
@@ -49,7 +58,10 @@ export class LineArrayEngine {
   /**
    * Validates lines array byte size against maximum limit.
    */
-  public static validateLinesSize(lines: string[], maxDocLength: number = LineArrayEngine.DEFAULT_MAX_DOC_LENGTH): number {
+  public static validateLinesSize(
+    lines: string[],
+    maxDocLength: number = LineArrayEngine.DEFAULT_MAX_DOC_LENGTH,
+  ): number {
     let totalChars = 0;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -72,7 +84,7 @@ export class LineArrayEngine {
     currentLines: string[],
     startLine: number,
     deleteCount: number,
-    newLines: string[]
+    newLines: string[],
   ): string[] {
     const updated = [...currentLines];
     const safeStart = Math.max(0, Math.min(startLine, updated.length));

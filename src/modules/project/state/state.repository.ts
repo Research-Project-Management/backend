@@ -35,9 +35,7 @@ export class StateRepository {
   /**
    * Seed the 8 default research states for a project.
    */
-  async seedDefaultProjectStates(
-    projectId: string,
-  ): Promise<ProjectState[]> {
+  async seedDefaultProjectStates(projectId: string): Promise<ProjectState[]> {
     const existing = await this.prisma.projectState.findMany({
       where: { projectId },
       orderBy: { sequence: 'asc' },
@@ -81,9 +79,7 @@ export class StateRepository {
    * Retrieve all states configured for a project, sorted by sequence ascending.
    * If user has deleted all states, returns empty array [] without re-seeding.
    */
-  async findProjectStates(
-    projectId: string,
-  ): Promise<ProjectState[]> {
+  async findProjectStates(projectId: string): Promise<ProjectState[]> {
     return this.prisma.projectState.findMany({
       where: { projectId },
       orderBy: { sequence: 'asc' },
@@ -256,4 +252,3 @@ export class StateRepository {
     });
   }
 }
-

@@ -1,14 +1,14 @@
-import { FileHashVo } from '../../src/modules/library/reader/domain/value-objects/file-hash.vo';
-import { MimeTypeVo } from '../../src/modules/library/reader/domain/value-objects/mime-type.vo';
-import { AttachmentAggregate } from '../../src/modules/library/reader/domain/model/attachment.aggregate';
-import { IngestionStatusVo } from '../../src/modules/library/ingestion/domain/value-objects/ingestion-status.vo';
-import { IngestionRunAggregate } from '../../src/modules/library/ingestion/domain/model/ingestion-run.aggregate';
-import { SearchQueryVo } from '../../src/modules/library/search/domain/value-objects/search-query.vo';
-import { CitationStyleVo } from '../../src/modules/library/citation/domain/value-objects/citation-style.vo';
-import { ExecuteSearchUseCase } from '../../src/modules/library/search/application/queries/execute-search.use-case';
-import { FormatCitationUseCase } from '../../src/modules/library/citation/application/queries/format-citation.use-case';
-import { ISearchEnginePort } from '../../src/modules/library/search/domain/ports/search-engine.port';
-import { ICitationEnginePort } from '../../src/modules/library/citation/domain/ports/citation-engine.port';
+import { FileHashVo } from '@/modules/library/extraction/core/domain/file-hash.vo';
+import { MimeTypeVo } from '@/modules/library/extraction/core/domain/mime-type.vo';
+import { AttachmentAggregate } from '@/modules/library/extraction/core/domain/attachment.aggregate';
+import { IngestionStatusVo } from '@/modules/library/ingestion/core/domain/ingestion-status.vo';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/core/domain/ingestion-run.aggregate';
+import { SearchQueryVo } from '@/modules/library/search/core/domain/search-query.vo';
+import { CitationStyleVo } from '@/modules/library/citation/core/domain/citation-style.vo';
+import { ExecuteSearchUseCase } from '@/modules/library/search/core/use-cases/execute-search.use-case';
+import { FormatCitationUseCase } from '@/modules/library/citation/core/use-cases/format-citation.use-case';
+import { ISearchEnginePort } from '@/modules/library/search/core/ports/search-engine.port';
+import { ICitationEnginePort } from '@/modules/library/citation/core/ports/citation-engine.port';
 
 describe('Reader, Ingestion, Search & Citation Bounded Contexts - Clean Architecture & DDD', () => {
   describe('Content Bounded Context', () => {

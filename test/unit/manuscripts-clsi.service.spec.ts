@@ -129,7 +129,10 @@ describe('Manuscripts - ClsiService', () => {
     it('should auto-break stale locks older than staleMs', async () => {
       const lockPath = path.join(testDir, '.project-lock');
       // Create a simulated stale lock
-      await fs.writeFile(lockPath, JSON.stringify({ pid: 99999, acquiredAt: '2020-01-01' }));
+      await fs.writeFile(
+        lockPath,
+        JSON.stringify({ pid: 99999, acquiredAt: '2020-01-01' }),
+      );
       // Set mtime to 1 hour ago
       const past = new Date(Date.now() - 3600000);
       await fs.utimes(lockPath, past, past);
@@ -141,7 +144,7 @@ describe('Manuscripts - ClsiService', () => {
         async () => {
           executed = true;
         },
-        { staleMs: 1000 }
+        { staleMs: 1000 },
       );
 
       expect(executed).toBe(true);
@@ -167,7 +170,10 @@ describe('Manuscripts - ClsiService', () => {
       // Simulate generated files
       await fs.writeFile(path.join(testDir, 'output.pdf'), 'PDF bytes');
       await fs.writeFile(path.join(testDir, 'output.log'), 'Log text');
-      await fs.writeFile(path.join(testDir, 'output.synctex.gz'), 'SyncTeX data');
+      await fs.writeFile(
+        path.join(testDir, 'output.synctex.gz'),
+        'SyncTeX data',
+      );
       await fs.mkdir(path.join(testDir, 'figures'), { recursive: true });
       await fs.writeFile(path.join(testDir, 'figures', 'fig1.png'), 'image');
 
@@ -211,34 +217,49 @@ describe('Manuscripts - ClsiService', () => {
       await workspace.purgeExtraneousFiles('proj-1', ['main.tex']);
 
       // Check output.pdf was purged
-      await expect(fs.access(path.join(scratchDir, 'output.pdf'))).rejects.toThrow();
-      await expect(fs.access(path.join(scratchDir, 'output.log'))).rejects.toThrow();
+      await expect(
+        fs.access(path.join(scratchDir, 'output.pdf')),
+      ).rejects.toThrow();
+      await expect(
+        fs.access(path.join(scratchDir, 'output.log')),
+      ).rejects.toThrow();
       // Check extraneous file was deleted
-      await expect(fs.access(path.join(scratchDir, 'dangling-file.txt'))).rejects.toThrow();
+      await expect(
+        fs.access(path.join(scratchDir, 'dangling-file.txt')),
+      ).rejects.toThrow();
       // Check aux files and input files were preserved!
-      await expect(fs.access(path.join(scratchDir, 'main.aux'))).resolves.toBeUndefined();
-      await expect(fs.access(path.join(scratchDir, 'refs.bbl'))).resolves.toBeUndefined();
-      await expect(fs.access(path.join(scratchDir, 'main.tex'))).resolves.toBeUndefined();
+      await expect(
+        fs.access(path.join(scratchDir, 'main.aux')),
+      ).resolves.toBeUndefined();
+      await expect(
+        fs.access(path.join(scratchDir, 'refs.bbl')),
+      ).resolves.toBeUndefined();
+      await expect(
+        fs.access(path.join(scratchDir, 'main.tex')),
+      ).resolves.toBeUndefined();
     });
   });
 
   describe('TexEngineDetector (Phase 3)', () => {
     it('should detect xelatex from % !TEX program = xelatex', () => {
-      const source = '% !TEX program = xelatex\n\\documentclass{article}\n\\begin{document}Hi\\end{document}';
+      const source =
+        '% !TEX program = xelatex\n\\documentclass{article}\n\\begin{document}Hi\\end{document}';
       const result = TexEngineDetector.detect(source);
       expect(result.engine).toBe('xelatex');
       expect(result.detectedFrom).toBe('magic-comment');
     });
 
     it('should detect lualatex from % !TeX program = lualatex', () => {
-      const source = '% !TeX program = lualatex\n\\documentclass{article}\n\\begin{document}Hi\\end{document}';
+      const source =
+        '% !TeX program = lualatex\n\\documentclass{article}\n\\begin{document}Hi\\end{document}';
       const result = TexEngineDetector.detect(source);
       expect(result.engine).toBe('lualatex');
       expect(result.detectedFrom).toBe('magic-comment');
     });
 
     it('should detect xelatex from fontspec package hint when engine is unspecified', () => {
-      const source = '\\documentclass{article}\n\\usepackage{fontspec}\n\\begin{document}Hi\\end{document}';
+      const source =
+        '\\documentclass{article}\n\\usepackage{fontspec}\n\\begin{document}Hi\\end{document}';
       const result = TexEngineDetector.detect(source);
       expect(result.engine).toBe('xelatex');
       expect(result.detectedFrom).toBe('package-hint');
@@ -247,7 +268,8 @@ describe('Manuscripts - ClsiService', () => {
     it('should auto-detect main.tex as entry point from files dictionary', () => {
       const files = {
         'chapters/ch1.tex': '\\section{Chapter 1}\nSome content',
-        'document.tex': '\\documentclass{book}\n\\begin{document}\\include{chapters/ch1}\\end{document}',
+        'document.tex':
+          '\\documentclass{book}\n\\begin{document}\\include{chapters/ch1}\\end{document}',
       };
       const main = TexEngineDetector.detectMainFile(files);
       expect(main).toBe('document.tex');
@@ -256,13 +278,15 @@ describe('Manuscripts - ClsiService', () => {
 
   describe('BibBackendDetector (Phase 3)', () => {
     it('should detect biber when biblatex is used without backend override', async () => {
-      const source = '\\documentclass{article}\n\\usepackage{biblatex}\n\\addbibresource{refs.bib}';
+      const source =
+        '\\documentclass{article}\n\\usepackage{biblatex}\n\\addbibresource{refs.bib}';
       const backend = await BibBackendDetector.detect(source);
       expect(backend).toBe('biber');
     });
 
     it('should detect bibtex when backend=bibtex is explicitly specified', async () => {
-      const source = '\\documentclass{article}\n\\usepackage[backend=bibtex]{biblatex}';
+      const source =
+        '\\documentclass{article}\n\\usepackage[backend=bibtex]{biblatex}';
       const backend = await BibBackendDetector.detect(source);
       expect(backend).toBe('bibtex');
     });
@@ -275,33 +299,43 @@ describe('Manuscripts - ClsiService', () => {
       });
 
       expect(config).toContain("$biber = 'biber %O %S';");
-      expect(config).toContain("$pdf_mode = 5;");
-      expect(config).toContain("-shell-escape");
+      expect(config).toContain('$pdf_mode = 5;');
+      expect(config).toContain('-shell-escape');
     });
   });
 
   describe('DraftModeManager (Phase 3)', () => {
     it('should inject \\PassOptionsToPackage{draft}{graphicx} before \\documentclass', () => {
-      const source = '\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\\includegraphics{fig.png}\\end{document}';
+      const source =
+        '\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\\includegraphics{fig.png}\\end{document}';
       const result = DraftModeManager.apply(source, { draft: true });
 
       expect(result.isModified).toBe(true);
-      expect(result.source).toContain('\\PassOptionsToPackage{draft}{graphicx}');
-      expect(result.source.indexOf('\\PassOptionsToPackage')).toBeLessThan(result.source.indexOf('\\documentclass'));
+      expect(result.source).toContain(
+        '\\PassOptionsToPackage{draft}{graphicx}',
+      );
+      expect(result.source.indexOf('\\PassOptionsToPackage')).toBeLessThan(
+        result.source.indexOf('\\documentclass'),
+      );
     });
 
     it('should not double-inject if draft option is already present', () => {
-      const source = '\\PassOptionsToPackage{draft}{graphicx}\n\\documentclass{article}';
+      const source =
+        '\\PassOptionsToPackage{draft}{graphicx}\n\\documentclass{article}';
       const result = DraftModeManager.apply(source, { draft: true });
       expect(result.isModified).toBe(false);
     });
 
     it('should detect shell-escape requirement when minted package is used', () => {
-      const sourceWithMinted = '\\documentclass{article}\n\\usepackage{minted}\n\\begin{document}\\end{document}';
-      const sourceWithoutMinted = '\\documentclass{article}\n\\usepackage{listings}\n\\begin{document}\\end{document}';
+      const sourceWithMinted =
+        '\\documentclass{article}\n\\usepackage{minted}\n\\begin{document}\\end{document}';
+      const sourceWithoutMinted =
+        '\\documentclass{article}\n\\usepackage{listings}\n\\begin{document}\\end{document}';
 
       expect(DraftModeManager.requiresShellEscape(sourceWithMinted)).toBe(true);
-      expect(DraftModeManager.requiresShellEscape(sourceWithoutMinted)).toBe(false);
+      expect(DraftModeManager.requiresShellEscape(sourceWithoutMinted)).toBe(
+        false,
+      );
     });
   });
 
@@ -310,7 +344,9 @@ describe('Manuscripts - ClsiService', () => {
     let cleaner: DiskUsageCleaner;
 
     beforeEach(async () => {
-      testScratch = await fs.mkdtemp(path.join(os.tmpdir(), 'clsi-cleaner-test-'));
+      testScratch = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'clsi-cleaner-test-'),
+      );
       cleaner = new DiskUsageCleaner(testScratch);
     });
 
@@ -327,14 +363,19 @@ describe('Manuscripts - ClsiService', () => {
       await fs.writeFile(path.join(p1, 'output.pdf'), 'data');
       await fs.writeFile(path.join(p2, 'output.pdf'), 'data');
       // Lock p2
-      await fs.writeFile(path.join(p2, '.project-lock'), JSON.stringify({ pid: process.pid }));
+      await fs.writeFile(
+        path.join(p2, '.project-lock'),
+        JSON.stringify({ pid: process.pid }),
+      );
 
       // Make p1 and its files very old (10 days ago)
       const oldDate = new Date(Date.now() - 10 * 24 * 3600 * 1000);
       await fs.utimes(p1, oldDate, oldDate);
       await fs.utimes(path.join(p1, 'output.pdf'), oldDate, oldDate);
 
-      const stats = await cleaner.cleanStaleProjects({ maxAgeMs: 5 * 24 * 3600 * 1000 });
+      const stats = await cleaner.cleanStaleProjects({
+        maxAgeMs: 5 * 24 * 3600 * 1000,
+      });
 
       expect(stats.cleanedProjects).toBe(1);
       expect(stats.skippedLocked).toBe(1);
@@ -356,7 +397,10 @@ describe('Manuscripts - ClsiService', () => {
       await fs.utimes(path.join(pOld, 'file.bin'), past, past);
 
       // Max 1500 bytes, target 1000 bytes -> should evict pOld
-      const stats = await cleaner.enforceDiskQuota({ maxBytes: 1500, targetBytes: 1000 });
+      const stats = await cleaner.enforceDiskQuota({
+        maxBytes: 1500,
+        targetBytes: 1000,
+      });
 
       expect(stats.cleanedProjects).toBe(1);
       await expect(fs.access(pOld)).rejects.toThrow();
@@ -410,4 +454,3 @@ describe('Manuscripts - ClsiService', () => {
     });
   });
 });
-

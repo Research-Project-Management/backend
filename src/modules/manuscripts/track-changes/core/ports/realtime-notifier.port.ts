@@ -8,9 +8,21 @@ import { CommentThread } from '../domain/entities/comment-thread.entity';
 import { CommentReply } from '../domain/entities/comment-reply.entity';
 
 export abstract class IRealtimeNotifierPort {
-  abstract notifyChangeRecorded(projectId: string, docId: string, change: TrackChange): void;
-  abstract notifyChangeResolved(projectId: string, docId: string, change: TrackChange): void;
-  abstract notifyCommentCreated(projectId: string, docId: string, thread: CommentThread): void;
+  abstract notifyChangeRecorded(
+    projectId: string,
+    docId: string,
+    change: TrackChange,
+  ): void;
+  abstract notifyChangeResolved(
+    projectId: string,
+    docId: string,
+    change: TrackChange,
+  ): void;
+  abstract notifyCommentCreated(
+    projectId: string,
+    docId: string,
+    thread: CommentThread,
+  ): void;
   abstract notifyCommentReplied(
     projectId: string,
     docId: string,
@@ -18,5 +30,9 @@ export abstract class IRealtimeNotifierPort {
     reply: CommentReply,
     threadOwnerId?: string | null,
   ): void;
-  abstract notifyCommentResolved(projectId: string, docId: string, thread: CommentThread): void;
+  abstract notifyCommentResolved(
+    projectId: string,
+    docId: string,
+    thread: CommentThread,
+  ): void;
 }

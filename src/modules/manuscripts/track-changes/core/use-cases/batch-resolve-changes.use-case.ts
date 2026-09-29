@@ -34,7 +34,11 @@ export class BatchResolveChangesUseCase {
     const { projectId, docId, action, userId } = input;
 
     // Fetch all pending changes for this doc
-    const pendingChanges = await this.repository.listChangesByDoc(projectId, docId, 'pending');
+    const pendingChanges = await this.repository.listChangesByDoc(
+      projectId,
+      docId,
+      'pending',
+    );
 
     if (action === 'accept_all') {
       for (const change of pendingChanges) {

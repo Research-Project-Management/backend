@@ -16,16 +16,22 @@ export class CreateCustomTemplateUseCase {
     private readonly templateRepository: ITemplateRepositoryPort,
   ) {}
 
-  async execute(props: CreateManuscriptTemplateProps): Promise<ManuscriptTemplateEntity> {
+  async execute(
+    props: CreateManuscriptTemplateProps,
+  ): Promise<ManuscriptTemplateEntity> {
     if (!props.name || !props.name.trim()) {
-      throw new InvalidTemplateException('Template name is required and cannot be empty');
+      throw new InvalidTemplateException(
+        'Template name is required and cannot be empty',
+      );
     }
 
     const mainFile = props.mainFile || 'main.tex';
     const files = props.files || {};
 
     if (Object.keys(files).length > 0 && !files[mainFile]) {
-      throw new InvalidTemplateException(`Specified mainFile "${mainFile}" does not exist in template files payload`);
+      throw new InvalidTemplateException(
+        `Specified mainFile "${mainFile}" does not exist in template files payload`,
+      );
     }
 
     const template = ManuscriptTemplateEntity.create({

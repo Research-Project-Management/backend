@@ -33,11 +33,17 @@ export class EvictDocBufferUseCase {
     // 2. Check if dirty; if dirty, flush before evicting
     const doc = await this.inFlightStore.get(projectId, docId);
     if (doc && doc.isDirty) {
-      await this.flushSingleDocUseCase.execute({ projectId, docId, force: true });
+      await this.flushSingleDocUseCase.execute({
+        projectId,
+        docId,
+        force: true,
+      });
     }
 
     // 3. Remove from buffer
     await this.inFlightStore.delete(projectId, docId);
-    this.logger.log(`[DocUpdater] Evicted document buffer for '${docId}' in project '${projectId}'.`);
+    this.logger.log(
+      `[DocUpdater] Evicted document buffer for '${docId}' in project '${projectId}'.`,
+    );
   }
 }

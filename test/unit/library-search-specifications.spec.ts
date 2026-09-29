@@ -7,11 +7,11 @@ import {
   CollectionSpecification,
   TagSpecification,
   TextSearchSpecification,
-} from '../../src/modules/library/search/domain/specifications/item-specifications';
-import { SearchSpecificationBuilder } from '../../src/modules/library/search/domain/specifications/search-specification.builder';
-import { SearchRepository } from '../../src/modules/library/search/infrastructure/repositories/search.repository';
-import { SearchService } from '../../src/modules/library/search/application/services/search.service';
-import { CatalogEventsSubscriber } from '../../src/modules/library/search/infrastructure/subscribers/catalog-events.subscriber';
+} from '@/modules/library/search/core/domain/item-specifications';
+import { SearchSpecificationBuilder } from '@/modules/library/search/core/domain/search-specification.builder';
+import { SearchRepository } from '@/modules/library/search/core/adapters/search.repository';
+import { SearchService } from '@/modules/library/search/core/use-cases/search.service';
+import { CatalogEventsSubscriber } from '@/modules/library/search/core/adapters/catalog-events.subscriber';
 import { PrismaService } from '../../src/core/database/prisma.service';
 import { RedisCacheService } from '../../src/core/cache/redis.service';
 
@@ -30,10 +30,17 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       citationKey: 'vaswani2017attention',
       collectionItems: [{ collectionId: 'col-1' }],
       itemTags: [{ tagId: 'tag-ai', tag: { name: 'Machine Learning' } }],
-      notesList: [{ title: 'Notes on Transformers', contentMd: 'Self-attention mechanism details' }],
+      notesList: [
+        {
+          title: 'Notes on Transformers',
+          contentMd: 'Self-attention mechanism details',
+        },
+      ],
       attachments: [
         {
-          annotations: [{ quoteText: 'Multi-head attention', comment: 'Key breakthrough' }],
+          annotations: [
+            { quoteText: 'Multi-head attention', comment: 'Key breakthrough' },
+          ],
         },
       ],
     };
@@ -41,14 +48,18 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
     it('should evaluate ScopeSpecification for personal and project libraries', () => {
       const personalSpec = new ScopeSpecification('user-1');
       expect(personalSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(personalSpec.isSatisfiedBy({ ...sampleItem, userId: 'other-user' })).toBe(false);
+      expect(
+        personalSpec.isSatisfiedBy({ ...sampleItem, userId: 'other-user' }),
+      ).toBe(false);
 
       expect(personalSpec.toPrismaWhere()).toEqual({
         userId: 'user-1',
       });
 
       const projectSpec = new ScopeSpecification('user-1', 'proj-1');
-      expect(projectSpec.isSatisfiedBy({ ...sampleItem, projectId: 'proj-1' })).toBe(true);
+      expect(
+        projectSpec.isSatisfiedBy({ ...sampleItem, projectId: 'proj-1' }),
+      ).toBe(true);
       expect(projectSpec.toPrismaWhere()).toEqual({
         projectId: 'proj-1',
       });
@@ -57,27 +68,35 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
     it('should evaluate ActiveItemsSpecification (soft-delete filter)', () => {
       const activeSpec = new ActiveItemsSpecification();
       expect(activeSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(activeSpec.isSatisfiedBy({ ...sampleItem, deletedAt: new Date() })).toBe(false);
+      expect(
+        activeSpec.isSatisfiedBy({ ...sampleItem, deletedAt: new Date() }),
+      ).toBe(false);
       expect(activeSpec.toPrismaWhere()).toEqual({ deletedAt: null });
     });
 
     it('should evaluate ItemTypeSpecification', () => {
       const typeSpec = new ItemTypeSpecification('journalArticle');
       expect(typeSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(typeSpec.isSatisfiedBy({ ...sampleItem, itemType: 'book' })).toBe(false);
+      expect(typeSpec.isSatisfiedBy({ ...sampleItem, itemType: 'book' })).toBe(
+        false,
+      );
       expect(typeSpec.toPrismaWhere()).toEqual({ itemType: 'journalArticle' });
     });
 
     it('should evaluate YearRangeSpecification for bounded and open intervals', () => {
       const rangeSpec = new YearRangeSpecification(2020, 2025);
       expect(rangeSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(rangeSpec.isSatisfiedBy({ ...sampleItem, year: 2019 })).toBe(false);
+      expect(rangeSpec.isSatisfiedBy({ ...sampleItem, year: 2019 })).toBe(
+        false,
+      );
       expect(rangeSpec.toPrismaWhere()).toEqual({
         year: { gte: 2020, lte: 2025 },
       });
 
       const minOnlySpec = new YearRangeSpecification(2020);
-      expect(minOnlySpec.isSatisfiedBy({ ...sampleItem, year: 2021 })).toBe(true);
+      expect(minOnlySpec.isSatisfiedBy({ ...sampleItem, year: 2021 })).toBe(
+        true,
+      );
       expect(minOnlySpec.toPrismaWhere()).toEqual({
         year: { gte: 2020 },
       });
@@ -92,14 +111,18 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
     it('should evaluate CollectionSpecification and TagSpecification', () => {
       const colSpec = new CollectionSpecification('col-1');
       expect(colSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(colSpec.isSatisfiedBy({ ...sampleItem, collectionItems: [] })).toBe(false);
+      expect(
+        colSpec.isSatisfiedBy({ ...sampleItem, collectionItems: [] }),
+      ).toBe(false);
       expect(colSpec.toPrismaWhere()).toEqual({
         collectionItems: { some: { collectionId: 'col-1' } },
       });
 
       const tagSpec = new TagSpecification('tag-ai');
       expect(tagSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(tagSpec.isSatisfiedBy({ ...sampleItem, itemTags: [] })).toBe(false);
+      expect(tagSpec.isSatisfiedBy({ ...sampleItem, itemTags: [] })).toBe(
+        false,
+      );
       expect(tagSpec.toPrismaWhere()).toEqual({
         itemTags: { some: { tagId: 'tag-ai' } },
       });
@@ -131,7 +154,12 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       // AND composition
       const activeArticleSpec = activeSpec.and(typeSpec);
       expect(activeArticleSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(activeArticleSpec.isSatisfiedBy({ ...sampleItem, deletedAt: new Date() })).toBe(false);
+      expect(
+        activeArticleSpec.isSatisfiedBy({
+          ...sampleItem,
+          deletedAt: new Date(),
+        }),
+      ).toBe(false);
       expect(activeArticleSpec.toPrismaWhere()).toEqual({
         AND: [{ deletedAt: null }, { itemType: 'journalArticle' }],
       });
@@ -139,8 +167,12 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       // OR composition
       const articleOrBookSpec = typeSpec.or(bookSpec);
       expect(articleOrBookSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(articleOrBookSpec.isSatisfiedBy({ ...sampleItem, itemType: 'book' })).toBe(true);
-      expect(articleOrBookSpec.isSatisfiedBy({ ...sampleItem, itemType: 'webpage' })).toBe(false);
+      expect(
+        articleOrBookSpec.isSatisfiedBy({ ...sampleItem, itemType: 'book' }),
+      ).toBe(true);
+      expect(
+        articleOrBookSpec.isSatisfiedBy({ ...sampleItem, itemType: 'webpage' }),
+      ).toBe(false);
       expect(articleOrBookSpec.toPrismaWhere()).toEqual({
         OR: [{ itemType: 'journalArticle' }, { itemType: 'book' }],
       });
@@ -148,7 +180,9 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       // NOT composition
       const notBookSpec = bookSpec.not();
       expect(notBookSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(notBookSpec.isSatisfiedBy({ ...sampleItem, itemType: 'book' })).toBe(false);
+      expect(
+        notBookSpec.isSatisfiedBy({ ...sampleItem, itemType: 'book' }),
+      ).toBe(false);
     });
 
     it('should build combined composite specification via SearchSpecificationBuilder', () => {
@@ -205,7 +239,9 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       };
       (mockCache.get as jest.Mock).mockResolvedValue(cachedFacets);
 
-      const facets = await searchRepo.computeFacets('user-1', { collectionId: 'col-1' });
+      const facets = await searchRepo.computeFacets('user-1', {
+        collectionId: 'col-1',
+      });
 
       expect(facets).toEqual(cachedFacets);
       expect(mockCache.get).toHaveBeenCalledTimes(1);
@@ -317,7 +353,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
           itemId: 'item-100',
           title: 'New Paper',
           itemType: 'journalArticle',
-        } as any,
+        },
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith('proj-1');

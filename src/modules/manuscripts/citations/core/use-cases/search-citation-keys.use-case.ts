@@ -15,7 +15,9 @@ export interface SearchCitationKeysCommand {
 export class SearchCitationKeysUseCase {
   constructor(private readonly aggregator: ICitationsAggregatorPort) {}
 
-  public async execute(command: SearchCitationKeysCommand): Promise<BibEntry[]> {
+  public async execute(
+    command: SearchCitationKeysCommand,
+  ): Promise<BibEntry[]> {
     const bibFiles = await this.aggregator.collectBibFiles(command.projectId);
     const limit = command.limit && command.limit > 0 ? command.limit : 50;
 

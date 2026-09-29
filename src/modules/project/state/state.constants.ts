@@ -77,4 +77,3 @@ export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
     isDefault: false,
   },
 ];
-

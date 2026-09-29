@@ -12,6 +12,7 @@ export interface EngineRunOptions {
   draft?: boolean;
   shellEscape?: boolean;
   syntaxOnly?: boolean;
+  onLogChunk?: (chunk: string) => void;
 }
 
 export interface EngineRunResult {
@@ -28,6 +29,6 @@ export interface ILatexEngine {
   isAvailable(): Promise<boolean>;
   compile(
     options: EngineRunOptions,
-    compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex'
+    compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex',
   ): Promise<EngineRunResult>;
 }

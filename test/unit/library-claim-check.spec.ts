@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import zlib from 'zlib';
-import { ExtractionHandler } from '@/modules/library/reader/application/handlers/extraction.handler';
-import { ExtractionRepository } from '@/modules/library/reader/infrastructure/repositories/extraction.repository';
-import { PdfProvider } from '@/modules/library/reader/infrastructure/providers/pdf.provider';
-import { QueryRepository } from '@/modules/library/bibliography/infrastructure/repositories/query.repository';
+import { ExtractionHandler } from '@/modules/library/extraction/core/adapters/extraction.handler';
+import { ExtractionRepository } from '@/modules/library/extraction/core/adapters/extraction.repository';
+import { PdfProvider } from '@/modules/library/extraction/core/adapters/pdf.provider';
+import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
 import { PrismaService } from '@/core/database/prisma.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { fromPartial } from '@total-typescript/shoehorn';
@@ -56,7 +56,10 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
           tables: [{ caption: 'Table 1: BLEU scores' }],
           formulas: [{ formula: 'E = mc^2' }],
           references: [
-            { rawText: 'Vaswani et al. 2017', title: 'Attention Is All You Need' },
+            {
+              rawText: 'Vaswani et al. 2017',
+              title: 'Attention Is All You Need',
+            },
           ],
         }),
       };
@@ -171,7 +174,7 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
         readOwnedFile: jest.fn(),
       };
 
-      repo = new QueryRepository(mockPrisma as any, mockStoragePort);
+      repo = new QueryRepository(mockPrisma, mockStoragePort);
     });
 
     it('should transparently hydrate offloaded Claim Check records from StoragePort', async () => {

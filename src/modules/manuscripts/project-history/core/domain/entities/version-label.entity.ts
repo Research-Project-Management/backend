@@ -44,14 +44,30 @@ export class VersionLabel {
     return new VersionLabel(props);
   }
 
-  public get id(): string { return this._id; }
-  public get projectId(): string { return this._projectId; }
-  public get snapshotId(): string { return this._snapshotId; }
-  public get version(): number { return this._version; }
-  public get label(): string { return this._label; }
-  public get createdById(): string | null | undefined { return this._createdById; }
-  public get createdAt(): Date { return this._createdAt; }
-  public get updatedAt(): Date { return this._updatedAt; }
+  public get id(): string {
+    return this._id;
+  }
+  public get projectId(): string {
+    return this._projectId;
+  }
+  public get snapshotId(): string {
+    return this._snapshotId;
+  }
+  public get version(): number {
+    return this._version;
+  }
+  public get label(): string {
+    return this._label;
+  }
+  public get createdById(): string | null | undefined {
+    return this._createdById;
+  }
+  public get createdAt(): Date {
+    return this._createdAt;
+  }
+  public get updatedAt(): Date {
+    return this._updatedAt;
+  }
 
   public updateLabel(newLabel: string): void {
     if (!newLabel || !newLabel.trim()) {

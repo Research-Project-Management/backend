@@ -33,10 +33,19 @@ export class S3BinaryStorageAdapter extends IBinaryStoragePort {
     const region = this.configService.get<string>('AWS_REGION', 'us-east-1');
     const endpoint = this.configService.get<string>('AWS_ENDPOINT');
     const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID', '');
-    const secretAccessKey = this.configService.get<string>('AWS_SECRET_ACCESS_KEY', '');
-    const forcePathStyle = this.configService.get<boolean>('AWS_S3_FORCE_PATH_STYLE', true);
+    const secretAccessKey = this.configService.get<string>(
+      'AWS_SECRET_ACCESS_KEY',
+      '',
+    );
+    const forcePathStyle = this.configService.get<boolean>(
+      'AWS_S3_FORCE_PATH_STYLE',
+      true,
+    );
 
-    this.defaultBucket = this.configService.get<string>('AWS_S3_BUCKET', 'manuscript-files');
+    this.defaultBucket = this.configService.get<string>(
+      'AWS_S3_BUCKET',
+      'manuscript-files',
+    );
 
     this.s3Client = new S3Client({
       region,
@@ -100,7 +109,10 @@ export class S3BinaryStorageAdapter extends IBinaryStoragePort {
     return response.Body as Readable;
   }
 
-  public async getObjectMetadata(bucket: string, key: string): Promise<StorageObjectMetadata> {
+  public async getObjectMetadata(
+    bucket: string,
+    key: string,
+  ): Promise<StorageObjectMetadata> {
     const command = new HeadObjectCommand({
       Bucket: bucket || this.defaultBucket,
       Key: key,
@@ -126,20 +138,32 @@ export class S3BinaryStorageAdapter extends IBinaryStoragePort {
     });
 
     try {
-      return await getSignedUrl(this.s3Client, command, { expiresIn: expiresInSeconds });
+      return await getSignedUrl(this.s3Client, command, {
+        expiresIn: expiresInSeconds,
+      });
     } catch (err) {
-      this.logger.warn(`Failed to generate pre-signed URL for key '${key}': ${(err as Error).message}`);
+      this.logger.warn(
+        `Failed to generate pre-signed URL for key '${key}': ${(err as Error).message}`,
+      );
       return null;
     }
   }
 
-  public async checkObjectExists(bucket: string, key: string): Promise<boolean> {
+  public async checkObjectExists(
+    bucket: string,
+    key: string,
+  ): Promise<boolean> {
     try {
       await this.getObjectMetadata(bucket, key);
       return true;
     } catch (err) {
       const name = (err as Error).name;
-      if (name === 'NotFound' || name === 'NoSuchKey' || (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
+      if (
+        name === 'NotFound' ||
+        name === 'NoSuchKey' ||
+        (err as { $metadata?: { httpStatusCode?: number } }).$metadata
+          ?.httpStatusCode === 404
+      ) {
         return false;
       }
       throw err;

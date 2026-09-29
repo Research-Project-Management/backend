@@ -5,7 +5,9 @@
 
 export class InvalidWordException extends Error {
   constructor(word: string, reason?: string) {
-    super(`Invalid word '${word}'${reason ? `: ${reason}` : ''}. Words must be non-empty alphabetic strings.`);
+    super(
+      `Invalid word '${word}'${reason ? `: ${reason}` : ''}. Words must be non-empty alphabetic strings.`,
+    );
     this.name = 'InvalidWordException';
   }
 }

@@ -24,12 +24,12 @@ jest.mock('@mozilla/readability', () => ({
 }));
 
 import { fromPartial, fromAny } from '@total-typescript/shoehorn';
-import { AttachmentsService } from '@/modules/library/reader/application/services/attachments.service';
-import { AttachmentsController } from '@/modules/library/reader/presentation/attachments.controller';
-import { WebSnapshotService } from '@/modules/library/reader/application/services/web-snapshot.service';
-import { IdentifyStage } from '@/modules/library/ingestion/infrastructure/stages/identify.stage';
-import { ExtractionHandler } from '@/modules/library/reader/application/handlers/extraction.handler';
-import { CommandRepository } from '@/modules/library/bibliography/infrastructure/repositories/command.repository';
+import { AttachmentsService } from '@/modules/library/extraction/core/use-cases/attachments.service';
+import { AttachmentsController } from '@/modules/library/extraction/attachments.controller';
+import { WebSnapshotService } from '@/modules/library/extraction/core/adapters/web-snapshot.service';
+import { IdentifyStage } from '@/modules/library/ingestion/core/adapters/identify.stage';
+import { ExtractionHandler } from '@/modules/library/extraction/core/adapters/extraction.handler';
+import { CommandRepository } from '@/modules/library/catalog/core/adapters/command.repository';
 import { IStoragePort } from '@/modules/storage/storage.port';
 
 describe('Library Attachments & Storage Integration Suite', () => {
@@ -723,7 +723,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
         markFailed: jest.fn().mockResolvedValue({ id: 'att-1' }),
         findScopePapers: jest.fn().mockResolvedValue([]),
         upsertItemCitationRelation: jest.fn().mockResolvedValue({}),
-        recordSearchablePdfRevision: jest.fn().mockResolvedValue({ id: 'rev-2' }),
+        recordSearchablePdfRevision: jest
+          .fn()
+          .mockResolvedValue({ id: 'rev-2' }),
       };
       mockPdf = {
         extractDocumentFromBuffer: jest.fn().mockResolvedValue({

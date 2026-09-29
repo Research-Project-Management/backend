@@ -24,7 +24,10 @@ export class DeleteManuscriptFileUseCase {
   ) {}
 
   public async execute(input: DeleteManuscriptFileInput): Promise<void> {
-    const file = await this.repository.findByProjectAndId(input.projectId, input.fileId);
+    const file = await this.repository.findByProjectAndId(
+      input.projectId,
+      input.fileId,
+    );
     if (!file || file.deleted) {
       throw new FileNotFoundException(input.fileId, input.projectId);
     }
@@ -35,14 +38,23 @@ export class DeleteManuscriptFileUseCase {
 
     // 2. CAS Garbage Collection check (if requested)
     if (input.purgePhysicalBlob) {
-      const remainingRefs = await this.repository.countReferencesByHash(file.hash.getValue());
+      const remainingRefs = await this.repository.countReferencesByHash(
+        file.hash.getValue(),
+      );
       if (remainingRefs <= 1) {
         // Only this record referenced the blob
         try {
-          await this.storage.deleteObject(file.bucketName, file.storageKey.getValue());
-          this.logger.log(`[CAS GC] Purged unreferenced physical blob '${file.storageKey.getValue()}'.`);
+          await this.storage.deleteObject(
+            file.bucketName,
+            file.storageKey.getValue(),
+          );
+          this.logger.log(
+            `[CAS GC] Purged unreferenced physical blob '${file.storageKey.getValue()}'.`,
+          );
         } catch (err) {
-          this.logger.warn(`[CAS GC] Failed to purge blob '${file.storageKey.getValue()}': ${(err as Error).message}`);
+          this.logger.warn(
+            `[CAS GC] Failed to purge blob '${file.storageKey.getValue()}': ${(err as Error).message}`,
+          );
         }
       }
     }

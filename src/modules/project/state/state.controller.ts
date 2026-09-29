@@ -53,7 +53,8 @@ export class StateController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
-    summary: 'List all states configured for a project, sorted by sequence for drag & drop UI',
+    summary:
+      'List all states configured for a project, sorted by sequence for drag & drop UI',
   })
   @ApiResponse({
     status: 200,
@@ -82,7 +83,8 @@ export class StateController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({
-    summary: 'Update a project state name, color, description, or sequence (Owner only)',
+    summary:
+      'Update a project state name, color, description, or sequence (Owner only)',
   })
   updateProjectStateItem(
     @Param('projectId') projectId: string,
@@ -90,7 +92,12 @@ export class StateController {
     @Body() dto: UpdateProjectStateItemDto,
     @CurrentUser('id') actorId: string,
   ) {
-    return this.stateService.updateCustomState(projectId, stateId, dto, actorId);
+    return this.stateService.updateCustomState(
+      projectId,
+      stateId,
+      dto,
+      actorId,
+    );
   }
 
   @Put(':projectId/settings/states/reorder')
@@ -111,12 +118,14 @@ export class StateController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({
-    summary: 'Permanently delete a custom state with optional fallback state migration (Owner only)',
+    summary:
+      'Permanently delete a custom state with optional fallback state migration (Owner only)',
   })
   @ApiQuery({
     name: 'fallbackStateId',
     required: false,
-    description: 'Target state ID to move project into if currently at state being deleted',
+    description:
+      'Target state ID to move project into if currently at state being deleted',
   })
   deleteProjectState(
     @Param('projectId') projectId: string,
@@ -165,7 +174,10 @@ export class StateController {
     @Body() dto: UpdateProjectStateDto,
     @CurrentUser('id') actorId: string,
   ) {
-    return this.stateService.transitionToState(projectId, dto.stateId ?? null, actorId);
+    return this.stateService.transitionToState(
+      projectId,
+      dto.stateId ?? null,
+      actorId,
+    );
   }
 }
-

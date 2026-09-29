@@ -5,7 +5,10 @@
  */
 
 import { DocumentVersionVo } from '../value-objects/document-version.vo';
-import { FlushStatusVo, FlushStatusEnum } from '../value-objects/flush-status.vo';
+import {
+  FlushStatusVo,
+  FlushStatusEnum,
+} from '../value-objects/flush-status.vo';
 import { UpdateOpVo } from '../value-objects/update-op.vo';
 
 export interface InFlightDocProps {

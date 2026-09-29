@@ -37,7 +37,8 @@ export class InMemoryTemplateAdapter implements ITemplateRepositoryPort {
         versionId: 'tmpl-ieee-tran-v1',
         name: 'IEEE Transactions Article',
         category: 'journal',
-        description: 'Standard IEEE Transactions template for journal publications and archival papers.',
+        description:
+          'Standard IEEE Transactions template for journal publications and archival papers.',
         compiler: 'pdflatex',
         imageName: 'texlive/texlive:latest',
         mainFile: 'bare_jrnl.tex',
@@ -98,7 +99,8 @@ IEEEtran, journal, LaTeX, template.
         versionId: 'tmpl-acm-sigconf-v1',
         name: 'ACM Conference Proceedings (SIGCONF)',
         category: 'conference',
-        description: 'Official ACM Primary Article Template for computer science conferences (SIGCONF layout).',
+        description:
+          'Official ACM Primary Article Template for computer science conferences (SIGCONF layout).',
         compiler: 'pdflatex',
         imageName: 'texlive/texlive:latest',
         mainFile: 'sample-sigconf.tex',
@@ -158,7 +160,8 @@ ACM conferences require papers to adhere to the standardized acmart class.
         versionId: 'tmpl-springer-lncs-v1',
         name: 'Springer LNCS Conference Template',
         category: 'conference',
-        description: 'Springer Lecture Notes in Computer Science (LNCS) proceedings and proceedings books.',
+        description:
+          'Springer Lecture Notes in Computer Science (LNCS) proceedings and proceedings books.',
         compiler: 'pdflatex',
         imageName: 'texlive/texlive:latest',
         mainFile: 'llncs.tex',
@@ -202,7 +205,8 @@ Author, F.: Article title. Journal \\textbf{2}(5), 99--110 (2026)
         versionId: 'tmpl-arxiv-minimal-v1',
         name: 'arXiv Minimal Preprint Template',
         category: 'journal',
-        description: 'Clean, clean-cut preprint template perfectly tuned for fast compilation and instant arXiv submission.',
+        description:
+          'Clean, clean-cut preprint template perfectly tuned for fast compilation and instant arXiv submission.',
         compiler: 'pdflatex',
         imageName: 'texlive/texlive:latest',
         mainFile: 'main.tex',
@@ -239,7 +243,8 @@ Welcome to your new manuscript project. Edit this file to begin authoring.
         versionId: 'tmpl-thesis-v1',
         name: 'Master & PhD Dissertation',
         category: 'thesis',
-        description: 'Multi-chapter university thesis & dissertation template with front matter, bibliography, and chapters.',
+        description:
+          'Multi-chapter university thesis & dissertation template with front matter, bibliography, and chapters.',
         compiler: 'xelatex',
         imageName: 'texlive/texlive:latest',
         mainFile: 'thesis.tex',
@@ -289,7 +294,8 @@ Summary of contributions and recommendations for further research.
         versionId: 'tmpl-academic-cv-v1',
         name: 'Academic Curriculum Vitae (CV)',
         category: 'cv',
-        description: 'Modern, elegant academic curriculum vitae template for researchers, postdocs, and professors.',
+        description:
+          'Modern, elegant academic curriculum vitae template for researchers, postdocs, and professors.',
         compiler: 'xelatex',
         imageName: 'texlive/texlive:latest',
         mainFile: 'cv.tex',
@@ -326,7 +332,8 @@ Summary of contributions and recommendations for further research.
         versionId: 'tmpl-beamer-slides-v1',
         name: 'Beamer Presentation Slides',
         category: 'presentation',
-        description: 'Professional academic slide presentation using the LaTeX Beamer theme.',
+        description:
+          'Professional academic slide presentation using the LaTeX Beamer theme.',
         compiler: 'pdflatex',
         imageName: 'texlive/texlive:latest',
         mainFile: 'presentation.tex',
@@ -389,7 +396,9 @@ Summary of contributions and recommendations for further research.
     return null;
   }
 
-  async findByVersionId(versionId: string): Promise<ManuscriptTemplateEntity | null> {
+  async findByVersionId(
+    versionId: string,
+  ): Promise<ManuscriptTemplateEntity | null> {
     const id = this.versionIndex.get(versionId);
     if (!id) return null;
     return this.templates.get(id) || null;
@@ -409,7 +418,9 @@ Summary of contributions and recommendations for further research.
 
     if (filter?.tag) {
       const tagLower = filter.tag.toLowerCase().trim();
-      list = list.filter((t) => t.tags.some((tg) => tg.toLowerCase() === tagLower));
+      list = list.filter((t) =>
+        t.tags.some((tg) => tg.toLowerCase() === tagLower),
+      );
     }
 
     // Sort by official first, then downloadCount descending
@@ -456,7 +467,9 @@ Summary of contributions and recommendations for further research.
     return { templates: paginated, total };
   }
 
-  async save(template: ManuscriptTemplateEntity): Promise<ManuscriptTemplateEntity> {
+  async save(
+    template: ManuscriptTemplateEntity,
+  ): Promise<ManuscriptTemplateEntity> {
     this.templates.set(template.id, template);
     this.versionIndex.set(template.versionId, template.id);
     return template;

@@ -10,11 +10,8 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import {
-  IWorkspaceManager,
-  WorkspaceFile,
-} from '../ports/workspace.port';
-import { ILatexEngine } from '../ports/engine.port';
+import { IWorkspaceManager, WorkspaceFile } from '../ports/workspace.port';
+import { ILatexEngine, EngineRunResult } from '../ports/engine.port';
 import {
   ILogParser,
   CompilerDiagnostic,
@@ -38,6 +35,8 @@ export interface CompilePipelineRequest {
   source?: string;
   files?: Record<string, string>;
   resources?: Array<{ path: string; content?: string; hash?: string }>;
+  signal?: AbortSignal;
+  onLogChunk?: (chunk: string) => void;
 }
 
 export type CompilePipelineResult =
@@ -68,11 +67,11 @@ export class CompilePipeline {
     private readonly tectonicEngine: ILatexEngine,
     private readonly logParser: ILogParser,
     private readonly projectLockManager: ProjectLockManager = new ProjectLockManager(),
-    private readonly outputFileFinder: IOutputFileFinder = new OverleafOutputFileFinder()
+    private readonly outputFileFinder: IOutputFileFinder = new OverleafOutputFileFinder(),
   ) {}
 
   public async execute(
-    dto: CompilePipelineRequest
+    dto: CompilePipelineRequest,
   ): Promise<CompilePipelineResult> {
     const startTime = Date.now();
     const projectId = dto.projectId || 'default';
@@ -144,8 +143,7 @@ export class CompilePipeline {
     if (workspaceFiles.length === 0) {
       workspaceFiles.push({
         path: mainFile,
-        content:
-          '\\documentclass{article}\n\\begin{document}\n\\end{document}',
+        content: '\\documentclass{article}\n\\begin{document}\n\\end{document}',
       });
     }
 
@@ -167,7 +165,7 @@ export class CompilePipeline {
           const bibBackend = await BibBackendDetector.detect(
             mainSource,
             scratchDir,
-            engineDetect.bibProgramHint
+            engineDetect.bibProgramHint,
           );
           const requiresShellEscape =
             DraftModeManager.requiresShellEscape(mainSource);
@@ -192,7 +190,8 @@ export class CompilePipeline {
 
           const isPrimaryAvailable = await engineToUse.isAvailable();
           if (!isPrimaryAvailable) {
-            const isSecondaryAvailable = await (engineToUse === this.latexmkEngine
+            const isSecondaryAvailable = await (engineToUse ===
+            this.latexmkEngine
               ? this.tectonicEngine.isAvailable()
               : this.latexmkEngine.isAvailable());
             if (isSecondaryAvailable) {
@@ -207,9 +206,9 @@ export class CompilePipeline {
           const timeoutMs = dto.timeoutMs || 240000;
           const stopOnFirstError = dto.stopOnFirstError ?? false;
 
-          let engineResult;
+          let engineResult: EngineRunResult;
           if ('compile' in engineToUse && engineToUse === this.latexmkEngine) {
-            engineResult = await (this.latexmkEngine as any).compile(
+            engineResult = await this.latexmkEngine.compile(
               {
                 cwd: scratchDir,
                 mainFile,
@@ -218,8 +217,10 @@ export class CompilePipeline {
                 draft: dto.draft ?? false,
                 syntaxOnly: dto.syntaxOnly ?? false,
                 shellEscape: requiresShellEscape,
+                signal: dto.signal,
+                onLogChunk: dto.onLogChunk,
               },
-              compilerFlag
+              compilerFlag,
             );
           } else {
             engineResult = await engineToUse.compile({
@@ -230,6 +231,8 @@ export class CompilePipeline {
               draft: dto.draft ?? false,
               syntaxOnly: dto.syntaxOnly ?? false,
               shellEscape: requiresShellEscape,
+              signal: dto.signal,
+              onLogChunk: dto.onLogChunk,
             });
           }
 
@@ -238,7 +241,7 @@ export class CompilePipeline {
           // Step 5: Collect Output Artifacts & Discover dynamically generated files
           const discoveredFiles = await this.outputFileFinder.find(
             scratchDir,
-            inputFiles
+            inputFiles,
           );
 
           const pdfPath = path.join(scratchDir, 'output.pdf');
@@ -304,13 +307,15 @@ export class CompilePipeline {
             outputFiles: discoveredFiles,
             durationMs,
           };
-        }
+        },
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
       return {
         success: false,
-        error: err.message || 'Compilation execution failed',
-        logs: err.stack || err.message || '',
+        error: message || 'Compilation execution failed',
+        logs: stack || message || '',
         durationMs: Date.now() - startTime,
       };
     }

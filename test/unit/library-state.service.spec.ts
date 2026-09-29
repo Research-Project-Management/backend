@@ -1,11 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { StateService } from '@/modules/library/bibliography/application/services/state.service';
-import { StateRepository } from '@/modules/library/bibliography/infrastructure/repositories/state.repository';
+import { StateService } from '@/modules/library/catalog/core/use-cases/state.service';
+import { StateRepository } from '@/modules/library/catalog/core/adapters/state.repository';
 import {
   ReadingStatus,
   StateData,
-} from '@/modules/library/bibliography/domain/types/state.types';
+} from '@/modules/library/catalog/core/domain/state.types';
 import {
   formatStateDate,
   isValidRating,
@@ -13,12 +13,12 @@ import {
   isValidScrollPosition,
   shouldAutoAdvanceToReading,
   toStateResponse,
-} from '@/modules/library/bibliography/application/utils/state.utils';
+} from '@/modules/library/catalog/core/adapters/state.utils';
 import {
   TransactionService,
   TransactionHelpers,
 } from '@/modules/library/shared-kernel/outbox/transaction.service';
-import { ITEM_EXISTENCE_PORT } from '@/modules/library/bibliography/domain/ports/items.ports';
+import { ITEM_EXISTENCE_PORT } from '@/modules/library/catalog/core/ports/items.ports';
 import { PrismaService } from '@/core/database/prisma.service';
 
 describe('Library State Service — Reading Progress, Ratings & Viewer Position', () => {
@@ -165,7 +165,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
         lastOpenedAt: new Date(),
         lastReadAt: new Date(),
         updatedAt: new Date(),
-      } as any);
+      });
 
       const state = await service.getState(
         mockUserId,
@@ -218,7 +218,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
         lastOpenedAt: new Date(),
         lastReadAt: new Date(),
         updatedAt: new Date(),
-      } as any);
+      });
 
       const result = await service.updateState(
         mockUserId,
@@ -277,7 +277,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
         lastOpenedAt: new Date(),
         lastReadAt: new Date(),
         updatedAt: new Date(),
-      } as any);
+      });
 
       await service.markAsRead(mockUserId, mockItemId, mockProjectId);
 
@@ -305,7 +305,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
           lastOpenedAt: new Date(),
           lastReadAt: new Date(),
           updatedAt: new Date(),
-        } as any,
+        },
       ]);
 
       const result = await service.getBatchStates(mockUserId, [

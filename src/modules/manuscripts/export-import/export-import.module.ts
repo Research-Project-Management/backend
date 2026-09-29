@@ -32,12 +32,7 @@ import { ExportImportService } from './export-import.service';
 import { ExportImportController } from './export-import.controller';
 
 @Module({
-  imports: [
-    StructureModule,
-    DocstoreModule,
-    FilestoreModule,
-    ClsiModule,
-  ],
+  imports: [StructureModule, DocstoreModule, FilestoreModule, ClsiModule],
   controllers: [ExportImportController],
   providers: [
     // Adapters bound to Ports

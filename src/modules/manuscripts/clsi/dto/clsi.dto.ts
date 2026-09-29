@@ -41,7 +41,10 @@ export class CompileManuscriptDto {
   @IsOptional()
   pageId?: string;
 
-  @ApiPropertyOptional({ description: 'Main entry TeX file', default: 'main.tex' })
+  @ApiPropertyOptional({
+    description: 'Main entry TeX file',
+    default: 'main.tex',
+  })
   @IsString()
   @IsOptional()
   main_file?: string;
@@ -59,12 +62,17 @@ export class CompileManuscriptDto {
   @IsOptional()
   engine?: ClsiCompilerEngine;
 
-  @ApiPropertyOptional({ description: 'Draft compilation (skips images/PDF embed for speed)' })
+  @ApiPropertyOptional({
+    description: 'Draft compilation (skips images/PDF embed for speed)',
+  })
   @IsBoolean()
   @IsOptional()
   draft?: boolean;
 
-  @ApiPropertyOptional({ description: 'Syntax only compilation (skips PDF generation for fast diagnostics)' })
+  @ApiPropertyOptional({
+    description:
+      'Syntax only compilation (skips PDF generation for fast diagnostics)',
+  })
   @IsBoolean()
   @IsOptional()
   syntax_only?: boolean;
@@ -74,17 +82,25 @@ export class CompileManuscriptDto {
   @IsOptional()
   syntaxOnly?: boolean;
 
-  @ApiPropertyOptional({ description: 'Compilation timeout in milliseconds', default: 240000 })
+  @ApiPropertyOptional({
+    description: 'Compilation timeout in milliseconds',
+    default: 240000,
+  })
   @IsNumber()
   @IsOptional()
   timeout_ms?: number;
 
-  @ApiPropertyOptional({ description: 'Compilation timeout in milliseconds (camelCase)' })
+  @ApiPropertyOptional({
+    description: 'Compilation timeout in milliseconds (camelCase)',
+  })
   @IsNumber()
   @IsOptional()
   timeoutMs?: number;
 
-  @ApiPropertyOptional({ description: 'Use cached compile results', default: true })
+  @ApiPropertyOptional({
+    description: 'Use cached compile results',
+    default: true,
+  })
   @IsBoolean()
   @IsOptional()
   use_cache?: boolean;
@@ -94,7 +110,9 @@ export class CompileManuscriptDto {
   @IsOptional()
   stop_on_first_error?: boolean;
 
-  @ApiPropertyOptional({ description: 'Multi-file dictionary: path -> content' })
+  @ApiPropertyOptional({
+    description: 'Multi-file dictionary: path -> content',
+  })
   @IsOptional()
   files?: Record<string, string>;
 }

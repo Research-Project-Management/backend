@@ -3,7 +3,10 @@
  * Port interface for persistence of Manuscript File Tree nodes.
  */
 
-import { ManuscriptNodeEntity, ManuscriptNodeType } from '../domain/manuscript-node.entity';
+import {
+  ManuscriptNodeEntity,
+  ManuscriptNodeType,
+} from '../domain/manuscript-node.entity';
 
 export interface CreateNodeParams {
   projectId: string;
@@ -21,8 +24,14 @@ export interface CreateNodeParams {
 
 export abstract class IStructureRepository {
   abstract createNode(params: CreateNodeParams): Promise<ManuscriptNodeEntity>;
-  abstract findById(projectId: string, nodeId: string): Promise<ManuscriptNodeEntity | null>;
-  abstract findByPath(projectId: string, path: string): Promise<ManuscriptNodeEntity | null>;
+  abstract findById(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ManuscriptNodeEntity | null>;
+  abstract findByPath(
+    projectId: string,
+    path: string,
+  ): Promise<ManuscriptNodeEntity | null>;
   abstract getAllNodes(projectId: string): Promise<ManuscriptNodeEntity[]>;
   abstract getRootDoc(projectId: string): Promise<ManuscriptNodeEntity | null>;
   abstract setRootDoc(projectId: string, nodeId: string): Promise<void>;
@@ -31,15 +40,22 @@ export abstract class IStructureRepository {
     projectId: string,
     sourcePath: string,
     destPath: string,
-    newParentId: string | null
+    newParentId: string | null,
   ): Promise<void>;
   abstract renameNode(
     projectId: string,
     nodeId: string,
     newName: string,
-    newPath: string
+    newPath: string,
   ): Promise<ManuscriptNodeEntity>;
-  abstract deleteSubtree(projectId: string, path: string): Promise<ManuscriptNodeEntity[]>;
-  abstract updateSortOrder(projectId: string, nodeId: string, sortOrder: number): Promise<void>;
+  abstract deleteSubtree(
+    projectId: string,
+    path: string,
+  ): Promise<ManuscriptNodeEntity[]>;
+  abstract updateSortOrder(
+    projectId: string,
+    nodeId: string,
+    sortOrder: number,
+  ): Promise<void>;
   abstract countNodes(projectId: string): Promise<number>;
 }

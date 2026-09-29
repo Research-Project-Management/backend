@@ -257,12 +257,7 @@ export class CoreRepository {
         startDate: data.startDate || null,
         targetDate: data.targetDate || null,
         templateId: data.templateId || null,
-        modules: data.modules || [
-          'work_items',
-          'cycles',
-          'views',
-          'pages',
-        ],
+        modules: data.modules || ['work_items', 'cycles', 'views', 'pages'],
         settings: (data.settings || {}) as Prisma.InputJsonValue,
         createdById: userId,
         members: {
@@ -316,7 +311,9 @@ export class CoreRepository {
     // Link initial stateId to the default project state
     const defaultProjectState =
       (data.stateId
-        ? project.projectStates?.find((s: ProjectState) => s.id === data.stateId)
+        ? project.projectStates?.find(
+            (s: ProjectState) => s.id === data.stateId,
+          )
         : null) ||
       project.projectStates?.find((s: ProjectState) => s.isDefault) ||
       project.projectStates?.[0];
@@ -600,10 +597,20 @@ export class CoreRepository {
       const target = new Date(project.targetDate);
       const diffMs = target.getTime() - now.getTime();
       daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      const terminalStates = ['completed', 'cancelled', 'suspended', 'hoàn thành & lưu trữ', 'hủy bỏ', 'tạm dừng'];
+      const terminalStates = [
+        'completed',
+        'cancelled',
+        'suspended',
+        'hoàn thành & lưu trữ',
+        'hủy bỏ',
+        'tạm dừng',
+      ];
       isOverdue =
         daysRemaining < 0 &&
-        Boolean(project.state && !terminalStates.includes(project.state.name?.toLowerCase()));
+        Boolean(
+          project.state &&
+          !terminalStates.includes(project.state.name?.toLowerCase()),
+        );
     }
 
     return {
@@ -743,47 +750,48 @@ export class CoreRepository {
   }
 
   async findProjectForDuplication(projectId: string) {
-    const [project, manuscriptDocs, manuscriptFiles, manuscriptNodes] = await Promise.all([
-      this.prisma.project.findUnique({
-        where: { id: projectId },
-        include: {
-          members: { select: { userId: true, role: true } },
-          labels: { include: { label: true } },
-          projectStates: true,
-        },
-      }),
-      this.prisma.manuscriptDoc.findMany({
-        where: { projectId, deleted: false },
-        select: {
-          id: true,
-          path: true,
-          lines: true,
-          rev: true,
-          version: true,
-          ranges: true,
-          hash: true,
-          sizeBytes: true,
-        },
-        orderBy: { createdAt: 'asc' },
-      }),
-      this.prisma.manuscriptFile.findMany({
-        where: { projectId, deleted: false },
-        select: {
-          id: true,
-          name: true,
-          mimeType: true,
-          sizeBytes: true,
-          hash: true,
-          storageKey: true,
-          bucketName: true,
-        },
-        orderBy: { createdAt: 'asc' },
-      }),
-      this.prisma.manuscriptNode.findMany({
-        where: { projectId },
-        orderBy: { depth: 'asc' },
-      }),
-    ]);
+    const [project, manuscriptDocs, manuscriptFiles, manuscriptNodes] =
+      await Promise.all([
+        this.prisma.project.findUnique({
+          where: { id: projectId },
+          include: {
+            members: { select: { userId: true, role: true } },
+            labels: { include: { label: true } },
+            projectStates: true,
+          },
+        }),
+        this.prisma.manuscriptDoc.findMany({
+          where: { projectId, deleted: false },
+          select: {
+            id: true,
+            path: true,
+            lines: true,
+            rev: true,
+            version: true,
+            ranges: true,
+            hash: true,
+            sizeBytes: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        }),
+        this.prisma.manuscriptFile.findMany({
+          where: { projectId, deleted: false },
+          select: {
+            id: true,
+            name: true,
+            mimeType: true,
+            sizeBytes: true,
+            hash: true,
+            storageKey: true,
+            bucketName: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        }),
+        this.prisma.manuscriptNode.findMany({
+          where: { projectId },
+          orderBy: { depth: 'asc' },
+        }),
+      ]);
     if (!project) return null;
     return {
       ...project,
@@ -801,13 +809,22 @@ export class CoreRepository {
     return this.prisma.project.findMany({
       where: {
         deletedAt: { not: null },
-        OR: [
-          { createdById: userId },
-          { members: { some: { userId } } },
-        ],
+        OR: [{ createdById: userId }, { members: { some: { userId } } }],
       },
       include: {
-        members: { select: { userId: true, role: true, user: { select: { id: true, email: true, profile: { select: { name: true, avatar: true } } } } } },
+        members: {
+          select: {
+            userId: true,
+            role: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                profile: { select: { name: true, avatar: true } },
+              },
+            },
+          },
+        },
         labels: { include: { label: true } },
       },
       orderBy: { deletedAt: 'desc' },

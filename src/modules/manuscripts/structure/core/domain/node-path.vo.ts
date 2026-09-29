@@ -89,16 +89,25 @@ export class NodePathVo {
       throw new InvalidNodeNameError(name, 'Name cannot be empty');
     }
     if (name.includes('/') || name.includes('\\')) {
-      throw new InvalidNodeNameError(name, 'Name cannot contain path separators');
+      throw new InvalidNodeNameError(
+        name,
+        'Name cannot contain path separators',
+      );
     }
     if (name.indexOf('\u0000') !== -1) {
       throw new InvalidNodeNameError(name, 'Name cannot contain null bytes');
     }
     if (name === '.' || name === '..') {
-      throw new InvalidNodeNameError(name, 'Name cannot be relative navigation tokens');
+      throw new InvalidNodeNameError(
+        name,
+        'Name cannot be relative navigation tokens',
+      );
     }
     if (name.length > 255) {
-      throw new InvalidNodeNameError(name, 'Name exceeds maximum 255 characters');
+      throw new InvalidNodeNameError(
+        name,
+        'Name exceeds maximum 255 characters',
+      );
     }
   }
 }

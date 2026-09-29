@@ -22,5 +22,3 @@ export class ProjectCurrentStateResponseDto {
   })
   stateLabel!: string;
 }
-
-

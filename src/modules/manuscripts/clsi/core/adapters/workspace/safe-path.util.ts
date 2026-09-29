@@ -22,7 +22,9 @@ export class SafePathUtil {
       normalized.startsWith('/') ||
       /^[a-zA-Z]:/.test(normalized)
     ) {
-      throw new Error(`Security Violation: Absolute paths are not allowed (${filePath})`);
+      throw new Error(
+        `Security Violation: Absolute paths are not allowed (${filePath})`,
+      );
     }
 
     if (
@@ -30,7 +32,9 @@ export class SafePathUtil {
       normalized === '..' ||
       normalized.includes('/../')
     ) {
-      throw new Error(`Security Violation: Path traversal detected in ${filePath}`);
+      throw new Error(
+        `Security Violation: Path traversal detected in ${filePath}`,
+      );
     }
 
     return normalized;
@@ -43,7 +47,7 @@ export class SafePathUtil {
 
     if (!resolved.startsWith(resolvedBase)) {
       throw new Error(
-        `Security Violation: Target path is outside base directory (${relativePath})`
+        `Security Violation: Target path is outside base directory (${relativePath})`,
       );
     }
 

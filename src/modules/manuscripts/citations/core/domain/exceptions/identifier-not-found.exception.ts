@@ -5,7 +5,9 @@
 
 export class IdentifierNotFoundException extends Error {
   constructor(public readonly identifier: string) {
-    super(`Academic identifier '${identifier}' could not be resolved from CrossRef or arXiv`);
+    super(
+      `Academic identifier '${identifier}' could not be resolved from CrossRef or arXiv`,
+    );
     this.name = 'IdentifierNotFoundException';
     Object.setPrototypeOf(this, IdentifierNotFoundException.prototype);
   }

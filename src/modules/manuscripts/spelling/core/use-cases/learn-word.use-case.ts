@@ -15,7 +15,9 @@ export interface LearnWordCommand {
 }
 
 export class LearnWordUseCase {
-  constructor(private readonly customDictionary: ICustomDictionaryRepositoryPort) {}
+  constructor(
+    private readonly customDictionary: ICustomDictionaryRepositoryPort,
+  ) {}
 
   public async execute(command: LearnWordCommand): Promise<void> {
     const raw = command.word ? command.word.trim() : '';
@@ -23,7 +25,7 @@ export class LearnWordUseCase {
     if (!raw || /\s/.test(raw) || !/^[a-zA-ZÀ-ÿ0-9_:.\\-]+$/.test(raw)) {
       throw new InvalidWordException(
         command.word,
-        'Word must not contain whitespace or invalid symbols'
+        'Word must not contain whitespace or invalid symbols',
       );
     }
 
@@ -31,12 +33,18 @@ export class LearnWordUseCase {
 
     if (scopeVo.isProject()) {
       if (!command.projectId) {
-        throw new InvalidWordException(raw, 'projectId is required for project dictionary');
+        throw new InvalidWordException(
+          raw,
+          'projectId is required for project dictionary',
+        );
       }
       await this.customDictionary.addProjectWord(command.projectId, raw);
     } else {
       if (!command.userId) {
-        throw new InvalidWordException(raw, 'userId is required for user dictionary');
+        throw new InvalidWordException(
+          raw,
+          'userId is required for user dictionary',
+        );
       }
       await this.customDictionary.addUserWord(command.userId, raw);
     }

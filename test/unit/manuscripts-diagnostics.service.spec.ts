@@ -76,8 +76,12 @@ describe('Manuscripts Diagnostics Subsystem (Log Parser, Linter & Explainer)', (
       it('should instantiate from string values flexibly', () => {
         expect(DiagnosticSeverityVo.fromString('ERROR').isError()).toBe(true);
         expect(DiagnosticSeverityVo.fromString('warn').isWarning()).toBe(true);
-        expect(DiagnosticSeverityVo.fromString('overfull').isBadbox()).toBe(true);
-        expect(DiagnosticSeverityVo.fromString('underfull').isBadbox()).toBe(true);
+        expect(DiagnosticSeverityVo.fromString('overfull').isBadbox()).toBe(
+          true,
+        );
+        expect(DiagnosticSeverityVo.fromString('underfull').isBadbox()).toBe(
+          true,
+        );
         expect(DiagnosticSeverityVo.fromString('other').value).toBe('info');
       });
     });
@@ -85,7 +89,10 @@ describe('Manuscripts Diagnostics Subsystem (Log Parser, Linter & Explainer)', (
     describe('LogLineVo', () => {
       it('should unwrap lines that were hard-wrapped at 79 characters by TeX', () => {
         const longPathLine =
-          '(/usr/local/texlive/2024/texmf-dist/tex/latex/amsmath/amsmath.sty'.padEnd(79, ' ');
+          '(/usr/local/texlive/2024/texmf-dist/tex/latex/amsmath/amsmath.sty'.padEnd(
+            79,
+            ' ',
+          );
         const wrappedContinuation = 'package loaded successfully)';
 
         const rawLog = `${longPathLine}\n${wrappedContinuation}\nNext line here`;
@@ -97,7 +104,11 @@ describe('Manuscripts Diagnostics Subsystem (Log Parser, Linter & Explainer)', (
       });
 
       it('should not combine lines if next line begins with ! or l.', () => {
-        const line79 = 'Some long text that just happens to be seventy-nine characters long..............'.slice(0, 79);
+        const line79 =
+          'Some long text that just happens to be seventy-nine characters long..............'.slice(
+            0,
+            79,
+          );
         const errorLine = '! Undefined control sequence.';
         const log = `${line79}\n${errorLine}`;
 
@@ -166,7 +177,10 @@ describe('Manuscripts Diagnostics Subsystem (Log Parser, Linter & Explainer)', (
   // =========================================================================
   describe('KnowledgeBaseExplainerAdapter', () => {
     it('should match undefined control sequence error and provide fix snippet', () => {
-      const exp = explainer.explain('! Undefined control sequence.', 'l.12 \\mycustommacro');
+      const exp = explainer.explain(
+        '! Undefined control sequence.',
+        'l.12 \\mycustommacro',
+      );
       expect(exp).not.toBeNull();
       expect(exp!.code).toBe('UNDEFINED_CONTROL_SEQUENCE');
       expect(exp!.suggestedFix).toContain('usepackage');
@@ -174,28 +188,35 @@ describe('Manuscripts Diagnostics Subsystem (Log Parser, Linter & Explainer)', (
     });
 
     it('should match missing $ error for unescaped math operators', () => {
-      const exp = explainer.explain('! Missing $ inserted.', 'l.5 The variable name is user_id');
+      const exp = explainer.explain(
+        '! Missing $ inserted.',
+        'l.5 The variable name is user_id',
+      );
       expect(exp).not.toBeNull();
       expect(exp!.code).toBe('MISSING_MATH_DELIMITER');
       expect(exp!.suggestedFix).toContain('escape');
     });
 
     it('should match file not found errors', () => {
-      const exp = explainer.explain("! LaTeX Error: File `custom.sty' not found.");
+      const exp = explainer.explain(
+        "! LaTeX Error: File `custom.sty' not found.",
+      );
       expect(exp).not.toBeNull();
       expect(exp!.code).toBe('FILE_NOT_FOUND');
     });
 
     it('should match environment ended mismatch', () => {
       const exp = explainer.explain(
-        '! LaTeX Error: \\begin{equation} on input line 15 ended by \\end{align}.'
+        '! LaTeX Error: \\begin{equation} on input line 15 ended by \\end{align}.',
       );
       expect(exp).not.toBeNull();
       expect(exp!.code).toBe('ENVIRONMENT_MISMATCH');
     });
 
     it('should match extra alignment tab & in tables', () => {
-      const exp = explainer.explain('! Extra alignment tab has been changed to \\cr.');
+      const exp = explainer.explain(
+        '! Extra alignment tab has been changed to \\cr.',
+      );
       expect(exp).not.toBeNull();
       expect(exp!.code).toBe('EXTRA_ALIGNMENT_TAB');
     });
@@ -204,7 +225,9 @@ describe('Manuscripts Diagnostics Subsystem (Log Parser, Linter & Explainer)', (
       const exp1 = explainer.explain('! Emergency stop.');
       expect(exp1?.code).toBe('EMERGENCY_STOP');
 
-      const exp2 = explainer.explain('! File ended while scanning use of \\@writefile.');
+      const exp2 = explainer.explain(
+        '! File ended while scanning use of \\@writefile.',
+      );
       expect(exp2?.code).toBe('CORRUPTED_AUX_FILE');
     });
 
@@ -241,7 +264,7 @@ Here is how much of TeX's memory you used:
       const items = texParser.parse(log, 'main.tex');
       expect(items.length).toBe(1);
 
-      const err = items[0]!;
+      const err = items[0];
       expect(err.file).toBe('main.tex');
       expect(err.line).toBe(15);
       expect(err.severity.isError()).toBe(true);
@@ -267,7 +290,7 @@ l.42 The formula calculates value_x
       const items = texParser.parse(log, 'main.tex');
       expect(items.length).toBe(1);
 
-      const err = items[0]!;
+      const err = items[0];
       expect(err.file).toBe('sections/introduction.tex'); // Correctly attributed to sub-file!
       expect(err.line).toBe(42);
       expect(err.code).toBe('MISSING_MATH_DELIMITER');
@@ -287,9 +310,9 @@ l.108 \\begin{myenv}
       const items = texParser.parse(log, 'main.tex');
       expect(items.length).toBe(1);
       // Because diagram.tex closed before the error, the error belongs to ch1.tex
-      expect(items[0]!.file).toBe('chapters/ch1.tex');
-      expect(items[0]!.line).toBe(108);
-      expect(items[0]!.code).toBe('ENVIRONMENT_UNDEFINED');
+      expect(items[0].file).toBe('chapters/ch1.tex');
+      expect(items[0].line).toBe(108);
+      expect(items[0].code).toBe('ENVIRONMENT_UNDEFINED');
     });
 
     it('should parse LaTeX Warnings with input line numbers and multiline messages', () => {
@@ -303,7 +326,9 @@ Package hyperref Warning: Token not allowed in a PDF string (PDFDocEncoding):
       const items = texParser.parse(log, 'main.tex');
       expect(items.length).toBe(2);
 
-      const warn1 = items.find((i) => i.message.includes('Reference `sec:results'));
+      const warn1 = items.find((i) =>
+        i.message.includes('Reference `sec:results'),
+      );
       expect(warn1).toBeDefined();
       expect(warn1!.line).toBe(58);
       expect(warn1!.severity.isWarning()).toBe(true);
@@ -325,13 +350,13 @@ Underfull \\hbox (badness 10000) in paragraph at lines 200--205
       const items = texParser.parse(log, 'main.tex');
       expect(items.length).toBe(2);
 
-      expect(items[0]!.severity.isBadbox()).toBe(true);
-      expect(items[0]!.line).toBe(102);
-      expect(items[0]!.code).toBe('OVERFULL_HBOX');
+      expect(items[0].severity.isBadbox()).toBe(true);
+      expect(items[0].line).toBe(102);
+      expect(items[0].code).toBe('OVERFULL_HBOX');
 
-      expect(items[1]!.severity.isBadbox()).toBe(true);
-      expect(items[1]!.line).toBe(200);
-      expect(items[1]!.code).toBe('UNDERFULL_HBOX');
+      expect(items[1].severity.isBadbox()).toBe(true);
+      expect(items[1].line).toBe(200);
+      expect(items[1].code).toBe('UNDERFULL_HBOX');
     });
   });
 
@@ -348,7 +373,7 @@ note: target halted
       const items = tectonicParser.parse(log, 'main.tex');
       expect(items.length).toBe(1);
 
-      const err = items[0]!;
+      const err = items[0];
       expect(err.file).toBe('chapters/intro.tex');
       expect(err.line).toBe(34);
       expect(err.severity.isError()).toBe(true);
@@ -363,12 +388,12 @@ error: main.tex:50: missing $ inserted
       const items = tectonicParser.parse(log, 'main.tex');
       expect(items.length).toBe(2);
 
-      expect(items[0]!.severity.isWarning()).toBe(true);
-      expect(items[0]!.line).toBe(12);
+      expect(items[0].severity.isWarning()).toBe(true);
+      expect(items[0].line).toBe(12);
 
-      expect(items[1]!.severity.isError()).toBe(true);
-      expect(items[1]!.line).toBe(50);
-      expect(items[1]!.code).toBe('MISSING_MATH_DELIMITER');
+      expect(items[1].severity.isError()).toBe(true);
+      expect(items[1].line).toBe(50);
+      expect(items[1].code).toBe('MISSING_MATH_DELIMITER');
     });
   });
 
@@ -381,8 +406,8 @@ error: main.tex:50: missing $ inserted
       const items = linter.lint(source, 'main.tex');
 
       expect(items.length).toBe(1);
-      expect(items[0]!.code).toBe('UNBALANCED_BRACES');
-      expect(items[0]!.line).toBe(3); // Line of \textbf{hello
+      expect(items[0].code).toBe('UNBALANCED_BRACES');
+      expect(items[0].line).toBe(3); // Line of \textbf{hello
     });
 
     it('should detect extra closing brace', () => {
@@ -390,8 +415,8 @@ error: main.tex:50: missing $ inserted
       const items = linter.lint(source, 'main.tex');
 
       expect(items.length).toBe(1);
-      expect(items[0]!.code).toBe('UNBALANCED_BRACES');
-      expect(items[0]!.line).toBe(3);
+      expect(items[0].code).toBe('UNBALANCED_BRACES');
+      expect(items[0].line).toBe(3);
     });
 
     it('should detect unclosed environments at end of document', () => {
@@ -450,7 +475,9 @@ y_2 = 10
 \\end{document}
 `;
       const items = linter.lint(source, 'main.tex');
-      const mathErrors = items.filter((i) => i.code === 'MISSING_MATH_DELIMITER');
+      const mathErrors = items.filter(
+        (i) => i.code === 'MISSING_MATH_DELIMITER',
+      );
       expect(mathErrors.length).toBe(0);
     });
 
@@ -501,16 +528,23 @@ Normal text.
     describe('ParseCompileLogUseCase', () => {
       it('should parse log and return DiagnosticReport', () => {
         const log = `(./main.tex\n! Undefined control sequence.\nl.10 \\foo\n)`;
-        const report = parseUseCase.execute({ logText: log, defaultFile: 'main.tex' });
+        const report = parseUseCase.execute({
+          logText: log,
+          defaultFile: 'main.tex',
+        });
 
         expect(report.isSuccess).toBe(false);
         expect(report.errorsCount).toBe(1);
-        expect(report.items[0]!.file).toBe('main.tex');
+        expect(report.items[0].file).toBe('main.tex');
       });
 
       it('should throw InvalidLogFormatException if logText is empty', () => {
-        expect(() => parseUseCase.execute({ logText: '' })).toThrow(InvalidLogFormatException);
-        expect(() => parseUseCase.execute({ logText: '   ' })).toThrow(InvalidLogFormatException);
+        expect(() => parseUseCase.execute({ logText: '' })).toThrow(
+          InvalidLogFormatException,
+        );
+        expect(() => parseUseCase.execute({ logText: '   ' })).toThrow(
+          InvalidLogFormatException,
+        );
       });
 
       it('should route to tectonicParser when engine is tectonic', () => {
@@ -522,7 +556,7 @@ Normal text.
         });
 
         expect(report.errorsCount).toBe(1);
-        expect(report.items[0]!.line).toBe(5);
+        expect(report.items[0].line).toBe(5);
       });
     });
 
@@ -545,7 +579,7 @@ Normal text.
 
       it('should throw ExplanationNotFoundException for unknown code', () => {
         expect(() => explainUseCase.execute('TOTALLY_BOGUS_CODE')).toThrow(
-          ExplanationNotFoundException
+          ExplanationNotFoundException,
         );
       });
 
@@ -562,11 +596,14 @@ Normal text.
   describe('Service & REST Controller Integration', () => {
     it('should parse log via controller endpoint', () => {
       const log = `(./main.tex\n! Missing $ inserted.\nl.22 x_1\n)`;
-      const res = controller.parseLog({ logText: log, defaultFile: 'main.tex' });
+      const res = controller.parseLog({
+        logText: log,
+        defaultFile: 'main.tex',
+      });
 
       expect(res.isSuccess).toBe(false);
       expect(res.errorsCount).toBe(1);
-      expect(res.items[0]!.code).toBe('MISSING_MATH_DELIMITER');
+      expect(res.items[0].code).toBe('MISSING_MATH_DELIMITER');
     });
 
     it('should lint document via controller endpoint', () => {
@@ -589,11 +626,15 @@ Normal text.
 
     describe('Controller Exception Translation', () => {
       it('should translate InvalidLogFormatException to 400 BadRequestException', () => {
-        expect(() => controller.parseLog({ logText: '' })).toThrow(BadRequestException);
+        expect(() => controller.parseLog({ logText: '' })).toThrow(
+          BadRequestException,
+        );
       });
 
       it('should translate ExplanationNotFoundException to 404 NotFoundException', () => {
-        expect(() => controller.getExplanation('NOT_REAL_CODE')).toThrow(NotFoundException);
+        expect(() => controller.getExplanation('NOT_REAL_CODE')).toThrow(
+          NotFoundException,
+        );
       });
     });
   });

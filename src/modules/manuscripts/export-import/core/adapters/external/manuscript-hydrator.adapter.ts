@@ -122,9 +122,15 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
 
     if (preferredRootDoc) {
       const preferredNorm = '/' + preferredRootDoc.replace(/^\/+/, '');
-      const match = await this.structureService.getNodeByPath(projectId, preferredNorm);
+      const match = await this.structureService.getNodeByPath(
+        projectId,
+        preferredNorm,
+      );
       if (match && match.type === 'DOC') {
-        const updated = await this.structureService.setRootDoc(projectId, match.id);
+        const updated = await this.structureService.setRootDoc(
+          projectId,
+          match.id,
+        );
         rootDocId = updated.id;
         rootDocPath = updated.path;
       }

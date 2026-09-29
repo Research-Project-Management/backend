@@ -39,7 +39,11 @@ export class UpdateOpVo {
     this.clientRev = props.clientRev;
   }
 
-  public static fromLines(lines: string[], userId?: string, clientRev?: number): UpdateOpVo {
+  public static fromLines(
+    lines: string[],
+    userId?: string,
+    clientRev?: number,
+  ): UpdateOpVo {
     return new UpdateOpVo({
       lines,
       userId,
@@ -72,7 +76,11 @@ export class UpdateOpVo {
     }
     if (this.splice) {
       const next = [...baseLines];
-      next.splice(this.splice.startLine, this.splice.deleteCount, ...this.splice.newLines);
+      next.splice(
+        this.splice.startLine,
+        this.splice.deleteCount,
+        ...this.splice.newLines,
+      );
       return next;
     }
     return baseLines;

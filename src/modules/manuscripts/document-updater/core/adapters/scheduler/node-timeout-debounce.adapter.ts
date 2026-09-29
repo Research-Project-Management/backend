@@ -7,7 +7,10 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { IDebounceTimerPort } from '../../ports/debounce-timer.port';
 
 @Injectable()
-export class NodeTimeoutDebounceAdapter extends IDebounceTimerPort implements OnModuleDestroy {
+export class NodeTimeoutDebounceAdapter
+  extends IDebounceTimerPort
+  implements OnModuleDestroy
+{
   private readonly logger = new Logger(NodeTimeoutDebounceAdapter.name);
   private readonly timers = new Map<string, NodeJS.Timeout>();
 

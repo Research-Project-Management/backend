@@ -19,6 +19,11 @@ export class BroadcastProjectEventUseCase {
 
   public execute(input: BroadcastProjectEventInput): void {
     const { projectId, event, payload, excludeSocketId } = input;
-    this.broadcaster.broadcastToProject(projectId, event, payload, excludeSocketId);
+    this.broadcaster.broadcastToProject(
+      projectId,
+      event,
+      payload,
+      excludeSocketId,
+    );
   }
 }

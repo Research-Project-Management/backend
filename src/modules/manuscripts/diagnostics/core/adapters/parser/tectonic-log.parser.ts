@@ -25,13 +25,16 @@ export class TectonicLogParser implements ILatexLogParserPort {
 
       const match = line.match(TectonicLogParser.TECTONIC_DIAGNOSTIC_REGEX);
       if (match) {
-        const severityType = match[1]!.toLowerCase();
+        const severityType = match[1].toLowerCase();
         const errorFile = match[2]?.trim() || defaultFile;
         const errorLine = match[3] ? parseInt(match[3], 10) : null;
-        const message = match[4]!.trim();
+        const message = match[4].trim();
 
-        const context = lines.slice(i, Math.min(i + 3, lines.length)).join('\n');
-        const explanation = this.explainer?.explain(message, context) || undefined;
+        const context = lines
+          .slice(i, Math.min(i + 3, lines.length))
+          .join('\n');
+        const explanation =
+          this.explainer?.explain(message, context) || undefined;
 
         let severity: DiagnosticSeverityVo;
         if (severityType === 'error') {
@@ -51,7 +54,7 @@ export class TectonicLogParser implements ILatexLogParserPort {
             context,
             code: explanation?.code,
             explanation,
-          })
+          }),
         );
       }
     }

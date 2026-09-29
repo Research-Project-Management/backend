@@ -177,7 +177,9 @@ export class MultipartUploadUseCase {
     this.verifySessionAccess(session, actor);
 
     if (session.status === UploadSessionStatus.COMPLETED) {
-      throw new BadRequestException('Upload session has already been completed');
+      throw new BadRequestException(
+        'Upload session has already been completed',
+      );
     }
     if (session.status === UploadSessionStatus.ABORTED) {
       throw new BadRequestException('Upload session has been aborted');
@@ -216,7 +218,9 @@ export class MultipartUploadUseCase {
     this.verifySessionAccess(session, input.actor);
 
     if (session.status === UploadSessionStatus.COMPLETED) {
-      throw new BadRequestException('Upload session has already been completed');
+      throw new BadRequestException(
+        'Upload session has already been completed',
+      );
     }
     if (session.status === UploadSessionStatus.ABORTED) {
       throw new BadRequestException('Upload session has been aborted');
@@ -335,10 +339,7 @@ export class MultipartUploadUseCase {
     };
   }
 
-  async abort(
-    sessionId: string,
-    actor?: MultipartActorContext,
-  ): Promise<void> {
+  async abort(sessionId: string, actor?: MultipartActorContext): Promise<void> {
     const session = await this.sessionRepo.findById(sessionId);
     if (!session) {
       throw new NotFoundException('Upload session not found');

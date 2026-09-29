@@ -8,6 +8,7 @@ export interface ProcessExecutionOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   env?: Record<string, string>;
+  onLogChunk?: (chunk: string) => void;
 }
 
 export interface ProcessExecutionResult {
@@ -21,6 +22,6 @@ export interface ISandboxRunner {
   run(
     command: string,
     args: string[],
-    options: ProcessExecutionOptions
+    options: ProcessExecutionOptions,
   ): Promise<ProcessExecutionResult>;
 }

@@ -18,13 +18,13 @@ export class DockerSandboxRunner implements ISandboxRunner {
   constructor(
     private readonly dockerImage: string = 'sharelatex/clsi:latest',
     private readonly memoryLimit: string = '1024m',
-    private readonly cpuLimit: string = '1.0'
+    private readonly cpuLimit: string = '1.0',
   ) {}
 
   public async run(
     command: string,
     args: string[],
-    options: ProcessExecutionOptions
+    options: ProcessExecutionOptions,
   ): Promise<ProcessExecutionResult> {
     const dockerArgs = [
       'run',

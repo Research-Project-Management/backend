@@ -58,8 +58,14 @@ import { InvalidRoomException } from '@/modules/realtime/manuscripts/core/domain
 
 // Ports & Adapters
 import { IRoomManagerPort } from '@/modules/realtime/manuscripts/core/ports/room-manager.port';
-import { IDocumentUpdaterBridgePort, BridgeUpdateResult } from '@/modules/realtime/manuscripts/core/ports/document-updater-bridge.port';
-import { IProjectAccessVerifierPort, ProjectAccessResult } from '@/modules/realtime/manuscripts/core/ports/project-access-verifier.port';
+import {
+  IDocumentUpdaterBridgePort,
+  BridgeUpdateResult,
+} from '@/modules/realtime/manuscripts/core/ports/document-updater-bridge.port';
+import {
+  IProjectAccessVerifierPort,
+  ProjectAccessResult,
+} from '@/modules/realtime/manuscripts/core/ports/project-access-verifier.port';
 import { IRealtimeBroadcasterPort } from '@/modules/realtime/manuscripts/core/ports/realtime-broadcaster.port';
 import { InMemoryRoomManagerAdapter } from '@/modules/realtime/manuscripts/core/adapters/storage/in-memory-room-manager.adapter';
 import { SocketIoBroadcasterAdapter } from '@/modules/realtime/manuscripts/core/adapters/broadcast/socket-io-broadcaster.adapter';
@@ -69,16 +75,45 @@ import { SocketIoBroadcasterAdapter } from '@/modules/realtime/manuscripts/core/
 // ---------------------------------------------------------------------------
 
 class MockBroadcaster extends IRealtimeBroadcasterPort {
-  public projectBroadcasts: Array<{ projectId: string; event: string; payload: any; excludeSocketId?: string }> = [];
-  public docBroadcasts: Array<{ projectId: string; docId: string; event: string; payload: any; excludeSocketId?: string }> = [];
-  public socketSends: Array<{ socketId: string; event: string; payload: any }> = [];
+  public projectBroadcasts: Array<{
+    projectId: string;
+    event: string;
+    payload: any;
+    excludeSocketId?: string;
+  }> = [];
+  public docBroadcasts: Array<{
+    projectId: string;
+    docId: string;
+    event: string;
+    payload: any;
+    excludeSocketId?: string;
+  }> = [];
+  public socketSends: Array<{ socketId: string; event: string; payload: any }> =
+    [];
 
-  public broadcastToProject(projectId: string, event: string, payload: any, excludeSocketId?: string): void {
+  public broadcastToProject(
+    projectId: string,
+    event: string,
+    payload: any,
+    excludeSocketId?: string,
+  ): void {
     this.projectBroadcasts.push({ projectId, event, payload, excludeSocketId });
   }
 
-  public broadcastToDoc(projectId: string, docId: string, event: string, payload: any, excludeSocketId?: string): void {
-    this.docBroadcasts.push({ projectId, docId, event, payload, excludeSocketId });
+  public broadcastToDoc(
+    projectId: string,
+    docId: string,
+    event: string,
+    payload: any,
+    excludeSocketId?: string,
+  ): void {
+    this.docBroadcasts.push({
+      projectId,
+      docId,
+      event,
+      payload,
+      excludeSocketId,
+    });
   }
 
   public sendToSocket(socketId: string, event: string, payload: any): void {
@@ -97,7 +132,9 @@ class MockUpdaterBridge extends IDocumentUpdaterBridgePort {
   public nextRev = 1;
   public nextSeq = 1;
 
-  public async forwardUpdate(payload: ClientUpdatePayloadVo): Promise<BridgeUpdateResult> {
+  public async forwardUpdate(
+    payload: ClientUpdatePayloadVo,
+  ): Promise<BridgeUpdateResult> {
     this.lastPayload = payload;
     return {
       serverRev: ++this.nextRev,
@@ -111,12 +148,25 @@ class MockUpdaterBridge extends IDocumentUpdaterBridgePort {
 class MockAccessVerifier extends IProjectAccessVerifierPort {
   public accessMap = new Map<string, ProjectAccessResult>();
 
-  public setAccess(userId: string, projectId: string, result: ProjectAccessResult): void {
+  public setAccess(
+    userId: string,
+    projectId: string,
+    result: ProjectAccessResult,
+  ): void {
     this.accessMap.set(`${userId}:${projectId}`, result);
   }
 
-  public async verifyProjectAccess(userId: string, projectId: string): Promise<ProjectAccessResult> {
-    return this.accessMap.get(`${userId}:${projectId}`) ?? { canRead: true, canWrite: true, role: 'contributor' };
+  public async verifyProjectAccess(
+    userId: string,
+    projectId: string,
+  ): Promise<ProjectAccessResult> {
+    return (
+      this.accessMap.get(`${userId}:${projectId}`) ?? {
+        canRead: true,
+        canWrite: true,
+        role: 'contributor',
+      }
+    );
   }
 }
 
@@ -152,15 +202,31 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
     updaterBridge = new MockUpdaterBridge();
     accessVerifier = new MockAccessVerifier();
 
-    joinProjectUseCase = new JoinProjectUseCase(roomManager, accessVerifier, broadcaster);
+    joinProjectUseCase = new JoinProjectUseCase(
+      roomManager,
+      accessVerifier,
+      broadcaster,
+    );
     leaveProjectUseCase = new LeaveProjectUseCase(roomManager, broadcaster);
     joinDocUseCase = new JoinDocUseCase(roomManager, broadcaster);
     leaveDocUseCase = new LeaveDocUseCase(roomManager, broadcaster);
-    sendDocUpdateUseCase = new SendDocUpdateUseCase(updaterBridge, broadcaster, accessVerifier);
-    broadcastCursorUseCase = new BroadcastCursorUseCase(roomManager, broadcaster);
-    broadcastProjectEventUseCase = new BroadcastProjectEventUseCase(broadcaster);
+    sendDocUpdateUseCase = new SendDocUpdateUseCase(
+      updaterBridge,
+      broadcaster,
+      accessVerifier,
+    );
+    broadcastCursorUseCase = new BroadcastCursorUseCase(
+      roomManager,
+      broadcaster,
+    );
+    broadcastProjectEventUseCase = new BroadcastProjectEventUseCase(
+      broadcaster,
+    );
 
-    realtimeService = new RealtimeService(broadcastProjectEventUseCase, roomManager);
+    realtimeService = new RealtimeService(
+      broadcastProjectEventUseCase,
+      roomManager,
+    );
 
     const socketIoBroadcasterAdapter = new SocketIoBroadcasterAdapter();
     gateway = new ManuscriptRealtimeGateway(
@@ -284,8 +350,16 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
       expect(room.isEmpty()).toBe(true);
       expect(room.socketCount).toBe(0);
 
-      const s1 = PresenceSession.create({ userId: user1, socketId: 's-1', projectId });
-      const s2 = PresenceSession.create({ userId: user2, socketId: 's-2', projectId });
+      const s1 = PresenceSession.create({
+        userId: user1,
+        socketId: 's-1',
+        projectId,
+      });
+      const s2 = PresenceSession.create({
+        userId: user2,
+        socketId: 's-2',
+        projectId,
+      });
 
       room.addSession(s1);
       room.addSession(s2);
@@ -309,8 +383,18 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
   // =========================================================================
   describe('2. Adapters & Ports', () => {
     it('InMemoryRoomManagerAdapter: coordinates project and doc presence', async () => {
-      const s1 = PresenceSession.create({ userId: user1, socketId: 's-1', projectId, name: 'Alice' });
-      const s2 = PresenceSession.create({ userId: user2, socketId: 's-2', projectId, name: 'Bob' });
+      const s1 = PresenceSession.create({
+        userId: user1,
+        socketId: 's-1',
+        projectId,
+        name: 'Alice',
+      });
+      const s2 = PresenceSession.create({
+        userId: user2,
+        socketId: 's-2',
+        projectId,
+        name: 'Bob',
+      });
 
       await roomManager.addProjectSession(s1);
       await roomManager.addProjectSession(s2);
@@ -319,18 +403,30 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
       expect(projectPresences).toHaveLength(2);
 
       // s1 joins docId
-      const docPresences = await roomManager.joinDocRoom(projectId, docId, 's-1');
+      const docPresences = await roomManager.joinDocRoom(
+        projectId,
+        docId,
+        's-1',
+      );
       expect(docPresences).toHaveLength(1);
       expect(docPresences[0].name).toBe('Alice');
 
       // Update cursor
       const cursorVo = CursorPositionVo.create({ row: 15, column: 2 });
-      const updated = await roomManager.updateSessionCursor(projectId, docId, 's-1', cursorVo);
+      const updated = await roomManager.updateSessionCursor(
+        projectId,
+        docId,
+        's-1',
+        cursorVo,
+      );
       expect(updated?.cursor?.row).toBe(15);
 
       // s1 leaves docId
       await roomManager.leaveDocRoom(projectId, docId, 's-1');
-      const docPresencesAfter = await roomManager.getDocSessions(projectId, docId);
+      const docPresencesAfter = await roomManager.getDocSessions(
+        projectId,
+        docId,
+      );
       expect(docPresencesAfter).toHaveLength(0);
 
       // s2 disconnects from project
@@ -346,7 +442,11 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
   // =========================================================================
   describe('3. Inbound Use Cases', () => {
     it('JoinProjectUseCase: verifies permission, registers presence, and broadcasts', async () => {
-      accessVerifier.setAccess(user1, projectId, { canRead: true, canWrite: true, role: 'owner' });
+      accessVerifier.setAccess(user1, projectId, {
+        canRead: true,
+        canWrite: true,
+        role: 'owner',
+      });
 
       const output = await joinProjectUseCase.execute({
         projectId,
@@ -361,12 +461,18 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
 
       // Check broadcast
       expect(broadcaster.projectBroadcasts).toHaveLength(1);
-      expect(broadcaster.projectBroadcasts[0].event).toBe('project:user-joined');
+      expect(broadcaster.projectBroadcasts[0].event).toBe(
+        'project:user-joined',
+      );
       expect(broadcaster.projectBroadcasts[0].excludeSocketId).toBe('sock-100');
     });
 
     it('JoinProjectUseCase: rejects unauthorized users with UnauthorizedProjectException', async () => {
-      accessVerifier.setAccess('intruder', projectId, { canRead: false, canWrite: false, role: 'none' });
+      accessVerifier.setAccess('intruder', projectId, {
+        canRead: false,
+        canWrite: false,
+        role: 'none',
+      });
 
       await expect(
         joinProjectUseCase.execute({
@@ -397,8 +503,14 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
         socketId: 'sock-1',
       });
 
-      expect(broadcaster.projectBroadcasts.some((b) => b.event === 'project:user-left')).toBe(true);
-      expect(broadcaster.docBroadcasts.some((b) => b.event === 'doc:user-left')).toBe(true);
+      expect(
+        broadcaster.projectBroadcasts.some(
+          (b) => b.event === 'project:user-left',
+        ),
+      ).toBe(true);
+      expect(
+        broadcaster.docBroadcasts.some((b) => b.event === 'doc:user-left'),
+      ).toBe(true);
     });
 
     it('JoinDocUseCase & LeaveDocUseCase: manages editor awareness and peer announcements', async () => {
@@ -415,7 +527,9 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
       });
 
       expect(res.docPresence).toHaveLength(1);
-      expect(broadcaster.docBroadcasts.some((b) => b.event === 'doc:user-joined')).toBe(true);
+      expect(
+        broadcaster.docBroadcasts.some((b) => b.event === 'doc:user-joined'),
+      ).toBe(true);
 
       // Leave
       await leaveDocUseCase.execute({
@@ -424,7 +538,9 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
         socketId: 'sock-1',
       });
 
-      expect(broadcaster.docBroadcasts.some((b) => b.event === 'doc:user-left')).toBe(true);
+      expect(
+        broadcaster.docBroadcasts.some((b) => b.event === 'doc:user-left'),
+      ).toBe(true);
     });
 
     it('JoinDocUseCase: throws InvalidRoomException if session not found', async () => {
@@ -438,7 +554,11 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
     });
 
     it('SendDocUpdateUseCase: bridges update into DocumentUpdater and broadcasts delta + ACK', async () => {
-      accessVerifier.setAccess(user1, projectId, { canRead: true, canWrite: true, role: 'contributor' });
+      accessVerifier.setAccess(user1, projectId, {
+        canRead: true,
+        canWrite: true,
+        role: 'contributor',
+      });
 
       const result = await sendDocUpdateUseCase.execute({
         projectId,
@@ -471,7 +591,11 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
     });
 
     it('SendDocUpdateUseCase: rejects read-only reviewer with UnauthorizedProjectException', async () => {
-      accessVerifier.setAccess('reviewer-1', projectId, { canRead: true, canWrite: false, role: 'reviewer' });
+      accessVerifier.setAccess('reviewer-1', projectId, {
+        canRead: true,
+        canWrite: false,
+        role: 'reviewer',
+      });
 
       await expect(
         sendDocUpdateUseCase.execute({
@@ -538,7 +662,9 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
 
       expect(broadcaster.projectBroadcasts).toHaveLength(1);
       expect(broadcaster.projectBroadcasts[0].event).toBe('fileTree:update');
-      expect(broadcaster.projectBroadcasts[0].payload.node.path).toBe('/chapters/intro.tex');
+      expect(broadcaster.projectBroadcasts[0].payload.node.path).toBe(
+        '/chapters/intro.tex',
+      );
     });
 
     it('broadcastCompileProgress: broadcasts compile:progress event', () => {
@@ -559,7 +685,9 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
       });
 
       expect(broadcaster.projectBroadcasts).toHaveLength(1);
-      expect(broadcaster.projectBroadcasts[0].event).toBe('history:new-version');
+      expect(broadcaster.projectBroadcasts[0].event).toBe(
+        'history:new-version',
+      );
       expect(broadcaster.projectBroadcasts[0].payload.version).toBe(5);
     });
 
@@ -632,12 +760,17 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
       };
 
       // 1. Join Project
-      const joinProjRes = await gateway.handleJoinProject(mockSocket, { projectId });
+      const joinProjRes = await gateway.handleJoinProject(mockSocket, {
+        projectId,
+      });
       expect(joinProjRes.success).toBe(true);
       expect(joinedRooms.has(`project:${projectId}`)).toBe(true);
 
       // 2. Join Doc
-      const joinDocRes = await gateway.handleJoinDoc(mockSocket, { projectId, docId });
+      const joinDocRes = await gateway.handleJoinDoc(mockSocket, {
+        projectId,
+        docId,
+      });
       expect(joinDocRes.success).toBe(true);
       expect(joinedRooms.has(`doc:${projectId}:${docId}`)).toBe(true);
 
@@ -661,12 +794,17 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Overleaf Parity)', () =
       expect(cursorRes.presence?.cursor?.row).toBe(1);
 
       // 5. Leave Doc
-      const leaveDocRes = await gateway.handleLeaveDoc(mockSocket, { projectId, docId });
+      const leaveDocRes = await gateway.handleLeaveDoc(mockSocket, {
+        projectId,
+        docId,
+      });
       expect(leaveDocRes.success).toBe(true);
       expect(joinedRooms.has(`doc:${projectId}:${docId}`)).toBe(false);
 
       // 6. Leave Project
-      const leaveProjRes = await gateway.handleLeaveProject(mockSocket, { projectId });
+      const leaveProjRes = await gateway.handleLeaveProject(mockSocket, {
+        projectId,
+      });
       expect(leaveProjRes.success).toBe(true);
       expect(joinedRooms.has(`project:${projectId}`)).toBe(false);
     });

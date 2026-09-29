@@ -18,7 +18,7 @@ export class AcademicIdentifierVo {
   private constructor(
     public readonly type: IdentifierType,
     public readonly raw: string,
-    public readonly clean: string
+    public readonly clean: string,
   ) {}
 
   public static parse(input: string): AcademicIdentifierVo {

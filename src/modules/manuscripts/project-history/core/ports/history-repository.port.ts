@@ -15,7 +15,10 @@ export abstract class IHistoryRepositoryPort {
   /**
    * Retrieves a snapshot by project and version number.
    */
-  abstract findByVersion(projectId: string, version: number): Promise<Snapshot | null>;
+  abstract findByVersion(
+    projectId: string,
+    version: number,
+  ): Promise<Snapshot | null>;
 
   /**
    * Returns the highest version number recorded for this project (returns 0 if no snapshots exist).
@@ -40,5 +43,8 @@ export abstract class IHistoryRepositoryPort {
   /**
    * Finds a label by project and label string.
    */
-  abstract findLabelByName(projectId: string, label: string): Promise<VersionLabel | null>;
+  abstract findLabelByName(
+    projectId: string,
+    label: string,
+  ): Promise<VersionLabel | null>;
 }

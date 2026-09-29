@@ -17,8 +17,16 @@ import {
   ConflictException,
   BadRequestException,
   ParseIntPipe,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { ProjectHistoryService } from './project-history.service';
 import {
   CreateSnapshotDto,
@@ -35,11 +43,14 @@ import { DuplicateLabelException } from './core/domain/exceptions/duplicate-labe
 import { EmptyProjectException } from './core/domain/exceptions/empty-project.exception';
 
 @ApiTags('Manuscripts - Project History & Snapshots')
+@ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/history',
   'manuscripts/projects/:projectId/history',
   'projects/:projectId/history',
 ])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
 export class ProjectHistoryController {
   constructor(private readonly historyService: ProjectHistoryService) {}
 
@@ -57,9 +68,13 @@ export class ProjectHistoryController {
   }
 
   @Get('versions')
-  @ApiOperation({ summary: 'List all historical snapshot versions and labels for project' })
+  @ApiOperation({
+    summary: 'List all historical snapshot versions and labels for project',
+  })
   @ApiResponse({ status: 200, type: [VersionListItemDto] })
-  async listVersions(@Param('projectId') projectId: string): Promise<VersionListItemDto[]> {
+  async listVersions(
+    @Param('projectId') projectId: string,
+  ): Promise<VersionListItemDto[]> {
     try {
       return await this.historyService.listVersions(projectId);
     } catch (err) {
@@ -68,7 +83,10 @@ export class ProjectHistoryController {
   }
 
   @Post('snapshots')
-  @ApiOperation({ summary: 'Manually capture an immutable snapshot of current project files' })
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary: 'Manually capture an immutable snapshot of current project files',
+  })
   @ApiResponse({ status: 201, type: SnapshotDetailDto })
   async createSnapshot(
     @Param('projectId') projectId: string,
@@ -82,7 +100,10 @@ export class ProjectHistoryController {
   }
 
   @Get('versions/:version')
-  @ApiOperation({ summary: 'Get full project file tree and content snapshot for a specific version' })
+  @ApiOperation({
+    summary:
+      'Get full project file tree and content snapshot for a specific version',
+  })
   @ApiResponse({ status: 200, type: SnapshotDetailDto })
   async getSnapshot(
     @Param('projectId') projectId: string,
@@ -96,21 +117,32 @@ export class ProjectHistoryController {
   }
 
   @Get('diff')
-  @ApiOperation({ summary: 'Compute Myers line diffs and word highlights between two versions' })
+  @ApiOperation({
+    summary:
+      'Compute Myers line diffs and word highlights between two versions',
+  })
   @ApiResponse({ status: 200, type: DiffResponseDto })
   async compareVersions(
     @Param('projectId') projectId: string,
     @Query() query: DiffQueryDto,
   ): Promise<DiffResponseDto> {
     try {
-      return await this.historyService.compareVersions(projectId, query.baseVersion, query.targetVersion);
+      return await this.historyService.compareVersions(
+        projectId,
+        query.baseVersion,
+        query.targetVersion,
+      );
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Post('versions/:version/labels')
-  @ApiOperation({ summary: 'Attach or update a named label/milestone tag on a specific version' })
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary:
+      'Attach or update a named label/milestone tag on a specific version',
+  })
   @ApiResponse({ status: 201, type: VersionLabelDto })
   async labelVersion(
     @Param('projectId') projectId: string,
@@ -118,13 +150,18 @@ export class ProjectHistoryController {
     @Body() dto: LabelVersionDto,
   ): Promise<VersionLabelDto> {
     try {
-      return await this.historyService.labelVersion(projectId, version, dto.label);
+      return await this.historyService.labelVersion(
+        projectId,
+        version,
+        dto.label,
+      );
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Delete('labels/:labelId')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove a named label from project history' })
   @ApiResponse({ status: 204 })
@@ -140,14 +177,21 @@ export class ProjectHistoryController {
   }
 
   @Post('restore')
-  @ApiOperation({ summary: 'Rollback project to a historical version (creates version N+1 non-destructively)' })
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary:
+      'Rollback project to a historical version (creates version N+1 non-destructively)',
+  })
   @ApiResponse({ status: 200 })
   async restoreVersion(
     @Param('projectId') projectId: string,
     @Body() dto: RestoreVersionDto,
   ) {
     try {
-      return await this.historyService.restoreVersion(projectId, dto.targetVersion);
+      return await this.historyService.restoreVersion(
+        projectId,
+        dto.targetVersion,
+      );
     } catch (err) {
       this.handleError(err);
     }

@@ -13,7 +13,10 @@ export class GetSnapshotByVersionUseCase {
   constructor(private readonly historyRepository: IHistoryRepositoryPort) {}
 
   public async execute(projectId: string, version: number): Promise<Snapshot> {
-    const snapshot = await this.historyRepository.findByVersion(projectId, version);
+    const snapshot = await this.historyRepository.findByVersion(
+      projectId,
+      version,
+    );
     if (!snapshot) {
       throw new VersionNotFoundException(projectId, version);
     }

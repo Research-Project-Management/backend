@@ -64,7 +64,9 @@ export class ProjectAccessVerifierAdapter extends IProjectAccessVerifierPort {
         role: member.role,
       };
     } catch (err) {
-      this.logger.warn(`Error verifying access for user ${userId} to project ${projectId}: ${err}`);
+      this.logger.warn(
+        `Error verifying access for user ${userId} to project ${projectId}: ${err}`,
+      );
       return { canRead: false, canWrite: false, role: 'none' };
     }
   }

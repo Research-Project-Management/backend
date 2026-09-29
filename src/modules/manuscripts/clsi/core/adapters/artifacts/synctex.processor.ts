@@ -99,7 +99,7 @@ export class SyncTexProcessor implements ISyncTexProcessor {
 
       if (/^[xkhvg]\d+,\d+/.test(line)) {
         const typeMatch = line.match(
-          /^[xkhvg](\d+),(\d+)(?:,(\d+))?:(-?\d+),(-?\d+)(?::(-?\d+),(-?\d+))?/
+          /^[xkhvg](\d+),(\d+)(?:,(\d+))?:(-?\d+),(-?\d+)(?::(-?\d+),(-?\d+))?/,
         );
         if (
           typeMatch &&
@@ -167,17 +167,18 @@ export class SyncTexProcessor implements ISyncTexProcessor {
     synctexText: string,
     file: string,
     line: number,
-    _col?: number
+    _col?: number,
   ): SyncPoint | null {
     if (!synctexText) return null;
-    const { inputs, records, recordsByTag, unit } = this.parseRecords(synctexText);
+    const { inputs, records, recordsByTag, unit } =
+      this.parseRecords(synctexText);
     if (records.length === 0) return null;
 
     const matchedInput = inputs.find(
       (inp) =>
         inp.path === file ||
         inp.path.endsWith(`/${file}`) ||
-        inp.path.endsWith(`\\${file}`)
+        inp.path.endsWith(`\\${file}`),
     );
     const targetTag = matchedInput ? matchedInput.tag : null;
 
@@ -218,10 +219,11 @@ export class SyncTexProcessor implements ISyncTexProcessor {
     synctexText: string,
     page: number,
     x: number,
-    y: number
+    y: number,
   ): ReverseSyncPoint | null {
     if (!synctexText) return null;
-    const { inputs, records, recordsByPage, unit } = this.parseRecords(synctexText);
+    const { inputs, records, recordsByPage, unit } =
+      this.parseRecords(synctexText);
     if (records.length === 0) return null;
 
     const scaleFactor = (unit / 65536) * 0.996264;

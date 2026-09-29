@@ -14,5 +14,8 @@ export abstract class IProjectRestorerPort {
   /**
    * Applies the files and structure from an immutable snapshot onto the current project.
    */
-  abstract restoreToState(projectId: string, snapshot: Snapshot): Promise<RestoreResult>;
+  abstract restoreToState(
+    projectId: string,
+    snapshot: Snapshot,
+  ): Promise<RestoreResult>;
 }

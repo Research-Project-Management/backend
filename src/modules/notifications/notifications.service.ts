@@ -64,13 +64,15 @@ export class NotificationsService {
       );
   }
 
-  async createNotification(command: CreateNotificationCommand): Promise<NotificationEntity> {
+  async createNotification(
+    command: CreateNotificationCommand,
+  ): Promise<NotificationEntity> {
     return this.createNotificationUseCase.execute(command);
   }
 
   async getUserNotifications(
     userId: string,
-    options?: QueryNotificationsOptions
+    options?: QueryNotificationsOptions,
   ): Promise<NotificationEntity[]> {
     return this.getUserNotificationsUseCase.execute(userId, options);
   }
@@ -99,7 +101,7 @@ export class NotificationsService {
    * Delegates to Manuscripts Notifications Submodule
    */
   async parseAndNotifyMentions(
-    command: ParseAndNotifyMentionsCommand
+    command: ParseAndNotifyMentionsCommand,
   ): Promise<ParseMentionsResult> {
     if (this.manuscripts) {
       return this.manuscripts.parseAndNotifyMentions(command);

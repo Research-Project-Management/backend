@@ -18,12 +18,12 @@ export interface CompilationPayload {
 export class BuildCompilerFilesUseCase {
   constructor(
     private readonly structureRepository: IStructureRepository,
-    private readonly resolveRootDocUseCase: ResolveRootDocUseCase
+    private readonly resolveRootDocUseCase: ResolveRootDocUseCase,
   ) {}
 
   public async execute(
     projectId: string,
-    docContentsMap: Map<string, { lines: string[]; hash?: string | null }>
+    docContentsMap: Map<string, { lines: string[]; hash?: string | null }>,
   ): Promise<CompilationPayload> {
     const nodes = await this.structureRepository.getAllNodes(projectId);
 
@@ -35,7 +35,10 @@ export class BuildCompilerFilesUseCase {
       for (const [id, val] of docContentsMap.entries()) {
         linesMap.set(id, val.lines);
       }
-      rootNode = await this.resolveRootDocUseCase.autoDetectAndSetRootDoc(projectId, linesMap);
+      rootNode = await this.resolveRootDocUseCase.autoDetectAndSetRootDoc(
+        projectId,
+        linesMap,
+      );
     }
 
     if (!rootNode) {
@@ -49,10 +52,14 @@ export class BuildCompilerFilesUseCase {
       if (node.isFolder()) continue; // Directory nodes are represented by file paths
 
       // Strip leading '/' for relative compiler paths inside workspace
-      const relativePath = node.path.startsWith('/') ? node.path.substring(1) : node.path;
+      const relativePath = node.path.startsWith('/')
+        ? node.path.substring(1)
+        : node.path;
 
       if (node.isDoc()) {
-        const docData = docContentsMap.get(node.id) || (node.docId ? docContentsMap.get(node.docId) : undefined);
+        const docData =
+          docContentsMap.get(node.id) ||
+          (node.docId ? docContentsMap.get(node.docId) : undefined);
         const content = docData ? docData.lines.join('\n') : '';
         const hash = docData?.hash || node.hash || undefined;
 
@@ -71,7 +78,9 @@ export class BuildCompilerFilesUseCase {
       }
     }
 
-    const relativeRootPath = rootNode.path.startsWith('/') ? rootNode.path.substring(1) : rootNode.path;
+    const relativeRootPath = rootNode.path.startsWith('/')
+      ? rootNode.path.substring(1)
+      : rootNode.path;
 
     return {
       rootDocPath: relativeRootPath,

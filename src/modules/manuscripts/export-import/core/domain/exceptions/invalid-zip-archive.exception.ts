@@ -4,7 +4,9 @@
  */
 
 export class InvalidZipArchiveException extends Error {
-  constructor(message = 'The provided archive is not a valid ZIP file or contains no usable entries.') {
+  constructor(
+    message = 'The provided archive is not a valid ZIP file or contains no usable entries.',
+  ) {
     super(message);
     this.name = 'InvalidZipArchiveException';
   }

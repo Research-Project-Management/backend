@@ -23,7 +23,7 @@ export class DictionaryScopeVo {
   public static fromString(raw: string): DictionaryScopeVo {
     const upper = raw.trim().toUpperCase();
     if (upper === 'PROJECT' || upper === 'USER') {
-      return new DictionaryScopeVo(upper as DictionaryScope);
+      return new DictionaryScopeVo(upper);
     }
     return DictionaryScopeVo.project();
   }

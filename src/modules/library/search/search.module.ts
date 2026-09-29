@@ -3,17 +3,21 @@ import { CoreModule } from '../../../core/core.module';
 import { SearchFacade, SEARCH_FACADE } from './search.facade';
 
 // Presentation
-import { SearchController } from './presentation/search.controller';
+import { SearchController } from './search.controller';
 
-// Application
-import { SearchService } from './application/services/search.service';
-import { SearchRepository } from './infrastructure/repositories/search.repository';
-import { FullTextProvider } from './infrastructure/providers/full-text.provider';
-import { EventHandler } from './application/handlers/event.handler';
-import { ExecuteSearchUseCase } from './application/queries/execute-search.use-case';
-import { SearchEngineAdapter } from './infrastructure/adapters/search-engine.adapter';
-import { SEARCH_ENGINE_PORT } from './domain/ports/search-engine.port';
-import { CatalogEventsSubscriber } from './infrastructure/subscribers/catalog-events.subscriber';
+// Application & Infrastructure (Hexagonal)
+import { SearchService } from './core/use-cases/search.service';
+import { SearchRepository } from './core/adapters/search.repository';
+import { FullTextProvider } from './core/adapters/full-text.provider';
+import { EventHandler } from './core/adapters/event.handler';
+import { ExecuteSearchUseCase } from './core/use-cases/execute-search.use-case';
+import { PostgresFtsAdapter } from './core/adapters/search-engine.adapter';
+import { VectorSearchAdapter } from './core/adapters/vector-search.adapter';
+import {
+  SEARCH_ENGINE_PORT,
+  VECTOR_SEARCH_ENGINE_PORT,
+} from './core/ports/search-engine.port';
+import { CatalogEventsSubscriber } from './core/adapters/catalog-events.subscriber';
 
 /**
  * Search Bounded Context Unified Module (Generic Domain).
@@ -36,10 +40,15 @@ import { CatalogEventsSubscriber } from './infrastructure/subscribers/catalog-ev
     SearchService,
     FullTextProvider,
     EventHandler,
-    SearchEngineAdapter,
+    PostgresFtsAdapter,
     {
       provide: SEARCH_ENGINE_PORT,
-      useClass: SearchEngineAdapter,
+      useClass: PostgresFtsAdapter,
+    },
+    VectorSearchAdapter,
+    {
+      provide: VECTOR_SEARCH_ENGINE_PORT,
+      useClass: VectorSearchAdapter,
     },
     ExecuteSearchUseCase,
     CatalogEventsSubscriber,
@@ -49,6 +58,8 @@ import { CatalogEventsSubscriber } from './infrastructure/subscribers/catalog-ev
     SEARCH_FACADE,
     SearchService,
     SEARCH_ENGINE_PORT,
+    VectorSearchAdapter,
+    VECTOR_SEARCH_ENGINE_PORT,
   ],
 })
 export class SearchModule {}

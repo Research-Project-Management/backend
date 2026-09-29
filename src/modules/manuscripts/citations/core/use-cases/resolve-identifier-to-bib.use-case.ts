@@ -24,11 +24,11 @@ export interface ResolveIdentifierResult {
 export class ResolveIdentifierToBibUseCase {
   constructor(
     private readonly resolver: IIdentifierResolverPort,
-    private readonly aggregator: ICitationsAggregatorPort
+    private readonly aggregator: ICitationsAggregatorPort,
   ) {}
 
   public async execute(
-    command: ResolveIdentifierToBibCommand
+    command: ResolveIdentifierToBibCommand,
   ): Promise<ResolveIdentifierResult> {
     const idVo = AcademicIdentifierVo.parse(command.identifier);
     if (idVo.type === 'unknown') {
@@ -44,7 +44,7 @@ export class ResolveIdentifierToBibUseCase {
     const filePath = await this.aggregator.appendEntryToBib(
       command.projectId,
       resolvedEntry,
-      targetFile
+      targetFile,
     );
 
     return {

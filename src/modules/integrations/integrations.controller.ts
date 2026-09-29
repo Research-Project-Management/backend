@@ -40,7 +40,9 @@ export class IntegrationsController {
   constructor(private readonly service: IntegrationsService) {}
 
   @Get('status')
-  @ApiOperation({ summary: 'Get current integration connection statuses for user' })
+  @ApiOperation({
+    summary: 'Get current integration connection statuses for user',
+  })
   async getStatus(@CurrentUser('id') userId: string) {
     return await this.service.getStatus(userId);
   }
@@ -50,7 +52,9 @@ export class IntegrationsController {
   // ============================================================================
 
   @Get('github/repos')
-  @ApiOperation({ summary: 'List repositories belonging to connected GitHub account' })
+  @ApiOperation({
+    summary: 'List repositories belonging to connected GitHub account',
+  })
   async listGithubRepos(@CurrentUser('id') userId: string) {
     return await this.service.listCollections(userId, 'github');
   }
@@ -95,7 +99,9 @@ export class IntegrationsController {
   }
 
   @Post('github/projects/push')
-  @ApiOperation({ summary: 'Push manuscript files to linked GitHub repository' })
+  @ApiOperation({
+    summary: 'Push manuscript files to linked GitHub repository',
+  })
   async pushProjectGithub(
     @CurrentUser('id') userId: string,
     @Body() dto: PushGithubDto,
@@ -104,7 +110,9 @@ export class IntegrationsController {
   }
 
   @Post('github/projects/pull')
-  @ApiOperation({ summary: 'Pull latest files from linked GitHub repository into project' })
+  @ApiOperation({
+    summary: 'Pull latest files from linked GitHub repository into project',
+  })
   async pullProjectGithub(
     @CurrentUser('id') userId: string,
     @Body() dto: PullGithubDto,
@@ -125,11 +133,14 @@ export class IntegrationsController {
     @Req() req: FastifyRequest,
   ) {
     if (!isValidProvider(provider)) {
-      throw new BadRequestException(`Invalid integration provider: ${provider}`);
+      throw new BadRequestException(
+        `Invalid integration provider: ${provider}`,
+      );
     }
 
     const host = (req.headers.host as string) || req.hostname;
-    const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const proto =
+      (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
     const baseUrl = process.env.API_URL || `${proto}://${host}`;
     const defaultCallback = `${baseUrl.replace(/\/$/, '')}/api/v1/integrations/${provider}/callback`;
     const redirectUri = query.redirectUri || defaultCallback;
@@ -140,7 +151,9 @@ export class IntegrationsController {
   @Public()
   @BypassEnvelope()
   @Get(':provider/callback')
-  @ApiOperation({ summary: 'Public OAuth callback endpoint for popup handshake' })
+  @ApiOperation({
+    summary: 'Public OAuth callback endpoint for popup handshake',
+  })
   async handleCallback(
     @Param('provider') provider: string,
     @Query() query: Record<string, string>,
@@ -148,7 +161,9 @@ export class IntegrationsController {
     @Res() res: FastifyReply,
   ) {
     if (!isValidProvider(provider)) {
-      res.type('text/html').send(`<h3>Invalid provider</h3><script>window.close();</script>`);
+      res
+        .type('text/html')
+        .send(`<h3>Invalid provider</h3><script>window.close();</script>`);
       return;
     }
 
@@ -161,7 +176,8 @@ export class IntegrationsController {
       const userId = userIdMatch ? userIdMatch[1] : 'anonymous-user';
 
       const host = (req.headers.host as string) || req.hostname;
-      const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+      const proto =
+        (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
       const baseUrl = process.env.API_URL || `${proto}://${host}`;
       const redirectUri = `${baseUrl.replace(/\/$/, '')}/api/v1/integrations/${provider}/callback`;
 
@@ -222,32 +238,42 @@ export class IntegrationsController {
     @Param('provider') provider: string,
   ) {
     if (!isValidProvider(provider)) {
-      throw new BadRequestException(`Invalid integration provider: ${provider}`);
+      throw new BadRequestException(
+        `Invalid integration provider: ${provider}`,
+      );
     }
     await this.service.disconnect(userId, provider);
   }
 
   @Get(':provider/collections')
-  @ApiOperation({ summary: 'List collections from connected third-party library' })
+  @ApiOperation({
+    summary: 'List collections from connected third-party library',
+  })
   async listCollections(
     @CurrentUser('id') userId: string,
     @Param('provider') provider: string,
   ) {
     if (!isValidProvider(provider)) {
-      throw new BadRequestException(`Invalid integration provider: ${provider}`);
+      throw new BadRequestException(
+        `Invalid integration provider: ${provider}`,
+      );
     }
     return await this.service.listCollections(userId, provider);
   }
 
   @Post(':provider/sync')
-  @ApiOperation({ summary: 'Sync remote collection to project references.bib file' })
+  @ApiOperation({
+    summary: 'Sync remote collection to project references.bib file',
+  })
   async syncProject(
     @CurrentUser('id') userId: string,
     @Param('provider') provider: string,
     @Body() dto: SyncCollectionDto,
   ) {
     if (!isValidProvider(provider)) {
-      throw new BadRequestException(`Invalid integration provider: ${provider}`);
+      throw new BadRequestException(
+        `Invalid integration provider: ${provider}`,
+      );
     }
 
     return await this.service.syncProjectCollection(userId, provider, dto);

@@ -4,7 +4,7 @@ import {
 } from '../../src/modules/library/shared-kernel/resilience/circuit-breaker';
 import { TokenBucketRateLimiter } from '../../src/modules/library/shared-kernel/resilience/rate-limiter';
 import { ResilienceRegistryService } from '../../src/modules/library/shared-kernel/resilience/resilience-registry.service';
-import { DoiContentNegotiationService } from '../../src/modules/library/citation/application/services/doi-content-negotiation.service';
+import { DoiContentNegotiationService } from '@/modules/library/citation/core/adapters/doi-content-negotiation.service';
 import { GrobidClient } from '../../src/modules/library/shared-kernel/infra/grobid/grobid.client';
 
 describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter)', () => {
@@ -34,15 +34,21 @@ describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter
       };
 
       // 1st failure
-      await expect(breaker.execute(failingFn)).rejects.toThrow('Remote HTTP 503');
+      await expect(breaker.execute(failingFn)).rejects.toThrow(
+        'Remote HTTP 503',
+      );
       expect(breaker.getState()).toBe('CLOSED');
 
       // 2nd failure
-      await expect(breaker.execute(failingFn)).rejects.toThrow('Remote HTTP 503');
+      await expect(breaker.execute(failingFn)).rejects.toThrow(
+        'Remote HTTP 503',
+      );
       expect(breaker.getState()).toBe('CLOSED');
 
       // 3rd failure (hits failureThreshold = 3)
-      await expect(breaker.execute(failingFn)).rejects.toThrow('Remote HTTP 503');
+      await expect(breaker.execute(failingFn)).rejects.toThrow(
+        'Remote HTTP 503',
+      );
       expect(breaker.getState()).toBe('OPEN');
 
       // 4th call: Fast-fails immediately without running the fn
@@ -67,7 +73,9 @@ describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter
 
       expect(result).toBe('fallback-value');
       expect(action).not.toHaveBeenCalled();
-      expect(fallback).toHaveBeenCalledWith(expect.any(CircuitBreakerOpenError));
+      expect(fallback).toHaveBeenCalledWith(
+        expect.any(CircuitBreakerOpenError),
+      );
     });
 
     it('should transition to HALF_OPEN after resetTimeoutMs and recover to CLOSED on success', async () => {
@@ -156,9 +164,7 @@ describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter
 
       controller.abort(new Error('Caller cancelled request'));
 
-      await expect(acquirePromise).rejects.toThrow(
-        'Caller cancelled request',
-      );
+      await expect(acquirePromise).rejects.toThrow('Caller cancelled request');
     });
   });
 

@@ -16,7 +16,10 @@ export abstract class IRoomManagerPort {
   /**
    * Removes a socket session from a project and any document room it was active in.
    */
-  abstract removeProjectSession(projectId: string, socketId: string): Promise<PresenceSession | null>;
+  abstract removeProjectSession(
+    projectId: string,
+    socketId: string,
+  ): Promise<PresenceSession | null>;
 
   /**
    * Returns all active user presence records in a project.
@@ -26,17 +29,28 @@ export abstract class IRoomManagerPort {
   /**
    * Switches an active user socket to collaborate on a specific document inside the project.
    */
-  abstract joinDocRoom(projectId: string, docId: string, socketId: string): Promise<UserPresenceVo[]>;
+  abstract joinDocRoom(
+    projectId: string,
+    docId: string,
+    socketId: string,
+  ): Promise<UserPresenceVo[]>;
 
   /**
    * Removes a socket from collaborating on a document room.
    */
-  abstract leaveDocRoom(projectId: string, docId: string, socketId: string): Promise<void>;
+  abstract leaveDocRoom(
+    projectId: string,
+    docId: string,
+    socketId: string,
+  ): Promise<void>;
 
   /**
    * Returns all active user presence records currently viewing/editing a specific document.
    */
-  abstract getDocSessions(projectId: string, docId: string): Promise<UserPresenceVo[]>;
+  abstract getDocSessions(
+    projectId: string,
+    docId: string,
+  ): Promise<UserPresenceVo[]>;
 
   /**
    * Updates real-time cursor/selection position for a collaborator.

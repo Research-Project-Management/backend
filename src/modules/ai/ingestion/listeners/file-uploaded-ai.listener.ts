@@ -40,7 +40,8 @@ export class FileUploadedAiListener {
 
     const isAiEnabled =
       process.env.FLUX_AI_ENABLED === 'true' ||
-      (Boolean(process.env.FLUX_AI_URL) && process.env.FLUX_AI_ENABLED !== 'false') ||
+      (Boolean(process.env.FLUX_AI_URL) &&
+        process.env.FLUX_AI_ENABLED !== 'false') ||
       process.env.NODE_ENV === 'test';
 
     if (!isAiEnabled) {

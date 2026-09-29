@@ -48,16 +48,36 @@ export class PresenceSession {
     return new PresenceSession(props);
   }
 
-  public get userId(): string { return this._userId; }
-  public get socketId(): string { return this._socketId; }
-  public get projectId(): string { return this._projectId; }
-  public get name(): string { return this._name; }
-  public get color(): string { return this._color; }
-  public get avatar(): string | null { return this._avatar; }
-  public get activeDocId(): string | null { return this._activeDocId; }
-  public get cursor(): CursorPositionVo | null { return this._cursor; }
-  public get connectedAt(): Date { return this._connectedAt; }
-  public get lastSeenAt(): Date { return this._lastSeenAt; }
+  public get userId(): string {
+    return this._userId;
+  }
+  public get socketId(): string {
+    return this._socketId;
+  }
+  public get projectId(): string {
+    return this._projectId;
+  }
+  public get name(): string {
+    return this._name;
+  }
+  public get color(): string {
+    return this._color;
+  }
+  public get avatar(): string | null {
+    return this._avatar;
+  }
+  public get activeDocId(): string | null {
+    return this._activeDocId;
+  }
+  public get cursor(): CursorPositionVo | null {
+    return this._cursor;
+  }
+  public get connectedAt(): Date {
+    return this._connectedAt;
+  }
+  public get lastSeenAt(): Date {
+    return this._lastSeenAt;
+  }
 
   public updateActiveDoc(docId: string | null): void {
     this._activeDocId = docId;
@@ -89,8 +109,16 @@ export class PresenceSession {
 
   private static generateColor(seed: string): string {
     const palette = [
-      '#ef4444', '#f97316', '#f59e0b', '#10b981', '#06b6d4',
-      '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#14b8a6',
+      '#ef4444',
+      '#f97316',
+      '#f59e0b',
+      '#10b981',
+      '#06b6d4',
+      '#3b82f6',
+      '#6366f1',
+      '#8b5cf6',
+      '#ec4899',
+      '#14b8a6',
     ];
     let hash = 0;
     for (let i = 0; i < seed.length; i++) {

@@ -3,7 +3,13 @@
  * Facade Service orchestrating LaTeX Spell Checking, Suggestions, and Custom Dictionaries.
  */
 
-import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { CheckSpellingUseCase } from './core/use-cases/check-spelling.use-case';
 import { GetSuggestionsUseCase } from './core/use-cases/get-suggestions.use-case';
 import { LearnWordUseCase } from './core/use-cases/learn-word.use-case';
@@ -29,7 +35,7 @@ export class SpellingService {
     private readonly listCustomWordsUseCase: ListCustomWordsUseCase,
     @Optional()
     @Inject(forwardRef(() => DocstoreService))
-    private readonly docstoreService?: DocstoreService
+    private readonly docstoreService?: DocstoreService,
   ) {}
 
   /**
@@ -38,7 +44,7 @@ export class SpellingService {
   public async checkDocumentSpelling(
     projectId: string,
     userId: string,
-    dto: CheckSpellingDto
+    dto: CheckSpellingDto,
   ): Promise<SpellingReportDto> {
     let contentToScan = dto.text || '';
 
@@ -48,7 +54,9 @@ export class SpellingService {
         const doc = await this.docstoreService.getDoc(projectId, dto.docId);
         contentToScan = (doc.lines || []).join('\n');
       } catch (err: any) {
-        this.logger.warn(`Could not load doc ${dto.docId} from docstore: ${err.message}`);
+        this.logger.warn(
+          `Could not load doc ${dto.docId} from docstore: ${err.message}`,
+        );
       }
     }
 
@@ -59,7 +67,7 @@ export class SpellingService {
       language: dto.language,
     });
 
-    return report.toJSON() as SpellingReportDto;
+    return report.toJSON();
   }
 
   /**
@@ -76,7 +84,10 @@ export class SpellingService {
   /**
    * Learn word in Project dictionary.
    */
-  public async learnProjectWord(projectId: string, word: string): Promise<void> {
+  public async learnProjectWord(
+    projectId: string,
+    word: string,
+  ): Promise<void> {
     await this.learnWordUseCase.execute({
       word,
       scope: 'PROJECT',
@@ -87,7 +98,10 @@ export class SpellingService {
   /**
    * Remove word from Project dictionary.
    */
-  public async unlearnProjectWord(projectId: string, word: string): Promise<boolean> {
+  public async unlearnProjectWord(
+    projectId: string,
+    word: string,
+  ): Promise<boolean> {
     return this.unlearnWordUseCase.execute({
       word,
       scope: 'PROJECT',
@@ -98,7 +112,9 @@ export class SpellingService {
   /**
    * List Project custom dictionary words.
    */
-  public async listProjectWords(projectId: string): Promise<CustomDictionaryResponseDto> {
+  public async listProjectWords(
+    projectId: string,
+  ): Promise<CustomDictionaryResponseDto> {
     const words = await this.listCustomWordsUseCase.execute({
       scope: 'PROJECT',
       projectId,
@@ -135,7 +151,9 @@ export class SpellingService {
   /**
    * List User personal dictionary words.
    */
-  public async listUserWords(userId: string): Promise<CustomDictionaryResponseDto> {
+  public async listUserWords(
+    userId: string,
+  ): Promise<CustomDictionaryResponseDto> {
     const words = await this.listCustomWordsUseCase.execute({
       scope: 'USER',
       userId,

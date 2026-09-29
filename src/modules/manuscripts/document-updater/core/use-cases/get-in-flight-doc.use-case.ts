@@ -27,7 +27,9 @@ export class GetInFlightDocUseCase {
     private readonly docstoreWriter: IDocstoreWriterPort,
   ) {}
 
-  public async execute(input: GetInFlightDocInput): Promise<GetInFlightDocOutput> {
+  public async execute(
+    input: GetInFlightDocInput,
+  ): Promise<GetInFlightDocOutput> {
     const { projectId, docId } = input;
 
     // 1. Check in-flight store (Redis/Memory)

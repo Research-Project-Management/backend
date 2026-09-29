@@ -1,7 +1,7 @@
-import { SearchService } from '../../src/modules/library/search/application/services/search.service';
+import { SearchService } from '@/modules/library/search/core/use-cases/search.service';
 import { SearchFacade } from '../../src/modules/library/search/search.facade';
-import { SearchRepository } from '../../src/modules/library/search/infrastructure/repositories/search.repository';
-import { FullTextProvider } from '../../src/modules/library/search/infrastructure/providers/full-text.provider';
+import { SearchRepository } from '@/modules/library/search/core/adapters/search.repository';
+import { FullTextProvider } from '@/modules/library/search/core/adapters/full-text.provider';
 
 describe('Library Search Module Architecture & Isolation', () => {
   let searchService: SearchService;
@@ -27,7 +27,9 @@ describe('Library Search Module Architecture & Isolation', () => {
             deletedAt: null,
             createdAt: new Date(),
             updatedAt: new Date(),
-            contributors: [{ id: 'c-1', fullName: 'Alice Smith', role: 'author' }],
+            contributors: [
+              { id: 'c-1', fullName: 'Alice Smith', role: 'author' },
+            ],
             attachments: [],
             tags: [],
           },
@@ -107,7 +109,9 @@ describe('Library Search Module Architecture & Isolation', () => {
         1,
       );
 
-      expect(mockSearchRepo.findAttachmentWithItem).toHaveBeenCalledWith('att-1');
+      expect(mockSearchRepo.findAttachmentWithItem).toHaveBeenCalledWith(
+        'att-1',
+      );
       expect(mockFullTextProvider.searchPageAnchors).toHaveBeenCalledWith(
         'att-1',
         'quantum',
@@ -139,7 +143,9 @@ describe('Library Search Module Architecture & Isolation', () => {
     });
 
     it('should no-op on indexItem without throwing or calling external APIs', async () => {
-      await expect(searchFacade.indexItem({ id: 'item-1' })).resolves.toBeUndefined();
+      await expect(
+        searchFacade.indexItem({ id: 'item-1' }),
+      ).resolves.toBeUndefined();
     });
   });
 });

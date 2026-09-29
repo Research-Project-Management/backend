@@ -33,9 +33,9 @@ describe('Project Access & Granular Permissions Evaluation', () => {
 
     it('should respect explicit grant override (true) for non-owner role', () => {
       // By baseline, REVIEWER does NOT have LIBRARY_UPLOAD
-      expect(
-        roleHasPermission(Role.REVIEWER, Permission.LIBRARY_UPLOAD),
-      ).toBe(false);
+      expect(roleHasPermission(Role.REVIEWER, Permission.LIBRARY_UPLOAD)).toBe(
+        false,
+      );
 
       const isAllowed = evaluateMemberPermission(
         Role.REVIEWER,

@@ -4,7 +4,9 @@
  */
 
 export class InvalidBibtexException extends Error {
-  constructor(message = 'The provided BibTeX content contains syntax errors or unclosed delimiters') {
+  constructor(
+    message = 'The provided BibTeX content contains syntax errors or unclosed delimiters',
+  ) {
     super(message);
     this.name = 'InvalidBibtexException';
     Object.setPrototypeOf(this, InvalidBibtexException.prototype);

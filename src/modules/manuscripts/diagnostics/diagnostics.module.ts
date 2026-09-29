@@ -18,12 +18,13 @@ import { TexParenTreeLogParser } from './core/adapters/parser/tex-paren-tree-log
 import { TectonicLogParser } from './core/adapters/parser/tectonic-log.parser';
 import { FastSyntaxLinterAdapter } from './core/adapters/linter/fast-syntax-linter.adapter';
 
-// Use Cases
 import { ParseCompileLogUseCase } from './core/use-cases/parse-compile-log.use-case';
 import { LintDocumentSyntaxUseCase } from './core/use-cases/lint-document-syntax.use-case';
 import { GetErrorExplanationUseCase } from './core/use-cases/get-error-explanation.use-case';
+import { DocstoreModule } from '../docstore/docstore.module';
 
 @Module({
+  imports: [DocstoreModule],
   controllers: [DiagnosticsController],
   providers: [
     // 1. Explainer Adapter
@@ -63,7 +64,7 @@ import { GetErrorExplanationUseCase } from './core/use-cases/get-error-explanati
       inject: [LATEX_LOG_PARSER_PORT, TectonicLogParser],
       useFactory: (
         defaultParser: TexParenTreeLogParser,
-        tectonicParser: TectonicLogParser
+        tectonicParser: TectonicLogParser,
       ) => {
         return new ParseCompileLogUseCase(defaultParser, tectonicParser);
       },

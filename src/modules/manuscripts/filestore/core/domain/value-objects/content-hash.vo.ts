@@ -18,7 +18,9 @@ export class ContentHash {
     const trimmed = hash.trim().toLowerCase();
     // Support standard SHA-1 (40 hex chars) or SHA-256 (64 hex chars)
     if (!/^[0-9a-f]{40}$/.test(trimmed) && !/^[0-9a-f]{64}$/.test(trimmed)) {
-      throw new Error(`Invalid content hash format: '${hash}'. Expected 40-char or 64-char hex string.`);
+      throw new Error(
+        `Invalid content hash format: '${hash}'. Expected 40-char or 64-char hex string.`,
+      );
     }
 
     return new ContentHash(trimmed);

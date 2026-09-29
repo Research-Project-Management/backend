@@ -6,7 +6,10 @@
 
 import { Injectable } from '@nestjs/common';
 import { IHistoryRepositoryPort } from '../ports/history-repository.port';
-import { IProjectRestorerPort, RestoreResult } from '../ports/project-restorer.port';
+import {
+  IProjectRestorerPort,
+  RestoreResult,
+} from '../ports/project-restorer.port';
 import { CreateSnapshotUseCase } from './create-snapshot.use-case';
 import { Snapshot } from '../domain/entities/snapshot.entity';
 import { VersionNotFoundException } from '../domain/exceptions/version-not-found.exception';
@@ -31,17 +34,25 @@ export class RestoreVersionUseCase {
     private readonly createSnapshotUseCase: CreateSnapshotUseCase,
   ) {}
 
-  public async execute(input: RestoreVersionInput): Promise<RestoreVersionOutput> {
+  public async execute(
+    input: RestoreVersionInput,
+  ): Promise<RestoreVersionOutput> {
     const { projectId, targetVersion, userId } = input;
 
     // 1. Retrieve the historical snapshot
-    const targetSnapshot = await this.historyRepository.findByVersion(projectId, targetVersion);
+    const targetSnapshot = await this.historyRepository.findByVersion(
+      projectId,
+      targetVersion,
+    );
     if (!targetSnapshot) {
       throw new VersionNotFoundException(projectId, targetVersion);
     }
 
     // 2. Apply snapshot state into active structure & docstore
-    const restoreResult = await this.projectRestorer.restoreToState(projectId, targetSnapshot);
+    const restoreResult = await this.projectRestorer.restoreToState(
+      projectId,
+      targetSnapshot,
+    );
 
     // 3. Commit non-destructive history: snapshot version N + 1
     const newSnapshot = await this.createSnapshotUseCase.execute({

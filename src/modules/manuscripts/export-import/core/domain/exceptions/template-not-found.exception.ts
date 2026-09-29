@@ -5,7 +5,9 @@
 
 export class TemplateNotFoundException extends Error {
   constructor(templateId: string) {
-    super(`Manuscript project template '${templateId}' was not found in catalog.`);
+    super(
+      `Manuscript project template '${templateId}' was not found in catalog.`,
+    );
     this.name = 'TemplateNotFoundException';
   }
 }

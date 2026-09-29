@@ -30,6 +30,7 @@ export * from './core/adapters/storage/in-memory-room-manager.adapter';
 export * from './core/adapters/external/document-updater-bridge.adapter';
 export * from './core/adapters/external/project-access-verifier.adapter';
 export * from './core/adapters/broadcast/socket-io-broadcaster.adapter';
+export * from './core/adapters/crdt/yjs-doc-manager.adapter';
 
 // Use Cases
 export * from './core/use-cases/join-project.use-case';

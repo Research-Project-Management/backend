@@ -65,16 +65,36 @@ export class Snapshot {
     return new Snapshot(props);
   }
 
-  public get id(): string { return this._id; }
-  public get projectId(): string { return this._projectId; }
-  public get version(): number { return this._version; }
-  public get summary(): string | null { return this._summary; }
-  public get createdById(): string | null { return this._createdById; }
-  public get isAutomatic(): boolean { return this._isAutomatic; }
-  public get files(): Map<string, FileSnapshotVo> { return new Map(this._files); }
-  public get fileCount(): number { return this._files.size; }
-  public get labels(): VersionLabel[] { return [...this._labels]; }
-  public get createdAt(): Date { return this._createdAt; }
+  public get id(): string {
+    return this._id;
+  }
+  public get projectId(): string {
+    return this._projectId;
+  }
+  public get version(): number {
+    return this._version;
+  }
+  public get summary(): string | null {
+    return this._summary;
+  }
+  public get createdById(): string | null {
+    return this._createdById;
+  }
+  public get isAutomatic(): boolean {
+    return this._isAutomatic;
+  }
+  public get files(): Map<string, FileSnapshotVo> {
+    return new Map(this._files);
+  }
+  public get fileCount(): number {
+    return this._files.size;
+  }
+  public get labels(): VersionLabel[] {
+    return [...this._labels];
+  }
+  public get createdAt(): Date {
+    return this._createdAt;
+  }
 
   public getFile(path: string): FileSnapshotVo | null {
     const normalized = path.startsWith('/') ? path : `/${path}`;

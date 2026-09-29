@@ -5,7 +5,9 @@
 
 export class ZipSlipSecurityException extends Error {
   constructor(entryPath: string) {
-    super(`Security Violation: Zip entry '${entryPath}' contains illegal path traversal sequences.`);
+    super(
+      `Security Violation: Zip entry '${entryPath}' contains illegal path traversal sequences.`,
+    );
     this.name = 'ZipSlipSecurityException';
   }
 }

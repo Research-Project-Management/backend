@@ -9,6 +9,7 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '@/core/database/prisma.module';
 import { CacheModule } from '@/core/cache/cache.module';
 import { DocumentUpdaterModule } from '@/modules/manuscripts/document-updater/document-updater.module';
+import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 
 import { ManuscriptRealtimeGateway } from './manuscripts-realtime.gateway';
 
@@ -33,6 +34,7 @@ import { InMemoryRoomManagerAdapter } from './core/adapters/storage/in-memory-ro
 import { DocumentUpdaterBridgeAdapter } from './core/adapters/external/document-updater-bridge.adapter';
 import { ProjectAccessVerifierAdapter } from './core/adapters/external/project-access-verifier.adapter';
 import { SocketIoBroadcasterAdapter } from './core/adapters/broadcast/socket-io-broadcaster.adapter';
+import { YjsDocManagerAdapter } from './core/adapters/crdt/yjs-doc-manager.adapter';
 
 @Module({
   imports: [
@@ -41,9 +43,11 @@ import { SocketIoBroadcasterAdapter } from './core/adapters/broadcast/socket-io-
     PrismaModule,
     CacheModule,
     DocumentUpdaterModule,
+    DocstoreModule,
   ],
   providers: [
     ManuscriptRealtimeGateway,
+    YjsDocManagerAdapter,
 
     // Use Cases
     JoinProjectUseCase,
@@ -81,6 +85,7 @@ import { SocketIoBroadcasterAdapter } from './core/adapters/broadcast/socket-io-
   ],
   exports: [
     ManuscriptRealtimeGateway,
+    YjsDocManagerAdapter,
     IRoomManagerPort,
     IDocumentUpdaterBridgePort,
     IProjectAccessVerifierPort,

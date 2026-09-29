@@ -18,15 +18,10 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { FastifyReply } from 'fastify';
 import { ClsiService } from './clsi.service';
-import {
-  CompileManuscriptDto,
-  ClsiWordCountDto,
-} from './dto/clsi.dto';
-import {
-  ForwardSyncDto,
-  ReverseSyncDto,
-} from './dto/synctex.dto';
+import { CompileManuscriptDto, ClsiWordCountDto } from './dto/clsi.dto';
+import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 
 @ApiTags('Manuscripts - CLSI')
 @ApiBearerAuth('JWT-auth')
@@ -48,9 +43,23 @@ export class ClsiController {
   })
   async compile(
     @Body() dto: CompileManuscriptDto,
-    @CurrentUser('id') userId: string
+    @CurrentUser('id') userId: string,
   ) {
     return this.clsiService.compile(dto, userId);
+  }
+
+  @Post([
+    'v1/manuscripts/projects/:projectId/compile/cancel',
+    'projects/:projectId/clsi/compile/cancel',
+    'projects/:projectId/compiler/compile/cancel',
+  ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel an ongoing compilation for a project' })
+  async cancelCompile(@Param('projectId') projectId: string) {
+    const cancelled = this.clsiService.cancelCompile(projectId);
+    return { success: true, cancelled };
   }
 
   @Post([
@@ -130,7 +139,7 @@ export class ClsiController {
   async downloadAuxFile(
     @Param('projectId') projectId: string,
     @Param('filename') filename: string,
-    @Res() res: any
+    @Res() res: FastifyReply,
   ) {
     return this.clsiService.downloadAuxFile(projectId, filename, res);
   }
@@ -142,22 +151,28 @@ export class ClsiController {
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'Download all project output artifacts packaged as a ZIP archive' })
+  @ApiOperation({
+    summary: 'Download all project output artifacts packaged as a ZIP archive',
+  })
   async downloadAllArtifactsZip(
     @Param('projectId') projectId: string,
-    @Res() res: any
+    @Res() res: FastifyReply,
   ) {
     return this.clsiService.downloadAllArtifactsZip(projectId, res);
   }
 
   @Get(['clsi/status', 'manuscripts/clsi/status'])
-  @ApiOperation({ summary: 'Check health status and probe TeX Live compiler binaries' })
+  @ApiOperation({
+    summary: 'Check health status and probe TeX Live compiler binaries',
+  })
   async getStatus() {
     return this.clsiService.getHealthReport();
   }
 
   @Get(['clsi/metrics', 'manuscripts/clsi/metrics'])
-  @ApiOperation({ summary: 'Prometheus metrics endpoint for CLSI compilation performance' })
+  @ApiOperation({
+    summary: 'Prometheus metrics endpoint for CLSI compilation performance',
+  })
   async getMetrics(@Res() res: any) {
     const metricsText = this.clsiService.getPrometheusMetrics();
     res.setHeader('Content-Type', 'text/plain; version=0.0.4');
@@ -171,7 +186,9 @@ export class ClsiController {
   }
 
   @Post('clsi/admin/clean-scratch')
-  @ApiOperation({ summary: 'Trigger LRU garbage collection and disk quota enforcement' })
+  @ApiOperation({
+    summary: 'Trigger LRU garbage collection and disk quota enforcement',
+  })
   async cleanScratch() {
     const staleStats = await this.clsiService.cleanStaleScratch();
     const quotaStats = await this.clsiService.enforceScratchQuota();

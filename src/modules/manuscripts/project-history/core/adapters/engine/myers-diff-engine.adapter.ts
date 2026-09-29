@@ -8,14 +8,21 @@ import { Injectable } from '@nestjs/common';
 import { IDiffEnginePort, TextDiffResult } from '../../ports/diff-engine.port';
 import { Snapshot } from '../../domain/entities/snapshot.entity';
 import { FileDiffVo } from '../../domain/value-objects/file-diff.vo';
-import { DiffHunkVo, DiffLine, WordDiffToken } from '../../domain/value-objects/diff-hunk.vo';
+import {
+  DiffHunkVo,
+  DiffLine,
+  WordDiffToken,
+} from '../../domain/value-objects/diff-hunk.vo';
 
 @Injectable()
 export class MyersDiffEngineAdapter extends IDiffEnginePort {
   /**
    * Compares two snapshots and identifies all added, deleted, modified, and renamed files.
    */
-  public compareSnapshots(baseSnapshot: Snapshot, targetSnapshot: Snapshot): FileDiffVo[] {
+  public compareSnapshots(
+    baseSnapshot: Snapshot,
+    targetSnapshot: Snapshot,
+  ): FileDiffVo[] {
     const baseFiles = baseSnapshot.files;
     const targetFiles = targetSnapshot.files;
     const diffs: FileDiffVo[] = [];
@@ -92,7 +99,10 @@ export class MyersDiffEngineAdapter extends IDiffEnginePort {
         if (baseFile.hash !== targetFile.hash) {
           // File MODIFIED
           if (baseFile.type === 'doc' && targetFile.type === 'doc') {
-            const diffResult = this.diffText(baseFile.lines || [], targetFile.lines || []);
+            const diffResult = this.diffText(
+              baseFile.lines || [],
+              targetFile.lines || [],
+            );
             diffs.push(
               new FileDiffVo({
                 path,
@@ -269,12 +279,18 @@ export class MyersDiffEngineAdapter extends IDiffEnginePort {
   ): Array<{ type: 'added' | 'deleted' | 'unchanged'; text: string }> {
     let x = a.length;
     let y = b.length;
-    const result: Array<{ type: 'added' | 'deleted' | 'unchanged'; text: string }> = [];
+    const result: Array<{
+      type: 'added' | 'deleted' | 'unchanged';
+      text: string;
+    }> = [];
 
     for (let d = trace.length - 1; d > 0; d--) {
       const k = x - y;
       let prevK: number;
-      if (k === -d || (k !== d && (trace[d - 1][k - 1] ?? -1) < (trace[d - 1][k + 1] ?? -1))) {
+      if (
+        k === -d ||
+        (k !== d && (trace[d - 1][k - 1] ?? -1) < (trace[d - 1][k + 1] ?? -1))
+      ) {
         prevK = k + 1;
       } else {
         prevK = k - 1;
@@ -338,9 +354,9 @@ export class MyersDiffEngineAdapter extends IDiffEnginePort {
     if (!hasChanges) return [];
 
     const hunks: DiffHunkVo[] = [];
-    let currentHunkLines: DiffLine[] = [];
-    let oldStart = 1;
-    let newStart = 1;
+    const currentHunkLines: DiffLine[] = [];
+    const oldStart = 1;
+    const newStart = 1;
     let oldLinesCount = 0;
     let newLinesCount = 0;
 

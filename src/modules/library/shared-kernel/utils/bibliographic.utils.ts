@@ -525,7 +525,10 @@ export function cleanAbstractText(text?: string | null): string | undefined {
   cleaned = cleaned.replace(
     /<(?:jats:)?disp-formula[^>]*>[\s\S]*?<(?:jats:)?tex-math[^>]*>([\s\S]*?)<\/(?:jats:)?tex-math>[\s\S]*?<\/(?:jats:)?disp-formula>/gi,
     (_, math) => {
-      const trimmed = math.trim().replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, '$1').trim();
+      const trimmed = math
+        .trim()
+        .replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, '$1')
+        .trim();
       const content = trimmed.replace(/^\$\$?([\s\S]*?)\$\$?$/, '$1').trim();
       return `\n\n$$${content}$$\n\n`;
     },
@@ -533,7 +536,10 @@ export function cleanAbstractText(text?: string | null): string | undefined {
   cleaned = cleaned.replace(
     /<(?:jats:)?(?:inline-formula[^>]*>[\s\S]*?)?<(?:jats:)?tex-math[^>]*>([\s\S]*?)<\/(?:jats:)?tex-math>(?:[\s\S]*?<\/(?:jats:)?inline-formula>)?/gi,
     (_, math) => {
-      const trimmed = math.trim().replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, '$1').trim();
+      const trimmed = math
+        .trim()
+        .replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, '$1')
+        .trim();
       const content = trimmed.replace(/^\$([\s\S]*?)\$$/, '$1').trim();
       return `$${content}$`;
     },
@@ -580,7 +586,8 @@ export function cleanAbstractText(text?: string | null): string | undefined {
   // PubMed structured abstract tags: <AbstractText Label="BACKGROUND">...</AbstractText>
   cleaned = cleaned.replace(
     /<AbstractText\s+[^>]*Label=["']\s*([^"']+?)\s*["'][^>]*>([\s\S]*?)<\/AbstractText>/gi,
-    (_, label, content) => `\n\n**${label.trim().toUpperCase()}:** ${content.trim()}`,
+    (_, label, content) =>
+      `\n\n**${label.trim().toUpperCase()}:** ${content.trim()}`,
   );
   // Unlabeled AbstractText tags become paragraph breaks
   cleaned = cleaned.replace(
@@ -615,9 +622,16 @@ export function cleanAbstractText(text?: string | null): string | undefined {
   );
 
   // 3. Remove repeated parenthesized / bracketed year-chain extraction artifacts
-  cleaned = cleaned.replace(/(?:\((?:19|20)\d{2}\)\s*){2,}(\.)?/g, (_, dot) => (dot ? '.' : ''));
-  cleaned = cleaned.replace(/(?:\[(?:19|20)\d{2}\]\s*){2,}(\.)?/g, (_, dot) => (dot ? '.' : ''));
-  cleaned = cleaned.replace(/\((?:(?:19|20)\d{2}[,\s;]*){3,}\)(\.)?/g, (_, dot) => (dot ? '.' : ''));
+  cleaned = cleaned.replace(/(?:\((?:19|20)\d{2}\)\s*){2,}(\.)?/g, (_, dot) =>
+    dot ? '.' : '',
+  );
+  cleaned = cleaned.replace(/(?:\[(?:19|20)\d{2}\]\s*){2,}(\.)?/g, (_, dot) =>
+    dot ? '.' : '',
+  );
+  cleaned = cleaned.replace(
+    /\((?:(?:19|20)\d{2}[,\s;]*){3,}\)(\.)?/g,
+    (_, dot) => (dot ? '.' : ''),
+  );
 
   // 4. Remove trailing author contribution / footnote / correspondence noise
   cleaned = cleaned.replace(

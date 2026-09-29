@@ -44,7 +44,9 @@ export class DocRangeVo {
           metadata: change.metadata
             ? {
                 ...change.metadata,
-                ts: change.metadata.ts ? new Date(change.metadata.ts).toISOString() : undefined,
+                ts: change.metadata.ts
+                  ? new Date(change.metadata.ts).toISOString()
+                  : undefined,
               }
             : undefined,
         }))
@@ -56,7 +58,9 @@ export class DocRangeVo {
           metadata: comment.metadata
             ? {
                 ...comment.metadata,
-                ts: comment.metadata.ts ? new Date(comment.metadata.ts).toISOString() : undefined,
+                ts: comment.metadata.ts
+                  ? new Date(comment.metadata.ts).toISOString()
+                  : undefined,
               }
             : undefined,
         }))

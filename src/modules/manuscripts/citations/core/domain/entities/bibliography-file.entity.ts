@@ -51,7 +51,8 @@ export class BibliographyFile {
       if (e.title && e.title.toLowerCase().includes(q)) return true;
       if (e.year && e.year.includes(q)) return true;
       if (e.authors.toDisplayString().toLowerCase().includes(q)) return true;
-      if (e.authors.toFullNameList().some((fn) => fn.toLowerCase().includes(q))) return true;
+      if (e.authors.toFullNameList().some((fn) => fn.toLowerCase().includes(q)))
+        return true;
       return false;
     });
   }

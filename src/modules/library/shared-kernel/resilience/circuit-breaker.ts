@@ -41,7 +41,10 @@ export class CircuitBreaker {
   public readonly failureThreshold: number;
   public readonly resetTimeoutMs: number;
   public readonly halfOpenMaxAttempts: number;
-  private readonly onStateChange?: (from: CircuitState, to: CircuitState) => void;
+  private readonly onStateChange?: (
+    from: CircuitState,
+    to: CircuitState,
+  ) => void;
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.name = options.name || 'default';

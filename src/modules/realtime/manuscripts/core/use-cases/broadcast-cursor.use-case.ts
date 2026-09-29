@@ -6,7 +6,10 @@
 import { Injectable } from '@nestjs/common';
 import { IRoomManagerPort } from '../ports/room-manager.port';
 import { IRealtimeBroadcasterPort } from '../ports/realtime-broadcaster.port';
-import { CursorPositionVo, CursorPositionProps } from '../domain/value-objects/cursor-position.vo';
+import {
+  CursorPositionVo,
+  CursorPositionProps,
+} from '../domain/value-objects/cursor-position.vo';
 import { UserPresenceVo } from '../domain/value-objects/user-presence.vo';
 
 export interface BroadcastCursorInput {
@@ -23,7 +26,9 @@ export class BroadcastCursorUseCase {
     private readonly broadcaster: IRealtimeBroadcasterPort,
   ) {}
 
-  public async execute(input: BroadcastCursorInput): Promise<UserPresenceVo | null> {
+  public async execute(
+    input: BroadcastCursorInput,
+  ): Promise<UserPresenceVo | null> {
     const { projectId, docId, socketId, cursor } = input;
 
     const cursorVo = CursorPositionVo.create(cursor);

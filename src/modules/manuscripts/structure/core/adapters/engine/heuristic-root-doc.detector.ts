@@ -14,7 +14,7 @@ const VALID_ROOT_EXTENSIONS = ['.tex', '.rtex', '.rnw'];
 export class HeuristicRootDocDetector implements IRootDocDetector {
   public detectRootDoc(
     nodes: ManuscriptNodeEntity[],
-    docContents: Map<string, string[]>
+    docContents: Map<string, string[]>,
   ): ManuscriptNodeEntity | null {
     // 1. Filter candidates: Must be DOC and have valid TeX extension
     const candidates = nodes.filter((n) => {
@@ -32,7 +32,9 @@ export class HeuristicRootDocDetector implements IRootDocDetector {
 
     // 3. Find first candidate with \documentclass declaration
     for (const candidate of sorted) {
-      const lines = docContents.get(candidate.id) || (candidate.docId ? docContents.get(candidate.docId) : undefined);
+      const lines =
+        docContents.get(candidate.id) ||
+        (candidate.docId ? docContents.get(candidate.docId) : undefined);
       if (lines && this.contentHasDocumentclass(lines)) {
         return candidate;
       }

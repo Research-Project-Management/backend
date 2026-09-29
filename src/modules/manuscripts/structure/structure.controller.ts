@@ -16,10 +16,24 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { StructureService } from './structure.service';
-import { CreateNodeDto, MoveNodeDto, RenameNodeDto, ReorderNodeDto, TreeNodeDto } from './dto/node.dto';
+import {
+  CreateNodeDto,
+  MoveNodeDto,
+  RenameNodeDto,
+  ReorderNodeDto,
+  TreeNodeDto,
+} from './dto/node.dto';
 import {
   NodeNotFoundError,
   DuplicateNodePathError,
@@ -31,6 +45,7 @@ import {
 } from './core/domain/structure-errors';
 
 @ApiTags('Manuscripts - Project Structure & File Tree')
+@ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/structure',
   'api/manuscripts/projects/:projectId/structure',
@@ -38,11 +53,16 @@ import {
   'projects/:projectId/structure',
   'api/projects/:projectId/structure',
 ])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
 export class StructureController {
   constructor(private readonly structureService: StructureService) {}
 
   private handleError(error: any): never {
-    if (error instanceof NodeNotFoundError || error instanceof RootDocNotFoundError) {
+    if (
+      error instanceof NodeNotFoundError ||
+      error instanceof RootDocNotFoundError
+    ) {
       throw new NotFoundException(error.message);
     }
     if (error instanceof DuplicateNodePathError) {
@@ -60,7 +80,9 @@ export class StructureController {
   }
 
   @Get('tree')
-  @ApiOperation({ summary: 'Get hierarchical recursive file tree for IDE sidebar' })
+  @ApiOperation({
+    summary: 'Get hierarchical recursive file tree for IDE sidebar',
+  })
   @ApiResponse({ status: 200, type: [TreeNodeDto] })
   async getFileTree(@Param('projectId') projectId: string) {
     try {
@@ -85,7 +107,7 @@ export class StructureController {
   @ApiOperation({ summary: 'Get single node metadata by ID' })
   async getNodeById(
     @Param('projectId') projectId: string,
-    @Param('nodeId') nodeId: string
+    @Param('nodeId') nodeId: string,
   ) {
     try {
       const node = await this.structureService.getNodeById(projectId, nodeId);
@@ -99,10 +121,13 @@ export class StructureController {
   }
 
   @Post('nodes')
-  @ApiOperation({ summary: 'Create new file, document, or folder with auto-mkdirp' })
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary: 'Create new file, document, or folder with auto-mkdirp',
+  })
   async createNode(
     @Param('projectId') projectId: string,
-    @Body() dto: CreateNodeDto
+    @Body() dto: CreateNodeDto,
   ) {
     try {
       const node = await this.structureService.createNode(projectId, dto);
@@ -112,12 +137,16 @@ export class StructureController {
     }
   }
 
+  @Patch('nodes/:nodeId/move')
   @Post('nodes/:nodeId/move')
-  @ApiOperation({ summary: 'Move node to destination folder or path (with cycle detection)' })
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary: 'Move node to destination folder or path (with cycle detection)',
+  })
   async moveNode(
     @Param('projectId') projectId: string,
     @Param('nodeId') nodeId: string,
-    @Body() dto: MoveNodeDto
+    @Body() dto: MoveNodeDto,
   ) {
     try {
       const node = await this.structureService.moveNode(projectId, nodeId, dto);
@@ -129,14 +158,21 @@ export class StructureController {
 
   @Patch('nodes/:nodeId/rename')
   @Post('nodes/:nodeId/rename')
-  @ApiOperation({ summary: 'Rename node (cascades path updates to all children if folder)' })
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary: 'Rename node (cascades path updates to all children if folder)',
+  })
   async renameNode(
     @Param('projectId') projectId: string,
     @Param('nodeId') nodeId: string,
-    @Body() dto: RenameNodeDto
+    @Body() dto: RenameNodeDto,
   ) {
     try {
-      const node = await this.structureService.renameNode(projectId, nodeId, dto);
+      const node = await this.structureService.renameNode(
+        projectId,
+        nodeId,
+        dto,
+      );
       return node.toJSON();
     } catch (err) {
       this.handleError(err);
@@ -144,10 +180,11 @@ export class StructureController {
   }
 
   @Delete('nodes/:nodeId')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete node and all nested descendants' })
   async deleteNode(
     @Param('projectId') projectId: string,
-    @Param('nodeId') nodeId: string
+    @Param('nodeId') nodeId: string,
   ) {
     try {
       const deleted = await this.structureService.deleteNode(projectId, nodeId);
@@ -175,10 +212,11 @@ export class StructureController {
   }
 
   @Post('root-doc/:nodeId')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Explicitly set the master LaTeX entrypoint' })
   async setRootDoc(
     @Param('projectId') projectId: string,
-    @Param('nodeId') nodeId: string
+    @Param('nodeId') nodeId: string,
   ) {
     try {
       const rootDoc = await this.structureService.setRootDoc(projectId, nodeId);
@@ -189,12 +227,13 @@ export class StructureController {
   }
 
   @Post('nodes/:nodeId/reorder')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Update sort order index for display' })
   async reorderNode(
     @Param('projectId') projectId: string,
     @Param('nodeId') nodeId: string,
-    @Body() dto: ReorderNodeDto
+    @Body() dto: ReorderNodeDto,
   ) {
     try {
       await this.structureService.reorderNode(projectId, nodeId, dto.sortOrder);

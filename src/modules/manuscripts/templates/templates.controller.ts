@@ -8,8 +8,15 @@ import {
   Post,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
 import { TemplatesService } from './templates.service';
 import {
   QueryTemplatesDto,
@@ -20,7 +27,11 @@ import {
 } from './dto/template.dto';
 
 @ApiTags('Manuscripts - Templates')
-@Controller(['api/v1/manuscripts/templates', 'manuscripts/templates', 'templates'])
+@Controller([
+  'api/v1/manuscripts/templates',
+  'manuscripts/templates',
+  'templates',
+])
 export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
 
@@ -50,9 +61,16 @@ export class TemplatesController {
   }
 
   @Post('instantiate')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a new project instantiated from a template' })
-  @ApiResponse({ status: 201, description: 'Project successfully created from template' })
+  @ApiOperation({
+    summary: 'Create a new project instantiated from a template',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Project successfully created from template',
+  })
   async instantiateTemplate(
     @Req() req: any,
     @Body() dto: InstantiateTemplateDto,
@@ -62,6 +80,8 @@ export class TemplatesController {
   }
 
   @Post('custom')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Publish or create a custom manuscript template' })
   @ApiResponse({ status: 201, description: 'Custom template created' })
@@ -71,7 +91,9 @@ export class TemplatesController {
 }
 
 @ApiTags('Manuscripts - Overleaf Parity')
+@ApiBearerAuth('JWT-auth')
 @Controller('project')
+@UseGuards(JwtAuthGuard)
 export class OverleafTemplatesParityController {
   constructor(private readonly templatesService: TemplatesService) {}
 
@@ -81,8 +103,13 @@ export class OverleafTemplatesParityController {
 
   @Post('new/template')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Overleaf 1:1 API Parity: Instantiate project from template' })
-  @ApiResponse({ status: 201, description: 'Created project object with project_id' })
+  @ApiOperation({
+    summary: 'Overleaf 1:1 API Parity: Instantiate project from template',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Created project object with project_id',
+  })
   async instantiateOverleaf(
     @Req() req: any,
     @Body() dto: OverleafInstantiateTemplateDto,

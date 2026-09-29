@@ -73,7 +73,10 @@ export class IntegrationsRepository {
     });
   }
 
-  async markAuthFailed(userId: string, provider: IntegrationProviderType): Promise<void> {
+  async markAuthFailed(
+    userId: string,
+    provider: IntegrationProviderType,
+  ): Promise<void> {
     await this.prisma.userIntegration.updateMany({
       where: {
         userId,
@@ -86,7 +89,10 @@ export class IntegrationsRepository {
     });
   }
 
-  async deleteConnection(userId: string, provider: IntegrationProviderType): Promise<void> {
+  async deleteConnection(
+    userId: string,
+    provider: IntegrationProviderType,
+  ): Promise<void> {
     await this.prisma.userIntegration.deleteMany({
       where: {
         userId,
@@ -145,4 +151,3 @@ export class IntegrationsRepository {
     });
   }
 }
-

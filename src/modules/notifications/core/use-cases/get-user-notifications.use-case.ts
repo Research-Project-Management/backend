@@ -10,12 +10,12 @@ import { NotificationEntity } from '../domain/entities/notification.entity';
 export class GetUserNotificationsUseCase {
   constructor(
     @Inject(NOTIFICATION_REPOSITORY_PORT)
-    private readonly repository: INotificationRepositoryPort
+    private readonly repository: INotificationRepositoryPort,
   ) {}
 
   async execute(
     userId: string,
-    options?: QueryNotificationsOptions
+    options?: QueryNotificationsOptions,
   ): Promise<NotificationEntity[]> {
     if (!userId || !userId.trim()) {
       return [];

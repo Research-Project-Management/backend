@@ -56,7 +56,9 @@ export class TokenBucketRateLimiter {
    */
   public async acquire(count = 1, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) {
-      throw signal.reason || new Error('Aborted before acquiring rate limit token');
+      throw (
+        signal.reason || new Error('Aborted before acquiring rate limit token')
+      );
     }
 
     if (this.tryAcquire(count)) {
@@ -65,7 +67,10 @@ export class TokenBucketRateLimiter {
 
     // Calculate wait time needed for required tokens
     const missing = count - this.tokens;
-    const waitMs = Math.max(10, Math.ceil((missing / this.refillRatePerSec) * 1000));
+    const waitMs = Math.max(
+      10,
+      Math.ceil((missing / this.refillRatePerSec) * 1000),
+    );
 
     this.logger.debug(
       `[RateLimiter:${this.name}] Rate limit reached. Waiting ${waitMs}ms for ${count} token(s).`,
@@ -76,12 +81,15 @@ export class TokenBucketRateLimiter {
 
       const onAbort = () => {
         if (timer) clearTimeout(timer);
-        reject(
-          signal?.reason ||
-            new Error(
-              `Aborted while waiting for rate limit token on "${this.name}"`,
-            ),
-        );
+        const reason =
+          signal?.reason instanceof Error
+            ? signal.reason
+            : new Error(
+                signal?.reason
+                  ? String(signal.reason)
+                  : `Aborted while waiting for rate limit token on "${this.name}"`,
+              );
+        reject(reason);
       };
 
       if (signal) {

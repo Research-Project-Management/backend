@@ -19,7 +19,10 @@ export class InMemoryInFlightStoreAdapter extends IInFlightStorePort {
     return `${projectId}:${docId}`;
   }
 
-  public async get(projectId: string, docId: string): Promise<InFlightDoc | null> {
+  public async get(
+    projectId: string,
+    docId: string,
+  ): Promise<InFlightDoc | null> {
     return this.docs.get(this.toKey(projectId, docId)) ?? null;
   }
 

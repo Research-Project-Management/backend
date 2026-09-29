@@ -22,7 +22,8 @@ export class DiagnosticReport {
   public readonly rawLog?: string;
 
   constructor(props: DiagnosticReportProps) {
-    this.id = props.id || `report-${Math.random().toString(36).substring(2, 10)}`;
+    this.id =
+      props.id || `report-${Math.random().toString(36).substring(2, 10)}`;
     this.items = Object.freeze([...props.items]);
     this.rawLog = props.rawLog;
 

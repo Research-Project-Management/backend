@@ -26,7 +26,10 @@ function toDosDateTime(d: Date = new Date()): { time: number; date: number } {
 }
 
 function sanitizeZipPath(relPath: string): string {
-  return relPath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\.\.\//g, '');
+  return relPath
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\.\.\//g, '');
 }
 
 export function buildZipArchive(entries: ZipFileEntry[]): Buffer {

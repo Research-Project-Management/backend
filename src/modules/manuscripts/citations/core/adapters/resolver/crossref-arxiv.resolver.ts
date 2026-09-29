@@ -12,7 +12,9 @@ import { RegexAstBibtexParser } from '../parser/regex-ast-bibtex.parser';
 export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
   private readonly parser = new RegexAstBibtexParser();
 
-  public async resolve(identifier: AcademicIdentifierVo): Promise<BibEntry | null> {
+  public async resolve(
+    identifier: AcademicIdentifierVo,
+  ): Promise<BibEntry | null> {
     if (identifier.isDoi()) {
       return this.resolveDoi(identifier.clean);
     }
@@ -30,12 +32,15 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
   private async resolveDoi(cleanDoi: string): Promise<BibEntry | null> {
     try {
       // 1. Try CrossRef Content Negotiation (returns formatted BibTeX directly)
-      const res = await fetch(`https://doi.org/${encodeURIComponent(cleanDoi)}`, {
-        headers: {
-          Accept: 'application/x-bibtex; charset=utf-8',
-          'User-Agent': 'FluxManuscripts/1.0 (mailto:support@flux.local)',
+      const res = await fetch(
+        `https://doi.org/${encodeURIComponent(cleanDoi)}`,
+        {
+          headers: {
+            Accept: 'application/x-bibtex; charset=utf-8',
+            'User-Agent': 'FluxManuscripts/1.0 (mailto:support@flux.local)',
+          },
         },
-      });
+      );
 
       if (res.ok) {
         const bibText = await res.text();
@@ -54,7 +59,7 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
         `https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`,
         {
           headers: { 'User-Agent': 'FluxManuscripts/1.0' },
-        }
+        },
       );
 
       if (jsonRes.ok) {
@@ -74,7 +79,8 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
             .filter(Boolean)
             .join(' and ');
 
-          const firstAuthorLast = item.author?.[0]?.family?.toLowerCase() || 'author';
+          const firstAuthorLast =
+            item.author?.[0]?.family?.toLowerCase() || 'author';
           const key = `${firstAuthorLast}${year}${title.slice(0, 8).replace(/\s+/g, '').toLowerCase()}`;
 
           return new BibEntry({
@@ -103,7 +109,7 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
   private async resolveArxiv(cleanArxivId: string): Promise<BibEntry | null> {
     try {
       const res = await fetch(
-        `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanArxivId)}`
+        `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanArxivId)}`,
       );
 
       if (res.ok) {
@@ -113,10 +119,14 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
           const entryXml = entryMatch[1];
 
           const titleMatch = entryXml.match(/<title>([\s\S]*?)<\/title>/i);
-          const title = titleMatch ? titleMatch[1]!.replace(/\s+/g, ' ').trim() : 'arXiv Preprint';
+          const title = titleMatch
+            ? titleMatch[1].replace(/\s+/g, ' ').trim()
+            : 'arXiv Preprint';
 
           const publishedMatch = entryXml.match(/<published>(\d{4})/i);
-          const year = publishedMatch ? publishedMatch[1]! : new Date().getFullYear().toString();
+          const year = publishedMatch
+            ? publishedMatch[1]
+            : new Date().getFullYear().toString();
 
           const authors: string[] = [];
           const authorRegex = /<author>\s*<name>([^<]+)<\/name>/gi;
@@ -125,7 +135,8 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
             if (aMatch[1]) authors.push(aMatch[1].trim());
           }
 
-          const firstLastName = authors[0]?.split(' ').pop()?.toLowerCase() || 'arxiv';
+          const firstLastName =
+            authors[0]?.split(' ').pop()?.toLowerCase() || 'arxiv';
           const key = `${firstLastName}${year}${cleanArxivId.replace(/[^0-9]/g, '').slice(0, 6)}`;
 
           return new BibEntry({

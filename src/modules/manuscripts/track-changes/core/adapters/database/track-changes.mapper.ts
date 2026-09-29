@@ -8,7 +8,11 @@ import {
   ManuscriptCommentThread as PrismaCommentThread,
   ManuscriptCommentReply as PrismaCommentReply,
 } from '@prisma/client';
-import { TrackChange, ChangeType, ChangeStatus } from '../../domain/entities/track-change.entity';
+import {
+  TrackChange,
+  ChangeType,
+  ChangeStatus,
+} from '../../domain/entities/track-change.entity';
 import { CommentThread } from '../../domain/entities/comment-thread.entity';
 import { CommentReply } from '../../domain/entities/comment-reply.entity';
 import { TextRangeVo } from '../../domain/value-objects/text-range.vo';
@@ -23,8 +27,8 @@ export class TrackChangesMapper {
       id: prisma.id,
       projectId: prisma.projectId,
       docId: prisma.docId,
-      type: prisma.type as ChangeType,
-      status: prisma.status as ChangeStatus,
+      type: prisma.type,
+      status: prisma.status,
       text: prisma.text,
       range: TextRangeVo.create({
         startLine: prisma.startLine,
@@ -52,7 +56,9 @@ export class TrackChangesMapper {
   }
 
   public static toDomainThread(prisma: PrismaThreadWithReplies): CommentThread {
-    const replies = prisma.replies ? prisma.replies.map(this.toDomainReply) : [];
+    const replies = prisma.replies
+      ? prisma.replies.map((reply) => this.toDomainReply(reply))
+      : [];
 
     return CommentThread.create({
       id: prisma.id,

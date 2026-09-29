@@ -41,7 +41,12 @@ describe('Global Notifications & Mentions Subsystem', () => {
       });
 
       it('should identify email handles correctly', () => {
-        const token = MentionToken.create('@user@uni.edu', 'user@uni.edu', 0, true);
+        const token = MentionToken.create(
+          '@user@uni.edu',
+          'user@uni.edu',
+          0,
+          true,
+        );
         expect(token.isEmail).toBe(true);
       });
     });
@@ -158,11 +163,16 @@ describe('Global Notifications & Mentions Subsystem', () => {
       });
 
       it('should extract multiple unique mentions and clean punctuation', () => {
-        const text = 'Hey @bob! Did you see @charlie.brown, @alice? and @bob again?';
+        const text =
+          'Hey @bob! Did you see @charlie.brown, @alice? and @bob again?';
         const tokens = parser.extractMentions(text);
 
         expect(tokens).toHaveLength(3); // bob, charlie.brown, alice (deduplicated bob)
-        expect(tokens.map((t) => t.handle)).toEqual(['bob', 'charlie.brown', 'alice']);
+        expect(tokens.map((t) => t.handle)).toEqual([
+          'bob',
+          'charlie.brown',
+          'alice',
+        ]);
       });
 
       it('should extract mentions with email format', () => {
@@ -228,9 +238,24 @@ describe('Global Notifications & Mentions Subsystem', () => {
       });
 
       it('should filter by isRead and pagination', async () => {
-        const n1 = new NotificationEntity({ id: '1', userId: 'u1', templateKey: 't', isRead: false });
-        const n2 = new NotificationEntity({ id: '2', userId: 'u1', templateKey: 't', isRead: true });
-        const n3 = new NotificationEntity({ id: '3', userId: 'u1', templateKey: 't', isRead: false });
+        const n1 = new NotificationEntity({
+          id: '1',
+          userId: 'u1',
+          templateKey: 't',
+          isRead: false,
+        });
+        const n2 = new NotificationEntity({
+          id: '2',
+          userId: 'u1',
+          templateKey: 't',
+          isRead: true,
+        });
+        const n3 = new NotificationEntity({
+          id: '3',
+          userId: 'u1',
+          templateKey: 't',
+          isRead: false,
+        });
         await repo.save(n1);
         await repo.save(n2);
         await repo.save(n3);
@@ -264,8 +289,22 @@ describe('Global Notifications & Mentions Subsystem', () => {
       });
 
       it('should mark all as read and delete by key', async () => {
-        await repo.save(new NotificationEntity({ id: '1', userId: 'u1', key: 'k1', templateKey: 't' }));
-        await repo.save(new NotificationEntity({ id: '2', userId: 'u1', key: 'k2', templateKey: 't' }));
+        await repo.save(
+          new NotificationEntity({
+            id: '1',
+            userId: 'u1',
+            key: 'k1',
+            templateKey: 't',
+          }),
+        );
+        await repo.save(
+          new NotificationEntity({
+            id: '2',
+            userId: 'u1',
+            key: 'k2',
+            templateKey: 't',
+          }),
+        );
 
         const updatedCount = await repo.markAllAsRead('u1');
         expect(updatedCount).toBe(2);
@@ -278,17 +317,21 @@ describe('Global Notifications & Mentions Subsystem', () => {
       });
 
       it('should delete expired notifications', async () => {
-        await repo.save(new NotificationEntity({
-          id: 'exp1',
-          userId: 'u1',
-          templateKey: 't',
-          expiresAt: new Date(Date.now() - 10000),
-        }));
-        await repo.save(new NotificationEntity({
-          id: 'valid1',
-          userId: 'u1',
-          templateKey: 't',
-        }));
+        await repo.save(
+          new NotificationEntity({
+            id: 'exp1',
+            userId: 'u1',
+            templateKey: 't',
+            expiresAt: new Date(Date.now() - 10000),
+          }),
+        );
+        await repo.save(
+          new NotificationEntity({
+            id: 'valid1',
+            userId: 'u1',
+            templateKey: 't',
+          }),
+        );
 
         const removed = await repo.deleteExpired();
         expect(removed).toBe(1);
@@ -349,7 +392,10 @@ describe('Global Notifications & Mentions Subsystem', () => {
       markReadUseCase = new MarkNotificationReadUseCase(repo, notifier);
       markAllReadUseCase = new MarkAllReadUseCase(repo, notifier);
       deleteUseCase = new DeleteNotificationUseCase(repo, notifier);
-      parseAndNotifyUseCase = new ParseAndNotifyMentionsUseCase(parser, createUseCase);
+      parseAndNotifyUseCase = new ParseAndNotifyMentionsUseCase(
+        parser,
+        createUseCase,
+      );
     });
 
     describe('CreateNotificationUseCase', () => {
@@ -388,27 +434,35 @@ describe('Global Notifications & Mentions Subsystem', () => {
       });
 
       it('should reject invalid commands', async () => {
-        await expect(createUseCase.execute({
-          userId: '',
-          templateKey: 'test',
-        })).rejects.toThrow(InvalidNotificationException);
+        await expect(
+          createUseCase.execute({
+            userId: '',
+            templateKey: 'test',
+          }),
+        ).rejects.toThrow(InvalidNotificationException);
 
-        await expect(createUseCase.execute({
-          userId: 'u1',
-          templateKey: '',
-        })).rejects.toThrow(InvalidNotificationException);
+        await expect(
+          createUseCase.execute({
+            userId: 'u1',
+            templateKey: '',
+          }),
+        ).rejects.toThrow(InvalidNotificationException);
 
-        await expect(createUseCase.execute({
-          userId: 'u1',
-          templateKey: 'test',
-          type: 'invalid-type' as any,
-        })).rejects.toThrow(InvalidNotificationException);
+        await expect(
+          createUseCase.execute({
+            userId: 'u1',
+            templateKey: 'test',
+            type: 'invalid-type' as any,
+          }),
+        ).rejects.toThrow(InvalidNotificationException);
 
-        await expect(createUseCase.execute({
-          userId: 'u1',
-          templateKey: 'test',
-          expiresAt: 'not-a-date',
-        })).rejects.toThrow(InvalidNotificationException);
+        await expect(
+          createUseCase.execute({
+            userId: 'u1',
+            templateKey: 'test',
+            expiresAt: 'not-a-date',
+          }),
+        ).rejects.toThrow(InvalidNotificationException);
       });
     });
 
@@ -430,16 +484,16 @@ describe('Global Notifications & Mentions Subsystem', () => {
 
       it('should throw NotificationNotFoundException on unknown ID or wrong user', async () => {
         await expect(markReadUseCase.execute('unknown-id')).rejects.toThrow(
-          NotificationNotFoundException
+          NotificationNotFoundException,
         );
 
         const notif = await createUseCase.execute({
           userId: 'user-owner',
           templateKey: 'test',
         });
-        await expect(markReadUseCase.execute(notif.id, 'user-intruder')).rejects.toThrow(
-          NotificationNotFoundException
-        );
+        await expect(
+          markReadUseCase.execute(notif.id, 'user-intruder'),
+        ).rejects.toThrow(NotificationNotFoundException);
       });
 
       it('should mark all notifications as read', async () => {
@@ -539,7 +593,10 @@ describe('Global Notifications & Mentions Subsystem', () => {
       const markReadUseCase = new MarkNotificationReadUseCase(repo, notifier);
       const markAllReadUseCase = new MarkAllReadUseCase(repo, notifier);
       const deleteUseCase = new DeleteNotificationUseCase(repo, notifier);
-      const parseAndNotifyUseCase = new ParseAndNotifyMentionsUseCase(parser, createUseCase);
+      const parseAndNotifyUseCase = new ParseAndNotifyMentionsUseCase(
+        parser,
+        createUseCase,
+      );
 
       service = new NotificationsService(
         createUseCase,
@@ -549,11 +606,13 @@ describe('Global Notifications & Mentions Subsystem', () => {
         markAllReadUseCase,
         deleteUseCase,
         parseAndNotifyUseCase,
-        parser
+        parser,
       );
 
       controller = new NotificationsController(service);
-      overleafCompatController = new OverleafNotificationsParityController(service);
+      overleafCompatController = new OverleafNotificationsParityController(
+        service,
+      );
     });
 
     describe('NotificationsController', () => {
@@ -569,7 +628,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
             templateKey: 'notification_comment_mention',
             messageOpts: { text: 'Hello' },
           },
-          mockReq()
+          mockReq(),
         );
         expect(created.id).toBeDefined();
 
@@ -589,7 +648,10 @@ describe('Global Notifications & Mentions Subsystem', () => {
         expect(unreadAfter.count).toBe(0);
 
         // 5. Delete notification
-        const delRes = await controller.deleteNotification(created.id, mockReq());
+        const delRes = await controller.deleteNotification(
+          created.id,
+          mockReq(),
+        );
         expect(delRes.success).toBe(true);
       });
 
@@ -606,8 +668,17 @@ describe('Global Notifications & Mentions Subsystem', () => {
       });
 
       it('should mark all read and delete by key', async () => {
-        await service.createNotification({ userId: 'u-test', key: 'batch-k', templateKey: 't1' });
-        await service.createNotification({ userId: 'u-test', key: 'batch-k', templateKey: 't2', forceCreate: true });
+        await service.createNotification({
+          userId: 'u-test',
+          key: 'batch-k',
+          templateKey: 't1',
+        });
+        await service.createNotification({
+          userId: 'u-test',
+          key: 'batch-k',
+          templateKey: 't2',
+          forceCreate: true,
+        });
 
         const req = mockReq('u-test');
         const markAllRes = await controller.markAllAsRead(req);
@@ -621,26 +692,35 @@ describe('Global Notifications & Mentions Subsystem', () => {
     describe('OverleafNotificationsParityController (1:1 Legacy Overleaf API)', () => {
       it('should support Overleaf service routes: addNotification, getUserNotifications, and removeNotification', async () => {
         // 1. POST /user/:user_id (Overleaf addNotification)
-        const addRes = await overleafCompatController.addNotification('overleaf-user-1', {
-          key: 'overleaf-key-1',
-          templateKey: 'notification_project_invite',
-          messageOpts: { projectName: 'Overleaf Doc' },
-        });
+        const addRes = await overleafCompatController.addNotification(
+          'overleaf-user-1',
+          {
+            key: 'overleaf-key-1',
+            templateKey: 'notification_project_invite',
+            messageOpts: { projectName: 'Overleaf Doc' },
+          },
+        );
         expect(addRes.status).toBe('ok');
 
         // 2. GET /user/:user_id (Overleaf getUserNotifications)
-        const notifs = await overleafCompatController.getUserNotifications('overleaf-user-1');
+        const notifs =
+          await overleafCompatController.getUserNotifications(
+            'overleaf-user-1',
+          );
         expect(notifs).toHaveLength(1);
         expect(notifs[0].key).toBe('overleaf-key-1');
 
         // 3. DELETE /user/:user_id/notification/:notification_id (Overleaf removeNotificationId)
         const delIdRes = await overleafCompatController.removeNotificationId(
           'overleaf-user-1',
-          notifs[0].id
+          notifs[0].id,
         );
         expect(delIdRes.status).toBe('ok');
 
-        const remaining = await overleafCompatController.getUserNotifications('overleaf-user-1');
+        const remaining =
+          await overleafCompatController.getUserNotifications(
+            'overleaf-user-1',
+          );
         expect(remaining).toHaveLength(0);
       });
 
@@ -650,14 +730,20 @@ describe('Global Notifications & Mentions Subsystem', () => {
           templateKey: 'tpl',
         });
 
-        const delKeyRes = await overleafCompatController.removeNotificationKey('overleaf-user-2', 'target-key');
+        const delKeyRes = await overleafCompatController.removeNotificationKey(
+          'overleaf-user-2',
+          'target-key',
+        );
         expect(delKeyRes.status).toBe('ok');
 
         await overleafCompatController.addNotification('overleaf-user-3', {
           key: 'global-key',
           templateKey: 'tpl',
         });
-        const delGlobalRes = await overleafCompatController.removeNotificationByKeyOnly('global-key');
+        const delGlobalRes =
+          await overleafCompatController.removeNotificationByKeyOnly(
+            'global-key',
+          );
         expect(delGlobalRes.status).toBe('ok');
       });
     });
@@ -683,7 +769,10 @@ describe('Global Notifications & Mentions Subsystem', () => {
       const markReadUseCase = new MarkNotificationReadUseCase(repo, notifier);
       const markAllReadUseCase = new MarkAllReadUseCase(repo, notifier);
       const deleteUseCase = new DeleteNotificationUseCase(repo, notifier);
-      const parseAndNotifyUseCase = new ParseAndNotifyMentionsUseCase(parser, createUseCase);
+      const parseAndNotifyUseCase = new ParseAndNotifyMentionsUseCase(
+        parser,
+        createUseCase,
+      );
 
       service = new NotificationsService(
         createUseCase,
@@ -693,7 +782,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
         markAllReadUseCase,
         deleteUseCase,
         parseAndNotifyUseCase,
-        parser
+        parser,
       );
     });
 
@@ -758,7 +847,10 @@ describe('Global Notifications & Mentions Subsystem', () => {
         expect(notif.type).toBe('thread_resolved');
 
         // Dismiss thread mentions
-        const dismissedCount = await service.manuscripts.dismissThreadNotifications('th-resolve-test');
+        const dismissedCount =
+          await service.manuscripts.dismissThreadNotifications(
+            'th-resolve-test',
+          );
         expect(dismissedCount).toBe(1);
       });
     });
@@ -781,10 +873,12 @@ describe('Global Notifications & Mentions Subsystem', () => {
         expect(notif.key).toBe('project_invite_proj-invite-1_invitee-1');
 
         // Dismiss invitation
-        const dismissed = await service.projects.dismissProjectInvitation('proj-invite-1', 'invitee-1');
+        const dismissed = await service.projects.dismissProjectInvitation(
+          'proj-invite-1',
+          'invitee-1',
+        );
         expect(dismissed).toBe(1);
       });
     });
   });
 });
-

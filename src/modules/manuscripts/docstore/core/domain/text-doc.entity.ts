@@ -60,21 +60,51 @@ export class TextDoc {
   }
 
   // Getters
-  public get id(): string { return this._id; }
-  public get projectId(): string { return this._projectId; }
-  public get path(): string { return this._path; }
-  public get lines(): string[] { return [...this._lines]; }
-  public get rev(): number { return this._rev; }
-  public get version(): number { return this._version; }
-  public get ranges(): DocRanges { return this._ranges; }
-  public get hash(): string { return this._hash; }
-  public get sizeBytes(): number { return this._sizeBytes; }
-  public get inStorage(): boolean { return this._inStorage; }
-  public get storageKey(): string | null { return this._storageKey; }
-  public get deleted(): boolean { return this._deleted; }
-  public get deletedAt(): Date | null { return this._deletedAt; }
-  public get createdAt(): Date { return this._createdAt; }
-  public get updatedAt(): Date { return this._updatedAt; }
+  public get id(): string {
+    return this._id;
+  }
+  public get projectId(): string {
+    return this._projectId;
+  }
+  public get path(): string {
+    return this._path;
+  }
+  public get lines(): string[] {
+    return [...this._lines];
+  }
+  public get rev(): number {
+    return this._rev;
+  }
+  public get version(): number {
+    return this._version;
+  }
+  public get ranges(): DocRanges {
+    return this._ranges;
+  }
+  public get hash(): string {
+    return this._hash;
+  }
+  public get sizeBytes(): number {
+    return this._sizeBytes;
+  }
+  public get inStorage(): boolean {
+    return this._inStorage;
+  }
+  public get storageKey(): string | null {
+    return this._storageKey;
+  }
+  public get deleted(): boolean {
+    return this._deleted;
+  }
+  public get deletedAt(): Date | null {
+    return this._deletedAt;
+  }
+  public get createdAt(): Date {
+    return this._createdAt;
+  }
+  public get updatedAt(): Date {
+    return this._updatedAt;
+  }
 
   /**
    * Calculates total text byte length from the lines array plus newlines.
@@ -118,7 +148,7 @@ export class TextDoc {
     lines: string[],
     version: number,
     ranges?: DocRanges,
-    hash?: string
+    hash?: string,
   ): void {
     this._lines = lines;
     this._version = version;

@@ -47,9 +47,11 @@ export interface UploadFileOutput {
 
 export interface IStoragePort {
   readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput>;
-  getOwnedFileStream?(input: ReadOwnedFileInput & {
-    range?: { start: number; end: number };
-  }): Promise<{
+  getOwnedFileStream?(
+    input: ReadOwnedFileInput & {
+      range?: { start: number; end: number };
+    },
+  ): Promise<{
     stream: NodeJS.ReadableStream;
     mimeType: string;
     size: number;

@@ -60,7 +60,9 @@ export class InMemoryRoomManagerAdapter extends IRoomManagerPort {
     return session;
   }
 
-  public async getProjectSessions(projectId: string): Promise<UserPresenceVo[]> {
+  public async getProjectSessions(
+    projectId: string,
+  ): Promise<UserPresenceVo[]> {
     const socketIds = this.projectRooms.get(projectId);
     if (!socketIds) return [];
 
@@ -122,7 +124,10 @@ export class InMemoryRoomManagerAdapter extends IRoomManagerPort {
     }
   }
 
-  public async getDocSessions(projectId: string, docId: string): Promise<UserPresenceVo[]> {
+  public async getDocSessions(
+    projectId: string,
+    docId: string,
+  ): Promise<UserPresenceVo[]> {
     const roomKey = this.docRoomKey(projectId, docId);
     const docRoom = this.docRooms.get(roomKey);
     return docRoom ? docRoom.getAllPresence() : [];

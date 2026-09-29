@@ -26,7 +26,9 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
   const attackerId = 'user-attacker-666';
   const projectId = 'proj-research-999';
 
-  const createTestSession = (overrides?: Partial<ConstructorParameters<typeof UploadSession>[0]>) => {
+  const createTestSession = (
+    overrides?: Partial<ConstructorParameters<typeof UploadSession>[0]>,
+  ) => {
     return new UploadSession({
       id: 'session-valid-1',
       userId: ownerId,
@@ -55,8 +57,12 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       copy: jest.fn(),
       getPresignedUploadUrl: jest.fn(),
       getPresignedDownloadUrl: jest.fn(),
-      initiateMultipartUpload: jest.fn().mockResolvedValue({ uploadId: 's3-upload-test-id' }),
-      getPresignedPartUploadUrl: jest.fn().mockResolvedValue('https://s3.example.com/part-signed-url'),
+      initiateMultipartUpload: jest
+        .fn()
+        .mockResolvedValue({ uploadId: 's3-upload-test-id' }),
+      getPresignedPartUploadUrl: jest
+        .fn()
+        .mockResolvedValue('https://s3.example.com/part-signed-url'),
       completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
       listUploadedParts: jest.fn().mockResolvedValue([]),
@@ -127,7 +133,9 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       const session = createTestSession();
       mockSessionRepo.findById.mockResolvedValue(session);
 
-      const url = await useCase.getPartUrl('session-valid-1', 1, { userId: ownerId });
+      const url = await useCase.getPartUrl('session-valid-1', 1, {
+        userId: ownerId,
+      });
 
       expect(url).toBe('https://s3.example.com/part-signed-url');
       expect(mockDriver.getPresignedPartUploadUrl).toHaveBeenCalledWith(

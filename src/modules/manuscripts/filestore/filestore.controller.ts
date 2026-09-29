@@ -18,8 +18,11 @@ import {
   NotFoundException,
   HttpStatus,
   HttpCode,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -33,11 +36,14 @@ import { FileNotFoundException } from './core/domain/exceptions/file-not-found.e
 import { InvalidByteRangeException } from './core/domain/exceptions/invalid-byte-range.exception';
 
 @ApiTags('Manuscripts - Filestore & Assets')
+@ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/files',
   'manuscripts/projects/:projectId/files',
   'project/:projectId/file',
 ])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
 export class FilestoreController {
   constructor(
     private readonly uploadUseCase: UploadManuscriptFileUseCase,
@@ -48,6 +54,7 @@ export class FilestoreController {
   ) {}
 
   @Post()
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   public async uploadFile(
     @Param('projectId') projectId: string,
@@ -59,13 +66,19 @@ export class FilestoreController {
     let dataStream: Readable;
 
     // Check if multipart
+    const multipartReq = req as FastifyRequest & {
+      isMultipart?: () => boolean;
+      file?: () => Promise<
+        { filename?: string; mimetype?: string; file: Readable } | undefined
+      >;
+    };
     const isMultipart =
-      typeof (req as any).isMultipart === 'function'
-        ? (req as any).isMultipart()
-        : Boolean((req as any).isMultipart);
+      typeof multipartReq.isMultipart === 'function'
+        ? multipartReq.isMultipart()
+        : Boolean(multipartReq.isMultipart);
 
-    if (isMultipart) {
-      const part = await (req as any).file();
+    if (isMultipart && typeof multipartReq.file === 'function') {
+      const part = await multipartReq.file();
       if (!part) {
         throw new BadRequestException('No file found in multipart upload.');
       }
@@ -131,13 +144,17 @@ export class FilestoreController {
         rangeHeader,
       });
 
-      const { file, stream, byteRange, isPartialContent, contentLength } = result;
+      const { file, stream, byteRange, isPartialContent, contentLength } =
+        result;
 
       // Defense in depth: Mobile Safari HTML execution defense (Overleaf Parity)
       const isMobileSafari =
-        userAgent && (userAgent.includes('iPhone') || userAgent.includes('iPad'));
+        userAgent &&
+        (userAgent.includes('iPhone') || userAgent.includes('iPad'));
       const isHtml =
-        file.name.endsWith('.html') || file.name.endsWith('.htm') || file.name.endsWith('.xhtml');
+        file.name.endsWith('.html') ||
+        file.name.endsWith('.htm') ||
+        file.name.endsWith('.xhtml');
 
       if (isMobileSafari && isHtml) {
         res.header('Content-Type', 'text/plain; charset=utf-8');
@@ -179,6 +196,7 @@ export class FilestoreController {
   }
 
   @Delete(':fileId')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   public async deleteFile(
     @Param('projectId') projectId: string,

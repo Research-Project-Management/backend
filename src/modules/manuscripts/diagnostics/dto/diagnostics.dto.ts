@@ -12,12 +12,18 @@ export class ParseLogDto {
   @IsNotEmpty({ message: 'logText is required and cannot be empty' })
   logText!: string;
 
-  @ApiPropertyOptional({ description: 'Default filename if none detected in log', default: 'main.tex' })
+  @ApiPropertyOptional({
+    description: 'Default filename if none detected in log',
+    default: 'main.tex',
+  })
   @IsString()
   @IsOptional()
   defaultFile?: string;
 
-  @ApiPropertyOptional({ description: 'Compiler engine (pdflatex, xelatex, tectonic)', default: 'pdflatex' })
+  @ApiPropertyOptional({
+    description: 'Compiler engine (pdflatex, xelatex, tectonic)',
+    default: 'pdflatex',
+  })
   @IsString()
   @IsOptional()
   engine?: string;
@@ -28,7 +34,10 @@ export class LintDocumentDto {
   @IsString()
   source!: string;
 
-  @ApiPropertyOptional({ description: 'Target filename for lint reports', default: 'main.tex' })
+  @ApiPropertyOptional({
+    description: 'Target filename for lint reports',
+    default: 'main.tex',
+  })
   @IsString()
   @IsOptional()
   filename?: string;
@@ -84,6 +93,45 @@ export class DiagnosticItemDto {
 
   @ApiPropertyOptional({ type: () => ErrorExplanationDto })
   explanation?: ErrorExplanationDto;
+
+  @ApiPropertyOptional()
+  quickFix?: {
+    description: string;
+    replacementText: string;
+  };
+}
+
+export class AutoFixRequestDto {
+  @ApiProperty({ description: 'LaTeX source content to auto-fix' })
+  @IsString()
+  source!: string;
+
+  @ApiPropertyOptional({ description: 'Target filename', default: 'main.tex' })
+  @IsString()
+  @IsOptional()
+  filename?: string;
+}
+
+export class AppliedFixDto {
+  @ApiProperty()
+  line!: number;
+
+  @ApiProperty()
+  rule!: string;
+
+  @ApiProperty()
+  description!: string;
+}
+
+export class AutoFixResponseDto {
+  @ApiProperty()
+  isFixed!: boolean;
+
+  @ApiProperty()
+  fixedSource!: string;
+
+  @ApiProperty({ type: [AppliedFixDto] })
+  appliedFixes!: AppliedFixDto[];
 }
 
 export class DiagnosticReportDto {

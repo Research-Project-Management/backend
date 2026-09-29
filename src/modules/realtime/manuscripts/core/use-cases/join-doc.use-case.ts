@@ -31,11 +31,18 @@ export class JoinDocUseCase {
 
     const session = await this.roomManager.getSession(socketId);
     if (!session) {
-      throw new InvalidRoomException(projectId, `Session for socket '${socketId}' not found.`);
+      throw new InvalidRoomException(
+        projectId,
+        `Session for socket '${socketId}' not found.`,
+      );
     }
 
     // Join doc room and retrieve active presence
-    const docPresence = await this.roomManager.joinDocRoom(projectId, docId, socketId);
+    const docPresence = await this.roomManager.joinDocRoom(
+      projectId,
+      docId,
+      socketId,
+    );
 
     // Notify other peers in this document
     this.broadcaster.broadcastToDoc(

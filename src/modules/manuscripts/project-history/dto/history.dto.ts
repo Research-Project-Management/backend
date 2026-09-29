@@ -4,28 +4,43 @@
  */
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, IsBoolean, IsInt, Min } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsBoolean,
+  IsInt,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateSnapshotDto {
-  @ApiPropertyOptional({ description: 'Optional human-readable summary of this version' })
+  @ApiPropertyOptional({
+    description: 'Optional human-readable summary of this version',
+  })
   @IsString()
   @IsOptional()
   summary?: string;
 
-  @ApiPropertyOptional({ description: 'Whether snapshot was triggered automatically by system' })
+  @ApiPropertyOptional({
+    description: 'Whether snapshot was triggered automatically by system',
+  })
   @IsBoolean()
   @IsOptional()
   isAutomatic?: boolean;
 
-  @ApiPropertyOptional({ description: 'Optional named label to attach to this version' })
+  @ApiPropertyOptional({
+    description: 'Optional named label to attach to this version',
+  })
   @IsString()
   @IsOptional()
   label?: string;
 }
 
 export class LabelVersionDto {
-  @ApiProperty({ description: 'Named tag or milestone label (e.g. "v1.0-submission")' })
+  @ApiProperty({
+    description: 'Named tag or milestone label (e.g. "v1.0-submission")',
+  })
   @IsString()
   @IsNotEmpty()
   label!: string;
@@ -86,7 +101,9 @@ export class VersionListItemDto {
 }
 
 export class SnapshotDetailDto extends VersionListItemDto {
-  @ApiProperty({ description: 'Full dictionary of file snapshots indexed by path' })
+  @ApiProperty({
+    description: 'Full dictionary of file snapshots indexed by path',
+  })
   files!: Record<string, any>;
 }
 
@@ -120,6 +137,9 @@ export class DiffResponseDto {
   @ApiProperty()
   filesChanged!: number;
 
-  @ApiProperty({ description: 'List of file-level diff results with line hunks and word highlights' })
+  @ApiProperty({
+    description:
+      'List of file-level diff results with line hunks and word highlights',
+  })
   files!: any[];
 }

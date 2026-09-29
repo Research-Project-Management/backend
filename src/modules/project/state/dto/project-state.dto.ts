@@ -50,7 +50,8 @@ export class CreateProjectStateDto {
   sequence?: number;
 
   @ApiPropertyOptional({
-    description: 'Whether this state is the initial default state for newly created projects',
+    description:
+      'Whether this state is the initial default state for newly created projects',
     default: false,
   })
   @IsBoolean()
@@ -101,7 +102,8 @@ export class UpdateProjectStateItemDto {
 
 export class TransitionProjectStateDto {
   @ApiPropertyOptional({
-    description: 'Target State UUID to transition project to, or null to unassign',
+    description:
+      'Target State UUID to transition project to, or null to unassign',
     example: '01957c91-2345-7890-abcd-ef0123456789',
     nullable: true,
   })

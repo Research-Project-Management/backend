@@ -19,21 +19,30 @@ import {
   Res,
   HttpStatus,
   HttpCode,
+  Optional,
+  NotFoundException,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core/database/prisma.service';
 import { DocstoreService } from './docstore.service';
+import { RealtimeService } from '@/modules/realtime/realtime.service';
 
 const isUuid = (val?: string | null): boolean =>
   typeof val === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 @ApiTags('Manuscripts - Pages Compatibility Bridge')
+@ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/manuscripts', 'api'])
+@UseGuards(JwtAuthGuard)
 export class PagesBridgeController {
   constructor(
     private readonly docstoreService: DocstoreService,
     private readonly prisma: PrismaService,
+    @Optional() private readonly realtimeService?: RealtimeService,
   ) {}
 
   // ─── 1. CORE DOCUMENT CONTENT & METADATA ──────────────────────────────────────
@@ -119,7 +128,13 @@ export class PagesBridgeController {
   @ApiOperation({ summary: 'Update document content by pageId' })
   async updatePageContent(
     @Param('pageId') pageId: string,
-    @Body() body: { content?: string; lines?: string[]; title?: string; version?: number },
+    @Body()
+    body: {
+      content?: string;
+      lines?: string[];
+      title?: string;
+      version?: number;
+    },
   ) {
     try {
       if (!isUuid(pageId)) {
@@ -154,15 +169,38 @@ export class PagesBridgeController {
         body.lines ||
         (typeof body.content === 'string' ? body.content.split('\n') : []);
 
-      const result = await this.docstoreService.updateDoc(record.projectId, pageId, {
-        lines,
-        version: (body.version ?? record.version) + 1,
-      });
+      const result = await this.docstoreService.updateDoc(
+        record.projectId,
+        pageId,
+        {
+          lines,
+          version: (body.version ?? record.version) + 1,
+        },
+      );
 
       const updatedLines = result.doc.lines || [];
       const content = Array.isArray(updatedLines)
         ? updatedLines.join('\n')
         : String(updatedLines);
+
+      // Broadcast real-time content notification to collaborating peers
+      if (this.realtimeService && record.projectId) {
+        try {
+          this.realtimeService.broadcastEvent(
+            record.projectId,
+            'doc:content-updated',
+            {
+              docId: pageId,
+              version: result.doc.version,
+              rev: result.doc.rev,
+              content,
+              updatedAt: new Date().toISOString(),
+            },
+          );
+        } catch {
+          // Non-blocking real-time broadcast error ignored
+        }
+      }
 
       return {
         ...result,
@@ -374,7 +412,10 @@ export class PagesBridgeController {
    * PATCH /api/v1/manuscripts/docs/:pageId/comments/:commentId
    * PATCH /api/pages/:pageId/comments/:commentId
    */
-  @Patch(['docs/:pageId/comments/:commentId', 'pages/:pageId/comments/:commentId'])
+  @Patch([
+    'docs/:pageId/comments/:commentId',
+    'pages/:pageId/comments/:commentId',
+  ])
   async updateComment(
     @Param('commentId') commentId: string,
     @Body() body: { content?: string; status?: 'open' | 'resolved' },
@@ -397,7 +438,10 @@ export class PagesBridgeController {
             id: updated.id,
             page: updated.docId,
             projectPageId: updated.docId,
-            author: { id: updated.createdById || 'user-1', name: 'Collaborator' },
+            author: {
+              id: updated.createdById || 'user-1',
+              name: 'Collaborator',
+            },
             content: updated.quote || '',
             line: updated.startLine,
             lineEnd: updated.endLine,
@@ -436,7 +480,10 @@ export class PagesBridgeController {
    * DELETE /api/v1/manuscripts/docs/:pageId/comments/:commentId
    * DELETE /api/pages/:pageId/comments/:commentId
    */
-  @Delete(['docs/:pageId/comments/:commentId', 'pages/:pageId/comments/:commentId'])
+  @Delete([
+    'docs/:pageId/comments/:commentId',
+    'pages/:pageId/comments/:commentId',
+  ])
   @HttpCode(HttpStatus.OK)
   async deleteComment(@Param('commentId') commentId: string) {
     if (isUuid(commentId)) {
@@ -485,7 +532,10 @@ export class PagesBridgeController {
               id: thread.id,
               page: thread.docId,
               projectPageId: thread.docId,
-              author: { id: thread.createdById || 'user-1', name: 'Collaborator' },
+              author: {
+                id: thread.createdById || 'user-1',
+                name: 'Collaborator',
+              },
               content: thread.quote || '',
               line: thread.startLine,
               lineEnd: thread.endLine,
@@ -510,7 +560,13 @@ export class PagesBridgeController {
       comment: {
         id: commentId,
         content: '',
-        replies: [{ id: `rep-${Date.now()}`, content: body.content, createdAt: new Date().toISOString() }],
+        replies: [
+          {
+            id: `rep-${Date.now()}`,
+            content: body.content,
+            createdAt: new Date().toISOString(),
+          },
+        ],
       },
     };
   }
@@ -562,7 +618,10 @@ export class PagesBridgeController {
             id: thread.id,
             page: thread.docId,
             projectPageId: thread.docId,
-            author: { id: thread.createdById || 'user-1', name: 'Collaborator' },
+            author: {
+              id: thread.createdById || 'user-1',
+              name: 'Collaborator',
+            },
             content: thread.quote || '',
             line: thread.startLine,
             lineEnd: thread.endLine,
@@ -681,7 +740,11 @@ export class PagesBridgeController {
             id: record.id,
             pageId: record.docId,
             authorId: userId || 'user-1',
-            author: { id: userId || 'user-1', name: 'Collaborator', email: 'collaborator@flux.ai' },
+            author: {
+              id: userId || 'user-1',
+              name: 'Collaborator',
+              email: 'collaborator@flux.ai',
+            },
             type: record.type,
             originalText: record.type === 'delete' ? record.text : '',
             suggestedText: record.type === 'insert' ? record.text : '',
@@ -705,7 +768,11 @@ export class PagesBridgeController {
         id: mockId,
         pageId,
         authorId: userId || 'user-1',
-        author: { id: userId || 'user-1', name: 'Collaborator', email: 'collaborator@flux.ai' },
+        author: {
+          id: userId || 'user-1',
+          name: 'Collaborator',
+          email: 'collaborator@flux.ai',
+        },
         type,
         originalText: type === 'delete' ? text : '',
         suggestedText: type === 'insert' ? text : '',
@@ -865,7 +932,10 @@ export class PagesBridgeController {
    * GET /api/v1/manuscripts/docs/:pageId/versions/:versionId
    * GET /api/pages/:pageId/versions/:versionId
    */
-  @Get(['docs/:pageId/versions/:versionId', 'pages/:pageId/versions/:versionId'])
+  @Get([
+    'docs/:pageId/versions/:versionId',
+    'pages/:pageId/versions/:versionId',
+  ])
   async getVersionById(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
@@ -1008,7 +1078,13 @@ export class PagesBridgeController {
       toVersionId: to,
       diff: '',
       chunks: [],
-      stats: { additions: 0, deletions: 0, addedLines: 0, deletedLines: 0, unchangedLines: 0 },
+      stats: {
+        additions: 0,
+        deletions: 0,
+        addedLines: 0,
+        deletedLines: 0,
+        unchangedLines: 0,
+      },
     };
   }
 
@@ -1018,7 +1094,11 @@ export class PagesBridgeController {
    */
   @Get(['docs/:pageId/timeline', 'pages/:pageId/timeline'])
   async getTimeline() {
-    return { entries: [], oldestMs: Date.now() - 3600000, newestMs: Date.now() };
+    return {
+      entries: [],
+      oldestMs: Date.now() - 3600000,
+      newestMs: Date.now(),
+    };
   }
 
   /**
@@ -1045,7 +1125,10 @@ export class PagesBridgeController {
    * POST /api/v1/manuscripts/docs/:rootPageId/sync-incremental
    * POST /api/pages/:rootPageId/sync-incremental
    */
-  @Post(['docs/:rootPageId/sync-incremental', 'pages/:rootPageId/sync-incremental'])
+  @Post([
+    'docs/:rootPageId/sync-incremental',
+    'pages/:rootPageId/sync-incremental',
+  ])
   @HttpCode(HttpStatus.OK)
   async syncIncremental(
     @Param('rootPageId') rootPageId: string,
@@ -1061,7 +1144,10 @@ export class PagesBridgeController {
    * GET /api/v1/manuscripts/docs/:pageId/collaboration/presence
    * GET /api/pages/:pageId/collaboration/presence
    */
-  @Get(['docs/:pageId/collaboration/presence', 'pages/:pageId/collaboration/presence'])
+  @Get([
+    'docs/:pageId/collaboration/presence',
+    'pages/:pageId/collaboration/presence',
+  ])
   async getPresence() {
     return { activeUsers: [], presence: [] };
   }
@@ -1070,7 +1156,10 @@ export class PagesBridgeController {
    * POST /api/v1/manuscripts/docs/:pageId/collaboration/heartbeat
    * POST /api/pages/:pageId/collaboration/heartbeat
    */
-  @Post(['docs/:pageId/collaboration/heartbeat', 'pages/:pageId/collaboration/heartbeat'])
+  @Post([
+    'docs/:pageId/collaboration/heartbeat',
+    'pages/:pageId/collaboration/heartbeat',
+  ])
   @HttpCode(HttpStatus.OK)
   async sendHeartbeat() {
     return { success: true };
@@ -1080,7 +1169,10 @@ export class PagesBridgeController {
    * POST /api/v1/manuscripts/docs/:pageId/collaboration/leave
    * POST /api/pages/:pageId/collaboration/leave
    */
-  @Post(['docs/:pageId/collaboration/leave', 'pages/:pageId/collaboration/leave'])
+  @Post([
+    'docs/:pageId/collaboration/leave',
+    'pages/:pageId/collaboration/leave',
+  ])
   @HttpCode(HttpStatus.OK)
   async leaveRoom() {
     return { success: true };
@@ -1118,9 +1210,7 @@ export class PagesBridgeController {
    */
   @Post(['docs/:pageId/export', 'pages/:pageId/export'])
   @HttpCode(HttpStatus.OK)
-  async exportDocument(
-    @Param('pageId') pageId: string,
-  ) {
+  async exportDocument(@Param('pageId') pageId: string) {
     let content = '';
     let filename = 'document.tex';
     const mimeType = 'application/x-tex';
@@ -1235,7 +1325,10 @@ export class PagesBridgeController {
    * POST /api/v1/manuscripts/projects/:projectId/replace
    * POST /api/projects/:projectId/documents/replace
    */
-  @Post(['projects/:projectId/replace', 'projects/:projectId/documents/replace'])
+  @Post([
+    'projects/:projectId/replace',
+    'projects/:projectId/documents/replace',
+  ])
   @HttpCode(HttpStatus.OK)
   async replaceDocuments(
     @Param('projectId') projectId: string,
@@ -1351,7 +1444,9 @@ export class PagesBridgeController {
           where: { id: pageId },
         });
         if (doc) {
-          await this.docstoreService.patchDoc(doc.projectId, pageId, { deleted: true });
+          await this.docstoreService.patchDoc(doc.projectId, pageId, {
+            deleted: true,
+          });
         }
       } catch {
         // Fallback
@@ -1361,19 +1456,133 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/duplicate
+   * POST /api/v1/manuscripts/docs/:pageId/clone
+   * POST /api/v1/manuscripts/pages/:pageId/duplicate
+   * POST /api/v1/manuscripts/pages/:pageId/clone
+   * POST /api/docs/:pageId/duplicate
+   * POST /api/docs/:pageId/clone
+   * POST /api/pages/:pageId/duplicate
+   * POST /api/pages/:pageId/clone
+   */
+  @Post([
+    'docs/:pageId/duplicate',
+    'docs/:pageId/clone',
+    'pages/:pageId/duplicate',
+    'pages/:pageId/clone',
+  ])
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Duplicate/clone a page by pageId with its content and tree node',
+  })
+  async duplicatePage(@Param('pageId') pageId: string) {
+    if (!isUuid(pageId)) {
+      throw new NotFoundException(`Page ${pageId} not found`);
+    }
+
+    const source = await this.prisma.manuscriptDoc.findUnique({
+      where: { id: pageId },
+    });
+
+    if (!source) {
+      throw new NotFoundException(`Page ${pageId} not found`);
+    }
+
+    const sourceTitle = source.path || 'document.tex';
+    const newTitle = sourceTitle.endsWith(' (Copy)')
+      ? `${sourceTitle.replace(/ \(Copy\)$/, '')} (Copy 2)`
+      : `${sourceTitle} (Copy)`;
+
+    // 1. Create duplicate doc in docstore / prisma
+    const newDoc = await this.prisma.manuscriptDoc.create({
+      data: {
+        projectId: source.projectId,
+        path: newTitle,
+        lines: source.lines ?? [],
+        rev: 0,
+        version: 1,
+        ranges: source.ranges ?? {},
+        hash: source.hash,
+        sizeBytes: source.sizeBytes,
+      },
+    });
+
+    // 2. Clone file tree node if exists
+    const sourceNode = await this.prisma.manuscriptNode.findFirst({
+      where: { projectId: source.projectId, docId: pageId },
+    });
+
+    if (sourceNode) {
+      await this.prisma.manuscriptNode.create({
+        data: {
+          projectId: source.projectId,
+          parentId: sourceNode.parentId,
+          type: sourceNode.type,
+          name: newTitle,
+          path: newTitle,
+          depth: sourceNode.depth,
+          docId: newDoc.id,
+          fileId: null,
+          isRootDoc: false,
+          sizeBytes: source.sizeBytes,
+          hash: source.hash,
+          sortOrder: sourceNode.sortOrder + 1,
+        },
+      });
+
+      // Broadcast tree mutation
+      if (this.realtimeService) {
+        this.realtimeService.broadcastFileTreeChange(source.projectId, {
+          action: 'create',
+          node: { id: newDoc.id, path: newTitle, docId: newDoc.id },
+        });
+      }
+    }
+
+    const lines = Array.isArray(newDoc.lines) ? newDoc.lines : [];
+    const content = lines.join('\n');
+
+    return {
+      page: {
+        id: newDoc.id,
+        title: newDoc.path,
+        content,
+        status: 'draft',
+        projectId: source.projectId,
+        version: newDoc.version,
+        rev: newDoc.rev,
+        createdAt: newDoc.createdAt.toISOString(),
+        updatedAt: newDoc.updatedAt.toISOString(),
+      },
+      mainFile: { id: newDoc.id, title: newDoc.path },
+      rootPageId: newDoc.id,
+      mainFileId: newDoc.id,
+    };
+  }
+
+  /**
    * Label management routes
    */
-  @Get(['projects/:projectId/docs/:pageId/labels', 'projects/:projectId/pages/:pageId/labels'])
+  @Get([
+    'projects/:projectId/docs/:pageId/labels',
+    'projects/:projectId/pages/:pageId/labels',
+  ])
   async getPageLabels() {
     return { labels: [] };
   }
 
-  @Post(['projects/:projectId/docs/:pageId/labels', 'projects/:projectId/pages/:pageId/labels'])
+  @Post([
+    'projects/:projectId/docs/:pageId/labels',
+    'projects/:projectId/pages/:pageId/labels',
+  ])
   async assignPageLabels(@Body() _body: any) {
     return { labels: [] };
   }
 
-  @Put(['projects/:projectId/docs/:pageId/labels', 'projects/:projectId/pages/:pageId/labels'])
+  @Put([
+    'projects/:projectId/docs/:pageId/labels',
+    'projects/:projectId/pages/:pageId/labels',
+  ])
   async replacePageLabels(@Body() _body: any) {
     return { labels: [] };
   }

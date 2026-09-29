@@ -9,6 +9,7 @@ import { DiagnosticReport } from '../domain/entities/diagnostic-report.entity';
 export interface LintDocumentSyntaxCommand {
   source: string;
   filename?: string;
+  knownBibKeys?: Set<string>;
 }
 
 export class LintDocumentSyntaxUseCase {
@@ -18,7 +19,7 @@ export class LintDocumentSyntaxUseCase {
     const source = command.source ?? '';
     const filename = command.filename || 'main.tex';
 
-    const items = this.linter.lint(source, filename);
+    const items = this.linter.lint(source, filename, command.knownBibKeys);
 
     return new DiagnosticReport({
       items,

@@ -86,7 +86,9 @@ export class ChatController {
   }
 
   @Get(['chats/:chatId', 'ai/chats/:chatId'])
-  @ApiOperation({ summary: 'Get details and message history of a chat session' })
+  @ApiOperation({
+    summary: 'Get details and message history of a chat session',
+  })
   async getChat(
     @Param('chatId') chatId: string,
     @CurrentUser('id') userId: string,

@@ -1,8 +1,8 @@
-import { RetractionDatabaseService } from '../../src/modules/library/ingestion/application/services/retraction-database.service';
-import { RetractionScannerProvider } from '../../src/modules/library/ingestion/infrastructure/providers/retraction-scanner.provider';
-import { RetractionService } from '../../src/modules/library/ingestion/application/services/retraction.service';
-import { RetractionRepository } from '../../src/modules/library/ingestion/infrastructure/repositories/retraction.repository';
-import { RetractionSyncService } from '../../src/modules/library/ingestion/application/services/retraction-sync.service';
+import { RetractionDatabaseService } from '@/modules/library/ingestion/core/use-cases/retraction-database.service';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/core/adapters/retraction-scanner.provider';
+import { RetractionService } from '@/modules/library/ingestion/core/use-cases/retraction.service';
+import { RetractionRepository } from '@/modules/library/ingestion/core/adapters/retraction.repository';
+import { RetractionSyncService } from '@/modules/library/ingestion/core/use-cases/retraction-sync.service';
 
 describe('Retraction Watch & Offline Retraction Detection', () => {
   let mockPrisma: any;
@@ -94,9 +94,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
         recordsMap.set(key, merged);
         return merged;
       }),
-      groupBy: jest.fn(async () => [
-        { source: 'retraction_watch', _count: 2 },
-      ]),
+      groupBy: jest.fn(async () => [{ source: 'retraction_watch', _count: 2 }]),
     };
 
     mockPrisma = {
@@ -281,7 +279,9 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
           metadata: {
             isRetracted: false,
             retractionNature: null,
-            retractionCheckedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
+            retractionCheckedAt: new Date(
+              Date.now() - 20 * 24 * 60 * 60 * 1000,
+            ).toISOString(),
           },
           isRetracted: false,
           retractionNature: null,

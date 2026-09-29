@@ -7,7 +7,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { RecordChangeUseCase } from './core/use-cases/record-change.use-case';
 import { AcceptChangeUseCase } from './core/use-cases/accept-change.use-case';
 import { RejectChangeUseCase } from './core/use-cases/reject-change.use-case';
-import { BatchResolveChangesUseCase, BatchAction } from './core/use-cases/batch-resolve-changes.use-case';
+import {
+  BatchResolveChangesUseCase,
+  BatchAction,
+} from './core/use-cases/batch-resolve-changes.use-case';
 import { CreateCommentThreadUseCase } from './core/use-cases/create-comment-thread.use-case';
 import { AddCommentReplyUseCase } from './core/use-cases/add-comment-reply.use-case';
 import { ResolveCommentThreadUseCase } from './core/use-cases/resolve-comment-thread.use-case';
@@ -154,7 +157,10 @@ export class TrackChangesService {
     return this.toThreadDto(thread);
   }
 
-  public async getDocReviews(projectId: string, docId: string): Promise<DocReviewsResponseDto> {
+  public async getDocReviews(
+    projectId: string,
+    docId: string,
+  ): Promise<DocReviewsResponseDto> {
     const result = await this.getDocReviewsUseCase.execute(projectId, docId);
     return {
       changes: result.changes.map((c) => this.toChangeDto(c)),
@@ -170,7 +176,7 @@ export class TrackChangesService {
       type: change.type,
       status: change.status,
       text: change.text,
-      range: change.range.toJSON() as any,
+      range: change.range.toJSON(),
       createdById: change.createdById,
       resolvedById: change.resolvedById,
       resolvedAt: change.resolvedAt?.toISOString() ?? null,
@@ -196,7 +202,7 @@ export class TrackChangesService {
       projectId: thread.projectId,
       docId: thread.docId,
       quote: thread.quote,
-      range: thread.range.toJSON() as any,
+      range: thread.range.toJSON(),
       isResolved: thread.isResolved,
       createdById: thread.createdById,
       resolvedById: thread.resolvedById,

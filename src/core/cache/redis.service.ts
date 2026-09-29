@@ -32,9 +32,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
           this.memoryCache.delete(k);
         }
       }
-      while (
-        this.memoryCache.size >= RedisCacheService.MAX_MEMORY_CACHE_SIZE
-      ) {
+      while (this.memoryCache.size >= RedisCacheService.MAX_MEMORY_CACHE_SIZE) {
         const oldestKey = this.memoryCache.keys().next().value;
         if (!oldestKey) break;
         this.memoryCache.delete(oldestKey);

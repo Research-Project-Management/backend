@@ -83,11 +83,49 @@ class MockStructureService {
 
   reset(pid: string = 'project-alpha') {
     this.nodes = [
-      { id: 'node-root-dir', projectId: pid, path: '/', name: '', type: 'FOLDER', isDeleted: false },
-      { id: 'node-main-tex', projectId: pid, path: '/main.tex', name: 'main.tex', type: 'DOC', docId: 'doc-1', isDeleted: false },
-      { id: 'node-refs-bib', projectId: pid, path: '/references.bib', name: 'references.bib', type: 'DOC', docId: 'doc-2', isDeleted: false },
-      { id: 'node-fig-dir', projectId: pid, path: '/figures', name: 'figures', type: 'FOLDER', isDeleted: false },
-      { id: 'node-plot-png', projectId: pid, path: '/figures/plot.png', name: 'plot.png', type: 'FILE', fileId: 'file-1', isDeleted: false },
+      {
+        id: 'node-root-dir',
+        projectId: pid,
+        path: '/',
+        name: '',
+        type: 'FOLDER',
+        isDeleted: false,
+      },
+      {
+        id: 'node-main-tex',
+        projectId: pid,
+        path: '/main.tex',
+        name: 'main.tex',
+        type: 'DOC',
+        docId: 'doc-1',
+        isDeleted: false,
+      },
+      {
+        id: 'node-refs-bib',
+        projectId: pid,
+        path: '/references.bib',
+        name: 'references.bib',
+        type: 'DOC',
+        docId: 'doc-2',
+        isDeleted: false,
+      },
+      {
+        id: 'node-fig-dir',
+        projectId: pid,
+        path: '/figures',
+        name: 'figures',
+        type: 'FOLDER',
+        isDeleted: false,
+      },
+      {
+        id: 'node-plot-png',
+        projectId: pid,
+        path: '/figures/plot.png',
+        name: 'plot.png',
+        type: 'FILE',
+        fileId: 'file-1',
+        isDeleted: false,
+      },
     ];
     this.rootDocId = 'node-main-tex';
   }
@@ -97,11 +135,16 @@ class MockStructureService {
   }
 
   async getNodeByPath(projectId: string, path: string) {
-    return this.nodes.find((n) => n.projectId === projectId && n.path === path) || null;
+    return (
+      this.nodes.find((n) => n.projectId === projectId && n.path === path) ||
+      null
+    );
   }
 
   async mkdirp(projectId: string, dirPath: string) {
-    let node = this.nodes.find((n) => n.projectId === projectId && n.path === dirPath);
+    let node = this.nodes.find(
+      (n) => n.projectId === projectId && n.path === dirPath,
+    );
     if (!node) {
       node = {
         id: `dir-${Math.random().toString(36).substring(7)}`,
@@ -126,18 +169,28 @@ class MockStructureService {
   }
 
   async setRootDoc(projectId: string, nodeId: string) {
-    const node = this.nodes.find((n) => n.projectId === projectId && n.id === nodeId);
+    const node = this.nodes.find(
+      (n) => n.projectId === projectId && n.id === nodeId,
+    );
     this.rootDocId = nodeId;
     return node || { id: nodeId, path: '/main.tex' };
   }
 
-  async autoDetectRootDoc(projectId: string, docContentsMap?: Map<string, string[]>) {
-    const mainNode = this.nodes.find((n) => n.projectId === projectId && n.name === 'main.tex' && n.type === 'DOC');
+  async autoDetectRootDoc(
+    projectId: string,
+    docContentsMap?: Map<string, string[]>,
+  ) {
+    const mainNode = this.nodes.find(
+      (n) =>
+        n.projectId === projectId && n.name === 'main.tex' && n.type === 'DOC',
+    );
     if (mainNode) {
       this.rootDocId = mainNode.id;
       return mainNode;
     }
-    const anyDoc = this.nodes.find((n) => n.projectId === projectId && n.type === 'DOC');
+    const anyDoc = this.nodes.find(
+      (n) => n.projectId === projectId && n.type === 'DOC',
+    );
     if (anyDoc) {
       this.rootDocId = anyDoc.id;
       return anyDoc;
@@ -147,7 +200,10 @@ class MockStructureService {
 }
 
 class MockDocstoreService {
-  public docs = new Map<string, { _id: string; path: string; lines: string[] }>();
+  public docs = new Map<
+    string,
+    { _id: string; path: string; lines: string[] }
+  >();
 
   constructor() {
     this.reset();
@@ -157,7 +213,12 @@ class MockDocstoreService {
     this.docs.set('doc-1', {
       _id: 'doc-1',
       path: '/main.tex',
-      lines: ['\\documentclass{article}', '\\begin{document}', 'Hello Manuscripts', '\\end{document}'],
+      lines: [
+        '\\documentclass{article}',
+        '\\begin{document}',
+        'Hello Manuscripts',
+        '\\end{document}',
+      ],
     });
     this.docs.set('doc-2', {
       _id: 'doc-2',
@@ -181,7 +242,10 @@ class MockDocstoreService {
 }
 
 class MockFilestoreService {
-  public files = new Map<string, { id: string; name: string; buffer: Buffer; mimeType?: string }>();
+  public files = new Map<
+    string,
+    { id: string; name: string; buffer: Buffer; mimeType?: string }
+  >();
 
   constructor() {
     this.reset();
@@ -198,14 +262,20 @@ class MockFilestoreService {
 
   async openReadStream(projectId: string, fileId: string) {
     const file = this.files.get(fileId);
-    if (!file) throw new Error(`File ${fileId} not found in MockFilestoreService`);
+    if (!file)
+      throw new Error(`File ${fileId} not found in MockFilestoreService`);
     return {
       file: { id: fileId, name: file.name },
       stream: Readable.from(file.buffer),
     };
   }
 
-  async uploadFileFromBuffer(projectId: string, name: string, buffer: Buffer, mimeType?: string) {
+  async uploadFileFromBuffer(
+    projectId: string,
+    name: string,
+    buffer: Buffer,
+    mimeType?: string,
+  ) {
     const id = `file-${Math.random().toString(36).substring(7)}`;
     const file = { id, name, buffer, mimeType };
     this.files.set(id, file);
@@ -217,10 +287,16 @@ class MockClsiService {
   public auxFiles = new Map<string, Buffer>();
 
   constructor() {
-    this.auxFiles.set('output.pdf', Buffer.from('%PDF-1.5 Sample Compiled Output'));
+    this.auxFiles.set(
+      'output.pdf',
+      Buffer.from('%PDF-1.5 Sample Compiled Output'),
+    );
   }
 
-  async readAuxFileBuffer(projectId: string, filename: string): Promise<Buffer | null> {
+  async readAuxFileBuffer(
+    projectId: string,
+    filename: string,
+  ): Promise<Buffer | null> {
     return this.auxFiles.get(filename) || null;
   }
 }
@@ -272,7 +348,10 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
     exportUseCase = new ExportProjectZipUseCase(aggregatorAdapter, zipEngine);
     importUseCase = new ImportProjectZipUseCase(zipEngine, hydratorAdapter);
     listTemplatesUseCase = new ListTemplatesUseCase(catalogAdapter);
-    scaffoldTemplateUseCase = new ScaffoldTemplateUseCase(catalogAdapter, hydratorAdapter);
+    scaffoldTemplateUseCase = new ScaffoldTemplateUseCase(
+      catalogAdapter,
+      hydratorAdapter,
+    );
 
     service = new ExportImportService(
       exportUseCase,
@@ -290,25 +369,42 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
   describe('Domain Value Objects & Entities', () => {
     describe('ArchiveEntryVo', () => {
       it('should create valid archive entry and normalize paths', () => {
-        const entry = ArchiveEntryVo.create('src\\chapters\\intro.tex', Buffer.from('hello'));
+        const entry = ArchiveEntryVo.create(
+          'src\\chapters\\intro.tex',
+          Buffer.from('hello'),
+        );
         expect(entry.path).toBe('src/chapters/intro.tex');
         expect(entry.sizeBytes).toBe(5);
         expect(entry.isDirectory).toBe(false);
       });
 
       it('should strip leading slashes and dot-slash prefixes', () => {
-        const entry = ArchiveEntryVo.create('./folder/main.tex', Buffer.from('text'));
+        const entry = ArchiveEntryVo.create(
+          './folder/main.tex',
+          Buffer.from('text'),
+        );
         expect(entry.path).toBe('folder/main.tex');
 
-        const entry2 = ArchiveEntryVo.create('///deep/nested.tex', Buffer.from('text'));
+        const entry2 = ArchiveEntryVo.create(
+          '///deep/nested.tex',
+          Buffer.from('text'),
+        );
         expect(entry2.path).toBe('deep/nested.tex');
       });
 
       it('should detect Zip Slip attacks and throw ZipSlipSecurityException', () => {
-        expect(() => ArchiveEntryVo.create('../../etc/passwd')).toThrow(ZipSlipSecurityException);
-        expect(() => ArchiveEntryVo.create('folder/../../secret.key')).toThrow(ZipSlipSecurityException);
-        expect(() => ArchiveEntryVo.create('/etc/shadow')).toThrow(ZipSlipSecurityException);
-        expect(() => ArchiveEntryVo.create('C:\\Windows\\System32\\calc.exe')).toThrow(ZipSlipSecurityException);
+        expect(() => ArchiveEntryVo.create('../../etc/passwd')).toThrow(
+          ZipSlipSecurityException,
+        );
+        expect(() => ArchiveEntryVo.create('folder/../../secret.key')).toThrow(
+          ZipSlipSecurityException,
+        );
+        expect(() => ArchiveEntryVo.create('/etc/shadow')).toThrow(
+          ZipSlipSecurityException,
+        );
+        expect(() =>
+          ArchiveEntryVo.create('C:\\Windows\\System32\\calc.exe'),
+        ).toThrow(ZipSlipSecurityException);
       });
 
       it('should identify macOS and Windows OS garbage artifacts', () => {
@@ -326,24 +422,42 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
       });
 
       it('should determine correct storage type (doc vs file)', () => {
-        const texDoc = ArchiveEntryVo.create('main.tex', Buffer.from('\\documentclass{article}'));
+        const texDoc = ArchiveEntryVo.create(
+          'main.tex',
+          Buffer.from('\\documentclass{article}'),
+        );
         expect(texDoc.getStorageType()).toBe('doc');
 
-        const bibDoc = ArchiveEntryVo.create('references.bib', Buffer.from('@article{}'));
+        const bibDoc = ArchiveEntryVo.create(
+          'references.bib',
+          Buffer.from('@article{}'),
+        );
         expect(bibDoc.getStorageType()).toBe('doc');
 
-        const pngFile = ArchiveEntryVo.create('fig.png', Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+        const pngFile = ArchiveEntryVo.create(
+          'fig.png',
+          Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+        );
         expect(pngFile.getStorageType()).toBe('file');
 
-        const pdfFile = ArchiveEntryVo.create('paper.pdf', Buffer.from('%PDF-1.5'));
+        const pdfFile = ArchiveEntryVo.create(
+          'paper.pdf',
+          Buffer.from('%PDF-1.5'),
+        );
         expect(pdfFile.getStorageType()).toBe('file');
 
         // Plain text with unknown extension but valid UTF-8
-        const customTxt = ArchiveEntryVo.create('notes.custom', Buffer.from('just plain english text'));
+        const customTxt = ArchiveEntryVo.create(
+          'notes.custom',
+          Buffer.from('just plain english text'),
+        );
         expect(customTxt.getStorageType()).toBe('doc');
 
         // Binary with null bytes
-        const binaryCustom = ArchiveEntryVo.create('data.bin', Buffer.from([0x00, 0x01, 0x02, 0x03]));
+        const binaryCustom = ArchiveEntryVo.create(
+          'data.bin',
+          Buffer.from([0x00, 0x01, 0x02, 0x03]),
+        );
         expect(binaryCustom.getStorageType()).toBe('file');
       });
     });
@@ -413,9 +527,18 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
   describe('PkzipEngineAdapter (Roundtrip Fidelity & Security)', () => {
     it('should build a valid PKZIP buffer and extract all entries with byte fidelity', () => {
       const originalEntries = [
-        { path: 'main.tex', data: Buffer.from('\\documentclass{article}\nHello World!') },
-        { path: 'chapters/intro.tex', data: Buffer.from('\\section{Introduction}\nThis is chapter 1.') },
-        { path: 'figures/plot.png', data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01, 0x02, 0x03]) },
+        {
+          path: 'main.tex',
+          data: Buffer.from('\\documentclass{article}\nHello World!'),
+        },
+        {
+          path: 'chapters/intro.tex',
+          data: Buffer.from('\\section{Introduction}\nThis is chapter 1.'),
+        },
+        {
+          path: 'figures/plot.png',
+          data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01, 0x02, 0x03]),
+        },
       ];
 
       const zipBuffer = zipEngine.buildZip(originalEntries);
@@ -431,15 +554,24 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
 
       const main = extracted.find((e) => e.path === 'main.tex');
       expect(main).toBeDefined();
-      expect(main!.data.toString('utf8')).toBe('\\documentclass{article}\nHello World!');
+      expect(main!.data.toString('utf8')).toBe(
+        '\\documentclass{article}\nHello World!',
+      );
 
       const intro = extracted.find((e) => e.path === 'chapters/intro.tex');
       expect(intro).toBeDefined();
-      expect(intro!.data.toString('utf8')).toBe('\\section{Introduction}\nThis is chapter 1.');
+      expect(intro!.data.toString('utf8')).toBe(
+        '\\section{Introduction}\nThis is chapter 1.',
+      );
 
       const fig = extracted.find((e) => e.path === 'figures/plot.png');
       expect(fig).toBeDefined();
-      expect(Buffer.compare(fig!.data, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01, 0x02, 0x03]))).toBe(0);
+      expect(
+        Buffer.compare(
+          fig!.data,
+          Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01, 0x02, 0x03]),
+        ),
+      ).toBe(0);
     });
 
     it('should handle empty files properly with Store compression (method 0)', () => {
@@ -457,10 +589,16 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
     });
 
     it('should throw InvalidZipArchiveException on corrupted or truncated zip buffers', () => {
-      expect(() => zipEngine.extractZip(Buffer.alloc(10))).toThrow(InvalidZipArchiveException);
+      expect(() => zipEngine.extractZip(Buffer.alloc(10))).toThrow(
+        InvalidZipArchiveException,
+      );
 
-      const corruptBuffer = Buffer.from('This is not a zip file at all, just random text');
-      expect(() => zipEngine.extractZip(corruptBuffer)).toThrow(InvalidZipArchiveException);
+      const corruptBuffer = Buffer.from(
+        'This is not a zip file at all, just random text',
+      );
+      expect(() => zipEngine.extractZip(corruptBuffer)).toThrow(
+        InvalidZipArchiveException,
+      );
     });
 
     it('should filter out macOS __MACOSX metadata and .DS_Store during extraction', () => {
@@ -483,7 +621,10 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
   // =========================================================================
   describe('Aggregator & Hydrator Adapters', () => {
     it('should aggregate project files from structure, docstore, and filestore', async () => {
-      const entries = await aggregatorAdapter.collectProjectEntries(projectId, false);
+      const entries = await aggregatorAdapter.collectProjectEntries(
+        projectId,
+        false,
+      );
       expect(entries.length).toBe(3); // main.tex, references.bib, figures/plot.png
 
       const main = entries.find((e) => e.path === 'main.tex');
@@ -498,7 +639,10 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
     });
 
     it('should include compiled output.pdf when includePdf is true', async () => {
-      const entries = await aggregatorAdapter.collectProjectEntries(projectId, true);
+      const entries = await aggregatorAdapter.collectProjectEntries(
+        projectId,
+        true,
+      );
       const pdf = entries.find((e) => e.path === 'output.pdf');
       expect(pdf).toBeDefined();
       expect(pdf!.data.toString('utf8')).toContain('%PDF-1.5');
@@ -507,12 +651,24 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
     it('should hydrate archive entries into structure, docstore, and filestore', async () => {
       const newProjectId = 'proj-new';
       const entries = [
-        ArchiveEntryVo.create('main.tex', Buffer.from('\\documentclass{article}\n\\begin{document}Hi\\end{document}')),
+        ArchiveEntryVo.create(
+          'main.tex',
+          Buffer.from(
+            '\\documentclass{article}\n\\begin{document}Hi\\end{document}',
+          ),
+        ),
         ArchiveEntryVo.create('references.bib', Buffer.from('@article{a1}')),
-        ArchiveEntryVo.create('figures/photo.jpg', Buffer.from([0xff, 0xd8, 0xff])), // JPG bytes
+        ArchiveEntryVo.create(
+          'figures/photo.jpg',
+          Buffer.from([0xff, 0xd8, 0xff]),
+        ), // JPG bytes
       ];
 
-      const summary = await hydratorAdapter.hydrateProjectEntries(newProjectId, entries, userId);
+      const summary = await hydratorAdapter.hydrateProjectEntries(
+        newProjectId,
+        entries,
+        userId,
+      );
 
       expect(summary.projectId).toBe(newProjectId);
       expect(summary.totalDocs).toBe(2);
@@ -520,15 +676,22 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
       expect(summary.rootDocPath).toBe('/main.tex');
 
       const nodes = await mockStructure.getAllNodes(newProjectId);
-      expect(nodes.some((n) => n.path === '/main.tex' && n.type === 'DOC')).toBe(true);
-      expect(nodes.some((n) => n.path === '/figures/photo.jpg' && n.type === 'FILE')).toBe(true);
+      expect(
+        nodes.some((n) => n.path === '/main.tex' && n.type === 'DOC'),
+      ).toBe(true);
+      expect(
+        nodes.some((n) => n.path === '/figures/photo.jpg' && n.type === 'FILE'),
+      ).toBe(true);
     });
 
     it('should respect preferredRootDoc when hydrating', async () => {
       const newProjectId = 'proj-custom-root';
       const entries = [
         ArchiveEntryVo.create('main.tex', Buffer.from('\\input{paper}')),
-        ArchiveEntryVo.create('paper.tex', Buffer.from('\\documentclass{article}')),
+        ArchiveEntryVo.create(
+          'paper.tex',
+          Buffer.from('\\documentclass{article}'),
+        ),
       ];
 
       const summary = await hydratorAdapter.hydrateProjectEntries(
@@ -566,7 +729,9 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
     });
 
     it('should return null for unknown template id', async () => {
-      const unknown = await catalogAdapter.getTemplateById('non-existent-template');
+      const unknown = await catalogAdapter.getTemplateById(
+        'non-existent-template',
+      );
       expect(unknown).toBeNull();
     });
   });
@@ -686,10 +851,16 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
         },
       };
 
-      await controller.exportProjectZip(projectId, { projectName: 'PaperExport' }, mockRes);
+      await controller.exportProjectZip(
+        projectId,
+        { projectName: 'PaperExport' },
+        mockRes,
+      );
 
       expect(headers['Content-Type']).toBe('application/zip');
-      expect(headers['Content-Disposition']).toBe('attachment; filename="PaperExport.zip"');
+      expect(headers['Content-Disposition']).toBe(
+        'attachment; filename="PaperExport.zip"',
+      );
       expect(sentBuffer).not.toBeNull();
       expect(sentBuffer!.length).toBeGreaterThan(0);
     });
@@ -703,7 +874,10 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
         body: zip,
       };
 
-      const result = await controller.importProjectZip('proj-ctrl-import', mockReq);
+      const result = await controller.importProjectZip(
+        'proj-ctrl-import',
+        mockReq,
+      );
       expect(result.totalDocs).toBe(1);
     });
 

@@ -24,7 +24,7 @@ export class GetSuggestionsUseCase {
     return this.spellEngine.getSuggestions(
       query.word,
       langVo,
-      query.maxSuggestions || 5
+      query.maxSuggestions || 5,
     );
   }
 }

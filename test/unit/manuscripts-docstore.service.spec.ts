@@ -60,7 +60,11 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
         }
         if (where.projectId && where.path) {
           for (const doc of mockDbDocs.values()) {
-            if (doc.projectId === where.projectId && doc.path === where.path && !doc.deleted) {
+            if (
+              doc.projectId === where.projectId &&
+              doc.path === where.path &&
+              !doc.deleted
+            ) {
               return doc;
             }
           }
@@ -71,7 +75,8 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
         const results: any[] = [];
         for (const doc of mockDbDocs.values()) {
           if (doc.projectId === where.projectId) {
-            if (where.deleted !== undefined && doc.deleted !== where.deleted) continue;
+            if (where.deleted !== undefined && doc.deleted !== where.deleted)
+              continue;
             results.push(doc);
           }
         }
@@ -106,7 +111,9 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
         const updated = {
           ...existing,
           ...data,
-          rev: data.rev?.increment ? existing.rev + 1 : (data.rev ?? existing.rev),
+          rev: data.rev?.increment
+            ? existing.rev + 1
+            : (data.rev ?? existing.rev),
           updatedAt: new Date(),
         };
         mockDbDocs.set(where.id, updated);
@@ -189,7 +196,9 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
       const rawText = 'line1\r\nline2\rline3\nline4';
       const lines = LineArrayEngine.textToLines(rawText);
       expect(lines).toEqual(['line1', 'line2', 'line3', 'line4']);
-      expect(LineArrayEngine.linesToText(lines)).toBe('line1\nline2\nline3\nline4');
+      expect(LineArrayEngine.linesToText(lines)).toBe(
+        'line1\nline2\nline3\nline4',
+      );
     });
 
     it('should strip UTF-8 Byte Order Mark (BOM)', () => {
@@ -201,19 +210,34 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
 
     it('should detect \\u0000 null byte and throw NullByteDetectedError', () => {
       const corruptText = 'some valid latex text\u0000corrupted string';
-      expect(() => LineArrayEngine.textToLines(corruptText)).toThrow(NullByteDetectedError);
+      expect(() => LineArrayEngine.textToLines(corruptText)).toThrow(
+        NullByteDetectedError,
+      );
     });
 
     it('should reject documents exceeding 2MB maximum size limit', () => {
       const oversizedText = 'x'.repeat(2 * 1024 * 1024 + 10);
-      expect(() => LineArrayEngine.textToLines(oversizedText)).toThrow(DocTooLargeError);
+      expect(() => LineArrayEngine.textToLines(oversizedText)).toThrow(
+        DocTooLargeError,
+      );
     });
 
     it('should apply in-place line splice correctly', () => {
       const originalLines = ['line1', 'line2', 'line3', 'line4', 'line5'];
       // Replace line 2 and 3 (index 1, deleteCount 2) with ['new2', 'new3', 'newExtra']
-      const spliced = LineArrayEngine.applySplice(originalLines, 1, 2, ['new2', 'new3', 'newExtra']);
-      expect(spliced).toEqual(['line1', 'new2', 'new3', 'newExtra', 'line4', 'line5']);
+      const spliced = LineArrayEngine.applySplice(originalLines, 1, 2, [
+        'new2',
+        'new3',
+        'newExtra',
+      ]);
+      expect(spliced).toEqual([
+        'line1',
+        'new2',
+        'new3',
+        'newExtra',
+        'line4',
+        'line5',
+      ]);
     });
   });
 
@@ -232,7 +256,10 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
         ranges: { changes: [], comments: [] },
       });
 
-      const diff = NoopDiffChecker.checkDiff(doc, ['line1', 'line2'], 5, { changes: [], comments: [] });
+      const diff = NoopDiffChecker.checkDiff(doc, ['line1', 'line2'], 5, {
+        changes: [],
+        comments: [],
+      });
       expect(diff.shouldUpdate).toBe(false);
       expect(diff.updateLines).toBe(false);
       expect(diff.updateVersion).toBe(false);
@@ -248,7 +275,11 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
         version: 5,
       });
 
-      const diff = NoopDiffChecker.checkDiff(doc, ['line1', 'modified line2'], 5);
+      const diff = NoopDiffChecker.checkDiff(
+        doc,
+        ['line1', 'modified line2'],
+        5,
+      );
       expect(diff.shouldUpdate).toBe(true);
       expect(diff.updateLines).toBe(true);
     });
@@ -303,7 +334,7 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
           lines: ['stale client write'],
           version: 3,
           expectedRev: 1, // Stale!
-        })
+        }),
       ).rejects.toThrow(DocModifiedError);
     });
 
@@ -361,7 +392,10 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
       // Perform peek
       const peekResult = await service.peekDoc(PROJECT_ID, doc._id);
       expect(peekResult.status).toBe('archived');
-      expect(peekResult.doc.lines).toEqual(['Line 1 for peek test', 'Line 2 for peek test']);
+      expect(peekResult.doc.lines).toEqual([
+        'Line 1 for peek test',
+        'Line 2 for peek test',
+      ]);
 
       // Ensure database STILL has lines cleared (Zero-write verified!)
       const dbDoc = mockDbDocs.get(doc._id);
@@ -394,8 +428,19 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
   describe('Level 5: Track Changes & Range Coordinate Mapping', () => {
     it('should normalize and persist comments and track changes ranges', async () => {
       const ranges = {
-        changes: [{ id: 'change-1', metadata: { user_id: 'user-123', ts: '2026-09-23T10:00:00.000Z' } }],
-        comments: [{ id: 'comment-1', op: { t: 'highlight' }, metadata: { user_id: 'user-456' } }],
+        changes: [
+          {
+            id: 'change-1',
+            metadata: { user_id: 'user-123', ts: '2026-09-23T10:00:00.000Z' },
+          },
+        ],
+        comments: [
+          {
+            id: 'comment-1',
+            op: { t: 'highlight' },
+            metadata: { user_id: 'user-456' },
+          },
+        ],
       };
 
       const doc = await service.createDoc(PROJECT_ID, {
@@ -463,7 +508,12 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
     it('should export all project documents into WorkspaceFile[] for CLSI compiler', async () => {
       await service.createDoc(PROJECT_ID, {
         path: 'main.tex',
-        lines: ['\\documentclass{article}', '\\begin{document}', '\\input{intro}', '\\end{document}'],
+        lines: [
+          '\\documentclass{article}',
+          '\\begin{document}',
+          '\\input{intro}',
+          '\\end{document}',
+        ],
       });
       await service.createDoc(PROJECT_ID, {
         path: 'intro.tex',

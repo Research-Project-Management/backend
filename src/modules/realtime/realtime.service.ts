@@ -26,7 +26,10 @@ export class RealtimeService {
    * Structure Subsystem Integration:
    * Broadcasts file tree mutations (node created, renamed, moved, deleted) to all active project peers.
    */
-  public broadcastFileTreeChange(projectId: string, change: { action: string; node: any }): void {
+  public broadcastFileTreeChange(
+    projectId: string,
+    change: { action: string; node: any },
+  ): void {
     this.broadcastProjectEventUseCase.execute({
       projectId,
       event: 'fileTree:update',
@@ -40,7 +43,11 @@ export class RealtimeService {
    */
   public broadcastCompileProgress(
     projectId: string,
-    progress: { status: 'queued' | 'compiling' | 'success' | 'failed'; logs?: string[]; pdfUrl?: string },
+    progress: {
+      status: 'queued' | 'compiling' | 'success' | 'failed';
+      logs?: string[];
+      pdfUrl?: string;
+    },
   ): void {
     this.broadcastProjectEventUseCase.execute({
       projectId,
@@ -55,7 +62,11 @@ export class RealtimeService {
    */
   public broadcastSnapshotCreated(
     projectId: string,
-    snapshot: { version: number; summary?: string | null; label?: string | null },
+    snapshot: {
+      version: number;
+      summary?: string | null;
+      label?: string | null;
+    },
   ): void {
     this.broadcastProjectEventUseCase.execute({
       projectId,
@@ -98,14 +109,19 @@ export class RealtimeService {
   /**
    * Queries active collaborator presence in a project.
    */
-  public async getProjectPresence(projectId: string): Promise<UserPresenceVo[]> {
+  public async getProjectPresence(
+    projectId: string,
+  ): Promise<UserPresenceVo[]> {
     return await this.roomManager.getProjectSessions(projectId);
   }
 
   /**
    * Queries active collaborator presence in a specific document.
    */
-  public async getDocPresence(projectId: string, docId: string): Promise<UserPresenceVo[]> {
+  public async getDocPresence(
+    projectId: string,
+    docId: string,
+  ): Promise<UserPresenceVo[]> {
     return await this.roomManager.getDocSessions(projectId, docId);
   }
 }

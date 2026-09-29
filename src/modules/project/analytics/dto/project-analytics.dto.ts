@@ -24,7 +24,10 @@ export class ProjectPortfolioOverviewDto {
   @ApiProperty({ example: 'Deep Learning Genome Analysis' })
   name!: string;
 
-  @ApiPropertyOptional({ example: '01957c91-2345-7890-abcd-ef0123456789', nullable: true })
+  @ApiPropertyOptional({
+    example: '01957c91-2345-7890-abcd-ef0123456789',
+    nullable: true,
+  })
   stateId?: string | null;
 
   @ApiPropertyOptional({

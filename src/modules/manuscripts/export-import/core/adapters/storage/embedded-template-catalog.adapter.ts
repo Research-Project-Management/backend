@@ -20,7 +20,9 @@ export class EmbeddedTemplateCatalogAdapter extends ITemplateCatalogPort {
     return Array.from(this.templates.values());
   }
 
-  public async getTemplateById(templateId: string): Promise<ProjectTemplate | null> {
+  public async getTemplateById(
+    templateId: string,
+  ): Promise<ProjectTemplate | null> {
     return this.templates.get(templateId) || null;
   }
 
@@ -30,7 +32,8 @@ export class EmbeddedTemplateCatalogAdapter extends ITemplateCatalogPort {
         id: 'ieee-transactions',
         title: 'IEEE Transactions Journal Template',
         category: 'article',
-        description: 'Standard two-column template for IEEE journals and transactions with IEEEtran class.',
+        description:
+          'Standard two-column template for IEEE journals and transactions with IEEEtran class.',
         author: 'IEEE Publications',
         defaultRootDoc: 'main.tex',
         files: [
@@ -86,7 +89,8 @@ E = mc^2
         id: 'acm-sigconf',
         title: 'ACM Conference Proceedings (SIGCONF)',
         category: 'conference',
-        description: 'Official ACM master article template for proceedings and conferences (acmart).',
+        description:
+          'Official ACM master article template for proceedings and conferences (acmart).',
         author: 'Association for Computing Machinery',
         defaultRootDoc: 'main.tex',
         files: [
@@ -133,7 +137,8 @@ Introduction to the problem and related work.
         id: 'arxiv-preprint',
         title: 'arXiv Minimal Clean Preprint',
         category: 'article',
-        description: 'Clean single-column preprint suitable for direct submission to arXiv.',
+        description:
+          'Clean single-column preprint suitable for direct submission to arXiv.',
         author: 'Flux Academic Team',
         defaultRootDoc: 'main.tex',
         files: [
@@ -169,7 +174,8 @@ Our findings show a substantial reduction in cycle times.
         id: 'springer-lncs',
         title: 'Springer LNCS Conference Template',
         category: 'conference',
-        description: 'Lecture Notes in Computer Science (LNCS) proceedings template.',
+        description:
+          'Lecture Notes in Computer Science (LNCS) proceedings template.',
         author: 'Springer Nature',
         defaultRootDoc: 'main.tex',
         files: [
@@ -200,7 +206,8 @@ Welcome to the LNCS paper format.
         id: 'beamer-presentation',
         title: 'Academic Presentation Slides (Beamer)',
         category: 'presentation',
-        description: 'Modern 16:9 aspect ratio slide deck for conferences and thesis defense.',
+        description:
+          'Modern 16:9 aspect ratio slide deck for conferences and thesis defense.',
         author: 'TeX Users Group',
         defaultRootDoc: 'main.tex',
         files: [

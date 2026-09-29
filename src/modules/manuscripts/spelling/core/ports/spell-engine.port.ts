@@ -19,7 +19,7 @@ export interface ISpellEnginePort {
   getSuggestions(
     word: string,
     language: LanguageCodeVo,
-    maxSuggestions?: number
+    maxSuggestions?: number,
   ): string[];
 
   /**

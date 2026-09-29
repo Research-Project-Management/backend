@@ -14,7 +14,16 @@ import {
   HttpCode,
   ConflictException,
   NotFoundException,
+  UseGuards,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { DocumentUpdaterService } from './document-updater.service';
 import { QueueUpdateDto } from './dto/queue-update.dto';
 import { FlushProjectDto } from './dto/flush-project.dto';
@@ -24,11 +33,15 @@ import { DocUpdaterConflictException } from './core/domain/exceptions/doc-update
 import { InFlightNotFoundException } from './core/domain/exceptions/in-flight-not-found.exception';
 import { DocumentLockedException } from './core/domain/exceptions/document-locked.exception';
 
+@ApiTags('Manuscripts - Document Updater')
+@ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/updater',
   'manuscripts/projects/:projectId/updater',
   'project/:projectId',
 ])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
 export class DocumentUpdaterController {
   constructor(private readonly service: DocumentUpdaterService) {}
 
@@ -36,6 +49,7 @@ export class DocumentUpdaterController {
    * Queue real-time updates for a document (keystrokes / lines / splice).
    */
   @Post('doc/:docId/update')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.ACCEPTED)
   public async queueUpdate(
     @Param('projectId') projectId: string,
@@ -59,6 +73,7 @@ export class DocumentUpdaterController {
    * Flush-Before-Compile endpoint: flushes all dirty docs in a project into Docstore.
    */
   @Post('flush')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   public async flushProject(
     @Param('projectId') projectId: string,
@@ -78,6 +93,7 @@ export class DocumentUpdaterController {
    * Flush a single document into Docstore.
    */
   @Post('doc/:docId/flush')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   public async flushDoc(
     @Param('projectId') projectId: string,
@@ -86,7 +102,10 @@ export class DocumentUpdaterController {
     try {
       return await this.service.flushDoc(projectId, docId);
     } catch (err) {
-      if (err instanceof DocumentLockedException || err instanceof DocUpdaterConflictException) {
+      if (
+        err instanceof DocumentLockedException ||
+        err instanceof DocUpdaterConflictException
+      ) {
         throw new ConflictException(err.message);
       }
       throw err;
@@ -115,6 +134,7 @@ export class DocumentUpdaterController {
    * Evict document buffer when users disconnect.
    */
   @Delete('doc/:docId/buffer')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   public async evictDoc(
     @Param('projectId') projectId: string,

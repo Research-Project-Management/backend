@@ -40,7 +40,11 @@ import { NotFoundException, BadRequestException } from '@nestjs/common';
 // Domain Value Objects & Entities
 import { TextRangeVo } from '@/modules/manuscripts/track-changes/core/domain/value-objects/text-range.vo';
 import { ChangeMetadataVo } from '@/modules/manuscripts/track-changes/core/domain/value-objects/change-metadata.vo';
-import { TrackChange, ChangeType, ChangeStatus } from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
+import {
+  TrackChange,
+  ChangeType,
+  ChangeStatus,
+} from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
 import { CommentReply } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-reply.entity';
 import { CommentThread } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-thread.entity';
 
@@ -71,11 +75,19 @@ import { TrackChangesController } from '@/modules/manuscripts/track-changes/trac
 // --- In-Memory Mocks for Ports ---
 
 class MockDocstoreService {
-  public docs = new Map<string, { lines: string[]; version: number; rev: number }>();
+  public docs = new Map<
+    string,
+    { lines: string[]; version: number; rev: number }
+  >();
 
   constructor() {
     this.docs.set('doc-1', {
-      lines: ['\\documentclass{article}', '\\begin{document}', 'Hello World', '\\end{document}'],
+      lines: [
+        '\\documentclass{article}',
+        '\\begin{document}',
+        'Hello World',
+        '\\end{document}',
+      ],
       version: 1,
       rev: 5,
     });
@@ -95,7 +107,11 @@ class MockDocstoreService {
     };
   }
 
-  async updateDoc(projectId: string, docId: string, dto: { lines: string[]; version: number }) {
+  async updateDoc(
+    projectId: string,
+    docId: string,
+    dto: { lines: string[]; version: number },
+  ) {
     const doc = this.docs.get(docId) || { lines: [], version: 0, rev: 0 };
     doc.lines = [...dto.lines];
     doc.version += 1;
@@ -127,9 +143,16 @@ class InMemoryTrackChangesRepository implements ITrackChangesRepositoryPort {
     return this.changes.get(id) || null;
   }
 
-  async listChangesByDoc(projectId: string, docId: string, status?: ChangeStatus): Promise<TrackChange[]> {
+  async listChangesByDoc(
+    projectId: string,
+    docId: string,
+    status?: ChangeStatus,
+  ): Promise<TrackChange[]> {
     return Array.from(this.changes.values()).filter(
-      (c) => c.projectId === projectId && c.docId === docId && (!status || c.status === status),
+      (c) =>
+        c.projectId === projectId &&
+        c.docId === docId &&
+        (!status || c.status === status),
     );
   }
 
@@ -142,13 +165,23 @@ class InMemoryTrackChangesRepository implements ITrackChangesRepositoryPort {
     return this.threads.get(id) || null;
   }
 
-  async listThreadsByDoc(projectId: string, docId: string, isResolved?: boolean): Promise<CommentThread[]> {
+  async listThreadsByDoc(
+    projectId: string,
+    docId: string,
+    isResolved?: boolean,
+  ): Promise<CommentThread[]> {
     return Array.from(this.threads.values()).filter(
-      (t) => t.projectId === projectId && t.docId === docId && (isResolved === undefined || t.isResolved === isResolved),
+      (t) =>
+        t.projectId === projectId &&
+        t.docId === docId &&
+        (isResolved === undefined || t.isResolved === isResolved),
     );
   }
 
-  async addCommentReply(threadId: string, reply: CommentReply): Promise<CommentReply> {
+  async addCommentReply(
+    threadId: string,
+    reply: CommentReply,
+  ): Promise<CommentReply> {
     const thread = this.threads.get(threadId);
     if (thread) {
       thread.addReply(reply);
@@ -157,32 +190,86 @@ class InMemoryTrackChangesRepository implements ITrackChangesRepositoryPort {
     return reply;
   }
 
-  async deleteCommentThread(projectId: string, threadId: string): Promise<void> {
+  async deleteCommentThread(
+    projectId: string,
+    threadId: string,
+  ): Promise<void> {
     this.threads.delete(threadId);
   }
 }
 
 class MockRealtimeNotifier implements IRealtimeNotifierPort {
-  public events: Array<{ type: string; projectId: string; docId: string; payload: any }> = [];
+  public events: Array<{
+    type: string;
+    projectId: string;
+    docId: string;
+    payload: any;
+  }> = [];
 
-  notifyChangeRecorded(projectId: string, docId: string, change: TrackChange): void {
-    this.events.push({ type: 'change:recorded', projectId, docId, payload: change });
+  notifyChangeRecorded(
+    projectId: string,
+    docId: string,
+    change: TrackChange,
+  ): void {
+    this.events.push({
+      type: 'change:recorded',
+      projectId,
+      docId,
+      payload: change,
+    });
   }
 
-  notifyChangeResolved(projectId: string, docId: string, change: TrackChange): void {
-    this.events.push({ type: 'change:resolved', projectId, docId, payload: change });
+  notifyChangeResolved(
+    projectId: string,
+    docId: string,
+    change: TrackChange,
+  ): void {
+    this.events.push({
+      type: 'change:resolved',
+      projectId,
+      docId,
+      payload: change,
+    });
   }
 
-  notifyCommentCreated(projectId: string, docId: string, thread: CommentThread): void {
-    this.events.push({ type: 'comment:created', projectId, docId, payload: thread });
+  notifyCommentCreated(
+    projectId: string,
+    docId: string,
+    thread: CommentThread,
+  ): void {
+    this.events.push({
+      type: 'comment:created',
+      projectId,
+      docId,
+      payload: thread,
+    });
   }
 
-  notifyCommentReplied(projectId: string, docId: string, threadId: string, reply: CommentReply): void {
-    this.events.push({ type: 'comment:replied', projectId, docId, payload: { threadId, reply } });
+  notifyCommentReplied(
+    projectId: string,
+    docId: string,
+    threadId: string,
+    reply: CommentReply,
+  ): void {
+    this.events.push({
+      type: 'comment:replied',
+      projectId,
+      docId,
+      payload: { threadId, reply },
+    });
   }
 
-  notifyCommentResolved(projectId: string, docId: string, thread: CommentThread): void {
-    this.events.push({ type: 'comment:resolved', projectId, docId, payload: thread });
+  notifyCommentResolved(
+    projectId: string,
+    docId: string,
+    thread: CommentThread,
+  ): void {
+    this.events.push({
+      type: 'comment:resolved',
+      projectId,
+      docId,
+      payload: thread,
+    });
   }
 
   clear() {
@@ -221,9 +308,21 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
     notifier = new MockRealtimeNotifier();
 
     recordChangeUseCase = new RecordChangeUseCase(repo, notifier);
-    acceptChangeUseCase = new AcceptChangeUseCase(repo, patcherAdapter, notifier);
-    rejectChangeUseCase = new RejectChangeUseCase(repo, patcherAdapter, notifier);
-    batchResolveUseCase = new BatchResolveChangesUseCase(repo, acceptChangeUseCase, rejectChangeUseCase);
+    acceptChangeUseCase = new AcceptChangeUseCase(
+      repo,
+      patcherAdapter,
+      notifier,
+    );
+    rejectChangeUseCase = new RejectChangeUseCase(
+      repo,
+      patcherAdapter,
+      notifier,
+    );
+    batchResolveUseCase = new BatchResolveChangesUseCase(
+      repo,
+      acceptChangeUseCase,
+      rejectChangeUseCase,
+    );
     createThreadUseCase = new CreateCommentThreadUseCase(repo, notifier);
     addReplyUseCase = new AddCommentReplyUseCase(repo, notifier);
     resolveThreadUseCase = new ResolveCommentThreadUseCase(repo, notifier);
@@ -293,10 +392,30 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
       });
 
       it('should accurately test overlaps between ranges', () => {
-        const r1 = TextRangeVo.create({ startLine: 1, startCol: 5, endLine: 1, endCol: 15 });
-        const r2 = TextRangeVo.create({ startLine: 1, startCol: 10, endLine: 1, endCol: 20 });
-        const r3 = TextRangeVo.create({ startLine: 1, startCol: 25, endLine: 1, endCol: 30 });
-        const r4 = TextRangeVo.create({ startLine: 2, startCol: 0, endLine: 2, endCol: 10 });
+        const r1 = TextRangeVo.create({
+          startLine: 1,
+          startCol: 5,
+          endLine: 1,
+          endCol: 15,
+        });
+        const r2 = TextRangeVo.create({
+          startLine: 1,
+          startCol: 10,
+          endLine: 1,
+          endCol: 20,
+        });
+        const r3 = TextRangeVo.create({
+          startLine: 1,
+          startCol: 25,
+          endLine: 1,
+          endCol: 30,
+        });
+        const r4 = TextRangeVo.create({
+          startLine: 2,
+          startCol: 0,
+          endLine: 2,
+          endCol: 10,
+        });
 
         expect(r1.overlaps(r2)).toBe(true);
         expect(r2.overlaps(r1)).toBe(true);
@@ -305,9 +424,24 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
       });
 
       it('should test range containment', () => {
-        const outer = TextRangeVo.create({ startLine: 1, startCol: 0, endLine: 3, endCol: 50 });
-        const inner = TextRangeVo.create({ startLine: 1, startCol: 10, endLine: 2, endCol: 20 });
-        const outside = TextRangeVo.create({ startLine: 3, startCol: 55, endLine: 4, endCol: 10 });
+        const outer = TextRangeVo.create({
+          startLine: 1,
+          startCol: 0,
+          endLine: 3,
+          endCol: 50,
+        });
+        const inner = TextRangeVo.create({
+          startLine: 1,
+          startCol: 10,
+          endLine: 2,
+          endCol: 20,
+        });
+        const outside = TextRangeVo.create({
+          startLine: 3,
+          startCol: 55,
+          endLine: 4,
+          endCol: 10,
+        });
 
         expect(outer.contains(inner)).toBe(true);
         expect(inner.contains(outer)).toBe(false);
@@ -347,7 +481,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'insert',
           text: 'Hello LaTeX',
-          range: TextRangeVo.create({ startLine: 2, startCol: 6, endLine: 2, endCol: 17 }),
+          range: TextRangeVo.create({
+            startLine: 2,
+            startCol: 6,
+            endLine: 2,
+            endCol: 17,
+          }),
           createdById: userId,
         });
 
@@ -365,7 +504,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'delete',
           text: 'old text',
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 8 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 8,
+          }),
         });
 
         change.accept('reviewer-1');
@@ -381,12 +525,21 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'insert',
           text: 'abc',
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 3 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 3,
+          }),
         });
 
         change.accept('reviewer-1');
-        expect(() => change.accept('reviewer-2')).toThrow(/has already been accepted/);
-        expect(() => change.reject('reviewer-2')).toThrow(/has already been accepted/);
+        expect(() => change.accept('reviewer-2')).toThrow(
+          /has already been accepted/,
+        );
+        expect(() => change.reject('reviewer-2')).toThrow(
+          /has already been accepted/,
+        );
       });
 
       it('should reject pending change successfully', () => {
@@ -396,7 +549,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'insert',
           text: 'wrong insertion',
-          range: TextRangeVo.create({ startLine: 1, startCol: 0, endLine: 1, endCol: 15 }),
+          range: TextRangeVo.create({
+            startLine: 1,
+            startCol: 0,
+            endLine: 1,
+            endCol: 15,
+          }),
         });
 
         change.reject('reviewer-2');
@@ -419,7 +577,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           projectId,
           docId,
           quote: '\\documentclass{article}',
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 23 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 23,
+          }),
           replies: [reply],
         });
 
@@ -436,7 +599,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           id: 't-2',
           projectId,
           docId,
-          range: TextRangeVo.create({ startLine: 1, startCol: 0, endLine: 1, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 1,
+            startCol: 0,
+            endLine: 1,
+            endCol: 5,
+          }),
         });
 
         const reply = CommentReply.create({
@@ -456,7 +624,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           id: 't-3',
           projectId,
           docId,
-          range: TextRangeVo.create({ startLine: 1, startCol: 0, endLine: 1, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 1,
+            startCol: 0,
+            endLine: 1,
+            endCol: 5,
+          }),
         });
 
         thread.resolve('user-alice');
@@ -472,7 +645,9 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           content: 'Wait one more thing',
         });
 
-        expect(() => thread.addReply(newReply)).toThrow(/Cannot add reply to a resolved comment thread/);
+        expect(() => thread.addReply(newReply)).toThrow(
+          /Cannot add reply to a resolved comment thread/,
+        );
       });
 
       it('should throw error when resolving already resolved thread', () => {
@@ -480,11 +655,18 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           id: 't-4',
           projectId,
           docId,
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 5,
+          }),
         });
 
         thread.resolve('user-alice');
-        expect(() => thread.resolve('user-alice')).toThrow(/Comment thread is already resolved/);
+        expect(() => thread.resolve('user-alice')).toThrow(
+          /Comment thread is already resolved/,
+        );
       });
 
       it('should unresolve thread and allow replies again', () => {
@@ -492,7 +674,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           id: 't-5',
           projectId,
           docId,
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 5,
+          }),
         });
 
         thread.resolve('user-alice');
@@ -523,7 +710,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
     describe('removeRange', () => {
       it('should splice out character range on the same line', () => {
         const lines = ['The quick brown fox jumps over the lazy dog'];
-        const range = TextRangeVo.create({ startLine: 0, startCol: 4, endLine: 0, endCol: 16 });
+        const range = TextRangeVo.create({
+          startLine: 0,
+          startCol: 4,
+          endLine: 0,
+          endCol: 16,
+        });
 
         const result = patcherAdapter.removeRange(lines, range);
         expect(result).toEqual(['The fox jumps over the lazy dog']);
@@ -537,15 +729,27 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           'REMOVE START - and keep this last part',
         ];
 
-        const range = TextRangeVo.create({ startLine: 0, startCol: 22, endLine: 3, endCol: 15 });
+        const range = TextRangeVo.create({
+          startLine: 0,
+          startCol: 22,
+          endLine: 3,
+          endCol: 15,
+        });
         const result = patcherAdapter.removeRange(lines, range);
 
-        expect(result).toEqual(['First line keep this -and keep this last part']);
+        expect(result).toEqual([
+          'First line keep this -and keep this last part',
+        ]);
       });
 
       it('should return original lines if startLine is out of bounds', () => {
         const lines = ['Line 1', 'Line 2'];
-        const range = TextRangeVo.create({ startLine: 10, startCol: 0, endLine: 12, endCol: 5 });
+        const range = TextRangeVo.create({
+          startLine: 10,
+          startCol: 0,
+          endLine: 12,
+          endCol: 5,
+        });
 
         const result = patcherAdapter.removeRange(lines, range);
         expect(result).toEqual(['Line 1', 'Line 2']);
@@ -555,7 +759,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
     describe('insertRange', () => {
       it('should insert single line text into line at column', () => {
         const lines = ['Hello world!'];
-        const range = TextRangeVo.create({ startLine: 0, startCol: 5, endLine: 0, endCol: 5 });
+        const range = TextRangeVo.create({
+          startLine: 0,
+          startCol: 5,
+          endLine: 0,
+          endCol: 5,
+        });
 
         const result = patcherAdapter.insertRange(lines, range, ' beautiful');
         expect(result).toEqual(['Hello beautiful world!']);
@@ -563,7 +772,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
 
       it('should expand lines array when inserting multiline text with newlines', () => {
         const lines = ['Start of doc.', 'End of doc.'];
-        const range = TextRangeVo.create({ startLine: 0, startCol: 13, endLine: 0, endCol: 13 });
+        const range = TextRangeVo.create({
+          startLine: 0,
+          startCol: 13,
+          endLine: 0,
+          endCol: 13,
+        });
 
         const inserted = '\nMiddle line 1\nMiddle line 2\n';
         const result = patcherAdapter.insertRange(lines, range, inserted);
@@ -579,9 +793,18 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
 
       it('should pad lines with empty strings if startLine exceeds length', () => {
         const lines = ['Line 0'];
-        const range = TextRangeVo.create({ startLine: 2, startCol: 0, endLine: 2, endCol: 0 });
+        const range = TextRangeVo.create({
+          startLine: 2,
+          startCol: 0,
+          endLine: 2,
+          endCol: 0,
+        });
 
-        const result = patcherAdapter.insertRange(lines, range, 'New line at 2');
+        const result = patcherAdapter.insertRange(
+          lines,
+          range,
+          'New line at 2',
+        );
         expect(result).toEqual(['Line 0', '', 'New line at 2']);
       });
     });
@@ -594,7 +817,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'insert',
           text: 'Hello',
-          range: TextRangeVo.create({ startLine: 2, startCol: 0, endLine: 2, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 2,
+            startCol: 0,
+            endLine: 2,
+            endCol: 5,
+          }),
         });
 
         const initialDoc = await mockDocstore.getDoc(projectId, docId);
@@ -611,7 +839,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'delete',
           text: ' World',
-          range: TextRangeVo.create({ startLine: 2, startCol: 5, endLine: 2, endCol: 11 }),
+          range: TextRangeVo.create({
+            startLine: 2,
+            startCol: 5,
+            endLine: 2,
+            endCol: 11,
+          }),
         });
 
         const res = await patcherAdapter.applyChange(projectId, docId, change);
@@ -629,7 +862,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'insert',
           text: ' World',
-          range: TextRangeVo.create({ startLine: 2, startCol: 5, endLine: 2, endCol: 11 }),
+          range: TextRangeVo.create({
+            startLine: 2,
+            startCol: 5,
+            endLine: 2,
+            endCol: 11,
+          }),
         });
 
         const res = await patcherAdapter.revertChange(projectId, docId, change);
@@ -644,7 +882,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'delete',
           text: ' Beautiful',
-          range: TextRangeVo.create({ startLine: 2, startCol: 5, endLine: 2, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 2,
+            startCol: 5,
+            endLine: 2,
+            endCol: 5,
+          }),
         });
 
         const res = await patcherAdapter.revertChange(projectId, docId, change);
@@ -693,7 +936,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'delete',
           text: ' World',
-          range: TextRangeVo.create({ startLine: 2, startCol: 5, endLine: 2, endCol: 11 }),
+          range: TextRangeVo.create({
+            startLine: 2,
+            startCol: 5,
+            endLine: 2,
+            endCol: 11,
+          }),
         });
         await repo.saveChange(change);
 
@@ -710,7 +958,9 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
         const doc = await mockDocstore.getDoc(projectId, docId);
         expect(doc.lines[2]).toBe('Hello');
 
-        expect(notifier.events.some((e) => e.type === 'change:resolved')).toBe(true);
+        expect(notifier.events.some((e) => e.type === 'change:resolved')).toBe(
+          true,
+        );
       });
 
       it('should throw ChangeNotFoundException if changeId does not exist', async () => {
@@ -733,7 +983,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'insert',
           text: ' World',
-          range: TextRangeVo.create({ startLine: 2, startCol: 5, endLine: 2, endCol: 11 }),
+          range: TextRangeVo.create({
+            startLine: 2,
+            startCol: 5,
+            endLine: 2,
+            endCol: 11,
+          }),
         });
         await repo.saveChange(change);
 
@@ -750,7 +1005,9 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
         const doc = await mockDocstore.getDoc(projectId, docId);
         expect(doc.lines[2]).toBe('Hello');
 
-        expect(notifier.events.some((e) => e.type === 'change:resolved')).toBe(true);
+        expect(notifier.events.some((e) => e.type === 'change:resolved')).toBe(
+          true,
+        );
       });
 
       it('should throw ChangeNotFoundException if changeId does not exist', async () => {
@@ -773,7 +1030,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'insert',
           text: 'text1',
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 5,
+          }),
         });
         const c2 = TrackChange.create({
           id: 'c-b-2',
@@ -781,7 +1043,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'insert',
           text: 'text2',
-          range: TextRangeVo.create({ startLine: 1, startCol: 0, endLine: 1, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 1,
+            startCol: 0,
+            endLine: 1,
+            endCol: 5,
+          }),
         });
         await repo.saveChange(c1);
         await repo.saveChange(c2);
@@ -809,7 +1076,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'insert',
           text: 'text3',
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 5,
+          }),
         });
         await repo.saveChange(c1);
 
@@ -845,7 +1117,9 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
         expect(thread.replies.length).toBe(1);
         expect(thread.replies[0].content).toBe('Add packages here');
 
-        expect(notifier.events.some((e) => e.type === 'comment:created')).toBe(true);
+        expect(notifier.events.some((e) => e.type === 'comment:created')).toBe(
+          true,
+        );
       });
     });
 
@@ -855,7 +1129,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           id: 't-rep-1',
           projectId,
           docId,
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 5,
+          }),
         });
         await repo.saveCommentThread(thread);
 
@@ -873,7 +1152,9 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
 
         const updatedThread = await repo.findThreadById('t-rep-1');
         expect(updatedThread?.replies.length).toBe(1);
-        expect(notifier.events.some((e) => e.type === 'comment:replied')).toBe(true);
+        expect(notifier.events.some((e) => e.type === 'comment:replied')).toBe(
+          true,
+        );
       });
 
       it('should throw ThreadNotFoundException if threadId does not exist', async () => {
@@ -893,7 +1174,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           id: 't-rep-res',
           projectId,
           docId,
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 5,
+          }),
         });
         thread.resolve(userId);
         await repo.saveCommentThread(thread);
@@ -916,7 +1202,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           id: 't-res-1',
           projectId,
           docId,
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 5,
+          }),
         });
         await repo.saveCommentThread(thread);
 
@@ -930,7 +1221,9 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
 
         expect(resolved.isResolved).toBe(true);
         expect(resolved.resolvedById).toBe('user-alice');
-        expect(notifier.events.some((e) => e.type === 'comment:resolved')).toBe(true);
+        expect(notifier.events.some((e) => e.type === 'comment:resolved')).toBe(
+          true,
+        );
       });
 
       it('should unresolve thread when resolve flag is false', async () => {
@@ -938,7 +1231,12 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           id: 't-res-2',
           projectId,
           docId,
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 5 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 5,
+          }),
         });
         thread.resolve('user-alice');
         await repo.saveCommentThread(thread);
@@ -976,13 +1274,23 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           docId,
           type: 'insert',
           text: 'val',
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 3 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 3,
+          }),
         });
         const t1 = CommentThread.create({
           id: 't-rev-1',
           projectId,
           docId,
-          range: TextRangeVo.create({ startLine: 0, startCol: 0, endLine: 0, endCol: 3 }),
+          range: TextRangeVo.create({
+            startLine: 0,
+            startCol: 0,
+            endLine: 0,
+            endCol: 3,
+          }),
         });
         await repo.saveChange(c1);
         await repo.saveCommentThread(t1);
@@ -1019,7 +1327,11 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
         range: { startLine: 0, startCol: 0, endLine: 0, endCol: 6 },
       });
 
-      const accepted = await controller.acceptChange(projectId, docId, recorded.id);
+      const accepted = await controller.acceptChange(
+        projectId,
+        docId,
+        recorded.id,
+      );
 
       expect(accepted.id).toBe(recorded.id);
       expect(accepted.status).toBe('accepted');
@@ -1032,7 +1344,11 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
         range: { startLine: 0, startCol: 0, endLine: 0, endCol: 6 },
       });
 
-      const rejected = await controller.rejectChange(projectId, docId, recorded.id);
+      const rejected = await controller.rejectChange(
+        projectId,
+        docId,
+        recorded.id,
+      );
 
       expect(rejected.id).toBe(recorded.id);
       expect(rejected.status).toBe('rejected');
@@ -1077,9 +1393,14 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
         content: 'Initial question',
       });
 
-      const replyRes = await controller.addCommentReply(projectId, docId, threadRes.id, {
-        content: 'Answer here',
-      });
+      const replyRes = await controller.addCommentReply(
+        projectId,
+        docId,
+        threadRes.id,
+        {
+          content: 'Answer here',
+        },
+      );
 
       expect(replyRes.id).toBeDefined();
       expect(replyRes.content).toBe('Answer here');
@@ -1091,9 +1412,14 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
         content: 'To resolve',
       });
 
-      const resolved = await controller.resolveCommentThread(projectId, docId, threadRes.id, {
-        resolve: true,
-      });
+      const resolved = await controller.resolveCommentThread(
+        projectId,
+        docId,
+        threadRes.id,
+        {
+          resolve: true,
+        },
+      );
 
       expect(resolved.id).toBe(threadRes.id);
       expect(resolved.isResolved).toBe(true);
@@ -1126,7 +1452,13 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
           range: { startLine: 0, startCol: 0, endLine: 0, endCol: 5 },
           content: 'Thread to be resolved',
         });
-        await service.resolveCommentThread(projectId, docId, thread.id, true, 'admin');
+        await service.resolveCommentThread(
+          projectId,
+          docId,
+          thread.id,
+          true,
+          'admin',
+        );
 
         await expect(
           controller.addCommentReply(projectId, docId, thread.id, {

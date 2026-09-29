@@ -11,7 +11,10 @@ export interface INotificationRepositoryPort {
   save(notification: NotificationEntity): Promise<NotificationEntity>;
   findById(id: string): Promise<NotificationEntity | null>;
   findByKey(key: string, userId?: string): Promise<NotificationEntity | null>;
-  findByUser(userId: string, options?: QueryNotificationsOptions): Promise<NotificationEntity[]>;
+  findByUser(
+    userId: string,
+    options?: QueryNotificationsOptions,
+  ): Promise<NotificationEntity[]>;
   countUnread(userId: string): Promise<number>;
   markAsRead(id: string, userId?: string): Promise<boolean>;
   markAllAsRead(userId: string): Promise<number>;
@@ -20,4 +23,6 @@ export interface INotificationRepositoryPort {
   deleteExpired(now?: Date): Promise<number>;
 }
 
-export const NOTIFICATION_REPOSITORY_PORT = Symbol('INotificationRepositoryPort');
+export const NOTIFICATION_REPOSITORY_PORT = Symbol(
+  'INotificationRepositoryPort',
+);
