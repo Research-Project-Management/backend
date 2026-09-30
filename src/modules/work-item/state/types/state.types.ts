@@ -70,7 +70,7 @@ export const DEFAULT_WORK_ITEM_STATES: WorkItemState[] = [
     icon: 'circle',
     sequence: 2000,
     isDefault: false,
-    description: 'Items ready to be worked on in the current cycle',
+    description: 'Items ready to be worked on',
   },
   {
     id: 'in_progress',
