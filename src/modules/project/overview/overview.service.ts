@@ -17,13 +17,11 @@ export class OverviewService {
     const [
       stateCounts,
       overdueCount,
-      activeCycleData,
       recentActivities,
       latestStatusUpdate,
     ] = await Promise.all([
       this.overviewRepo.getWorkItemStateGroupCounts(projectId),
       this.overviewRepo.getOverdueCount(projectId),
-      this.overviewRepo.getActiveCycle(projectId),
       this.overviewRepo.getRecentActivities(projectId, 10),
       this.overviewRepo.getLatestStatusUpdate(projectId),
     ]);
@@ -41,34 +39,6 @@ export class OverviewService {
       actionableTotal > 0
         ? parseFloat(((completed / actionableTotal) * 100).toFixed(1))
         : 0;
-
-    let activeCycleDto = null;
-    if (activeCycleData?.activeCycle) {
-      const cycle = activeCycleData.activeCycle;
-      const cycleTotal = cycle._count?.workItems || 0;
-      const cycleCompleted = activeCycleData.completedIssues || 0;
-      const cyclePercentage =
-        cycleTotal > 0
-          ? parseFloat(((cycleCompleted / cycleTotal) * 100).toFixed(1))
-          : 0;
-
-      let daysRemaining: number | null = null;
-      if (cycle.endDate) {
-        const diffMs = new Date(cycle.endDate).getTime() - new Date().getTime();
-        daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      }
-
-      activeCycleDto = {
-        id: cycle.id,
-        name: cycle.name,
-        startDate: cycle.startDate,
-        endDate: cycle.endDate,
-        daysRemaining,
-        totalIssues: cycleTotal,
-        completedIssues: cycleCompleted,
-        completionPercentage: cyclePercentage,
-      };
-    }
 
     return {
       project: {
@@ -116,7 +86,6 @@ export class OverviewService {
         overdue: overdueCount,
         completionPercentage,
       },
-      activeCycle: activeCycleDto,
       recentActivities: (recentActivities || []).map((act: any) => ({
         id: act.id,
         verb: act.verb,

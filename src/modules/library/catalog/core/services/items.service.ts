@@ -826,8 +826,19 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     const now = new Date().toISOString();
     const linkedRelations = [];
 
+    // Batch fetch target items to eliminate N+1 queries
+    let targetItemMap = new Map<string, any>();
+    if (this.query.findByIds && targetIds.length > 0) {
+      const targetItems = await this.query.findByIds(userId, targetIds, projectId);
+      if (targetItems && targetItems.length > 0) {
+        targetItemMap = new Map(targetItems.map((item) => [item.id, item]));
+      }
+    }
+
     for (const targetId of targetIds) {
-      const targetItem = await this.query.findById(userId, targetId, projectId);
+      const targetItem =
+        targetItemMap.get(targetId) ||
+        (await this.query.findById(userId, targetId, projectId));
       if (!targetItem) continue;
 
       const relation = {
@@ -1075,15 +1086,55 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     const sourceItems = await this.query.findByIds(userId, itemIds);
     let importedCount = 0;
 
-    for (const source of sourceItems) {
-      const existingInProject = await this.query.findDuplicateInProject(
+    // Batch query to detect duplicates in one go, avoiding N+1 queries.
+    let existingDois = new Set<string>();
+    let existingCitationKeys = new Set<string>();
+    let existingTitles = new Set<string>();
+
+    if (this.query.findDuplicatesInProject && sourceItems.length > 0) {
+      const existingItems = await this.query.findDuplicatesInProject(
         projectId,
-        {
-          doi: source.doi,
-          citationKey: source.citationKey,
-          title: source.title,
-        },
+        sourceItems.map((s) => ({
+          doi: s.doi,
+          citationKey: s.citationKey,
+          title: s.title,
+        })),
       );
+      existingDois = new Set(
+        existingItems
+          .map((e) => e.doi?.trim().toLowerCase())
+          .filter((d): d is string => Boolean(d)),
+      );
+      existingCitationKeys = new Set(
+        existingItems
+          .map((e) => e.citationKey?.trim().toLowerCase())
+          .filter((k): k is string => Boolean(k)),
+      );
+      existingTitles = new Set(
+        existingItems
+          .map((e) => e.title?.trim().toLowerCase())
+          .filter((t): t is string => Boolean(t)),
+      );
+    }
+
+    for (const source of sourceItems) {
+      const isBatchDuplicate =
+        (source.doi && existingDois.has(source.doi.trim().toLowerCase())) ||
+        (source.citationKey &&
+          existingCitationKeys.has(source.citationKey.trim().toLowerCase())) ||
+        (source.title && existingTitles.has(source.title.trim().toLowerCase()));
+
+      let existingInProject: any = isBatchDuplicate;
+      if (!isBatchDuplicate && !this.query.findDuplicatesInProject) {
+        existingInProject = await this.query.findDuplicateInProject(
+          projectId,
+          {
+            doi: source.doi,
+            citationKey: source.citationKey,
+            title: source.title,
+          },
+        );
+      }
 
       if (existingInProject) {
         continue;

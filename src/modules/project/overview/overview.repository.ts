@@ -106,18 +106,6 @@ export class OverviewRepository {
     });
   }
 
-  async getActiveCycle(_projectId: string): Promise<{
-    activeCycle: {
-      id: string;
-      name: string;
-      startDate: Date | null;
-      endDate: Date | null;
-      _count?: { workItems: number };
-    };
-    completedIssues: number;
-  } | null> {
-    return null;
-  }
 
   async getRecentActivities(projectId: string, limit = 10) {
     return this.prisma.activityEvent.findMany({
@@ -172,5 +160,19 @@ export class OverviewRepository {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async getActiveCycle(projectId: string): Promise<{
+    activeCycle: {
+      id: string;
+      name: string;
+      startDate: Date;
+      endDate: Date;
+      _count: { workItems: number };
+    } | null;
+    completedIssues: number;
+  }> {
+    // Placeholder: returns null until Cycle entity is wired in Prisma schema
+    return { activeCycle: null, completedIssues: 0 };
   }
 }

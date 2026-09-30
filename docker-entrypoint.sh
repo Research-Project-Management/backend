@@ -45,8 +45,8 @@ if [ -n "$DATABASE_URL" ] && [ "$SKIP_MIGRATIONS" != "true" ]; then
     if [ -d "./prisma/migrations" ] && [ "$(ls -A ./prisma/migrations 2>/dev/null)" ]; then
       $PRISMA_CLI migrate deploy
     else
-      echo "ℹ️ [Database] No migrations directory found. Running prisma db push..."
-      $PRISMA_CLI db push --accept-data-loss
+      echo "⚠️ [Database] No migrations directory found. Running non-destructive prisma db push..."
+      $PRISMA_CLI db push
     fi
     EXIT_CODE=$?
 

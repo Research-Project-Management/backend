@@ -1159,6 +1159,50 @@ export class QueryRepository {
       },
     });
   }
+
+  async findDuplicatesInProject(
+    projectId: string,
+    criteriaList: Array<{
+      doi?: string | null;
+      citationKey?: string | null;
+      title?: string | null;
+    }>,
+    tx?: Prisma.TransactionClient,
+  ) {
+    if (!isUuid(projectId) || !criteriaList?.length) return [];
+    const client = this.getClient(tx);
+
+    const dois = criteriaList
+      .map((c) => c.doi?.trim())
+      .filter((d): d is string => Boolean(d));
+    const citationKeys = criteriaList
+      .map((c) => c.citationKey?.trim())
+      .filter((k): k is string => Boolean(k));
+    const titles = criteriaList
+      .map((c) => c.title?.trim())
+      .filter((t): t is string => Boolean(t));
+
+    const orConditions: Prisma.ItemWhereInput[] = [];
+    if (dois.length > 0) orConditions.push({ doi: { in: dois } });
+    if (citationKeys.length > 0) orConditions.push({ citationKey: { in: citationKeys } });
+    if (titles.length > 0) orConditions.push({ title: { in: titles } });
+
+    if (orConditions.length === 0) return [];
+
+    return client.item.findMany({
+      where: {
+        projectId,
+        deletedAt: null,
+        OR: orConditions,
+      },
+      select: {
+        id: true,
+        doi: true,
+        citationKey: true,
+        title: true,
+      },
+    });
+  }
 }
 
 export { QueryRepository as ItemQueryRepository };

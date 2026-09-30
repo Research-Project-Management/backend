@@ -40,17 +40,6 @@ export interface ProjectOverviewMetricsDto {
   completionPercentage: number;
 }
 
-export interface ProjectOverviewActiveCycleDto {
-  id: string;
-  name: string;
-  startDate: Date | null;
-  endDate: Date | null;
-  daysRemaining?: number | null;
-  totalIssues: number;
-  completedIssues: number;
-  completionPercentage: number;
-}
-
 export interface ProjectOverviewActivityDto {
   id: string;
   verb: string;
@@ -79,10 +68,20 @@ export interface ProjectOverviewStatusUpdateDto {
   };
 }
 
+export interface ProjectOverviewActiveCycleDto {
+  id: string;
+  name: string;
+  startDate: Date;
+  endDate: Date;
+  totalIssues: number;
+  completedIssues: number;
+  completionPercentage: number;
+}
+
 export interface ProjectOverviewResponseDto {
   project: ProjectOverviewProjectDto;
   metrics: ProjectOverviewMetricsDto;
-  activeCycle: ProjectOverviewActiveCycleDto | null;
   recentActivities: ProjectOverviewActivityDto[];
   currentUpdate: ProjectOverviewStatusUpdateDto | null;
+  activeCycle?: ProjectOverviewActiveCycleDto | null;
 }
