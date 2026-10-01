@@ -91,6 +91,11 @@ export class DriveController {
   async getMyFiles(
     @CurrentUser('id') userId: string,
     @Query('parentId') parentId?: string,
+    @Query('search') search?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+    @Query('type') type?: string,
+    @Query('types') types?: string,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
     @Query('page') page?: number,
@@ -104,12 +109,25 @@ export class DriveController {
           : 0;
     const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
 
+    const parsedTypes = types
+      ? types
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : type && type !== 'all'
+        ? [type]
+        : undefined;
+
     const result = await this.listDriveUseCase.execute({
       userId,
       parentId:
         !parentId || parentId === 'null' || parentId === 'root'
           ? null
           : parentId,
+      search: search?.trim() || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || 'asc',
+      types: parsedTypes,
       limit: take,
       offset: skip,
     });

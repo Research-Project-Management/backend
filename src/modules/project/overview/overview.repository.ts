@@ -106,7 +106,6 @@ export class OverviewRepository {
     });
   }
 
-
   async getRecentActivities(projectId: string, limit = 10) {
     return this.prisma.activityEvent.findMany({
       where: {

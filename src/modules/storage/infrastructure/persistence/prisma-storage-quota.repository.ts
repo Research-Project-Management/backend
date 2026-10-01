@@ -4,6 +4,14 @@ import { IStorageQuotaRepository } from '../../domain/ports/storage-quota.reposi
 import { StorageQuota } from '../../domain/entities/storage-quota.entity';
 import { StorageQuotaMapper } from './mappers/storage-quota.mapper';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function cleanUuid(id?: string | null): string | null {
+  if (!id || typeof id !== 'string') return null;
+  const trimmed = id.trim();
+  return UUID_REGEX.test(trimmed) ? trimmed : null;
+}
+
 @Injectable()
 export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -12,10 +20,12 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     userId?: string | null,
     projectId?: string | null,
   ): Promise<StorageQuota | null> {
+    const validUserId = cleanUuid(userId);
+    const validProjectId = cleanUuid(projectId);
     const record = await this.prisma.storageQuota.findFirst({
       where: {
-        userId: userId ?? null,
-        projectId: projectId ?? null,
+        userId: validUserId,
+        projectId: validProjectId,
       },
     });
     return record ? StorageQuotaMapper.toDomain(record) : null;
@@ -23,6 +33,8 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
 
   async upsert(quota: StorageQuota): Promise<StorageQuota> {
     const data = StorageQuotaMapper.toPrismaCreate(quota);
+    data.userId = cleanUuid(data.userId);
+    data.projectId = cleanUuid(data.projectId);
     const existing = await this.findByScope(data.userId, data.projectId);
 
     if (existing) {
@@ -46,7 +58,9 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     bytes: bigint,
   ): Promise<bigint> {
     const DEFAULT_LIMIT = 5n * 1024n * 1024n * 1024n; // 5 GB
-    const existing = await this.findByScope(userId, projectId);
+    const validUserId = cleanUuid(userId);
+    const validProjectId = cleanUuid(projectId);
+    const existing = await this.findByScope(validUserId, validProjectId);
 
     if (existing) {
       if (existing.usedBytes + bytes > existing.maxBytes) {
@@ -65,8 +79,8 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
 
     const created = await this.prisma.storageQuota.create({
       data: {
-        userId: userId ?? null,
-        projectId: projectId ?? null,
+        userId: validUserId,
+        projectId: validProjectId,
         usedBytes: bytes,
         maxBytes: DEFAULT_LIMIT,
       },
@@ -79,7 +93,9 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     projectId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint> {
-    const quota = await this.findByScope(userId, projectId);
+    const validUserId = cleanUuid(userId);
+    const validProjectId = cleanUuid(projectId);
+    const quota = await this.findByScope(validUserId, validProjectId);
     if (!quota) return 0n;
 
     const newUsed = quota.usedBytes > bytes ? quota.usedBytes - bytes : 0n;
@@ -96,7 +112,9 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     actualBytes: bigint,
   ): Promise<void> {
     const DEFAULT_LIMIT = 5n * 1024n * 1024n * 1024n;
-    const existing = await this.findByScope(userId, projectId);
+    const validUserId = cleanUuid(userId);
+    const validProjectId = cleanUuid(projectId);
+    const existing = await this.findByScope(validUserId, validProjectId);
 
     if (existing) {
       await this.prisma.storageQuota.update({
@@ -106,8 +124,8 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     } else {
       await this.prisma.storageQuota.create({
         data: {
-          userId: userId ?? null,
-          projectId: projectId ?? null,
+          userId: validUserId,
+          projectId: validProjectId,
           usedBytes: actualBytes,
           maxBytes: DEFAULT_LIMIT,
         },
@@ -115,3 +133,4 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     }
   }
 }
+

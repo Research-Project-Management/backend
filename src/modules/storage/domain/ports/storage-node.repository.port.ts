@@ -9,6 +9,10 @@ export interface ListDriveFilter {
   starredOnly?: boolean;
   trashedOnly?: boolean;
   authorId?: string;
+  search?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  types?: string[];
   limit?: number;
   offset?: number;
 }

@@ -80,6 +80,10 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
       where.starred = true;
     }
 
+    if (filter.search && filter.search.trim()) {
+      where.filename = { contains: filter.search.trim(), mode: 'insensitive' };
+    }
+
     if (filter.scope) {
       where.linkedToType = filter.scope;
       if (filter.projectId) {
@@ -89,15 +93,27 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
       // Default: Exclude Library and Paper files from Personal Drive
       where.NOT = [
         { linkedToType: { in: [FileScope.Library, FileScope.Paper] } },
-        { metaData: { path: ['source'], equals: 'library' } },
-        { metaData: { path: ['source'], equals: 'paper' } },
       ];
+    }
+
+    let orderBy: any[] = [{ isFolder: 'desc' }, { filename: 'asc' }];
+    if (filter.sortBy) {
+      const orderDir = filter.sortOrder === 'desc' ? 'desc' : 'asc';
+      if (filter.sortBy === 'updatedAt' || filter.sortBy === 'updated_at') {
+        orderBy = [{ isFolder: 'desc' }, { updatedAt: orderDir }];
+      } else if (filter.sortBy === 'createdAt' || filter.sortBy === 'created_at') {
+        orderBy = [{ isFolder: 'desc' }, { createdAt: orderDir }];
+      } else if (filter.sortBy === 'size') {
+        orderBy = [{ isFolder: 'desc' }, { size: orderDir }];
+      } else if (filter.sortBy === 'name' || filter.sortBy === 'filename') {
+        orderBy = [{ isFolder: 'desc' }, { filename: orderDir }];
+      }
     }
 
     const [records, total] = await Promise.all([
       this.prisma.file.findMany({
         where,
-        orderBy: [{ isFolder: 'desc' }, { filename: 'asc' }],
+        orderBy,
         take: filter.limit ?? 100,
         skip: filter.offset ?? 0,
       }),

@@ -83,32 +83,32 @@ async function bootstrap() {
   app.useWebSocketAdapter(redisIoAdapter);
 
   // Multipart file uploads (Cloudflare R2 / S3 streaming)
-  await app.register(multipart, {
+  await app.register(multipart as any, {
     limits: {
       fileSize: 100 * 1024 * 1024, // 100MB
     },
   });
 
   // Security Headers (Helmet)
-  await app.register(helmet, {
+  await app.register(helmet as any, {
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
   });
 
   // Rate Limiting (Throttle & Brute-force protection)
   const isProd = process.env.NODE_ENV === 'production';
-  await app.register(rateLimit, {
+  await app.register(rateLimit as any, {
     timeWindow: '1 minute',
-    max: (req) => {
-      const url = req.raw.url || '';
+    max: (req: any) => {
+      const url = req.raw?.url || '';
       // Throttle sensitive auth endpoints (120 req/min in dev, 15 req/min in prod)
       if (isSensitiveAuthRoute(url)) {
         return isProd ? 15 : 120;
       }
       return isProd ? 150 : 600;
     },
-    keyGenerator: (req) => {
-      const url = req.raw.url || '';
+    keyGenerator: (req: any) => {
+      const url = req.raw?.url || '';
       if (isSensitiveAuthRoute(url)) {
         return `auth:${req.ip}`;
       }

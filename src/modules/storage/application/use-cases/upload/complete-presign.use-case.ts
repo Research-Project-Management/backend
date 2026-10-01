@@ -189,8 +189,10 @@ export class CompletePresignUseCase {
     });
     await this.nodeRepo.create(node);
 
-    // 5. Invalidate folder listing cache
+    // 5. Invalidate folder listing cache and quota
     await this.cache.invalidateFolder(scopeKey, input.parentId ?? null);
+    await this.cache.invalidateScopeTree(scopeKey);
+    await this.cache.invalidateQuota(input.userId, input.projectId ?? null);
 
     // 6. Emit domain event
     this.eventEmitter.emit(

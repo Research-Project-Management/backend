@@ -829,7 +829,11 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     // Batch fetch target items to eliminate N+1 queries
     let targetItemMap = new Map<string, any>();
     if (this.query.findByIds && targetIds.length > 0) {
-      const targetItems = await this.query.findByIds(userId, targetIds, projectId);
+      const targetItems = await this.query.findByIds(
+        userId,
+        targetIds,
+        projectId,
+      );
       if (targetItems && targetItems.length > 0) {
         targetItemMap = new Map(targetItems.map((item) => [item.id, item]));
       }
@@ -1126,14 +1130,11 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
 
       let existingInProject: any = isBatchDuplicate;
       if (!isBatchDuplicate && !this.query.findDuplicatesInProject) {
-        existingInProject = await this.query.findDuplicateInProject(
-          projectId,
-          {
-            doi: source.doi,
-            citationKey: source.citationKey,
-            title: source.title,
-          },
-        );
+        existingInProject = await this.query.findDuplicateInProject(projectId, {
+          doi: source.doi,
+          citationKey: source.citationKey,
+          title: source.title,
+        });
       }
 
       if (existingInProject) {

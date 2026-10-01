@@ -21,8 +21,16 @@ export class ListDriveUseCase {
     const scopeKey =
       filter.projectId ?? filter.userId ?? filter.authorId ?? 'default';
 
-    // Only cache top-level / active root folder queries
-    if (!filter.trashedOnly && !filter.starredOnly && !filter.offset) {
+    // Only cache top-level / active root folder queries without search/filter
+    const isFilterActive =
+      filter.trashedOnly ||
+      filter.starredOnly ||
+      Boolean(filter.offset) ||
+      Boolean(filter.search) ||
+      Boolean(filter.types && filter.types.length > 0) ||
+      Boolean(filter.sortBy);
+
+    if (!isFilterActive) {
       const cached = await this.cache.getFolderListing<{
         nodes: any[];
         total: number;
@@ -37,12 +45,12 @@ export class ListDriveUseCase {
 
     const result = await this.nodeRepo.list(filter);
 
-    if (!filter.trashedOnly && !filter.starredOnly && !filter.offset) {
+    if (!isFilterActive) {
       await this.cache.setFolderListing(
         scopeKey,
         filter.parentId,
         result,
-        1800,
+        120, // 2 minutes TTL
       );
     }
 

@@ -183,8 +183,15 @@ export class UploadController {
       'uploaded-file';
     const mimeType = data.mimetype || 'application/octet-stream';
 
-    const projectId = fields.projectId?.value;
-    const parentId = fields.parentId?.value;
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const cleanUuid = (val: any): string | undefined => {
+      if (typeof val !== 'string') return undefined;
+      const trimmed = val.trim();
+      return UUID_REGEX.test(trimmed) ? trimmed : undefined;
+    };
+
+    const projectId = cleanUuid(fields.projectId?.value);
+    const parentId = cleanUuid(fields.parentId?.value);
 
     const result = await this.uploadDirectUseCase.execute({
       userId,

@@ -1194,7 +1194,8 @@ export class QueryRepository {
 
     const orConditions: Prisma.ItemWhereInput[] = [];
     if (dois.length > 0) orConditions.push({ doi: { in: dois } });
-    if (citationKeys.length > 0) orConditions.push({ citationKey: { in: citationKeys } });
+    if (citationKeys.length > 0)
+      orConditions.push({ citationKey: { in: citationKeys } });
     if (titles.length > 0) orConditions.push({ title: { in: titles } });
 
     if (orConditions.length === 0) return [];

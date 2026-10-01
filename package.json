@@ -154,6 +154,18 @@
     "testTimeout": 60000
   },
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "@scarf/scarf",
+      "bcrypt",
+      "msgpackr-extract",
+      "prisma",
+      "sharp",
+      "@napi-rs/canvas",
+      "tesseract.js",
+      "unrs-resolver"
+    ],
     "overrides": {
       "fastify": "^5.12.1",
       "qs": "^6.16.0",

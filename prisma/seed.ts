@@ -125,7 +125,6 @@ async function main() {
       doi: '10.48550/arXiv.2010.08895',
       citationKey: 'li2021fourier',
       userId: adminUser.id,
-      uploadedById: adminUser.id,
       projectId: project.id,
       contributors: {
         create: [
@@ -151,7 +150,6 @@ async function main() {
       doi: '10.1016/j.jcp.2018.10.045',
       citationKey: 'raissi2019physics',
       userId: researcherUser.id,
-      uploadedById: researcherUser.id,
       projectId: project.id,
       contributors: {
         create: [

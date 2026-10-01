@@ -97,6 +97,10 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
 
     mockCache = {
       invalidateFolder: jest.fn().mockResolvedValue(undefined),
+      invalidateScopeTree: jest.fn().mockResolvedValue(undefined),
+      invalidateQuota: jest.fn().mockResolvedValue(undefined),
+      getFolderListing: jest.fn().mockResolvedValue(null),
+      setFolderListing: jest.fn().mockResolvedValue(undefined),
     } as any;
 
     mockEvents = {

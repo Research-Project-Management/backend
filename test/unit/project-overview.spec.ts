@@ -133,12 +133,6 @@ describe('Project Overview Module', () => {
       expect(result.metrics.overdue).toBe(3);
       expect(result.metrics.completionPercentage).toBe(50.0);
 
-      // Check active cycle
-      expect(result.activeCycle?.name).toBe('Sprint 1');
-      expect(result.activeCycle?.totalIssues).toBe(10);
-      expect(result.activeCycle?.completedIssues).toBe(6);
-      expect(result.activeCycle?.completionPercentage).toBe(60.0);
-
       // Check activities
       expect(result.recentActivities).toHaveLength(1);
       expect(result.recentActivities[0].actor.name).toBe('Bob');

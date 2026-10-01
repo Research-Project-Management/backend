@@ -14,17 +14,13 @@ export class OverviewService {
       throw new NotFoundException(`Project with ID "${projectId}" not found`);
     }
 
-    const [
-      stateCounts,
-      overdueCount,
-      recentActivities,
-      latestStatusUpdate,
-    ] = await Promise.all([
-      this.overviewRepo.getWorkItemStateGroupCounts(projectId),
-      this.overviewRepo.getOverdueCount(projectId),
-      this.overviewRepo.getRecentActivities(projectId, 10),
-      this.overviewRepo.getLatestStatusUpdate(projectId),
-    ]);
+    const [stateCounts, overdueCount, recentActivities, latestStatusUpdate] =
+      await Promise.all([
+        this.overviewRepo.getWorkItemStateGroupCounts(projectId),
+        this.overviewRepo.getOverdueCount(projectId),
+        this.overviewRepo.getRecentActivities(projectId, 10),
+        this.overviewRepo.getLatestStatusUpdate(projectId),
+      ]);
 
     const backlog = stateCounts.backlog || 0;
     const unstarted = stateCounts.unstarted || 0;

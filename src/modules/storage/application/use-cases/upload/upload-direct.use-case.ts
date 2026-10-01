@@ -142,8 +142,10 @@ export class UploadDirectUseCase {
     });
     await this.nodeRepo.create(node);
 
-    // 7. Invalidate folder listing cache
-    await this.cache.invalidateFolder(scopeKey, input.parentId);
+    // 7. Invalidate folder listing cache and quota
+    await this.cache.invalidateFolder(scopeKey, input.parentId ?? null);
+    await this.cache.invalidateScopeTree(scopeKey);
+    await this.cache.invalidateQuota(input.userId, input.projectId ?? null);
 
     // 8. Emit domain event for async subscribers (AI indexing, virus scan)
     this.eventEmitter.emit(
