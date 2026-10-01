@@ -18,7 +18,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { AttachmentsService } from './core/use-cases/attachments.service';
+import { AttachmentsService } from './core/services/attachments.service';
 import { WebSnapshotService } from './core/adapters/web-snapshot.service';
 import {
   CreateAttachmentDto,
@@ -53,24 +53,6 @@ export class AttachmentController {
   private webSnapshotServiceInstance?: WebSnapshotService;
   private storagePortInstance?: IStoragePort;
 
-  constructor(
-    attachmentsService: AttachmentsService,
-    webSnapshotService: WebSnapshotService,
-    storagePort?: IStoragePort,
-  );
-  constructor(
-    createAttachmentUseCase: CreateAttachmentUseCase,
-    getAttachmentUseCase: GetAttachmentUseCase,
-    getItemAttachmentsUseCase: GetItemAttachmentsUseCase,
-    deleteAttachmentUseCase: DeleteAttachmentUseCase,
-    setPrimaryAttachmentUseCase: SetPrimaryAttachmentUseCase,
-    renameAttachmentUseCase: RenameAttachmentUseCase,
-    batchRenameAttachmentsUseCase: BatchRenameAttachmentsUseCase,
-    getThumbnailUseCase: GetAttachmentThumbnailUseCase,
-    webSnapshotService: WebSnapshotService,
-    storagePort?: IStoragePort,
-    attachmentsService?: AttachmentsService,
-  );
   constructor(
     @Optional() private readonly createAttachmentUseCase?: any,
     @Optional() private readonly getAttachmentUseCase?: any,

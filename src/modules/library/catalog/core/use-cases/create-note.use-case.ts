@@ -4,7 +4,7 @@ import {
   INoteRepositoryPort,
 } from '../ports/note-repository.port';
 import { NoteEntity } from '../domain/note.entity';
-import { NotesService } from './notes.service';
+import { NotesService } from '../services/notes.service';
 import { CreateNoteData } from '../domain/notes.types';
 
 export interface CreateNoteCommand {

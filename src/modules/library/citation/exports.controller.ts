@@ -9,7 +9,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ExportsService } from './core/use-cases/exports.service';
+import { ExportsService } from './core/services/exports.service';
 import { ExportLibraryUseCase } from './core/use-cases/export-library.use-case';
 import { ExportBibliographyUseCase } from './core/use-cases/export-bibliography.use-case';
 import { ExportAnnotatedPdfUseCase } from './core/use-cases/export-annotated-pdf.use-case';

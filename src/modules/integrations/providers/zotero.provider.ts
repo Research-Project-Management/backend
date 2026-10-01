@@ -18,6 +18,20 @@ export class ZoteroProvider implements IIntegrationProvider {
   private readonly clientSecret: string;
   private readonly isMockMode: boolean;
 
+  private readonly inMemoryStore = new Map<
+    string,
+    { secret: string; userId: string; expiresAt: number }
+  >();
+
+  private cleanExpiredInMemoryTokens() {
+    const now = Date.now();
+    for (const [key, val] of this.inMemoryStore.entries()) {
+      if (val.expiresAt <= now) {
+        this.inMemoryStore.delete(key);
+      }
+    }
+  }
+
   constructor(@Optional() private readonly redis?: RedisCacheService) {
     this.clientKey = process.env.ZOTERO_CLIENT_KEY || '';
     this.clientSecret = process.env.ZOTERO_CLIENT_SECRET || '';
@@ -38,6 +52,12 @@ export class ZoteroProvider implements IIntegrationProvider {
       const mockToken = `mock_req_${randomBytes(8).toString('hex')}`;
       const state = `state_${userId}_${randomBytes(8).toString('hex')}`;
       const mockAuthUrl = `${redirectUri}?oauth_token=${mockToken}&oauth_verifier=mock_verified&state=${state}`;
+      this.cleanExpiredInMemoryTokens();
+      this.inMemoryStore.set(mockToken, {
+        secret: 'mock_secret',
+        userId,
+        expiresAt: Date.now() + 15 * 60 * 1000,
+      });
       return {
         authUrl: mockAuthUrl,
         state,
@@ -49,9 +69,19 @@ export class ZoteroProvider implements IIntegrationProvider {
       const state = `state_${userId}_${randomBytes(8).toString('hex')}`;
       const requestTokenUrl = 'https://www.zotero.org/oauth/request';
 
+      // Include state in callback URL if possible so Zotero can preserve it
+      let effectiveCallback = redirectUri;
+      try {
+        const url = new URL(redirectUri);
+        url.searchParams.set('state', state);
+        effectiveCallback = url.toString();
+      } catch {
+        // Preserve default redirectUri if URL parsing fails
+      }
+
       const oauthParams = this.buildOAuthParams({
         oauth_consumer_key: this.clientKey,
-        oauth_callback: redirectUri,
+        oauth_callback: effectiveCallback,
       });
 
       const signature = this.generateOAuthSignature(
@@ -89,11 +119,18 @@ export class ZoteroProvider implements IIntegrationProvider {
         throw new Error('Zotero did not return an oauth_token');
       }
 
-      // Preserve requestTokenSecret for OAuth 1.0a access exchange (15 min TTL)
+      // Preserve requestTokenSecret & userId for OAuth 1.0a access exchange (15 min TTL)
+      this.cleanExpiredInMemoryTokens();
+      this.inMemoryStore.set(requestToken, {
+        secret: requestTokenSecret || '',
+        userId,
+        expiresAt: Date.now() + 15 * 60 * 1000,
+      });
+
       if (this.redis) {
         await this.redis.set(
           `oauth:zotero:${requestToken}`,
-          requestTokenSecret || '',
+          JSON.stringify({ secret: requestTokenSecret || '', userId }),
           900,
         );
       }
@@ -125,24 +162,46 @@ export class ZoteroProvider implements IIntegrationProvider {
     redirectUri: string;
   }): Promise<OAuthExchangeResult> {
     if (this.isMockMode || params.codeOrToken.startsWith('mock_')) {
+      const mockEntry = this.inMemoryStore.get(params.codeOrToken);
+      this.inMemoryStore.delete(params.codeOrToken);
       return {
         accessToken: `zotero_mock_key_${randomBytes(16).toString('hex')}`,
         providerUserId: '1234567',
         accountName: 'Zotero Researcher (Sandbox)',
         accountEmail: 'researcher@zotero.sandbox',
         metadata: { isMock: true },
+        userId: mockEntry?.userId,
       };
     }
 
     try {
       let tokenSecret = params.secret || '';
-      if (!tokenSecret && this.redis) {
-        const storedSecret = await this.redis.get<string>(
-          `oauth:zotero:${params.codeOrToken}`,
-        );
-        if (storedSecret && typeof storedSecret === 'string') {
-          tokenSecret = storedSecret;
+      let resolvedUserId: string | undefined;
+
+      if (this.redis) {
+        const stored = await this.redis.get<
+          string | { secret: string; userId: string }
+        >(`oauth:zotero:${params.codeOrToken}`);
+        if (stored) {
+          if (typeof stored === 'string') {
+            try {
+              const parsed = JSON.parse(stored);
+              tokenSecret = parsed.secret || tokenSecret;
+              resolvedUserId = parsed.userId;
+            } catch {
+              tokenSecret = stored;
+            }
+          } else if (typeof stored === 'object' && stored !== null) {
+            tokenSecret = (stored as any).secret || tokenSecret;
+            resolvedUserId = (stored as any).userId;
+          }
         }
+      }
+
+      if (!resolvedUserId && this.inMemoryStore.has(params.codeOrToken)) {
+        const entry = this.inMemoryStore.get(params.codeOrToken)!;
+        tokenSecret = entry.secret || tokenSecret;
+        resolvedUserId = entry.userId;
       }
 
       const accessTokenUrl = 'https://www.zotero.org/oauth/access';
@@ -188,6 +247,7 @@ export class ZoteroProvider implements IIntegrationProvider {
         throw new Error('Zotero access response missing oauth_token or userID');
       }
 
+      this.inMemoryStore.delete(params.codeOrToken);
       if (this.redis) {
         await this.redis.del(`oauth:zotero:${params.codeOrToken}`);
       }
@@ -201,6 +261,7 @@ export class ZoteroProvider implements IIntegrationProvider {
           username,
           userID,
         },
+        userId: resolvedUserId,
       };
     } catch (err: any) {
       this.logger.error(

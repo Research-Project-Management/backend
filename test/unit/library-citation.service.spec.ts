@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { CitationService } from '@/modules/library/citation/core/use-cases/citation.service';
+import { CitationService } from '@/modules/library/citation/core/services/citation.service';
 import {
   CslStyleRegistry,
   SUPPORTED_CITATION_STYLES,

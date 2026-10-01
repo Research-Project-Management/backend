@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
+import { normalizeAcademicTags } from '../../../shared-kernel/utils/tag.utils';
+import { buildTipTapDocFromText } from '../../../shared-kernel/utils/tiptap.utils';
 
 @Injectable()
 export class ExtractionRepository {
@@ -287,5 +289,159 @@ export class ExtractionRepository {
     });
 
     return revision;
+  }
+
+  async countItemTags(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    return client.itemTag.count({
+      where: { itemId },
+    });
+  }
+
+  async syncItemTags(
+    params: {
+      userId: string;
+      itemId: string;
+      rawTags: string[];
+      projectId?: string | null;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<string[]> {
+    const client = this.getClient(tx);
+    const normalized = normalizeAcademicTags(params.rawTags);
+    if (normalized.length === 0) return [];
+
+    const projectId = params.projectId ?? null;
+    for (const tagName of normalized) {
+      let tag = await client.tag.findFirst({
+        where: {
+          userId: params.userId,
+          name: tagName,
+          projectId,
+        },
+      });
+
+      if (!tag) {
+        tag = await client.tag.create({
+          data: {
+            userId: params.userId,
+            createdById: params.userId,
+            name: tagName,
+            type: 'automatic',
+            projectId,
+          },
+        });
+      }
+
+      await client.itemTag.upsert({
+        where: {
+          tagId_itemId: {
+            tagId: tag.id,
+            itemId: params.itemId,
+          },
+        },
+        create: {
+          tagId: tag.id,
+          itemId: params.itemId,
+          type: 'automatic',
+        },
+        update: {},
+      });
+    }
+
+    // Also synchronize onto item.metadata.tags & keywords
+    const item = await client.item.findUnique({
+      where: { id: params.itemId },
+      select: { metadata: true },
+    });
+    if (item) {
+      const currentMeta = (item.metadata as Record<string, any>) || {};
+      const existingTags = Array.isArray(currentMeta.tags)
+        ? currentMeta.tags
+        : [];
+      const mergedTags = Array.from(new Set([...existingTags, ...normalized]));
+      await client.item.update({
+        where: { id: params.itemId },
+        data: {
+          metadata: {
+            ...currentMeta,
+            tags: mergedTags,
+            keywords: mergedTags,
+          },
+        },
+      });
+    }
+
+    return normalized;
+  }
+
+  async countItemNotes(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    return client.note.count({
+      where: { itemId, deletedAt: null },
+    });
+  }
+
+  async createItemNotes(
+    params: {
+      userId: string;
+      itemId: string;
+      notes: Array<{ content: string; type?: string }>;
+      projectId?: string | null;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    if (!params.notes || params.notes.length === 0) return 0;
+
+    const existing = await client.note.findMany({
+      where: { itemId: params.itemId, deletedAt: null },
+      select: { contentMd: true },
+    });
+    const existingContents = new Set(existing.map((n) => n.contentMd.trim()));
+
+    let createdCount = 0;
+    for (const n of params.notes) {
+      const cleanContent = n.content.trim();
+      if (!cleanContent || existingContents.has(cleanContent)) continue;
+
+      const title = n.type
+        ? `Extracted Note (${n.type})`
+        : 'Extracted Document Note';
+      const contentJson = buildTipTapDocFromText(cleanContent);
+
+      await client.note.create({
+        data: {
+          userId: params.userId,
+          createdById: params.userId,
+          projectId: params.projectId ?? null,
+          itemId: params.itemId,
+          title,
+          contentMd: cleanContent,
+          contentJson: contentJson as Prisma.InputJsonValue,
+          tags: ['grobid', 'automatic'],
+          version: 1,
+        },
+      });
+      existingContents.add(cleanContent);
+      createdCount++;
+    }
+
+    if (createdCount > 0) {
+      await client.item.update({
+        where: { id: params.itemId },
+        data: {
+          noteCount: { increment: createdCount },
+        },
+      });
+    }
+
+    return createdCount;
   }
 }

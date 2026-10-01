@@ -17,3 +17,4 @@ export * from './core/adapters/outbox.dispatcher';
 export * from './core/adapters/outbox.metrics';
 export * from './core/adapters/idempotent-consumer.service';
 export * from './core/adapters/changelog.repository';
+export * from './core/adapters/integration-event-bus.service';

@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { TypesService } from '../use-cases/types.service';
+import { TypesService } from '../services/types.service';
 import { ItemsMapper } from './items.mapper';
 import {
   TypeConversionPreview,

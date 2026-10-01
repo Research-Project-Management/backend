@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('tsconfig-paths/register');
@@ -47,7 +49,9 @@ process.on('uncaughtException', (error: Error) => {
     '[Fatal Uncaught Exception]:',
     error?.stack || error?.message || error,
   );
-  process.exit(1);
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
 });
 
 async function bootstrap() {

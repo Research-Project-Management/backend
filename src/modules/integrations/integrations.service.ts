@@ -177,6 +177,14 @@ export class IntegrationsService {
       redirectUri: params.redirectUri,
     });
 
+    const targetUserId = exchange.userId || params.userId;
+
+    if (!targetUserId || targetUserId === 'anonymous-user') {
+      throw new BadRequestException(
+        'Unable to identify the authenticated user session for this integration. Please ensure you are logged into Flux and try connecting again.',
+      );
+    }
+
     const encryptedAccess = encryptToken(exchange.accessToken);
     const encryptedRefresh = exchange.refreshToken
       ? encryptToken(exchange.refreshToken)
@@ -186,7 +194,7 @@ export class IntegrationsService {
       : null;
 
     await this.repo.upsertConnection({
-      userId: params.userId,
+      userId: targetUserId,
       provider: params.provider,
       accessToken: encryptedAccess,
       refreshToken: encryptedRefresh,

@@ -4,7 +4,7 @@ import {
   FormattedCitationResult,
 } from '../ports/citation-engine.port';
 import { CitationStyleVo } from '../domain/citation-style.vo';
-import { CitationService } from '../use-cases/citation.service';
+import { CitationService } from '../services/citation.service';
 
 /**
  * Infrastructure Adapter implementing ICitationEnginePort using CitationService (CSL Engine).

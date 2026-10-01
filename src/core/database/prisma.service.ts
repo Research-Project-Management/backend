@@ -22,7 +22,7 @@ export class PrismaService
     const connectionString =
       configService.get<string>('DATABASE_URL') ||
       process.env.DATABASE_URL ||
-      'postgresql://localhost:5432/rpm';
+      'postgresql://postgres:Thanh26102006@127.0.0.1:5433/flux-db?schema=public';
 
     const isProd = process.env.NODE_ENV === 'production';
     // Bulkhead safety headroom: Background workers (Outbox: 5, Ingest: 3, Retraction: 3, OCR: 2)

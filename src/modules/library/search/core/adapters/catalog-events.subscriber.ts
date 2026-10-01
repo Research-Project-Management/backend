@@ -8,7 +8,7 @@ import {
   ItemCreatedIntegrationPayload,
   ItemDeletedIntegrationPayload,
 } from '../../../shared-kernel/events/integration-events';
-import { SearchService } from '../use-cases/search.service';
+import { SearchService } from '../services/search.service';
 
 /**
  * CatalogEventsSubscriber in Discovery Bounded Context.

@@ -4,7 +4,7 @@ import {
   ATTACHMENT_REPOSITORY_PORT,
   IAttachmentRepositoryPort,
 } from '../ports/attachment-repository.port';
-import { AttachmentsService } from './attachments.service';
+import { AttachmentsService } from '../services/attachments.service';
 import { CreateAttachmentInput } from '../domain/attachments.types';
 
 export interface CreateAttachmentCommand {

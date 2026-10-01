@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
-import { NotesService } from './core/use-cases/notes.service';
+import { NotesService } from './core/services/notes.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 
 import { CreateNoteDto, UpdateNoteDto } from './dto/notes.dto';

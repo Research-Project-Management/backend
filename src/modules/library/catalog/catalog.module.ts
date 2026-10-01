@@ -21,30 +21,30 @@ import { NoteController, NotesController } from './notes.controller';
 import {
   ItemService,
   ItemService as ItemsService,
-} from './core/services/item.service';
+} from './core/services/items.service';
 import { ItemSyncDelegate } from './core/services/item-sync.delegate';
 import {
   CollectionService,
   CollectionService as CollectionsService,
-} from './core/services/collection.service';
+} from './core/services/collections.service';
 import {
   TagService,
   TagService as TagsService,
-} from './core/services/tag.service';
+} from './core/services/tags.service';
 import {
   TypeService,
   TypeService as TypesService,
-} from './core/services/type.service';
+} from './core/services/types.service';
 import { StateService } from './core/services/state.service';
 import {
   SavedSearchService,
   SavedSearchService as SavedSearchesService,
-} from './core/services/saved-search.service';
+} from './core/services/saved-searches.service';
 import { ZoteroSchemaValidatorService } from './core/services/zotero-schema-validator.service';
 import {
   NoteService,
   NoteService as NotesService,
-} from './core/services/note.service';
+} from './core/services/notes.service';
 
 // Search Indexing Gateway
 import { SEARCH_INDEXING_PORT } from './core/ports/search-indexing.port';

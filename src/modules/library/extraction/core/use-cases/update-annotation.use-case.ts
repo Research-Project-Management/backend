@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AnnotationsService } from './annotations.service';
+import { AnnotationsService } from '../services/annotations.service';
 import { UpdateAnnotationData } from '../domain/annotations.types';
 
 export interface UpdateAnnotationCommand {

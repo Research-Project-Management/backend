@@ -16,6 +16,7 @@ import {
   extractYearFromDate,
   decodeHtmlEntities,
   parseCreatorString,
+  splitAuthorString,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 
 export interface ScrapedUrlResult {
@@ -432,11 +433,12 @@ export class UrlMetadataScraperService {
     }
 
     // 2. Authors (Highwire Press supports multiple citation_author meta tags)
-    const authors = this.extractAllMetaValues(html, [
+    const rawAuthors = this.extractAllMetaValues(html, [
       'citation_author',
       'dc.creator',
       'dc:creator',
     ]);
+    const authors = rawAuthors.flatMap((a) => splitAuthorString(a));
     if (authors.length > 0) {
       result.authors = authors;
       result.creators = authors.map((authStr, idx) => {

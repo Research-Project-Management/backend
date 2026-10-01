@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { StateService } from '@/modules/library/catalog/core/use-cases/state.service';
+import { StateService } from '@/modules/library/catalog/core/services/state.service';
 import { StateRepository } from '@/modules/library/catalog/core/adapters/state.repository';
 import {
   ReadingStatus,

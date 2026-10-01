@@ -34,6 +34,7 @@ export interface ExtractedPdfMetadata {
   abstractParagraphs?: string[];
   abstractSections?: Array<{ heading?: string; text: string }>;
   keywords?: string[];
+  notes?: Array<{ content: string; type?: string }>;
   journal?: string;
   bookTitle?: string;
   conferenceName?: string;
@@ -499,6 +500,9 @@ export class PdfProvider {
     }
     if (header.keywords && header.keywords.length > 0) {
       metadata.keywords = header.keywords;
+    }
+    if (header.notes && header.notes.length > 0) {
+      metadata.notes = header.notes;
     }
     if (header.year) {
       metadata.year = header.year;

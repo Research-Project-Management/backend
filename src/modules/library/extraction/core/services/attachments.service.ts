@@ -12,7 +12,7 @@ import { createHash } from 'crypto';
 import {
   TransactionService,
   TransactionHelpers,
-} from '../../../sync/core/adapters/transaction.service';
+} from '../../../sync';
 import {
   CreateAttachmentInput,
   ReplaceAttachmentFileInput,

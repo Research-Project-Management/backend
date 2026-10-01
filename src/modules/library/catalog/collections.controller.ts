@@ -15,7 +15,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { CollectionsService } from './core/use-cases/collections.service';
+import { CollectionsService } from './core/services/collections.service';
 import { GetCollectionsUseCase } from './core/use-cases/get-collections.use-case';
 import { GetCollectionTreeUseCase } from './core/use-cases/get-collection-tree.use-case';
 import { GetCollectionByIdUseCase } from './core/use-cases/get-collection-by-id.use-case';

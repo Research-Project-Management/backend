@@ -13,6 +13,8 @@ import {
   cleanAbstractText,
   sanitizeItemTitle,
   parseCreatorString,
+  splitAuthorString,
+  isNoiseAuthorName,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
@@ -966,35 +968,16 @@ export async function buildCommandCreateInput(
     ...(data.contributors && data.contributors.length > 0
       ? {
           contributors: {
-            create: data.contributors.map((c: any, index: number) => {
-              const fullName =
-                c.fullName ||
-                [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-                c.name ||
-                '';
-              let first = c.firstName || '';
-              let last = c.lastName || '';
-              if (!first && !last && fullName) {
-                const parsed = parseCreatorString(fullName, index);
-                first = parsed.firstName;
-                last = parsed.lastName;
-              }
-              return {
-                creatorType: c.creatorType || 'author',
-                fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
-                firstName: first,
-                lastName: last,
-                fullName,
-                shortName: c.shortName || '',
-                orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
-              };
-            }),
-          },
-        }
-      : data.creators && data.creators.length > 0
-        ? {
-            contributors: {
-              create: data.creators.map((c: any, index: number) => {
+            create: data.contributors
+              .filter((c: any) => {
+                const fullName =
+                  c.fullName ||
+                  [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                  c.name ||
+                  '';
+                return fullName && !isNoiseAuthorName(fullName);
+              })
+              .map((c: any, index: number) => {
                 const fullName =
                   c.fullName ||
                   [c.firstName, c.lastName].filter(Boolean).join(' ') ||
@@ -1009,8 +992,7 @@ export async function buildCommandCreateInput(
                 }
                 return {
                   creatorType: c.creatorType || 'author',
-                  fieldMode:
-                    c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
+                  fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
                   firstName: first,
                   lastName: last,
                   fullName,
@@ -1018,13 +1000,52 @@ export async function buildCommandCreateInput(
                   orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
                 };
               }),
+          },
+        }
+      : data.creators && data.creators.length > 0
+        ? {
+            contributors: {
+              create: data.creators
+                .filter((c: any) => {
+                  const fullName =
+                    c.fullName ||
+                    [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                    c.name ||
+                    '';
+                  return fullName && !isNoiseAuthorName(fullName);
+                })
+                .map((c: any, index: number) => {
+                  const fullName =
+                    c.fullName ||
+                    [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                    c.name ||
+                    '';
+                  let first = c.firstName || '';
+                  let last = c.lastName || '';
+                  if (!first && !last && fullName) {
+                    const parsed = parseCreatorString(fullName, index);
+                    first = parsed.firstName;
+                    last = parsed.lastName;
+                  }
+                  return {
+                    creatorType: c.creatorType || 'author',
+                    fieldMode:
+                      c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
+                    firstName: first,
+                    lastName: last,
+                    fullName,
+                    shortName: c.shortName || '',
+                    orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
+                  };
+                }),
             },
           }
         : data.authors && data.authors.length > 0
           ? {
               contributors: {
-                create: data.authors.map(
-                  (authorName: string, index: number) => {
+                create: data.authors
+                  .flatMap((authorName: string) => splitAuthorString(authorName))
+                  .map((authorName: string, index: number) => {
                     const parsed = parseCreatorString(authorName, index);
                     return {
                       creatorType: parsed.creatorType,
@@ -1033,8 +1054,7 @@ export async function buildCommandCreateInput(
                       fullName: parsed.fullName,
                       orderIndex: parsed.orderIndex,
                     };
-                  },
-                ),
+                  }),
               },
             }
           : {}),
@@ -1387,8 +1407,16 @@ export function buildCommandUpdateInput(
       ? {
           contributors: {
             deleteMany: {},
-            create: (data.contributors || data.creators || []).map(
-              (c: any, index: number) => {
+            create: (data.contributors || data.creators || [])
+              .filter((c: any) => {
+                const fullName =
+                  c.fullName ||
+                  [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                  c.name ||
+                  '';
+                return fullName && !isNoiseAuthorName(fullName);
+              })
+              .map((c: any, index: number) => {
                 const fullName =
                   c.fullName ||
                   [c.firstName, c.lastName].filter(Boolean).join(' ') ||
@@ -1411,16 +1439,16 @@ export function buildCommandUpdateInput(
                   shortName: c.shortName || '',
                   orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
                 };
-              },
-            ),
+              }),
           },
         }
       : data.authors !== undefined
         ? {
             contributors: {
               deleteMany: {},
-              create: (data.authors || []).map(
-                (authorName: string, index: number) => {
+              create: (data.authors || [])
+                .flatMap((authorName: string) => splitAuthorString(authorName))
+                .map((authorName: string, index: number) => {
                   const parsed = parseCreatorString(authorName, index);
                   return {
                     creatorType: parsed.creatorType,
@@ -1429,8 +1457,7 @@ export function buildCommandUpdateInput(
                     fullName: parsed.fullName,
                     orderIndex: parsed.orderIndex,
                   };
-                },
-              ),
+                }),
             },
           }
         : {}),

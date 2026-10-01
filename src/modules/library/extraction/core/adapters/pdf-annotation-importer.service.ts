@@ -10,8 +10,8 @@ import {
 import { AnnotationsRepository } from './annotations.repository';
 import { AttachmentsRepository } from './attachments.repository';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { AnnotationsService } from '../use-cases/annotations.service';
-import { AttachmentsService } from '../use-cases/attachments.service';
+import { AnnotationsService } from '../services/annotations.service';
+import { AttachmentsService } from '../services/attachments.service';
 import { AnnotationType } from '../domain/annotations.types';
 import { getDocumentProxy } from 'unpdf';
 

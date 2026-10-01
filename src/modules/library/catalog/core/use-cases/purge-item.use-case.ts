@@ -14,7 +14,7 @@ import {
   PROJECT_ACCESS_PORT,
   IProjectAccessPort,
 } from '../ports/project-access.port';
-import { TagsService } from './tags.service';
+import { TagsService } from '../services/tags.service';
 
 export interface PurgeItemCommand {
   userId: string;

@@ -4,7 +4,7 @@
 # Note: Frontend (Next.js) is deployed on Vercel and excluded from this stack.
 # ==============================================================================
 
-name: backend
+name: flux
 
 services:
   # ----------------------------------------------------------------------------
@@ -27,8 +27,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-flux-db}"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 90s
     deploy:
       resources:
         limits:

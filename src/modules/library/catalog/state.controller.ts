@@ -8,7 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { StateService } from './core/use-cases/state.service';
+import { StateService } from './core/services/state.service';
 import { UpdateStateDto, GetBatchStatesDto } from './dto/state.dto';
 import { isUUID } from 'class-validator';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';

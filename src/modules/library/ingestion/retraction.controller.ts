@@ -9,7 +9,7 @@ import {
   UseGuards,
   ForbiddenException,
 } from '@nestjs/common';
-import { RetractionService } from './core/use-cases/retraction.service';
+import { RetractionService } from './core/services/retraction.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
   FlagRetractionDto,

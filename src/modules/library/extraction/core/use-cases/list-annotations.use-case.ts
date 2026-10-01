@@ -3,7 +3,7 @@ import {
   ANNOTATION_REPOSITORY_PORT,
   IAnnotationRepositoryPort,
 } from '../ports/annotation-repository.port';
-import { AnnotationsService } from './annotations.service';
+import { AnnotationsService } from '../services/annotations.service';
 import { AnnotationType } from '../domain/annotations.types';
 
 export interface ListAnnotationsQuery {

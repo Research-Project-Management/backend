@@ -9,7 +9,7 @@ import {
   QueryType,
 } from '../domain/metadata.types';
 import { normalizeIsbn } from './metadata.utils';
-import { ProviderFetchError } from '../use-cases/metadata-executor.service';
+import { ProviderFetchError } from '../services/metadata-executor.service';
 
 @Injectable()
 export class OpenLibraryProvider implements MetadataProvider {

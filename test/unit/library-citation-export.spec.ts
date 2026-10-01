@@ -1,6 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
-import { ExportsService } from '@/modules/library/citation/core/use-cases/exports.service';
-import { CitationService } from '@/modules/library/citation/core/use-cases/citation.service';
+import { ExportsService } from '@/modules/library/citation/core/services/exports.service';
+import { CitationService } from '@/modules/library/citation/core/services/citation.service';
 import { ExportsRepository } from '@/modules/library/citation/core/adapters/exports.repository';
 import { ExportBibliographyUseCase } from '@/modules/library/citation/core/use-cases/export-bibliography.use-case';
 import { CitationFacade } from '@/modules/library/citation/citation.facade';

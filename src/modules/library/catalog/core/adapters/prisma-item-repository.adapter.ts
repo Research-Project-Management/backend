@@ -3,7 +3,7 @@ import { IItemRepositoryPort } from '../ports/item-repository.port';
 import { ItemAggregate } from '../domain/item.aggregate';
 import { QueryRepository } from './query.repository';
 import { CommandRepository } from './command.repository';
-import { TransactionService } from '../../../sync/core/adapters/transaction.service';
+import { TransactionService } from '../../../sync';
 import { PrismaService } from '../../../../../core/database/prisma.service';
 import { ItemsMapper } from './items.mapper';
 import { syncTagsForCatalogItem } from './command-payload.builder';

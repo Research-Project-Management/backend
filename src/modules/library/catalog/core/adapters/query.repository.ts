@@ -83,8 +83,18 @@ export class QueryRepository {
       return null;
     }
 
-    if (item.userId === userId && !item.projectId) {
+    if (item.userId === userId) {
       return item;
+    }
+
+    if (item.projectId) {
+      const member = await client.projectMember.findFirst({
+        where: {
+          projectId: item.projectId,
+          userId,
+        },
+      });
+      if (member) return item;
     }
 
     return null;

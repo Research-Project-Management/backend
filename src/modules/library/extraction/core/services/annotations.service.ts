@@ -20,7 +20,7 @@ import { AnnotationNormalizer } from '../adapters/annotation.normalizer';
 import {
   TransactionService,
   TransactionHelpers,
-} from '../../../sync/core/adapters/transaction.service';
+} from '../../../sync';
 import { AttachmentsService } from './attachments.service';
 import type {
   UpsertSyncAnnotationCommand,

@@ -1,11 +1,11 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
-import { ItemsService } from './core/use-cases/items.service';
+import { ItemsService } from './core/services/items.service';
 import { QueryRepository } from './core/adapters/query.repository';
-import { CollectionsService } from './core/use-cases/collections.service';
-import { TagsService } from './core/use-cases/tags.service';
-import { TypesService } from './core/use-cases/types.service';
-import { StateService } from './core/use-cases/state.service';
-import { NotesService } from './core/use-cases/notes.service';
+import { CollectionsService } from './core/services/collections.service';
+import { TagsService } from './core/services/tags.service';
+import { TypesService } from './core/services/types.service';
+import { StateService } from './core/services/state.service';
+import { NotesService } from './core/services/notes.service';
 import {
   ITEM_READ_PORT,
   ITEM_EXISTENCE_PORT,

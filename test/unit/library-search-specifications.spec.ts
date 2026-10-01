@@ -10,7 +10,7 @@ import {
 } from '@/modules/library/search/core/domain/item-specifications';
 import { SearchSpecificationBuilder } from '@/modules/library/search/core/domain/search-specification.builder';
 import { SearchRepository } from '@/modules/library/search/core/adapters/search.repository';
-import { SearchService } from '@/modules/library/search/core/use-cases/search.service';
+import { SearchService } from '@/modules/library/search/core/services/search.service';
 import { CatalogEventsSubscriber } from '@/modules/library/search/core/adapters/catalog-events.subscriber';
 import { PrismaService } from '../../src/core/database/prisma.service';
 import { RedisCacheService } from '../../src/core/cache/redis.service';

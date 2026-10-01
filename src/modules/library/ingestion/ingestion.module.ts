@@ -30,7 +30,7 @@ import {
 
 // ── 1. Ingestion Pipeline ─────────────────────────────────────────────────
 import { IngestionController } from './ingestion.controller';
-import { IngestionService } from './core/use-cases/ingestion.service';
+import { IngestionService } from './core/services/ingestion.service';
 import { IngestionRepository } from './core/adapters/ingestion.repository';
 import { IdempotencyRepository } from './core/adapters/idempotency.repository';
 import { DoiParser } from './core/adapters/doi.parser';
@@ -47,13 +47,13 @@ import { MatchStage } from './core/adapters/match.stage';
 import { CommitStage } from './core/adapters/commit.stage';
 import { UrlCaptureProvider } from './core/adapters/url-capture.provider';
 import { INGESTION_PORT } from './core/domain/ingestion.types';
-import { WatchdogService } from './core/use-cases/watchdog.service';
-import { UrlCaptureService } from './core/use-cases/url-capture.service';
-import { PipelineService } from './core/use-cases/pipeline.service';
-import { IngestionSagaOrchestrator } from './core/use-cases/ingestion-saga.orchestrator';
-import { QueueService } from './core/use-cases/queue.service';
+import { WatchdogService } from './core/services/watchdog.service';
+import { UrlCaptureService } from './core/services/url-capture.service';
+import { PipelineService } from './core/services/pipeline.service';
+import { IngestionSagaOrchestrator } from './core/services/ingestion-saga.orchestrator';
+import { QueueService } from './core/services/queue.service';
 import { IngestionQueueConsumer } from './core/use-cases/ingestion-queue.consumer';
-import { UrlMetadataScraperService } from './core/use-cases/url-metadata-scraper.service';
+import { UrlMetadataScraperService } from './core/services/url-metadata-scraper.service';
 
 // ── 2. Metadata Resolution ────────────────────────────────────────────────
 import {
@@ -62,9 +62,9 @@ import {
   MetadataProvider,
 } from './core/domain/metadata.types';
 import { MetadataCache } from './core/adapters/metadata.cache';
-import { ReconciliationService } from './core/use-cases/metadata-reconciliation.service';
-import { ExecutorService } from './core/use-cases/metadata-executor.service';
-import { MetadataService } from './core/use-cases/metadata.service';
+import { ReconciliationService } from './core/services/metadata-reconciliation.service';
+import { ExecutorService } from './core/services/metadata-executor.service';
+import { MetadataService } from './core/services/metadata.service';
 import { CrossRefProvider } from './core/adapters/crossref.provider';
 import { ArxivProvider } from './core/adapters/arxiv.provider';
 import { PubMedProvider } from './core/adapters/pubmed.provider';
@@ -74,16 +74,16 @@ import { UnpaywallProvider } from './core/adapters/unpaywall.provider';
 
 // ── 3. Curation / Deduplication ──────────────────────────────────────────
 import { CurationController } from './curation.controller';
-import { DuplicateService } from './core/use-cases/duplicate.service';
-import { QualityService } from './core/use-cases/quality.service';
+import { DuplicateService } from './core/services/duplicate.service';
+import { QualityService } from './core/services/quality.service';
 
 // ── 4. Retraction Watch ──────────────────────────────────────────────────
 import { RetractionController } from './retraction.controller';
-import { RetractionService } from './core/use-cases/retraction.service';
+import { RetractionService } from './core/services/retraction.service';
 import { RetractionRepository } from './core/adapters/retraction.repository';
 import { RetractionScannerProvider } from './core/adapters/retraction-scanner.provider';
-import { RetractionDatabaseService } from './core/use-cases/retraction-database.service';
-import { RetractionSyncService } from './core/use-cases/retraction-sync.service';
+import { RetractionDatabaseService } from './core/services/retraction-database.service';
+import { RetractionSyncService } from './core/services/retraction-sync.service';
 
 // ── Clean Architecture — Ingestion Run Port & Use Cases ──────────────────
 import { INGESTION_RUN_REPOSITORY_PORT } from './core/ports/ingestion-run-repository.port';

@@ -28,6 +28,7 @@ export interface OAuthExchangeResult {
   accountName?: string;
   accountEmail?: string;
   metadata?: Record<string, unknown>;
+  userId?: string;
 }
 
 export interface RemoteCollectionItem {

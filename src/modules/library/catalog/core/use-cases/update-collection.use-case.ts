@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CollectionsService } from './collections.service';
+import { CollectionsService } from '../services/collections.service';
 import { UpdateCollectionDto } from '../../dto/collections.dto';
 
 export interface UpdateCollectionCommand {

@@ -5,8 +5,8 @@ import {
   LIBRARY_INGESTION_QUEUE_STANDARD,
   LIBRARY_INGESTION_JOB,
 } from '../domain/queue.constants';
-import { QueuedIngestionJob } from './queue.service';
-import { PipelineService } from './pipeline.service';
+import { QueuedIngestionJob } from '../services/queue.service';
+import { PipelineService } from '../services/pipeline.service';
 import { IngestionRepository } from '../adapters/ingestion.repository';
 import { IngestionStatus } from '@prisma/client';
 

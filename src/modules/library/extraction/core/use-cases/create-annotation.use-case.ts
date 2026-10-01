@@ -4,7 +4,7 @@ import {
   IAnnotationRepositoryPort,
 } from '../ports/annotation-repository.port';
 import { AnnotationEntity } from '../domain/annotation.entity';
-import { AnnotationsService } from './annotations.service';
+import { AnnotationsService } from '../services/annotations.service';
 import { CreateAnnotationData } from '../domain/annotations.types';
 
 export interface CreateAnnotationCommand {

@@ -96,3 +96,10 @@ export function createIntegrationEvent<T>(
     scope,
   };
 }
+
+export const INTEGRATION_EVENT_BUS = Symbol('INTEGRATION_EVENT_BUS');
+
+export interface IIntegrationEventBus {
+  publish<T>(event: BaseIntegrationEvent<T>): Promise<void>;
+  publishBatch<T>(events: BaseIntegrationEvent<T>[]): Promise<void>;
+}

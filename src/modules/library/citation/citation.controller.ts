@@ -10,7 +10,7 @@ import {
   Header,
 } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { CitationService } from './core/use-cases/citation.service';
+import { CitationService } from './core/services/citation.service';
 import { FormatCitationDto, FormatBatchCitationDto } from './dto/citation.dto';
 import { normalizeCitationStyleId } from './core/adapters/citation.utils';
 import { ProjectRoleGuard } from '@/modules/project/access';
@@ -158,7 +158,12 @@ export class CitationController {
    * Format citation for a persisted item by ID.
    * Route: GET /citation/items/:itemId/citation
    */
-  @Get('items/:itemId/citation')
+  @Get([
+    'items/:itemId/citation',
+    'items/:itemId',
+    'item/:itemId/citation',
+    'item/:itemId',
+  ])
   @Header(
     'Cache-Control',
     'private, max-age=3600, stale-while-revalidate=86400',

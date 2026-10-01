@@ -1,7 +1,9 @@
-import { Prisma } from '@prisma/client';
-import { CompositeSpecification } from './specification.interface';
+import {
+  CompositeSpecification,
+  QueryCriteria,
+} from './specification.interface';
 
-export { CompositeSpecification };
+export { CompositeSpecification, QueryCriteria };
 
 /**
  * ScopeSpecification: Enforces multi-tenant isolation.
@@ -27,7 +29,7 @@ export class ScopeSpecification extends CompositeSpecification {
     return candidate?.userId === this.userId;
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
+  toPrismaWhere(): QueryCriteria {
     if (
       this.projectId &&
       this.projectId !== 'user' &&
@@ -48,7 +50,7 @@ export class ActiveItemsSpecification extends CompositeSpecification {
     return candidate?.deletedAt == null;
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
+  toPrismaWhere(): QueryCriteria {
     return { deletedAt: null };
   }
 }
@@ -68,7 +70,7 @@ export class ItemTypeSpecification extends CompositeSpecification {
     return this.itemTypes.includes(candidate?.itemType);
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
+  toPrismaWhere(): QueryCriteria {
     if (this.itemTypes.length === 1) {
       return { itemType: this.itemTypes[0] };
     }
@@ -95,8 +97,8 @@ export class YearRangeSpecification extends CompositeSpecification {
     return true;
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
-    const yearFilter: Prisma.IntNullableFilter = {};
+  toPrismaWhere(): QueryCriteria {
+    const yearFilter: Record<string, any> = {};
     if (this.yearFrom !== undefined) yearFilter.gte = this.yearFrom;
     if (this.yearTo !== undefined) yearFilter.lte = this.yearTo;
     return { year: yearFilter };
@@ -123,7 +125,7 @@ export class CollectionSpecification extends CompositeSpecification {
     return false;
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
+  toPrismaWhere(): QueryCriteria {
     return {
       collectionItems: {
         some: { collectionId: this.collectionId },
@@ -149,7 +151,7 @@ export class TagSpecification extends CompositeSpecification {
     return false;
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
+  toPrismaWhere(): QueryCriteria {
     return {
       itemTags: {
         some: { tagId: this.tagId },
@@ -220,7 +222,7 @@ export class TextSearchSpecification extends CompositeSpecification {
     return false;
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
+  toPrismaWhere(): QueryCriteria {
     if (!this.query) return {};
 
     return {

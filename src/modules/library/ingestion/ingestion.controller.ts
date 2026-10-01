@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { IngestionPort, INGESTION_PORT } from './core/domain/ingestion.types';
-import { IngestionService } from './core/use-cases/ingestion.service';
+import { IngestionService } from './core/services/ingestion.service';
 import { IngestionSubmissionDto } from './dto/submission.dto';
 import { UnifiedIngestionDto } from './dto/ingestion.dto';
 import { CaptureUrlDto, ConfirmCapturedUrlDto } from './dto/capture-url.dto';

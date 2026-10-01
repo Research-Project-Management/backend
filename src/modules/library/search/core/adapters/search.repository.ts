@@ -39,7 +39,7 @@ export class SearchRepository implements OnModuleInit {
     return SearchSpecificationBuilder.baseFromOptions(
       userId,
       options,
-    ).toPrismaWhere();
+    ).toPrismaWhere() as Prisma.ItemWhereInput;
   }
 
   /**
@@ -47,7 +47,7 @@ export class SearchRepository implements OnModuleInit {
    * Used as fallback when tsvector is not available.
    */
   private buildTextWhereIlike(q: string): Prisma.ItemWhereInput {
-    return new TextSearchSpecification(q).toPrismaWhere();
+    return new TextSearchSpecification(q).toPrismaWhere() as Prisma.ItemWhereInput;
   }
 
   async searchItems(

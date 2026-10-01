@@ -8,15 +8,15 @@
  */
 export const LIBRARY_INGESTION_QUEUE_PRIORITY =
   process.env.LIBRARY_INGESTION_QUEUE_PRIORITY ||
-  'flux:library:ingestion:priority';
+  'flux_library_ingestion_priority';
 
 export const LIBRARY_INGESTION_QUEUE_STANDARD =
   process.env.LIBRARY_INGESTION_QUEUE_STANDARD ||
-  'flux:library:ingestion:standard';
+  'flux_library_ingestion_standard';
 
 export const LIBRARY_INGESTION_QUEUE_CAPTURE =
   process.env.LIBRARY_INGESTION_QUEUE_CAPTURE ||
-  'flux:library:ingestion:capture';
+  'flux_library_ingestion_capture';
 
 /** @deprecated Use LIBRARY_INGESTION_QUEUE_STANDARD for default routing */
 export const LIBRARY_INGESTION_QUEUE =

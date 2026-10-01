@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { TagsService } from './tags.service';
+import { TagsService } from '../services/tags.service';
 
 export interface DeleteTagCommand {
   userId: string;

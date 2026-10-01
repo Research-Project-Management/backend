@@ -36,6 +36,7 @@ export interface GrobidHeaderResult {
   issn?: string;
   isbn?: string;
   keywords?: string[];
+  notes?: Array<{ content: string; type?: string }>;
   affiliations?: string[];
   rawTei?: string;
 }
@@ -677,6 +678,30 @@ export class GrobidClient {
       if (kw) keywords.push(kw);
     }
     if (keywords.length > 0) result.keywords = keywords;
+
+    // Notes & Annotations in TEI Header / Document
+    const notes: Array<{ content: string; type?: string }> = [];
+    const noteRegex = /<note\b([^>]*)>([\s\S]*?)<\/note>/gi;
+    let nMatch: RegExpExecArray | null;
+    while ((nMatch = noteRegex.exec(teiXml)) !== null) {
+      const attrs = nMatch[1];
+      const typeAttr =
+        attrs.match(/\btype=["']([^"']*)["']/i)?.[1] ||
+        attrs.match(/\bplace=["']([^"']*)["']/i)?.[1] ||
+        undefined;
+      const rawContent = this.cleanText(nMatch[2].replace(/<[^>]+>/g, ' '));
+      if (
+        rawContent &&
+        rawContent.length >= 15 &&
+        rawContent.length <= 1500 &&
+        !/^(?:page|pp\.?|\d+|\*+|©|all rights reserved|doi:)/i.test(rawContent)
+      ) {
+        if (!notes.some((n) => n.content === rawContent)) {
+          notes.push({ content: rawContent, type: typeAttr });
+        }
+      }
+    }
+    if (notes.length > 0) result.notes = notes;
 
     return result;
   }

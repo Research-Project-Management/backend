@@ -52,6 +52,7 @@ export type CanonicalItemType =
 
 export interface ItemFieldDefinition {
   key: string;
+  field?: string;
   label: string;
   baseField?: string;
   order: number;

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../../../core/database/prisma.service';
 import { RetractionDetails } from '../domain/retraction.types';
-import { RetractionDatabaseService } from '../use-cases/retraction-database.service';
+import { RetractionDatabaseService } from '../services/retraction-database.service';
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,

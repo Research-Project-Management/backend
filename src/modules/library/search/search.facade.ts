@@ -1,5 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { SearchService } from './core/use-cases/search.service';
+import { SearchService } from './core/services/search.service';
 import { SearchItemsQueryDto } from './dto/search.dto';
 
 export const SEARCH_FACADE = 'SEARCH_FACADE';

@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+export type QueryCriteria = Record<string, any>;
 
 /**
  * Specification Pattern Interface.
@@ -6,12 +6,12 @@ import { Prisma } from '@prisma/client';
  * Encapsulates domain query and filtering criteria into reusable, composable objects.
  * Supports:
  * - In-memory evaluation via `isSatisfiedBy(candidate)` (great for unit tests and local filters)
- * - Database query compilation via `toPrismaWhere()`
+ * - Database query compilation via `toPrismaWhere()` / `toQueryCriteria()`
  * - Logical composition via `.and()`, `.or()`, and `.not()`
  */
 export interface ISpecification<T = any> {
   isSatisfiedBy(candidate: T): boolean;
-  toPrismaWhere(): Prisma.ItemWhereInput;
+  toPrismaWhere(): QueryCriteria;
   and(other: ISpecification<T>): ISpecification<T>;
   or(other: ISpecification<T>): ISpecification<T>;
   not(): ISpecification<T>;
@@ -21,7 +21,7 @@ export abstract class CompositeSpecification<
   T = any,
 > implements ISpecification<T> {
   abstract isSatisfiedBy(candidate: T): boolean;
-  abstract toPrismaWhere(): Prisma.ItemWhereInput;
+  abstract toPrismaWhere(): QueryCriteria;
 
   and(other: ISpecification<T>): ISpecification<T> {
     return new AndSpecification(this, other);
@@ -50,7 +50,7 @@ export class AndSpecification<T = any> extends CompositeSpecification<T> {
     );
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
+  toPrismaWhere(): QueryCriteria {
     const leftWhere = this.left.toPrismaWhere();
     const rightWhere = this.right.toPrismaWhere();
     return {
@@ -73,7 +73,7 @@ export class OrSpecification<T = any> extends CompositeSpecification<T> {
     );
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
+  toPrismaWhere(): QueryCriteria {
     const leftWhere = this.left.toPrismaWhere();
     const rightWhere = this.right.toPrismaWhere();
     return {
@@ -91,7 +91,7 @@ export class NotSpecification<T = any> extends CompositeSpecification<T> {
     return !this.spec.isSatisfiedBy(candidate);
   }
 
-  toPrismaWhere(): Prisma.ItemWhereInput {
+  toPrismaWhere(): QueryCriteria {
     return {
       NOT: this.spec.toPrismaWhere(),
     };

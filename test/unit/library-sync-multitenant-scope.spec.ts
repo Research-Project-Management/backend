@@ -1,13 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma, TagType } from '@prisma/client';
-import { NotesService } from '@/modules/library/catalog/core/use-cases/notes.service';
+import { NotesService } from '@/modules/library/catalog/core/services/notes.service';
 import { NotesRepository } from '@/modules/library/catalog/core/adapters/notes.repository';
-import { AnnotationsService } from '@/modules/library/extraction/core/use-cases/annotations.service';
+import { AnnotationsService } from '@/modules/library/extraction/core/services/annotations.service';
 import { AnnotationsRepository } from '@/modules/library/extraction/core/adapters/annotations.repository';
-import { TagsService } from '@/modules/library/catalog/core/use-cases/tags.service';
+import { TagsService } from '@/modules/library/catalog/core/services/tags.service';
 import { TagsRepository } from '@/modules/library/catalog/core/adapters/tags.repository';
-import { AttachmentsService } from '@/modules/library/extraction/core/use-cases/attachments.service';
+import { AttachmentsService } from '@/modules/library/extraction/core/services/attachments.service';
 import {
   TransactionService,
   TransactionHelpers,

@@ -25,7 +25,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { AnnotationType } from './core/domain/annotations.types';
-import { AnnotationsService } from './core/use-cases/annotations.service';
+import { AnnotationsService } from './core/services/annotations.service';
 import { PdfAnnotationImporterService } from './core/adapters/pdf-annotation-importer.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
@@ -61,23 +61,14 @@ export class AnnotationsController {
   private getAnnotationUseCaseInstance?: GetAnnotationUseCase;
 
   constructor(
-    annotationsService: AnnotationsService,
-    pdfAnnotationImporterService: PdfAnnotationImporterService,
-  );
-  constructor(
-    createAnnotationUseCase: CreateAnnotationUseCase,
-    listAnnotationsUseCase: ListAnnotationsUseCase,
-    updateAnnotationUseCase: UpdateAnnotationUseCase,
-    deleteAnnotationUseCase: DeleteAnnotationUseCase,
-    batchUpsertAnnotationsUseCase: BatchUpsertAnnotationsUseCase,
-    pdfAnnotationImporterService: PdfAnnotationImporterService,
-    getAnnotationUseCase?: GetAnnotationUseCase,
-    annotationsService?: AnnotationsService,
-  );
-  constructor(
     @Optional()
-    private readonly createAnnotationUseCase?: any,
-    @Optional() private readonly listAnnotationsUseCase?: any,
+    private readonly createAnnotationUseCase?:
+      | CreateAnnotationUseCase
+      | AnnotationsService,
+    @Optional()
+    private readonly listAnnotationsUseCase?:
+      | ListAnnotationsUseCase
+      | PdfAnnotationImporterService,
     @Optional()
     private readonly updateAnnotationUseCase?: UpdateAnnotationUseCase,
     @Optional()
@@ -86,18 +77,24 @@ export class AnnotationsController {
     private readonly batchUpsertAnnotationsUseCase?: BatchUpsertAnnotationsUseCase,
     @Optional()
     private readonly pdfAnnotationImporterService?: PdfAnnotationImporterService,
-    @Optional() private readonly getAnnotationUseCase?: GetAnnotationUseCase,
-    @Optional() private readonly annotationsService?: AnnotationsService,
+    @Optional()
+    private readonly getAnnotationUseCase?: GetAnnotationUseCase,
+    @Optional()
+    private readonly annotationsService?: AnnotationsService,
   ) {
     const isLegacyService =
       createAnnotationUseCase && !('execute' in createAnnotationUseCase);
 
     if (isLegacyService) {
-      this.annotationsServiceInstance = createAnnotationUseCase;
-      this.pdfAnnotationImporterServiceInstance = listAnnotationsUseCase;
+      this.annotationsServiceInstance =
+        createAnnotationUseCase as AnnotationsService;
+      this.pdfAnnotationImporterServiceInstance =
+        listAnnotationsUseCase as PdfAnnotationImporterService;
     } else {
-      this.createAnnotationUseCaseInstance = createAnnotationUseCase;
-      this.listAnnotationsUseCaseInstance = listAnnotationsUseCase;
+      this.createAnnotationUseCaseInstance =
+        createAnnotationUseCase as CreateAnnotationUseCase;
+      this.listAnnotationsUseCaseInstance =
+        listAnnotationsUseCase as ListAnnotationsUseCase;
       this.updateAnnotationUseCaseInstance = updateAnnotationUseCase;
       this.deleteAnnotationUseCaseInstance = deleteAnnotationUseCase;
       this.batchUpsertAnnotationsUseCaseInstance =

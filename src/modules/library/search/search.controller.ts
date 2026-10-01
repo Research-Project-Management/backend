@@ -1,5 +1,5 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
-import { SearchService } from './core/use-cases/search.service';
+import { SearchService } from './core/services/search.service';
 import { SearchItemsQueryDto } from './dto/search.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';

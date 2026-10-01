@@ -1,5 +1,3 @@
-import { OutboxEvent } from '@prisma/client';
-
 /**
  * Formal Typed Registry of all Domain Events produced within the Library Bounded Context.
  */

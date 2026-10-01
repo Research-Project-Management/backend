@@ -15,7 +15,7 @@ import {
   cleanBibliographicText,
   cleanAbstractText,
 } from './metadata.utils';
-import { ProviderFetchError } from '../use-cases/metadata-executor.service';
+import { ProviderFetchError } from '../services/metadata-executor.service';
 import { getAcademicContactEmail } from '../../../shared-kernel/core/constants/academic-client.constants';
 
 @Injectable()

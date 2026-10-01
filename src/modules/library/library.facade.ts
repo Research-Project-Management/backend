@@ -7,11 +7,11 @@ import {
   ContentFacade,
   ExtractionFacade,
 } from './extraction/extraction.facade';
-import { CslJsonMapper } from './citation/core/adapters/csl-json.mapper';
-import { TransactionService } from './sync/core/adapters/transaction.service';
+import { CslJsonMapper } from './citation';
+import { TransactionService } from './sync';
 import { LibraryChange, Tombstone } from '@prisma/client';
 
-import { ExtractedPdfDocument } from './extraction/core/adapters/pdf.provider';
+import { ExtractedPdfDocument } from './extraction';
 
 export interface LibraryItemSummary {
   id: string;

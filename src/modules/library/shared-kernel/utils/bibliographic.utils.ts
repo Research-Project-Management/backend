@@ -71,8 +71,138 @@ const PREFIX_PARTICLES = new Set([
   'le',
 ]);
 
+const GENERATIONAL_SUFFIX_REGEX =
+  /^(?:Jr\.?|Sr\.?|II|III|IV|V|Esq\.?)$/i;
+
+export const NOISE_AUTHOR_WORDS = new Set([
+  'abstract',
+  'introduction',
+  'indexterms',
+  'keywords',
+  'keyword',
+  'references',
+  'reference',
+  'bibliography',
+  'contents',
+  'tableofcontents',
+  'acknowledgments',
+  'acknowledgements',
+  'correspondence',
+  'correspondingauthor',
+  'allrightsreserved',
+  'copyright',
+  'unknown',
+  'none',
+  'na',
+  'nil',
+  'etal',
+  'andothers',
+  'visualgeometrygroup',
+]);
+
 /**
- * Splits a composite string of authors separated by ';', ' and ', ' & ', or newlines.
+ * Validates if an extracted author name token is actually section noise, OCR artifact,
+ * or academic affiliation header rather than a genuine author name.
+ */
+export function isNoiseAuthorName(raw?: string | null): boolean {
+  if (!raw || typeof raw !== 'string') return true;
+  const trimmed = raw.trim();
+  if (!trimmed) return true;
+
+  // Single non-word character or too short non-alphabetic
+  if (trimmed.length <= 1 && !/[a-zA-Z]/.test(trimmed)) return true;
+
+  // Collapse non-alpha characters to match against known noise blacklist
+  // Handles letter-spaced headers: "A B S T R A C T", "A BSTRACT", "I N T R O D U C T I O N"
+  const collapsed = trimmed.toLowerCase().replace(/[^a-z]/g, '');
+  if (NOISE_AUTHOR_WORDS.has(collapsed)) return true;
+
+  const lower = trimmed.toLowerCase();
+
+  // Academic affiliations/departments mistakenly extracted as author names
+  if (
+    /^(?:department|faculty|school|division|college)\s+of\s+/i.test(lower) ||
+    /^(?:lab|laboratory)\s+of\s+/i.test(lower) ||
+    /^(?:centre|center)\s+for\s+/i.test(lower) ||
+    /^(?:institute|university)\s+of\s+[a-z\s]+,\s*(?:department|faculty|school|division)/i.test(lower)
+  ) {
+    return true;
+  }
+
+  // Reject emails or URLs mistakenly passed as author names
+  if (/@/.test(trimmed) || /^https?:\/\//i.test(trimmed)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Strips OCR junk, footnote markers, email addresses, affiliations,
+ * and academic titles from a single author string token.
+ */
+export function cleanAuthorName(raw?: string | null): string {
+  if (!raw || typeof raw !== 'string') return '';
+
+  let cleaned = stripXmlAndHtmlTags(raw);
+  cleaned = decodeHtmlEntities(cleaned);
+  cleaned = stripLatexBraces(cleaned);
+  cleaned = cleaned.trim();
+
+  // Strip emails: e.g. <user@domain.com> or user@domain.com
+  cleaned = cleaned.replace(/<[^>]+@[^>]+>/g, ' ');
+  cleaned = cleaned.replace(
+    /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+    ' ',
+  );
+
+  // Strip leading list numbering, bullets, or prefix: e.g. "1. ", "[1] ", "- ", "By: "
+  cleaned = cleaned.replace(
+    /^(?:(?:\[?\d+\]?[\.\)]?|[-•*])\s+|(?:by|author|authors):\s*)/i,
+    '',
+  );
+
+  // Strip parenthetical roles/annotations: e.g. "(corresponding author)", "(equal contribution)", "(author)"
+  cleaned = cleaned.replace(
+    /\s*\((?:corresponding(?:\s*author)?|equal\s*contribution|author|lead\s*author|co-author|presenter|speaker|advisor|mentor|first\s*author)[^)]*\)/gi,
+    '',
+  );
+
+  // Strip leading honorifics / academic titles: e.g. "Prof. Dr.", "Prof.", "Dr.", "Mr.", "Mrs.", "Ms."
+  cleaned = cleaned.replace(
+    /^(?:(?:Prof(?:essor)?|Dr|Doctor|Mr|Mrs|Ms)\.?\s+)+/i,
+    '',
+  );
+
+  // Strip trailing professional degrees / fellowships: e.g. ", PhD", " PhD", " M.D.", " FRS"
+  cleaned = cleaned.replace(
+    /[,\s]+(?:PhD|M\.?D\.?|M\.?S\.?|B\.?S\.?|OBE|FRS|FRSE|FIEEE|CBE)\b/gi,
+    '',
+  );
+
+  // Strip trailing footnote markers, superscripts, and affiliation numbers:
+  // e.g. "1,2*", "*", "1", "†", "‡", "§", "1*", "*1"
+  cleaned = cleaned.replace(
+    /(?:[\s,]*[*†‡§^#~]+[\s,]*\d*|[\s,]*\d+[*†‡§^#~]*)+$/,
+    '',
+  );
+
+  // Normalize excessive internal whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  // Remove trailing comma or semicolon if leftover
+  cleaned = cleaned.replace(/[,;]+$/, '').trim();
+
+  if (isNoiseAuthorName(cleaned)) {
+    return '';
+  }
+
+  return cleaned;
+}
+
+/**
+ * Splits a composite string of authors separated by ';', ' and ', ' & ', or commas.
+ * Handles both "LastName, FirstName" pairs and forward names without mangling.
  */
 export function splitAuthorString(input: string): string[] {
   if (!input || !input.trim()) return [];
@@ -84,40 +214,95 @@ export function splitAuthorString(input: string): string[] {
   const result: string[] = [];
 
   for (const line of lines) {
+    // 1. Semicolons are unequivocal delimiters in academic metadata
     if (line.includes(';')) {
-      result.push(
-        ...line
-          .split(';')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-    } else if (/\s+and\s+/i.test(line)) {
-      result.push(
-        ...line
-          .split(/\s+and\s+/i)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-    } else if (/\s+&\s+/.test(line)) {
-      result.push(
-        ...line
-          .split(/\s+&\s+/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-    } else if ((line.match(/,/g) || []).length >= 2) {
-      result.push(
-        ...line
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-    } else {
-      result.push(line);
+      const parts = line
+        .split(';')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (const p of parts) {
+        result.push(...splitAuthorString(p));
+      }
+      continue;
     }
+
+    // 2. "and" / "&" conjunctions (e.g. "A, B, and C" or "A and B" or "A & B")
+    if (/\s+and\s+/i.test(line) || /\s+&\s+/.test(line)) {
+      const parts = line
+        .split(/(?:,\s*(?:and|&)\s*|\s+(?:and|&)\s+)/i)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (const p of parts) {
+        result.push(...splitAuthorString(p));
+      }
+      continue;
+    }
+
+    // 3. Comma-separated lists
+    if (line.includes(',')) {
+      const rawTokens = line
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (rawTokens.length <= 1) {
+        result.push(line.trim());
+        continue;
+      }
+
+      if (rawTokens.length === 2) {
+        // Disambiguate: Is it "LastName, FirstName" (1 author) OR "FirstName1 LastName1, FirstName2 LastName2" (2 authors)?
+        const firstHasSpace = rawTokens[0].includes(' ');
+        const secondHasSpace = rawTokens[1].includes(' ');
+        const isSuffix = GENERATIONAL_SUFFIX_REGEX.test(rawTokens[1]);
+
+        if (isSuffix) {
+          // e.g. "Martin Luther King, Jr." -> single author
+          result.push(line.trim());
+        } else if (firstHasSpace && secondHasSpace) {
+          // e.g. "Karen Simonyan, Andrew Zisserman" -> two authors!
+          result.push(rawTokens[0], rawTokens[1]);
+        } else {
+          // e.g. "Simonyan, Karen" or "Knuth, Donald E." -> single inverted author
+          result.push(line.trim());
+        }
+        continue;
+      }
+
+      // rawTokens.length >= 3:
+      // Check if rawTokens are alternating [Surname, First/Initial, Surname, First/Initial, ...]
+      const isEven = rawTokens.length % 2 === 0;
+      let looksLikeInvertedPairs = isEven;
+
+      if (isEven) {
+        for (let i = 0; i < rawTokens.length; i += 2) {
+          const surname = rawTokens[i];
+          if (
+            surname.includes(' ') &&
+            !/^(?:van|von|de|del|der|da|di|du|la|le)\s+/i.test(surname)
+          ) {
+            looksLikeInvertedPairs = false;
+            break;
+          }
+        }
+      }
+
+      if (looksLikeInvertedPairs) {
+        for (let i = 0; i < rawTokens.length; i += 2) {
+          result.push(`${rawTokens[i]}, ${rawTokens[i + 1]}`);
+        }
+      } else {
+        // Forward author list: each token is an author
+        for (const t of rawTokens) {
+          result.push(t);
+        }
+      }
+      continue;
+    }
+
+    result.push(line.trim());
   }
 
-  return result;
+  return result.map(cleanAuthorName).filter(Boolean);
 }
 
 /**
@@ -126,6 +311,7 @@ export function splitAuthorString(input: string): string[] {
  * - Institutional names (OpenAI, University of Cambridge, etc.)
  * - "LastName, FirstName MiddleName"
  * - "FirstName MiddleName LastName"
+ * - Generational suffixes (Jr., Sr., III)
  * - Mononyms ("Aristotle", "Plato")
  */
 export function parseCreatorString(
@@ -133,9 +319,9 @@ export function parseCreatorString(
   orderIndex: number = 0,
   creatorType: CreatorType = 'author',
 ): ParsedCreator {
-  const trimmed = (rawName || '').trim().replace(/\s+/g, ' ');
+  const cleaned = cleanAuthorName(rawName);
 
-  if (!trimmed) {
+  if (!cleaned) {
     return {
       orderIndex,
       creatorType,
@@ -146,7 +332,7 @@ export function parseCreatorString(
     };
   }
 
-  const lower = trimmed.toLowerCase();
+  const lower = cleaned.toLowerCase();
   const isInstitution = INSTITUTION_KEYWORDS.some((kw) =>
     new RegExp(`\\b${kw}\\b`, 'i').test(lower),
   );
@@ -157,29 +343,35 @@ export function parseCreatorString(
       creatorType,
       fieldMode: 1,
       firstName: '',
-      lastName: trimmed,
-      fullName: trimmed,
+      lastName: cleaned,
+      fullName: cleaned,
     };
   }
 
-  // Comma separated: "LastName, FirstName MiddleName"
-  if (trimmed.includes(',')) {
-    const parts = trimmed.split(',').map((p) => p.trim());
-    const lastName = parts[0] || '';
-    const firstName = parts.slice(1).join(' ') || '';
-    const fullName = firstName ? `${firstName} ${lastName}` : lastName;
-    return {
-      orderIndex,
-      creatorType,
-      fieldMode: 0,
-      firstName,
-      lastName,
-      fullName,
-    };
+  let workingName = cleaned;
+
+  // Comma separated: "LastName, FirstName MiddleName" OR "Name, Jr."
+  if (workingName.includes(',')) {
+    const parts = workingName.split(',').map((p) => p.trim());
+    if (parts.length === 2 && GENERATIONAL_SUFFIX_REGEX.test(parts[1])) {
+      workingName = `${parts[0]} ${parts[1]}`;
+    } else {
+      const lastName = parts[0] || '';
+      const firstName = parts.slice(1).join(' ') || '';
+      const fullName = firstName ? `${firstName} ${lastName}` : lastName;
+      return {
+        orderIndex,
+        creatorType,
+        fieldMode: 0,
+        firstName,
+        lastName,
+        fullName,
+      };
+    }
   }
 
-  // Space separated: "FirstName [MiddleName...] LastName"
-  const tokens = trimmed.split(' ');
+  // Space separated: "FirstName [MiddleName...] LastName [Suffix]"
+  const tokens = workingName.split(' ');
   if (tokens.length === 1) {
     // Single word name / mononym (e.g. "Plato", "Aristotle")
     return {
@@ -192,9 +384,14 @@ export function parseCreatorString(
     };
   }
 
-  // Handle prefix particles like "von Neumann", "van Beethoven", "de Fermat"
+  // Check if last token is generational suffix (e.g. "Martin Luther King Jr.")
   let splitIndex = tokens.length - 1;
   if (
+    tokens.length >= 3 &&
+    GENERATIONAL_SUFFIX_REGEX.test(tokens[tokens.length - 1])
+  ) {
+    splitIndex = tokens.length - 2;
+  } else if (
     tokens.length >= 3 &&
     PREFIX_PARTICLES.has(tokens[tokens.length - 2].toLowerCase())
   ) {
@@ -209,6 +406,7 @@ export function parseCreatorString(
 
   const lastName = tokens.slice(splitIndex).join(' ');
   const firstName = tokens.slice(0, splitIndex).join(' ');
+  const fullName = firstName ? `${firstName} ${lastName}` : lastName;
 
   return {
     orderIndex,
@@ -216,7 +414,7 @@ export function parseCreatorString(
     fieldMode: 0,
     firstName,
     lastName,
-    fullName: trimmed,
+    fullName,
   };
 }
 
@@ -1316,6 +1514,16 @@ export function sanitizeItemTitle(title?: string | null): string {
   cleaned = stripLatexBraces(cleaned);
   // eslint-disable-next-line no-control-regex
   cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
+
+  // Fix PDF small-caps drop-cap gaps (e.g. "V ERY" -> "VERY", "D EEP" -> "DEEP")
+  cleaned = cleaned.replace(/\b([A-Z])\s+([A-Z]{2,})\b/g, '$1$2');
+
+  // Fix spaced hyphens (e.g. "Auto - Encoding" -> "Auto-Encoding", "Large - Scale" -> "Large-Scale")
+  cleaned = cleaned.replace(/\b([A-Za-z0-9]+)\s+[-–—]\s+([A-Za-z0-9]+)\b/g, '$1-$2');
+
+  // Fix single letter uppercase gaps: "B Y" -> "BY"
+  cleaned = cleaned.replace(/\b([B-HJ-Z])\s+([A-Z])\b/g, '$1$2');
+
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
   cleaned = normalizeAcademicTitleCase(cleaned);
   if (cleaned.length > 1000) {

@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
-import { SavedSearchesService } from './core/use-cases/saved-searches.service';
+import { SavedSearchesService } from './core/services/saved-searches.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
   CreateSavedSearchDto,

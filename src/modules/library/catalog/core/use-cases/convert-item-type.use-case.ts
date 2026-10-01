@@ -3,7 +3,7 @@ import {
   ITEM_REPOSITORY_PORT,
   IItemRepositoryPort,
 } from '../ports/item-repository.port';
-import { TypesService } from './types.service';
+import { TypesService } from '../services/types.service';
 import {
   ITEM_TRANSFORMER_PORT,
   IItemTransformerPort,

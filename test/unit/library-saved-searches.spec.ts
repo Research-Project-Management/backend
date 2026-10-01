@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { ConditionEvaluatorEngine } from '@/modules/library/catalog/core/adapters/condition-evaluator.engine';
-import { SavedSearchesService } from '@/modules/library/catalog/core/use-cases/saved-searches.service';
+import { SavedSearchesService } from '@/modules/library/catalog/core/services/saved-searches.service';
 import { SavedSearchesRepository } from '@/modules/library/catalog/core/adapters/saved-searches.repository';
 import { SavedSearchConditionGroup } from '@/modules/library/catalog/core/domain/saved-search.types';
 

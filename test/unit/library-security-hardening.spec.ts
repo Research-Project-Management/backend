@@ -1,5 +1,5 @@
-import { ItemsService } from '@/modules/library/catalog/core/use-cases/items.service';
-import { AttachmentsService } from '@/modules/library/extraction/core/use-cases/attachments.service';
+import { ItemsService } from '@/modules/library/catalog/core/services/items.service';
+import { AttachmentsService } from '@/modules/library/extraction/core/services/attachments.service';
 import { IdempotencyMiddleware } from '../../src/modules/library/shared-kernel/core/middlewares/idempotency.middleware';
 import { NotFoundException } from '@nestjs/common';
 import { RedisCacheService } from '../../src/core/cache/redis.service';

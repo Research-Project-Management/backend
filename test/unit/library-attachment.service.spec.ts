@@ -24,7 +24,7 @@ jest.mock('@mozilla/readability', () => ({
 }));
 
 import { fromPartial, fromAny } from '@total-typescript/shoehorn';
-import { AttachmentsService } from '@/modules/library/extraction/core/use-cases/attachments.service';
+import { AttachmentsService } from '@/modules/library/extraction/core/services/attachments.service';
 import { AttachmentsController } from '@/modules/library/extraction/attachments.controller';
 import { WebSnapshotService } from '@/modules/library/extraction/core/adapters/web-snapshot.service';
 import { IdentifyStage } from '@/modules/library/ingestion/core/adapters/identify.stage';

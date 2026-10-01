@@ -1,5 +1,5 @@
 import { MetadataCache } from '@/modules/library/ingestion/core/adapters/metadata.cache';
-import { MetadataService } from '@/modules/library/ingestion/core/use-cases/metadata.service';
+import { MetadataService } from '@/modules/library/ingestion/core/services/metadata.service';
 import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
 import { ResolvedMetadata } from '@/modules/library/ingestion/core/domain/metadata.types';
 

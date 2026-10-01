@@ -25,7 +25,7 @@ import {
   UpdateItemDto,
   ParseCitationsDto,
 } from './dto/items.dto';
-import { ItemsService } from './core/use-cases/items.service';
+import { ItemsService } from './core/services/items.service';
 import { CreateItemUseCase } from './core/use-cases/create-item.use-case';
 import { UpdateItemUseCase } from './core/use-cases/update-item.use-case';
 import { DeleteItemUseCase } from './core/use-cases/delete-item.use-case';

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ExportsService } from './exports.service';
+import { ExportsService } from '../services/exports.service';
 
 export interface ExportBibliographyQuery {
   userId: string;

@@ -4,7 +4,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
-import { CollectionsService } from '@/modules/library/catalog/core/use-cases/collections.service';
+import { CollectionsService } from '@/modules/library/catalog/core/services/collections.service';
 import { CollectionsRepository } from '@/modules/library/catalog/core/adapters/collections.repository';
 import { TreeEngine } from '@/modules/library/catalog/core/adapters/tree.engine';
 import { PrismaService } from '@/core/database/prisma.service';

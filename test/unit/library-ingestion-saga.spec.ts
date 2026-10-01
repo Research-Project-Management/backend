@@ -3,7 +3,7 @@ import { IngestionStatusVo } from '@/modules/library/ingestion/core/domain/inges
 import {
   IngestionSagaOrchestrator,
   IngestionSagaSession,
-} from '@/modules/library/ingestion/core/use-cases/ingestion-saga.orchestrator';
+} from '@/modules/library/ingestion/core/services/ingestion-saga.orchestrator';
 import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
 import { ICatalogFacade } from '@/modules/library/catalog/catalog.facade';
 import { IngestionStatus } from '@prisma/client';
@@ -253,7 +253,7 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
 
     beforeEach(async () => {
       const imported =
-        await import('@/modules/library/ingestion/core/use-cases/pipeline.service');
+        await import('@/modules/library/ingestion/core/services/pipeline.service');
       PipelineServiceClass = imported.PipelineService;
       const PipelineService = PipelineServiceClass;
 

@@ -14,10 +14,8 @@ import {
   EventDispatcher,
   EXTERNAL_BROKER_TRANSPORT,
 } from './core/adapters/outbox.dispatcher';
-import {
-  IntegrationEventBusService,
-  INTEGRATION_EVENT_BUS,
-} from '../shared-kernel/events/integration-event-bus.service';
+import { IntegrationEventBusService } from './core/adapters/integration-event-bus.service';
+import { INTEGRATION_EVENT_BUS } from '../shared-kernel/events/integration-events';
 import { EVENT_PUBLISHER_PORT } from './core/ports/event-publisher.port';
 import { UNIT_OF_WORK_PORT } from './core/ports/unit-of-work.port';
 import {

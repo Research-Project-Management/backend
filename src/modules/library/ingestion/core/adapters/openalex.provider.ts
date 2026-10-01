@@ -15,7 +15,7 @@ import {
   normalizeTags,
   cleanAbstractText,
 } from './metadata.utils';
-import { ProviderFetchError } from '../use-cases/metadata-executor.service';
+import { ProviderFetchError } from '../services/metadata-executor.service';
 
 @Injectable()
 export class OpenAlexProvider implements MetadataProvider {

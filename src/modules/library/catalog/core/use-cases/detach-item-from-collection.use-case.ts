@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CollectionsService } from './collections.service';
+import { CollectionsService } from '../services/collections.service';
 
 export interface DetachItemFromCollectionCommand {
   userId: string;

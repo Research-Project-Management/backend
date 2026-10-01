@@ -1,11 +1,11 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { AttachmentsService } from './core/use-cases/attachments.service';
+import { AttachmentsService } from './core/services/attachments.service';
 import {
   PdfProvider,
   ExtractedPdfDocument,
 } from './core/adapters/pdf.provider';
 import { WebSnapshotService } from './core/adapters/web-snapshot.service';
-import { AnnotationsService } from './core/use-cases/annotations.service';
+import { AnnotationsService } from './core/services/annotations.service';
 
 export const EXTRACTION_FACADE = 'EXTRACTION_FACADE';
 export const READER_FACADE = EXTRACTION_FACADE;

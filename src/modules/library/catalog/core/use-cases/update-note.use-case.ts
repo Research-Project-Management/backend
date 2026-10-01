@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { NotesService } from './notes.service';
+import { NotesService } from '../services/notes.service';
 import { UpdateNoteData } from '../domain/notes.types';
 
 export interface UpdateNoteCommand {

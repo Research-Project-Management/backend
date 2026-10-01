@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IngestionService } from './ingestion.service';
+import { IngestionService } from '../services/ingestion.service';
 
 export interface GetIngestionStatusQuery {
   userId: string;

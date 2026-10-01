@@ -5,10 +5,12 @@ import { ExtractionRepository } from './extraction.repository';
 import { PdfProvider } from './pdf.provider';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { OutboxEvent, Prisma } from '@prisma/client';
-import { OutboxDispatchHandler } from '../../../sync/core/domain/outbox.types';
+import { OutboxDispatchHandler, IdempotentConsumerService } from '../../../sync';
 import { AttachmentStorageException } from '../domain/attachments.types';
-import { parseCreatorString } from '../../../shared-kernel/utils/bibliographic.utils';
-import { IdempotentConsumerService } from '../../../sync/core/adapters/idempotent-consumer.service';
+import {
+  parseCreatorString,
+  isNoiseAuthorName,
+} from '../../../shared-kernel/utils/bibliographic.utils';
 
 export const EXTRACTION_EVENT_TYPES = {
   EXTRACTION_REQUESTED: 'library.attachment.extraction_requested',
@@ -301,7 +303,9 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       if (
         doc.metadata?.rawTei ||
         (doc.references && doc.references.length > 0) ||
-        (doc.sections && doc.sections.length > 0)
+        (doc.sections && doc.sections.length > 0) ||
+        (doc.metadata?.keywords && doc.metadata.keywords.length > 0) ||
+        (doc.metadata?.notes && doc.metadata.notes.length > 0)
       ) {
         try {
           const fulltextTree = {
@@ -312,6 +316,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
             arxivId: doc.metadata?.arxivId,
             year: doc.metadata?.year,
             keywords: doc.metadata?.keywords,
+            notes: doc.metadata?.notes,
             sections: doc.sections ?? [],
             figures: doc.figures ?? [],
             tables: doc.tables ?? [],
@@ -392,6 +397,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
               arxivId: doc.metadata.arxivId,
               year: doc.metadata.year,
               keywords: doc.metadata.keywords,
+              notes: doc.metadata.notes,
               referenceCount: doc.references?.length ?? 0,
               references: doc.references ?? [],
             } as any,
@@ -440,8 +446,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
               attachment.itemId,
             );
             if (count === 0) {
-              await this.extractionRepo.createContributors(
-                doc.metadata.creators.map((c, idx) => {
+              const validContributors = doc.metadata.creators
+                .map((c, idx) => {
                   const creatorType = 'author';
                   const parsed = parseCreatorString(
                     c.fullName ||
@@ -449,13 +455,16 @@ export class ExtractionHandler implements OutboxDispatchHandler {
                     idx,
                     creatorType,
                   );
-                  const first = c.firstName || parsed.firstName || '';
-                  const last = c.lastName || parsed.lastName || '';
+                  const first = parsed.firstName || c.firstName || '';
+                  const last = parsed.lastName || c.lastName || '';
                   const full =
-                    c.fullName ||
                     parsed.fullName ||
+                    c.fullName ||
                     [first, last].filter(Boolean).join(' ') ||
                     '';
+                  if (!full || isNoiseAuthorName(full)) {
+                    return null;
+                  }
                   return {
                     itemId: attachment.itemId,
                     orderIndex: idx,
@@ -464,8 +473,49 @@ export class ExtractionHandler implements OutboxDispatchHandler {
                     lastName: last,
                     fullName: full,
                   };
-                }),
-              );
+                })
+                .filter((c): c is NonNullable<typeof c> => c !== null);
+
+              if (validContributors.length > 0) {
+                await this.extractionRepo.createContributors(
+                  validContributors.map((c, idx) => ({
+                    ...c,
+                    orderIndex: idx,
+                  })),
+                );
+              }
+            }
+          }
+
+          // Synchronize GROBID extracted keywords as automatic item tags
+          if (doc.metadata?.keywords && doc.metadata.keywords.length > 0) {
+            const tagCount = await this.extractionRepo.countItemTags(
+              attachment.itemId,
+            );
+            if (tagCount === 0) {
+              const effectiveUserId = attachment.item?.userId || 'system';
+              await this.extractionRepo.syncItemTags({
+                userId: effectiveUserId,
+                itemId: attachment.itemId,
+                rawTags: doc.metadata.keywords,
+                projectId: attachment.item?.projectId,
+              });
+            }
+          }
+
+          // Synchronize GROBID extracted notes/annotations as item literature notes
+          if (doc.metadata?.notes && doc.metadata.notes.length > 0) {
+            const noteCount = await this.extractionRepo.countItemNotes(
+              attachment.itemId,
+            );
+            if (noteCount === 0) {
+              const effectiveUserId = attachment.item?.userId || 'system';
+              await this.extractionRepo.createItemNotes({
+                userId: effectiveUserId,
+                itemId: attachment.itemId,
+                notes: doc.metadata.notes,
+                projectId: attachment.item?.projectId,
+              });
             }
           }
         } catch (provenanceErr: any) {

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ExportsService } from './exports.service';
+import { ExportsService } from '../services/exports.service';
 import { ExportLibraryDto } from '../../dto/exports.dto';
 import { ExportResult } from '../domain/exports.types';
 

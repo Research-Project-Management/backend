@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AttachmentsService } from './attachments.service';
+import { AttachmentsService } from '../services/attachments.service';
 
 export interface GetAttachmentThumbnailQuery {
   userId: string;

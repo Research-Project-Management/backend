@@ -2,7 +2,7 @@ import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
 import { StorageModule } from '../../storage/storage.module';
 import { SyncModule } from '../sync/sync.module';
-import { OutboxWorker } from '../sync/core/adapters/outbox.worker';
+import { OutboxWorker } from '../sync';
 
 // Presentation
 import {
@@ -24,7 +24,7 @@ import {
 import {
   AttachmentService,
   AttachmentsService,
-} from './core/use-cases/attachments.service';
+} from './core/services/attachments.service';
 import { AttachmentsRepository } from './core/adapters/attachments.repository';
 import { ExtractionRepository } from './core/adapters/extraction.repository';
 import { PdfProvider } from './core/adapters/pdf.provider';
@@ -61,7 +61,7 @@ import {
 import {
   AnnotationService,
   AnnotationsService,
-} from './core/use-cases/annotations.service';
+} from './core/services/annotations.service';
 import { AnnotationsRepository } from './core/adapters/annotations.repository';
 import { AnnotationNormalizer } from './core/adapters/annotation.normalizer';
 import { ANNOTATION_REPOSITORY_PORT } from './core/ports/annotation-repository.port';
@@ -174,7 +174,6 @@ import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catal
     GetAttachmentUseCase,
 
     // Annotation domain exports
-    AnnotationsController,
     AnnotationsService,
     AnnotationNormalizer,
     ANNOTATION_REPOSITORY_PORT,

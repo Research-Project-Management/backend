@@ -1,6 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { CitationService } from './core/use-cases/citation.service';
-import { ExportsService } from './core/use-cases/exports.service';
+import { CitationService } from './core/services/citation.service';
+import { ExportsService } from './core/services/exports.service';
 
 export const CITATION_FACADE = 'CITATION_FACADE';
 

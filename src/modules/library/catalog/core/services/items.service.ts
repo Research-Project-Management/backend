@@ -15,7 +15,7 @@ import { sanitizeItemTitle } from '../../../shared-kernel/utils/bibliographic.ut
 import {
   TransactionService,
   TransactionHelpers,
-} from '../../../sync/core/adapters/transaction.service';
+} from '../../../sync';
 import {
   LIBRARY_EVENT_TYPES,
   SYNC_EVENT_TYPES,
@@ -1158,7 +1158,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
    * Retrieves raw provenance metadata records for an item across all providers (arXiv, Grobid, CrossRef).
    */
   async getMetadataSources(userId: string, itemId: string, projectId?: string) {
-    const item = await this.query.findById(itemId, userId, projectId);
+    const item = await this.query.findById(userId, itemId, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found in library`);
     }

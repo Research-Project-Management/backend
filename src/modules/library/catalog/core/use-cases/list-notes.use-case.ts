@@ -3,7 +3,7 @@ import {
   NOTE_REPOSITORY_PORT,
   INoteRepositoryPort,
 } from '../ports/note-repository.port';
-import { NotesService } from './notes.service';
+import { NotesService } from '../services/notes.service';
 
 export interface ListNotesQuery {
   userId: string;

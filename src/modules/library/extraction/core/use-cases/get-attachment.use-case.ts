@@ -4,7 +4,7 @@ import {
   IAttachmentRepositoryPort,
 } from '../ports/attachment-repository.port';
 import { AttachmentResultDto } from './create-attachment.use-case';
-import { AttachmentsService } from './attachments.service';
+import { AttachmentsService } from '../services/attachments.service';
 
 @Injectable()
 export class GetAttachmentUseCase {

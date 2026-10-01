@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CollectionsService } from './collections.service';
+import { CollectionsService } from '../services/collections.service';
 import { CollectionTreeNode } from '../domain/collections.types';
 
 export interface GetCollectionTreeQuery {

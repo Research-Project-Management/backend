@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CommandRepository } from '../adapters/command.repository';
-import { TransactionHelpers } from '../../../sync/core/adapters/transaction.service';
+import { TransactionHelpers } from '../../../sync';
 import {
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,

@@ -7,12 +7,12 @@ import { CitationFacade, CITATION_FACADE } from './citation.facade';
 import { CitationController } from './citation.controller';
 import { ExportController, ExportsController } from './exports.controller';
 
-import { CitationService } from './core/use-cases/citation.service';
+import { CitationService } from './core/services/citation.service';
 import { DoiContentNegotiationService } from './core/adapters/doi-content-negotiation.service';
 import { CslEngineService } from './core/adapters/csl-engine.service';
 import { CslRepositoryService } from './core/adapters/csl-repository.service';
 import { CslStyleRegistry } from './core/adapters/csl-style-registry';
-import { ExportsService } from './core/use-cases/exports.service';
+import { ExportsService } from './core/services/exports.service';
 import { PdfBakerService } from './core/adapters/pdf-baker.service';
 import { FormatCitationUseCase } from './core/use-cases/format-citation.use-case';
 import { ExportLibraryUseCase } from './core/use-cases/export-library.use-case';

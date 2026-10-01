@@ -6,7 +6,7 @@ import { SearchFacade, SEARCH_FACADE } from './search.facade';
 import { SearchController } from './search.controller';
 
 // Application & Infrastructure (Hexagonal)
-import { SearchService } from './core/use-cases/search.service';
+import { SearchService } from './core/services/search.service';
 import { SearchRepository } from './core/adapters/search.repository';
 import { FullTextProvider } from './core/adapters/full-text.provider';
 import { EventHandler } from './core/adapters/event.handler';

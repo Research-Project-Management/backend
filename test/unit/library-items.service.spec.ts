@@ -1,13 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UnprocessableEntityException } from '@nestjs/common';
 import { fromPartial } from '@total-typescript/shoehorn';
-import { ItemsService } from '@/modules/library/catalog/core/use-cases/items.service';
+import { ItemsService } from '@/modules/library/catalog/core/services/items.service';
 import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/core/adapters/command.repository';
 import { TransactionService } from '@/modules/library/sync/core/adapters/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { TagsService } from '@/modules/library/catalog/core/use-cases/tags.service';
-import { TypesService } from '@/modules/library/catalog/core/use-cases/types.service';
+import { TagsService } from '@/modules/library/catalog/core/services/tags.service';
+import { TypesService } from '@/modules/library/catalog/core/services/types.service';
 import { ItemTransformer } from '@/modules/library/catalog/core/adapters/item.transformer';
 import { sanitizeItemTitle } from '@/modules/library/shared-kernel/utils/bibliographic.utils';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';

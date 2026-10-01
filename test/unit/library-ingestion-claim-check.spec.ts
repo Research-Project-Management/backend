@@ -1,10 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { IngestionService } from '@/modules/library/ingestion/core/use-cases/ingestion.service';
+import { IngestionService } from '@/modules/library/ingestion/core/services/ingestion.service';
 import { IdentifyStage } from '@/modules/library/ingestion/core/adapters/identify.stage';
 import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
-import { PipelineService } from '@/modules/library/ingestion/core/use-cases/pipeline.service';
-import { QueueService } from '@/modules/library/ingestion/core/use-cases/queue.service';
-import { UrlCaptureService } from '@/modules/library/ingestion/core/use-cases/url-capture.service';
+import { PipelineService } from '@/modules/library/ingestion/core/services/pipeline.service';
+import { QueueService } from '@/modules/library/ingestion/core/services/queue.service';
+import { UrlCaptureService } from '@/modules/library/ingestion/core/services/url-capture.service';
 import { DoiParser } from '@/modules/library/ingestion/core/adapters/doi.parser';
 import { BibtexParser } from '@/modules/library/ingestion/core/adapters/bibtex.parser';
 import { RisParser } from '@/modules/library/ingestion/core/adapters/ris.parser';

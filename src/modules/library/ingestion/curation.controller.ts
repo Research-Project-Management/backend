@@ -7,8 +7,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { DuplicateService } from './core/use-cases/duplicate.service';
-import { QualityService } from './core/use-cases/quality.service';
+import { DuplicateService } from './core/services/duplicate.service';
+import { QualityService } from './core/services/quality.service';
 import { MergeDuplicatesDto } from './dto/curation.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';

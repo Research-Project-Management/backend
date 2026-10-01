@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ISearchEnginePort, SearchResult } from '../ports/search-engine.port';
 import { SearchQueryVo } from '../domain/search-query.vo';
-import { SearchService } from '../use-cases/search.service';
+import { SearchService } from '../services/search.service';
 
 /**
  * Postgres Full-Text Search (FTS) Adapter — implements ISearchEnginePort

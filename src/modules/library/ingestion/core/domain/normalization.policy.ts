@@ -11,6 +11,7 @@ import {
   normalizeIsbn,
   normalizeIssn,
   parseCreatorString,
+  splitAuthorString,
   normalizeAcademicTitleCase,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 import { normalizeTags as canonicalNormalizeTags } from '../../../shared-kernel/utils/tag.utils';
@@ -443,6 +444,14 @@ export class NormalizationPolicy {
       let lastName = (creator.lastName || '').trim();
       let fullName = (creator.fullName || creator.name || '').trim();
 
+      // If fullName has a composite delimiter, split into multiple creators
+      if (fullName && (fullName.includes(';') || /\s+and\s+/i.test(fullName))) {
+        for (const part of splitAuthorString(fullName)) {
+          append({ creatorType, fullName: part });
+        }
+        return;
+      }
+
       // If fullName has a comma (e.g. "Einstein, Albert") or only fullName is supplied, parse it
       if (fullName && (fullName.includes(',') || (!firstName && !lastName))) {
         const parsed = parseCreatorString(fullName, 0, creatorType);
@@ -486,31 +495,35 @@ export class NormalizationPolicy {
 
     if (Array.isArray(authorsInput)) {
       for (const a of authorsInput) {
-        const cleanA = this.cleanString(a);
-        if (!cleanA) continue;
-        const parsed = parseCreatorString(cleanA, 0, 'author');
-        append({
-          creatorType: 'author',
-          name: parsed.fullName,
-          fullName: parsed.fullName,
-          firstName: parsed.firstName,
-          lastName: parsed.lastName,
-        });
+        for (const author of splitAuthorString(a)) {
+          const cleanA = this.cleanString(author);
+          if (!cleanA) continue;
+          const parsed = parseCreatorString(cleanA, 0, 'author');
+          append({
+            creatorType: 'author',
+            name: parsed.fullName,
+            fullName: parsed.fullName,
+            firstName: parsed.firstName,
+            lastName: parsed.lastName,
+          });
+        }
       }
     }
 
     if (Array.isArray(editorsInput)) {
       for (const editor of editorsInput) {
-        const cleanEditor = this.cleanString(editor);
-        if (!cleanEditor) continue;
-        const parsed = parseCreatorString(cleanEditor, 0, 'editor');
-        append({
-          creatorType: 'editor',
-          name: parsed.fullName,
-          fullName: parsed.fullName,
-          firstName: parsed.firstName,
-          lastName: parsed.lastName,
-        });
+        for (const singleEditor of splitAuthorString(editor)) {
+          const cleanEditor = this.cleanString(singleEditor);
+          if (!cleanEditor) continue;
+          const parsed = parseCreatorString(cleanEditor, 0, 'editor');
+          append({
+            creatorType: 'editor',
+            name: parsed.fullName,
+            fullName: parsed.fullName,
+            firstName: parsed.firstName,
+            lastName: parsed.lastName,
+          });
+        }
       }
     }
 

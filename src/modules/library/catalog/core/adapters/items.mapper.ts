@@ -7,6 +7,7 @@ import { BASE_FIELD_MAPPINGS } from '../../../shared-kernel/types/schema.constan
 import {
   cleanAbstractText,
   cleanCommentText,
+  splitAuthorString,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 import {
   resolveCanonicalArxivCategory,
@@ -465,9 +466,9 @@ export class ItemMapper {
     }
 
     // 5. Canonical Authors Projection (string[] for fast UI display)
-    if (!it.authors || !Array.isArray(it.authors) || it.authors.length === 0) {
+    if (Array.isArray(it.creators) && it.creators.length > 0) {
       const authorCreators = it.creators.filter(
-        (creator: any) => creator.creatorType === 'author',
+        (creator: any) => (creator.creatorType || 'author') === 'author',
       );
       it.authors = (authorCreators.length > 0 ? authorCreators : it.creators)
         .map(
@@ -477,6 +478,10 @@ export class ItemMapper {
             [c.firstName, c.lastName].filter(Boolean).join(' '),
         )
         .filter(Boolean);
+    } else if (Array.isArray(it.authors) && it.authors.length > 0) {
+      it.authors = it.authors.flatMap((a: string) => splitAuthorString(a));
+    } else {
+      it.authors = [];
     }
     it.editors = it.creators
       .filter((creator: any) => creator.creatorType === 'editor')

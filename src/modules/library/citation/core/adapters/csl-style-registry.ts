@@ -15,7 +15,9 @@ export interface CitationStyleDefinition {
 export interface StyleSummary {
   id: CitationStyleId;
   name: string;
+  shortTitle?: string;
   category: 'author-date' | 'numeric' | 'label' | 'raw';
+  isPrimary?: boolean;
 }
 
 /**
@@ -28,47 +30,65 @@ export const SUPPORTED_CITATION_STYLES: ReadonlyArray<StyleSummary> = [
   {
     id: 'apa-7th',
     name: 'American Psychological Association 7th edition',
+    shortTitle: 'APA',
     category: 'author-date',
+    isPrimary: true,
   },
   {
     id: 'ieee',
     name: 'IEEE',
+    shortTitle: 'IEEE',
     category: 'numeric',
-  },
-  {
-    id: 'nature',
-    name: 'Nature',
-    category: 'numeric',
-  },
-  {
-    id: 'bibtex',
-    name: 'BibTeX',
-    category: 'raw',
-  },
-  {
-    id: 'ris',
-    name: 'Research Information Systems (RIS)',
-    category: 'raw',
+    isPrimary: true,
   },
   {
     id: 'mla-9th',
     name: 'Modern Language Association 9th edition',
+    shortTitle: 'MLA',
     category: 'author-date',
+    isPrimary: true,
+  },
+  {
+    id: 'bibtex',
+    name: 'BibTeX',
+    shortTitle: 'BibTeX',
+    category: 'raw',
+    isPrimary: true,
   },
   {
     id: 'chicago',
     name: 'Chicago Manual of Style 17th edition (Author-Date)',
+    shortTitle: 'Chicago',
     category: 'author-date',
+    isPrimary: false,
   },
   {
     id: 'harvard',
     name: 'Harvard Reference Format 1 (Author-Date)',
+    shortTitle: 'Harvard',
     category: 'author-date',
+    isPrimary: false,
+  },
+  {
+    id: 'nature',
+    name: 'Nature',
+    shortTitle: 'Nature',
+    category: 'numeric',
+    isPrimary: false,
   },
   {
     id: 'vancouver',
     name: 'Vancouver',
+    shortTitle: 'Vancouver',
     category: 'numeric',
+    isPrimary: false,
+  },
+  {
+    id: 'ris',
+    name: 'Research Information Systems (RIS)',
+    shortTitle: 'RIS',
+    category: 'raw',
+    isPrimary: false,
   },
 ];
 
@@ -83,17 +103,23 @@ export class CslStyleRegistry {
     this.styleMap.set('apa', {
       id: 'apa',
       name: 'American Psychological Association (APA)',
+      shortTitle: 'APA',
       category: 'author-date',
+      isPrimary: true,
     });
     this.styleMap.set('mla', {
       id: 'mla',
       name: 'Modern Language Association (MLA)',
+      shortTitle: 'MLA',
       category: 'author-date',
+      isPrimary: true,
     });
     this.styleMap.set('chicago-author-date', {
       id: 'chicago-author-date',
       name: 'Chicago (Author-Date)',
+      shortTitle: 'Chicago',
       category: 'author-date',
+      isPrimary: false,
     });
   }
 

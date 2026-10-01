@@ -1,8 +1,8 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { IngestionService } from './core/use-cases/ingestion.service';
-import { DuplicateService } from './core/use-cases/duplicate.service';
-import { QualityService } from './core/use-cases/quality.service';
-import { RetractionService } from './core/use-cases/retraction.service';
+import { IngestionService } from './core/services/ingestion.service';
+import { DuplicateService } from './core/services/duplicate.service';
+import { QualityService } from './core/services/quality.service';
+import { RetractionService } from './core/services/retraction.service';
 
 export const INGESTION_FACADE = 'INGESTION_FACADE';
 export const PROCESSING_FACADE = INGESTION_FACADE;

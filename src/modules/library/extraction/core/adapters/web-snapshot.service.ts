@@ -6,7 +6,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { AttachmentsService } from '../use-cases/attachments.service';
+import { AttachmentsService } from '../services/attachments.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { SsrfGuardService } from '../../../shared-kernel/core/services/ssrf-guard.service';
 

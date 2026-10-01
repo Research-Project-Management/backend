@@ -13,7 +13,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { TagsService } from './core/use-cases/tags.service';
+import { TagsService } from './core/services/tags.service';
 import { CreateTagDto } from './dto/tags.dto';
 import { ListTagsUseCase } from './core/use-cases/list-tags.use-case';
 import { CreateTagUseCase } from './core/use-cases/create-tag.use-case';

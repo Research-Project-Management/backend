@@ -173,7 +173,7 @@ export class IntegrationsController {
       const state = query.state || '';
 
       const userIdMatch = state.match(/state_([^_]+)_/);
-      const userId = userIdMatch ? userIdMatch[1] : 'anonymous-user';
+      const userId = userIdMatch ? userIdMatch[1] : '';
 
       const host = (req.headers.host as string) || req.hostname;
       const proto =

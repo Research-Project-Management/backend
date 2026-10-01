@@ -20,7 +20,7 @@ import {
   normalizePmid,
   normalizeIsbn,
 } from '../../../shared-kernel/utils/bibliographic.utils';
-import { UrlMetadataScraperService } from '../use-cases/url-metadata-scraper.service';
+import { UrlMetadataScraperService } from '../services/url-metadata-scraper.service';
 import {
   EXTRACTION_GATEWAY_PORT,
   IExtractionGatewayPort,
@@ -715,6 +715,12 @@ export class IdentifyStage {
           filename: payload.filename,
           referenceCount: extractedMetadata.referenceCount,
           citationCount: extractedMetadata.citationCount,
+          notes: Array.isArray(extractedMetadata.notes)
+            ? extractedMetadata.notes.map((n: any) => ({
+                content: typeof n === 'string' ? n : n.content,
+                source: 'grobid',
+              }))
+            : undefined,
           extraFields: {
             ...(extractedMetadata.extraFields || {}),
             ...(extractedMetadata.numberOfPages

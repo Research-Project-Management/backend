@@ -8,7 +8,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { TransactionHelpers } from '../../../sync/core/adapters/transaction.service';
+import type { TransactionHelpers } from '../../../sync';
 import type {
   UpsertSyncCollectionCommand,
   DeleteSyncEntityCommand,

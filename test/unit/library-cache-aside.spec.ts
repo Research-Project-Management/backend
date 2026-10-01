@@ -1,9 +1,9 @@
-import { ItemsService } from '@/modules/library/catalog/core/use-cases/items.service';
+import { ItemsService } from '@/modules/library/catalog/core/services/items.service';
 import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/core/adapters/command.repository';
 import { TransactionService } from '@/modules/library/sync/core/adapters/transaction.service';
-import { TagsService } from '@/modules/library/catalog/core/use-cases/tags.service';
-import { TypesService } from '@/modules/library/catalog/core/use-cases/types.service';
+import { TagsService } from '@/modules/library/catalog/core/services/tags.service';
+import { TypesService } from '@/modules/library/catalog/core/services/types.service';
 import { ItemTransformer } from '@/modules/library/catalog/core/adapters/item.transformer';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';

@@ -7,8 +7,8 @@ import {
   UseGuards,
   NotFoundException,
 } from '@nestjs/common';
-import { TypesService } from './core/use-cases/types.service';
-import { ZoteroSchemaValidatorService } from './core/use-cases/zotero-schema-validator.service';
+import { TypesService } from './core/services/types.service';
+import { ZoteroSchemaValidatorService } from './core/services/zotero-schema-validator.service';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 
 @Controller(['api/v1/library/item-types'])

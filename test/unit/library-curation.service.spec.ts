@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma } from '@prisma/client';
-import { DuplicateService } from '@/modules/library/ingestion/core/use-cases/duplicate.service';
+import { DuplicateService } from '@/modules/library/ingestion/core/services/duplicate.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   TransactionService,

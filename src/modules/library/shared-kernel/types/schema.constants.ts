@@ -224,6 +224,7 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
         }
         return {
           key: f.field,
+          field: f.field,
           label: en.fields[f.field] || f.field,
           order: idx + 1,
           baseField: f.baseField,

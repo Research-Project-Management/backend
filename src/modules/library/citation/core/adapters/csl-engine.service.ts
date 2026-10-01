@@ -262,12 +262,69 @@ export class CslEngineService implements OnModuleInit {
       });
     } catch (err: any) {
       this.logger.warn(
-        `Failed to render CSL template ${normalizedStyle}: ${err?.message || err}. Falling back to APA.`,
+        `Failed to render CSL template ${normalizedStyle}: ${err?.message || err}. Falling back to smart formatter.`,
       );
-      // Resilient fallback to APA
+
+      const authors = cslItem.author || [];
+      const firstAuthorFamily =
+        authors[0]?.family || authors[0]?.literal || 'Anonymous';
+      const authorListStr =
+        authors.length > 0
+          ? authors
+              .map(
+                (a: any) =>
+                  `${a.family || a.literal || ''} ${a.given ? a.given[0] + '.' : ''}`.trim(),
+              )
+              .filter(Boolean)
+              .join(', ')
+          : 'Anonymous';
+      const year = cslItem.issued?.['date-parts']?.[0]?.[0] || 'n.d.';
+      const title = cslItem.title || 'Untitled Item';
+      const journal = cslItem['container-title'] || '';
+      const volume = cslItem.volume ? ` ${cslItem.volume}` : '';
+      const issue = cslItem.issue ? `(${cslItem.issue})` : '';
+      const page = cslItem.page ? `: ${cslItem.page}` : '';
+
+      const isNumeric = [
+        'vancouver',
+        'nature',
+        'science',
+        'ieee',
+        'the-lancet',
+        'pnas',
+        'plos',
+      ].some((s) => normalizedStyle.includes(s));
+
+      if (isNumeric) {
+        const inText = `[${index}]`;
+        const bibliography = `[${index}] ${authorListStr}. ${title}.${journal ? ` ${journal}.` : ''} ${year}${volume}${issue}${page}.`;
+        const bibliographyHtml = `[${index}] ${authorListStr}. ${title}.${journal ? ` <i>${journal}</i>.` : ''} ${year}${volume}${issue}${page}.`;
+        return this.setCache(cacheKey, {
+          styleId: normalizedStyle,
+          inText,
+          bibliography,
+          bibliographyHtml,
+          source: 'csl-engine',
+        });
+      }
+
+      if (normalizedStyle.includes('harvard')) {
+        const inText = `(${firstAuthorFamily}, ${year})`;
+        const bibliography = `${authorListStr} (${year}) '${title}', ${journal}${volume}${issue}${cslItem.page ? `, pp. ${cslItem.page}` : ''}.`;
+        const bibliographyHtml = `${authorListStr} (${year}) &lsquo;${title}&rsquo;, <i>${journal}</i>${volume}${issue}${cslItem.page ? `, pp. ${cslItem.page}` : ''}.`;
+        return this.setCache(cacheKey, {
+          styleId: normalizedStyle,
+          inText,
+          bibliography,
+          bibliographyHtml,
+          source: 'csl-engine',
+        });
+      }
+
+      // Resilient fallback to APA with requested styleId preserved
       const cite = new Cite(cslItem);
       return this.setCache(cacheKey, {
-        styleId: 'apa',
+        styleId: normalizedStyle,
         inText: cite
           .format('citation', {
             template: 'apa',
