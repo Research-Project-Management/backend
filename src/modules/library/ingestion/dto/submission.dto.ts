@@ -31,7 +31,7 @@ export class RecordPayloadDto {
   @IsIn(['RECORD'])
   kind!: 'RECORD';
 
-  @IsIn(['BIBTEX', 'RIS', 'CSL_JSON'])
+  @IsIn(['BIBTEX', 'RIS', 'CSL_JSON', 'ENDNOTE_XML', 'MODS', 'REFER'])
   format!: RecordFormat;
 
   @IsString()
@@ -101,11 +101,31 @@ export class IngestionSubmissionDto {
 
   // Record fields
   @IsOptional()
-  @IsIn(['BIBTEX', 'RIS', 'CSL_JSON', 'bibtex', 'ris', 'csl_json'])
+  @IsIn([
+    'BIBTEX',
+    'RIS',
+    'CSL_JSON',
+    'ENDNOTE_XML',
+    'MODS',
+    'REFER',
+    'bibtex',
+    'ris',
+    'csl_json',
+  ])
   format?: RecordFormat;
 
   @IsOptional()
-  @IsIn(['BIBTEX', 'RIS', 'CSL_JSON', 'bibtex', 'ris', 'csl_json'])
+  @IsIn([
+    'BIBTEX',
+    'RIS',
+    'CSL_JSON',
+    'ENDNOTE_XML',
+    'MODS',
+    'REFER',
+    'bibtex',
+    'ris',
+    'csl_json',
+  ])
   recordFormat?: RecordFormat;
 
   @IsOptional()
@@ -154,12 +174,12 @@ export class IngestionSubmissionDto {
 
   @IsOptional()
   @IsArray()
-  @IsUUID('4', { each: true })
+  @IsUUID(undefined, { each: true })
   collectionIds?: string[];
 
   @IsOptional()
   @IsArray()
-  @IsUUID('4', { each: true })
+  @IsUUID(undefined, { each: true })
   tagIds?: string[];
 
   @IsOptional()
@@ -171,6 +191,6 @@ export class IngestionSubmissionDto {
   contractVersion?: string;
 
   @IsOptional()
-  @IsUUID('4')
+  @IsUUID()
   projectId?: string;
 }

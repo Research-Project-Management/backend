@@ -14,13 +14,19 @@ export class OverviewService {
       throw new NotFoundException(`Project with ID "${projectId}" not found`);
     }
 
-    const [stateCounts, overdueCount, recentActivities, latestStatusUpdate] =
-      await Promise.all([
-        this.overviewRepo.getWorkItemStateGroupCounts(projectId),
-        this.overviewRepo.getOverdueCount(projectId),
-        this.overviewRepo.getRecentActivities(projectId, 10),
-        this.overviewRepo.getLatestStatusUpdate(projectId),
-      ]);
+    const [
+      stateCounts,
+      overdueCount,
+      recentActivities,
+      latestStatusUpdate,
+      cycleData,
+    ] = await Promise.all([
+      this.overviewRepo.getWorkItemStateGroupCounts(projectId),
+      this.overviewRepo.getOverdueCount(projectId),
+      this.overviewRepo.getRecentActivities(projectId, 10),
+      this.overviewRepo.getLatestStatusUpdate(projectId),
+      this.overviewRepo.getActiveCycle(projectId),
+    ]);
 
     const backlog = stateCounts.backlog || 0;
     const unstarted = stateCounts.unstarted || 0;
@@ -35,6 +41,27 @@ export class OverviewService {
       actionableTotal > 0
         ? parseFloat(((completed / actionableTotal) * 100).toFixed(1))
         : 0;
+
+    const activeCycle = cycleData?.activeCycle
+      ? {
+          id: cycleData.activeCycle.id,
+          name: cycleData.activeCycle.name,
+          startDate: cycleData.activeCycle.startDate,
+          endDate: cycleData.activeCycle.endDate,
+          totalIssues: cycleData.activeCycle._count?.workItems ?? 0,
+          completedIssues: cycleData.completedIssues ?? 0,
+          completionPercentage:
+            (cycleData.activeCycle._count?.workItems ?? 0) > 0
+              ? parseFloat(
+                  (
+                    ((cycleData.completedIssues ?? 0) /
+                      cycleData.activeCycle._count.workItems) *
+                    100
+                  ).toFixed(1),
+                )
+              : 0,
+        }
+      : null;
 
     return {
       project: {
@@ -110,6 +137,7 @@ export class OverviewService {
             },
           }
         : null,
+      activeCycle,
     };
   }
 }

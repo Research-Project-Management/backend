@@ -10,7 +10,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { isUUID } from 'class-validator';
 import { SavedSearchesService } from './core/services/saved-searches.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
@@ -20,11 +19,7 @@ import {
   ExecuteSavedSearchQueryDto,
 } from './dto/saved-search.dto';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
-
-const toValidProjectId = (val?: string): string | undefined =>
-  val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
-    ? val
-    : undefined;
+import { toValidProjectId } from '../shared-kernel';
 
 @ApiTags('Library Saved Searches')
 @ApiBearerAuth('JWT-auth')

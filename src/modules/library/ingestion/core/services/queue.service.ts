@@ -10,7 +10,6 @@ import {
   LIBRARY_INGESTION_QUEUE,
   LIBRARY_INGESTION_JOB,
   IngestionQueueTier,
-  resolveIngestionQueue,
 } from '../domain/queue.constants';
 
 export interface QueuedIngestionJob {
@@ -123,7 +122,9 @@ export class QueueService implements OnModuleInit {
 
     if (this.bullQueue) {
       try {
-        const targetQueue = resolveIngestionQueue(tier);
+        // Priority routing uses BullMQ job-level priority numbers (1 = high, 5 = normal)
+        // within a single standard queue — not separate physical queues.
+        // The `tier` parameter is preserved in job data for observability only.
         await this.bullQueue.add(
           LIBRARY_INGESTION_JOB,
           { runId, projectId, tier, envelope },
@@ -141,7 +142,7 @@ export class QueueService implements OnModuleInit {
         );
         this.queuedRunIds.add(runId);
         this.logger.log(
-          `[BullMQ] Enqueued run ${runId} (priority=${jobPriority}, fastPath=${isFastPath}, tier=${tier ?? 'standard'}) for project ${projectId} into Redis queue ${targetQueue}`,
+          `[BullMQ] Enqueued run ${runId} (jobPriority=${jobPriority}, fastPath=${isFastPath}, tier=${tier ?? 'standard'}) for project ${projectId}`,
         );
         return true;
       } catch (err: any) {
@@ -199,8 +200,10 @@ export class QueueService implements OnModuleInit {
             state === 'prioritized'
           );
         }
-      } catch {
-        // ignore redis error
+      } catch (err: any) {
+        this.logger.warn(
+          `[QueueService] Failed to check BullMQ job state for runId "${runId}": ${err?.message}`,
+        );
       }
     }
     return false;
@@ -218,8 +221,10 @@ export class QueueService implements OnModuleInit {
           this.bullQueue.getActiveCount(),
           this.bullQueue.getWaitingCount(),
         ]);
-      } catch {
-        // ignore
+      } catch (err: any) {
+        this.logger.warn(
+          `[QueueService] Failed to fetch BullMQ queue metrics: ${err?.message}`,
+        );
       }
     }
     return {

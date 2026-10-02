@@ -86,6 +86,16 @@ export class CslJsonMapper {
       id: item.citationKey || item.id || `item_${Date.now()}`,
       type: cslType,
       title: item.title || 'Untitled',
+      version:
+        item.version !== undefined
+          ? String(item.version)
+          : item.updatedAt
+            ? String(new Date(item.updatedAt).getTime())
+            : undefined,
+      _itemId: item.id,
+      _updatedAt: item.updatedAt
+        ? new Date(item.updatedAt).getTime()
+        : undefined,
     };
 
     // Dates

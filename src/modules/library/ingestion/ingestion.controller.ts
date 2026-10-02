@@ -31,11 +31,7 @@ import { RetryIngestionRunUseCase } from './core/use-cases/retry-ingestion-run.u
 import { CaptureUrlUseCase } from './core/use-cases/capture-url.use-case';
 import { ConfirmCapturedUrlUseCase } from './core/use-cases/confirm-captured-url.use-case';
 import { UnifiedIngestUseCase } from './core/use-cases/unified-ingest.use-case';
-
-const toValidProjectId = (val?: string): string | undefined =>
-  val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
-    ? val
-    : undefined;
+import { toValidProjectId } from '../shared-kernel';
 
 @Controller([
   'api/v1/library/ingestion',

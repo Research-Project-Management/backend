@@ -202,5 +202,23 @@ export class ResilienceRegistryService {
         refillRatePerSec: 4,
       }),
     );
+
+    // 6. Zotero Translation Server sidecar: local container, 700+ publisher translators
+    this.breakers.set(
+      'zotero',
+      new CircuitBreaker({
+        name: 'zotero',
+        failureThreshold: 3,
+        resetTimeoutMs: 20000,
+      }),
+    );
+    this.limiters.set(
+      'zotero',
+      new TokenBucketRateLimiter({
+        name: 'zotero',
+        capacity: 8,
+        refillRatePerSec: 4,
+      }),
+    );
   }
 }

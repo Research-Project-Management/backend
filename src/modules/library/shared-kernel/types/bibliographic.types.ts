@@ -77,11 +77,21 @@ export type IdentifierScheme =
   'doi' | 'arxiv' | 'pmid' | 'isbn' | 'issn' | 'url' | 'urn' | (string & {});
 
 // ── Tag Input ────────────────────────────────────────────────────────────────
-export type TagObjectInput = { tag?: string; name?: string; type?: number };
+export type TagObjectInput = {
+  tag?: string;
+  name?: string;
+  type?: number | string;
+};
 export type TagInput = string | TagObjectInput;
 
-// ── Canonical Field Mappings ────────────────────────────────────────────────
-export const BASE_FIELD_MAPPINGS: Record<string, string> = {
+/**
+ * Maps itemType → its primary venue/container field name for display.
+ * e.g. journalArticle → 'publicationTitle', bookSection → 'bookTitle'.
+ *
+ * Distinct from schema.constants.ts BASE_FIELD_MAPPINGS which is the
+ * nested Zotero base-field → type-specific-field crosswalk (different shape).
+ */
+export const VENUE_FIELD_MAP: Record<string, string> = {
   publicationTitle: 'publicationTitle',
   journalArticle: 'publicationTitle',
   proceedingsTitle: 'proceedingsTitle',
@@ -100,6 +110,9 @@ export const BASE_FIELD_MAPPINGS: Record<string, string> = {
   audioRecordingFormat: 'audioRecordingFormat',
   videoRecordingFormat: 'videoRecordingFormat',
 };
+
+/** @deprecated Renamed to VENUE_FIELD_MAP to avoid collision with schema.constants.ts export. */
+export const BASE_FIELD_MAPPINGS = VENUE_FIELD_MAP;
 
 export const ITEM_COLUMN_METADATA_FIELDS = [
   'title',

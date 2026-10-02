@@ -13,6 +13,7 @@ import {
   parseCreatorString,
   splitAuthorString,
   normalizeAcademicTitleCase,
+  normalizeItemType,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 import { normalizeTags as canonicalNormalizeTags } from '../../../shared-kernel/utils/tag.utils';
 
@@ -53,9 +54,22 @@ export class NormalizationPolicy {
       }
     }
 
-    // 2. Item Type
+    // 2. Item Type — normalise only when a value is present.
+    // Run through normalizeItemType() so CrossRef/BibTeX/RIS raw strings like
+    // 'journal-article', 'proceedings-article', 'conference-paper', 'book-chapter'
+    // etc. are mapped to canonical Zotero types via ITEM_TYPE_ALIASES.
+    // Do NOT fall back to 'journalArticle' here: if no type is known at this
+    // stage the ReconciliationPolicy will apply the default after all candidates
+    // have been merged (see reconciliation.policy.ts line ~244).
     if (raw.itemType) {
-      result.itemType = this.cleanString(raw.itemType) || 'journalArticle';
+      const cleaned = this.cleanString(raw.itemType);
+      if (cleaned) {
+        // normalizeItemType returns 'journalArticle' as last-resort fallback;
+        // only store the result when the raw string was non-empty to avoid
+        // silently coercing missing types to journalArticle at normalize-time.
+        const canonical = normalizeItemType(cleaned);
+        result.itemType = canonical;
+      }
     }
 
     // 3. DOI
@@ -172,10 +186,7 @@ export class NormalizationPolicy {
       if (value) (result as Record<string, unknown>)[field] = value;
     }
 
-    const pageNum =
-      (raw as any).numberOfPages ??
-      (raw as any).numPages ??
-      (raw as any).pageCount;
+    const pageNum = raw.numberOfPages ?? raw.numPages ?? raw.pageCount;
     if (pageNum != null) {
       const cleanNum =
         typeof pageNum === 'number' ? pageNum : parseInt(String(pageNum), 10);
@@ -191,14 +202,18 @@ export class NormalizationPolicy {
     const pages = this.cleanString(raw.pages);
     if (pages) result.pages = pages.replace(/--/g, '-');
 
-    // 8. Abstract
-    const rawAbs = raw.abstract || raw.abstractNote;
-    const abstractText = cleanAbstractText(rawAbs) || this.cleanString(rawAbs);
-    if (abstractText) result.abstract = abstractText;
-    const rawAbsNote = raw.abstractNote;
-    const abstractNote =
-      cleanAbstractText(rawAbsNote) || this.cleanString(rawAbsNote);
-    if (abstractNote) result.abstractNote = abstractNote;
+    // 8. Abstract — Zotero canonical field is 'abstractNote'; we store in DB as 'abstract'.
+    // Prefer the longer/richer of the two raw sources, clean it once, then sync both fields.
+    const rawAbsBoth = [raw.abstract, raw.abstractNote]
+      .filter(Boolean)
+      .sort((a, b) => (b?.length ?? 0) - (a?.length ?? 0))[0];
+    const abstractText =
+      cleanAbstractText(rawAbsBoth) || this.cleanString(rawAbsBoth);
+    if (abstractText) {
+      result.abstract = abstractText;
+      // Keep abstractNote in sync — Zotero uses abstractNote as canonical field name.
+      result.abstractNote = abstractText;
+    }
 
     // 9. URL
     if (raw.url) {
@@ -233,7 +248,8 @@ export class NormalizationPolicy {
     if (Array.isArray(raw.notes) && raw.notes.length > 0) {
       const cleanNotes: Array<{ content: string; source?: string }> = [];
       for (const n of raw.notes) {
-        const rawContent = typeof n === 'string' ? n : (n as any)?.content;
+        const rawContent =
+          typeof n === 'string' ? n : (n as { content?: string })?.content;
         if (typeof rawContent !== 'string') continue;
         const clean = cleanCommentText(rawContent);
         if (!clean) continue;
@@ -242,8 +258,13 @@ export class NormalizationPolicy {
             ? `Comment: ${clean}`
             : clean,
         };
-        if (n && typeof n === 'object' && (n as any).source) {
-          noteItem.source = String((n as any).source).trim();
+        if (
+          n &&
+          typeof n === 'object' &&
+          'source' in n &&
+          (n as { source?: string }).source
+        ) {
+          noteItem.source = String((n as { source?: string }).source).trim();
         }
         cleanNotes.push(noteItem);
       }
@@ -254,9 +275,7 @@ export class NormalizationPolicy {
     }
 
     // 12. Citation Key
-    const citKey = this.cleanString(
-      raw.citationKey || (raw as any).explicitCitationKey,
-    );
+    const citKey = this.cleanString(raw.citationKey || raw.explicitCitationKey);
     if (citKey) result.citationKey = citKey;
 
     // 13. Extra Zotero & Extended Metadata
@@ -278,6 +297,14 @@ export class NormalizationPolicy {
     }
     if (raw.extraFields && typeof raw.extraFields === 'object') {
       result.extraFields = this.cleanExtraFields(raw.extraFields);
+    }
+    if (Array.isArray(raw.seeAlso) && raw.seeAlso.length > 0) {
+      result.seeAlso = raw.seeAlso
+        .map((s) => (typeof s === 'string' ? s.trim() : ''))
+        .filter(Boolean);
+    }
+    if (raw.relations && typeof raw.relations === 'object') {
+      result.relations = raw.relations;
     }
     if (raw.libraryCatalog) {
       const cleanCat = this.cleanString(raw.libraryCatalog);

@@ -7,6 +7,7 @@ import { TransactionService } from '../../../sync';
 import { PrismaService } from '../../../../../core/database/prisma.service';
 import { ItemsMapper } from './items.mapper';
 import { syncTagsForCatalogItem } from './command-payload.builder';
+import { TagType } from '@prisma/client';
 import { ItemConcurrencyDomainException } from '../domain/item-domain.exception';
 
 /**
@@ -170,12 +171,35 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
         const notesCreate =
           Array.isArray(rawNotes) && rawNotes.length > 0
             ? {
-                create: rawNotes.map((n: any) => ({
-                  userId: aggregate.userId,
-                  content: n.content || n.contentMd || n.note || '',
-                  contentMd: n.contentMd || n.content || n.note || '',
-                  note: n.note || `<p>${n.content || n.contentMd || ''}</p>`,
-                })),
+                create: rawNotes.map((n: any) => {
+                  const contentMd =
+                    typeof n === 'string'
+                      ? n
+                      : n.contentMd || n.content || n.note || '';
+                  const title =
+                    (typeof n === 'object' && n?.title) ||
+                    contentMd
+                      .split(/\r?\n/)
+                      .find((l: string) => l.trim().length > 0)
+                      ?.trim()
+                      ?.slice(0, 80) ||
+                    'Imported Note';
+                  return {
+                    userId: aggregate.userId,
+                    createdById: aggregate.userId,
+                    projectId: aggregate.projectId ?? null,
+                    title,
+                    contentMd,
+                    contentJson:
+                      typeof n === 'object' && n.contentJson
+                        ? n.contentJson
+                        : null,
+                    tags:
+                      typeof n === 'object' && Array.isArray(n.tags)
+                        ? n.tags
+                        : [],
+                  };
+                }),
               }
             : undefined;
 
@@ -204,11 +228,16 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
         });
 
         if (Array.isArray(rawTags) && rawTags.length > 0) {
+          const defaultTagType =
+            aggregate.fields.keywords?.length || aggregate.fields.labels?.length
+              ? TagType.automatic
+              : TagType.manual;
           await syncTagsForCatalogItem(
             tx,
             aggregate.userId,
             aggregate.id,
             rawTags,
+            defaultTagType,
           );
         }
       } else {
@@ -246,11 +275,16 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
         }
 
         if (Array.isArray(rawTags)) {
+          const defaultTagType =
+            aggregate.fields.keywords?.length || aggregate.fields.labels?.length
+              ? TagType.automatic
+              : TagType.manual;
           await syncTagsForCatalogItem(
             tx,
             aggregate.userId,
             aggregate.id,
             rawTags,
+            defaultTagType,
           );
         }
 

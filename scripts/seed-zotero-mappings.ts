@@ -12,7 +12,7 @@ export async function seedZoteroFieldMappings(prismaClient?: PrismaClient) {
     pool = new Pool({
       connectionString:
         process.env.DATABASE_URL ||
-        'postgresql://postgres:postgres@localhost:5432/rpm_db?schema=public',
+        'postgresql://postgres:Thanh26102006@localhost:5433/flux-db?schema=public',
     });
     const adapter = new PrismaPg(pool);
     prisma = new PrismaClient({ adapter });

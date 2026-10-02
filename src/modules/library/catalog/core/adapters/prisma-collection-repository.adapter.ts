@@ -149,15 +149,17 @@ export class PrismaCollectionRepositoryAdapter implements ICollectionRepositoryP
     const scopeWhere =
       projectId && projectId !== 'user' ? { projectId } : { userId };
 
-    // Orphan child collections
-    await this.prisma.collection.updateMany({
-      where: { ...scopeWhere, parentId: collectionId, deletedAt: null },
-      data: { parentId: null },
-    });
+    await this.prisma.$transaction(async (tx) => {
+      // Orphan child collections atomically
+      await tx.collection.updateMany({
+        where: { ...scopeWhere, parentId: collectionId, deletedAt: null },
+        data: { parentId: null },
+      });
 
-    await this.prisma.collection.updateMany({
-      where: { id: collectionId, ...scopeWhere, deletedAt: null },
-      data: { deletedAt: new Date() },
+      await tx.collection.updateMany({
+        where: { id: collectionId, ...scopeWhere, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
     });
   }
 

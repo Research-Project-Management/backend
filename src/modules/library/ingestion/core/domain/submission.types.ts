@@ -7,7 +7,13 @@ export type SubmissionKind =
   'IDENTIFIER' | 'RECORD' | 'URL' | 'FILE' | 'CONNECTOR';
 
 export type IdentifierType = 'DOI' | 'PMID' | 'ARXIV' | 'ISBN';
-export type RecordFormat = 'BIBTEX' | 'RIS' | 'CSL_JSON';
+export type RecordFormat =
+  | 'BIBTEX' // BibTeX (.bib)
+  | 'RIS' // Research Information Systems (.ris)
+  | 'CSL_JSON' // Citation Style Language JSON (.json)
+  | 'ENDNOTE_XML' // EndNote XML (.xml) — via Zotero Translation Server
+  | 'MODS' // Metadata Object Description Schema (.xml) — via Zotero Translation Server
+  | 'REFER'; // BibIX / Refer format (.refer) — via Zotero Translation Server
 
 export interface IdentifierSubmissionInput {
   kind: 'IDENTIFIER';

@@ -120,7 +120,7 @@ export class CollectionRepository {
     inputOrTx?: CreateCollectionInput | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    let createdById = userId || 'system';
+    let createdById = userId;
     let input: CreateCollectionInput;
     let clientTx: Prisma.TransactionClient | undefined;
 
@@ -130,7 +130,7 @@ export class CollectionRepository {
       clientTx = tx;
     } else {
       input = userIdOrInput;
-      createdById = input.createdById || userId || 'system';
+      createdById = input.createdById || userId;
       clientTx = inputOrTx as Prisma.TransactionClient | undefined;
     }
 
@@ -326,6 +326,21 @@ export class CollectionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     return this.removeItemFromCollection(userId, collectionId, itemId, tx);
+  }
+
+  async removeItems(
+    collectionId: string,
+    itemIds: string[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (!itemIds || itemIds.length === 0) return;
+    const client = this.getClient(tx);
+    await client.collectionItem.deleteMany({
+      where: {
+        collectionId,
+        itemId: { in: itemIds },
+      },
+    });
   }
 
   /**

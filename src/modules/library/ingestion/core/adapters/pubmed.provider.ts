@@ -16,6 +16,10 @@ import {
   cleanAbstractText,
 } from './metadata.utils';
 import { ProviderFetchError } from '../services/metadata-executor.service';
+import {
+  getAcademicContactEmail,
+  getAcademicUserAgent,
+} from '../../../shared-kernel/core/constants/academic-client.constants';
 
 @Injectable()
 export class PubMedProvider implements MetadataProvider {
@@ -29,16 +33,14 @@ export class PubMedProvider implements MetadataProvider {
 
   private readonly logger = new Logger(PubMedProvider.name);
   private readonly CTXP_BASE_URL =
+    process.env.NCBI_CTXP_BASE_URL ||
     'https://api.ncbi.nlm.nih.gov/lit/ctxp/v1/pubmed/';
   private readonly EUTILS_BASE_URL =
+    process.env.NCBI_EUTILS_BASE_URL ||
     'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi';
 
   private get email(): string {
-    return (
-      process.env.NCBI_EMAIL ||
-      process.env.ACADEMIC_EMAIL ||
-      'contact@flux.academic'
-    );
+    return process.env.NCBI_EMAIL || getAcademicContactEmail();
   }
 
   private get apiKey(): string | undefined {
@@ -91,8 +93,7 @@ export class PubMedProvider implements MetadataProvider {
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
+        'User-Agent': getAcademicUserAgent('PubMed'),
         Accept: '*/*',
       },
       signal,
@@ -129,8 +130,7 @@ export class PubMedProvider implements MetadataProvider {
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
+        'User-Agent': getAcademicUserAgent('PubMed'),
         Accept: 'application/json',
       },
       signal,
@@ -312,6 +312,7 @@ export class PubMedProvider implements MetadataProvider {
         openAccessPdfUrl,
         itemType: 'journalArticle',
         url: canonicalUrl,
+        libraryCatalog: 'PubMed',
         provenance: {
           originProvider: this.id,
           resolvedAt: new Date().toISOString(),
@@ -431,6 +432,7 @@ export class PubMedProvider implements MetadataProvider {
         openAccessPdfUrl,
         itemType: 'journalArticle',
         url: canonicalUrl,
+        libraryCatalog: 'PubMed',
         provenance: {
           originProvider: this.id,
           resolvedAt: new Date().toISOString(),

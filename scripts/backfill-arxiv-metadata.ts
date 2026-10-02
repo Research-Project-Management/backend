@@ -3,10 +3,12 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 
 const connectionString =
-  process.env.DATABASE_URL || 'postgresql://localhost:5432/rpm';
+  process.env.DATABASE_URL ||
+  'postgresql://postgres:Thanh26102006@localhost:5433/flux-db?schema=public';
 const pool = new Pool({ connectionString });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
-const ARXIV_FILENAME = /(?:arxiv[:_.\-]*)?(\d{4}\.\d{4,5}(?:v\d+)?)(?:\.pdf)?$/i;
+const ARXIV_FILENAME =
+  /(?:arxiv[:_.\-]*)?(\d{4}\.\d{4,5}(?:v\d+)?)(?:\.pdf)?$/i;
 
 interface ArxivRecord {
   id: string;
@@ -21,7 +23,9 @@ interface ArxivRecord {
 }
 
 function textBetween(source: string, tag: string): string | null {
-  const match = source.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i'));
+  const match = source.match(
+    new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i'),
+  );
   return match?.[1]?.replace(/\s+/g, ' ').trim() || null;
 }
 
@@ -47,7 +51,9 @@ async function fetchArxiv(id: string): Promise<ArxivRecord | null> {
 
   const published = textBetween(entry, 'published');
   const authorMatches = entry.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/gi);
-  const authors = Array.from(authorMatches, (match) => decodeXml(match[1].trim()));
+  const authors = Array.from(authorMatches, (match) =>
+    decodeXml(match[1].trim()),
+  );
   const title = textBetween(entry, 'title');
   if (!title) return null;
 

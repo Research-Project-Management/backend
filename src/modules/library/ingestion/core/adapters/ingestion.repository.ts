@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../../../../core/database/prisma.service';
 import {
   Prisma,
@@ -76,8 +76,14 @@ export function parseRunScope(
 ): { userId: string; projectId: string | null } {
   if (typeof scope === 'object' && scope !== null) {
     const rawProject = scope.projectId;
+    const resolvedUserId = scope.userId || fallbackUserId;
+    if (!resolvedUserId) {
+      throw new BadRequestException(
+        'User context (userId) is required for ingestion run operations',
+      );
+    }
     return {
-      userId: scope.userId || fallbackUserId || 'system',
+      userId: resolvedUserId,
       projectId: rawProject && isUUID(rawProject) ? rawProject : null,
     };
   }
@@ -89,8 +95,14 @@ export function parseRunScope(
     str !== 'personal' &&
     str !== fallbackUserId &&
     isUUID(str);
+  const resolvedUserId = fallbackUserId || (!isProject && str ? str : '');
+  if (!resolvedUserId) {
+    throw new BadRequestException(
+      'User context (userId) is required for ingestion run operations',
+    );
+  }
   return {
-    userId: fallbackUserId || (!isProject && str ? str : 'system'),
+    userId: resolvedUserId,
     projectId: isProject ? str : null,
   };
 }
@@ -691,23 +703,10 @@ export class IngestionRepository {
     }
   }
 
-  // ── Capture Preview Operations (In-Memory Ephemeral Store) ─────────────────
-  private readonly inMemoryPreviews = new Map<string, any>();
-
+  // ── Capture Preview Operations (Persistent Database Store) ─────────────────
   async createCapturePreview(data: any, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
-    if ((client as any).capturePreview) {
-      return await (client as any).capturePreview.create({ data });
-    }
-    const record = {
-      id: data.id || randomUUID(),
-      ...data,
-      consumedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    this.inMemoryPreviews.set(data.tokenHash, record);
-    return record;
+    return await (client as any).capturePreview.create({ data });
   }
 
   async findCapturePreviewByTokenHash(
@@ -715,18 +714,9 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    if ((client as any).capturePreview) {
-      return await (client as any).capturePreview.findUnique({
-        where: { tokenHash },
-      });
-    }
-    const item = this.inMemoryPreviews.get(tokenHash);
-    if (!item) return null;
-    if (item.expiresAt && new Date(item.expiresAt).getTime() < Date.now()) {
-      this.inMemoryPreviews.delete(tokenHash);
-      return null;
-    }
-    return item;
+    return await (client as any).capturePreview.findUnique({
+      where: { tokenHash },
+    });
   }
 
   async claimCapturePreview(
@@ -734,22 +724,16 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
     const client = this.getClient(tx);
-    if ((client as any).capturePreview) {
-      const updateRes = await (client as any).capturePreview.updateMany({
-        where: {
-          tokenHash,
-          claimedAt: null,
-        },
-        data: {
-          claimedAt: new Date(),
-        },
-      });
-      return updateRes.count;
-    }
-    const item = this.inMemoryPreviews.get(tokenHash);
-    if (!item || item.consumedAt) return 0;
-    item.consumedAt = new Date();
-    return 1;
+    const updateRes = await (client as any).capturePreview.updateMany({
+      where: {
+        tokenHash,
+        claimedAt: null,
+      },
+      data: {
+        claimedAt: new Date(),
+      },
+    });
+    return updateRes.count;
   }
 
   async deleteExpiredCapturePreviews(
@@ -757,25 +741,12 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
     const client = this.getClient(tx);
-    if ((client as any).capturePreview) {
-      const res = await (client as any).capturePreview.deleteMany({
-        where: {
-          expiresAt: { lt: olderThan },
-        },
-      });
-      return res.count;
-    }
-    let count = 0;
-    for (const [key, val] of this.inMemoryPreviews.entries()) {
-      if (
-        val.expiresAt &&
-        new Date(val.expiresAt).getTime() < olderThan.getTime()
-      ) {
-        this.inMemoryPreviews.delete(key);
-        count++;
-      }
-    }
-    return count;
+    const res = await (client as any).capturePreview.deleteMany({
+      where: {
+        expiresAt: { lt: olderThan },
+      },
+    });
+    return res.count;
   }
 
   // ── Local Metadata Identifier Lookup ────────────────────────────────────

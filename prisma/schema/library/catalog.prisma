@@ -57,7 +57,9 @@ model Item {
 
   @@index([projectId, deletedAt])
   @@index([projectId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([projectId, deletedAt, updatedAt(sort: Desc)])
   @@index([userId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([userId, deletedAt, updatedAt(sort: Desc)])
   @@index([userId, deletedAt, year(sort: Desc), id(sort: Desc)])
   @@index([userId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
   @@index([userId, itemType])

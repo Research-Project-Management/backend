@@ -28,6 +28,7 @@ export interface ISearchEnginePort {
 
 /** Semantic/Vector KNN search (pgvector / Qdrant — GPU-backed) */
 export interface IVectorSearchEnginePort {
+  isAvailable(): boolean;
   semanticSearch(
     userId: string,
     queryText: string,

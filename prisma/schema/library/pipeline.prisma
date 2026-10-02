@@ -66,3 +66,19 @@ model IngestionRun {
 
   @@map("ingestion_runs")
 }
+
+model CapturePreview {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  tokenHash         String    @unique @map("token_hash") @db.VarChar(64)
+  sourceUrl         String    @map("source_url") @db.Text
+  userId            String    @map("user_id") @db.Uuid
+  canonicalMetadata Json      @map("canonical_metadata") @db.JsonB
+  metadataDigest    String?   @map("metadata_digest") @db.VarChar(128)
+  claimedAt         DateTime? @map("claimed_at") @db.Timestamptz(6)
+  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tokenHash])
+  @@index([expiresAt])
+  @@map("capture_previews")
+}

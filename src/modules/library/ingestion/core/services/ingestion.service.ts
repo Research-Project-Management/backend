@@ -55,6 +55,12 @@ export class IngestionService implements IngestionPort {
     envelope: IngestionSubmissionEnvelope,
     options?: { enqueue?: boolean },
   ): Promise<IngestionAcceptedResult> {
+    if (!envelope.userId) {
+      throw new BadRequestException(
+        'User context (userId) is required for ingestion submission',
+      );
+    }
+
     const projectId = envelope.projectId ?? '';
     const idempotencyKey = envelope.idempotencyKey?.trim();
 
@@ -102,7 +108,7 @@ export class IngestionService implements IngestionPort {
         const rawBuffer = Buffer.from(envelope.payload.content, 'utf-8');
         const compressed = zlib.gzipSync(rawBuffer);
         const uploadResult = await this.storagePort.uploadFile({
-          userId: envelope.userId || 'system',
+          userId: envelope.userId,
           projectId: envelope.projectId || undefined,
           filename: `ingest_${envelope.payload.format.toLowerCase()}_${randomUUID().slice(0, 8)}.json.gz`,
           buffer: compressed,
@@ -216,10 +222,11 @@ export class IngestionService implements IngestionPort {
   }
 
   async getRunStatus(
-    projectId: string,
+    /** scopeId: may be userId (personal library) or projectId — repo ignores it, kept for interface parity */
+    scopeId: string,
     runId: string,
   ): Promise<IngestionRunSnapshot> {
-    const run = await this.repo.findRunById(projectId, runId);
+    const run = await this.repo.findRunById(scopeId, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
@@ -254,7 +261,8 @@ export class IngestionService implements IngestionPort {
   }
 
   async getRunProgress(
-    projectId: string,
+    /** scopeId: may be userId (personal library) or projectId — repo ignores it, kept for interface parity */
+    scopeId: string,
     runId: string,
   ): Promise<{
     runId: string;
@@ -277,7 +285,7 @@ export class IngestionService implements IngestionPort {
     startedAt: string;
     completedAt?: string;
   }> {
-    const run = await this.repo.findRunById(projectId, runId);
+    const run = await this.repo.findRunById(scopeId, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
@@ -326,7 +334,7 @@ export class IngestionService implements IngestionPort {
 
     return {
       runId: run.id,
-      projectId,
+      projectId: scopeId,
       status: String(run.status),
       currentStage: (run as any).currentStage || undefined,
       total,
@@ -342,22 +350,26 @@ export class IngestionService implements IngestionPort {
     };
   }
 
-  async retryRun(projectId: string, runId: string): Promise<any> {
-    const run = await this.repo.findRunById(projectId, runId);
+  async retryRun(
+    /** scopeId: may be userId (personal library) or projectId — repo ignores it, kept for interface parity */
+    scopeId: string,
+    runId: string,
+  ): Promise<any> {
+    const run = await this.repo.findRunById(scopeId, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
 
-    await this.repo.updateRunStatus(projectId, runId, IngestionStatus.PENDING);
+    await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.PENDING);
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
     if (envelope && typeof envelope === 'object') {
-      void this.queue.enqueue(runId, projectId, {
+      void this.queue.enqueue(runId, scopeId, {
         ...envelope,
-        projectId,
+        projectId: scopeId,
       });
       this.logger.log(
-        `Retry initiated and re-enqueued for run ${runId} in project ${projectId}`,
+        `Retry initiated and re-enqueued for run ${runId} (scope: ${scopeId})`,
       );
     } else {
       this.logger.warn(

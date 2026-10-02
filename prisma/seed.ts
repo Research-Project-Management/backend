@@ -10,11 +10,12 @@ import {
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
+import { SCHEMA_V42_DATA } from '../src/modules/library/shared-kernel/types/schema.constants';
 
 const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL ||
-    'postgresql://postgres:postgres@localhost:5432/rpm_db?schema=public',
+    'postgresql://postgres:Thanh26102006@localhost:5433/flux-db?schema=public',
 });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
@@ -53,7 +54,8 @@ async function main() {
       profile: {
         create: {
           name: 'Dr. Evelyn Vance',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+          avatar:
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
         },
       },
     },
@@ -67,7 +69,8 @@ async function main() {
       profile: {
         create: {
           name: 'Alex Chen',
-          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+          avatar:
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
         },
       },
     },
@@ -80,7 +83,8 @@ async function main() {
     data: {
       name: 'Physics-Informed Deep Learning for Navier-Stokes',
       identifier: 'PIDL',
-      description: 'Accelerating computational fluid dynamics solvers using neural operator architectures and transformer attention.',
+      description:
+        'Accelerating computational fluid dynamics solvers using neural operator architectures and transformer attention.',
       createdById: adminUser.id,
       members: {
         create: [
@@ -94,21 +98,64 @@ async function main() {
   // Seed default WorkItemState workflow states
   await prisma.workItemState.createMany({
     data: [
-      { id: 'backlog', name: 'Backlog', color: '#6366F1', group: 'backlog', sequence: 1000, isDefault: false, projectId: project.id },
-      { id: 'todo', name: 'To Do', color: '#0EA5E9', group: 'unstarted', sequence: 2000, isDefault: true, projectId: project.id },
-      { id: 'in_progress', name: 'In Progress', color: '#F59E0B', group: 'started', sequence: 3000, isDefault: false, projectId: project.id },
-      { id: 'review', name: 'Under Review', color: '#8B5CF6', group: 'started', sequence: 4000, isDefault: false, projectId: project.id },
-      { id: 'done', name: 'Completed', color: '#10B981', group: 'completed', sequence: 5000, isDefault: false, projectId: project.id },
+      {
+        id: 'backlog',
+        name: 'Backlog',
+        color: '#6366F1',
+        group: 'backlog',
+        sequence: 1000,
+        isDefault: false,
+        projectId: project.id,
+      },
+      {
+        id: 'todo',
+        name: 'To Do',
+        color: '#0EA5E9',
+        group: 'unstarted',
+        sequence: 2000,
+        isDefault: true,
+        projectId: project.id,
+      },
+      {
+        id: 'in_progress',
+        name: 'In Progress',
+        color: '#F59E0B',
+        group: 'started',
+        sequence: 3000,
+        isDefault: false,
+        projectId: project.id,
+      },
+      {
+        id: 'review',
+        name: 'Under Review',
+        color: '#8B5CF6',
+        group: 'started',
+        sequence: 4000,
+        isDefault: false,
+        projectId: project.id,
+      },
+      {
+        id: 'done',
+        name: 'Completed',
+        color: '#10B981',
+        group: 'completed',
+        sequence: 5000,
+        isDefault: false,
+        projectId: project.id,
+      },
     ],
   });
 
-  console.log(`📁 Created project: ${project.name} (${project.id}) with default workflow states`);
+  console.log(
+    `📁 Created project: ${project.name} (${project.id}) with default workflow states`,
+  );
 
   // 4. Create Library Collections & Papers
   const collection = await prisma.collection.create({
     data: {
       name: 'Neural Operators & PDE Solvers',
-      description: 'Foundational literature on Fourier Neural Operators (FNO) and DeepONets.',
+      description:
+        'Foundational literature on Fourier Neural Operators (FNO) and DeepONets.',
       color: '#3b82f6',
       icon: 'Atom',
       userId: adminUser.id,
@@ -118,10 +165,13 @@ async function main() {
 
   const paper1 = await prisma.item.create({
     data: {
-      title: 'Fourier Neural Operator for Parametric Partial Differential Equations',
-      abstract: 'We propose a new framework for learning operators: Fourier Neural Operator (FNO). FNO maps infinite-dimensional function spaces with mesh-independent zero-shot super-resolution.',
+      title:
+        'Fourier Neural Operator for Parametric Partial Differential Equations',
+      abstract:
+        'We propose a new framework for learning operators: Fourier Neural Operator (FNO). FNO maps infinite-dimensional function spaces with mesh-independent zero-shot super-resolution.',
       year: 2021,
-      publicationTitle: 'International Conference on Learning Representations (ICLR)',
+      publicationTitle:
+        'International Conference on Learning Representations (ICLR)',
       doi: '10.48550/arXiv.2010.08895',
       citationKey: 'li2021fourier',
       userId: adminUser.id,
@@ -130,9 +180,17 @@ async function main() {
         create: [
           { creatorType: 'author', fullName: 'Zongyi Li', orderIndex: 0 },
           { creatorType: 'author', fullName: 'Nikola Kovachki', orderIndex: 1 },
-          { creatorType: 'author', fullName: 'Kamyar Azizzadenesheli', orderIndex: 2 },
+          {
+            creatorType: 'author',
+            fullName: 'Kamyar Azizzadenesheli',
+            orderIndex: 2,
+          },
           { creatorType: 'author', fullName: 'Burigede Liu', orderIndex: 3 },
-          { creatorType: 'author', fullName: 'Anima Anandkumar', orderIndex: 4 },
+          {
+            creatorType: 'author',
+            fullName: 'Anima Anandkumar',
+            orderIndex: 4,
+          },
         ],
       },
       collectionItems: {
@@ -143,8 +201,10 @@ async function main() {
 
   const paper2 = await prisma.item.create({
     data: {
-      title: 'Physics-Informed Neural Networks: A Deep Learning Framework for Solving Forward and Inverse Problems',
-      abstract: 'We introduce physics-informed neural networks -- neural networks that are trained to solve supervised learning tasks while respecting physical conservation laws described by general nonlinear PDEs.',
+      title:
+        'Physics-Informed Neural Networks: A Deep Learning Framework for Solving Forward and Inverse Problems',
+      abstract:
+        'We introduce physics-informed neural networks -- neural networks that are trained to solve supervised learning tasks while respecting physical conservation laws described by general nonlinear PDEs.',
       year: 2019,
       publicationTitle: 'Journal of Computational Physics',
       doi: '10.1016/j.jcp.2018.10.045',
@@ -155,7 +215,11 @@ async function main() {
         create: [
           { creatorType: 'author', fullName: 'M. Raissi', orderIndex: 0 },
           { creatorType: 'author', fullName: 'P. Perdikaris', orderIndex: 1 },
-          { creatorType: 'author', fullName: 'G.E. Karniadakis', orderIndex: 2 },
+          {
+            creatorType: 'author',
+            fullName: 'G.E. Karniadakis',
+            orderIndex: 2,
+          },
         ],
       },
       collectionItems: {
@@ -166,7 +230,43 @@ async function main() {
 
   console.log(`📚 Created papers: "${paper1.title}" and "${paper2.title}"`);
 
-  // 5. Create Manuscript Pages (LaTeX hierarchy)
+  // 5. Seed ItemFieldMapping from Zotero schema v42
+  console.log('📖 Seeding item_field_mappings from Zotero schema v42...');
+  const fieldMappingRows: Array<{
+    itemType: string;
+    baseField: string;
+    fieldKey: string;
+    fieldLabel: string | null;
+    orderIndex: number;
+  }> = [];
+
+  for (const [itemType, mappings] of Object.entries(
+    SCHEMA_V42_DATA.baseFieldMappings,
+  )) {
+    let orderIndex = 0;
+    for (const [baseField, fieldKey] of Object.entries(
+      mappings as Record<string, string>,
+    )) {
+      fieldMappingRows.push({
+        itemType,
+        baseField,
+        fieldKey,
+        fieldLabel: null,
+        orderIndex: orderIndex++,
+      });
+    }
+  }
+
+  if (fieldMappingRows.length > 0) {
+    await prisma.itemFieldMapping.deleteMany();
+    await prisma.itemFieldMapping.createMany({
+      data: fieldMappingRows,
+      skipDuplicates: true,
+    });
+    console.log(`   ✅ Seeded ${fieldMappingRows.length} field mapping rows.`);
+  }
+
+  // 6. Create Manuscript Pages (LaTeX hierarchy)
   const mainPage = await prisma.page.create({
     data: {
       title: 'main.tex',
@@ -194,13 +294,16 @@ async function main() {
     },
   });
 
-  console.log(`📝 Created LaTeX manuscript pages: ${mainPage.title}, ${abstractPage.title}`);
+  console.log(
+    `📝 Created LaTeX manuscript pages: ${mainPage.title}, ${abstractPage.title}`,
+  );
 
-  // 6. Create Cycles / Sprints
+  // 7. Create Cycles / Sprints
   const cycle = await prisma.cycle.create({
     data: {
       name: 'Sprint 1: Architecture & Loss Formulation',
-      description: 'Implement Sobolev loss penalty and setup baseline FNO vs U-Net benchmarks.',
+      description:
+        'Implement Sobolev loss penalty and setup baseline FNO vs U-Net benchmarks.',
       status: CycleStatus.active,
       startDate: new Date(),
       endDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
@@ -213,11 +316,12 @@ async function main() {
     },
   });
 
-  // 7. Create Work Items
+  // 8. Create Work Items
   await prisma.workItem.create({
     data: {
       title: 'Implement H1 Sobolev norm regularization',
-      content: 'Add gradient penalty to enforce conservation of vorticity in Navier-Stokes 2D box test cases.',
+      content:
+        'Add gradient penalty to enforce conservation of vorticity in Navier-Stokes 2D box test cases.',
       columnId: 'in_progress',
       priority: WorkItemPriority.high,
       completed: false,
@@ -231,7 +335,8 @@ async function main() {
   await prisma.workItem.create({
     data: {
       title: 'Export BibTeX citations for related works',
-      content: 'Aggregate CSL bibliography entries into references.bib for LaTeX compiler sync.',
+      content:
+        'Aggregate CSL bibliography entries into references.bib for LaTeX compiler sync.',
       columnId: 'todo',
       priority: WorkItemPriority.medium,
       completed: false,
@@ -244,11 +349,12 @@ async function main() {
 
   console.log(`📋 Created sprint cycle and work items.`);
 
-  // 8. Create Personal Stickies
+  // 9. Create Personal Stickies
   await prisma.sticky.create({
     data: {
       title: 'Lab Meeting Notes',
-      content: 'Remember to submit camera-ready preprint to arXiv by Friday 5 PM EST.',
+      content:
+        'Remember to submit camera-ready preprint to arXiv by Friday 5 PM EST.',
       color: 'yellow-1',
       positionX: 40,
       positionY: 80,
@@ -260,7 +366,8 @@ async function main() {
   await prisma.sticky.create({
     data: {
       title: 'Cluster GPU Allocation',
-      content: 'Nodes A100-node[01-04] reserved for Reynolds number 10,000 simulations.',
+      content:
+        'Nodes A100-node[01-04] reserved for Reynolds number 10,000 simulations.',
       color: 'cyan-1',
       positionX: 320,
       positionY: 80,

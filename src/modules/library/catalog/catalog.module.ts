@@ -1,9 +1,14 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
 import { SyncModule } from '../sync/sync.module';
+import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
 
 // Controllers
-import { ItemController, ItemsController } from './items.controller';
+import {
+  ItemController,
+  ItemsController,
+  ItemCurationController,
+} from './items.controller';
 import {
   CollectionController,
   CollectionsController,
@@ -98,6 +103,7 @@ import { UpdateItemUseCase } from './core/use-cases/update-item.use-case';
 import { DeleteItemUseCase } from './core/use-cases/delete-item.use-case';
 import { RestoreItemUseCase } from './core/use-cases/restore-item.use-case';
 import { PurgeItemUseCase } from './core/use-cases/purge-item.use-case';
+import { BulkPurgeItemsUseCase } from './core/use-cases/bulk-purge-items.use-case';
 import { ConvertItemTypeUseCase } from './core/use-cases/convert-item-type.use-case';
 import { ImportItemsToProjectUseCase } from './core/use-cases/import-items-to-project.use-case';
 import { SetMyPublicationUseCase } from './core/use-cases/set-my-publication.use-case';
@@ -121,6 +127,7 @@ import { ReorderCollectionsUseCase } from './core/use-cases/reorder-collections.
 import { MoveItemsToCollectionUseCase } from './core/use-cases/move-items-to-collection.use-case';
 import { AssignItemsToCollectionUseCase } from './core/use-cases/assign-items-to-collection.use-case';
 import { DetachItemFromCollectionUseCase } from './core/use-cases/detach-item-from-collection.use-case';
+import { BulkDetachItemsUseCase } from './core/use-cases/bulk-detach-items.use-case';
 
 // Use Cases - Tags
 import { CreateTagUseCase } from './core/use-cases/create-tag.use-case';
@@ -159,8 +166,9 @@ import {
  * - Scholarly Markdown Research Notes
  */
 @Module({
-  imports: [CoreModule, SyncModule],
+  imports: [CoreModule, SyncModule, SharedKernelModule],
   controllers: [
+    ItemCurationController,
     ItemController,
     CollectionController,
     TagController,
@@ -269,6 +277,7 @@ import {
     DeleteItemUseCase,
     RestoreItemUseCase,
     PurgeItemUseCase,
+    BulkPurgeItemsUseCase,
     ConvertItemTypeUseCase,
     ImportItemsToProjectUseCase,
     SetMyPublicationUseCase,
@@ -292,6 +301,7 @@ import {
     MoveItemsToCollectionUseCase,
     AssignItemsToCollectionUseCase,
     DetachItemFromCollectionUseCase,
+    BulkDetachItemsUseCase,
 
     // Use cases - Tags
     CreateTagUseCase,

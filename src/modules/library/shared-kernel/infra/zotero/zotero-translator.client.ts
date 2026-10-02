@@ -1,5 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { getAcademicUserAgent } from '../../core/constants/academic-client.constants';
+import { ResilienceRegistryService } from '../../resilience/resilience-registry.service';
+import { CircuitBreaker } from '../../resilience/circuit-breaker';
 
 /**
  * Represents a single item returned by Zotero Translation Server.
@@ -31,6 +33,15 @@ export interface ZoteroItem {
   libraryCatalog?: string;
   extra?: string;
   tags?: Array<{ tag: string; type?: number }>;
+  notes?: Array<
+    | {
+        note?: string;
+        title?: string;
+        tags?: Array<{ tag: string; type?: number }>;
+      }
+    | string
+  >;
+  note?: string;
   creators?: Array<{
     creatorType: string;
     firstName?: string;
@@ -58,6 +69,13 @@ export interface ZoteroItem {
 @Injectable()
 export class ZoteroTranslatorClient {
   private readonly logger = new Logger(ZoteroTranslatorClient.name);
+  private readonly breaker: CircuitBreaker | null;
+
+  constructor(
+    @Optional() private readonly resilience?: ResilienceRegistryService,
+  ) {
+    this.breaker = resilience?.getCircuitBreaker('zotero') ?? null;
+  }
 
   private get baseUrl(): string {
     return (
@@ -77,6 +95,22 @@ export class ZoteroTranslatorClient {
   private readonly userAgent = getAcademicUserAgent('Translator');
 
   /**
+   * Executes a Zotero network call through the circuit breaker (if available).
+   * If the circuit is OPEN, returns the provided fallback value immediately
+   * without issuing a network request — matching the GROBID resilience pattern.
+   */
+  private async withBreaker<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+    if (!this.breaker) {
+      try {
+        return await fn();
+      } catch {
+        return fallback;
+      }
+    }
+    return this.breaker.execute(fn, async () => fallback);
+  }
+
+  /**
    * Translates a URL into structured Zotero/CSL-JSON metadata.
    *
    * POST /web {"url": "https://..."}
@@ -88,59 +122,64 @@ export class ZoteroTranslatorClient {
   async translateUrl(url: string): Promise<ZoteroItem[]> {
     if (!this.enabled) return [];
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    return this.withBreaker(async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    try {
-      const response = await fetch(`${this.baseUrl}/web`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain',
-          'User-Agent': this.userAgent,
-        },
-        body: url,
-        signal: controller.signal,
-      });
+      try {
+        const response = await fetch(`${this.baseUrl}/web`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain',
+            'User-Agent': this.userAgent,
+          },
+          body: url,
+          signal: controller.signal,
+        });
 
-      if (response.status === 300) {
-        // Multiple choices — try to pick the first option
-        const body = await response.json().catch(() => null);
-        if (body?.items && typeof body.items === 'object') {
-          const firstKey = Object.keys(body.items)[0];
-          if (firstKey) {
-            return this.selectItem(url, firstKey);
+        if (response.status === 300) {
+          // Multiple choices — try to pick the first option (not an outage)
+          const body = await response.json().catch(() => null);
+          if (body?.items && typeof body.items === 'object') {
+            const firstKey = Object.keys(body.items)[0];
+            if (firstKey) {
+              return this.selectItem(url, firstKey);
+            }
           }
+          return [];
         }
-        return [];
-      }
 
-      if (!response.ok) {
-        if (response.status === 501) {
-          // No translator found for this URL — not an error
-          this.logger.debug(`Zotero: no translator for URL ${url} (501)`);
-        } else {
+        if (!response.ok) {
+          if (response.status === 501) {
+            // No translator found for this URL — not an error
+            this.logger.debug(`Zotero: no translator for URL ${url} (501)`);
+            return [];
+          }
+          // Non-501 server errors count toward the circuit breaker threshold
           this.logger.warn(
             `Zotero Translation Server returned HTTP ${response.status} for ${url}`,
           );
+          throw new Error(`Zotero HTTP ${response.status}`);
         }
-        return [];
-      }
 
-      const items = await response.json();
-      if (!Array.isArray(items)) return [];
-      return items as ZoteroItem[];
-    } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        this.logger.warn(`Zotero Translation Server timed out for URL: ${url}`);
-      } else {
-        this.logger.warn(
-          `Zotero Translation Server unavailable: ${err?.message}`,
-        );
+        const items = await response.json();
+        if (!Array.isArray(items)) return [];
+        return items as ZoteroItem[];
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          this.logger.warn(
+            `Zotero Translation Server timed out for URL: ${url}`,
+          );
+        } else {
+          this.logger.warn(
+            `Zotero Translation Server unavailable: ${err?.message}`,
+          );
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeout);
       }
-      return [];
-    } finally {
-      clearTimeout(timeout);
-    }
+    }, []);
   }
 
   /**
@@ -185,35 +224,37 @@ export class ZoteroTranslatorClient {
   async importData(data: string, formatHint?: string): Promise<ZoteroItem[]> {
     if (!this.enabled || !data?.trim()) return [];
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    return this.withBreaker(async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    try {
-      const response = await fetch(`${this.baseUrl}/import`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': formatHint || 'text/plain; charset=utf-8',
-          'User-Agent': this.userAgent,
-        },
-        body: data,
-        signal: controller.signal,
-      });
+      try {
+        const response = await fetch(`${this.baseUrl}/import`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': formatHint || 'text/plain; charset=utf-8',
+            'User-Agent': this.userAgent,
+          },
+          body: data,
+          signal: controller.signal,
+        });
 
-      if (!response.ok) {
-        this.logger.debug(
-          `Zotero Translation Server /import returned status ${response.status}`,
-        );
-        return [];
+        if (!response.ok) {
+          this.logger.debug(
+            `Zotero Translation Server /import returned status ${response.status}`,
+          );
+          throw new Error(`Zotero /import HTTP ${response.status}`);
+        }
+
+        const parsed = await response.json();
+        return Array.isArray(parsed) ? (parsed as ZoteroItem[]) : [];
+      } catch (err: any) {
+        this.logger.warn(`Zotero /import call failed: ${err?.message}`);
+        throw err;
+      } finally {
+        clearTimeout(timeout);
       }
-
-      const parsed = await response.json();
-      return Array.isArray(parsed) ? (parsed as ZoteroItem[]) : [];
-    } catch (err: any) {
-      this.logger.warn(`Zotero /import call failed: ${err?.message}`);
-      return [];
-    } finally {
-      clearTimeout(timeout);
-    }
+    }, []);
   }
 
   /**
@@ -221,6 +262,7 @@ export class ZoteroTranslatorClient {
    * Supported formats: 'bibtex', 'betterbibtex', 'ris', 'csljson', or any CSL style ('apa', 'ieee', etc.).
    *
    * POST /export?format=...
+   * Note: export is a non-critical path — not wrapped in circuit breaker.
    */
   async exportItems(
     items: ZoteroItem[],
@@ -270,34 +312,36 @@ export class ZoteroTranslatorClient {
   async searchIdentifier(identifier: string): Promise<ZoteroItem[]> {
     if (!this.enabled || !identifier?.trim()) return [];
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    return this.withBreaker(async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    try {
-      const response = await fetch(`${this.baseUrl}/search`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain; charset=utf-8',
-          'User-Agent': this.userAgent,
-        },
-        body: identifier.trim(),
-        signal: controller.signal,
-      });
+      try {
+        const response = await fetch(`${this.baseUrl}/search`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'User-Agent': this.userAgent,
+          },
+          body: identifier.trim(),
+          signal: controller.signal,
+        });
 
-      if (!response.ok) {
-        return [];
+        if (!response.ok) {
+          throw new Error(`Zotero /search HTTP ${response.status}`);
+        }
+
+        const parsed = await response.json();
+        return Array.isArray(parsed) ? (parsed as ZoteroItem[]) : [];
+      } catch (err: any) {
+        this.logger.debug(
+          `Zotero /search failed for ${identifier}: ${err?.message}`,
+        );
+        throw err;
+      } finally {
+        clearTimeout(timeout);
       }
-
-      const parsed = await response.json();
-      return Array.isArray(parsed) ? (parsed as ZoteroItem[]) : [];
-    } catch (err: any) {
-      this.logger.debug(
-        `Zotero /search failed for ${identifier}: ${err?.message}`,
-      );
-      return [];
-    } finally {
-      clearTimeout(timeout);
-    }
+    }, []);
   }
 
   /**

@@ -164,7 +164,7 @@ export class NoteController {
     const createData = {
       ...body,
       projectId: effectiveProjectId || undefined,
-      createdById: currentUserId || 'system',
+      createdById: currentUserId,
     };
 
     if (this.createNoteUseCaseInstance) {

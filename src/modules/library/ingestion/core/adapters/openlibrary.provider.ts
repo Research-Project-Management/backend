@@ -10,6 +10,7 @@ import {
 } from '../domain/metadata.types';
 import { normalizeIsbn } from './metadata.utils';
 import { ProviderFetchError } from '../services/metadata-executor.service';
+import { getAcademicUserAgent } from '../../../shared-kernel/core/constants/academic-client.constants';
 
 @Injectable()
 export class OpenLibraryProvider implements MetadataProvider {
@@ -22,7 +23,8 @@ export class OpenLibraryProvider implements MetadataProvider {
   };
 
   private readonly logger = new Logger(OpenLibraryProvider.name);
-  private readonly BASE_URL = 'https://openlibrary.org/api/books';
+  private readonly BASE_URL =
+    process.env.OPENLIBRARY_API_URL || 'https://openlibrary.org/api/books';
 
   supports(queryType: QueryType): boolean {
     return this.capabilities.queryTypes.includes(queryType);
@@ -40,8 +42,7 @@ export class OpenLibraryProvider implements MetadataProvider {
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
+        'User-Agent': getAcademicUserAgent('OpenLibrary'),
         Accept: 'application/json',
       },
       signal,

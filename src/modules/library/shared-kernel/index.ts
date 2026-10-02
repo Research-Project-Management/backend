@@ -44,3 +44,4 @@ export * from './types/schema.types';
 // Utilities
 export * from './utils/bibliographic.utils';
 export * from './utils/tag.utils';
+export * from './utils/project-scope.utils';

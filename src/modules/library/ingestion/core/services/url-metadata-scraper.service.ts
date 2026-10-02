@@ -19,6 +19,9 @@ import {
   splitAuthorString,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 
+/** Canonical actor identifier for automated system-level ingestion downloads */
+export const SYSTEM_INGESTION_USER_ID = 'system';
+
 export interface ScrapedUrlResult {
   url: string;
   isPdf: boolean;
@@ -243,7 +246,7 @@ export class UrlMetadataScraperService {
           if (this.storagePort) {
             try {
               const uploadRes = await this.storagePort.uploadFile({
-                userId: options?.userId || 'system',
+                userId: options?.userId || SYSTEM_INGESTION_USER_ID,
                 filename: effectiveFilename,
                 buffer,
                 mimeType: 'application/pdf',

@@ -20,17 +20,18 @@ export class VectorSearchAdapter implements IVectorSearchEnginePort {
 
   constructor() {}
 
+  isAvailable(): boolean {
+    return false;
+  }
+
   async semanticSearch(
     userId: string,
     queryText: string,
     limit: number = 20,
     projectId?: string,
   ): Promise<SearchResult> {
-    // TODO (scale): Replace with Qdrant HTTP client call
-    // For now: returns empty — semantic search is an enhancement,
-    // not required for core FTS functionality.
     this.logger.debug(
-      `[VectorSearch] semanticSearch called for user ${userId} query="${queryText}" (pgvector/Qdrant not yet configured)`,
+      `[VectorSearch] semanticSearch called for user ${userId} query="${queryText}" (vector search engine not enabled)`,
     );
     return { hits: [], total: 0 };
   }

@@ -1,5 +1,9 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger, OnApplicationBootstrap } from '@nestjs/common';
+import {
+  Logger,
+  OnApplicationBootstrap,
+  OnApplicationShutdown,
+} from '@nestjs/common';
 import { Job } from 'bullmq';
 import {
   LIBRARY_INGESTION_QUEUE_STANDARD,
@@ -13,7 +17,7 @@ import { IngestionStatus } from '@prisma/client';
 @Processor(LIBRARY_INGESTION_QUEUE_STANDARD, { concurrency: 4 })
 export class IngestionQueueConsumer
   extends WorkerHost
-  implements OnApplicationBootstrap
+  implements OnApplicationBootstrap, OnApplicationShutdown
 {
   private readonly logger = new Logger(IngestionQueueConsumer.name);
 
@@ -34,6 +38,19 @@ export class IngestionQueueConsumer
       );
     } catch {
       // ignore
+    }
+  }
+
+  async onApplicationShutdown() {
+    try {
+      if (this.worker) {
+        this.logger.log(`Closing IngestionQueueConsumer worker on shutdown...`);
+        await this.worker.close();
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `Error closing IngestionQueueConsumer worker: ${err?.message}`,
+      );
     }
   }
 

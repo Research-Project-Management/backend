@@ -13,10 +13,10 @@ import {
 import { CitationService } from './citation.service';
 import { CslJsonMapper } from '../adapters/csl-json.mapper';
 import { ExportLibraryDto, ExportFormatType } from '../../dto/exports.dto';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { PdfBakerService } from '../adapters/pdf-baker.service';
 import { ExportResult, BurnableAnnotation } from '../domain/exports.types';
 import { formatCsvExport } from '../adapters/exports.utils';
+import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 
 export { BurnableAnnotation, ExportResult };
 
@@ -29,6 +29,9 @@ export class ExportsService {
     private readonly citationService: CitationService,
     @Optional() private readonly itemReadPort?: any,
     @Optional() private readonly contentFacade?: any,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
     @Optional()
     private readonly pdfBakerService: PdfBakerService = new PdfBakerService(),
   ) {}
@@ -370,17 +373,29 @@ export class ExportsService {
           )
         : [];
 
-    // If no buffer passed, create minimal placeholder PDF if empty, or throw
+    // Resolve raw PDF binary from parameter or storage layer
     let bufferToUse = rawPdfBuffer;
-    if (!bufferToUse) {
-      const doc = await PDFDocument.create();
-      const page = doc.addPage([595.28, 841.89]); // A4
-      const font = await doc.embedFont(StandardFonts.Helvetica);
-      page.drawText(item.title, { x: 50, y: 780, size: 14, font });
-      if (item.doi) {
-        page.drawText(`DOI: ${item.doi}`, { x: 50, y: 760, size: 10, font });
+    if (!bufferToUse && pdfAttachment?.fileId && this.storagePort) {
+      try {
+        const fileOutput = await this.storagePort.readOwnedFile({
+          fileId: pdfAttachment.fileId,
+          userId,
+          projectId,
+        });
+        if (fileOutput?.buffer) {
+          bufferToUse = fileOutput.buffer;
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `Could not read PDF attachment ${pdfAttachment.fileId} from storage: ${err?.message || err}`,
+        );
       }
-      bufferToUse = Buffer.from(await doc.save());
+    }
+
+    if (!bufferToUse) {
+      throw new NotFoundException(
+        `Source PDF file content for attachment ${pdfAttachment?.id || 'unknown'} not found in storage`,
+      );
     }
 
     const burned = await this.burnAnnotationsToPdf(bufferToUse, annotations);
@@ -443,7 +458,26 @@ export class ExportsService {
           ],
         };
 
-    const items = await this.exportsRepo.findItemsByScope(scopeWhere);
+    const isUuid = (val: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-7][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        val,
+      );
+    const idKeys = normalizedKeys.filter((k) => isUuid(k));
+    const citeKeys = normalizedKeys;
+
+    const targetedScopeWhere: any = {
+      AND: [
+        scopeWhere,
+        {
+          OR: [
+            { citationKey: { in: citeKeys, mode: 'insensitive' } },
+            ...(idKeys.length > 0 ? [{ id: { in: idKeys } }] : []),
+          ],
+        },
+      ],
+    };
+
+    const items = await this.exportsRepo.findItemsByScope(targetedScopeWhere);
 
     const keySet = new Set(normalizedKeys);
     const matchedItems = items.filter((it: any) => {

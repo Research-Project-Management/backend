@@ -122,6 +122,8 @@ export interface ItemMetadata {
   institution?: string;
   numPages?: string | number;
   numberOfPages?: number;
+  pageCount?: string | number;
+  explicitCitationKey?: string;
   reportNumber?: string;
   reportType?: string;
   thesisType?: string;
@@ -133,6 +135,14 @@ export interface ItemMetadata {
   distributor?: string;
   system?: string;
   extraFields?: Record<string, unknown>;
+  seeAlso?: string[];
+  relations?:
+    | Record<string, string | string[]>
+    | Array<{
+        targetItemId?: string;
+        relationType?: string;
+        description?: string;
+      }>;
 
   // Retraction indicators
   isRetracted?: boolean;

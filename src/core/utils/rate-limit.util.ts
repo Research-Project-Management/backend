@@ -17,3 +17,16 @@ export function isSensitiveAuthRoute(rawUrl?: string): boolean {
     normalized.startsWith('/auth/oauth/exchange')
   );
 }
+
+export function isSensitiveScrapeRoute(rawUrl?: string): boolean {
+  if (!rawUrl) return false;
+
+  const path = rawUrl.split('?')[0].split('#')[0];
+  const normalized = path.replace(/^\/api(?:\/v1)?(?=\/)/, '');
+
+  return (
+    normalized.includes('/library/ingestion/capture-url') ||
+    normalized.includes('/library/url-capture') ||
+    normalized.includes('/ingestion/capture-url')
+  );
+}

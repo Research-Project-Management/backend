@@ -1,7 +1,10 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ItemMetadata, CreatorInput } from '../domain/metadata.types';
 import { IngestionValidationException } from '../domain/ingestion.errors';
-import { cleanAbstractText } from '../../../shared-kernel/utils/bibliographic.utils';
+import {
+  cleanAbstractText,
+  mapCslTypeToZoteroItemType,
+} from '../../../shared-kernel/utils/bibliographic.utils';
 import { normalizeAcademicTags } from '../../../shared-kernel/utils/tag.utils';
 import {
   ZoteroTranslatorClient,
@@ -12,6 +15,40 @@ import {
 const { Cite } = require('@citation-js/core');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 require('@citation-js/plugin-ris');
+
+const VALID_ZOTERO_CREATOR_TYPES = new Set([
+  'author',
+  'editor',
+  'translator',
+  'contributor',
+  'advisor',
+  'reviewer',
+  'seriesEditor',
+  'bookAuthor',
+  'reviewedAuthor',
+  'inventor',
+  'attorneyAgent',
+  'director',
+  'producer',
+  'scriptwriter',
+  'presenter',
+  'counsel',
+  'interviewee',
+  'interviewer',
+  'cartographer',
+  'programmer',
+  'artist',
+  'recipient',
+  'performer',
+  'composer',
+  'wordsBy',
+  'guest',
+  'castMember',
+  'podcaster',
+  'sponsor',
+  'cosponsor',
+  'commenter',
+]);
 
 @Injectable()
 export class RisParser {
@@ -62,11 +99,17 @@ export class RisParser {
       const given = (c.firstName || '').trim();
       const fullName = family && given ? `${given} ${family}` : family || given;
       if (fullName) {
-        rawAuthors.push(fullName);
+        const resolvedType = VALID_ZOTERO_CREATOR_TYPES.has(c.creatorType)
+          ? c.creatorType
+          : 'author';
+        // Only add to rawAuthors if this is an author-role creator
+        if (resolvedType === 'author' || resolvedType === 'bookAuthor') {
+          rawAuthors.push(fullName);
+        }
         creators.push({
           firstName: given || undefined,
           lastName: family || undefined,
-          creatorType: c.creatorType === 'editor' ? 'editor' : 'author',
+          creatorType: resolvedType as any,
         });
       }
     }
@@ -82,6 +125,21 @@ export class RisParser {
     const keywords = (item.tags || [])
       .map((t) => t.tag?.trim())
       .filter(Boolean);
+
+    const notes: Array<{ content: string; source?: string }> = [];
+    if (Array.isArray(item.notes)) {
+      for (const n of item.notes) {
+        const text =
+          typeof n === 'string'
+            ? n
+            : (n as any)?.note || (n as any)?.content || '';
+        if (text && text.trim()) {
+          notes.push({ content: text.trim(), source: 'zotero' });
+        }
+      }
+    } else if (typeof item.note === 'string' && item.note.trim()) {
+      notes.push({ content: item.note.trim(), source: 'zotero' });
+    }
 
     return {
       title: item.title || 'Untitled',
@@ -100,6 +158,15 @@ export class RisParser {
       url: item.url,
       abstract: cleanAbstractText(item.abstractNote),
       keywords: keywords.length > 0 ? keywords : undefined,
+      notes: notes.length > 0 ? notes : undefined,
+      seeAlso:
+        Array.isArray(item.seeAlso) && item.seeAlso.length > 0
+          ? item.seeAlso
+          : undefined,
+      relations:
+        item.relations && Object.keys(item.relations).length > 0
+          ? item.relations
+          : undefined,
       itemType: item.itemType || 'journalArticle',
     };
   }
@@ -356,19 +423,7 @@ export class RisParser {
   }
 
   private mapCslTypeToItemType(cslType: string): string {
-    const map: Record<string, string> = {
-      'article-journal': 'journalArticle',
-      'paper-conference': 'conferencePaper',
-      book: 'book',
-      chapter: 'bookSection',
-      thesis: 'thesis',
-      report: 'report',
-      webpage: 'webpage',
-      patent: 'patent',
-      dataset: 'dataset',
-      software: 'computerProgram',
-    };
-    return map[cslType] || 'journalArticle';
+    return mapCslTypeToZoteroItemType(cslType);
   }
 
   private mapRisTypeToItemType(risType: string): string {

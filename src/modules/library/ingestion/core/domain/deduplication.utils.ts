@@ -53,8 +53,14 @@ export function generateDedupeBucketKey(
   authors: string[],
   titlePrefixLength = 32,
 ): string {
-  const normTitle = normalizeTitleForDedupe(title);
   const authorFamily = extractFirstAuthorFamily(authors);
+  const tokens = tokenizeTitleWords(title);
+  if (tokens.length >= 2) {
+    // Resilient to leading stop words (e.g. "A Study of...", "Towards a...", "The...")
+    const topTokens = tokens.slice(0, 3).sort().join('_');
+    return `${topTokens}::${authorFamily}`;
+  }
+  const normTitle = normalizeTitleForDedupe(title);
   return `${normTitle.substring(0, titlePrefixLength)}::${authorFamily}`;
 }
 

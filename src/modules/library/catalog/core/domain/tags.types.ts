@@ -1,6 +1,7 @@
 export interface TagObjectInput {
   tag?: string;
   name?: string;
+  type?: number | string;
 }
 
 export type TagInput = string | TagObjectInput;

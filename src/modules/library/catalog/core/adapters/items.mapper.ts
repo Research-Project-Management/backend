@@ -509,7 +509,12 @@ export class ItemMapper {
           seenZotero.add(lower);
           return {
             tag: cleanedName,
-            type: t.tag?.type === 'automatic' ? 1 : 0,
+            type:
+              t.type === 'automatic' ||
+              t.type === 1 ||
+              (!t.type && t.tag?.type === 'automatic')
+                ? 1
+                : 0,
           };
         })
         .filter((zt: any): zt is NonNullable<typeof zt> => Boolean(zt));
@@ -967,6 +972,103 @@ export class ItemMapper {
       };
     } else {
       it.primaryFile = it.primaryFile ?? null;
+    }
+
+    // 13. My Publications Dual-State Harmonization
+    if (it.isMyPublication === undefined) {
+      if (Array.isArray(it.publications) && it.publications.length > 0) {
+        it.isMyPublication = true;
+      } else {
+        it.isMyPublication = Boolean(it.metadata?.isMyPublication);
+      }
+    } else {
+      it.isMyPublication = Boolean(it.isMyPublication);
+    }
+
+    // 14. Item Relations Canonical Projection (Zotero parity: seeAlso & dc:relation)
+    const combinedRelations: any[] = [];
+    if (Array.isArray(it.outgoingRel)) {
+      for (const rel of it.outgoingRel) {
+        combinedRelations.push({
+          id: rel.id,
+          targetItemId: rel.targetItemId,
+          relationType: rel.relationType || 'related',
+          direction: 'outgoing',
+          description: rel.description || '',
+          linkedAt: rel.createdAt,
+          targetItem: rel.targetItem
+            ? ItemsMapper.toDomain(rel.targetItem)
+            : undefined,
+        });
+      }
+    }
+    if (Array.isArray(it.incomingRel)) {
+      for (const rel of it.incomingRel) {
+        combinedRelations.push({
+          id: rel.id,
+          targetItemId: rel.sourceItemId,
+          relationType: rel.relationType || 'related',
+          direction: 'incoming',
+          description: rel.description || '',
+          linkedAt: rel.createdAt,
+          targetItem: rel.sourceItem
+            ? ItemsMapper.toDomain(rel.sourceItem)
+            : undefined,
+        });
+      }
+    }
+    if (combinedRelations.length === 0 && it.metadata?.relations) {
+      const metaRels = it.metadata.relations;
+      if (Array.isArray(metaRels)) {
+        combinedRelations.push(...metaRels);
+      } else if (typeof metaRels === 'object') {
+        // dc:relation — Zotero primary relation type (related items)
+        const dcRelations = metaRels['dc:relation'];
+        if (Array.isArray(dcRelations)) {
+          for (const uri of dcRelations) {
+            combinedRelations.push({
+              uri,
+              relationType: 'related',
+              direction: 'outgoing',
+            });
+          }
+        } else if (typeof dcRelations === 'string' && dcRelations) {
+          combinedRelations.push({
+            uri: dcRelations,
+            relationType: 'related',
+            direction: 'outgoing',
+          });
+        }
+
+        // owl:sameAs — Zotero cross-library identity (same item in another library/group)
+        const owlSameAs = metaRels['owl:sameAs'];
+        if (Array.isArray(owlSameAs)) {
+          for (const uri of owlSameAs) {
+            combinedRelations.push({
+              uri,
+              relationType: 'is_published_version_of',
+              direction: 'outgoing',
+              sameAs: true,
+            });
+          }
+        } else if (typeof owlSameAs === 'string' && owlSameAs) {
+          combinedRelations.push({
+            uri: owlSameAs,
+            relationType: 'is_published_version_of',
+            direction: 'outgoing',
+            sameAs: true,
+          });
+        }
+      }
+    }
+    it.relations = combinedRelations;
+
+    if (!it.seeAlso && it.metadata?.seeAlso) {
+      it.seeAlso = it.metadata.seeAlso;
+    } else if (!it.seeAlso && combinedRelations.length > 0) {
+      it.seeAlso = combinedRelations
+        .map((r) => r.targetItemId || r.uri)
+        .filter(Boolean);
     }
 
     return it as T;

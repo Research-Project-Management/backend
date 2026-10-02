@@ -90,51 +90,38 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
     );
 
     try {
-      const tasks: Promise<any>[] = [];
+      const now = new Date();
+      const attachments = await this.prisma.attachment.findMany({
+        where: { itemId },
+        select: { id: true },
+      });
+      const attachmentIds = attachments.map((a: any) => a.id);
 
-      if (
-        this.prisma?.attachment?.findMany &&
-        this.prisma?.annotation?.updateMany
-      ) {
-        try {
-          const attachments = await this.prisma.attachment.findMany({
-            where: { itemId },
-            select: { id: true },
+      const performUpdates = async (tx: any) => {
+        if (attachmentIds.length > 0) {
+          await tx.annotation.updateMany({
+            where: {
+              attachmentId: { in: attachmentIds },
+              deletedAt: null,
+            },
+            data: { deletedAt: now },
           });
-          const attachmentIds = attachments.map((a: any) => a.id);
-          if (attachmentIds.length > 0) {
-            tasks.push(
-              this.prisma.annotation.updateMany({
-                where: {
-                  attachmentId: { in: attachmentIds },
-                  deletedAt: null,
-                },
-                data: { deletedAt: new Date() },
-              }),
-            );
-          }
-        } catch {
-          // non-blocking fallback if findMany not present in test mock
         }
-      }
+        await tx.attachment.updateMany({
+          where: { itemId, deletedAt: null },
+          data: { deletedAt: now },
+        });
+        await tx.note.updateMany({
+          where: { itemId, deletedAt: null },
+          data: { deletedAt: now },
+        });
+      };
 
-      if (this.prisma?.attachment?.updateMany) {
-        tasks.push(
-          this.prisma.attachment.updateMany({
-            where: { itemId, deletedAt: null },
-            data: { deletedAt: new Date() },
-          }),
-        );
+      if (typeof this.prisma.$transaction === 'function') {
+        await this.prisma.$transaction(performUpdates);
+      } else {
+        await performUpdates(this.prisma);
       }
-      if (this.prisma?.note?.updateMany) {
-        tasks.push(
-          this.prisma.note.updateMany({
-            where: { itemId, deletedAt: null },
-            data: { deletedAt: new Date() },
-          }),
-        );
-      }
-      await Promise.all(tasks);
     } catch (err: any) {
       this.logger.warn(
         `[ContentSubscriber] Content cascade cleanup error for item ${itemId}: ${err?.message || err}`,

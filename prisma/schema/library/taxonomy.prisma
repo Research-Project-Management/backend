@@ -6,7 +6,6 @@
 enum TagType {
   manual
   automatic
-  ai
 }
 
 model Collection {

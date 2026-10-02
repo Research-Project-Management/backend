@@ -1,4 +1,4 @@
-import { Prisma, LinkMode, AttachmentType } from '@prisma/client';
+import { Prisma, LinkMode, AttachmentType, TagType } from '@prisma/client';
 import { PrismaService } from '../../../../../core/database/prisma.service';
 import { normalizeTags } from '../../../shared-kernel/utils/tag.utils';
 import { TagInput } from '../domain/tags.types';
@@ -368,6 +368,70 @@ export function buildTipTapDocFromText(text: string): Record<string, unknown> {
   };
 }
 
+export function convertHtmlToMarkdown(html: string): string {
+  if (!html || typeof html !== 'string') return '';
+  let md = html.replace(/\r\n/g, '\n');
+
+  // Headings
+  md = md.replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, (_, c) => `# ${c.trim()}\n\n`);
+  md = md.replace(
+    /<h2[^>]*>([\s\S]*?)<\/h2>/gi,
+    (_, c) => `## ${c.trim()}\n\n`,
+  );
+  md = md.replace(
+    /<h3[^>]*>([\s\S]*?)<\/h3>/gi,
+    (_, c) => `### ${c.trim()}\n\n`,
+  );
+  md = md.replace(
+    /<h[4-6][^>]*>([\s\S]*?)<\/h[4-6]>/gi,
+    (_, c) => `#### ${c.trim()}\n\n`,
+  );
+
+  // Blockquotes
+  md = md.replace(
+    /<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi,
+    (_, c) => `> ${c.trim()}\n\n`,
+  );
+
+  // Lists
+  md = md.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, c) => `- ${c.trim()}\n`);
+  md = md.replace(/<\/?(ul|ol)[^>]*>/gi, '\n');
+
+  // Paragraphs & line breaks
+  md = md.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, c) => `${c.trim()}\n\n`);
+  md = md.replace(/<br\s*\/?>/gi, '\n');
+
+  // Inline formatting
+  md = md.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**');
+  md = md.replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*');
+  md = md.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`');
+  md = md.replace(
+    /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    '[$2]($1)',
+  );
+
+  // Strip remaining tags
+  md = md.replace(/<[^>]+>/g, '');
+
+  // Decode common HTML entities
+  md = md
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&mdash;/g, '—')
+    .replace(/&ndash;/g, '–');
+
+  return md
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function prepareNotesToCreate(
   notes: unknown,
   userId: string,
@@ -397,10 +461,7 @@ export function prepareNotesToCreate(
                 ? noteObj.note
                 : '';
       const cleanContent = /<\/?[a-z][\s\S]*>/i.test(rawContent)
-        ? rawContent
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
+        ? convertHtmlToMarkdown(rawContent)
         : rawContent.trim();
       const source =
         typeof noteObj?.source === 'string' ? noteObj.source.trim() : undefined;
@@ -456,7 +517,7 @@ export function prepareNotesToCreate(
 
       return {
         userId,
-        createdById: createdById || userId || 'system',
+        createdById: createdById || userId,
         title: noteTitle,
         contentMd,
         contentJson,
@@ -639,18 +700,51 @@ export function prepareAttachmentsToCreate(
   return result;
 }
 
+export interface ResolvedTag {
+  id: string;
+  type: TagType;
+}
+
 export async function resolveOrCreateTags(
   client: Prisma.TransactionClient | PrismaService,
   userId: string,
   rawTagList: (TagInput | null | undefined)[],
-): Promise<string[]> {
+  defaultTagType: TagType = TagType.manual,
+): Promise<ResolvedTag[]> {
   const normalizedTagNames = normalizeTags(rawTagList).slice(0, 30);
   if (normalizedTagNames.length === 0) return [];
+
+  // Extract explicit tag type if provided per tag object (e.g. Zotero schema type 1 = automatic, 0 = manual)
+  const tagTypeMap = new Map<string, TagType>();
+  if (Array.isArray(rawTagList)) {
+    for (const rt of rawTagList) {
+      if (typeof rt === 'object' && rt !== null) {
+        const tagName = (rt.name || rt.tag || '').trim();
+        if (tagName) {
+          const typeVal = (rt as any).type;
+          if (
+            typeVal === 1 ||
+            typeVal === 'automatic' ||
+            typeVal === TagType.automatic
+          ) {
+            tagTypeMap.set(tagName.toLowerCase(), TagType.automatic);
+          } else if (
+            typeVal === 0 ||
+            typeVal === 'manual' ||
+            typeVal === TagType.manual
+          ) {
+            tagTypeMap.set(tagName.toLowerCase(), TagType.manual);
+          }
+        }
+      }
+    }
+  }
 
   await client.tag.createMany({
     data: normalizedTagNames.map((name) => ({
       userId,
       name,
+      type: tagTypeMap.get(name.toLowerCase()) || defaultTagType,
     })),
     skipDuplicates: true,
   });
@@ -660,9 +754,13 @@ export async function resolveOrCreateTags(
       userId,
       name: { in: normalizedTagNames },
     },
-    select: { id: true },
+    select: { id: true, name: true, type: true },
   });
-  return existingTags.map((t) => t.id);
+
+  return existingTags.map((t) => ({
+    id: t.id,
+    type: tagTypeMap.get(t.name.toLowerCase()) || t.type || defaultTagType,
+  }));
 }
 
 export async function syncTagsForCatalogItem(
@@ -670,6 +768,7 @@ export async function syncTagsForCatalogItem(
   userId: string,
   itemId: string,
   rawTags: (TagInput | null | undefined)[],
+  defaultTagType: TagType = TagType.manual,
 ): Promise<void> {
   const normalizedTagsList = normalizeTags(rawTags);
   if (normalizedTagsList.length === 0) {
@@ -688,6 +787,32 @@ export async function syncTagsForCatalogItem(
     },
   });
 
+  // Extract explicit tag type if provided per tag object (e.g. Zotero schema type 1 = automatic, 0 = manual)
+  const tagTypeMap = new Map<string, TagType>();
+  if (Array.isArray(rawTags)) {
+    for (const rt of rawTags) {
+      if (typeof rt === 'object' && rt !== null) {
+        const tagName = (rt.name || rt.tag || '').trim();
+        if (tagName) {
+          const typeVal = (rt as any).type;
+          if (
+            typeVal === 1 ||
+            typeVal === 'automatic' ||
+            typeVal === TagType.automatic
+          ) {
+            tagTypeMap.set(tagName.toLowerCase(), TagType.automatic);
+          } else if (
+            typeVal === 0 ||
+            typeVal === 'manual' ||
+            typeVal === TagType.manual
+          ) {
+            tagTypeMap.set(tagName.toLowerCase(), TagType.manual);
+          }
+        }
+      }
+    }
+  }
+
   for (const tagName of normalizedTagsList) {
     let tag = await client.tag.findFirst({
       where: {
@@ -697,12 +822,16 @@ export async function syncTagsForCatalogItem(
       },
     });
 
+    const determinedType =
+      tagTypeMap.get(tagName.toLowerCase()) || defaultTagType;
+
     if (!tag) {
       tag = await client.tag.create({
         data: {
           userId,
           createdById: userId,
           name: tagName,
+          type: determinedType,
           projectId: null,
         },
       });
@@ -717,8 +846,11 @@ export async function syncTagsForCatalogItem(
       create: {
         tagId: tag.id,
         itemId,
+        type: determinedType,
       },
-      update: {},
+      update: {
+        type: determinedType,
+      },
     });
   }
 }
@@ -785,7 +917,7 @@ export async function buildCommandCreateInput(
   const notes = prepareNotesToCreate(
     data.notes,
     userId,
-    data.uploadedById || 'system',
+    data.uploadedById || userId,
   );
 
   const attachmentsToCreate = prepareAttachmentsToCreate(
@@ -817,7 +949,17 @@ export async function buildCommandCreateInput(
     ...(data.keywords || []),
     ...(data.labels || []),
   ];
-  const resolvedTagIds = await resolveOrCreateTags(client, userId, rawTagList);
+  const defaultTagType =
+    (data.keywords && data.keywords.length > 0) ||
+    (data.labels && data.labels.length > 0)
+      ? TagType.automatic
+      : TagType.manual;
+  const resolvedTags = await resolveOrCreateTags(
+    client,
+    userId,
+    rawTagList,
+    defaultTagType,
+  );
 
   const resolvedPubTitle =
     data.publicationTitle ??
@@ -904,7 +1046,7 @@ export async function buildCommandCreateInput(
     referenceCount: data.referenceCount ?? 0,
     openAccessPdfUrl: data.openAccessPdfUrl ?? '',
     extra: resolveExtraPlainText(data.extra, null, effectiveExtraFields) ?? '',
-    uploadedById: data.uploadedById || 'system',
+    uploadedById: data.uploadedById || userId,
     ...(effectiveExtraFields && typeof effectiveExtraFields === 'object'
       ? effectiveExtraFields
       : {}),
@@ -920,6 +1062,8 @@ export async function buildCommandCreateInput(
             data.retractionCheckedAt ?? new Date().toISOString(),
         }
       : {}),
+    ...(data.relations ? { relations: data.relations } : {}),
+    ...((data as any).seeAlso ? { seeAlso: (data as any).seeAlso } : {}),
     tags: normalizeTags(rawTagList),
     keywords: normalizeTags(rawTagList),
     labels: normalizeTags(rawTagList),
@@ -992,7 +1136,8 @@ export async function buildCommandCreateInput(
                 }
                 return {
                   creatorType: c.creatorType || 'author',
-                  fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
+                  fieldMode:
+                    c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
                   firstName: first,
                   lastName: last,
                   fullName,
@@ -1035,7 +1180,8 @@ export async function buildCommandCreateInput(
                     lastName: last,
                     fullName,
                     shortName: c.shortName || '',
-                    orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
+                    orderIndex:
+                      c.orderIndex !== undefined ? c.orderIndex : index,
                   };
                 }),
             },
@@ -1044,7 +1190,9 @@ export async function buildCommandCreateInput(
           ? {
               contributors: {
                 create: data.authors
-                  .flatMap((authorName: string) => splitAuthorString(authorName))
+                  .flatMap((authorName: string) =>
+                    splitAuthorString(authorName),
+                  )
                   .map((authorName: string, index: number) => {
                     const parsed = parseCreatorString(authorName, index);
                     return {
@@ -1058,11 +1206,12 @@ export async function buildCommandCreateInput(
               },
             }
           : {}),
-    ...(resolvedTagIds.length > 0
+    ...(resolvedTags.length > 0
       ? {
           itemTags: {
-            create: resolvedTagIds.map((tagId) => ({
-              tagId,
+            create: resolvedTags.map(({ id, type }) => ({
+              tagId: id,
+              type,
             })),
           },
         }
@@ -1183,7 +1332,7 @@ export function buildCommandUpdateInput(
   const newNotesToCreate = prepareNotesToCreate(
     data.notes,
     userId,
-    data.userId || existing.uploadedById || 'system',
+    data.userId || existing.uploadedById || userId,
     existing.notesList,
   );
 

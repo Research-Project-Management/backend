@@ -16,6 +16,7 @@ export {
   cleanAbstractText,
   cleanBannedString,
   cleanCommentText,
+  inferItemTypeFromPdfSignals,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 
 export type {

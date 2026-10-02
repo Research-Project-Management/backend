@@ -18,6 +18,7 @@ import {
   normalizeTags,
 } from './metadata.utils';
 import { ProviderFetchError } from '../services/metadata-executor.service';
+import { getAcademicUserAgent } from '../../../shared-kernel/core/constants/academic-client.constants';
 
 @Injectable()
 export class ArxivProvider implements MetadataProvider {
@@ -30,7 +31,8 @@ export class ArxivProvider implements MetadataProvider {
   };
 
   private readonly logger = new Logger(ArxivProvider.name);
-  private readonly BASE_URL = 'https://export.arxiv.org/api/query';
+  private readonly BASE_URL =
+    process.env.ARXIV_API_URL || 'https://export.arxiv.org/api/query';
 
   supports(queryType: QueryType): boolean {
     return this.capabilities.queryTypes.includes(queryType);
@@ -47,8 +49,7 @@ export class ArxivProvider implements MetadataProvider {
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
+        'User-Agent': getAcademicUserAgent('Arxiv'),
         Accept: 'application/atom+xml, application/xml, text/xml',
       },
       signal,

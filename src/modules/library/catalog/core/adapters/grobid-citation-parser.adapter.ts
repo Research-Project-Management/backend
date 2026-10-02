@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   ICitationParserPort,
   ParsedCitationReference,
@@ -7,14 +7,11 @@ import { GrobidClient } from '../../../shared-kernel/infra/grobid/grobid.client'
 
 @Injectable()
 export class GrobidCitationParserAdapter implements ICitationParserPort {
-  constructor(@Optional() private readonly grobidClient?: GrobidClient) {}
+  constructor(private readonly grobidClient: GrobidClient) {}
 
   async processCitationList(
     rawCitations: string,
   ): Promise<ParsedCitationReference[]> {
-    if (!this.grobidClient) {
-      return [];
-    }
     const refs = await this.grobidClient.processCitationList(rawCitations);
     return (refs || []).map((ref) => ({
       raw: ref.rawCitation || '',

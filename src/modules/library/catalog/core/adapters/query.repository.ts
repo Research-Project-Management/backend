@@ -35,7 +35,7 @@ export class QueryRepository {
     tx?: Prisma.TransactionClient,
     includeContent: boolean = true,
     includeDeleted: boolean = false,
-  ) {
+  ): Promise<any> {
     if (!isUuid(id) || !isUuid(userId)) return null;
     const client = this.getClient(tx);
     const item = await client.item.findFirst({
@@ -66,7 +66,26 @@ export class QueryRepository {
       },
     });
 
-    if (!item) return null;
+    if (!item) {
+      if (!includeDeleted) {
+        const tombstone = await client.item.findUnique({
+          where: { id },
+          select: { metadata: true, deletedAt: true },
+        });
+        const targetId = (tombstone?.metadata as any)?.mergedIntoId;
+        if (targetId && isUuid(targetId) && targetId !== id) {
+          return this.findById(
+            userId,
+            targetId,
+            projectId,
+            tx,
+            includeContent,
+            false,
+          );
+        }
+      }
+      return null;
+    }
 
     const isProjectScope = Boolean(projectId && isUuid(projectId));
 
@@ -1057,7 +1076,7 @@ export class QueryRepository {
 
   async findDuplicateCandidateItems(
     userId: string,
-    limit: number = 2000,
+    limit?: number,
     projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
@@ -1093,7 +1112,7 @@ export class QueryRepository {
           orderBy: { orderIndex: 'asc' },
         },
       },
-      take: limit,
+      ...(limit && limit > 0 ? { take: limit } : {}),
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -1211,6 +1230,65 @@ export class QueryRepository {
         doi: true,
         citationKey: true,
         title: true,
+      },
+    });
+  }
+
+  async findByCitationKey(
+    userId: string,
+    citationKey: string,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    if (!citationKey?.trim()) return null;
+    const client = this.getClient(tx);
+    const scopeWhere: Prisma.ItemWhereInput =
+      projectId && isUuid(projectId)
+        ? { projectId, deletedAt: null }
+        : { userId, projectId: null, deletedAt: null };
+
+    return client.item.findFirst({
+      where: {
+        citationKey: { equals: citationKey.trim(), mode: 'insensitive' },
+        ...scopeWhere,
+      },
+      include: {
+        contributors: { orderBy: { orderIndex: 'asc' } },
+        itemTags: { include: { tag: true } },
+        collectionItems: { include: { collection: true } },
+        attachments: { include: { revisions: true } },
+        notesList: { where: { deletedAt: null } },
+      },
+    });
+  }
+
+  async findByCitationKeys(
+    userId: string,
+    citationKeys: string[],
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const cleanKeys = (citationKeys || [])
+      .map((k) => k?.trim())
+      .filter((k): k is string => Boolean(k));
+    if (cleanKeys.length === 0) return [];
+    const client = this.getClient(tx);
+    const scopeWhere: Prisma.ItemWhereInput =
+      projectId && isUuid(projectId)
+        ? { projectId, deletedAt: null }
+        : { userId, projectId: null, deletedAt: null };
+
+    return client.item.findMany({
+      where: {
+        citationKey: { in: cleanKeys, mode: 'insensitive' },
+        ...scopeWhere,
+      },
+      include: {
+        contributors: { orderBy: { orderIndex: 'asc' } },
+        itemTags: { include: { tag: true } },
+        collectionItems: { include: { collection: true } },
+        attachments: { include: { revisions: true } },
+        notesList: { where: { deletedAt: null } },
       },
     });
   }

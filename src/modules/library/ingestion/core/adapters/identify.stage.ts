@@ -19,6 +19,8 @@ import {
   normalizeArxivId,
   normalizePmid,
   normalizeIsbn,
+  inferItemTypeFromPdfSignals,
+  mapCslTypeToZoteroItemType,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 import { UrlMetadataScraperService } from '../services/url-metadata-scraper.service';
 import {
@@ -222,6 +224,8 @@ export class IdentifyStage {
               rights: item.rights,
               fileUrl: item.fileUrl,
               extra: item.extra,
+              seeAlso: item.seeAlso,
+              relations: item.relations,
             };
             const normalized = this.normalizer.normalize(rawMetadata);
             candidates.push({
@@ -337,21 +341,8 @@ export class IdentifyStage {
                 ? String(csl['number-of-pages'])
                 : undefined;
 
-            const mapCslType = (cslType: string): string => {
-              const typeMap: Record<string, string> = {
-                'article-journal': 'journalArticle',
-                'paper-conference': 'conferencePaper',
-                book: 'book',
-                chapter: 'bookSection',
-                thesis: 'thesis',
-                report: 'report',
-                webpage: 'webpage',
-                patent: 'patent',
-                dataset: 'dataset',
-                software: 'computerProgram',
-              };
-              return typeMap[cslType] || cslType || 'journalArticle';
-            };
+            const mapCslType = (cslType: string): string =>
+              mapCslTypeToZoteroItemType(cslType);
 
             const rawMetadata = {
               title: csl.title || 'Untitled Document',
@@ -402,6 +393,32 @@ export class IdentifyStage {
               ),
               normalizedMetadata: normalized,
               confidenceScore: 0.95,
+            });
+          }
+        } else if (
+          payload.format === 'ENDNOTE_XML' ||
+          payload.format === 'MODS' ||
+          payload.format === 'REFER'
+        ) {
+          // Delegate to Zotero Translation Server's universal /import endpoint
+          // which natively supports EndNoteXML, MODS, and BibIX/Refer formats.
+          const parsedList = await this.risParser.parseAsync(recordContent);
+          for (const item of parsedList) {
+            const normalized = this.normalizer.normalize(item);
+            candidates.push({
+              candidateId: randomUUID(),
+              sourceKind: 'RECORD',
+              sourceName: payload.format,
+              sourceRecordId: item.doi || item.citationKey,
+              retrievedAt: new Date().toISOString(),
+              schemaVersion: '1.0.0',
+              fields: this.buildEvidenceFields(
+                item,
+                normalized,
+                payload.format,
+              ),
+              normalizedMetadata: normalized,
+              confidenceScore: 0.9,
             });
           }
         }
@@ -663,7 +680,6 @@ export class IdentifyStage {
                   .trim();
               }
             }
-            t = t.replace(/\s+Ashish\s+Vaswani[\s∗*†‡§#]*$/i, '').trim();
             resolvedTitle = normalizeAcademicTitleCase(t);
           }
         }
@@ -686,12 +702,54 @@ export class IdentifyStage {
           resolvedTitle = 'Uploaded Document';
         }
 
+        // ── Infer itemType from GROBID signals when no authoritative ID exists ──
+        // Only run when there is no DOI/arXiv/ISBN (those are resolved later by
+        // CrossRef/PubMed enrichment which provides a more reliable type).
+        const hasAuthoritativeId = Boolean(
+          extractedMetadata.doi ||
+          filenameDoi ||
+          extractedMetadata.arxivId ||
+          filenameArxivId ||
+          extractedMetadata.isbn,
+        );
+
+        let inferredItemType: string | undefined;
+        let inferredItemTypeConfidence = 0.75; // default StagedPdf confidence
+
+        if (!hasAuthoritativeId) {
+          const inferred = inferItemTypeFromPdfSignals({
+            title: resolvedTitle,
+            notes: extractedMetadata.notes,
+            journal: extractedMetadata.journal,
+            conferenceName: extractedMetadata.conferenceName,
+            bookTitle: extractedMetadata.bookTitle,
+            isbn: extractedMetadata.isbn,
+            publisher: extractedMetadata.publisher,
+            filename: payload.filename,
+          });
+
+          if (inferred) {
+            inferredItemType = inferred.itemType;
+            // Scale candidate confidence by heuristic certainty so reconciliation
+            // weights it appropriately against authoritative providers later.
+            inferredItemTypeConfidence = 0.75 * inferred.confidence;
+            this.logger.debug(
+              `[IdentifyStage] PDF itemType inferred as "${inferred.itemType}" ` +
+                `(confidence=${inferred.confidence.toFixed(2)}, reason=${inferred.reason}) ` +
+                `for file "${payload.filename}"`,
+            );
+          }
+        }
+
         const rawFileMetadata = {
           ...extractedItemMetadata,
           doi: extractedMetadata.doi || filenameDoi,
           isbn: extractedMetadata.isbn,
           arxivId: extractedMetadata.arxivId || filenameArxivId,
           title: resolvedTitle,
+          // Inferred type wins over any raw extractor value; omit entirely when
+          // authoritative ID is present so enrichment providers can set it.
+          itemType: inferredItemType ?? extractedMetadata.itemType,
           authors: extractedMetadata.authors?.length
             ? extractedMetadata.authors
             : undefined,
@@ -752,7 +810,7 @@ export class IdentifyStage {
               ? 0.92
               : extractedMetadata.isbn
                 ? 0.9
-                : 0.75,
+                : inferredItemTypeConfidence,
         });
         break;
       }

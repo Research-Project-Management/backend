@@ -13,7 +13,6 @@ import {
   NotFoundException,
   BadRequestException,
   Optional,
-  Header,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -23,7 +22,7 @@ import {
   CursorPaginationQueryDto,
   CreateItemDto,
   UpdateItemDto,
-  ParseCitationsDto,
+  BulkPurgeItemsDto,
 } from './dto/items.dto';
 import { ItemsService } from './core/services/items.service';
 import { CreateItemUseCase } from './core/use-cases/create-item.use-case';
@@ -32,30 +31,23 @@ import { DeleteItemUseCase } from './core/use-cases/delete-item.use-case';
 import { RestoreItemUseCase } from './core/use-cases/restore-item.use-case';
 import { GetItemUseCase } from './core/use-cases/get-item.use-case';
 import { ListItemsUseCase } from './core/use-cases/list-items.use-case';
-// A1 — New Use Cases
-import { GetFulltextUseCase } from './core/use-cases/get-fulltext.use-case';
-import { ParseCitationsUseCase } from './core/use-cases/parse-citations.use-case';
-import { ReindexItemUseCase } from './core/use-cases/reindex-item.use-case';
-import { ConvertItemTypeUseCase } from './core/use-cases/convert-item-type.use-case';
+import { ImportItemsToProjectUseCase } from './core/use-cases/import-items-to-project.use-case';
+import { PurgeItemUseCase } from './core/use-cases/purge-item.use-case';
+import { BulkPurgeItemsUseCase } from './core/use-cases/bulk-purge-items.use-case';
 import {
   CatalogDomainException,
   ItemNotFoundDomainException,
   ItemConcurrencyDomainException,
 } from './core/domain/item-domain.exception';
 import { VersionMismatchException } from '../shared-kernel/core/errors/version-mismatch.exception';
+import { toValidProjectId } from '../shared-kernel';
 
-import { ImportItemsToProjectUseCase } from './core/use-cases/import-items-to-project.use-case';
-import { PurgeItemUseCase } from './core/use-cases/purge-item.use-case';
-import { SetMyPublicationUseCase } from './core/use-cases/set-my-publication.use-case';
-import { ManageRelationsUseCase } from './core/use-cases/manage-relations.use-case';
-import { PreviewTypeConversionUseCase } from './core/use-cases/preview-type-conversion.use-case';
+import { ItemCurationController } from './item-curation.controller';
 
-const toValidProjectId = (val?: string): string | undefined =>
-  val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
-    ? val
-    : undefined;
+// Re-export ItemCurationController for clean modular import
+export { ItemCurationController } from './item-curation.controller';
 
-@ApiTags('Library Items')
+@ApiTags('Library Items - Catalog Lifecycle')
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/library/items',
@@ -71,16 +63,14 @@ export class ItemController {
     private readonly restoreItemUseCase: RestoreItemUseCase,
     private readonly getItemUseCase: GetItemUseCase,
     private readonly listItemsUseCase: ListItemsUseCase,
-    private readonly getFulltextUseCase: GetFulltextUseCase,
-    private readonly parseCitationsUseCase: ParseCitationsUseCase,
-    private readonly reindexItemUseCase: ReindexItemUseCase,
-    private readonly convertItemTypeUseCase: ConvertItemTypeUseCase,
-    private readonly importItemsToProjectUseCase: ImportItemsToProjectUseCase,
-    private readonly purgeItemUseCase: PurgeItemUseCase,
-    private readonly setMyPublicationUseCase: SetMyPublicationUseCase,
-    private readonly manageRelationsUseCase: ManageRelationsUseCase,
-    private readonly previewTypeConversionUseCase: PreviewTypeConversionUseCase,
-    @Optional() private readonly itemsService?: ItemsService,
+    @Optional()
+    private readonly importItemsToProjectUseCase?: ImportItemsToProjectUseCase,
+    @Optional()
+    private readonly purgeItemUseCase?: PurgeItemUseCase,
+    @Optional()
+    private readonly bulkPurgeItemsUseCase?: BulkPurgeItemsUseCase,
+    @Optional()
+    private readonly itemsService?: ItemsService,
   ) {}
 
   @Get()
@@ -167,29 +157,14 @@ export class ItemController {
         'Project ID is required in URL parameter to import items',
       );
     }
+    if (!this.importItemsToProjectUseCase) {
+      throw new BadRequestException('Import use-case is not available');
+    }
     return this.importItemsToProjectUseCase.execute({
       userId,
       projectId,
       itemIds: body.itemIds || [],
     });
-  }
-
-  @Post('citations/parse')
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({
-    summary: 'Parse raw unformatted citation strings via GROBID CRF model',
-    description:
-      'Extracts structured title, authors, venue, year, volume, and DOI from unstructured raw text strings without needing a PDF file.',
-  })
-  async parseCitations(@Body() dto: ParseCitationsDto) {
-    const result = await this.parseCitationsUseCase.execute({
-      rawCitations: dto.citations,
-    });
-    return {
-      success: true,
-      count: result.count,
-      data: result.references,
-    };
   }
 
   @Get(':id')
@@ -203,7 +178,7 @@ export class ItemController {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
-    const item = await this.getItemUseCase.execute({
+    const item = await this.getItemUseCase!.execute({
       userId,
       itemId: id,
       projectId: toValidProjectId(projectId),
@@ -214,25 +189,7 @@ export class ItemController {
     return item;
   }
 
-  @Get(':id/fulltext')
-  @Header('Cache-Control', 'private, max-age=300, stale-while-revalidate=3600')
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'Get fulltext of an item' })
-  async getFulltext(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-    @Param('projectId') projectId?: string,
-  ) {
-    const fulltext = await this.getFulltextUseCase.execute({
-      userId,
-      itemId: id,
-      projectId: toValidProjectId(projectId),
-    });
-    return { success: true, data: fulltext, ...fulltext };
-  }
-
   @Get(':id/metadata-sources')
-  @Header('Cache-Control', 'private, max-age=300, stale-while-revalidate=3600')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get raw provenance metadata sources for an item',
@@ -286,8 +243,6 @@ export class ItemController {
       ...otherFields
     } = cleanBody as any;
 
-    // `extra` is always a Zotero plain-text key:value string (e.g. "arXiv: 2103.00020 [cs.CV]").
-    // Never JSON-parse it — the mapper's parseExtraToObject() handles structured extraction.
     const combinedFields = {
       ...otherFields,
       ...(extra !== undefined ? { extra: String(extra) } : {}),
@@ -383,88 +338,6 @@ export class ItemController {
     return this.updateItem(id, userId, ifMatch, body, projectId);
   }
 
-  @Post(':id/reindex')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Reindex a library item' })
-  async reindexItem(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-    @Param('projectId') projectId?: string,
-  ) {
-    return this.reindexItemUseCase.execute({
-      userId,
-      itemId: id,
-      projectId: toValidProjectId(projectId),
-    });
-  }
-
-  @Post(':id/convert-type/preview')
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'Preview type conversion of an item' })
-  async previewTypeConversion(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-    @Body() body: { targetType: string; retainUnmappedInExtra?: boolean },
-    @Param('projectId') projectId?: string,
-  ) {
-    const item = await this.getItemUseCase.execute({
-      userId,
-      itemId: id,
-      projectId: toValidProjectId(projectId),
-    });
-    if (!item) {
-      throw new NotFoundException(`Item ${id} not found in library`);
-    }
-    const preview = this.previewTypeConversionUseCase.execute({
-      item,
-      targetType: body.targetType,
-      options: {
-        retainUnmappedInExtra: body.retainUnmappedInExtra ?? true,
-      },
-    });
-    return { success: true, preview, data: preview };
-  }
-
-  @Post(':id/convert-type')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Convert item type' })
-  async convertItemType(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-    @Headers('if-match') ifMatch?: string,
-    @Body()
-    body?: {
-      targetType: string;
-      expectedVersion?: number;
-      retainUnmappedInExtra?: boolean;
-    },
-    @Param('projectId') projectId?: string,
-  ) {
-    const expectedVersion =
-      body?.expectedVersion !== undefined
-        ? body.expectedVersion
-        : ifMatch
-          ? parseInt(ifMatch.replace(/["']/g, ''), 10)
-          : undefined;
-    const result = await this.convertItemTypeUseCase.execute({
-      userId,
-      itemId: id,
-      targetType: body?.targetType || 'journalArticle',
-      options: {
-        expectedVersion,
-        retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
-      },
-      projectId: toValidProjectId(projectId),
-    });
-
-    return {
-      success: true,
-      data: result.item,
-      item: result.item,
-      conversionReport: result.conversionReport,
-    };
-  }
-
   @Delete(':id')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete an item (soft delete)' })
@@ -555,6 +428,9 @@ export class ItemController {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found`);
     }
+    if (!this.purgeItemUseCase) {
+      throw new BadRequestException('Purge service unavailable');
+    }
     const purged = await this.purgeItemUseCase.execute({
       userId,
       itemId: id,
@@ -563,89 +439,25 @@ export class ItemController {
     return { success: true, purged, id };
   }
 
-  @Get(':id/relations')
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'Get related items' })
-  async getRelatedItems(
-    @Param('id') id: string,
+  @Post('bulk-purge')
+  @ProjectRoles('owner')
+  @ApiOperation({
+    summary: 'Permanently purge multiple deleted items in batch',
+  })
+  async bulkPurgeItems(
     @CurrentUser('id') userId: string,
+    @Body() body: BulkPurgeItemsDto,
     @Param('projectId') projectId?: string,
   ) {
-    return this.manageRelationsUseCase.getRelatedItems(
+    const itemIds = body?.itemIds || [];
+    if (!this.bulkPurgeItemsUseCase) {
+      throw new BadRequestException('Bulk purge service unavailable');
+    }
+    return this.bulkPurgeItemsUseCase.execute({
       userId,
-      id,
-      toValidProjectId(projectId),
-    );
-  }
-
-  @Post([':id/relations', ':id/link'])
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Link two or more items together' })
-  async linkItems(
-    @Param('id') id: string,
-    @Body()
-    body: {
-      targetItemId?: string;
-      targetItemIds?: string[];
-      relationType?: string;
-      note?: string;
-    },
-    @CurrentUser('id') userId: string,
-    @Param('projectId') projectId?: string,
-  ) {
-    return this.manageRelationsUseCase.linkItems({
-      userId,
-      sourceItemId: id,
-      data: body,
+      itemIds,
       projectId: toValidProjectId(projectId),
     });
-  }
-
-  @Delete([':id/relations/:targetId', ':id/link/:targetId'])
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Unlink items' })
-  async unlinkItems(
-    @Param('id') id: string,
-    @Param('targetId') targetItemId: string,
-    @CurrentUser('id') userId: string,
-    @Param('projectId') projectId?: string,
-  ) {
-    return this.manageRelationsUseCase.unlinkItems({
-      userId,
-      sourceItemId: id,
-      targetItemId,
-      projectId: toValidProjectId(projectId),
-    });
-  }
-
-  @Post(':id/my-publication')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Mark an item as my publication' })
-  async markMyPublication(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-  ) {
-    const item = await this.setMyPublicationUseCase.execute({
-      userId,
-      itemId: id,
-      isMyPublication: true,
-    });
-    return { success: true, data: item, item };
-  }
-
-  @Delete(':id/my-publication')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Unmark an item as my publication' })
-  async unmarkMyPublication(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-  ) {
-    const item = await this.setMyPublicationUseCase.execute({
-      userId,
-      itemId: id,
-      isMyPublication: false,
-    });
-    return { success: true, data: item, item };
   }
 }
 

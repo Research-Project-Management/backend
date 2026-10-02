@@ -47,7 +47,9 @@ export class SearchRepository implements OnModuleInit {
    * Used as fallback when tsvector is not available.
    */
   private buildTextWhereIlike(q: string): Prisma.ItemWhereInput {
-    return new TextSearchSpecification(q).toPrismaWhere() as Prisma.ItemWhereInput;
+    return new TextSearchSpecification(
+      q,
+    ).toPrismaWhere() as Prisma.ItemWhereInput;
   }
 
   async searchItems(
@@ -468,9 +470,10 @@ export class SearchRepository implements OnModuleInit {
       select: { id: true },
     });
 
-    for (const att of attachments) {
+    const attachmentIds = attachments.map((att) => att.id);
+    if (attachmentIds.length > 0) {
       await this.prisma.fullTextIndex.deleteMany({
-        where: { attachmentId: att.id },
+        where: { attachmentId: { in: attachmentIds } },
       });
     }
   }

@@ -67,7 +67,7 @@ export class DuplicateService {
     const items = this.catalogGateway
       ? await this.catalogGateway.findDuplicateCandidateItems(
           userId,
-          2000,
+          undefined,
           projectId,
         )
       : [];
@@ -563,13 +563,43 @@ export class DuplicateService {
           }
         }
 
-        // ── 8. Update Primary Item ───────────────────────────────────────────────
+        // ── 8. Update Primary Item & Automatic Field Backfilling ─────────────────
+        const backfillFields: Record<string, any> = {};
+        for (const field of ALLOWED_MERGE_METADATA_FIELDS) {
+          if (scalarSelections[field] !== undefined) continue;
+          const primaryVal = (primary as any)[field];
+          if (
+            primaryVal === null ||
+            primaryVal === undefined ||
+            primaryVal === ''
+          ) {
+            for (const dup of duplicates) {
+              const dupVal = (dup as any)[field];
+              if (dupVal !== null && dupVal !== undefined && dupVal !== '') {
+                backfillFields[field] = dupVal;
+                break;
+              }
+            }
+          }
+        }
+
         const primaryMeta = primary.metadata ?? {};
         primaryMeta.extra = extraObj;
+        primaryMeta.mergeHistory = [
+          ...(Array.isArray(primaryMeta.mergeHistory)
+            ? primaryMeta.mergeHistory
+            : []),
+          {
+            mergedAt: now.toISOString(),
+            duplicateItemIds: uniqueDupIds,
+            backfilledFields: Object.keys(backfillFields),
+          },
+        ];
 
         const updatedPrimary = await tx.item.update({
           where: { id: primary.id },
           data: {
+            ...backfillFields,
             ...scalarSelections,
             metadata: primaryMeta,
             version: { increment: 1 },

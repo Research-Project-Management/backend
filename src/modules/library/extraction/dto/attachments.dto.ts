@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsArray } from 'class-validator';
+﻿import { IsString, IsOptional, IsNumber, IsArray } from 'class-validator';
 import type {
   LinkMode,
   AttachmentType,
@@ -10,6 +10,10 @@ export class CreateAttachmentDto {
 
   @IsString()
   url!: string;
+
+  @IsOptional()
+  @IsString()
+  itemId?: string;
 
   @IsString()
   @IsOptional()
@@ -86,4 +90,65 @@ export class BatchRenameAttachmentsDto {
   @IsString()
   @IsOptional()
   pattern?: string;
+}
+
+export class PresignUploadDto {
+  @IsString()
+  filename!: string;
+
+  @IsOptional()
+  @IsString()
+  mimeType?: string;
+
+  @IsOptional()
+  @IsNumber()
+  sizeBytes?: number;
+
+  @IsOptional()
+  @IsString()
+  contentHash?: string;
+}
+
+export class CompletePresignDto {
+  @IsString()
+  storageKey!: string;
+
+  @IsString()
+  filename!: string;
+
+  @IsOptional()
+  @IsString()
+  mimeType?: string;
+
+  @IsOptional()
+  @IsNumber()
+  sizeBytes?: number;
+
+  @IsOptional()
+  @IsString()
+  contentHash?: string;
+}
+
+export class InitiateMultipartDto {
+  @IsString()
+  filename!: string;
+
+  @IsOptional()
+  @IsString()
+  mimeType?: string;
+
+  @IsNumber()
+  totalSize!: number;
+
+  @IsOptional()
+  @IsString()
+  expectedHash?: string;
+}
+
+export class CompleteMultipartDto {
+  @IsString()
+  sessionId!: string;
+
+  @IsArray()
+  parts!: { partNumber: number; eTag: string }[];
 }

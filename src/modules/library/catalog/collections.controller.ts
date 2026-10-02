@@ -26,22 +26,20 @@ import { ReorderCollectionsUseCase } from './core/use-cases/reorder-collections.
 import { MoveItemsToCollectionUseCase } from './core/use-cases/move-items-to-collection.use-case';
 import { AssignItemsToCollectionUseCase } from './core/use-cases/assign-items-to-collection.use-case';
 import { DetachItemFromCollectionUseCase } from './core/use-cases/detach-item-from-collection.use-case';
+import { BulkDetachItemsUseCase } from './core/use-cases/bulk-detach-items.use-case';
 import {
   CreateCollectionDto,
   UpdateCollectionDto,
   MoveItemsDto,
   ReorderCollectionsDto,
   AssignItemsToCollectionDto,
+  BulkDetachItemsDto,
 } from './dto/collections.dto';
 import { CollectionDeleteStrategy } from './core/domain/collections.types';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { isUUID } from 'class-validator';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
-
-const toValidProjectId = (val?: string): string | undefined =>
-  val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
-    ? val
-    : undefined;
+import { toValidProjectId } from '../shared-kernel';
 
 @ApiTags('Library Collections')
 @ApiBearerAuth('JWT-auth')
@@ -73,6 +71,8 @@ export class CollectionController {
     private readonly assignItemsUseCase?: AssignItemsToCollectionUseCase,
     @Optional()
     private readonly detachItemUseCase?: DetachItemFromCollectionUseCase,
+    @Optional()
+    private readonly bulkDetachItemsUseCase?: BulkDetachItemsUseCase,
   ) {}
 
   @Get()
@@ -349,6 +349,36 @@ export class CollectionController {
       userId,
       collectionId,
       itemId,
+      effectiveProjectId,
+    );
+  }
+
+  @Post(':collectionId/items/bulk-detach')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({ summary: 'Detach multiple items from collection in batch' })
+  async bulkDetachItems(
+    @CurrentUser('id') userId: string,
+    @Param('collectionId') collectionId: string,
+    @Body() dto: BulkDetachItemsDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
+    const itemIds = dto?.itemIds || [];
+    if (this.bulkDetachItemsUseCase) {
+      return this.bulkDetachItemsUseCase.execute({
+        userId,
+        collectionId,
+        itemIds,
+        projectId: effectiveProjectId,
+      });
+    }
+    return this.collectionsService!.detachItemsFromCollection(
+      userId,
+      collectionId,
+      itemIds,
       effectiveProjectId,
     );
   }

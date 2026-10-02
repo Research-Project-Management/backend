@@ -488,6 +488,8 @@ export class CrossRefProvider implements MetadataProvider {
         archive,
         keywords: keywords.length ? keywords : undefined,
         itemType,
+        // Zotero spec: libraryCatalog identifies the upstream authority source
+        libraryCatalog: 'DOI.org (Crossref)',
         provenance: {
           originProvider: this.id,
           resolvedAt: new Date().toISOString(),

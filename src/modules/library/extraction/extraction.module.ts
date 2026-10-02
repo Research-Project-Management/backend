@@ -2,12 +2,14 @@ import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
 import { StorageModule } from '../../storage/storage.module';
 import { SyncModule } from '../sync/sync.module';
+import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
 import { OutboxWorker } from '../sync';
 
 // Presentation
 import {
   AttachmentController,
   AttachmentsController,
+  AttachmentStorageController,
 } from './attachments.controller';
 
 // Facades
@@ -89,8 +91,12 @@ import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catal
  * - Annotation Domain (PDF highlights, comments — moved from Catalog)
  */
 @Module({
-  imports: [CoreModule, StorageModule, SyncModule],
-  controllers: [AttachmentController, AnnotationController],
+  imports: [CoreModule, StorageModule, SyncModule, SharedKernelModule],
+  controllers: [
+    AttachmentStorageController,
+    AttachmentController,
+    AnnotationController,
+  ],
   providers: [
     // Facades
     ExtractionFacade,

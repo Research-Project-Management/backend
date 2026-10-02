@@ -31,7 +31,7 @@ export interface ReconstituteNoteProps {
 
 export class NoteEntity {
   private readonly _id: string;
-  private readonly _itemId: string;
+  private _itemId: string;
   private readonly _userId: string;
   private _title?: string | null;
   private _content?: string | null;
@@ -124,7 +124,7 @@ export class NoteEntity {
 
   reassignToItem(targetItemId: string): void {
     if (!targetItemId) throw new Error('Target item ID cannot be empty');
-    (this as any)._itemId = targetItemId;
+    this._itemId = targetItemId;
     this._version += 1;
     this._updatedAt = new Date();
   }

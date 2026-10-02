@@ -10,6 +10,10 @@ import {
 } from '../domain/metadata.types';
 import { normalizeDoi } from './metadata.utils';
 import { ProviderFetchError } from '../services/metadata-executor.service';
+import {
+  getAcademicContactEmail,
+  getAcademicUserAgent,
+} from '../../../shared-kernel/core/constants/academic-client.constants';
 
 @Injectable()
 export class UnpaywallProvider implements MetadataProvider {
@@ -22,14 +26,11 @@ export class UnpaywallProvider implements MetadataProvider {
   };
 
   private readonly logger = new Logger(UnpaywallProvider.name);
-  private readonly BASE_URL = 'https://api.unpaywall.org/v2';
+  private readonly BASE_URL =
+    process.env.UNPAYWALL_API_URL || 'https://api.unpaywall.org/v2';
 
   private get email(): string {
-    return (
-      process.env.UNPAYWALL_EMAIL ||
-      process.env.ACADEMIC_EMAIL ||
-      'contact@flux.academic'
-    );
+    return process.env.UNPAYWALL_EMAIL || getAcademicContactEmail();
   }
 
   supports(queryType: QueryType): boolean {
@@ -47,7 +48,7 @@ export class UnpaywallProvider implements MetadataProvider {
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent': `FluxResearchPlatform/1.0 (academic-research-bot; mailto:${this.email})`,
+        'User-Agent': getAcademicUserAgent('Unpaywall'),
         Accept: 'application/json',
       },
       signal,

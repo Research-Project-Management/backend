@@ -222,7 +222,7 @@ export class NoteRepository {
           type: 'doc',
           content: [{ type: 'paragraph', text: trimmed }],
         },
-        createdById: userId || 'system',
+        createdById: userId,
         tags: ['imported', ...(source ? [source] : [])],
         version: 1,
       },

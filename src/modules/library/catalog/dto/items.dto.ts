@@ -593,3 +593,13 @@ export class ParseCitationsDto {
   @IsString()
   citations!: string;
 }
+
+export class BulkPurgeItemsDto {
+  @ApiProperty({
+    description: 'Array of item IDs to permanently delete from library/trash',
+    example: ['uuid-1', 'uuid-2'],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  itemIds!: string[];
+}

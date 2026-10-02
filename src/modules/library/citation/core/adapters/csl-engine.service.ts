@@ -45,9 +45,19 @@ export class CslEngineService implements OnModuleInit {
   ) {}
 
   private getCacheKey(cslItem: CslItemData, style: string): string {
-    const rawId = cslItem.id || cslItem.DOI || cslItem.title || '';
+    const rawId =
+      (cslItem as any)._itemId ||
+      cslItem.id ||
+      cslItem.DOI ||
+      cslItem.title ||
+      '';
     const date = cslItem.issued?.['date-parts']?.[0]?.[0] || '';
-    return `${rawId}::${style}::${date}`;
+    const ver =
+      cslItem.version ||
+      (cslItem as any)._version ||
+      (cslItem as any)._updatedAt ||
+      '';
+    return `${rawId}::${style}::${date}::${ver}`;
   }
 
   private setCache(
@@ -271,9 +281,8 @@ export class CslEngineService implements OnModuleInit {
       const authorListStr =
         authors.length > 0
           ? authors
-              .map(
-                (a: any) =>
-                  `${a.family || a.literal || ''} ${a.given ? a.given[0] + '.' : ''}`.trim(),
+              .map((a: any) =>
+                `${a.family || a.literal || ''} ${a.given ? a.given[0] + '.' : ''}`.trim(),
               )
               .filter(Boolean)
               .join(', ')
@@ -458,8 +467,20 @@ export class CslEngineService implements OnModuleInit {
   public formatBibtex(cslItem: CslItemData): string {
     try {
       const cite = new Cite(cslItem);
-      const raw = cite.format('bibtex');
+      let raw = cite.format('bibtex');
       if (raw && raw.trim().startsWith('@')) {
+        const typeMap: Record<string, string> = {
+          'article-journal': 'article',
+          'paper-conference': 'inproceedings',
+          book: 'book',
+          chapter: 'incollection',
+          report: 'techreport',
+          thesis: 'phdthesis',
+        };
+        const targetType = typeMap[cslItem.type];
+        if (targetType && /^@misc\{/i.test(raw.trim())) {
+          raw = raw.replace(/^@misc\{/i, `@${targetType}{`);
+        }
         return raw.trim();
       }
     } catch {

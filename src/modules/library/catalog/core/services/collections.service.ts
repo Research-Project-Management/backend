@@ -423,6 +423,28 @@ export class CollectionService {
     return { success: true };
   }
 
+  async detachItemsFromCollection(
+    userId: string,
+    collectionId: string,
+    itemIds: string[],
+    projectId?: string,
+  ) {
+    if (!itemIds || itemIds.length === 0) return { success: true, count: 0 };
+    const collection = await this.repo.findById(
+      userId,
+      collectionId,
+      undefined,
+      projectId,
+    );
+    if (!collection) {
+      throw new NotFoundException(`Collection not found: ${collectionId}`);
+    }
+
+    await (this.repo as any).removeItems(collectionId, itemIds);
+    await this.invalidateCollectionsCache(userId, projectId);
+    return { success: true, count: itemIds.length };
+  }
+
   /**
    * Sync protocol adapter: transactional upsert for a Collection from an external sync batch.
    */

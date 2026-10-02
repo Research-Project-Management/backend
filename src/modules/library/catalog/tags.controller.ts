@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Delete,
+  Patch,
   Param,
   Body,
   UseGuards,
@@ -14,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TagsService } from './core/services/tags.service';
-import { CreateTagDto } from './dto/tags.dto';
+import { CreateTagDto, UpdateTagDto } from './dto/tags.dto';
 import { ListTagsUseCase } from './core/use-cases/list-tags.use-case';
 import { CreateTagUseCase } from './core/use-cases/create-tag.use-case';
 import { DeleteTagUseCase } from './core/use-cases/delete-tag.use-case';
@@ -109,6 +110,31 @@ export class TagController {
       return this.deleteAutomaticTagsUseCase.execute({ userId, projectId });
     }
     return this.tagsService!.deleteAutomaticTags(userId, projectId);
+  }
+
+  @Patch(':tagId')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update a tag' })
+  async updateTag(
+    @CurrentUser('id') userId: string,
+    @Param('tagId') tagId: string,
+    @Body() body: UpdateTagDto,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+  ) {
+    const projectId = routeProjectId ?? queryProjectId;
+    const updated = await this.tagsService!.updateTag(
+      userId,
+      tagId,
+      {
+        name: body.name,
+        color: body.color,
+        type: body.type as any,
+      },
+      projectId,
+    );
+    return { success: true, data: updated };
   }
 
   @Delete(':tagId')

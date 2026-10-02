@@ -208,11 +208,13 @@ export class CitationController {
     @Param('projectId') routeProjectId?: string,
   ) {
     const styleId = normalizeCitationStyleId(style);
-    const ids = Array.isArray(itemIds)
+    const rawIds = Array.isArray(itemIds)
       ? itemIds
       : Array.isArray(paperIds)
         ? paperIds
         : [];
+    // Safety guard: Deduplicate and cap batch at 100 items to protect Node.js event loop
+    const ids = Array.from(new Set(rawIds)).slice(0, 100);
     const projectId = bodyProjectId || queryProjectId || routeProjectId;
     return this.citationService.formatItemBatch(
       userId,

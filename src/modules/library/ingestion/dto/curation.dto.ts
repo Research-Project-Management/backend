@@ -9,14 +9,14 @@ import {
 } from 'class-validator';
 
 export class MergeDuplicatesDto {
-  @IsUUID('4', { message: 'primaryItemId must be a valid UUID v4' })
+  @IsUUID(undefined, { message: 'primaryItemId must be a valid UUID' })
   primaryItemId!: string;
 
   @IsArray()
   @ArrayNotEmpty({ message: 'duplicateItemIds must contain at least one ID' })
-  @IsUUID('4', {
+  @IsUUID(undefined, {
     each: true,
-    message: 'Each duplicateItemId must be a valid UUID v4',
+    message: 'Each duplicateItemId must be a valid UUID',
   })
   duplicateItemIds!: string[];
 
@@ -25,7 +25,7 @@ export class MergeDuplicatesDto {
   fieldSelections?: Record<string, unknown>;
 
   @IsOptional()
-  @IsUUID('4', { message: 'projectId must be a valid UUID v4' })
+  @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
   projectId?: string;
 }
 
@@ -42,6 +42,6 @@ export class AutoResolveClusterDto {
   strategy?: AutoResolveStrategy;
 
   @IsOptional()
-  @IsUUID('4', { message: 'projectId must be a valid UUID v4' })
+  @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
   projectId?: string;
 }

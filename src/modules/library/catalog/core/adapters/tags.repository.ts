@@ -160,6 +160,34 @@ export class TagsRepository {
     });
   }
 
+  async update(
+    userId: string,
+    id: string,
+    data: { name?: string; color?: string; type?: TagType },
+    tx?: Prisma.TransactionClient,
+    projectId?: string,
+  ) {
+    const client = this.getClient(tx);
+    const scopeWhere: Prisma.TagWhereInput =
+      projectId && projectId !== 'user'
+        ? { id, projectId }
+        : { id, userId, projectId: null };
+
+    const tag = await client.tag.findFirst({
+      where: scopeWhere,
+    });
+    if (!tag) return null;
+
+    return client.tag.update({
+      where: { id: tag.id },
+      data: {
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.color !== undefined ? { color: data.color } : {}),
+        ...(data.type !== undefined ? { type: data.type } : {}),
+      },
+    });
+  }
+
   async delete(
     userId: string,
     id: string,
@@ -185,14 +213,25 @@ export class TagsRepository {
     projectId?: string,
   ): Promise<string[]> {
     const client = this.getClient(tx);
-    const where: Prisma.TagWhereInput = {
-      ...(projectId && projectId !== 'user'
+    const scopeWhere: Prisma.TagWhereInput =
+      projectId && projectId !== 'user'
         ? { projectId }
-        : { userId, projectId: null }),
-      type: { in: [TagType.automatic, TagType.ai] },
-    };
+        : { userId, projectId: null };
+
+    // 1. Delete all automatic itemTag associations in this scope
+    await client.itemTag.deleteMany({
+      where: {
+        type: TagType.automatic,
+        tag: scopeWhere,
+      },
+    });
+
+    // 2. Find and delete tags designated as automatic
     const automaticTags = await client.tag.findMany({
-      where,
+      where: {
+        ...scopeWhere,
+        type: TagType.automatic,
+      },
       select: { id: true },
     });
     if (automaticTags.length === 0) return [];

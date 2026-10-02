@@ -378,7 +378,7 @@ export class NoteService {
       title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
       contentMd: markdown,
       contentJson: buildTipTapDocFromText(markdown),
-      createdById: userId || 'system',
+      createdById: userId,
       tags: ['literature-note', 'highlights'],
     });
 

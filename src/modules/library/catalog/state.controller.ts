@@ -10,13 +10,8 @@ import {
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { StateService } from './core/services/state.service';
 import { UpdateStateDto, GetBatchStatesDto } from './dto/state.dto';
-import { isUUID } from 'class-validator';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
-
-const toValidProjectId = (val?: string): string | undefined =>
-  val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
-    ? val
-    : undefined;
+import { toValidProjectId } from '../shared-kernel';
 
 @Controller([
   'api/v1/library/items/:itemId/state',

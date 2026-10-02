@@ -119,6 +119,67 @@ export class TagsService {
     return result;
   }
 
+  async updateTag(
+    userId: UserId | string,
+    tagId: TagId | string,
+    data: { name?: string; color?: string; type?: TagType },
+    projectId?: ProjectId | string,
+  ) {
+    if (data.name) {
+      const cleanName = cleanSingleTag(data.name);
+      if (!cleanName) {
+        throw new BadRequestException(
+          `Invalid or disallowed tag name: "${data.name}"`,
+        );
+      }
+      data.name = cleanName;
+    }
+
+    const effectiveProjectId =
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
+        ? projectId
+        : undefined;
+    const eventScope = { userId, projectId: effectiveProjectId };
+
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        const updated = await this.repo.update(
+          userId,
+          tagId,
+          data,
+          tx,
+          effectiveProjectId,
+        );
+        if (!updated) {
+          throw new NotFoundException(`Tag ${tagId} not found`);
+        }
+
+        await helpers.appendChange(eventScope, {
+          entityType: 'Tag',
+          entityId: tagId,
+          action: 'update',
+          version: 1,
+          data: updated,
+        });
+
+        await helpers.publishOutbox(
+          eventScope,
+          tagId,
+          'library.tag.updated',
+          updated,
+        );
+
+        return updated;
+      },
+    );
+
+    await this.invalidateTagsCache(userId, effectiveProjectId);
+    return result;
+  }
+
   async deleteTag(
     userId: UserId | string,
     tagId: TagId | string,
@@ -336,6 +397,7 @@ export class TagsService {
     userId: UserId | string,
     itemId: ItemId | string,
     tagNames: string[],
+    defaultTagType: TagType = TagType.automatic,
   ): Promise<void> {
     if (tagNames.length === 0) return;
 
@@ -362,7 +424,11 @@ export class TagsService {
     );
     if (missingNames.length > 0) {
       await tx.tag.createMany({
-        data: missingNames.map((name) => ({ userId, name })),
+        data: missingNames.map((name) => ({
+          userId,
+          name,
+          type: defaultTagType,
+        })),
         skipDuplicates: true,
       });
     }

@@ -188,7 +188,10 @@ export class RetractionScannerProvider {
 
       // 200 OK received with valid payload and no retraction notices found
       return { retraction: null, isVerifiedClean: true };
-    } catch {
+    } catch (err: any) {
+      this.logger.debug(
+        `[RetractionScanner] Crossref check failed for DOI "${doi}": ${err?.message}`,
+      );
       // Network timeout, connection abort, or JSON parse failure: transient error, not clean
       return { retraction: null, isVerifiedClean: false };
     } finally {

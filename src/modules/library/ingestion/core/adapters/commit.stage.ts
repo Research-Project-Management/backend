@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
@@ -320,6 +320,9 @@ export function toItemData(
     extraFields: (() => {
       const cleanEf = { ...extraFields };
       delete cleanEf.comment;
+      if (metadata.primaryCategory && !cleanEf.primaryCategory) {
+        cleanEf.primaryCategory = metadata.primaryCategory;
+      }
       return cleanEf;
     })(),
     notes: (() => {
@@ -354,11 +357,11 @@ export function toItemData(
     })(),
     collectionId: options?.collectionIds?.[0] || null,
     collectionIds: options?.collectionIds,
-    uploadedById: options?.userId || 'system',
-    isRetracted: (metadata as any).isRetracted,
-    retractionNature: (metadata as any).retractionNature,
-    retractionDetails: (metadata as any).retractionDetails,
-    retractionCheckedAt: (metadata as any).retractionCheckedAt,
+    uploadedById: options?.userId || '',
+    isRetracted: metadata.isRetracted,
+    retractionNature: metadata.retractionNature,
+    retractionDetails: metadata.retractionDetails,
+    retractionCheckedAt: metadata.retractionCheckedAt,
   };
 }
 
@@ -388,14 +391,22 @@ export class CommitStage {
     let effectiveProjectId: string | undefined;
 
     if (typeof scope === 'object' && scope !== null) {
-      effectiveUserId = scope.userId || options?.userId || 'system';
+      effectiveUserId = scope.userId || options?.userId || '';
       effectiveProjectId = scope.projectId || undefined;
     } else {
       const isProject =
         Boolean(scope) && scope !== 'user' && scope !== options?.userId;
-      effectiveUserId = options?.userId || scope;
+      effectiveUserId = options?.userId || (scope && !isProject ? scope : '');
       effectiveProjectId = isProject ? scope : undefined;
     }
+
+    if (!effectiveUserId) {
+      throw new BadRequestException(
+        'User context (userId) is mandatory to commit an item into the library catalog.',
+      );
+    }
+
+    createData.uploadedById = effectiveUserId;
 
     if (effectiveProjectId) {
       createData.projectId = effectiveProjectId;
@@ -404,6 +415,7 @@ export class CommitStage {
     const createdItem = await this.catalogGateway.createItem(
       effectiveUserId,
       createData,
+      { projectId: effectiveProjectId, ...options },
       effectiveProjectId,
     );
 

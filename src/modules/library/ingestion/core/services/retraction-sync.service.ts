@@ -131,6 +131,9 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
             }
             scanned++;
           } catch (err: any) {
+            this.logger.warn(
+              `Failed to sync retraction status for item ${item.id}: ${err?.message || err}`,
+            );
             failed++;
           }
         }),

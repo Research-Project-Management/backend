@@ -17,7 +17,10 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
-import { isSensitiveAuthRoute } from './core/utils/rate-limit.util';
+import {
+  isSensitiveAuthRoute,
+  isSensitiveScrapeRoute,
+} from './core/utils/rate-limit.util';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './core/filters/exception.filter';
 import { LoggerService } from './core/logger/logger.service';
@@ -105,12 +108,19 @@ async function bootstrap() {
       if (isSensitiveAuthRoute(url)) {
         return isProd ? 15 : 120;
       }
+      // Throttle sensitive scraping/URL-capture endpoints to protect Zotero Translation container (120 in dev, 30 in prod)
+      if (isSensitiveScrapeRoute(url)) {
+        return isProd ? 30 : 120;
+      }
       return isProd ? 150 : 600;
     },
     keyGenerator: (req: any) => {
       const url = req.raw?.url || '';
       if (isSensitiveAuthRoute(url)) {
         return `auth:${req.ip}`;
+      }
+      if (isSensitiveScrapeRoute(url)) {
+        return `scrape:${req.ip}`;
       }
       return req.ip;
     },

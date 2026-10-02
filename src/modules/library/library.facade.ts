@@ -1,12 +1,8 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { BibliographyFacade, CatalogFacade } from './catalog/catalog.facade';
+import { CatalogFacade } from './catalog/catalog.facade';
 import { SearchFacade } from './search/search.facade';
 import { CitationFacade } from './citation/citation.facade';
-import {
-  ReaderFacade,
-  ContentFacade,
-  ExtractionFacade,
-} from './extraction/extraction.facade';
+import { ExtractionFacade } from './extraction/extraction.facade';
 import { CslJsonMapper } from './citation';
 import { TransactionService } from './sync';
 import { LibraryChange, Tombstone } from '@prisma/client';
@@ -113,9 +109,9 @@ export const LIBRARY_FACADE = 'LIBRARY_FACADE';
 export class LibraryFacade implements ILibraryFacade {
   constructor(
     @Optional()
-    private readonly bibliographyFacade?: BibliographyFacade,
+    private readonly catalogFacade?: CatalogFacade,
     @Optional()
-    private readonly readerFacade?: ReaderFacade,
+    private readonly extractionFacade?: ExtractionFacade,
     @Optional()
     private readonly searchFacade?: SearchFacade,
     @Optional()
@@ -124,12 +120,25 @@ export class LibraryFacade implements ILibraryFacade {
     private readonly transactionService?: TransactionService,
   ) {}
 
-  get catalogFacade(): BibliographyFacade | undefined {
-    return this.bibliographyFacade;
+  get catalog(): CatalogFacade | undefined {
+    return this.catalogFacade;
   }
 
-  get contentFacade(): ReaderFacade | undefined {
-    return this.readerFacade;
+  get extraction(): ExtractionFacade | undefined {
+    return this.extractionFacade;
+  }
+
+  // Backwards compatibility getters
+  get bibliographyFacade(): CatalogFacade | undefined {
+    return this.catalogFacade;
+  }
+
+  get contentFacade(): ExtractionFacade | undefined {
+    return this.extractionFacade;
+  }
+
+  get readerFacade(): ExtractionFacade | undefined {
+    return this.extractionFacade;
   }
 
   get search(): SearchFacade | undefined {

@@ -339,6 +339,9 @@ export class CslRepositoryService implements OnModuleInit {
    */
   public async fetchCslXml(styleId: string): Promise<string | null> {
     const normalized = styleId.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._-]{0,100}$/.test(normalized)) {
+      return null;
+    }
 
     // 1. Built-in hardcoded high-performance styles
     if (normalized === 'ieee') return IEEE_CSL;
@@ -422,6 +425,11 @@ export class CslRepositoryService implements OnModuleInit {
     customTitle?: string,
     scopeId?: string,
   ): Promise<CslStyleMetadata> {
+    if (!cslXml || typeof cslXml !== 'string' || cslXml.length > 512 * 1024) {
+      throw new Error(
+        'Invalid CSL XML content: must be a non-empty string under 512KB',
+      );
+    }
     if (!this.isValidCslXml(cslXml)) {
       throw new Error(
         'Invalid CSL XML content: must contain valid <style> definition with required <title>, <id>, and <citation> or <bibliography> elements',

@@ -128,3 +128,9 @@ export class ReorderCollectionsDto {
   @Type(() => ReorderCollectionItemDto)
   collections!: ReorderCollectionItemDto[];
 }
+
+export class BulkDetachItemsDto {
+  @IsArray()
+  @IsString({ each: true })
+  itemIds!: string[];
+}

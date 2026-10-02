@@ -20,7 +20,7 @@ export class EngineService {
     private readonly jwtService: JwtService,
   ) {
     this.fluxUrl =
-      this.configService.get<string>('FLUX_AI_URL') || 'http://localhost:8000';
+      this.configService.get<string>('FLUX_AI_URL') || 'http://127.0.0.1:8000';
   }
 
   private async createDelegationToken(
@@ -66,7 +66,7 @@ export class EngineService {
     const result = await tryCatch(
       fetch(`${this.fluxUrl}/health`, {
         method: 'GET',
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(5000),
       }),
     );
 

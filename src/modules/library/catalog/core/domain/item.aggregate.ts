@@ -200,6 +200,7 @@ export class ItemAggregate {
       year?: number | null;
       publicationTitle?: string | null;
       fields?: Record<string, any>;
+      [key: string]: any;
     },
     expectedVersion?: number,
   ): void {
@@ -274,7 +275,7 @@ export class ItemAggregate {
       publicationTitle: _pt,
       fields,
       ...extraChanges
-    } = changes as any;
+    } = changes;
 
     if (changes.fields !== undefined || Object.keys(extraChanges).length > 0) {
       this._fields = {

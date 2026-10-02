@@ -37,6 +37,8 @@ export interface ParsedBibtexEntry {
   fileUrl?: string;
   extra?: string;
   arxivId?: string;
+  seeAlso?: string[];
+  relations?: Record<string, string | string[]>;
 }
 
 @Injectable()
@@ -123,6 +125,29 @@ export class BibtexParser {
       abstract: item.abstractNote,
       series: (item as any).series,
       keywords: item.tags?.map((t) => t.tag).filter(Boolean),
+      notes: (() => {
+        const notes: string[] = [];
+        if (Array.isArray(item.notes)) {
+          for (const n of item.notes) {
+            const text =
+              typeof n === 'string'
+                ? n
+                : (n as any)?.note || (n as any)?.content || '';
+            if (text && text.trim()) notes.push(text.trim());
+          }
+        } else if (typeof item.note === 'string' && item.note.trim()) {
+          notes.push(item.note.trim());
+        }
+        return notes.length > 0 ? notes : undefined;
+      })(),
+      seeAlso:
+        Array.isArray(item.seeAlso) && item.seeAlso.length > 0
+          ? item.seeAlso
+          : undefined,
+      relations:
+        item.relations && Object.keys(item.relations).length > 0
+          ? item.relations
+          : undefined,
       extra: item.extra,
     };
   }

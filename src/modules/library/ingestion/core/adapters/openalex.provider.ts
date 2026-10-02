@@ -486,6 +486,7 @@ export class OpenAlexProvider implements MetadataProvider {
         keywords: keywords.length ? keywords : undefined,
         tags: keywords.length ? keywords : undefined,
         openAccessPdfUrl,
+        libraryCatalog: 'OpenAlex',
         provenance: {
           originProvider: this.id,
           resolvedAt: new Date().toISOString(),
