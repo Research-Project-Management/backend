@@ -43,15 +43,17 @@ export class SocketIoBroadcasterAdapter extends IRealtimeBroadcasterPort {
     event: string,
     payload: any,
     excludeSocketId?: string,
+    volatile = false,
   ): void {
     if (!this.ioServer) {
       return;
     }
     const room = `doc:${projectId}:${docId}`;
+    const emitter = volatile ? this.ioServer.volatile : this.ioServer;
     if (excludeSocketId) {
-      this.ioServer.to(room).except(excludeSocketId).emit(event, payload);
+      emitter.to(room).except(excludeSocketId).emit(event, payload);
     } else {
-      this.ioServer.to(room).emit(event, payload);
+      emitter.to(room).emit(event, payload);
     }
   }
 

@@ -106,8 +106,20 @@ export class CoreService {
         projectId,
         filterOptions,
       );
-      const allLabelIds = records.flatMap((r) => r.labels || []);
-      const labelLookup = await this.buildLabelLookup(projectId, allLabelIds);
+      // Fast-path: Only fetch label lookup from DB if there are legacy raw labels without relational assignments
+      const needsLookup = records.some(
+        (r) =>
+          (!r.labelAssignments || r.labelAssignments.length === 0) &&
+          Array.isArray(r.labels) &&
+          r.labels.length > 0,
+      );
+      const allLabelIds = needsLookup
+        ? records.flatMap((r) => r.labels || [])
+        : [];
+      const labelLookup =
+        allLabelIds.length > 0
+          ? await this.buildLabelLookup(projectId, allLabelIds)
+          : new Map<string, { name: string; color: string }>();
       return records.map((r) => formatWorkItem(r, labelLookup)).filter(Boolean);
     };
 
@@ -129,16 +141,25 @@ export class CoreService {
       limit,
       offset,
     );
-    const allLabelIds = records.flatMap((r) => r.labels || []);
+    const needsLookup = records.some(
+      (r) =>
+        (!r.labelAssignments || r.labelAssignments.length === 0) &&
+        Array.isArray(r.labels) &&
+        r.labels.length > 0,
+    );
+    const allLabelIds = needsLookup
+      ? records.flatMap((r) => r.labels || [])
+      : [];
     const projectIds = query?.projectId
       ? query.projectId
       : Array.from(new Set(records.map((r) => r.projectId).filter(Boolean)));
     const hasProjectContext = Array.isArray(projectIds)
       ? projectIds.length > 0
       : Boolean(projectIds);
-    const labelLookup = hasProjectContext
-      ? await this.buildLabelLookup(projectIds, allLabelIds)
-      : new Map<string, { id: string; name: string; color: string }>();
+    const labelLookup =
+      hasProjectContext && allLabelIds.length > 0
+        ? await this.buildLabelLookup(projectIds, allLabelIds)
+        : new Map<string, { id: string; name: string; color: string }>();
     const workItems = records
       .map((r) => formatWorkItem(r, labelLookup))
       .filter(Boolean);

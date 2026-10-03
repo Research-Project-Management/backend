@@ -69,6 +69,15 @@ export class YourWorkSummaryDto {
   @IsOptional()
   userData?: import('../types/your-work.types').UserProfileData;
 
+  @ApiProperty({
+    description:
+      'Flag indicating if user has no work items across all categories',
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isEmpty?: boolean;
+
   @ApiProperty()
   @IsBoolean()
   success!: boolean;

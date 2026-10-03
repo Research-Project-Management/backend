@@ -379,28 +379,7 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
   ): void {
     session.lastActiveAt = Date.now();
 
-    // Cache latest state in Redis fast path
-    if (this.redis && this.redis.isReady()) {
-      try {
-        const client = this.redis.getClient();
-        if (client) {
-          const binarySnapshot = Y.encodeStateAsUpdate(session.doc);
-          const base64 = Buffer.from(binarySnapshot).toString('base64');
-          client
-            .set(
-              this.redisKey(projectId, docId),
-              base64,
-              'EX',
-              this.REDIS_SNAPSHOT_TTL_SECONDS,
-            )
-            .catch(() => {});
-        }
-      } catch {
-        // Ignored in fast path
-      }
-    }
-
-    // Schedule debounced flush to database
+    // Schedule debounced flush to Redis cache and Docstore
     if (session.flushTimeout) {
       clearTimeout(session.flushTimeout);
     }

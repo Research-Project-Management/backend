@@ -17,8 +17,10 @@ import { shouldRunWorkerConsumers } from '../../../core/utils/worker-mode.util';
 // Gateway Ports & Adapters for Microservice Decoupling
 import { CATALOG_GATEWAY_PORT } from './core/ports/catalog-gateway.port';
 import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catalog-gateway.adapter';
+import { HttpCatalogGatewayAdapter } from './core/adapters/http-catalog-gateway.adapter';
 import { EXTRACTION_GATEWAY_PORT } from './core/ports/extraction-gateway.port';
 import { InProcessExtractionGatewayAdapter } from './core/adapters/in-process-extraction-gateway.adapter';
+import { HttpExtractionGatewayAdapter } from './core/adapters/http-extraction-gateway.adapter';
 
 // Facade
 import {
@@ -163,14 +165,28 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
 
     // ── Gateway Ports & Adapters (Microservices Decoupling) ─────────
     InProcessCatalogGatewayAdapter,
+    HttpCatalogGatewayAdapter,
     {
       provide: CATALOG_GATEWAY_PORT,
-      useClass: InProcessCatalogGatewayAdapter,
+      useFactory: (
+        inProcess: InProcessCatalogGatewayAdapter,
+        http: HttpCatalogGatewayAdapter,
+      ) => {
+        return process.env.LIBRARY_CATALOG_URL ? http : inProcess;
+      },
+      inject: [InProcessCatalogGatewayAdapter, HttpCatalogGatewayAdapter],
     },
     InProcessExtractionGatewayAdapter,
+    HttpExtractionGatewayAdapter,
     {
       provide: EXTRACTION_GATEWAY_PORT,
-      useClass: InProcessExtractionGatewayAdapter,
+      useFactory: (
+        inProcess: InProcessExtractionGatewayAdapter,
+        http: HttpExtractionGatewayAdapter,
+      ) => {
+        return process.env.LIBRARY_EXTRACTION_URL ? http : inProcess;
+      },
+      inject: [InProcessExtractionGatewayAdapter, HttpExtractionGatewayAdapter],
     },
 
     // ── PIPELINE Sub-Domain (CPU-heavy — extract as worker process) ────────

@@ -18,6 +18,11 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     string,
     { value: string; expiresAt?: number }
   >();
+  /**
+   * Single-Flight Request Coalescing Map (Matteo Collina async-cache-dedupe pattern).
+   * Deduplicates concurrent database queries for identical cache keys during cache misses.
+   */
+  private readonly inFlightPromises = new Map<string, Promise<any>>();
   private readonly logger = new Logger(RedisCacheService.name);
 
   private setMemoryCache(
@@ -138,6 +143,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       this.redisClient = null;
       this.isConnected = false;
     }
+    this.inFlightPromises.clear();
   }
 
   getClient(): Redis | null {
@@ -279,7 +285,10 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Cache-Aside Pattern: Retrieve from cache if present, otherwise fetch from fallback function and cache it.
+   * Cache-Aside Pattern with Single-Flight Request Coalescing (Matteo Collina pattern).
+   * Prevents Cache Stampede / Thundering Herd when multiple concurrent requests query a cache miss.
+   * If N concurrent requests arrive for the same missing key, exactly 1 executes fallbackFn(),
+   * and the remaining N-1 await the same in-flight Promise.
    */
   async wrap<T>(
     key: string,
@@ -291,11 +300,26 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       return cached;
     }
 
-    const fresh = await fallbackFn();
-    if (fresh !== null && fresh !== undefined) {
-      await this.set(key, fresh, ttlSeconds);
+    // Single-Flight: Check if another request is already fetching this key
+    const existingInFlight = this.inFlightPromises.get(key);
+    if (existingInFlight) {
+      return existingInFlight as Promise<T>;
     }
-    return fresh;
+
+    const fetchPromise = (async () => {
+      try {
+        const fresh = await fallbackFn();
+        if (fresh !== null && fresh !== undefined) {
+          await this.set(key, fresh, ttlSeconds);
+        }
+        return fresh;
+      } finally {
+        this.inFlightPromises.delete(key);
+      }
+    })();
+
+    this.inFlightPromises.set(key, fetchPromise);
+    return fetchPromise;
   }
 
   /**

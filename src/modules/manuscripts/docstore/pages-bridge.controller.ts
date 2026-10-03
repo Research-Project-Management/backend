@@ -21,6 +21,9 @@ import {
   HttpCode,
   Optional,
   NotFoundException,
+  InternalServerErrorException,
+  BadRequestException,
+  Logger,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -39,6 +42,8 @@ const isUuid = (val?: string | null): boolean =>
 @Controller(['api/v1/manuscripts', 'api'])
 @UseGuards(JwtAuthGuard)
 export class PagesBridgeController {
+  private readonly logger = new Logger(PagesBridgeController.name);
+
   constructor(
     private readonly docstoreService: DocstoreService,
     private readonly prisma: PrismaService,
@@ -1412,11 +1417,23 @@ export class PagesBridgeController {
     @Param('projectId') projectId: string,
     @Query('status') _status?: string,
     @Query('search') _search?: string,
+    @Query('forceEmpty') forceEmpty?: string,
+    @Query('forceError') forceError?: string,
   ) {
-    if (!isUuid(projectId)) return { pages: [] };
+    if (forceError === 'true') {
+      throw new InternalServerErrorException(
+        'Simulated internal server error while fetching project pages',
+      );
+    }
+    if (forceEmpty === 'true') {
+      return { pages: [], total: 0, isEmpty: true };
+    }
+    if (!isUuid(projectId)) {
+      return { pages: [], total: 0, isEmpty: true };
+    }
     try {
       const docs = await this.docstoreService.getAllDocs(projectId);
-      const pages = docs.map((d) => ({
+      let pages = docs.map((d) => ({
         id: d._id,
         title: d.path || 'document.tex',
         content: Array.isArray(d.lines) ? d.lines.join('\n') : '',
@@ -1425,9 +1442,29 @@ export class PagesBridgeController {
         version: d.version,
         rev: d.rev,
       }));
-      return { pages };
-    } catch {
-      return { pages: [] };
+
+      if (_search && _search.trim()) {
+        const query = _search.trim().toLowerCase();
+        pages = pages.filter((p) => p.title.toLowerCase().includes(query));
+      }
+
+      return {
+        pages,
+        total: pages.length,
+        isEmpty: pages.length === 0,
+      };
+    } catch (err) {
+      if (
+        err instanceof NotFoundException ||
+        err instanceof BadRequestException ||
+        err instanceof InternalServerErrorException
+      ) {
+        throw err;
+      }
+      this.logger.error(`Error fetching docs for project ${projectId}`, err);
+      throw new InternalServerErrorException(
+        'Failed to fetch project documents and pages',
+      );
     }
   }
 

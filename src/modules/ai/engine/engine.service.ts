@@ -66,7 +66,7 @@ export class EngineService {
     const result = await tryCatch(
       fetch(`${this.fluxUrl}/health`, {
         method: 'GET',
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(10000),
       }),
     );
 

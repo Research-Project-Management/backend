@@ -37,12 +37,27 @@ export class YourWorkController {
       'Returns workload work items, activity feed, and recent items for user',
     type: YourWorkSummaryDto,
   })
+  @ApiResponse({
+    status: 403,
+    description:
+      'User does not have permission to access this project workload',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Target project not found',
+  })
   async getYourWork(
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
     @Query('projectId') queryProjectId?: string,
+    @Query('forceEmpty') forceEmpty?: string,
   ): Promise<YourWorkSummaryDto> {
     const targetProjectId = projectId || queryProjectId;
-    return this.yourWorkService.getYourWork(targetProjectId, userId);
+    const isForceEmpty = forceEmpty === 'true' || forceEmpty === '1';
+    return this.yourWorkService.getYourWork(
+      targetProjectId,
+      userId,
+      isForceEmpty,
+    );
   }
 }

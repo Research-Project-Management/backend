@@ -19,4 +19,4 @@ export * from './diagnostics';
 export * from './citations';
 export * from './spelling';
 export * from './templates';
-export { TemplateNotFoundException } from './templates';
+export * from './linked-files';

@@ -1,4 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { YourWorkRepository } from './your-work.repository';
 import { ActivityService } from '@/modules/activity/activity.service';
 import { YourWorkSummaryDto } from './dto/your-work.dto';
@@ -13,10 +19,64 @@ import type { StateGroup } from '@/modules/work-item/state/types/state.types';
 
 @Injectable()
 export class YourWorkService {
+  private readonly logger = new Logger(YourWorkService.name);
+
   constructor(
     private readonly yourWorkRepo: YourWorkRepository,
     private readonly activityService: ActivityService,
   ) {}
+
+  /**
+   * Generates a fully zeroed-out structured payload for empty states
+   */
+  private async buildEmptyYourWork(
+    projectId: string | undefined,
+    userId: string,
+  ): Promise<YourWorkSummaryDto> {
+    const userProfile = await this.yourWorkRepo.findUserProfile(userId);
+    return {
+      projectId,
+      userId,
+      assigned: [],
+      created: [],
+      subscribed: [],
+      activity: [],
+      recent: [],
+      stateGroupBreakdown: {
+        backlog: 0,
+        unstarted: 0,
+        started: 0,
+        completed: 0,
+        cancelled: 0,
+      },
+      subscribedStateGroupBreakdown: {
+        backlog: 0,
+        unstarted: 0,
+        started: 0,
+        completed: 0,
+        cancelled: 0,
+      },
+      priorityBreakdown: {
+        urgent: 0,
+        high: 0,
+        medium: 0,
+        low: 0,
+        none: 0,
+      },
+      projectBreakdown: [],
+      userData: userProfile
+        ? {
+            ...userProfile,
+            createdAt:
+              userProfile.createdAt instanceof Date
+                ? userProfile.createdAt.toISOString()
+                : String(userProfile.createdAt),
+          }
+        : undefined,
+      isEmpty: true,
+      success: true,
+    };
+  }
 
   /**
    * Your Workload & Activity Aggregator
@@ -24,7 +84,29 @@ export class YourWorkService {
   async getYourWork(
     projectId: string | undefined,
     userId: string,
+    forceEmpty = false,
   ): Promise<YourWorkSummaryDto> {
+    if (forceEmpty) {
+      return this.buildEmptyYourWork(projectId, userId);
+    }
+
+    if (projectId) {
+      const accessCheck = await this.yourWorkRepo.checkProjectAccess(
+        projectId,
+        userId,
+      );
+      if (!accessCheck.exists) {
+        throw new NotFoundException(
+          `Project with ID "${projectId}" was not found`,
+        );
+      }
+      if (!accessCheck.hasAccess) {
+        throw new ForbiddenException(
+          'You do not have permission to access this project workload',
+        );
+      }
+    }
+
     const [workItems, activityFeed, recentItems, userProfile, projectList] =
       await Promise.all([
         this.yourWorkRepo.findUserWorkItems(projectId, userId),
@@ -261,6 +343,12 @@ export class YourWorkService {
           b.assignedCount - a.assignedCount || b.totalCount - a.totalCount,
       );
 
+    const isEmpty =
+      assigned.length === 0 &&
+      created.length === 0 &&
+      subscribed.length === 0 &&
+      formattedActivities.length === 0;
+
     return {
       projectId,
       userId,
@@ -282,6 +370,7 @@ export class YourWorkService {
                 : String(userProfile.createdAt),
           }
         : undefined,
+      isEmpty,
       success: true,
     };
   }

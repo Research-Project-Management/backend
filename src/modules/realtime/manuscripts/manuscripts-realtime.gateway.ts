@@ -313,6 +313,7 @@ export class ManuscriptRealtimeGateway
 
       return { success: true, presence: presence ? presence.toJSON() : null };
     } catch (err: any) {
+      this.logger.debug(`Ignored ephemeral cursor error: ${err?.message}`);
       return { success: false, error: err?.message };
     }
   }

@@ -23,6 +23,7 @@ export abstract class IRealtimeBroadcasterPort {
     event: string,
     payload: any,
     excludeSocketId?: string,
+    volatile?: boolean,
   ): void;
 
   /**

@@ -63,6 +63,10 @@ describe('YourWorkService', () => {
               avatar: null,
               createdAt: new Date('2026-03-04T00:00:00Z'),
             }),
+            checkProjectAccess: jest.fn().mockResolvedValue({
+              exists: true,
+              hasAccess: true,
+            }),
           },
         },
         {

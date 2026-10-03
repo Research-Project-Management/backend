@@ -46,6 +46,7 @@ export class BroadcastCursorUseCase {
         'doc:cursor',
         updatedPresence.toJSON(),
         socketId,
+        true,
       );
     }
 

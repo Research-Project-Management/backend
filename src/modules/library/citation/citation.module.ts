@@ -5,7 +5,7 @@ import { CitationFacade, CITATION_FACADE } from './citation.facade';
 
 // Presentation
 import { CitationController } from './citation.controller';
-import { ExportController, ExportsController } from './exports.controller';
+import { ExportController } from './exports.controller';
 
 import { CitationService } from './core/services/citation.service';
 import { DoiContentNegotiationService } from './core/adapters/doi-content-negotiation.service';
@@ -23,6 +23,7 @@ import { CITATION_ENGINE_PORT } from './core/ports/citation-engine.port';
 import { ExportsRepository } from './core/adapters/exports.repository';
 import { CATALOG_GATEWAY_PORT } from './core/ports/catalog-gateway.port';
 import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catalog-gateway.adapter';
+import { HttpCatalogGatewayAdapter } from './core/adapters/http-catalog-gateway.adapter';
 
 /**
  * Citation Bounded Context Unified Module (Supporting Domain).
@@ -58,9 +59,16 @@ import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catal
       useClass: CslCitationEngineAdapter,
     },
     InProcessCatalogGatewayAdapter,
+    HttpCatalogGatewayAdapter,
     {
       provide: CATALOG_GATEWAY_PORT,
-      useClass: InProcessCatalogGatewayAdapter,
+      useFactory: (
+        inProcess: InProcessCatalogGatewayAdapter,
+        http: HttpCatalogGatewayAdapter,
+      ) => {
+        return process.env.LIBRARY_CATALOG_URL ? http : inProcess;
+      },
+      inject: [InProcessCatalogGatewayAdapter, HttpCatalogGatewayAdapter],
     },
     FormatCitationUseCase,
     ExportLibraryUseCase,

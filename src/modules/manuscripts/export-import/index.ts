@@ -16,7 +16,7 @@ export * from './core/domain/entities/archive-manifest.entity';
 export * from './core/domain/exceptions/invalid-zip-archive.exception';
 export * from './core/domain/exceptions/zip-slip-security.exception';
 export * from './core/domain/exceptions/archive-size-exceeded.exception';
-export * from './core/domain/exceptions/template-not-found.exception';
+export { TemplateNotFoundException as ProjectArchiveTemplateNotFoundException } from './core/domain/exceptions/template-not-found.exception';
 
 // Ports
 export * from './core/ports/zip-engine.port';

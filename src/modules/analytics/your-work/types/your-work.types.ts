@@ -108,4 +108,8 @@ export interface IYourWorkRepository {
     projectId: string | undefined,
     userId: string,
   ): Promise<ProjectMinimal[]>;
+  checkProjectAccess(
+    projectId: string,
+    userId: string,
+  ): Promise<{ exists: boolean; hasAccess: boolean; project?: ProjectMinimal }>;
 }

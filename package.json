@@ -25,6 +25,7 @@
     "start:light": "pnpm build && node --max-old-space-size=512 dist/main.js",
     "clean:ports": "node scripts/clean-ports.mjs",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
+    "typecheck": "tsc --noEmit",
     "test": "jest --forceExit",
     "test:changed": "jest --onlyChanged --passWithNoTests --forceExit",
     "test:smoke": "jest test/smoke --forceExit",

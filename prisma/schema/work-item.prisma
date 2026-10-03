@@ -84,6 +84,7 @@ model WorkItem {
 
   @@index([projectId, columnId, rank])
   @@index([projectId, columnId, deletedAt, rank])
+  @@index([projectId, deletedAt, archivedAt, rank])
   @@index([projectId, parentWorkItemId, rank])
   @@index([projectId, completed, deletedAt])
   @@index([projectId, identifier])

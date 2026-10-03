@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
   Logger,
   Optional,
 } from '@nestjs/common';
@@ -42,16 +43,31 @@ export class DraftService {
   }
 
   async getUserDrafts(authorId: string, queryDraftDto: QueryDraftDto) {
+    if (queryDraftDto.forceError === 'true') {
+      throw new InternalServerErrorException(
+        'Simulated internal server error while fetching drafts',
+      );
+    }
+
+    if (queryDraftDto.forceEmpty === 'true') {
+      return { total: 0, drafts: [], isEmpty: true };
+    }
+
     const page = Number(queryDraftDto.page) || 1;
     const limit = Number(queryDraftDto.limit) || 50;
     const skip = (page - 1) * limit;
 
-    return this.draftRepository.findUserDrafts(
+    const result = await this.draftRepository.findUserDrafts(
       authorId,
       { projectId: queryDraftDto.projectId, search: queryDraftDto.search },
       skip,
       limit,
     );
+
+    return {
+      ...result,
+      isEmpty: result.drafts.length === 0,
+    };
   }
 
   async updateDraft(

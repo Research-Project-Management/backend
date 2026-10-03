@@ -26,4 +26,18 @@ export class QueryDraftDto {
   @IsInt()
   @Min(1)
   limit?: number = 50;
+
+  @ApiPropertyOptional({
+    description: 'Force empty response for UI preview/testing',
+  })
+  @IsOptional()
+  @IsString()
+  forceEmpty?: string;
+
+  @ApiPropertyOptional({
+    description: 'Simulate server error for testing error states',
+  })
+  @IsOptional()
+  @IsString()
+  forceError?: string;
 }

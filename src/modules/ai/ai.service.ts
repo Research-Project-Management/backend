@@ -131,16 +131,60 @@ export class AiService {
   private async resolveDocumentIds(documentIds: string[]): Promise<string[]> {
     if (!documentIds || documentIds.length === 0) return [];
 
+    const fileMap = new Map<string, string>();
+
+    // 1. Storage Files
     const files = await this.prisma.file.findMany({
       where: { id: { in: documentIds } },
       select: { id: true, metaData: true },
     });
-
-    const fileMap = new Map<string, string>();
     for (const f of files) {
       const meta = f.metaData as Record<string, any> | null;
       if (meta?.ragDocId) {
         fileMap.set(f.id, meta.ragDocId);
+      }
+    }
+
+    // 2. Library Items
+    const missingForItems = documentIds.filter((id) => !fileMap.has(id));
+    if (missingForItems.length > 0) {
+      const items = await (this.prisma as any).item?.findMany({
+        where: { id: { in: missingForItems } },
+        include: {
+          attachments: {
+            where: { deletedAt: null },
+            select: { fileId: true, metadata: true, attachmentType: true },
+          },
+        },
+      });
+
+      if (items) {
+        for (const it of items) {
+          const itMeta = it.metadata as Record<string, any> | null;
+          if (itMeta?.ragDocId) {
+            fileMap.set(it.id, itMeta.ragDocId);
+            continue;
+          }
+          if (it.attachments && it.attachments.length > 0) {
+            const att =
+              it.attachments.find(
+                (a: any) => a.attachmentType === 'primary_pdf',
+              ) || it.attachments[0];
+            const attMeta = att.metadata as Record<string, any> | null;
+            if (attMeta?.ragDocId) {
+              fileMap.set(it.id, attMeta.ragDocId);
+            } else if (att.fileId) {
+              const file = await this.prisma.file.findUnique({
+                where: { id: att.fileId },
+                select: { metaData: true },
+              });
+              const fMeta = file?.metaData as Record<string, any> | null;
+              if (fMeta?.ragDocId) {
+                fileMap.set(it.id, fMeta.ragDocId);
+              }
+            }
+          }
+        }
       }
     }
 
@@ -374,12 +418,19 @@ export class AiService {
     // 1. Try finding Library Item
     const item = await (this.prisma as any).item?.findFirst({
       where: { id: paperOrFileId, deletedAt: null },
-      include: { contributors: { orderBy: { orderIndex: 'asc' } } },
+      include: {
+        contributors: { orderBy: { orderIndex: 'asc' } },
+        attachments: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
 
     if (item) {
       const hasAccess =
-        item.uploadedById === userId ||
+        item.userId === userId ||
+        (item as any).uploadedById === userId ||
         (item.projectId
           ? (await this.prisma.projectMember.findFirst({
               where: {
@@ -393,18 +444,47 @@ export class AiService {
         throw new ForbiddenException('You do not have access to this paper');
       }
 
+      // Priority resolution of ragDocId:
+      // a) check item.metadata.ragDocId
+      let ragDocId: string | null =
+        (item.metadata as Record<string, any>)?.ragDocId ||
+        (item as any).ragDocId ||
+        null;
+
+      // b) check primary_pdf attachment or any attachment
+      if (!ragDocId && item.attachments && item.attachments.length > 0) {
+        const primaryAtt =
+          item.attachments.find(
+            (a: any) => a.attachmentType === 'primary_pdf',
+          ) || item.attachments[0];
+
+        const attMeta = (primaryAtt?.metadata as Record<string, any>) || {};
+        if (attMeta.ragDocId) {
+          ragDocId = attMeta.ragDocId;
+        } else if (primaryAtt?.fileId) {
+          const file = await this.prisma.file.findUnique({
+            where: { id: primaryAtt.fileId },
+            select: { metaData: true },
+          });
+          const fileMeta = (file?.metaData as Record<string, any>) || {};
+          if (fileMeta.ragDocId) {
+            ragDocId = fileMeta.ragDocId;
+          }
+        }
+      }
+
       return {
         title: item.title,
         authors: item.contributors?.map((c: any) => c.fullName) || [],
         year: item.year || undefined,
         doi: item.doi || undefined,
         abstract: item.abstract || undefined,
-        ragDocId: item.ragDocId || null,
+        ragDocId,
         scopeId: item.projectId || userId,
       };
     }
 
-    // 2. Try finding Storage File
+    // 2. Try finding Storage File directly
     const file = await this.prisma.file.findFirst({
       where: { id: paperOrFileId, trashedAt: null },
       include: {
@@ -412,44 +492,53 @@ export class AiService {
       },
     });
 
-    if (!file) {
-      throw new NotFoundException(
-        `Paper or scientific file with ID ${paperOrFileId} not found`,
-      );
+    if (file) {
+      let hasAccess = file.authorId === userId || file.sharedWith.length > 0;
+      if (!hasAccess && file.linkedToType === 'project' && file.linkedToId) {
+        const isMember = await this.prisma.projectMember.findFirst({
+          where: { projectId: file.linkedToId, userId },
+        });
+        hasAccess = isMember !== null;
+      }
+
+      if (!hasAccess) {
+        throw new ForbiddenException('You do not have access to this file');
+      }
+
+      const meta = (file.metaData as Record<string, any>) || {};
+      const scopeId =
+        file.linkedToType === 'project' && file.linkedToId
+          ? file.linkedToId
+          : userId;
+
+      return {
+        title: meta.title || file.filename,
+        authors: Array.isArray(meta.authors)
+          ? meta.authors
+          : meta.authors
+            ? [meta.authors]
+            : [],
+        year: meta.year || undefined,
+        doi: meta.doi || undefined,
+        abstract: meta.abstract || undefined,
+        ragDocId: meta.ragDocId || null,
+        scopeId,
+      };
     }
 
-    // Access control for Storage File
-    let hasAccess = file.authorId === userId || file.sharedWith.length > 0;
-    if (!hasAccess && file.linkedToType === 'project' && file.linkedToId) {
-      const isMember = await this.prisma.projectMember.findFirst({
-        where: { projectId: file.linkedToId, userId },
-      });
-      hasAccess = isMember !== null;
+    // 3. Try finding by Attachment ID
+    const attachment = await (this.prisma as any).attachment?.findFirst({
+      where: { id: paperOrFileId, deletedAt: null },
+      select: { itemId: true },
+    });
+
+    if (attachment?.itemId) {
+      return this.resolvePaperTarget(userId, attachment.itemId);
     }
 
-    if (!hasAccess) {
-      throw new ForbiddenException('You do not have access to this file');
-    }
-
-    const meta = (file.metaData as Record<string, any>) || {};
-    const scopeId =
-      file.linkedToType === 'project' && file.linkedToId
-        ? file.linkedToId
-        : userId;
-
-    return {
-      title: meta.title || file.filename,
-      authors: Array.isArray(meta.authors)
-        ? meta.authors
-        : meta.authors
-          ? [meta.authors]
-          : [],
-      year: meta.year || undefined,
-      doi: meta.doi || undefined,
-      abstract: meta.abstract || undefined,
-      ragDocId: meta.ragDocId || null,
-      scopeId,
-    };
+    throw new NotFoundException(
+      `Paper or scientific file with ID ${paperOrFileId} not found`,
+    );
   }
 
   /**
@@ -465,7 +554,7 @@ export class AiService {
 
     // Chat ID ownership verification if provided, or secure user-scoped default
     let chatId = dto.chatId || dto.chat_id;
-    if (chatId) {
+    if (chatId && this.isValidUuid(chatId)) {
       const existingChat = await this.prisma.aiChat.findFirst({
         where: { id: chatId },
       });
@@ -474,7 +563,7 @@ export class AiService {
           'You do not have access to this chat session',
         );
       }
-    } else {
+    } else if (!chatId) {
       chatId = `paper-${paperId}-${userId}`;
     }
 
@@ -511,7 +600,7 @@ export class AiService {
 
     // Chat ID ownership verification if provided, or secure user-scoped default
     let chatId = dto.chatId || dto.chat_id;
-    if (chatId) {
+    if (chatId && this.isValidUuid(chatId)) {
       const existingChat = await this.prisma.aiChat.findFirst({
         where: { id: chatId },
       });
@@ -520,7 +609,7 @@ export class AiService {
           'You do not have access to this chat session',
         );
       }
-    } else {
+    } else if (!chatId) {
       chatId = `paper-${paperId}-${userId}`;
     }
 

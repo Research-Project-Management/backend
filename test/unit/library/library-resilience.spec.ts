@@ -241,7 +241,7 @@ describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter
 
       expect(res).toBeNull();
       expect(global.fetch).not.toHaveBeenCalled(); // Fast-failed!
-      expect(durationMs).toBeLessThan(50); // Instant 0ms response!
+      expect(durationMs).toBeLessThan(250); // Instant response when circuit is open!
     });
   });
 

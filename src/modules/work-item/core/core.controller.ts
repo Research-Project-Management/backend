@@ -15,6 +15,8 @@ import {
   Optional,
   BadRequestException,
   Req,
+  OnModuleInit,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import {
@@ -24,7 +26,7 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Observable, fromEvent, merge } from 'rxjs';
+import { Observable, Subject, fromEvent } from 'rxjs';
 import { map, filter, takeUntil } from 'rxjs/operators';
 import { CoreService } from './core.service';
 import { CreateWorkItemDto } from './dto/create.dto';
@@ -45,11 +47,29 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
-export class CoreController {
+export class CoreController implements OnModuleInit, OnModuleDestroy {
+  private readonly workItemEvents$ = new Subject<any>();
+  private wildcardListener?: (event: any) => void;
+
   constructor(
     private readonly workItemService: CoreService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
+
+  onModuleInit() {
+    if (this.eventEmitter) {
+      this.wildcardListener = (event: any) => {
+        this.workItemEvents$.next(event);
+      };
+      this.eventEmitter.on('work-item.**', this.wildcardListener);
+    }
+  }
+
+  onModuleDestroy() {
+    if (this.eventEmitter && this.wildcardListener) {
+      this.eventEmitter.off('work-item.**', this.wildcardListener);
+    }
+  }
 
   @Sse('projects/:projectId/work-items/events')
   @UseGuards(ProjectRoleGuard)
@@ -61,63 +81,9 @@ export class CoreController {
     @Param('projectId') projectId: string,
     @Req() req: FastifyRequest,
   ): Observable<MessageEvent> {
-    if (!this.eventEmitter) {
-      return new Observable<MessageEvent>();
-    }
-
     const disconnect$ = fromEvent(req.raw, 'close');
 
-    const created$ = fromEvent(this.eventEmitter, 'work-item.created');
-    const updated$ = fromEvent(this.eventEmitter, 'work-item.updated');
-    const deleted$ = fromEvent(this.eventEmitter, 'work-item.deleted');
-    const reordered$ = fromEvent(this.eventEmitter, 'work-item.reordered');
-    const assigned$ = fromEvent(this.eventEmitter, 'work-item.assigned');
-    const unassigned$ = fromEvent(this.eventEmitter, 'work-item.unassigned');
-    const relationAdded$ = fromEvent(
-      this.eventEmitter,
-      'work-item.relation.added',
-    );
-    const relationRemoved$ = fromEvent(
-      this.eventEmitter,
-      'work-item.relation.removed',
-    );
-    const stateChanged$ = fromEvent(
-      this.eventEmitter,
-      'work-item.state.changed',
-    );
-    const priorityChanged$ = fromEvent(
-      this.eventEmitter,
-      'work-item.priority.changed',
-    );
-    const titleChanged$ = fromEvent(
-      this.eventEmitter,
-      'work-item.title.changed',
-    );
-    const contentChanged$ = fromEvent(
-      this.eventEmitter,
-      'work-item.content.changed',
-    );
-    const duplicated$ = fromEvent(this.eventEmitter, 'work-item.duplicated');
-    const archived$ = fromEvent(this.eventEmitter, 'work-item.archived');
-    const restored$ = fromEvent(this.eventEmitter, 'work-item.restored');
-
-    return merge(
-      created$,
-      updated$,
-      deleted$,
-      reordered$,
-      assigned$,
-      unassigned$,
-      relationAdded$,
-      relationRemoved$,
-      stateChanged$,
-      priorityChanged$,
-      titleChanged$,
-      contentChanged$,
-      duplicated$,
-      archived$,
-      restored$,
-    ).pipe(
+    return this.workItemEvents$.pipe(
       filter((event: any) => event?.projectId === projectId),
       map((event: any) => ({
         data: event,

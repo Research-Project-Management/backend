@@ -4,52 +4,24 @@ import { SyncModule } from '../sync/sync.module';
 import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
 
 // Controllers
-import {
-  ItemController,
-  ItemsController,
-  ItemCurationController,
-} from './items.controller';
-import {
-  CollectionController,
-  CollectionsController,
-} from './collections.controller';
-import { TagController, TagsController } from './tags.controller';
-import { TypeController, TypesController } from './types.controller';
+import { ItemController, ItemCurationController } from './items.controller';
+import { CollectionController } from './collections.controller';
+import { TagController } from './tags.controller';
+import { TypeController } from './types.controller';
 import { StateController, StateBatchController } from './state.controller';
-import {
-  SavedSearchesController,
-  SavedSearchesController as SavedSearchController,
-} from './saved-searches.controller';
-import { NoteController, NotesController } from './notes.controller';
+import { SavedSearchesController } from './saved-searches.controller';
+import { NoteController } from './notes.controller';
 
 // Services (Application & Domain Services)
-import {
-  ItemService,
-  ItemService as ItemsService,
-} from './core/services/items.service';
+import { ItemsService } from './core/services/items.service';
 import { ItemSyncDelegate } from './core/services/item-sync.delegate';
-import {
-  CollectionService,
-  CollectionService as CollectionsService,
-} from './core/services/collections.service';
-import {
-  TagService,
-  TagService as TagsService,
-} from './core/services/tags.service';
-import {
-  TypeService,
-  TypeService as TypesService,
-} from './core/services/types.service';
+import { CollectionsService } from './core/services/collections.service';
+import { TagsService } from './core/services/tags.service';
+import { TypesService } from './core/services/types.service';
 import { StateService } from './core/services/state.service';
-import {
-  SavedSearchService,
-  SavedSearchService as SavedSearchesService,
-} from './core/services/saved-searches.service';
+import { SavedSearchesService } from './core/services/saved-searches.service';
 import { ZoteroSchemaValidatorService } from './core/services/zotero-schema-validator.service';
-import {
-  NoteService,
-  NoteService as NotesService,
-} from './core/services/notes.service';
+import { NotesService } from './core/services/notes.service';
 
 // Search Indexing Gateway
 import { SEARCH_INDEXING_PORT } from './core/ports/search-indexing.port';
@@ -58,26 +30,17 @@ import { InProcessSearchIndexingAdapter } from './core/adapters/in-process-searc
 // Engines & Mappers
 import { TreeEngine } from './core/adapters/tree.engine';
 import { ConditionEvaluatorEngine } from './core/adapters/condition-evaluator.engine';
-import { ItemMapper, ItemsMapper } from './core/adapters/items.mapper';
+import { ItemsMapper } from './core/adapters/items.mapper';
 import { ItemTransformer } from './core/adapters/item.transformer';
 
 // Repositories
 import { ItemCommandRepository } from './core/adapters/command.repository';
 import { ItemQueryRepository } from './core/adapters/query.repository';
-import {
-  CollectionRepository,
-  CollectionsRepository,
-} from './core/adapters/collections.repository';
+import { CollectionsRepository } from './core/adapters/collections.repository';
 import { TagsRepository } from './core/adapters/tags.repository';
 import { StateRepository } from './core/adapters/state.repository';
-import {
-  SavedSearchRepository,
-  SavedSearchesRepository,
-} from './core/adapters/saved-searches.repository';
-import {
-  NoteRepository,
-  NotesRepository,
-} from './core/adapters/notes.repository';
+import { SavedSearchesRepository } from './core/adapters/saved-searches.repository';
+import { NotesRepository } from './core/adapters/notes.repository';
 
 // Ports & Adapters
 import { ITEM_REPOSITORY_PORT } from './core/ports/item-repository.port';
@@ -175,7 +138,7 @@ import {
     TypeController,
     StateController,
     StateBatchController,
-    SavedSearchController,
+    SavedSearchesController,
     NoteController,
   ],
   providers: [

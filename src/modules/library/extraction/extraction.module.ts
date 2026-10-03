@@ -8,7 +8,6 @@ import { OutboxWorker } from '../sync';
 // Presentation
 import {
   AttachmentController,
-  AttachmentsController,
   AttachmentStorageController,
 } from './attachments.controller';
 
@@ -23,10 +22,7 @@ import {
 } from './extraction.facade';
 
 // Services & Infrastructure
-import {
-  AttachmentService,
-  AttachmentsService,
-} from './core/services/attachments.service';
+import { AttachmentsService } from './core/services/attachments.service';
 import { AttachmentsRepository } from './core/adapters/attachments.repository';
 import { ExtractionRepository } from './core/adapters/extraction.repository';
 import { PdfProvider } from './core/adapters/pdf.provider';
@@ -56,14 +52,8 @@ import { GetAttachmentThumbnailUseCase } from './core/use-cases/get-attachment-t
 import { ItemLifecycleSubscriber } from './core/adapters/item-lifecycle.subscriber';
 
 // Annotation domain
-import {
-  AnnotationController,
-  AnnotationsController,
-} from './annotations.controller';
-import {
-  AnnotationService,
-  AnnotationsService,
-} from './core/services/annotations.service';
+import { AnnotationController } from './annotations.controller';
+import { AnnotationsService } from './core/services/annotations.service';
 import { AnnotationsRepository } from './core/adapters/annotations.repository';
 import { AnnotationNormalizer } from './core/adapters/annotation.normalizer';
 import { ANNOTATION_REPOSITORY_PORT } from './core/ports/annotation-repository.port';
@@ -77,6 +67,7 @@ import { GetAnnotationUseCase } from './core/use-cases/get-annotation.use-case';
 import { ListAnnotationsUseCase } from './core/use-cases/list-annotations.use-case';
 import { CATALOG_GATEWAY_PORT } from './core/ports/catalog-gateway.port';
 import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catalog-gateway.adapter';
+import { HttpCatalogGatewayAdapter } from './core/adapters/http-catalog-gateway.adapter';
 
 /**
  * Dedicated Extraction & Document Processing Hexagonal Module.
@@ -155,9 +146,16 @@ import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catal
     GetAnnotationUseCase,
     ListAnnotationsUseCase,
     InProcessCatalogGatewayAdapter,
+    HttpCatalogGatewayAdapter,
     {
       provide: CATALOG_GATEWAY_PORT,
-      useClass: InProcessCatalogGatewayAdapter,
+      useFactory: (
+        inProcess: InProcessCatalogGatewayAdapter,
+        http: HttpCatalogGatewayAdapter,
+      ) => {
+        return process.env.LIBRARY_CATALOG_URL ? http : inProcess;
+      },
+      inject: [InProcessCatalogGatewayAdapter, HttpCatalogGatewayAdapter],
     },
   ],
   exports: [
@@ -205,5 +203,3 @@ export class ExtractionModule implements OnModuleInit {
     );
   }
 }
-
-export { AttachmentsController, AnnotationsController };

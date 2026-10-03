@@ -131,4 +131,49 @@ export class YourWorkRepository implements IYourWorkRepository {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  async checkProjectAccess(
+    projectId: string,
+    userId: string,
+  ): Promise<{
+    exists: boolean;
+    hasAccess: boolean;
+    project?: ProjectMinimal;
+  }> {
+    const project = await (this.prisma as any).project.findFirst({
+      where: { id: projectId, deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        identifier: true,
+        avatar: true,
+        states: true,
+        createdById: true,
+        members: {
+          where: { userId },
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!project) {
+      return { exists: false, hasAccess: false };
+    }
+
+    const hasAccess =
+      project.createdById === userId ||
+      (Array.isArray(project.members) && project.members.length > 0);
+
+    return {
+      exists: true,
+      hasAccess,
+      project: {
+        id: project.id,
+        name: project.name,
+        identifier: project.identifier,
+        avatar: project.avatar,
+        states: project.states,
+      },
+    };
+  }
 }

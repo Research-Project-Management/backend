@@ -164,6 +164,53 @@ export class DocumentAiIngestionService {
       this.logger.log(
         `AI RAG Ingestion finished for file ${fileId}: status=${isIndexed ? 'indexed' : 'offline_fallback'}, chunks=${chunks.length}`,
       );
+
+      // 8. Propagate ragDocId and metadata to linked Library Attachment & Item if present
+      if (isIndexed && ragDocId) {
+        try {
+          const attachment = await (this.prisma as any).attachment?.findFirst({
+            where: { fileId, deletedAt: null },
+            select: { id: true, itemId: true, metadata: true },
+          });
+          if (attachment) {
+            const attMeta = (attachment.metadata as Record<string, any>) || {};
+            await (this.prisma as any).attachment.update({
+              where: { id: attachment.id },
+              data: {
+                metadata: {
+                  ...attMeta,
+                  ragDocId,
+                  ragStatus: 'indexed',
+                },
+              },
+            });
+
+            if (attachment.itemId) {
+              const item = await (this.prisma as any).item?.findUnique({
+                where: { id: attachment.itemId },
+                select: { id: true, metadata: true },
+              });
+              if (item) {
+                const itemMeta = (item.metadata as Record<string, any>) || {};
+                await (this.prisma as any).item.update({
+                  where: { id: item.id },
+                  data: {
+                    metadata: {
+                      ...itemMeta,
+                      ragDocId,
+                      ragStatus: 'indexed',
+                    },
+                  },
+                });
+              }
+            }
+          }
+        } catch (propagateErr: any) {
+          this.logger.debug(
+            `Non-fatal: could not propagate ragDocId to attachment/item: ${propagateErr.message}`,
+          );
+        }
+      }
     } catch (err: any) {
       this.logger.error(
         `AI RAG Ingestion failed for file ${fileId}: ${err.message}`,
