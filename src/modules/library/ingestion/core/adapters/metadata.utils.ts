@@ -17,6 +17,8 @@ export {
   cleanBannedString,
   cleanCommentText,
   inferItemTypeFromPdfSignals,
+  titleSimilarity,
+  TITLE_MATCH_THRESHOLD,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 
 export type {

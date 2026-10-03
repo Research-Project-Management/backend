@@ -10,7 +10,6 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { TransactionService } from './core/adapters/transaction.service';
-import { ChangeLogRepository } from './core/adapters/changelog.repository';
 import { SyncQueryDto } from './dto/sync-query.dto';
 import { ResilienceRegistryService } from '../shared-kernel/resilience/resilience-registry.service';
 import { OutboxWorker } from './core/adapters/outbox.worker';
@@ -35,7 +34,6 @@ function parseSafeBigInt(val?: string): bigint | undefined {
 export class SyncController {
   constructor(
     private readonly transactionService: TransactionService,
-    @Optional() private readonly changeLogRepo?: ChangeLogRepository,
     @Optional() private readonly resilienceRegistry?: ResilienceRegistryService,
     @Optional() private readonly outboxWorker?: OutboxWorker,
     @Optional() private readonly outboxMetrics?: OutboxMetrics,

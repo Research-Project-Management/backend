@@ -230,44 +230,73 @@ export class LibraryFacade implements ILibraryFacade {
       updatedAt: n.updatedAt,
     }));
 
+    interface ExtendedCatalogRelations {
+      itemTags?: Array<{
+        tag?: { id?: string; name?: string; color?: string | null };
+        tagId?: string;
+        name?: string;
+        color?: string | null;
+      }>;
+      tags?: Array<
+        | string
+        | { id?: string; name?: string; tag?: string; color?: string | null }
+      >;
+      collectionItems?: Array<{
+        collection?: {
+          id?: string;
+          name?: string;
+          color?: string | null;
+          parentId?: string | null;
+        };
+        collectionId?: string;
+      }>;
+      collections?: Array<{
+        id?: string;
+        name?: string;
+        color?: string | null;
+        parentId?: string | null;
+      }>;
+    }
+    const extItem = catalogItem as ExtendedCatalogRelations;
+
     let tags: TagSummaryDto[] = [];
-    if (Array.isArray((catalogItem as any).itemTags)) {
-      tags = (catalogItem as any).itemTags
-        .map((it: any) => ({
+    if (Array.isArray(extItem.itemTags)) {
+      tags = extItem.itemTags
+        .map((it) => ({
           id: it.tag?.id || it.tagId,
           name: it.tag?.name || it.name || '',
           color: it.tag?.color || null,
         }))
-        .filter((t: TagSummaryDto) => Boolean(t.name));
-    } else if (Array.isArray((catalogItem as any).tags)) {
-      tags = (catalogItem as any).tags
-        .map((t: any) =>
+        .filter((t: any): t is TagSummaryDto => Boolean(t.name));
+    } else if (Array.isArray(extItem.tags)) {
+      tags = extItem.tags
+        .map((t) =>
           typeof t === 'string'
             ? { name: t }
             : { id: t.id, name: t.name || t.tag || '', color: t.color || null },
         )
-        .filter((t: TagSummaryDto) => Boolean(t.name));
+        .filter((t: any): t is TagSummaryDto => Boolean(t.name));
     }
 
     let collections: CollectionSummaryDto[] = [];
-    if (Array.isArray((catalogItem as any).collectionItems)) {
-      collections = (catalogItem as any).collectionItems
-        .map((ci: any) => ({
-          id: ci.collection?.id || ci.collectionId,
+    if (Array.isArray(extItem.collectionItems)) {
+      collections = extItem.collectionItems
+        .filter((ci) => Boolean(ci.collection?.id || ci.collectionId))
+        .map((ci) => ({
+          id: (ci.collection?.id || ci.collectionId) as string,
           name: ci.collection?.name || '',
           color: ci.collection?.color || null,
           parentId: ci.collection?.parentId || null,
-        }))
-        .filter((c: CollectionSummaryDto) => Boolean(c.id));
-    } else if (Array.isArray((catalogItem as any).collections)) {
-      collections = (catalogItem as any).collections
-        .map((c: any) => ({
-          id: c.id,
+        }));
+    } else if (Array.isArray(extItem.collections)) {
+      collections = extItem.collections
+        .filter((c) => Boolean(c.id))
+        .map((c) => ({
+          id: c.id as string,
           name: c.name || '',
           color: c.color || null,
           parentId: c.parentId || null,
-        }))
-        .filter((c: CollectionSummaryDto) => Boolean(c.id));
+        }));
     }
 
     return {

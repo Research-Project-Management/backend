@@ -39,7 +39,7 @@ export class SearchRepository implements OnModuleInit {
     return SearchSpecificationBuilder.baseFromOptions(
       userId,
       options,
-    ).toPrismaWhere() as Prisma.ItemWhereInput;
+    ).toPrismaWhere();
   }
 
   /**
@@ -47,9 +47,7 @@ export class SearchRepository implements OnModuleInit {
    * Used as fallback when tsvector is not available.
    */
   private buildTextWhereIlike(q: string): Prisma.ItemWhereInput {
-    return new TextSearchSpecification(
-      q,
-    ).toPrismaWhere() as Prisma.ItemWhereInput;
+    return new TextSearchSpecification(q).toPrismaWhere();
   }
 
   async searchItems(
@@ -60,6 +58,32 @@ export class SearchRepository implements OnModuleInit {
     const limit = Math.min(options.limit ?? 20, 100);
     const q = options.q?.trim();
 
+    if (!tx && this.cache) {
+      const scopeKey = options.projectId
+        ? `proj:${options.projectId}`
+        : `user:${userId}`;
+      const filterHash = createHash('sha256')
+        .update(JSON.stringify({ ...options, limit, q }))
+        .digest('hex');
+      const cacheKey = `library:search:items:${scopeKey}:${filterHash}`;
+
+      return this.cache.wrap(
+        cacheKey,
+        () => this.executeSearchItems(userId, options, q, limit, tx),
+        60, // 60s TTL for fast navigation & debounced typing
+      );
+    }
+
+    return this.executeSearchItems(userId, options, q, limit, tx);
+  }
+
+  private async executeSearchItems(
+    userId: string,
+    options: SearchOptions,
+    q: string | undefined,
+    limit: number,
+    tx?: Prisma.TransactionClient,
+  ) {
     // ── Full-Text Search via PostgreSQL tsvector ────────────────────────────
     // Uses generated column `search_vector` (GIN index) added by migration
     // `add_catalog_item_fts`. Falls back to ILIKE if migration hasn't run yet.
@@ -389,7 +413,10 @@ export class SearchRepository implements OnModuleInit {
 
   async invalidateFacets(scopeId: string): Promise<void> {
     if (this.cache) {
-      await this.cache.delPattern(`library:search:facets:*${scopeId}*`);
+      await Promise.all([
+        this.cache.delPattern(`library:search:facets:*${scopeId}*`),
+        this.cache.delPattern(`library:search:items:*${scopeId}*`),
+      ]);
     }
   }
 

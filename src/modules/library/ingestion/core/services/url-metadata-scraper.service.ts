@@ -7,16 +7,19 @@ import {
 import { SsrfGuardService } from '../../../shared-kernel/core/services/ssrf-guard.service';
 import { MetadataRoutingPolicy } from '../domain/metadata.policy';
 import {
-  normalizeAcademicTitleCase,
   cleanBibliographicText,
   cleanAbstractText,
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
+  normalizeIsbn,
+  normalizeIssn,
   extractYearFromDate,
   decodeHtmlEntities,
   parseCreatorString,
   splitAuthorString,
+  isBotChallengePage,
+  deriveDoiFromPublisherUrl,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 
 /** Canonical actor identifier for automated system-level ingestion downloads */
@@ -49,8 +52,93 @@ export interface ScrapedUrlResult {
   abstract?: string;
   keywords?: string[];
   pdfUrl?: string;
+  /** Journal / periodical volume (citation_volume, prism.volume, …) */
+  volume?: string;
+  /** Journal issue / number (citation_issue, prism.number, …) */
+  issue?: string;
+  /** Page range "first-last" or single page */
+  pages?: string;
+  /** Language code/name as published (citation_language, dc.language, …) */
+  language?: string;
+  /** Place of publication (maps to Zotero `place`) */
+  publisherPlace?: string;
+  /** Conference / proceedings name (citation_conference_title) */
+  conferenceName?: string;
+  /** Containing book title for chapters (citation_inbook_title) */
+  bookTitle?: string;
+  /** Degree-granting / report-issuing institution */
+  institution?: string;
+  /** Report / technical report number */
+  reportNumber?: string;
+  /**
+   * Zotero item type hint derived from embedded metadata
+   * (journalArticle | conferencePaper | bookSection | book | thesis | report |
+   *  newspaperArticle | blogPost | dataset). Hint only — callers decide.
+   */
+  itemType?: string;
   confidence: number;
 }
+
+/** Thrown when a redirect hop targets an unsafe destination. */
+class UnsafeRedirectError extends Error {}
+
+type MetaEntry = { key: string; value: string; alias: boolean };
+
+/** Partial metadata from a structured fallback source (JSON-LD / COinS). */
+type FallbackMeta = {
+  title?: string;
+  authors?: string[];
+  date?: string;
+  publicationTitle?: string;
+  publisher?: string;
+  doi?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  issn?: string;
+  isbn?: string;
+  abstract?: string;
+  keywords?: string[];
+  language?: string;
+  itemType?: string;
+};
+
+const MAX_REDIRECTS = 5;
+const FETCH_TIMEOUT_MS = 14000;
+const FETCH_HEADERS: Record<string, string> = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (Academic Client; mailto:contact@flux.academic)',
+  Accept:
+    'text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
+/** JSON-LD @type values considered bibliographic, in priority order. */
+const JSONLD_TYPES = [
+  'ScholarlyArticle',
+  'MedicalScholarlyArticle',
+  'Chapter',
+  'Thesis',
+  'Report',
+  'Book',
+  'Dataset',
+  'Article',
+  'NewsArticle',
+  'BlogPosting',
+];
+
+const JSONLD_TYPE_TO_ITEM_TYPE: Record<string, string | undefined> = {
+  ScholarlyArticle: 'journalArticle',
+  MedicalScholarlyArticle: 'journalArticle',
+  Chapter: 'bookSection',
+  Thesis: 'thesis',
+  Report: 'report',
+  Book: 'book',
+  Dataset: 'dataset',
+  NewsArticle: 'newspaperArticle',
+  BlogPosting: 'blogPost',
+  Article: undefined,
+};
 
 @Injectable()
 export class UrlMetadataScraperService {
@@ -70,7 +158,9 @@ export class UrlMetadataScraperService {
    * Extracts a readable title and filename hint from the URL pathname slug.
    * e.g. "https://proceedings.neurips.cc/paper/7181-attention-is-all-you-need.pdf"
    * -> filename: "7181-attention-is-all-you-need.pdf"
-   * -> title: "Attention Is All You Need"
+   * -> title: "Attention is all you need"
+   * Only the first letter is capitalized — slugs carry no case information,
+   * so we do not invent title case.
    */
   extractSlugMetadata(rawUrl: string): { title?: string; filename: string } {
     try {
@@ -123,21 +213,92 @@ export class UrlMetadataScraperService {
       ]);
 
       const meaningfulWords = words.filter(
-        (w) => !genericWords.has(w.toLowerCase()) && !/^\d+$/.test(w),
+        (w) =>
+          !genericWords.has(w.toLowerCase()) &&
+          // Only purely alphabetic tokens of ≥3 letters count as "words";
+          // ID fragments like "s41586", "025", "10072" do not.
+          /^[A-Za-z\u00C0-\u024F]{3,}$/.test(w),
       );
 
       let title: string | undefined;
-      if (
-        meaningfulWords.length >= 2 ||
-        (words.length >= 3 && cleanSlug.length >= 10)
-      ) {
+      if (meaningfulWords.length >= 2) {
         const rawTitle = words.join(' ');
-        title = normalizeAcademicTitleCase(rawTitle);
+        title = rawTitle.charAt(0).toUpperCase() + rawTitle.slice(1);
       }
 
       return { title, filename };
     } catch {
       return { filename: 'document.pdf' };
+    }
+  }
+
+  /** Runs the SSRF guard (or static policy fallback) against a URL. */
+  private async assertSafeUrl(url: string): Promise<void> {
+    if (this.ssrfGuard) {
+      await this.ssrfGuard.assertSafeUrl(url);
+    } else {
+      MetadataRoutingPolicy.validateUrl(url);
+    }
+  }
+
+  /**
+   * Fetches a URL following redirects manually (max {@link MAX_REDIRECTS}
+   * hops) and re-validating every Location target against the SSRF guard, so
+   * a public URL cannot bounce us into a private network. The timeout budget
+   * is shared across all hops.
+   */
+  private async fetchWithSafeRedirects(
+    startUrl: string,
+  ): Promise<{ response: Response; finalUrl: string }> {
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    let currentUrl = startUrl;
+
+    for (let hop = 0; ; hop++) {
+      const res = await fetch(currentUrl, {
+        headers: FETCH_HEADERS,
+        signal,
+        redirect: 'manual',
+      });
+
+      const status = res.status;
+      const location =
+        typeof status === 'number' && status >= 300 && status < 400
+          ? res.headers?.get?.('location')
+          : null;
+      if (!location) {
+        return { response: res, finalUrl: currentUrl };
+      }
+
+      // Release the redirect body before moving on.
+      try {
+        await res.body?.cancel();
+      } catch {
+        /* ignore */
+      }
+
+      if (hop >= MAX_REDIRECTS) {
+        throw new Error(`Too many redirects (>${MAX_REDIRECTS})`);
+      }
+
+      let nextUrl: string;
+      try {
+        nextUrl = new URL(location, currentUrl).toString();
+      } catch {
+        throw new UnsafeRedirectError(`Invalid redirect target "${location}"`);
+      }
+      if (!/^https?:$/i.test(new URL(nextUrl).protocol)) {
+        throw new UnsafeRedirectError(
+          `Redirect to non-HTTP scheme rejected: "${nextUrl}"`,
+        );
+      }
+      try {
+        await this.assertSafeUrl(nextUrl);
+      } catch (err: any) {
+        throw new UnsafeRedirectError(
+          `Redirect target "${nextUrl}" rejected: ${err?.message}`,
+        );
+      }
+      currentUrl = nextUrl;
     }
   }
 
@@ -154,65 +315,55 @@ export class UrlMetadataScraperService {
   ): Promise<ScrapedUrlResult> {
     const canonicalUrl = url.trim();
     const slugHint = this.extractSlugMetadata(canonicalUrl);
+    // Deterministic DOI from publisher URL patterns (nature.com/articles/…,
+    // /doi/10.x/…). Survives fetch failures and anti-bot pages.
+    const urlDoi = deriveDoiFromPublisherUrl(canonicalUrl);
+
+    const fallbackResult = (): ScrapedUrlResult => ({
+      url: canonicalUrl,
+      isPdf: false,
+      title: slugHint.title,
+      filename: slugHint.filename,
+      doi: urlDoi || undefined,
+      confidence: 0.5,
+    });
 
     // 1. SSRF verification
     try {
-      if (this.ssrfGuard) {
-        await this.ssrfGuard.assertSafeUrl(canonicalUrl);
-      } else {
-        MetadataRoutingPolicy.validateUrl(canonicalUrl);
-      }
+      await this.assertSafeUrl(canonicalUrl);
     } catch (ssrfErr: any) {
       this.logger.warn(
         `SSRF rejection for URL "${canonicalUrl}": ${ssrfErr?.message}`,
       );
-      return {
-        url: canonicalUrl,
-        isPdf: false,
-        title: slugHint.title,
-        filename: slugHint.filename,
-        confidence: 0.5,
-      };
+      return fallbackResult();
     }
 
-    // 2. Fetch the URL with standard academic User-Agent
+    // 2. Fetch the URL with standard academic User-Agent; redirects are
+    //    followed manually with per-hop SSRF validation.
     let response: Response;
+    let finalUrl = canonicalUrl;
     try {
-      response = await fetch(canonicalUrl, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (Academic Client; mailto:contact@flux.academic)',
-          Accept:
-            'text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-        },
-        signal: AbortSignal.timeout(14000),
-        redirect: 'follow',
-      });
+      const fetched = await this.fetchWithSafeRedirects(canonicalUrl);
+      response = fetched.response;
+      finalUrl = fetched.finalUrl;
     } catch (fetchErr: any) {
-      this.logger.warn(
-        `Failed to fetch URL "${canonicalUrl}": ${fetchErr?.message}`,
-      );
-      return {
-        url: canonicalUrl,
-        isPdf: false,
-        title: slugHint.title,
-        filename: slugHint.filename,
-        confidence: 0.5,
-      };
+      if (fetchErr instanceof UnsafeRedirectError) {
+        this.logger.warn(
+          `SSRF rejection on redirect for URL "${canonicalUrl}": ${fetchErr.message}`,
+        );
+      } else {
+        this.logger.warn(
+          `Failed to fetch URL "${canonicalUrl}": ${fetchErr?.message}`,
+        );
+      }
+      return fallbackResult();
     }
 
     if (!response.ok) {
       this.logger.warn(
         `HTTP ${response.status} when fetching URL "${canonicalUrl}"`,
       );
-      return {
-        url: canonicalUrl,
-        isPdf: false,
-        title: slugHint.title,
-        filename: slugHint.filename,
-        confidence: 0.5,
-      };
+      return fallbackResult();
     }
 
     const contentType = (
@@ -221,7 +372,8 @@ export class UrlMetadataScraperService {
     const isPdfContent =
       contentType.includes('application/pdf') ||
       canonicalUrl.toLowerCase().endsWith('.pdf') ||
-      new URL(canonicalUrl).pathname.toLowerCase().endsWith('.pdf');
+      new URL(canonicalUrl).pathname.toLowerCase().endsWith('.pdf') ||
+      new URL(finalUrl).pathname.toLowerCase().endsWith('.pdf');
 
     // ── Branch A: Direct PDF URL Ingestion ──────────────────────────────────
     if (isPdfContent) {
@@ -346,7 +498,27 @@ export class UrlMetadataScraperService {
     // ── Branch B: HTML Webpage Ingestion ────────────────────────────────────
     try {
       const htmlText = await response.text();
-      const parsedHtml = this.extractHtmlMetadata(htmlText, canonicalUrl);
+
+      // Anti-bot interstitials (Akamai "Client Challenge", Cloudflare "Just a
+      // moment...") are served with HTTP 200. Their <title> must never be used
+      // as bibliographic title — it poisons downstream title searches.
+      if (isBotChallengePage(htmlText)) {
+        this.logger.warn(
+          `Bot-challenge page detected for "${canonicalUrl}" — ignoring page metadata${urlDoi ? `, using URL-derived DOI ${urlDoi}` : ''}`,
+        );
+        return {
+          url: canonicalUrl,
+          isPdf: false,
+          filename: slugHint.filename,
+          title: urlDoi ? undefined : slugHint.title,
+          doi: urlDoi || undefined,
+          confidence: urlDoi ? 0.9 : 0.3,
+        };
+      }
+
+      // finalUrl (post-redirect) is the correct base for relative pdf links.
+      const parsedHtml = this.extractHtmlMetadata(htmlText, finalUrl);
+      const resolvedDoi = parsedHtml.doi || urlDoi || undefined;
 
       const resolvedTitle = parsedHtml.title || slugHint.title;
       return {
@@ -356,7 +528,7 @@ export class UrlMetadataScraperService {
         title: resolvedTitle,
         authors: parsedHtml.authors,
         creators: parsedHtml.creators,
-        doi: parsedHtml.doi,
+        doi: resolvedDoi,
         arxivId: parsedHtml.arxivId,
         pmid: parsedHtml.pmid,
         isbn: parsedHtml.isbn,
@@ -369,8 +541,18 @@ export class UrlMetadataScraperService {
         abstract: parsedHtml.abstract,
         keywords: parsedHtml.keywords,
         pdfUrl: parsedHtml.pdfUrl,
+        volume: parsedHtml.volume,
+        issue: parsedHtml.issue,
+        pages: parsedHtml.pages,
+        language: parsedHtml.language,
+        publisherPlace: parsedHtml.publisherPlace,
+        conferenceName: parsedHtml.conferenceName,
+        bookTitle: parsedHtml.bookTitle,
+        institution: parsedHtml.institution,
+        reportNumber: parsedHtml.reportNumber,
+        itemType: parsedHtml.itemType,
         confidence:
-          parsedHtml.doi || parsedHtml.arxivId || parsedHtml.pmid
+          resolvedDoi || parsedHtml.arxivId || parsedHtml.pmid
             ? 0.95
             : resolvedTitle
               ? 0.85
@@ -385,32 +567,44 @@ export class UrlMetadataScraperService {
         isPdf: false,
         filename: slugHint.filename,
         title: slugHint.title,
+        doi: urlDoi || undefined,
         confidence: 0.5,
       };
     }
   }
 
   /**
-   * Extracts academic metadata from HTML source via Highwire Press, Dublin Core,
-   * OpenGraph, and title tags.
+   * Extracts academic metadata from HTML source via Highwire Press
+   * (citation_*, bepress_citation_*), PRISM, Dublin Core, EPrints, JSON-LD
+   * (schema.org), COinS (Z3988), OpenGraph, and title tags.
+   *
+   * Titles are kept verbatim as published (only markup/entity/whitespace
+   * cleanup) — matching Zotero behaviour.
    */
   extractHtmlMetadata(
     html: string,
     pageUrl: string,
   ): Partial<ScrapedUrlResult> {
-    const metaTags = this.parseMetaTags(html);
+    const entries = this.parseMetaEntries(html);
+    const metaTags = this.buildMetaMap(entries);
+    const all = (...keys: string[]) => this.collectMetaValues(entries, keys);
+    const first = (...keys: string[]): string | undefined => {
+      for (const k of keys) {
+        const v = metaTags[k];
+        if (v && v.trim()) return v.trim();
+      }
+      return undefined;
+    };
+    const jsonLd = this.extractJsonLdMetadata(html);
+    const coins = this.extractCoinsMetadata(html);
     const result: Partial<ScrapedUrlResult> = {};
 
     // 1. Title
-    const titleCandidates = [
-      metaTags['citation_title'],
-      metaTags['dc.title'],
-      metaTags['dc:title'],
-      metaTags['og:title'],
-      metaTags['twitter:title'],
-    ].filter(Boolean);
-
-    let rawTitle = titleCandidates[0];
+    let rawTitle =
+      first('citation_title', 'eprints.title', 'dc.title', 'dcterms.title') ||
+      jsonLd.title ||
+      coins.title ||
+      first('og:title', 'twitter:title');
     if (!rawTitle) {
       // Fall back to <title> tag
       const titleTagMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
@@ -430,89 +624,301 @@ export class UrlMetadataScraperService {
     }
 
     if (rawTitle) {
-      result.title = normalizeAcademicTitleCase(
-        cleanBibliographicText(rawTitle) || rawTitle,
-      );
+      result.title = cleanBibliographicText(rawTitle) || rawTitle;
     }
 
-    // 2. Authors (Highwire Press supports multiple citation_author meta tags)
-    const rawAuthors = this.extractAllMetaValues(html, [
-      'citation_author',
-      'dc.creator',
-      'dc:creator',
-    ]);
-    const authors = rawAuthors.flatMap((a) => splitAuthorString(a));
+    // 2. Authors (Highwire Press supports multiple citation_author meta tags).
+    // Prefer citation_author; only fall back to Dublin Core when absent, since
+    // many publishers (e.g. Nature) emit both and would duplicate every author.
+    let rawAuthors = all('citation_author');
+    if (rawAuthors.length === 0) rawAuthors = all('citation_authors');
+    if (rawAuthors.length === 0) rawAuthors = all('eprints.creators_name');
+    if (rawAuthors.length === 0) {
+      rawAuthors = all('dc.creator', 'dcterms.creator');
+    }
+    if (rawAuthors.length === 0 && jsonLd.authors?.length) {
+      rawAuthors = jsonLd.authors;
+    }
+    if (rawAuthors.length === 0 && coins.authors?.length) {
+      rawAuthors = coins.authors;
+    }
+    const authors = this.dedupeNames(rawAuthors);
+    const editors = this.dedupeNames(
+      all('citation_editor', 'eprints.editors_name'),
+    );
     if (authors.length > 0) {
       result.authors = authors;
-      result.creators = authors.map((authStr, idx) => {
-        const parsed = parseCreatorString(authStr, idx);
-        return {
-          firstName: parsed.firstName,
-          lastName: parsed.lastName,
-          fullName: parsed.fullName,
-          creatorType: 'author',
-        };
-      });
+    }
+    const creators = [
+      ...authors.map((a, idx) => this.toCreator(a, idx, 'author')),
+      ...editors.map((e, idx) => this.toCreator(e, idx, 'editor')),
+    ];
+    if (creators.length > 0) {
+      result.creators = creators;
     }
 
-    // 3. Identifiers: DOI, arXiv, PMID
-    const rawDoi =
-      metaTags['citation_doi'] ||
-      metaTags['dc.identifier'] ||
-      metaTags['dc:identifier'];
-    if (rawDoi) {
-      result.doi = normalizeDoi(rawDoi);
+    // 3. Identifiers: DOI, arXiv, PMID, ISSN, ISBN
+    for (const cand of [
+      first('citation_doi'),
+      first('prism.doi'),
+      ...all('dc.identifier', 'dcterms.identifier', 'eprints.id_number'),
+      jsonLd.doi,
+      coins.doi,
+    ]) {
+      const d = cand ? normalizeDoi(cand) : undefined;
+      if (d) {
+        result.doi = d;
+        break;
+      }
     }
     if (!result.doi) {
-      // Sniff embedded DOI from HTML
-      const embeddedDoiMatch = html.match(
-        /\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+)\b/i,
-      );
-      if (embeddedDoiMatch && !embeddedDoiMatch[1].includes('schema.org')) {
-        result.doi = normalizeDoi(embeddedDoiMatch[1]);
+      const urlDoi = deriveDoiFromPublisherUrl(pageUrl);
+      if (urlDoi) result.doi = urlDoi;
+    }
+    if (!result.doi) {
+      // Sniff embedded DOI from HTML. Pages usually list many DOIs (references,
+      // related articles), so only accept the dominant one if it repeats.
+      const counts = new Map<string, number>();
+      const doiRe = /\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+)\b/gi;
+      let m: RegExpExecArray | null;
+      while ((m = doiRe.exec(html)) !== null) {
+        if (m[1].includes('schema.org')) continue;
+        const d = normalizeDoi(m[1]);
+        if (d) counts.set(d, (counts.get(d) || 0) + 1);
+      }
+      let best: string | undefined;
+      let bestCount = 0;
+      for (const [d, c] of counts) {
+        if (c > bestCount) {
+          best = d;
+          bestCount = c;
+        }
+      }
+      if (best && bestCount >= 2) {
+        result.doi = best;
       }
     }
 
-    const rawArxiv = metaTags['citation_arxiv_id'];
+    const rawArxiv = first('citation_arxiv_id');
     if (rawArxiv) {
       result.arxivId = normalizeArxivId(rawArxiv);
     }
 
-    const rawPmid = metaTags['citation_pmid'];
+    const rawPmid = first('citation_pmid');
     if (rawPmid) {
       result.pmid = normalizePmid(rawPmid);
     }
 
-    // 4. Dates & Year
+    for (const cand of [
+      ...all(
+        'citation_issn',
+        'citation_eissn',
+        'prism.issn',
+        'prism.eissn',
+        'eprints.issn',
+      ),
+      jsonLd.issn,
+      coins.issn,
+    ]) {
+      const v = cand ? normalizeIssn(cand) : undefined;
+      if (v) {
+        result.issn = v;
+        break;
+      }
+    }
+
+    for (const cand of [
+      ...all('citation_isbn', 'prism.isbn', 'eprints.isbn'),
+      jsonLd.isbn,
+      coins.isbn,
+    ]) {
+      const v = cand ? normalizeIsbn(cand) : undefined;
+      if (v) {
+        result.isbn = v;
+        break;
+      }
+    }
+
+    // 4. Dates & Year (citation_online_date is a last-resort meta fallback)
     const rawDate =
-      metaTags['citation_publication_date'] ||
-      metaTags['citation_date'] ||
-      metaTags['dc.date'] ||
-      metaTags['dc:date'];
+      first(
+        'citation_publication_date',
+        'citation_date',
+        'citation_cover_date',
+        'prism.publicationdate',
+        'prism.coverdate',
+        'dc.date',
+        'dcterms.issued',
+        'dcterms.date',
+        'eprints.date',
+        'citation_online_date',
+        'prism.onlinedate',
+      ) ||
+      jsonLd.date ||
+      coins.date;
     if (rawDate) {
       result.publicationDate = rawDate.trim();
       result.year = extractYearFromDate(rawDate);
+    } else {
+      // Fallback: extract date from URL path pattern like /2020/09/29/ or /2020-09-29/
+      const urlDateMatch = pageUrl.match(
+        /(?:^|\/)((?:19|20)\d{2})[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])(?:\/|[?#]|$)/,
+      );
+      if (urlDateMatch) {
+        result.publicationDate = `${urlDateMatch[1]}-${urlDateMatch[2]}-${urlDateMatch[3]}`;
+        result.year = parseInt(urlDateMatch[1], 10);
+      }
     }
 
-    // 5. Venue / Publication Title
+    // 5. Venue / container titles
+    const journalTitle = this.cleanText(
+      first(
+        'citation_journal_title',
+        'prism.publicationname',
+        'eprints.publication',
+        'dc.source',
+      ),
+    );
+    const conferenceName = this.cleanText(
+      first(
+        'citation_conference_title',
+        'citation_conference',
+        'eprints.event_title',
+      ),
+    );
+    const bookTitle = this.cleanText(
+      first(
+        'citation_inbook_title',
+        'citation_book_title',
+        'eprints.book_title',
+      ),
+    );
+    const seriesTitle = this.cleanText(first('citation_series_title'));
+    const fallbackVenue = this.cleanText(
+      jsonLd.publicationTitle || coins.publicationTitle,
+    );
+    if (conferenceName) result.conferenceName = conferenceName;
+    if (bookTitle) result.bookTitle = bookTitle;
+
     const venue =
-      metaTags['citation_journal_title'] ||
-      metaTags['citation_conference_title'] ||
-      metaTags['citation_series_title'];
+      journalTitle ||
+      conferenceName ||
+      bookTitle ||
+      seriesTitle ||
+      fallbackVenue;
     if (venue) {
-      result.publicationTitle = cleanBibliographicText(venue);
-      result.journal = result.publicationTitle;
+      result.publicationTitle = venue;
+      // `journal` historically mirrored publicationTitle; keep that, except
+      // for book containers which are not periodicals.
+      if (venue !== bookTitle) result.journal = venue;
     }
 
-    // 6. Publisher
-    const pub = metaTags['citation_publisher'] || metaTags['dc.publisher'];
-    if (pub) {
-      result.publisher = cleanBibliographicText(pub);
+    // 6. Publisher / place / institution
+    const pub = first(
+      'citation_publisher',
+      'dc.publisher',
+      'dcterms.publisher',
+      'eprints.publisher',
+      'prism.publisher',
+    );
+    const cleanPub = this.cleanText(pub || jsonLd.publisher);
+    if (cleanPub) {
+      result.publisher = cleanPub;
+    }
+    const place = this.cleanText(
+      first(
+        'citation_publisher_place',
+        'citation_publication_place',
+        'eprints.place_of_pub',
+      ),
+    );
+    if (place) result.publisherPlace = place;
+
+    const thesisInstitution = this.cleanText(
+      first('citation_dissertation_institution'),
+    );
+    const reportInstitution = this.cleanText(
+      first('citation_technical_report_institution'),
+    );
+    const eprintsInstitution = this.cleanText(first('eprints.institution'));
+    const institution =
+      thesisInstitution || reportInstitution || eprintsInstitution;
+    if (institution) result.institution = institution;
+    const reportNumber = first(
+      'citation_technical_report_number',
+      'eprints.number_report',
+    );
+    if (reportNumber) result.reportNumber = reportNumber;
+
+    // 7. Volume / issue / pages
+    const volume =
+      first('citation_volume', 'prism.volume', 'eprints.volume') ||
+      jsonLd.volume ||
+      coins.volume;
+    if (volume) result.volume = volume;
+
+    const issue =
+      first(
+        'citation_issue',
+        'prism.number',
+        'prism.issueidentifier',
+        'eprints.number',
+      ) ||
+      jsonLd.issue ||
+      coins.issue;
+    if (issue) result.issue = issue;
+
+    const pages =
+      this.joinPages(first('citation_firstpage'), first('citation_lastpage')) ||
+      this.joinPages(first('prism.startingpage'), first('prism.endingpage')) ||
+      first('prism.pagerange', 'eprints.pagerange') ||
+      jsonLd.pages ||
+      coins.pages;
+    if (pages) result.pages = pages;
+
+    // 8. Language
+    const language =
+      first(
+        'citation_language',
+        'dc.language',
+        'dcterms.language',
+        'eprints.language',
+      ) || jsonLd.language;
+    if (language) result.language = language;
+
+    // 9. Item type hint (Zotero Embedded Metadata precedence)
+    const eprintsType = (first('eprints.type') || '').toLowerCase();
+    if (thesisInstitution || eprintsType === 'thesis') {
+      result.itemType = 'thesis';
+    } else if (
+      reportInstitution ||
+      reportNumber ||
+      eprintsType === 'monograph'
+    ) {
+      result.itemType = 'report';
+    } else if (conferenceName || eprintsType === 'conference_item') {
+      result.itemType = 'conferencePaper';
+    } else if (bookTitle || eprintsType === 'book_section') {
+      result.itemType = 'bookSection';
+    } else if (journalTitle || eprintsType === 'article') {
+      result.itemType = 'journalArticle';
+    } else if (eprintsType === 'book') {
+      result.itemType = 'book';
+    } else if (jsonLd.itemType) {
+      result.itemType = jsonLd.itemType;
+    } else if (coins.itemType) {
+      result.itemType = coins.itemType;
+    } else if (/\/blogs?\//i.test(pageUrl)) {
+      result.itemType = 'blogPost';
     }
 
-    // 7. PDF URL
-    const pdfUrl =
-      metaTags['citation_pdf_url'] || metaTags['citation_fulltext_html_url'];
+    // 10. PDF URL (resolved relative to the post-redirect page URL)
+    const pdfUrl = first(
+      'citation_pdf_url',
+      'citation_fulltext_html_url',
+      'eprints.document_url',
+      'bepress_citation_pdf_url',
+    );
     if (pdfUrl) {
       try {
         result.pdfUrl = new URL(pdfUrl, pageUrl).toString();
@@ -521,81 +927,427 @@ export class UrlMetadataScraperService {
       }
     }
 
-    // 8. Abstract
-    const rawAbstract =
-      metaTags['citation_abstract'] ||
-      metaTags['og:description'] ||
-      metaTags['description'];
+    // 11. Abstract — scholarly sources only; og:description is a last resort
+    // and only when long enough to plausibly be an abstract. Generic
+    // `description` meta (SEO blurbs) is never used.
+    let rawAbstract =
+      first(
+        'citation_abstract',
+        'eprints.abstract',
+        'dcterms.abstract',
+        'dc.description',
+      ) ||
+      jsonLd.abstract ||
+      coins.abstract;
+    if (!rawAbstract) {
+      const og = first('og:description');
+      if (og && og.length >= 200) rawAbstract = og;
+    }
     if (rawAbstract) {
-      result.abstract = cleanAbstractText(rawAbstract);
+      const cleanedAbstract = cleanAbstractText(rawAbstract);
+      if (cleanedAbstract) result.abstract = cleanedAbstract;
     }
 
-    // 9. Keywords
-    const rawKeywords = metaTags['citation_keywords'] || metaTags['keywords'];
-    if (rawKeywords) {
-      result.keywords = rawKeywords
-        .split(/[,;]/)
-        .map((k) => k.trim())
-        .filter(Boolean);
+    // 12. Keywords — citation_keywords (possibly repeated) first; generic
+    // `keywords` meta only when it looks like a real keyword list.
+    let keywordValues = all('citation_keywords', 'citation_keyword');
+    if (keywordValues.length === 0) {
+      keywordValues = all('eprints.keywords', 'dc.subject', 'dcterms.subject');
+    }
+    if (keywordValues.length === 0 && jsonLd.keywords?.length) {
+      keywordValues = jsonLd.keywords;
+    }
+    let keywords = this.splitKeywords(keywordValues);
+    if (keywords.length === 0) {
+      const generic = this.splitKeywords(all('keywords'));
+      if (this.looksLikeKeywordList(generic)) keywords = generic;
+    }
+    if (keywords.length > 0) {
+      result.keywords = keywords;
     }
 
     return result;
   }
 
-  private parseMetaTags(html: string): Record<string, string> {
-    const metaTags: Record<string, string> = {};
-    const metaRegex =
-      /<meta\s+[^>]*(?:name|property)=["']([^"']+)["'][^>]*content=["']([^"']*)["'][^>]*>/gi;
-    let match: RegExpExecArray | null;
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
-    while ((match = metaRegex.exec(html)) !== null) {
-      const key = match[1].trim().toLowerCase();
-      const val = decodeHtmlEntities(match[2].trim());
-      if (key && val && !metaTags[key]) {
-        metaTags[key] = val;
-      }
-    }
-
-    // Handle reverse attribute order: content="..." name="..."
-    const reverseMetaRegex =
-      /<meta\s+[^>]*content=["']([^"']*)["'][^>]*(?:name|property)=["']([^"']+)["'][^>]*>/gi;
-    while ((match = reverseMetaRegex.exec(html)) !== null) {
-      const key = match[2].trim().toLowerCase();
-      const val = decodeHtmlEntities(match[1].trim());
-      if (key && val && !metaTags[key]) {
-        metaTags[key] = val;
-      }
-    }
-
-    return metaTags;
+  private cleanText(v?: string): string | undefined {
+    if (!v) return undefined;
+    return cleanBibliographicText(v) || undefined;
   }
 
-  private extractAllMetaValues(html: string, targetKeys: string[]): string[] {
-    const targets = new Set(targetKeys.map((k) => k.toLowerCase()));
-    const values: string[] = [];
+  private joinPages(firstPage?: string, lastPage?: string): string | undefined {
+    const f = firstPage?.trim();
+    const l = lastPage?.trim();
+    if (!f) return undefined;
+    if (/[-–]/.test(f) || !l || l === f) return f;
+    return `${f}-${l}`;
+  }
 
-    const metaRegex =
-      /<meta\s+[^>]*(?:name|property)=["']([^"']+)["'][^>]*content=["']([^"']*)["'][^>]*>/gi;
-    let match: RegExpExecArray | null;
+  private dedupeNames(raw: string[]): string[] {
+    const seen = new Set<string>();
+    return raw
+      .flatMap((a) => splitAuthorString(a))
+      .filter((a) => {
+        const key = a.toLowerCase().replace(/\s+/g, ' ').trim();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
 
-    while ((match = metaRegex.exec(html)) !== null) {
-      const key = match[1].trim().toLowerCase();
-      const val = decodeHtmlEntities(match[2].trim());
-      if (targets.has(key) && val) {
-        values.push(val);
+  private toCreator(
+    name: string,
+    idx: number,
+    creatorType: string,
+  ): {
+    firstName?: string;
+    lastName: string;
+    fullName?: string;
+    creatorType?: string;
+  } {
+    const parsed = parseCreatorString(name, idx);
+    return {
+      firstName: parsed.firstName,
+      lastName: parsed.lastName,
+      fullName: parsed.fullName,
+      creatorType,
+    };
+  }
+
+  private splitKeywords(values: string[]): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const v of values) {
+      for (const k of v.split(/[,;]/)) {
+        const t = k.trim();
+        const key = t.toLowerCase();
+        if (t && !seen.has(key)) {
+          seen.add(key);
+          out.push(t);
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Heuristic: short, non-sentence tokens, bounded count. */
+  private looksLikeKeywordList(items: string[]): boolean {
+    if (items.length < 2 || items.length > 30) return false;
+    return items.every(
+      (k) => k.length <= 60 && k.split(/\s+/).length <= 6 && !/[.!?]$/.test(k),
+    );
+  }
+
+  /**
+   * Parses every <meta> tag into (key, value) entries. Attributes are parsed
+   * individually so double-quoted values may contain apostrophes
+   * (e.g. content="Alzheimer's disease") and vice versa. Keys come from
+   * `name`, `property` and `itemprop`. Keys are lower-cased; `dc:`/`dcterms:`/
+   * `prism:`/`eprints:` prefixes are normalized to dot form, and
+   * `bepress_citation_X` is aliased to `citation_X`.
+   */
+  private parseMetaEntries(html: string): MetaEntry[] {
+    const entries: MetaEntry[] = [];
+    const tagRe = /<meta\b((?:"[^"]*"|'[^']*'|[^'">])*)>/gi;
+    let tagMatch: RegExpExecArray | null;
+
+    while ((tagMatch = tagRe.exec(html)) !== null) {
+      const attrs = this.parseAttributes(tagMatch[1]);
+      const content = attrs['content'];
+      if (content === undefined) continue;
+      const value = decodeHtmlEntities(content).trim();
+      if (!value) continue;
+
+      for (const attrName of ['name', 'property', 'itemprop']) {
+        const rawKey = attrs[attrName];
+        if (!rawKey) continue;
+        for (const k of rawKey.split(/\s+/).filter(Boolean)) {
+          let key = k.trim().toLowerCase();
+          key = key.replace(/^(dc|dcterms|prism|eprints):/, '$1.');
+          if (key.startsWith('bepress_citation_')) {
+            entries.push({ key, value, alias: false });
+            entries.push({
+              key: key.replace(/^bepress_/, ''),
+              value,
+              alias: true,
+            });
+          } else {
+            entries.push({ key, value, alias: false });
+          }
+        }
+      }
+    }
+    return entries;
+  }
+
+  private parseAttributes(attrText: string): Record<string, string> {
+    const attrs: Record<string, string> = {};
+    const attrRe = /([a-zA-Z_:.-]+)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/g;
+    let m: RegExpExecArray | null;
+    while ((m = attrRe.exec(attrText)) !== null) {
+      const name = m[1].toLowerCase();
+      if (attrs[name] !== undefined) continue;
+      attrs[name] = m[3] ?? m[4] ?? m[5] ?? '';
+    }
+    return attrs;
+  }
+
+  /** First-wins key→value map; native keys beat bepress aliases. */
+  private buildMetaMap(entries: MetaEntry[]): Record<string, string> {
+    const map: Record<string, string> = {};
+    for (const pass of [false, true]) {
+      for (const e of entries) {
+        if (e.alias === pass && !map[e.key]) map[e.key] = e.value;
+      }
+    }
+    return map;
+  }
+
+  /**
+   * All values for the given keys, in document order. Native entries are
+   * preferred; bepress aliases are only used when no native value exists
+   * (avoids duplicate authors on pages emitting both schemes).
+   */
+  private collectMetaValues(entries: MetaEntry[], keys: string[]): string[] {
+    const targets = new Set(keys.map((k) => k.toLowerCase()));
+    const native = entries.filter((e) => !e.alias && targets.has(e.key));
+    if (native.length > 0) return native.map((e) => e.value);
+    return entries
+      .filter((e) => e.alias && targets.has(e.key))
+      .map((e) => e.value);
+  }
+
+  // ── JSON-LD (schema.org) ──────────────────────────────────────────────────
+
+  private extractJsonLdMetadata(html: string): FallbackMeta {
+    const out: FallbackMeta = {};
+    const nodes: any[] = [];
+    const scriptRe =
+      /<script\b[^>]*type\s*=\s*["']?application\/ld\+json["']?[^>]*>([\s\S]*?)<\/script>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = scriptRe.exec(html)) !== null) {
+      const raw = m[1]
+        .trim()
+        .replace(/^<!--|-->$/g, '')
+        .trim();
+      if (!raw) continue;
+      try {
+        this.flattenJsonLd(JSON.parse(raw), nodes, 0);
+      } catch {
+        /* malformed JSON-LD — ignore */
+      }
+    }
+    if (nodes.length === 0) return out;
+
+    const typesOf = (n: any): string[] =>
+      (Array.isArray(n?.['@type']) ? n['@type'] : [n?.['@type']])
+        .filter((t: any) => typeof t === 'string')
+        .map((t: string) => t.replace(/^.*[/#:]/, ''));
+
+    let node: any;
+    let nodeType: string | undefined;
+    for (const t of JSONLD_TYPES) {
+      node = nodes.find((n) => typesOf(n).includes(t));
+      if (node) {
+        nodeType = t;
+        break;
+      }
+    }
+    if (!node || !nodeType) return out;
+
+    const str = (v: any): string | undefined => {
+      if (v === undefined || v === null) return undefined;
+      if (typeof v === 'string' || typeof v === 'number') {
+        const s = decodeHtmlEntities(String(v)).trim();
+        return s || undefined;
+      }
+      if (Array.isArray(v)) return str(v[0]);
+      if (typeof v === 'object') return str(v.name ?? v['@value'] ?? v.value);
+      return undefined;
+    };
+    const arr = (v: any): any[] =>
+      v === undefined || v === null ? [] : Array.isArray(v) ? v : [v];
+
+    out.itemType = JSONLD_TYPE_TO_ITEM_TYPE[nodeType];
+    out.title = str(node.headline) || str(node.name);
+
+    const authors: string[] = [];
+    for (const a of arr(node.author ?? node.creator)) {
+      if (typeof a === 'string') {
+        const s = str(a);
+        if (s) authors.push(s);
+      } else if (a && typeof a === 'object') {
+        const given = str(a.givenName);
+        const family = str(a.familyName);
+        const name =
+          given || family
+            ? [given, family].filter(Boolean).join(' ')
+            : str(a.name);
+        if (name) authors.push(name);
+      }
+    }
+    if (authors.length) out.authors = authors;
+
+    out.date = str(node.datePublished) || str(node.dateCreated);
+    out.abstract = str(node.description) || str(node.abstract);
+    out.volume = str(node.volumeNumber);
+    out.issue = str(node.issueNumber);
+    out.pages =
+      str(node.pagination) ||
+      this.joinPages(str(node.pageStart), str(node.pageEnd));
+    out.isbn = str(node.isbn);
+    out.issn = str(node.issn);
+    out.language = str(node.inLanguage);
+
+    const kw = node.keywords;
+    if (typeof kw === 'string') {
+      out.keywords = kw
+        .split(/[,;]/)
+        .map((k) => k.trim())
+        .filter(Boolean);
+    } else if (Array.isArray(kw)) {
+      out.keywords = kw.map((k) => str(k)).filter((k): k is string => !!k);
+    }
+
+    // Walk isPartOf chain: PublicationIssue → PublicationVolume → Periodical.
+    let container = arr(node.isPartOf)[0];
+    for (let depth = 0; container && depth < 4; depth++) {
+      if (typeof container === 'string') {
+        out.publicationTitle = out.publicationTitle || str(container);
+        break;
+      }
+      const ctypes = typesOf(container);
+      if (ctypes.includes('PublicationIssue')) {
+        out.issue = out.issue || str(container.issueNumber);
+      } else if (ctypes.includes('PublicationVolume')) {
+        out.volume = out.volume || str(container.volumeNumber);
+      } else {
+        out.publicationTitle = out.publicationTitle || str(container.name);
+      }
+      out.issn = out.issn || str(container.issn);
+      out.isbn = out.isbn || str(container.isbn);
+      container = arr(container.isPartOf)[0];
+    }
+
+    out.publisher = str(node.publisher);
+
+    // DOI from identifier / sameAs / url
+    const idCandidates: string[] = [];
+    for (const id of arr(node.identifier)) {
+      if (typeof id === 'string') idCandidates.push(id);
+      else if (id && typeof id === 'object') {
+        const prop = String(id.propertyID || '').toLowerCase();
+        const val = str(id.value ?? id['@id']);
+        if (val && (!prop || prop === 'doi' || /10\.\d{4,9}\//.test(val))) {
+          idCandidates.push(val);
+        }
+      }
+    }
+    for (const s of arr(node.sameAs))
+      if (typeof s === 'string') idCandidates.push(s);
+    if (typeof node['@id'] === 'string') idCandidates.push(node['@id']);
+    for (const c of idCandidates) {
+      if (!/10\.\d{4,9}\//.test(c)) continue;
+      const d = normalizeDoi(c);
+      if (d) {
+        out.doi = d;
+        break;
       }
     }
 
-    const reverseRegex =
-      /<meta\s+[^>]*content=["']([^"']*)["'][^>]*(?:name|property)=["']([^"']+)["'][^>]*>/gi;
-    while ((match = reverseRegex.exec(html)) !== null) {
-      const key = match[2].trim().toLowerCase();
-      const val = decodeHtmlEntities(match[1].trim());
-      if (targets.has(key) && val) {
-        values.push(val);
+    return out;
+  }
+
+  private flattenJsonLd(value: any, acc: any[], depth: number): void {
+    if (depth > 6 || value === null || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const v of value) this.flattenJsonLd(v, acc, depth + 1);
+      return;
+    }
+    if (value['@type']) acc.push(value);
+    if (Array.isArray(value['@graph'])) {
+      this.flattenJsonLd(value['@graph'], acc, depth + 1);
+    }
+    // Some sites nest the article under mainEntity
+    if (value.mainEntity && typeof value.mainEntity === 'object') {
+      this.flattenJsonLd(value.mainEntity, acc, depth + 1);
+    }
+  }
+
+  // ── COinS (OpenURL ContextObject in SPAN, class="Z3988") ──────────────────
+
+  private extractCoinsMetadata(html: string): FallbackMeta {
+    const out: FallbackMeta = {};
+    const spanRe = /<span\b((?:"[^"]*"|'[^']*'|[^'">])*)>/gi;
+    let m: RegExpExecArray | null;
+    let ctx: string | undefined;
+    while ((m = spanRe.exec(html)) !== null) {
+      const attrs = this.parseAttributes(m[1]);
+      if (!/\bZ3988\b/.test(attrs['class'] || '')) continue;
+      if (attrs['title']) {
+        ctx = attrs['title'];
+        break;
+      }
+    }
+    if (!ctx) return out;
+
+    let params: URLSearchParams;
+    try {
+      params = new URLSearchParams(decodeHtmlEntities(ctx));
+    } catch {
+      return out;
+    }
+    const get = (k: string): string | undefined => {
+      const v = params.get(k);
+      return v && v.trim() ? v.trim() : undefined;
+    };
+
+    out.title = get('rft.atitle') || get('rft.title') || get('rft.btitle');
+
+    const authors = params
+      .getAll('rft.au')
+      .map((a) => a.trim())
+      .filter(Boolean);
+    if (authors.length === 0) {
+      const last = get('rft.aulast');
+      const firstName = get('rft.aufirst');
+      if (last) authors.push(firstName ? `${firstName} ${last}` : last);
+    }
+    if (authors.length) out.authors = authors;
+
+    out.date = get('rft.date');
+    out.publicationTitle =
+      get('rft.jtitle') || (get('rft.atitle') ? get('rft.btitle') : undefined);
+    out.volume = get('rft.volume');
+    out.issue = get('rft.issue');
+    out.pages =
+      this.joinPages(get('rft.spage'), get('rft.epage')) || get('rft.pages');
+    out.issn = get('rft.issn') || get('rft.eissn');
+    out.isbn = get('rft.isbn');
+    out.publisher = get('rft.pub');
+
+    for (const id of params.getAll('rft_id')) {
+      if (/^info:doi\//i.test(id) || /doi\.org\//i.test(id)) {
+        const d = normalizeDoi(id.replace(/^info:doi\//i, ''));
+        if (d) {
+          out.doi = d;
+          break;
+        }
       }
     }
 
-    return values;
+    const genre = (get('rft.genre') || '').toLowerCase();
+    const fmt = (get('rft_val_fmt') || '').toLowerCase();
+    if (fmt.includes('dissertation')) out.itemType = 'thesis';
+    else if (genre === 'proceeding' || genre === 'conference')
+      out.itemType = 'conferencePaper';
+    else if (genre === 'bookitem') out.itemType = 'bookSection';
+    else if (genre === 'book') out.itemType = 'book';
+    else if (genre === 'report') out.itemType = 'report';
+    else if (genre === 'article' || fmt.includes('journal'))
+      out.itemType = 'journalArticle';
+
+    return out;
   }
 }

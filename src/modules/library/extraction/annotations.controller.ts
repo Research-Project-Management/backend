@@ -25,7 +25,6 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { AnnotationType } from './core/domain/annotations.types';
-import { AnnotationsService } from './core/services/annotations.service';
 import { PdfAnnotationImporterService } from './core/adapters/pdf-annotation-importer.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
@@ -51,70 +50,15 @@ import { GetAnnotationUseCase } from './core/use-cases/get-annotation.use-case';
 ])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class AnnotationsController {
-  private annotationsServiceInstance?: AnnotationsService;
-  private pdfAnnotationImporterServiceInstance?: PdfAnnotationImporterService;
-  private createAnnotationUseCaseInstance?: CreateAnnotationUseCase;
-  private listAnnotationsUseCaseInstance?: ListAnnotationsUseCase;
-  private updateAnnotationUseCaseInstance?: UpdateAnnotationUseCase;
-  private deleteAnnotationUseCaseInstance?: DeleteAnnotationUseCase;
-  private batchUpsertAnnotationsUseCaseInstance?: BatchUpsertAnnotationsUseCase;
-  private getAnnotationUseCaseInstance?: GetAnnotationUseCase;
-
   constructor(
-    @Optional()
-    private readonly createAnnotationUseCase?:
-      | CreateAnnotationUseCase
-      | AnnotationsService,
-    @Optional()
-    private readonly listAnnotationsUseCase?:
-      | ListAnnotationsUseCase
-      | PdfAnnotationImporterService,
-    @Optional()
-    private readonly updateAnnotationUseCase?: UpdateAnnotationUseCase,
-    @Optional()
-    private readonly deleteAnnotationUseCase?: DeleteAnnotationUseCase,
-    @Optional()
-    private readonly batchUpsertAnnotationsUseCase?: BatchUpsertAnnotationsUseCase,
-    @Optional()
-    private readonly pdfAnnotationImporterService?: PdfAnnotationImporterService,
-    @Optional()
-    private readonly getAnnotationUseCase?: GetAnnotationUseCase,
-    @Optional()
-    private readonly annotationsService?: AnnotationsService,
-  ) {
-    const isLegacyService =
-      createAnnotationUseCase && !('execute' in createAnnotationUseCase);
-
-    if (isLegacyService) {
-      this.annotationsServiceInstance =
-        createAnnotationUseCase as AnnotationsService;
-      this.pdfAnnotationImporterServiceInstance =
-        listAnnotationsUseCase as PdfAnnotationImporterService;
-    } else {
-      this.createAnnotationUseCaseInstance =
-        createAnnotationUseCase as CreateAnnotationUseCase;
-      this.listAnnotationsUseCaseInstance =
-        listAnnotationsUseCase as ListAnnotationsUseCase;
-      this.updateAnnotationUseCaseInstance = updateAnnotationUseCase;
-      this.deleteAnnotationUseCaseInstance = deleteAnnotationUseCase;
-      this.batchUpsertAnnotationsUseCaseInstance =
-        batchUpsertAnnotationsUseCase;
-      this.pdfAnnotationImporterServiceInstance = pdfAnnotationImporterService;
-      this.getAnnotationUseCaseInstance = getAnnotationUseCase;
-      this.annotationsServiceInstance = annotationsService;
-    }
-  }
-
-  private get effectiveAnnotationsService(): AnnotationsService {
-    return (this.annotationsServiceInstance ?? this.annotationsService)!;
-  }
-
-  private get effectivePdfImporterService(): PdfAnnotationImporterService {
-    return (
-      this.pdfAnnotationImporterServiceInstance ??
-      this.pdfAnnotationImporterService!
-    );
-  }
+    private readonly createAnnotationUseCase: CreateAnnotationUseCase,
+    private readonly listAnnotationsUseCase: ListAnnotationsUseCase,
+    private readonly updateAnnotationUseCase: UpdateAnnotationUseCase,
+    private readonly deleteAnnotationUseCase: DeleteAnnotationUseCase,
+    private readonly batchUpsertAnnotationsUseCase: BatchUpsertAnnotationsUseCase,
+    private readonly pdfAnnotationImporterService: PdfAnnotationImporterService,
+    @Optional() private readonly getAnnotationUseCase?: GetAnnotationUseCase,
+  ) {}
 
   // ─── GET / ─────────────────────────────────────────────────────────────────
 
@@ -146,21 +90,12 @@ export class AnnotationsController {
       );
     }
 
-    if (this.listAnnotationsUseCaseInstance) {
-      return this.listAnnotationsUseCaseInstance.execute({
-        userId,
-        attachmentId,
-        pageIndex,
-        type,
-      });
-    }
-
-    return this.effectiveAnnotationsService.getAnnotationsByAttachment(
+    return this.listAnnotationsUseCase.execute({
       userId,
       attachmentId,
       pageIndex,
       type,
-    );
+    });
   }
 
   // ─── POST / ────────────────────────────────────────────────────────────────
@@ -191,17 +126,10 @@ export class AnnotationsController {
       authorId: userId,
     };
 
-    if (this.createAnnotationUseCaseInstance) {
-      return this.createAnnotationUseCaseInstance.execute({
-        userId,
-        data: createData,
-      });
-    }
-
-    return this.effectiveAnnotationsService.createAnnotation(
+    return this.createAnnotationUseCase.execute({
       userId,
-      createData,
-    );
+      data: createData,
+    });
   }
 
   // ─── PATCH /:id ────────────────────────────────────────────────────────────
@@ -231,21 +159,12 @@ export class AnnotationsController {
 
     const { expectedVersion: _, ...updateData } = body;
 
-    if (this.updateAnnotationUseCaseInstance) {
-      return this.updateAnnotationUseCaseInstance.execute({
-        userId,
-        id,
-        expectedVersion: rawVersion,
-        data: updateData,
-      });
-    }
-
-    return this.effectiveAnnotationsService.updateAnnotation(
+    return this.updateAnnotationUseCase.execute({
       userId,
       id,
-      rawVersion,
-      updateData,
-    );
+      expectedVersion: rawVersion,
+      data: updateData,
+    });
   }
 
   // ─── DELETE /:id ───────────────────────────────────────────────────────────
@@ -277,20 +196,11 @@ export class AnnotationsController {
       }
     }
 
-    let deleted: boolean;
-    if (this.deleteAnnotationUseCaseInstance) {
-      deleted = await this.deleteAnnotationUseCaseInstance.execute({
-        userId,
-        id,
-        expectedVersion,
-      });
-    } else {
-      deleted = await this.effectiveAnnotationsService.deleteAnnotation(
-        userId,
-        id,
-        expectedVersion,
-      );
-    }
+    const deleted = await this.deleteAnnotationUseCase.execute({
+      userId,
+      id,
+      expectedVersion,
+    });
 
     if (!deleted) throw new NotFoundException(`Annotation ${id} not found`);
     return { id, deleted: true };
@@ -312,19 +222,11 @@ export class AnnotationsController {
       throw new UnauthorizedException('Authentication required');
     }
 
-    if (this.batchUpsertAnnotationsUseCaseInstance) {
-      return this.batchUpsertAnnotationsUseCaseInstance.execute({
-        userId,
-        attachmentId,
-        data: { upserts: body.upserts, deletes: body.deletes },
-      });
-    }
-
-    return this.effectiveAnnotationsService.batchUpsertAnnotations(
+    return this.batchUpsertAnnotationsUseCase.execute({
       userId,
       attachmentId,
-      { upserts: body.upserts, deletes: body.deletes },
-    );
+      data: { upserts: body.upserts, deletes: body.deletes },
+    });
   }
 
   // ─── POST /import-external ──────────────────────────────────────────────────
@@ -341,7 +243,7 @@ export class AnnotationsController {
     if (!userId) {
       throw new UnauthorizedException('Authentication required');
     }
-    return this.effectivePdfImporterService.importFromAttachment(
+    return this.pdfAnnotationImporterService.importFromAttachment(
       userId,
       attachmentId,
     );

@@ -1042,8 +1042,14 @@ export async function buildCommandCreateInput(
       data.accessedAt ??
       (data.accessDate ? parseAccessDate(data.accessDate) : null),
     arxivId: cleanArxivId,
-    citationCount: data.citationCount ?? 0,
-    referenceCount: data.referenceCount ?? 0,
+    citationCount:
+      data.citationCount && Number(data.citationCount) > 0
+        ? Number(data.citationCount)
+        : null,
+    referenceCount:
+      data.referenceCount && Number(data.referenceCount) > 0
+        ? Number(data.referenceCount)
+        : null,
     openAccessPdfUrl: data.openAccessPdfUrl ?? '',
     extra: resolveExtraPlainText(data.extra, null, effectiveExtraFields) ?? '',
     uploadedById: data.uploadedById || userId,
@@ -1432,10 +1438,20 @@ export function buildCommandUpdateInput(
         : {}),
     ...(cleanArxivId !== undefined ? { arxivId: cleanArxivId } : {}),
     ...(data.citationCount !== undefined
-      ? { citationCount: data.citationCount }
+      ? {
+          citationCount:
+            data.citationCount && Number(data.citationCount) > 0
+              ? Number(data.citationCount)
+              : null,
+        }
       : {}),
     ...(data.referenceCount !== undefined
-      ? { referenceCount: data.referenceCount }
+      ? {
+          referenceCount:
+            data.referenceCount && Number(data.referenceCount) > 0
+              ? Number(data.referenceCount)
+              : null,
+        }
       : {}),
     ...(data.openAccessPdfUrl !== undefined
       ? { openAccessPdfUrl: data.openAccessPdfUrl }

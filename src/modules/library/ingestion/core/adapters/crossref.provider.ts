@@ -14,9 +14,15 @@ import {
   normalizeIssn,
   cleanBibliographicText,
   cleanAbstractText,
+  titleSimilarity,
+  TITLE_MATCH_THRESHOLD,
 } from './metadata.utils';
 import { ProviderFetchError } from '../services/metadata-executor.service';
 import { getAcademicContactEmail } from '../../../shared-kernel/core/constants/academic-client.constants';
+import {
+  CSL_TYPE_TO_ITEM_TYPE,
+  normalizePageRange,
+} from '../../../shared-kernel/utils/bibliographic.utils';
 
 @Injectable()
 export class CrossRefProvider implements MetadataProvider {
@@ -106,7 +112,7 @@ export class CrossRefProvider implements MetadataProvider {
     const cleanTitle = title.trim();
     if (!cleanTitle) return null;
 
-    const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(cleanTitle)}&rows=1&mailto=${encodeURIComponent(this.mailto)}`;
+    const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(cleanTitle)}&rows=5&mailto=${encodeURIComponent(this.mailto)}`;
 
     const response = await fetch(url, {
       headers: {
@@ -146,12 +152,35 @@ export class CrossRefProvider implements MetadataProvider {
     const payload = json as {
       message?: { items?: Array<Record<string, unknown>> };
     } | null;
-    const item = payload?.message?.items?.[0];
-    if (!item) return null;
+    const items = payload?.message?.items || [];
 
-    const rawDoi = typeof item.DOI === 'string' ? item.DOI : '';
+    // Never trust the top hit blindly: Crossref's bibliographic search always
+    // returns *something* (e.g. "Client Challenge" → "The client/server
+    // challenge", 1995). Pick the best title match above the threshold.
+    let best: Record<string, unknown> | undefined;
+    let bestScore = 0;
+    for (const candidate of items) {
+      const candTitle = Array.isArray(candidate.title)
+        ? String(candidate.title[0] ?? '')
+        : typeof candidate.title === 'string'
+          ? candidate.title
+          : '';
+      const score = titleSimilarity(cleanTitle, candTitle);
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    if (!best || bestScore < TITLE_MATCH_THRESHOLD) {
+      this.logger.debug(
+        `CrossRef title search rejected for "${cleanTitle}" (best similarity ${bestScore.toFixed(2)})`,
+      );
+      return null;
+    }
+
+    const rawDoi = typeof best.DOI === 'string' ? best.DOI : '';
     const doi = normalizeDoi(rawDoi) || rawDoi;
-    return this.transformMessage(item, doi, false);
+    return this.transformMessage(best, doi, false);
   }
 
   private transformMessage(
@@ -167,7 +196,23 @@ export class CrossRefProvider implements MetadataProvider {
       : typeof rawTitle === 'string'
         ? rawTitle
         : 'Untitled';
-    const title = cleanBibliographicText(rawTitleStr) || 'Untitled';
+    const baseTitle = cleanBibliographicText(rawTitleStr) || 'Untitled';
+
+    // Zotero Crossref translator: append subtitle as "Title: Subtitle"
+    const rawSubtitle = Array.isArray(message.subtitle)
+      ? typeof message.subtitle[0] === 'string'
+        ? message.subtitle[0]
+        : undefined
+      : typeof message.subtitle === 'string'
+        ? message.subtitle
+        : undefined;
+    const subtitle = cleanBibliographicText(rawSubtitle);
+    const title =
+      subtitle &&
+      baseTitle !== 'Untitled' &&
+      !baseTitle.toLowerCase().includes(subtitle.toLowerCase())
+        ? `${baseTitle.replace(/[\s:]+$/, '')}: ${subtitle}`
+        : baseTitle;
 
     const authors: string[] = [];
     const creators: Array<{
@@ -176,6 +221,7 @@ export class CrossRefProvider implements MetadataProvider {
       firstName?: string;
       lastName?: string;
       fullName: string;
+      fieldMode?: number;
     }> = [];
 
     const addCreators = (list: unknown, role: string) => {
@@ -189,6 +235,21 @@ export class CrossRefProvider implements MetadataProvider {
             };
             const firstName = auth.given?.trim();
             const lastName = auth.family?.trim();
+            const orgName = auth.name?.trim();
+
+            // Organizational / single-field creator: { name } without given/family
+            if (!firstName && !lastName && orgName) {
+              if (role === 'author') authors.push(orgName);
+              creators.push({
+                orderIndex: creators.length,
+                creatorType: role,
+                lastName: orgName,
+                fullName: orgName,
+                fieldMode: 1,
+              });
+              continue;
+            }
+
             let fullName = '';
             if (firstName && lastName) {
               fullName = `${firstName} ${lastName}`;
@@ -196,8 +257,6 @@ export class CrossRefProvider implements MetadataProvider {
               fullName = lastName;
             } else if (firstName) {
               fullName = firstName;
-            } else if (auth.name) {
-              fullName = auth.name.trim();
             }
 
             if (fullName) {
@@ -207,9 +266,10 @@ export class CrossRefProvider implements MetadataProvider {
               creators.push({
                 orderIndex: creators.length,
                 creatorType: role,
-                firstName: firstName || undefined,
-                lastName: lastName || undefined,
+                firstName: lastName ? firstName || undefined : undefined,
+                lastName: lastName || firstName || undefined,
                 fullName,
+                fieldMode: lastName ? 0 : 1,
               });
             }
           }
@@ -220,7 +280,8 @@ export class CrossRefProvider implements MetadataProvider {
     addCreators(message.author, 'author');
     addCreators(message.editor, 'editor');
     addCreators(message.translator, 'translator');
-    addCreators(message.chair, 'presenter');
+    // Zotero Crossref translator maps conference chairs to "contributor"
+    addCreators(message.chair, 'contributor');
 
     let year: number | null = null;
     let publicationDate: string | undefined = undefined;
@@ -230,10 +291,10 @@ export class CrossRefProvider implements MetadataProvider {
       { 'date-parts'?: number[][] } | undefined;
     const issued = message.issued as { 'date-parts'?: number[][] } | undefined;
 
-    const dateParts =
-      pubPrint?.['date-parts']?.[0] ||
-      pubOnline?.['date-parts']?.[0] ||
-      issued?.['date-parts']?.[0];
+    // Zotero Crossref translator: "issued" is the canonical publication date
+    const dateParts = [issued, pubPrint, pubOnline]
+      .map((d) => d?.['date-parts']?.[0])
+      .find((parts) => Array.isArray(parts) && !!parts[0]);
     if (dateParts && dateParts[0]) {
       year = Number(dateParts[0]);
       const y = String(dateParts[0]).padStart(4, '0');
@@ -261,35 +322,42 @@ export class CrossRefProvider implements MetadataProvider {
     const journal = cleanBibliographicText(rawJournal);
 
     const typeStr = typeof message.type === 'string' ? message.type : '';
-    let itemType = 'journalArticle';
-    if (typeStr === 'journal-article') {
-      itemType = 'journalArticle';
-    } else if (typeStr === 'book-chapter' || typeStr === 'book-section') {
-      itemType = 'bookSection';
-    } else if (
-      typeStr === 'proceedings-article' ||
-      typeStr === 'conference-paper' ||
-      typeStr === 'proceedings'
-    ) {
-      itemType = 'conferencePaper';
-    } else if (
-      typeStr === 'book' ||
-      typeStr === 'monograph' ||
-      typeStr === 'edited-book' ||
-      typeStr === 'reference-book'
-    ) {
-      itemType = 'book';
-    } else if (typeStr === 'dissertation') {
-      itemType = 'thesis';
-    } else if (typeStr === 'report' || typeStr === 'report-series') {
-      itemType = 'report';
-    } else if (typeStr === 'posted-content' || typeStr === 'preprint') {
-      itemType = 'preprint';
-    } else if (typeStr === 'dataset') {
-      itemType = 'dataset';
-    } else if (typeStr === 'standard' || typeStr === 'component') {
-      itemType = 'standard';
-    }
+    // Crossref "type" → Zotero itemType (mirrors Zotero's Crossref REST translator).
+    // Only "journal-article" maps to journalArticle; unknown types fall back
+    // to "document" rather than silently becoming journal articles.
+    const CROSSREF_TYPE_MAP: Record<string, string> = {
+      'journal-article': 'journalArticle',
+      'book-chapter': 'bookSection',
+      'book-section': 'bookSection',
+      'book-part': 'bookSection',
+      'proceedings-article': 'conferencePaper',
+      'conference-paper': 'conferencePaper',
+      proceedings: 'book',
+      book: 'book',
+      monograph: 'book',
+      'edited-book': 'book',
+      'reference-book': 'book',
+      'book-set': 'book',
+      'book-series': 'book',
+      'book-track': 'book',
+      dissertation: 'thesis',
+      report: 'report',
+      'report-series': 'report',
+      'report-component': 'report',
+      'posted-content': 'preprint',
+      preprint: 'preprint',
+      dataset: 'dataset',
+      database: 'dataset',
+      standard: 'standard',
+      'reference-entry': 'encyclopediaArticle',
+      component: 'document',
+      'peer-review': 'document',
+      other: 'document',
+    };
+    const itemType = typeStr
+      ? CROSSREF_TYPE_MAP[typeStr] ||
+        (CSL_TYPE_TO_ITEM_TYPE[typeStr] ?? 'document')
+      : 'journalArticle';
 
     const keywords: string[] = [];
     if (Array.isArray(message.subject)) {
@@ -331,6 +399,12 @@ export class CrossRefProvider implements MetadataProvider {
     const rawEventPlace =
       typeof eventObj?.location === 'string' ? eventObj.location : undefined;
     const eventPlace = cleanBibliographicText(rawEventPlace);
+    const publisherLocation = cleanBibliographicText(
+      typeof message['publisher-location'] === 'string'
+        ? (message['publisher-location'] as string)
+        : undefined,
+    );
+    const place = publisherLocation || eventPlace;
 
     const rawProceedings = message['proceedings-title'];
     const rawProceedingsStr = Array.isArray(rawProceedings)
@@ -352,7 +426,10 @@ export class CrossRefProvider implements MetadataProvider {
     const volume =
       typeof message.volume === 'string' ? message.volume : undefined;
     const issue = typeof message.issue === 'string' ? message.issue : undefined;
-    const pages = typeof message.page === 'string' ? message.page : undefined;
+    const pages =
+      typeof message.page === 'string'
+        ? normalizePageRange(message.page)
+        : undefined;
 
     const rawIssn = message.ISSN;
     const rawIssnStr = Array.isArray(rawIssn)
@@ -424,17 +501,17 @@ export class CrossRefProvider implements MetadataProvider {
 
     const rawRefByCount = message['is-referenced-by-count'];
     const citationCount =
-      typeof rawRefByCount === 'number'
+      typeof rawRefByCount === 'number' && rawRefByCount > 0
         ? rawRefByCount
-        : typeof rawRefByCount === 'string' && !isNaN(Number(rawRefByCount))
+        : typeof rawRefByCount === 'string' && Number(rawRefByCount) > 0
           ? Number(rawRefByCount)
           : undefined;
 
     const rawRefCount = message['references-count'];
     const referenceCount =
-      typeof rawRefCount === 'number'
+      typeof rawRefCount === 'number' && rawRefCount > 0
         ? rawRefCount
-        : typeof rawRefCount === 'string' && !isNaN(Number(rawRefCount))
+        : typeof rawRefCount === 'string' && Number(rawRefCount) > 0
           ? Number(rawRefCount)
           : undefined;
 
@@ -469,7 +546,7 @@ export class CrossRefProvider implements MetadataProvider {
             ? proceedingsTitle || journal
             : undefined,
         bookTitle: itemType === 'bookSection' ? journal || series : undefined,
-        place: eventPlace,
+        place,
         journalAbbr,
         publisher,
         volume,

@@ -521,6 +521,9 @@ export class ExportsService {
           citationKey: citeKey,
           creators: it.contributors,
           abstract: it.abstract ?? undefined,
+          // Cache-busting: CslEngineService keys its LRU cache on id + version/updatedAt.
+          updatedAt: it.updatedAt ?? undefined,
+          version: it.version ?? undefined,
         },
         'bibtex',
       );

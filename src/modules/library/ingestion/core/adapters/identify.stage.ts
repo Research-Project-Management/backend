@@ -21,6 +21,7 @@ import {
   normalizeIsbn,
   inferItemTypeFromPdfSignals,
   mapCslTypeToZoteroItemType,
+  deriveDoiFromPublisherUrl,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 import { UrlMetadataScraperService } from '../services/url-metadata-scraper.service';
 import {
@@ -438,6 +439,10 @@ export class IdentifyStage {
         } else if (classified.type === 'ISBN') {
           extractedRaw.isbn = classified.clean;
         }
+        if (!extractedRaw.doi && !extractedRaw.arxivId && !extractedRaw.pmid) {
+          const urlDoi = deriveDoiFromPublisherUrl(payload.url);
+          if (urlDoi) extractedRaw.doi = urlDoi;
+        }
 
         // Active Academic Web & PDF Scraper
         if (this.urlScraper) {
@@ -453,9 +458,11 @@ export class IdentifyStage {
               title: scraped.title || extractedRaw.title,
               authors: scraped.authors || extractedRaw.authors,
               creators: scraped.creators || extractedRaw.creators,
-              doi: scraped.doi || extractedRaw.doi,
-              arxivId: scraped.arxivId || extractedRaw.arxivId,
-              pmid: scraped.pmid || extractedRaw.pmid,
+              // Identifiers parsed from the URL itself are deterministic and
+              // must win over values sniffed from page HTML.
+              doi: extractedRaw.doi || scraped.doi,
+              arxivId: extractedRaw.arxivId || scraped.arxivId,
+              pmid: extractedRaw.pmid || scraped.pmid,
               isbn: scraped.isbn || extractedRaw.isbn,
               issn: scraped.issn || extractedRaw.issn,
               year: scraped.year || extractedRaw.year,
@@ -467,6 +474,16 @@ export class IdentifyStage {
               publisher: scraped.publisher || extractedRaw.publisher,
               abstract: scraped.abstract || extractedRaw.abstract,
               keywords: scraped.keywords || extractedRaw.keywords,
+              itemType: scraped.itemType || extractedRaw.itemType,
+              volume: scraped.volume || extractedRaw.volume,
+              issue: scraped.issue || extractedRaw.issue,
+              pages: scraped.pages || extractedRaw.pages,
+              language: scraped.language || extractedRaw.language,
+              place: scraped.publisherPlace || extractedRaw.place,
+              conferenceName:
+                scraped.conferenceName || extractedRaw.conferenceName,
+              bookTitle: scraped.bookTitle || extractedRaw.bookTitle,
+              institution: scraped.institution || extractedRaw.institution,
               fileId: scraped.fileId,
               filename: scraped.filename || payload.filename,
               fileUrl:

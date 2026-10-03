@@ -488,12 +488,13 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
       expect(bibtex).toContain('title');
     });
 
-    it('should fallback to local collections when user has no Zotero connection', async () => {
+    it('should not fabricate mock collections when user has no Zotero connection', async () => {
       mockRepo.findConnection.mockResolvedValue(null);
 
       const collections = await adapter.listCollections('user_no_zotero');
-      expect(collections.length).toBeGreaterThan(0);
-      expect(collections[0].id).toBe('coll-default');
+      expect(
+        collections.find((c: any) => c.id === 'coll-default'),
+      ).toBeUndefined();
     });
   });
 });

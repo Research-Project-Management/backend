@@ -29,6 +29,23 @@ export class StorageRedisCacheService {
     await this.redis.set(key, data, ttlSeconds);
   }
 
+  async wrapFolderListing<T>(
+    scopeKey: string,
+    parentId: string | null | undefined,
+    factory: () => Promise<T>,
+    ttlSeconds = 120,
+  ): Promise<T> {
+    const key = this.getTreeKey(scopeKey, parentId);
+    if (typeof (this.redis as any)?.wrap === 'function') {
+      return (this.redis as any).wrap(key, factory, ttlSeconds);
+    }
+    const cached = await this.getFolderListing<T>(scopeKey, parentId);
+    if (cached !== null && cached !== undefined) return cached;
+    const fresh = await factory();
+    await this.setFolderListing(scopeKey, parentId, fresh, ttlSeconds);
+    return fresh;
+  }
+
   async invalidateFolder(
     scopeKey: string,
     parentId?: string | null,

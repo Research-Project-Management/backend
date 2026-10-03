@@ -63,7 +63,7 @@ export class ProjectAccessGuard implements CanActivate {
     const userId = user.sub || user.id;
 
     // 4. Resolve Project ID
-    const projectId = await this.resolveProjectId(request);
+    let projectId = await this.resolveProjectId(request);
     if (!projectId) {
       // If client explicitly requested a project context but it couldn't be resolved, reject
       const rawRequestedProject =
@@ -129,10 +129,34 @@ export class ProjectAccessGuard implements CanActivate {
     }
 
     // 5. Fetch Member Access Context (Role + Overrides + Effective Permissions)
-    const accessContext = await this.accessService.getMemberAccessContext(
+    let accessContext = await this.accessService.getMemberAccessContext(
       projectId,
       userId,
     );
+
+    if (!accessContext && isUUID(projectId)) {
+      // Check if projectId is actually a document ID from manuscript_docs
+      try {
+        const doc = await this.prisma.manuscriptDoc.findUnique({
+          where: { id: projectId },
+          select: { projectId: true },
+        });
+        if (doc?.projectId) {
+          projectId = doc.projectId;
+          if (request.params) {
+            request.params.projectId = doc.projectId;
+          }
+          accessContext = await this.accessService.getMemberAccessContext(
+            projectId,
+            userId,
+          );
+        }
+      } catch (err) {
+        this.logger.debug(
+          `Project doc fallback resolution failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     if (!accessContext) {
       throw new ForbiddenException(

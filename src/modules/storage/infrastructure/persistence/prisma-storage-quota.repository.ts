@@ -4,7 +4,8 @@ import { IStorageQuotaRepository } from '../../domain/ports/storage-quota.reposi
 import { StorageQuota } from '../../domain/entities/storage-quota.entity';
 import { StorageQuotaMapper } from './mappers/storage-quota.mapper';
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function cleanUuid(id?: string | null): string | null {
   if (!id || typeof id !== 'string') return null;
@@ -133,4 +134,3 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     }
   }
 }
-

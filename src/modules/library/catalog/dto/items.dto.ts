@@ -603,3 +603,23 @@ export class BulkPurgeItemsDto {
   @IsString({ each: true })
   itemIds!: string[];
 }
+
+export class BulkTrashItemsDto {
+  @ApiProperty({
+    description: 'Array of item IDs to move to trash',
+    example: ['uuid-1', 'uuid-2'],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  itemIds!: string[];
+}
+
+export class BulkRestoreItemsDto {
+  @ApiProperty({
+    description: 'Array of item IDs to restore from trash',
+    example: ['uuid-1', 'uuid-2'],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  itemIds!: string[];
+}

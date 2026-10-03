@@ -259,35 +259,191 @@ export class PagesBridgeController {
   async getPageFiles(@Param('pageId') pageId: string) {
     try {
       if (!isUuid(pageId)) return { files: [] };
+
+      let projectId: string | null = null;
+      let rootDoc: any = null;
+
       const record = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
       });
-      const projectId = record?.projectId;
+
+      if (record) {
+        projectId = record.projectId;
+        rootDoc = record;
+      } else {
+        const project = await this.prisma.project.findUnique({
+          where: { id: pageId },
+        });
+        if (project) {
+          projectId = project.id;
+        }
+      }
 
       if (!projectId) {
         return { files: [] };
       }
 
-      const nodes = await this.prisma.manuscriptNode.findMany({
+      let nodes = await this.prisma.manuscriptNode.findMany({
         where: { projectId },
         orderBy: { sortOrder: 'asc' },
       });
 
-      const files = nodes.map((node) => ({
-        id: node.id,
-        name: node.name,
-        path: node.path,
-        type: node.type === 'FOLDER' ? 'folder' : 'file',
-        size: node.sizeBytes || 0,
-        pageId,
-        createdAt: node.createdAt.toISOString(),
-        updatedAt: node.updatedAt.toISOString(),
-      }));
+      const allDocs = await this.prisma.manuscriptDoc.findMany({
+        where: { projectId, deleted: false },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      const existingDocIds = new Set(nodes.map((n) => n.docId).filter(Boolean));
+      for (const d of allDocs) {
+        if (!existingDocIds.has(d.id)) {
+          try {
+            const cleanPath = d.path.startsWith('/') ? d.path : `/${d.path}`;
+            const cleanName = d.path.replace(/^\//, '') || 'main.tex';
+            const newNode = await this.prisma.manuscriptNode.create({
+              data: {
+                projectId,
+                name: cleanName,
+                path: cleanPath,
+                type: 'DOC',
+                docId: d.id,
+                isRootDoc: d.id === rootDoc?.id,
+                sizeBytes: d.sizeBytes || 0,
+              },
+            });
+            nodes.push(newNode);
+            existingDocIds.add(d.id);
+          } catch {
+            // ignore duplicate path
+          }
+        }
+      }
+
+      const files = nodes.map((node) => {
+        const cleanName =
+          node.name || node.path.replace(/^\//, '') || 'untitled.tex';
+        return {
+          id: node.docId || node.id,
+          nodeId: node.id,
+          name: cleanName,
+          title: cleanName,
+          path: node.path,
+          type: node.type === 'FOLDER' ? 'folder' : 'file',
+          size: node.sizeBytes || 0,
+          pageId,
+          createdAt: node.createdAt.toISOString(),
+          updatedAt: node.updatedAt.toISOString(),
+        };
+      });
+
+      if (files.length === 0 && rootDoc) {
+        const cleanName = rootDoc.path.replace(/^\//, '') || 'main.tex';
+        files.push({
+          id: rootDoc.id,
+          nodeId: rootDoc.id,
+          name: cleanName,
+          title: cleanName,
+          path: rootDoc.path,
+          type: 'file',
+          size: rootDoc.sizeBytes || 0,
+          pageId,
+          createdAt: rootDoc.createdAt.toISOString(),
+          updatedAt: rootDoc.updatedAt.toISOString(),
+        });
+      }
 
       return { files };
     } catch {
       return { files: [] };
     }
+  }
+
+  /**
+   * POST /api/v1/manuscripts/docs/:pageId/files
+   * POST /api/pages/:pageId/files
+   */
+  @Post(['docs/:pageId/files', 'pages/:pageId/files'])
+  @HttpCode(HttpStatus.CREATED)
+  async createPageFile(
+    @Param('pageId') pageId: string,
+    @Body() body: { title?: string; name?: string; content?: string },
+  ) {
+    const fileName = body?.title || body?.name || 'untitled.tex';
+    const cleanName = fileName.trim().replace(/^\//, '');
+    const content = body?.content || '';
+
+    let projectId: string | null = null;
+    let parentDocId = pageId;
+
+    if (isUuid(pageId)) {
+      const record = await this.prisma.manuscriptDoc.findUnique({
+        where: { id: pageId },
+      });
+      if (record) {
+        projectId = record.projectId;
+      } else {
+        const project = await this.prisma.project.findUnique({
+          where: { id: pageId },
+        });
+        if (project) {
+          projectId = project.id;
+        }
+      }
+    }
+
+    if (!projectId) {
+      const mockId = `file-${Date.now()}`;
+      return {
+        file: {
+          id: mockId,
+          title: cleanName,
+          name: cleanName,
+          path: `/${cleanName}`,
+          type: 'file',
+          pageId,
+          content,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    }
+
+    const createdDoc = await this.docstoreService.createDoc(projectId, {
+      path: `/${cleanName}`,
+      text: content,
+      version: 1,
+    });
+
+    let nodeId = createdDoc._id;
+    try {
+      const node = await this.prisma.manuscriptNode.create({
+        data: {
+          projectId,
+          name: cleanName,
+          path: `/${cleanName}`,
+          type: 'DOC',
+          docId: createdDoc._id,
+          sizeBytes: Buffer.byteLength(content, 'utf8'),
+        },
+      });
+      nodeId = node.id;
+    } catch {
+      // ignore path conflicts
+    }
+
+    return {
+      file: {
+        id: createdDoc._id,
+        nodeId,
+        title: cleanName,
+        name: cleanName,
+        path: `/${cleanName}`,
+        type: 'file',
+        pageId: parentDocId,
+        content,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    };
   }
 
   // ─── 2. INLINE COMMENTS & THREADS ─────────────────────────────────────────────
@@ -1195,16 +1351,26 @@ export class PagesBridgeController {
     'pages/:pageId/collaboration/stream',
     'projects/:projectId/pages/:pageId/collaboration/stream',
   ])
-  async getStream(@Res() reply: any) {
-    if (reply?.raw?.setHeader) {
-      reply.raw.setHeader('Content-Type', 'text/event-stream');
-      reply.raw.setHeader('Cache-Control', 'no-cache');
-      reply.raw.setHeader('Connection', 'keep-alive');
-      reply.raw.write(': keepalive\n\n');
-      reply.raw.end();
-    } else {
-      reply.send(': keepalive\n\n');
-    }
+  async getStream(@Req() req: any, @Res() reply: any) {
+    const origin =
+      req.headers?.origin || req.headers?.Origin || 'http://localhost:2915';
+    reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+    reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
+    reply.raw.setHeader('Content-Type', 'text/event-stream');
+    reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
+    reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.writeHead(200);
+    reply.raw.write(': keepalive\n\n');
+
+    const interval = setInterval(() => {
+      if (!reply.raw.writableEnded && !reply.raw.destroyed) {
+        reply.raw.write(': keepalive\n\n');
+      }
+    }, 15000);
+
+    req.raw.on('close', () => {
+      clearInterval(interval);
+    });
   }
 
   // ─── 7. DOCUMENT EXPORT ──────────────────────────────────────────────────────
@@ -1368,21 +1534,39 @@ export class PagesBridgeController {
     if (isUuid(projectId)) {
       try {
         const doc = await this.docstoreService.createDoc(projectId, {
-          path: title,
+          path: title.startsWith('/') ? title : `/${title}`,
           text: content,
           version: 1,
         });
+
+        // Ensure a corresponding manuscriptNode exists in the file tree
+        try {
+          await this.prisma.manuscriptNode.create({
+            data: {
+              projectId,
+              name: title.replace(/^\//, ''),
+              path: title.startsWith('/') ? title : `/${title}`,
+              type: 'DOC',
+              docId: doc._id,
+              isRootDoc: true,
+              sizeBytes: Buffer.byteLength(content, 'utf8'),
+            },
+          });
+        } catch {
+          // ignore duplicate path conflicts
+        }
+
         return {
           page: {
             id: doc._id,
-            title: doc.path,
+            title: doc.path.replace(/^\//, ''),
             content,
             status: body?.status || 'draft',
             projectId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           },
-          mainFile: { id: doc._id, title: doc.path },
+          mainFile: { id: doc._id, title: doc.path.replace(/^\//, '') },
           rootPageId: doc._id,
           mainFileId: doc._id,
         };

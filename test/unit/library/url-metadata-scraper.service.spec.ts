@@ -133,9 +133,8 @@ describe('UrlMetadataScraperService', () => {
     );
     expect(result).not.toBeNull();
     expect(result.title).toBe('Deep Residual Learning for Image Recognition');
-    expect(result.abstract).toBe(
-      'Deeper neural networks are more difficult to train.',
-    );
+    // Short og:description (<200 chars) is usually a site blurb, not an abstract.
+    expect(result.abstract).toBeUndefined();
   });
 
   it('downloads direct PDF, extracts metadata, and saves to storage', async () => {
@@ -192,6 +191,6 @@ describe('UrlMetadataScraperService', () => {
       'https://proceedings.neurips.cc/paper/7181-attention-is-all-you-need.pdf?utm_source=chatgpt.com',
     );
     expect(result).not.toBeNull();
-    expect(result.title).toBe('Attention Is All You Need');
+    expect(result.title).toBe('Attention is all you need');
   });
 });

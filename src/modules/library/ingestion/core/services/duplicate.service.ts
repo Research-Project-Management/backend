@@ -567,14 +567,14 @@ export class DuplicateService {
         const backfillFields: Record<string, any> = {};
         for (const field of ALLOWED_MERGE_METADATA_FIELDS) {
           if (scalarSelections[field] !== undefined) continue;
-          const primaryVal = (primary as any)[field];
+          const primaryVal = primary[field];
           if (
             primaryVal === null ||
             primaryVal === undefined ||
             primaryVal === ''
           ) {
             for (const dup of duplicates) {
-              const dupVal = (dup as any)[field];
+              const dupVal = dup[field];
               if (dupVal !== null && dupVal !== undefined && dupVal !== '') {
                 backfillFields[field] = dupVal;
                 break;

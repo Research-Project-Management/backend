@@ -78,14 +78,13 @@ describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapt
 
     controller = new ItemCurationController(
       mockGetFulltextUseCase as any,
-      mockParseCitationsUseCase as any,
+      mockParseCitationsUseCase,
       mockReindexItemUseCase as any,
       mockConvertItemTypeUseCase as any,
       mockPreviewTypeConversionUseCase as any,
       mockManageRelationsUseCase as any,
       mockSetMyPublicationUseCase as any,
       mockGetItemUseCase as any,
-      undefined,
     );
   });
 

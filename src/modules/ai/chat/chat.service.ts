@@ -45,7 +45,11 @@ function formatChat(chat: any): FormattedChatSession {
       id: m.id,
       role: m.role,
       content: m.content,
-      sources: m.sources,
+      sources: m.role === 'assistant' ? m.sources : undefined,
+      attachments:
+        m.role === 'user' && Array.isArray(m.sources) && m.sources.length > 0
+          ? m.sources
+          : undefined,
       widgets: m.widgets,
       createdAt: m.createdAt?.toISOString?.() || m.createdAt,
     })),
@@ -294,7 +298,7 @@ export class ChatService {
       const formattedMessages = dto.messages.map((m: any) => ({
         role: validateAndSanitizeRole(m.role),
         content: sanitizeChatMessageContent(m.content),
-        sources: m.sources,
+        sources: m.attachments || m.sources,
         widgets: m.widgets,
         selectionContext: m.selectionContext,
       }));
@@ -330,7 +334,7 @@ export class ChatService {
     const formattedMessages = dto.messages.map((m: any) => ({
       role: validateAndSanitizeRole(m.role),
       content: sanitizeChatMessageContent(m.content),
-      sources: m.sources,
+      sources: m.attachments || m.sources,
       widgets: m.widgets,
       selectionContext: m.selectionContext,
     }));

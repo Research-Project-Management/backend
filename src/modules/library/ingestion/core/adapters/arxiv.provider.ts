@@ -119,7 +119,10 @@ export class ArxivProvider implements MetadataProvider {
     let publicationDate: string | undefined;
     const publishedMatch = entry.match(/<published>([\s\S]*?)<\/published>/i);
     if (publishedMatch) {
-      publicationDate = publishedMatch[1].trim();
+      const rawPublished = publishedMatch[1].trim();
+      // Zotero stores the date part only (YYYY-MM-DD), not the ISO timestamp
+      const dateOnly = rawPublished.match(/^(\d{4}-\d{2}-\d{2})/);
+      publicationDate = dateOnly ? dateOnly[1] : rawPublished;
       const yearMatch = publicationDate.match(/^(\d{4})/);
       if (yearMatch) year = Number(yearMatch[1]);
     }
@@ -206,7 +209,11 @@ export class ArxivProvider implements MetadataProvider {
     const canonicalArxivId = cleanId.replace(/v\d+$/i, '');
 
     // Native Zotero arXiv Extra format: arXiv: <id> [<primary_category>]
-    const extra = `arXiv: ${canonicalArxivId}${primaryCategory ? ` [${primaryCategory}]` : ''}`;
+    const extraLines = [
+      `arXiv: ${canonicalArxivId}${primaryCategory ? ` [${primaryCategory}]` : ''}`,
+    ];
+    if (journal) extraLines.push(`Journal reference: ${journal}`);
+    const extra = extraLines.join('\n');
 
     // PDF link
     const pdfUrl = `https://arxiv.org/pdf/${cleanId}.pdf`;
@@ -230,12 +237,12 @@ export class ArxivProvider implements MetadataProvider {
         creators,
         year,
         publicationDate,
-        journal: journal || undefined,
-        publicationTitle: journal || undefined,
-        publisher: undefined,
+        date: publicationDate,
+        // journal_ref is a free-text citation ("Phys. Rev. D 76, 013009 (2007)"),
+        // not a container title — it is kept in Extra instead.
+        publisher: 'arXiv',
         genre: 'Preprint',
         abstract,
-        language: 'en',
         archive: 'arXiv',
         repository: 'arXiv',
         archiveId: `arXiv:${canonicalArxivId}`,

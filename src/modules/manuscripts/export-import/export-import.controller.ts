@@ -62,7 +62,7 @@ export class ExportImportController {
     throw error;
   }
 
-  @Get(':projectId/export/zip')
+  @Get([':projectId/export/zip', ':projectId/export'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({

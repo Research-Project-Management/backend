@@ -109,7 +109,7 @@ export class RisParser {
         creators.push({
           firstName: given || undefined,
           lastName: family || undefined,
-          creatorType: resolvedType as any,
+          creatorType: resolvedType,
         });
       }
     }

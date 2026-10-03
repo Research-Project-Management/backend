@@ -30,6 +30,7 @@ export interface CompilePipelineRequest {
   engine?: string;
   draft?: boolean;
   syntaxOnly?: boolean;
+  force?: boolean;
   stopOnFirstError?: boolean;
   timeoutMs?: number;
   source?: string;
@@ -156,7 +157,90 @@ export class CompilePipeline {
         scratchDir,
         async () => {
           // Step 2: Incremental Workspace Sync (Overleaf ResourceWriter)
-          await this.workspace.syncFiles(projectId, workspaceFiles);
+          const syncStats = await this.workspace.syncFiles(
+            projectId,
+            workspaceFiles,
+          );
+
+          const pdfPath = path.join(scratchDir, 'output.pdf');
+          const logPath = path.join(scratchDir, 'output.log');
+          const buildStatePath = path.join(
+            scratchDir,
+            '.clsi-build-state.json',
+          );
+
+          // Step 2a: Short-Circuit Cache Hit: If 0 files changed and build state matches, return cached PDF in <5ms
+          if (
+            syncStats.written === 0 &&
+            syncStats.deleted === 0 &&
+            !dto.syntaxOnly &&
+            !dto.force
+          ) {
+            try {
+              const stateRaw = await fs.readFile(buildStatePath, 'utf8');
+              const buildState = JSON.parse(stateRaw);
+              if (
+                buildState.success &&
+                buildState.mainFile === mainFile &&
+                buildState.engine === resolvedEngine &&
+                buildState.draft === (dto.draft ?? false)
+              ) {
+                const pdfStat = await fs.stat(pdfPath);
+                if (pdfStat.size > 0) {
+                  const pdfBuffer = await fs.readFile(pdfPath);
+                  const pdfBase64 = pdfBuffer.toString('base64');
+                  let logs = '';
+                  try {
+                    logs = await fs.readFile(logPath, 'utf8');
+                  } catch {}
+
+                  let synctexBase64 = '';
+                  const synctexGzPath = path.join(
+                    scratchDir,
+                    'output.synctex.gz',
+                  );
+                  const synctexPlainPath = path.join(
+                    scratchDir,
+                    'output.synctex',
+                  );
+                  try {
+                    const synctexBuffer = await fs.readFile(synctexGzPath);
+                    synctexBase64 = synctexBuffer.toString('base64');
+                  } catch {
+                    try {
+                      const synctexBuffer = await fs.readFile(synctexPlainPath);
+                      synctexBase64 = synctexBuffer.toString('base64');
+                    } catch {}
+                  }
+
+                  const discoveredFiles = await this.outputFileFinder.find(
+                    scratchDir,
+                    inputFiles,
+                  );
+                  const diagnostics = this.logParser.parse(logs, mainFile);
+
+                  dto.onLogChunk?.(
+                    '[CLSI Cache] Build up to date: 0 source files modified. Returning cached output.',
+                  );
+
+                  return {
+                    success: true,
+                    pdf: pdfBase64,
+                    synctex: synctexBase64 || undefined,
+                    logs:
+                      logs ||
+                      '[CLSI Cache] Build up to date: workspace unchanged.',
+                    diagnostics:
+                      diagnostics.length > 0 ? diagnostics : undefined,
+                    outputFiles: discoveredFiles,
+                    durationMs: Date.now() - startTime,
+                  };
+                }
+              }
+            } catch {
+              // Cache miss or missing file: proceed to standard compile
+            }
+          }
 
           // Step 2b: Overleaf Extraneous Files Purge & Stale Output Cleanup
           await this.workspace.purgeExtraneousFiles(projectId, inputFiles);
@@ -244,8 +328,6 @@ export class CompilePipeline {
             inputFiles,
           );
 
-          const pdfPath = path.join(scratchDir, 'output.pdf');
-          const logPath = path.join(scratchDir, 'output.log');
           const synctexGzPath = path.join(scratchDir, 'output.synctex.gz');
           const synctexPlainPath = path.join(scratchDir, 'output.synctex');
 
@@ -284,6 +366,20 @@ export class CompilePipeline {
           const diagnostics = this.logParser.parse(logs, mainFile);
 
           if (engineResult.pdfGenerated && pdfBase64) {
+            try {
+              await fs.writeFile(
+                buildStatePath,
+                JSON.stringify({
+                  success: true,
+                  mainFile,
+                  engine: resolvedEngine,
+                  draft: dto.draft ?? false,
+                  timestamp: Date.now(),
+                }),
+                'utf8',
+              );
+            } catch {}
+
             return {
               success: true,
               pdf: pdfBase64,
@@ -294,6 +390,10 @@ export class CompilePipeline {
               durationMs,
             };
           }
+
+          try {
+            await fs.unlink(buildStatePath);
+          } catch {}
 
           return {
             success: false,

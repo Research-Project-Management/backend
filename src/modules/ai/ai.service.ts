@@ -18,7 +18,9 @@ import {
   sanitizeChatTitle,
 } from './utils/ai.util';
 
+import * as crypto from 'node:crypto';
 import { PrismaService } from '@/core/database/prisma.service';
+import { RedisCacheService } from '@/core/cache/redis.service';
 
 @Injectable()
 export class AiService {
@@ -28,6 +30,7 @@ export class AiService {
     private readonly engineService: EngineService,
     private readonly chatService: ChatService,
     private readonly prisma: PrismaService,
+    @Optional() private readonly redis?: RedisCacheService,
   ) {}
 
   async health() {
@@ -203,25 +206,24 @@ export class AiService {
     const targetPageId = dto.pageId || dto.page_id;
     let targetChatId = dto.chatId || dto.chat_id;
 
-    await this.validateAccess(
-      userId,
-      targetProjectId,
-      targetChatId,
-      targetPageId,
-    );
-
     const payload = buildAiPayload(userId, dto);
-    if (payload.document_ids && payload.document_ids.length > 0) {
-      payload.document_ids = await this.resolveDocumentIds(
-        payload.document_ids,
-      );
-    }
 
-    // Validate that user message is not empty
+    // Validate that user message is not empty early before DB calls
     const userMessages = payload.messages.filter((m) => m.role === 'user');
     const lastUserMsg = userMessages[userMessages.length - 1];
     if (!lastUserMsg || !lastUserMsg.content || !lastUserMsg.content.trim()) {
       throw new UnprocessableEntityException('Message content cannot be empty');
+    }
+
+    // Parallel pre-flight: execute access check and document ID resolution simultaneously
+    const [_, resolvedDocIds] = await Promise.all([
+      this.validateAccess(userId, targetProjectId, targetChatId, targetPageId),
+      payload.document_ids && payload.document_ids.length > 0
+        ? this.resolveDocumentIds(payload.document_ids)
+        : Promise.resolve([]),
+    ]);
+    if (payload.document_ids && payload.document_ids.length > 0) {
+      payload.document_ids = resolvedDocIds;
     }
 
     // Resolve or establish authoritative chat session
@@ -249,17 +251,29 @@ export class AiService {
 
     payload.chat_id = targetChatId;
 
-    // Save user message to thread
-    try {
-      await this.chatService.appendMessages(targetChatId, userId, {
-        messages: [{ role: 'user', content: lastUserMsg.content }],
+    // Concurrent user message append without blocking SSE stream initiation
+    const persistUserMsgPromise = this.chatService
+      .appendMessages(targetChatId, userId, {
+        messages: [
+          {
+            role: 'user',
+            content: lastUserMsg.content,
+            ...((lastUserMsg as any).attachments || (lastUserMsg as any).sources
+              ? {
+                  sources:
+                    (lastUserMsg as any).attachments ||
+                    (lastUserMsg as any).sources,
+                }
+              : {}),
+          },
+        ],
         documentIds: payload.document_ids,
+      })
+      .catch((err) => {
+        this.logger.warn(
+          `Could not persist user message to thread: ${String(err)}`,
+        );
       });
-    } catch (err) {
-      this.logger.warn(
-        `Could not persist user message to thread: ${String(err)}`,
-      );
-    }
 
     const initialEvents = [
       `data: [META]${JSON.stringify({
@@ -269,6 +283,7 @@ export class AiService {
     ];
 
     const onComplete = async (accumulatedText: string) => {
+      await persistUserMsgPromise;
       if (targetChatId && accumulatedText && accumulatedText.trim()) {
         try {
           await this.chatService.appendMessages(targetChatId, userId, {
@@ -307,25 +322,24 @@ export class AiService {
     const targetPageId = dto.pageId || dto.page_id;
     let targetChatId = dto.chatId || dto.chat_id;
 
-    await this.validateAccess(
-      userId,
-      targetProjectId,
-      targetChatId,
-      targetPageId,
-    );
-
     const payload = buildAiPayload(userId, dto);
-    if (payload.document_ids && payload.document_ids.length > 0) {
-      payload.document_ids = await this.resolveDocumentIds(
-        payload.document_ids,
-      );
-    }
 
-    // Validate that user message is not empty
+    // Validate that user message is not empty early before DB calls
     const userMessages = payload.messages.filter((m) => m.role === 'user');
     const lastUserMsg = userMessages[userMessages.length - 1];
     if (!lastUserMsg || !lastUserMsg.content || !lastUserMsg.content.trim()) {
       throw new UnprocessableEntityException('Message content cannot be empty');
+    }
+
+    // Parallel pre-flight: execute access check and document ID resolution simultaneously
+    const [_, resolvedDocIds] = await Promise.all([
+      this.validateAccess(userId, targetProjectId, targetChatId, targetPageId),
+      payload.document_ids && payload.document_ids.length > 0
+        ? this.resolveDocumentIds(payload.document_ids)
+        : Promise.resolve([]),
+    ]);
+    if (payload.document_ids && payload.document_ids.length > 0) {
+      payload.document_ids = resolvedDocIds;
     }
 
     // Resolve or establish authoritative chat session
@@ -356,7 +370,19 @@ export class AiService {
     // Save user message to thread
     try {
       await this.chatService.appendMessages(targetChatId, userId, {
-        messages: [{ role: 'user', content: lastUserMsg.content }],
+        messages: [
+          {
+            role: 'user',
+            content: lastUserMsg.content,
+            ...((lastUserMsg as any).attachments || (lastUserMsg as any).sources
+              ? {
+                  sources:
+                    (lastUserMsg as any).attachments ||
+                    (lastUserMsg as any).sources,
+                }
+              : {}),
+          },
+        ],
         documentIds: payload.document_ids,
       });
     } catch (err) {
@@ -430,7 +456,7 @@ export class AiService {
     if (item) {
       const hasAccess =
         item.userId === userId ||
-        (item as any).uploadedById === userId ||
+        item.uploadedById === userId ||
         (item.projectId
           ? (await this.prisma.projectMember.findFirst({
               where: {
@@ -448,7 +474,7 @@ export class AiService {
       // a) check item.metadata.ragDocId
       let ragDocId: string | null =
         (item.metadata as Record<string, any>)?.ragDocId ||
-        (item as any).ragDocId ||
+        item.ragDocId ||
         null;
 
       // b) check primary_pdf attachment or any attachment
@@ -576,7 +602,6 @@ export class AiService {
     });
 
     const payload = buildAiPayload(userId, dto);
-    payload.workspace_id = resolved.scopeId;
     // Strict paper document scope - prevent foreign injected document IDs
     payload.document_ids = resolved.ragDocId ? [resolved.ragDocId] : [];
     payload.chat_id = chatId;
@@ -622,7 +647,6 @@ export class AiService {
     });
 
     const payload = buildAiPayload(userId, dto);
-    payload.workspace_id = resolved.scopeId;
     payload.document_ids = resolved.ragDocId ? [resolved.ragDocId] : [];
     payload.chat_id = chatId;
     payload.intent_hint = 'paper_rag_qa';
@@ -632,6 +656,24 @@ export class AiService {
         { role: 'system' as const, content: paperContext },
         ...payload.messages,
       ];
+    }
+
+    const cleanQuery = (
+      dto.query ||
+      dto.messages?.[dto.messages.length - 1]?.content ||
+      ''
+    ).trim();
+    const cacheKey =
+      this.redis && cleanQuery
+        ? `ai:paper-qa:${resolved.scopeId}:${resolved.ragDocId || paperId}:${crypto.createHash('sha256').update(cleanQuery).digest('hex')}`
+        : null;
+
+    if (cacheKey && this.redis) {
+      return this.redis.wrap(
+        cacheKey,
+        () => this.engineService.syncChat(payload),
+        3600,
+      );
     }
 
     return this.engineService.syncChat(payload);
@@ -708,6 +750,17 @@ export class AiService {
     await this.validateAccess(userId, cleanProjectId);
     const scopeId = cleanProjectId || userId;
     return this.engineService.getDocuments({
+      userId,
+      scopeId,
+      projectId: cleanProjectId,
+    });
+  }
+
+  async deleteDocument(userId: string, docId: string, projectId?: string) {
+    const cleanProjectId = this.sanitizeProjectId(projectId);
+    await this.validateAccess(userId, cleanProjectId);
+    const scopeId = cleanProjectId || userId;
+    return this.engineService.deleteDocument(docId, {
       userId,
       scopeId,
       projectId: cleanProjectId,

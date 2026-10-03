@@ -11,11 +11,9 @@ import {
   UseGuards,
   NotFoundException,
   BadRequestException,
-  Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
-import { NotesService } from './core/services/notes.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 
 import { CreateNoteDto, UpdateNoteDto } from './dto/notes.dto';
@@ -37,53 +35,14 @@ import { ListNotesUseCase } from './core/use-cases/list-notes.use-case';
 ])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class NoteController {
-  private notesServiceInstance?: NotesService;
-  private createNoteUseCaseInstance?: CreateNoteUseCase;
-  private getNoteUseCaseInstance?: GetNoteUseCase;
-  private listNotesUseCaseInstance?: ListNotesUseCase;
-  private updateNoteUseCaseInstance?: UpdateNoteUseCase;
-  private deleteNoteUseCaseInstance?: DeleteNoteUseCase;
-  private extractNotesUseCaseInstance?: ExtractNotesFromAnnotationsUseCase;
-
-  constructor(notesService: NotesService);
   constructor(
-    createNoteUseCase: CreateNoteUseCase,
-    getNoteUseCase: GetNoteUseCase,
-    listNotesUseCase: ListNotesUseCase,
-    updateNoteUseCase: UpdateNoteUseCase,
-    deleteNoteUseCase: DeleteNoteUseCase,
-    extractNotesUseCase: ExtractNotesFromAnnotationsUseCase,
-    notesService?: NotesService,
-  );
-  constructor(
-    @Optional() private readonly createNoteUseCase?: any,
-    @Optional() private readonly getNoteUseCase?: GetNoteUseCase,
-    @Optional() private readonly listNotesUseCase?: ListNotesUseCase,
-    @Optional() private readonly updateNoteUseCase?: UpdateNoteUseCase,
-    @Optional() private readonly deleteNoteUseCase?: DeleteNoteUseCase,
-    @Optional()
-    private readonly extractNotesUseCase?: ExtractNotesFromAnnotationsUseCase,
-    @Optional() private readonly notesService?: NotesService,
-  ) {
-    const isLegacyService =
-      createNoteUseCase && !('execute' in createNoteUseCase);
-
-    if (isLegacyService) {
-      this.notesServiceInstance = createNoteUseCase;
-    } else {
-      this.createNoteUseCaseInstance = createNoteUseCase;
-      this.getNoteUseCaseInstance = getNoteUseCase;
-      this.listNotesUseCaseInstance = listNotesUseCase;
-      this.updateNoteUseCaseInstance = updateNoteUseCase;
-      this.deleteNoteUseCaseInstance = deleteNoteUseCase;
-      this.extractNotesUseCaseInstance = extractNotesUseCase;
-      this.notesServiceInstance = notesService;
-    }
-  }
-
-  private get effectiveNotesService(): NotesService {
-    return (this.notesServiceInstance ?? this.notesService)!;
-  }
+    private readonly createNoteUseCase: CreateNoteUseCase,
+    private readonly getNoteUseCase: GetNoteUseCase,
+    private readonly listNotesUseCase: ListNotesUseCase,
+    private readonly updateNoteUseCase: UpdateNoteUseCase,
+    private readonly deleteNoteUseCase: DeleteNoteUseCase,
+    private readonly extractNotesUseCase: ExtractNotesFromAnnotationsUseCase,
+  ) {}
 
   @Get()
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
@@ -104,19 +63,11 @@ export class NoteController {
         ? rawProjectId
         : undefined;
 
-    if (this.listNotesUseCaseInstance) {
-      return this.listNotesUseCaseInstance.execute({
-        userId: currentUserId,
-        itemId,
-        projectId: effectiveProjectId,
-      });
-    }
-
-    return this.effectiveNotesService.listNotes(
-      currentUserId,
+    return this.listNotesUseCase.execute({
+      userId: currentUserId,
       itemId,
-      effectiveProjectId,
-    );
+      projectId: effectiveProjectId,
+    });
   }
 
   @Get(':id')
@@ -129,20 +80,11 @@ export class NoteController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
-    let note;
-    if (this.getNoteUseCaseInstance) {
-      note = await this.getNoteUseCaseInstance.execute({
-        userId: currentUserId,
-        id,
-        projectId: effectiveProjectId,
-      });
-    } else {
-      note = await this.effectiveNotesService.getNote(
-        currentUserId,
-        id,
-        effectiveProjectId,
-      );
-    }
+    const note = await this.getNoteUseCase.execute({
+      userId: currentUserId,
+      id,
+      projectId: effectiveProjectId,
+    });
     if (!note) {
       throw new NotFoundException(`Note ${id} not found`);
     }
@@ -167,15 +109,11 @@ export class NoteController {
       createdById: currentUserId,
     };
 
-    if (this.createNoteUseCaseInstance) {
-      return this.createNoteUseCaseInstance.execute({
-        userId: currentUserId,
-        data: createData,
-        projectId: effectiveProjectId || undefined,
-      });
-    }
-
-    return this.effectiveNotesService.createNote(currentUserId, createData);
+    return this.createNoteUseCase.execute({
+      userId: currentUserId,
+      data: createData,
+      projectId: effectiveProjectId || undefined,
+    });
   }
 
   @Get('items/:itemId')
@@ -188,19 +126,11 @@ export class NoteController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
-    if (this.listNotesUseCaseInstance) {
-      return this.listNotesUseCaseInstance.execute({
-        userId: currentUserId,
-        itemId,
-        projectId: effectiveProjectId,
-      });
-    }
-
-    return this.effectiveNotesService.listNotes(
-      currentUserId,
+    return this.listNotesUseCase.execute({
+      userId: currentUserId,
       itemId,
-      effectiveProjectId,
-    );
+      projectId: effectiveProjectId,
+    });
   }
 
   @Post('items/:itemId/from-annotations')
@@ -218,19 +148,11 @@ export class NoteController {
       ? { protocol, webBaseUrl: body?.webBaseUrl }
       : undefined;
 
-    if (this.extractNotesUseCaseInstance) {
-      return this.extractNotesUseCaseInstance.execute({
-        userId: currentUserId,
-        itemId,
-        options,
-      });
-    }
-
-    return this.effectiveNotesService.extractNotesFromAnnotations(
-      currentUserId,
+    return this.extractNotesUseCase.execute({
+      userId: currentUserId,
       itemId,
       options,
-    );
+    });
   }
 
   @Patch(':id')
@@ -256,23 +178,13 @@ export class NoteController {
 
     const { expectedVersion: _, ...updateData } = body;
 
-    if (this.updateNoteUseCaseInstance) {
-      return this.updateNoteUseCaseInstance.execute({
-        userId: currentUserId,
-        id,
-        expectedVersion,
-        data: updateData,
-        projectId: effectiveProjectId,
-      });
-    }
-
-    return this.effectiveNotesService.updateNote(
-      currentUserId,
+    return this.updateNoteUseCase.execute({
+      userId: currentUserId,
       id,
       expectedVersion,
-      updateData,
-      effectiveProjectId,
-    );
+      data: updateData,
+      projectId: effectiveProjectId,
+    });
   }
 
   @Delete(':id')
@@ -294,22 +206,12 @@ export class NoteController {
           ? parseInt(ifMatch.replace(/["']/g, ''), 10)
           : undefined;
 
-    let deleted: boolean;
-    if (this.deleteNoteUseCaseInstance) {
-      deleted = await this.deleteNoteUseCaseInstance.execute({
-        userId: currentUserId,
-        id,
-        expectedVersion,
-        projectId: effectiveProjectId,
-      });
-    } else {
-      deleted = await this.effectiveNotesService.deleteNote(
-        currentUserId,
-        id,
-        expectedVersion,
-        effectiveProjectId,
-      );
-    }
+    const deleted = await this.deleteNoteUseCase.execute({
+      userId: currentUserId,
+      id,
+      expectedVersion,
+      projectId: effectiveProjectId,
+    });
 
     if (!deleted) {
       throw new NotFoundException(`Note ${id} not found`);

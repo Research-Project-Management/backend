@@ -32,6 +32,7 @@ export class ClsiController {
 
   @Post([
     'v1/manuscripts/compile',
+    'v1/manuscripts/projects/:projectId/compile',
     'manuscripts/compile',
     'clsi/compile',
     'compiler/compile',
@@ -44,7 +45,12 @@ export class ClsiController {
   async compile(
     @Body() dto: CompileManuscriptDto,
     @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
   ) {
+    if (projectId && !dto.projectId && !dto.project_id) {
+      dto.projectId = projectId;
+      dto.project_id = projectId;
+    }
     return this.clsiService.compile(dto, userId);
   }
 

@@ -7,71 +7,145 @@ import {
 
 export { ParsedCreator };
 
+/**
+ * Whole-word keywords that mark a creator string as an organization
+ * (Zotero single-field creator, fieldMode = 1). Deliberately excludes short
+ * tokens that collide with person names (e.g. "who", "mit", "meta").
+ */
 export const INSTITUTION_KEYWORDS = [
+  'university',
+  'universities',
+  'universität',
+  'université',
+  'universidad',
+  'universidade',
+  'università',
+  'institute',
+  'institutes',
+  'institution',
+  'institutions',
+  'consortium',
+  'consortia',
+  'collaboration',
+  'collaborations',
+  'committee',
+  'committees',
   'organization',
   'organizations',
   'organisation',
   'organisations',
   'association',
   'associations',
-  'institute',
-  'institutes',
-  'institution',
-  'institutions',
-  'university',
-  'universities',
-  'laboratory',
-  'laboratories',
-  'collab',
-  'collaboration',
-  'collaborations',
+  'society',
+  'societies',
+  'foundation',
   'group',
+  'groups',
   'team',
-  'consortium',
-  'network',
-  'department',
-  'departments',
+  'council',
   'agency',
   'agencies',
+  'department',
+  'departments',
+  'ministry',
+  'laboratory',
+  'laboratories',
   'center',
   'centers',
   'centre',
   'centres',
-  'foundation',
+  'network',
+  'initiative',
+  'working party',
+  'investigators',
+  'commission',
   'corporation',
+  'hospital',
+  'hospitals',
   'inc',
   'llc',
   'ltd',
-  'hospital',
-  'hospitals',
   'openai',
-  'google',
-  'microsoft',
-  'meta',
   'deepmind',
   'anthropic',
-  'mit',
+  'google',
+  'microsoft',
   'cern',
   'nasa',
-  'who',
   'ieee',
-  'acm',
 ];
 
+const INSTITUTION_REGEX = new RegExp(
+  `(?:^|[^\\p{L}\\p{N}])(?:${INSTITUTION_KEYWORDS.map((kw) =>
+    kw.replace(/\s+/g, '\\s+'),
+  ).join('|')})(?=$|[^\\p{L}\\p{N}])`,
+  'iu',
+);
+
+/**
+ * Returns true when the (already cleaned) creator string looks like an
+ * organization rather than a person (whole-word keyword match).
+ */
+export function isInstitutionName(name?: string | null): boolean {
+  if (!name || typeof name !== 'string') return false;
+  return INSTITUTION_REGEX.test(name);
+}
+
+/** Lowercase name particles (only matched when written in lowercase). */
 const PREFIX_PARTICLES = new Set([
   'von',
   'van',
   'de',
   'del',
+  'della',
   'der',
+  'den',
+  'des',
   'da',
+  'das',
+  'do',
+  'dos',
   'di',
   'du',
   'la',
   'le',
+  'ter',
+  'ten',
+  'zu',
+  'al',
+  'el',
+  'bin',
+  'ibn',
 ]);
 
 const GENERATIONAL_SUFFIX_REGEX = /^(?:Jr\.?|Sr\.?|II|III|IV|V|Esq\.?)$/i;
+
+/** Surname beginning with a name particle, e.g. "van der Berg", "De Silva". */
+const PARTICLE_SURNAME_REGEX =
+  /^(?:(?:von|van|de|del|della|der|den|des|da|das|do|dos|di|du|la|le|ter|ten|zu|al|el|bin|ibn|Von|Van|De|Del|Della|Der|Den|Des|Da|Das|Dos|Di|Du|Ter|Ten)\s+)+\S/;
+
+/**
+ * Detects Vancouver / Medline style names: "Smith JA", "van der Berg AB",
+ * "O'Neil P". The trailing token must be 1-3 uppercase initials without dots
+ * and every surname token must be a lowercase particle or a capitalized word
+ * containing at least one lowercase letter.
+ */
+export function isVancouverName(raw?: string | null): boolean {
+  if (!raw || typeof raw !== 'string') return false;
+  const tokens = raw.trim().split(/\s+/);
+  if (tokens.length < 2) return false;
+  const initials = tokens[tokens.length - 1];
+  if (!/^[A-Z]{1,3}$/.test(initials)) return false;
+  if (/^(?:II|III|IV)$/.test(initials)) return false;
+  const surname = tokens.slice(0, -1);
+  let hasCore = false;
+  for (const t of surname) {
+    if (PREFIX_PARTICLES.has(t)) continue;
+    if (!/^\p{Lu}[\p{L}'’-]*$/u.test(t) || !/\p{Ll}/u.test(t)) return false;
+    hasCore = true;
+  }
+  return hasCore;
+}
 
 export const NOISE_AUTHOR_WORDS = new Set([
   'abstract',
@@ -175,11 +249,20 @@ export function cleanAuthorName(raw?: string | null): string {
     '',
   );
 
-  // Strip trailing professional degrees / fellowships: e.g. ", PhD", " PhD", " M.D.", " FRS"
-  cleaned = cleaned.replace(
-    /[,\s]+(?:PhD|M\.?D\.?|M\.?S\.?|B\.?S\.?|OBE|FRS|FRSE|FIEEE|CBE)\b/gi,
-    '',
-  );
+  // Strip trailing comma-delimited professional degrees / fellowships:
+  // e.g. "John Smith, PhD", "Smith, J. A., MD". Only stripped when the text
+  // before the comma already contains a full name (space or comma), so that
+  // inverted initials like "Wong, M.D." are NOT mistaken for a degree.
+  // Generational suffixes (Jr., Sr., III) are kept.
+  const TRAILING_DEGREE_REGEX =
+    /,\s*(?:Ph\.?\s?D\.?|PHD|M\.?D\.?|M\.?Sc\.?|MSc|M\.?S\.?|B\.?Sc\.?|BSc|B\.?S\.?|MBA|MPH|D\.?Phil\.?|DPhil|FRS|FRSE|FIEEE|OBE|CBE)\s*$/;
+  for (let guard = 0; guard < 4; guard++) {
+    const m = cleaned.match(TRAILING_DEGREE_REGEX);
+    if (!m || m.index === undefined) break;
+    const prefix = cleaned.slice(0, m.index).trim();
+    if (!/[\s,]/.test(prefix)) break;
+    cleaned = prefix;
+  }
 
   // Strip trailing footnote markers, superscripts, and affiliation numbers:
   // e.g. "1,2*", "*", "1", "†", "‡", "§", "1*", "*1"
@@ -228,7 +311,11 @@ export function splitAuthorString(input: string): string[] {
     }
 
     // 2. "and" / "&" conjunctions (e.g. "A, B, and C" or "A and B" or "A & B")
-    if (/\s+and\s+/i.test(line) || /\s+&\s+/.test(line)) {
+    //    Organizations ("Bill & Melinda Gates Foundation") are never split.
+    if (
+      (/\s+and\s+/i.test(line) || /\s+&\s+/.test(line)) &&
+      !(isInstitutionName(line) && !line.includes(','))
+    ) {
       const parts = line
         .split(/(?:,\s*(?:and|&)\s*|\s+(?:and|&)\s+)/i)
         .map((s) => s.trim())
@@ -250,9 +337,17 @@ export function splitAuthorString(input: string): string[] {
         continue;
       }
 
+      // Vancouver / Medline lists: "Smith JA, Jones B, van der Berg AB"
+      if (rawTokens.every((t) => isVancouverName(t))) {
+        result.push(...rawTokens);
+        continue;
+      }
+
       if (rawTokens.length === 2) {
         // Disambiguate: Is it "LastName, FirstName" (1 author) OR "FirstName1 LastName1, FirstName2 LastName2" (2 authors)?
-        const firstHasSpace = rawTokens[0].includes(' ');
+        const firstHasSpace =
+          rawTokens[0].includes(' ') &&
+          !PARTICLE_SURNAME_REGEX.test(rawTokens[0]);
         const secondHasSpace = rawTokens[1].includes(' ');
         const isSuffix = GENERATIONAL_SUFFIX_REGEX.test(rawTokens[1]);
 
@@ -277,10 +372,7 @@ export function splitAuthorString(input: string): string[] {
       if (isEven) {
         for (let i = 0; i < rawTokens.length; i += 2) {
           const surname = rawTokens[i];
-          if (
-            surname.includes(' ') &&
-            !/^(?:van|von|de|del|der|da|di|du|la|le)\s+/i.test(surname)
-          ) {
+          if (surname.includes(' ') && !PARTICLE_SURNAME_REGEX.test(surname)) {
             looksLikeInvertedPairs = false;
             break;
           }
@@ -333,12 +425,7 @@ export function parseCreatorString(
     };
   }
 
-  const lower = cleaned.toLowerCase();
-  const isInstitution = INSTITUTION_KEYWORDS.some((kw) =>
-    new RegExp(`\\b${kw}\\b`, 'i').test(lower),
-  );
-
-  if (isInstitution) {
+  if (isInstitutionName(cleaned)) {
     return {
       orderIndex,
       creatorType,
@@ -346,6 +433,25 @@ export function parseCreatorString(
       firstName: '',
       lastName: cleaned,
       fullName: cleaned,
+    };
+  }
+
+  // Vancouver / Medline: "Smith JA" → lastName "Smith", firstName "J. A."
+  if (!cleaned.includes(',') && isVancouverName(cleaned)) {
+    const vTokens = cleaned.split(/\s+/);
+    const initials = vTokens[vTokens.length - 1];
+    const lastName = vTokens.slice(0, -1).join(' ');
+    const firstName = initials
+      .split('')
+      .map((c) => `${c}.`)
+      .join(' ');
+    return {
+      orderIndex,
+      creatorType,
+      fieldMode: 0,
+      firstName,
+      lastName,
+      fullName: `${firstName} ${lastName}`,
     };
   }
 
@@ -394,14 +500,14 @@ export function parseCreatorString(
     splitIndex = tokens.length - 2;
   } else if (
     tokens.length >= 3 &&
-    PREFIX_PARTICLES.has(tokens[tokens.length - 2].toLowerCase())
+    PREFIX_PARTICLES.has(tokens[tokens.length - 2])
   ) {
+    // Lowercase particles attach to the surname: "Vincent van Gogh",
+    // "Juan de la Cruz", "Ludwig van der Rohe". Capitalized forms ("Le", "Van")
+    // are left alone since they are frequently given/middle names.
     splitIndex = tokens.length - 2;
-    if (
-      tokens.length >= 4 &&
-      PREFIX_PARTICLES.has(tokens[tokens.length - 3].toLowerCase())
-    ) {
-      splitIndex = tokens.length - 3;
+    while (splitIndex > 1 && PREFIX_PARTICLES.has(tokens[splitIndex - 1])) {
+      splitIndex--;
     }
   }
 
@@ -442,6 +548,7 @@ export function normalizeCreators(
         'Unknown',
       firstName: c.firstName,
       lastName: c.lastName,
+      ...(c.fieldMode !== undefined ? { fieldMode: c.fieldMode } : {}),
     }));
   }
   if (Array.isArray(fallbackAuthors) && fallbackAuthors.length > 0) {
@@ -465,32 +572,190 @@ export const BANNED_STRINGS = new Set([
   '',
 ]);
 
-const HTML_ENTITY_MAP: Record<string, string> = {
-  '&amp;': '&',
-  '&lt;': '<',
-  '&gt;': '>',
-  '&quot;': '"',
-  '&#39;': "'",
-  '&apos;': "'",
-  '&nbsp;': ' ',
-  '&ndash;': '–',
-  '&mdash;': '—',
-  '&lsquo;': '‘',
-  '&rsquo;': '’',
-  '&ldquo;': '“',
-  '&rdquo;': '”',
-  '&hellip;': '…',
-  '&copy;': '©',
-  '&reg;': '®',
-  '&trade;': '™',
-  '&plusmn;': '±',
-  '&times;': '×',
-  '&divide;': '÷',
-  '&micro;': 'µ',
-  '&deg;': '°',
-};
+const HTML_ENTITY_CODEPOINTS: Record<string, number> = (() => {
+  const map: Record<string, number> = {
+    amp: 0x26,
+    lt: 0x3c,
+    gt: 0x3e,
+    quot: 0x22,
+    apos: 0x27,
+    nbsp: 0x20, // decoded as a plain space on purpose (whitespace collapsing)
+    ensp: 0x20,
+    emsp: 0x20,
+    thinsp: 0x20,
+    shy: 0, // soft hyphen → removed
+    zwnj: 0,
+    zwj: 0,
+    ndash: 0x2013,
+    mdash: 0x2014,
+    minus: 0x2212,
+    hyphen: 0x2010,
+    lsquo: 0x2018,
+    rsquo: 0x2019,
+    sbquo: 0x201a,
+    ldquo: 0x201c,
+    rdquo: 0x201d,
+    bdquo: 0x201e,
+    laquo: 0xab,
+    raquo: 0xbb,
+    lsaquo: 0x2039,
+    rsaquo: 0x203a,
+    hellip: 0x2026,
+    bull: 0x2022,
+    middot: 0xb7,
+    prime: 0x2032,
+    Prime: 0x2033,
+    dagger: 0x2020,
+    Dagger: 0x2021,
+    permil: 0x2030,
+    copy: 0xa9,
+    reg: 0xae,
+    trade: 0x2122,
+    sect: 0xa7,
+    para: 0xb6,
+    cent: 0xa2,
+    pound: 0xa3,
+    yen: 0xa5,
+    euro: 0x20ac,
+    iexcl: 0xa1,
+    iquest: 0xbf,
+    ordf: 0xaa,
+    ordm: 0xba,
+    plusmn: 0xb1,
+    times: 0xd7,
+    divide: 0xf7,
+    micro: 0xb5,
+    deg: 0xb0,
+    sup1: 0xb9,
+    sup2: 0xb2,
+    sup3: 0xb3,
+    frac14: 0xbc,
+    frac12: 0xbd,
+    frac34: 0xbe,
+    acute: 0xb4,
+    uml: 0xa8,
+    cedil: 0xb8,
+    macr: 0xaf,
+    le: 0x2264,
+    ge: 0x2265,
+    ne: 0x2260,
+    asymp: 0x2248,
+    equiv: 0x2261,
+    infin: 0x221e,
+    sum: 0x2211,
+    prod: 0x220f,
+    radic: 0x221a,
+    part: 0x2202,
+    nabla: 0x2207,
+    isin: 0x2208,
+    larr: 0x2190,
+    uarr: 0x2191,
+    rarr: 0x2192,
+    darr: 0x2193,
+    harr: 0x2194,
+    szlig: 0xdf,
+    yuml: 0xff,
+    Yuml: 0x178,
+    AElig: 0xc6,
+    aelig: 0xe6,
+    OElig: 0x152,
+    oelig: 0x153,
+    Scaron: 0x160,
+    scaron: 0x161,
+    Zcaron: 0x17d,
+    zcaron: 0x17e,
+    ETH: 0xd0,
+    eth: 0xf0,
+    THORN: 0xde,
+    thorn: 0xfe,
+    sigmaf: 0x3c2,
+    thetasym: 0x3d1,
+    upsih: 0x3d2,
+    piv: 0x3d6,
+  };
+  // Latin-1 accented letters: lowercase at U+00E0.., uppercase = lowercase - 0x20
+  const latin1: Array<[string, number]> = [
+    ['agrave', 0xe0],
+    ['aacute', 0xe1],
+    ['acirc', 0xe2],
+    ['atilde', 0xe3],
+    ['auml', 0xe4],
+    ['aring', 0xe5],
+    ['ccedil', 0xe7],
+    ['egrave', 0xe8],
+    ['eacute', 0xe9],
+    ['ecirc', 0xea],
+    ['euml', 0xeb],
+    ['igrave', 0xec],
+    ['iacute', 0xed],
+    ['icirc', 0xee],
+    ['iuml', 0xef],
+    ['ntilde', 0xf1],
+    ['ograve', 0xf2],
+    ['oacute', 0xf3],
+    ['ocirc', 0xf4],
+    ['otilde', 0xf5],
+    ['ouml', 0xf6],
+    ['oslash', 0xf8],
+    ['ugrave', 0xf9],
+    ['uacute', 0xfa],
+    ['ucirc', 0xfb],
+    ['uuml', 0xfc],
+    ['yacute', 0xfd],
+  ];
+  for (const [name, cp] of latin1) {
+    map[name] = cp;
+    map[name.charAt(0).toUpperCase() + name.slice(1)] = cp - 0x20;
+  }
+  // Greek letters: lowercase U+03B1.., uppercase = lowercase - 0x20
+  const greek = [
+    'alpha',
+    'beta',
+    'gamma',
+    'delta',
+    'epsilon',
+    'zeta',
+    'eta',
+    'theta',
+    'iota',
+    'kappa',
+    'lambda',
+    'mu',
+    'nu',
+    'xi',
+    'omicron',
+    'pi',
+    'rho',
+    '', // final sigma slot (handled as sigmaf)
+    'sigma',
+    'tau',
+    'upsilon',
+    'phi',
+    'chi',
+    'psi',
+    'omega',
+  ];
+  greek.forEach((name, idx) => {
+    if (!name) return;
+    const cp = 0x3b1 + idx;
+    map[name] = cp;
+    map[name.charAt(0).toUpperCase() + name.slice(1)] = cp - 0x20;
+  });
+  return map;
+})();
 
-const HTML_ENTITY_REGEX = /&(?:([a-zA-Z]+)|#(\d+)|#x([0-9a-fA-F]+));/g;
+const HTML_ENTITY_REGEX =
+  /&(?:([a-zA-Z][a-zA-Z0-9]*)|#(\d+)|#[xX]([0-9a-fA-F]+));/g;
+
+function safeFromCodePoint(code: number): string {
+  if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return '';
+  if (code >= 0xd800 && code <= 0xdfff) return '';
+  try {
+    return String.fromCodePoint(code);
+  } catch {
+    return '';
+  }
+}
 
 /**
  * Decodes named, decimal, and hexadecimal HTML/XML entities into UTF-8 text.
@@ -501,26 +766,83 @@ export function decodeHtmlEntities(text: string): string {
 
   return text.replace(HTML_ENTITY_REGEX, (match, named, dec, hex) => {
     if (named) {
-      return HTML_ENTITY_MAP[`&${named};`] ?? match;
+      const key = Object.prototype.hasOwnProperty.call(
+        HTML_ENTITY_CODEPOINTS,
+        named,
+      )
+        ? named
+        : String(named).toLowerCase();
+      if (!Object.prototype.hasOwnProperty.call(HTML_ENTITY_CODEPOINTS, key)) {
+        return match;
+      }
+      const cp = HTML_ENTITY_CODEPOINTS[key];
+      return cp === 0 ? '' : String.fromCodePoint(cp);
     }
     if (dec) {
-      const code = parseInt(dec, 10);
-      return Number.isFinite(code) && code > 0 ? String.fromCharCode(code) : '';
+      return safeFromCodePoint(parseInt(dec, 10));
     }
     if (hex) {
-      const code = parseInt(hex, 16);
-      return Number.isFinite(code) && code > 0 ? String.fromCharCode(code) : '';
+      return safeFromCodePoint(parseInt(hex, 16));
     }
     return match;
   });
 }
 
+/** Double-encoded tags such as "&lt;i&gt;" or "&amp;lt;sub&amp;gt;". */
+const DOUBLE_ENCODED_TAG_REGEX =
+  /&(?:amp;)?lt;(\/?[a-zA-Z][\w:-]*(?:\s[^&<>]*?)?\/?)&(?:amp;)?gt;/g;
+
+/** Inline formatting tags that must be removed WITHOUT inserting whitespace. */
+const INLINE_FORMAT_TAG_REGEX =
+  /<\/?(?:jats:|mml:|html:)?(?:i|b|u|em|strong|sub|sup|sc|scp|span|small|tt|italic|bold|underline|font|smallcaps)\b[^>]*>/gi;
+
+/**
+ * Converts <sub>/<sup> (incl. JATS-prefixed) to Unicode sub/superscripts when
+ * every character of the content is mappable; otherwise keeps the raw content
+ * (the tag is dropped without inserting spaces, e.g. "CO<sub>2max</sub>" →
+ * "CO2max").
+ */
+export function convertSubSupTagsToUnicode(text: string): string {
+  if (!text || typeof text !== 'string') return '';
+  if (!/<(?:jats:|mml:)?su[bp]\b/i.test(text)) return text;
+  const mapAll = (content: string, map: Record<string, string>) => {
+    const inner = content.trim();
+    if (!inner) return content;
+    let out = '';
+    for (const ch of inner) {
+      const mapped = map[ch];
+      if (!mapped) return content;
+      out += mapped;
+    }
+    return out;
+  };
+  return text
+    .replace(
+      /<(?:jats:|mml:)?sub\b[^>]*>([\s\S]*?)<\/(?:jats:|mml:)?sub>/gi,
+      (_, content: string) => mapAll(content, UNICODE_SUB_MAP),
+    )
+    .replace(
+      /<(?:jats:|mml:)?sup\b[^>]*>([\s\S]*?)<\/(?:jats:|mml:)?sup>/gi,
+      (_, content: string) => mapAll(content, UNICODE_SUP_MAP),
+    );
+}
+
 /**
  * Strips XML and HTML tags including JATS XML (<jats:...>), math tags, etc.
+ * - Double-encoded tags (&lt;i&gt;) are decoded first so they get stripped.
+ * - <sub>/<sup> become Unicode sub/superscripts where fully mappable.
+ * - Inline formatting tags (i, b, em, strong, sub, sup, sc, span, ...) are
+ *   removed without inserting spaces; block-level tags become a space.
  */
 export function stripXmlAndHtmlTags(text: string): string {
   if (!text || typeof text !== 'string') return '';
-  return text
+  let out = text;
+  if (out.includes('&')) {
+    out = out.replace(DOUBLE_ENCODED_TAG_REGEX, '<$1>');
+  }
+  out = convertSubSupTagsToUnicode(out);
+  out = out.replace(INLINE_FORMAT_TAG_REGEX, '');
+  return out
     .replace(/<\/?[a-zA-Z0-9_:-]+(?:\s+[^>]*?)?\/?>/g, ' ')
     .replace(/\s+([.,;:!?])/g, '$1')
     .replace(/\s+/g, ' ')
@@ -528,11 +850,26 @@ export function stripXmlAndHtmlTags(text: string): string {
 }
 
 /**
- * Strips enclosing LaTeX curly braces (e.g. "{Deep Learning}" -> "Deep Learning").
+ * Strips LaTeX curly braces (e.g. "{Deep Learning}" -> "Deep Learning").
+ * Braces inside math segments ($...$, $$...$$, \(...\), \[...\], \begin..\end)
+ * are preserved so formulas such as "$\mathcal{O}(n^{2})$" stay intact.
  */
 export function stripLatexBraces(text: string): string {
   if (!text || typeof text !== 'string') return '';
-  return text.replace(/[{}]/g, '').trim();
+  if (!/[{}]/.test(text)) return text.trim();
+  if (!/[$\\]/.test(text)) return text.replace(/[{}]/g, '').trim();
+
+  let result = '';
+  let lastIndex = 0;
+  text.replace(MATH_BLOCK_REGEX, (match: string, ...args: unknown[]) => {
+    const offset = args[args.length - 2] as number;
+    result += text.slice(lastIndex, offset).replace(/[{}]/g, '');
+    result += match;
+    lastIndex = offset + match.length;
+    return match;
+  });
+  result += text.slice(lastIndex).replace(/[{}]/g, '');
+  return result.trim();
 }
 
 /**
@@ -760,14 +1097,7 @@ export function cleanAbstractText(text?: string | null): string | undefined {
 
   // 2. Structured JATS / PubMed / HTML Pre-Processing
   // Convert <sub> and <sup> tags to scientific Unicode characters before stripping
-  cleaned = cleaned.replace(
-    /<(?:jats:)?sub[^>]*>([\s\S]*?)<\/(?:jats:)?sub>/gi,
-    (_, content) => convertSubscriptsToUnicode(content.trim()),
-  );
-  cleaned = cleaned.replace(
-    /<(?:jats:)?sup[^>]*>([\s\S]*?)<\/(?:jats:)?sup>/gi,
-    (_, content) => convertSuperscriptsToUnicode(content.trim()),
-  );
+  cleaned = convertSubSupTagsToUnicode(cleaned);
 
   // Remove generic abstract headings inside JATS/HTML tags
   cleaned = cleaned.replace(
@@ -800,6 +1130,8 @@ export function cleanAbstractText(text?: string | null): string | undefined {
   cleaned = cleaned.replace(/<\/(?:jats:)?sec>/gi, '\n\n');
 
   // Strip remaining XML/HTML tags without flattening paragraph newlines
+  // (inline formatting tags are dropped without inserting whitespace)
+  cleaned = cleaned.replace(INLINE_FORMAT_TAG_REGEX, '');
   cleaned = cleaned
     .replace(/<\/?[a-zA-Z0-9_:-]+(?:\s+[^>]*?)?\/?>/g, ' ')
     .replace(/[ \t]+([.,;:!?])/g, '$1');
@@ -1079,8 +1411,33 @@ export function extractYearFromDate(
   dateStr?: string | null,
 ): number | undefined {
   if (!dateStr || typeof dateStr !== 'string') return undefined;
-  const match = dateStr.match(/\b(19\d\d|20\d\d)\b/);
+  const match = dateStr.match(/\b(1\d{3}|20\d{2})\b/);
   return match ? parseInt(match[1], 10) : undefined;
+}
+
+/**
+ * Normalizes a page range:
+ * - "--", en dash, em dash, minus and other dash variants → "-"
+ * - Expands Medline-style abbreviated ranges ("857-63" → "857-863")
+ *   only when the abbreviated end would otherwise be smaller than the start.
+ */
+export function normalizePageRange(pages?: string | null): string | undefined {
+  if (!pages || typeof pages !== 'string') return undefined;
+  let cleaned = pages
+    .trim()
+    .replace(/\s*(?:--+|[\u2010-\u2015\u2212])\s*/g, '-')
+    .replace(/\s*-\s*/g, '-');
+  cleaned = cleaned.replace(
+    /\b(\d+)-(\d+)\b/g,
+    (m, start: string, end: string) => {
+      if (end.length >= start.length) return m;
+      const expanded = start.slice(0, start.length - end.length) + end;
+      return parseInt(expanded, 10) > parseInt(start, 10)
+        ? `${start}-${expanded}`
+        : m;
+    },
+  );
+  return cleaned || undefined;
 }
 
 // ── Bibliographic Item Types ────────────────────────────────────────────────
@@ -1632,57 +1989,36 @@ const MINOR_WORDS = new Set([
 ]);
 
 /**
- * Normalizes academic paper title casing:
- * - If title is ALL CAPS or all lowercase, converts to standard academic Title Case.
- * - If title has shouting uppercase non-acronym words (e.g. "SURVEY OF DEEP LEARNING"), normalizes them.
- * - Preserves standard academic acronyms (BERT, GPT, LLM, CNN, RNA, etc.) and mixed-case terms (arXiv, mRNA).
- * - Leaves correctly cased mixed-case titles untouched.
+ * Zotero-compatible title casing ("Fix ALL CAPS" only).
+ *
+ * Zotero stores titles verbatim. The only automatic recasing we apply is for
+ * titles that are ENTIRELY uppercase (e.g. "A SURVEY OF DEEP LEARNING"), which
+ * are converted to Title Case while preserving known acronyms (BERT, DNA, ...)
+ * and mixed-case terms (arXiv, mRNA).
+ *
+ * Mixed-case, sentence-case and lowercase titles are returned unchanged
+ * (only trimmed). Single-word all-caps titles are also left unchanged because
+ * they are usually acronyms or proper names.
  */
 export function normalizeAcademicTitleCase(title?: string | null): string {
   if (!title || typeof title !== 'string') return '';
   const trimmed = title.trim();
   if (trimmed.length < 3) return trimmed;
 
+  // Ignore math segments when deciding whether the title is all caps
+  const withoutMath = trimmed.replace(MATH_BLOCK_REGEX, ' ');
   const isAllUpper =
-    trimmed.length > 3 &&
-    trimmed === trimmed.toUpperCase() &&
-    /[A-Z]/.test(trimmed);
-  const isAllLower =
-    trimmed.length > 3 &&
-    trimmed === trimmed.toLowerCase() &&
-    /[a-z]/.test(trimmed);
+    /\p{Lu}/u.test(withoutMath) &&
+    !/\p{Ll}/u.test(withoutMath) &&
+    withoutMath === withoutMath.toUpperCase();
 
-  const startsWithLower = /^[a-z]/.test(trimmed);
+  if (!isAllUpper) {
+    return trimmed;
+  }
 
   const words = trimmed.split(/\s+/).filter(Boolean);
-  const hasShoutingWords = words.some((w) => {
-    const clean = w.replace(/^[^\w]+|[^\w]+$/g, '');
-    return (
-      clean.length >= 4 &&
-      clean === clean.toUpperCase() &&
-      !COMMON_ACADEMIC_ACRONYMS.has(clean) &&
-      /[A-Z]/.test(clean)
-    );
-  });
-
-  const significantWords = words
-    .map((w) => w.replace(/^[^\w]+|[^\w]+$/g, ''))
-    .filter(
-      (w) => w.length >= 4 && !COMMON_ACADEMIC_ACRONYMS.has(w.toUpperCase()),
-    );
-  const isSentenceCase =
-    significantWords.length >= 2 &&
-    significantWords.filter((w) => w === w.toLowerCase()).length /
-      significantWords.length >=
-      0.5;
-
-  if (
-    !isAllUpper &&
-    !isAllLower &&
-    !startsWithLower &&
-    !hasShoutingWords &&
-    !isSentenceCase
-  ) {
+  const letterWords = words.filter((w) => /\p{L}{2,}/u.test(w));
+  if (letterWords.length < 2) {
     return trimmed;
   }
 
@@ -1691,8 +2027,8 @@ export function normalizeAcademicTitleCase(title?: string | null): string {
     isFirstOrLast: boolean,
     prevEndsWithColon: boolean,
   ): string => {
-    const leadingPunct = word.match(/^[^\w]+/)?.[0] || '';
-    const trailingPunct = word.match(/[^\w]+$/)?.[0] || '';
+    const leadingPunct = word.match(/^[^\p{L}\p{N}]+/u)?.[0] || '';
+    const trailingPunct = word.match(/[^\p{L}\p{N}]+$/u)?.[0] || '';
     const core = word.slice(
       leadingPunct.length,
       word.length - (trailingPunct.length || 0),
@@ -1738,18 +2074,10 @@ export function normalizeAcademicTitleCase(title?: string | null): string {
     const prevWord = i > 0 ? words[i - 1] : '';
     const prevEndsWithColon = /[:—\-?!]$/.test(prevWord);
 
-    if (!isAllUpper && !isAllLower) {
-      const clean = w.replace(/^[^\w]+|[^\w]+$/g, '');
-      const cleanUpper = clean.toUpperCase();
-      if (
-        clean.length <= 4 ||
-        COMMON_ACADEMIC_ACRONYMS.has(cleanUpper) ||
-        SPECIAL_CASE_WORDS[clean.toLowerCase()] ||
-        clean !== cleanUpper
-      ) {
-        formattedWords.push(w);
-        continue;
-      }
+    // Never recase LaTeX/math tokens
+    if (/[$\\]/.test(w)) {
+      formattedWords.push(w);
+      continue;
     }
 
     formattedWords.push(formatWord(w, isFirstOrLast, prevEndsWithColon));
@@ -1766,7 +2094,7 @@ export function normalizeAcademicTitleCase(title?: string | null): string {
  * 4. Strips LaTeX curly braces
  * 5. Strips control characters
  * 6. Collapses multiple whitespace into a single space and trims
- * 7. Normalizes screaming ALL CAPS or all lowercase into standard academic Title Case
+ * 7. Fixes screaming ALL CAPS titles only (Zotero "Fix ALL CAPS"); any other casing is stored verbatim
  * 8. Enforces maximum length of 1000 characters
  */
 export function sanitizeItemTitle(title?: string | null): string {
@@ -1780,22 +2108,145 @@ export function sanitizeItemTitle(title?: string | null): string {
   // eslint-disable-next-line no-control-regex
   cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
 
-  // Fix PDF small-caps drop-cap gaps (e.g. "V ERY" -> "VERY", "D EEP" -> "DEEP")
-  cleaned = cleaned.replace(/\b([A-Z])\s+([A-Z]{2,})\b/g, '$1$2');
-
-  // Fix spaced hyphens (e.g. "Auto - Encoding" -> "Auto-Encoding", "Large - Scale" -> "Large-Scale")
-  cleaned = cleaned.replace(
-    /\b([A-Za-z0-9]+)\s+[-–—]\s+([A-Za-z0-9]+)\b/g,
-    '$1-$2',
-  );
-
-  // Fix single letter uppercase gaps: "B Y" -> "BY"
-  cleaned = cleaned.replace(/\b([B-HJ-Z])\s+([A-Z])\b/g, '$1$2');
+  // Normalize OCR / publisher spaced hyphens (e.g. "Large - Scale" -> "Large-Scale")
+  // Requires at least 2 letters on both sides so legitimate subtitles like "Part A - Methods" are preserved.
+  cleaned = cleaned.replace(/(\b\p{L}{2,})\s+-\s+(\p{L}{2,}\b)/gu, '$1-$2');
 
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  // normalizeAcademicTitleCase is a no-op unless the title is entirely uppercase.
   cleaned = normalizeAcademicTitleCase(cleaned);
   if (cleaned.length > 1000) {
     cleaned = cleaned.substring(0, 1000).trim();
   }
   return cleaned;
+}
+
+// ─── Metadata trust guards ──────────────────────────────────────────────────
+
+const TITLE_SIMILARITY_STOPWORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'of',
+  'and',
+  'or',
+  'in',
+  'on',
+  'for',
+  'to',
+  'with',
+  'by',
+  'at',
+  'from',
+  'via',
+]);
+
+function tokenizeTitleForSimilarity(title: string): string[] {
+  return (decodeHtmlEntities(title) || title)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length > 0 && !TITLE_SIMILARITY_STOPWORDS.has(t));
+}
+
+/**
+ * Dice coefficient over normalized title tokens (0..1).
+ * Used to reject title-search hits that do not actually match the query
+ * (e.g. query "Client Challenge" → "The client/server challenge").
+ */
+export function titleSimilarity(a?: string | null, b?: string | null): number {
+  if (!a || !b) return 0;
+  const ta = tokenizeTitleForSimilarity(a);
+  const tb = tokenizeTitleForSimilarity(b);
+  if (ta.length === 0 || tb.length === 0) return 0;
+  if (ta.join(' ') === tb.join(' ')) return 1;
+
+  const counts = new Map<string, number>();
+  for (const t of tb) counts.set(t, (counts.get(t) || 0) + 1);
+  let overlap = 0;
+  for (const t of ta) {
+    const c = counts.get(t) || 0;
+    if (c > 0) {
+      overlap++;
+      counts.set(t, c - 1);
+    }
+  }
+  return (2 * overlap) / (ta.length + tb.length);
+}
+
+/** Minimum similarity for accepting a title-search hit from an external provider. */
+export const TITLE_MATCH_THRESHOLD = 0.85;
+
+const BOT_CHALLENGE_TITLE_RE =
+  /client challenge|just a moment|attention required|access denied|are you a robot|verify you are human|captcha|security check|ddos-guard|please wait|cloudflare|bot verification|request blocked|unusual traffic/i;
+const BOT_CHALLENGE_HTML_RE =
+  /cf-challenge|_cf_chl|challenge-platform|perimeterx|px-captcha|datadome|captcha-delivery|cf-browser-verification/i;
+
+/**
+ * Detects anti-bot interstitials (Cloudflare, Akamai "Client Challenge",
+ * PerimeterX, DataDome...) that are served with HTTP 200 but contain no
+ * bibliographic metadata.
+ */
+export function isBotChallengePage(
+  html: string,
+  title?: string | null,
+): boolean {
+  if (!html) return false;
+  if (/<meta\s+[^>]*name=["']citation_title["']/i.test(html)) return false;
+  const pageTitle =
+    title ||
+    decodeHtmlEntities(
+      html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '',
+    ).trim();
+  if (pageTitle && BOT_CHALLENGE_TITLE_RE.test(pageTitle)) return true;
+  return BOT_CHALLENGE_HTML_RE.test(html) && html.length < 50000;
+}
+
+/**
+ * Derives a DOI deterministically from well-known publisher URL patterns,
+ * so that metadata can be resolved even when the landing page is blocked.
+ */
+export function deriveDoiFromPublisherUrl(rawUrl?: string | null): string {
+  if (!rawUrl) return '';
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch {
+    return '';
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+  const path = decodeURIComponent(parsed.pathname);
+
+  // doi.org / dx.doi.org
+  if (host === 'doi.org' || host === 'dx.doi.org') {
+    return normalizeDoi(path.replace(/^\//, '')) || '';
+  }
+
+  // Nature portfolio: nature.com/articles/<id>
+  if (host === 'nature.com' || host.endsWith('.nature.com')) {
+    const m = path.match(/\/articles\/([a-z0-9.-]+?)(?:\.pdf)?\/?$/i);
+    if (m && /^[a-z]+\d|^\d/i.test(m[1])) {
+      return normalizeDoi(`10.1038/${m[1]}`) || '';
+    }
+  }
+
+  // Generic: DOI embedded in the URL path (Springer, Wiley, ACM, T&F, SAGE,
+  // Frontiers, PLOS, IEEE /doi/, ...). Strip common trailing view suffixes.
+  const embedded = path.match(/(10\.\d{4,9}\/[^\s?#]+)/);
+  if (embedded) {
+    const cleaned = embedded[1]
+      .replace(/\/(full|abstract|pdf|epdf|html|fulltext|meta)\/?$/i, '')
+      .replace(/\.pdf$/i, '')
+      .replace(/\/$/, '');
+    return normalizeDoi(cleaned) || '';
+  }
+
+  // PLOS / query-string ?id=10.xxxx
+  const qid = parsed.searchParams.get('id') || parsed.searchParams.get('doi');
+  if (qid && /^10\.\d{4,9}\//.test(qid)) return normalizeDoi(qid) || '';
+
+  return '';
 }

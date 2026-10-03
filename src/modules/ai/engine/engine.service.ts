@@ -25,7 +25,6 @@ export class EngineService {
 
   private async createDelegationToken(
     userId: string,
-    scopeId?: string | null,
     projectId?: string | null,
   ): Promise<string> {
     const secret =
@@ -36,7 +35,6 @@ export class EngineService {
     return this.jwtService.signAsync(
       {
         sub: userId,
-        workspace_id: scopeId || undefined,
         project_id: projectId || undefined,
         scope: 'ai-delegated-action',
       },
@@ -141,7 +139,6 @@ export class EngineService {
     try {
       delegationToken = await this.createDelegationToken(
         payload.user_id || '00000000-0000-0000-0000-000000000000',
-        payload.workspace_id,
         payload.project_id,
       );
     } catch (tokenErr) {
@@ -270,7 +267,6 @@ export class EngineService {
     try {
       delegationToken = await this.createDelegationToken(
         payload.user_id || '00000000-0000-0000-0000-000000000000',
-        payload.workspace_id,
         payload.project_id,
       );
     } catch (tokenErr) {
@@ -336,7 +332,6 @@ export class EngineService {
   ): Promise<Record<string, unknown>> {
     const delegationToken = await this.createDelegationToken(
       context.userId,
-      context.scopeId,
       context.projectId,
     );
     const headers = this.getInternalHeaders(delegationToken);
@@ -344,7 +339,6 @@ export class EngineService {
     const formData = new FormData();
     const blob = new Blob([new Uint8Array(rawBody)], { type: contentType });
     formData.append('file', blob, filename);
-    formData.append('workspace_id', context.scopeId);
     if (context.userId) formData.append('user_id', context.userId);
     if (context.projectId) formData.append('project_id', context.projectId);
     if (context.chatId) formData.append('chat_id', context.chatId);
@@ -372,22 +366,23 @@ export class EngineService {
 
   async getDocumentsBulk(
     ids: string[],
-    context?: { userId: string; scopeId: string; projectId?: string },
+    context?: { userId: string; scopeId?: string; projectId?: string },
   ): Promise<Array<Record<string, unknown>>> {
     let headers: Record<string, string> = {};
-    let wsQuery = '';
+    let pQuery = '';
     if (context) {
       const delegationToken = await this.createDelegationToken(
         context.userId,
-        context.scopeId,
         context.projectId,
       );
       headers = this.getInternalHeaders(delegationToken);
-      wsQuery = `&workspace_id=${encodeURIComponent(context.scopeId)}`;
+      if (context.projectId) {
+        pQuery = `&project_id=${encodeURIComponent(context.projectId)}`;
+      }
     }
     const result = await tryCatch(
       fetch(
-        `${this.fluxUrl}/documents/bulk?ids=${encodeURIComponent(ids.join(','))}${wsQuery}`,
+        `${this.fluxUrl}/documents/bulk?ids=${encodeURIComponent(ids.join(','))}${pQuery}`,
         { headers },
       ),
     );
@@ -409,26 +404,24 @@ export class EngineService {
 
   async getDocument(
     docId: string,
-    context?: { userId: string; scopeId: string; projectId?: string },
+    context?: { userId: string; scopeId?: string; projectId?: string },
   ): Promise<Record<string, unknown> | null> {
     let headers: Record<string, string> = {};
-    let wsQuery = '';
+    let pQuery = '';
     if (context) {
       const delegationToken = await this.createDelegationToken(
         context.userId,
-        context.scopeId,
         context.projectId,
       );
       headers = this.getInternalHeaders(delegationToken);
-      wsQuery = `?workspace_id=${encodeURIComponent(context.scopeId)}`;
+      if (context.projectId) {
+        pQuery = `?project_id=${encodeURIComponent(context.projectId)}`;
+      }
     }
     const result = await tryCatch(
-      fetch(
-        `${this.fluxUrl}/documents/${encodeURIComponent(docId)}${wsQuery}`,
-        {
-          headers,
-        },
-      ),
+      fetch(`${this.fluxUrl}/documents/${encodeURIComponent(docId)}${pQuery}`, {
+        headers,
+      }),
     );
 
     if (result.ok && result.value.ok) {
@@ -441,22 +434,25 @@ export class EngineService {
 
   async getDocuments(context?: {
     userId: string;
-    scopeId: string;
+    scopeId?: string;
     projectId?: string;
   }): Promise<Array<Record<string, unknown>>> {
     let headers: Record<string, string> = {};
-    let wsQuery = '';
+    let docQuery = '';
     if (context) {
       const delegationToken = await this.createDelegationToken(
         context.userId,
-        context.scopeId,
         context.projectId,
       );
       headers = this.getInternalHeaders(delegationToken);
-      wsQuery = `?workspace_id=${encodeURIComponent(context.scopeId)}`;
+      const params = new URLSearchParams();
+      if (context.userId) params.append('user_id', context.userId);
+      if (context.projectId) params.append('project_id', context.projectId);
+      const queryStr = params.toString();
+      docQuery = queryStr ? `?${queryStr}` : '';
     }
     const result = await tryCatch(
-      fetch(`${this.fluxUrl}/documents/${wsQuery}`, { headers }),
+      fetch(`${this.fluxUrl}/documents${docQuery}`, { headers }),
     );
 
     if (result.ok && result.value.ok) {
@@ -465,5 +461,39 @@ export class EngineService {
     }
 
     return [];
+  }
+
+  async deleteDocument(
+    docId: string,
+    context?: { userId: string; scopeId?: string; projectId?: string },
+  ): Promise<Record<string, unknown>> {
+    let headers: Record<string, string> = {};
+    let wsQuery = '';
+    if (context) {
+      const delegationToken = await this.createDelegationToken(
+        context.userId,
+        context.projectId,
+      );
+      headers = this.getInternalHeaders(delegationToken);
+      const params = new URLSearchParams();
+      if (context.userId) params.append('user_id', context.userId);
+      wsQuery = `?${params.toString()}`;
+    }
+    const result = await tryCatch(
+      fetch(
+        `${this.fluxUrl}/documents/${encodeURIComponent(docId)}${wsQuery}`,
+        {
+          method: 'DELETE',
+          headers,
+        },
+      ),
+    );
+
+    if (result.ok && result.value.ok) {
+      const json = await tryCatch(result.value.json());
+      if (json.ok) return json.value as Record<string, unknown>;
+    }
+
+    return { deleted: true, id: docId };
   }
 }

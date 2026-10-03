@@ -12,10 +12,7 @@ import { QueryRepository } from '../adapters/query.repository';
 import { CommandRepository } from '../adapters/command.repository';
 import { CreateItemData, UpdateItemData } from '../domain/items.types';
 import { sanitizeItemTitle } from '../../../shared-kernel/utils/bibliographic.utils';
-import {
-  TransactionService,
-  TransactionHelpers,
-} from '../../../sync';
+import { TransactionService, TransactionHelpers } from '../../../sync';
 import {
   LIBRARY_EVENT_TYPES,
   SYNC_EVENT_TYPES,
@@ -104,6 +101,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       if (userId) {
         tasks.push(
           this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+          this.cache.del(`library:counts:user:${userId}`),
         );
       }
       if (projectId && projectId !== 'user') {
@@ -111,6 +109,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`),
           ),
+          this.cache.del(`library:counts:proj:${projectId}`),
         );
       }
       await Promise.all(tasks);
@@ -144,6 +143,26 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     starred: number;
     trash: number;
   }> {
+    const cacheKey = projectId
+      ? `library:counts:proj:${projectId}`
+      : `library:counts:user:${userId}`;
+
+    if (this.cache && typeof this.cache.wrap === 'function') {
+      return this.cache.wrap(
+        cacheKey,
+        async () => {
+          const [total, unfiled, starred, trash] = await Promise.all([
+            this.query.count(userId, { view: 'all', projectId }),
+            this.query.count(userId, { view: 'unfiled', projectId }),
+            this.query.count(userId, { view: 'starred', projectId }),
+            this.query.count(userId, { view: 'trash', projectId }),
+          ]);
+          return { total, unfiled, starred, trash };
+        },
+        15, // 15s TTL for high navigation speed
+      );
+    }
+
     const [total, unfiled, starred, trash] = await Promise.all([
       this.query.count(userId, { view: 'all', projectId }),
       this.query.count(userId, { view: 'unfiled', projectId }),
@@ -163,6 +182,26 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
   async getItem(userId: string, id: string, projectId?: string) {
     const cacheKey = LIBRARY_REDIS_KEYS.item(id);
     if (this.cache) {
+      if (typeof this.cache.wrap === 'function') {
+        const cached = await this.cache.wrap<Record<string, any> | null>(
+          cacheKey,
+          async () => {
+            const item = await this.query.findById(userId, id, projectId);
+            return item ? this.mapFlattenedState(item, userId) : null;
+          },
+          300, // 5 min TTL
+        );
+        if (cached) {
+          const isOwner = cached.userId === userId;
+          const isProjectMatch = projectId && cached.projectId === projectId;
+          if (isOwner || isProjectMatch) {
+            return cached;
+          }
+          return null;
+        }
+        return null;
+      }
+
       try {
         const cached = await this.cache.get<Record<string, any>>(cacheKey);
         if (cached) {
@@ -624,8 +663,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       throw new NotFoundException(`Item ${id} not found in user library`);
     }
 
-    const effectiveProjectId =
-      projectId ?? (item as any).projectId ?? undefined;
+    const effectiveProjectId = projectId ?? item.projectId ?? undefined;
     const eventScope = { userId, projectId: effectiveProjectId };
 
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {

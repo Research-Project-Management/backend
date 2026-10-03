@@ -6,7 +6,6 @@ import {
   Body,
   Query,
   UseGuards,
-  Optional,
 } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ExportsService } from './core/services/exports.service';
@@ -23,12 +22,10 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class ExportsController {
   constructor(
-    @Optional() private readonly exportsService?: ExportsService,
-    @Optional() private readonly exportLibraryUseCase?: ExportLibraryUseCase,
-    @Optional()
-    private readonly exportBibliographyUseCase?: ExportBibliographyUseCase,
-    @Optional()
-    private readonly exportAnnotatedPdfUseCase?: ExportAnnotatedPdfUseCase,
+    private readonly exportAnnotatedPdfUseCase: ExportAnnotatedPdfUseCase,
+    private readonly exportLibraryUseCase: ExportLibraryUseCase,
+    private readonly exportBibliographyUseCase: ExportBibliographyUseCase,
+    private readonly exportsService: ExportsService,
   ) {}
 
   @Get('items/:itemId/annotated-pdf')
@@ -40,24 +37,11 @@ export class ExportsController {
     @Query('projectId') queryProjectId?: string,
   ) {
     const effectiveProjectId = routeProjectId || queryProjectId;
-    if (this.exportAnnotatedPdfUseCase) {
-      return this.exportAnnotatedPdfUseCase.execute({
-        userId,
-        itemId,
-        projectId: effectiveProjectId,
-      });
-    }
-    const res = await this.exportsService!.exportAnnotatedItemPdf(
+    return this.exportAnnotatedPdfUseCase.execute({
       userId,
       itemId,
-      undefined,
-      effectiveProjectId,
-    );
-    return {
-      filename: res.filename,
-      mimeType: 'application/pdf',
-      base64: Buffer.from(res.buffer).toString('base64'),
-    };
+      projectId: effectiveProjectId,
+    });
   }
 
   @Post()
@@ -70,10 +54,7 @@ export class ExportsController {
     if (routeProjectId && !dto.projectId) {
       dto.projectId = routeProjectId;
     }
-    if (this.exportLibraryUseCase) {
-      return this.exportLibraryUseCase.execute({ userId, dto });
-    }
-    return this.exportsService!.exportLibrary(userId, dto);
+    return this.exportLibraryUseCase.execute({ userId, dto });
   }
 
   @Post('citations/bibtex')
@@ -86,18 +67,11 @@ export class ExportsController {
   ) {
     const effectiveProjectId =
       routeProjectId || body.projectId || queryProjectId;
-    if (this.exportBibliographyUseCase) {
-      return this.exportBibliographyUseCase.execute({
-        userId,
-        citeKeys: body.keys || [],
-        projectId: effectiveProjectId,
-      });
-    }
-    return this.exportsService!.exportByCitationKeys(
+    return this.exportBibliographyUseCase.execute({
       userId,
-      body.keys || [],
-      effectiveProjectId,
-    );
+      citeKeys: body.keys || [],
+      projectId: effectiveProjectId,
+    });
   }
 
   @Get()
@@ -119,9 +93,10 @@ export class ExportsController {
       projectId: effectiveProjectId,
     };
 
-    const result = this.exportLibraryUseCase
-      ? await this.exportLibraryUseCase.execute({ userId, dto: queryDto })
-      : await this.exportsService!.exportLibrary(userId, queryDto);
+    const result = await this.exportLibraryUseCase.execute({
+      userId,
+      dto: queryDto,
+    });
 
     return {
       ...result,
@@ -137,7 +112,7 @@ export class ExportsController {
     @CurrentUser('id') userId: string,
     @Param('collectionId') collectionId: string,
   ) {
-    return this.exportsService!.exportBundle(userId, collectionId);
+    return this.exportsService.exportBundle(userId, collectionId);
   }
 }
 

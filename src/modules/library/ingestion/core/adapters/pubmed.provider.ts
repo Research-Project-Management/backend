@@ -20,6 +20,10 @@ import {
   getAcademicContactEmail,
   getAcademicUserAgent,
 } from '../../../shared-kernel/core/constants/academic-client.constants';
+import {
+  normalizePageRange,
+  parseCreatorString,
+} from '../../../shared-kernel/utils/bibliographic.utils';
 
 @Injectable()
 export class PubMedProvider implements MetadataProvider {
@@ -203,6 +207,7 @@ export class PubMedProvider implements MetadataProvider {
       firstName?: string;
       lastName?: string;
       fullName: string;
+      fieldMode?: number;
     }> = [];
 
     if (Array.isArray(data.author)) {
@@ -211,18 +216,35 @@ export class PubMedProvider implements MetadataProvider {
         if (a && typeof a === 'object') {
           const family = typeof a.family === 'string' ? a.family.trim() : '';
           const given = typeof a.given === 'string' ? a.given.trim() : '';
+          const literal =
+            typeof a.literal === 'string'
+              ? a.literal.trim()
+              : typeof a.name === 'string'
+                ? a.name.trim()
+                : '';
+          if (!family && !given && literal) {
+            // Collective / group author → single-field creator
+            authors.push(literal);
+            creators.push({
+              orderIndex: i,
+              creatorType: 'author',
+              lastName: literal,
+              fullName: literal,
+              fieldMode: 1,
+            });
+            continue;
+          }
           const fullName =
-            family && given
-              ? `${given} ${family}`
-              : family || given || a.name || '';
+            family && given ? `${given} ${family}` : family || given || '';
           if (fullName) {
             authors.push(fullName);
             creators.push({
               orderIndex: i,
               creatorType: 'author',
-              firstName: given || undefined,
-              lastName: family || undefined,
+              firstName: family ? given || undefined : undefined,
+              lastName: family || given || undefined,
               fullName,
+              fieldMode: family ? 0 : 1,
             });
           }
         }
@@ -230,11 +252,18 @@ export class PubMedProvider implements MetadataProvider {
     }
 
     let year: number | null = null;
-    const dateParts =
-      data.issued?.['date-parts']?.[0] ||
-      data['epub-date']?.['date-parts']?.[0];
+    let publicationDate: string | undefined;
+    const dateParts = [data.issued, data['epub-date']]
+      .map((d) => d?.['date-parts']?.[0])
+      .find((parts) => Array.isArray(parts) && !!parts[0]);
     if (dateParts && dateParts[0]) {
       year = Number(dateParts[0]);
+      const y = String(dateParts[0]).padStart(4, '0');
+      publicationDate = dateParts[1]
+        ? dateParts[2]
+          ? `${y}-${String(dateParts[1]).padStart(2, '0')}-${String(dateParts[2]).padStart(2, '0')}`
+          : `${y}-${String(dateParts[1]).padStart(2, '0')}`
+        : y;
     }
 
     const doi =
@@ -268,7 +297,8 @@ export class PubMedProvider implements MetadataProvider {
       typeof data.issue === 'string' || typeof data.issue === 'number'
         ? String(data.issue)
         : undefined;
-    const pages = typeof data.page === 'string' ? data.page : undefined;
+    const pages =
+      typeof data.page === 'string' ? normalizePageRange(data.page) : undefined;
     const issn = typeof data.ISSN === 'string' ? data.ISSN : undefined;
 
     const rawAbstract =
@@ -298,6 +328,8 @@ export class PubMedProvider implements MetadataProvider {
         authors,
         creators,
         year,
+        publicationDate,
+        date: publicationDate,
         pmid: resolvedPmid,
         pmcid: resolvedPmcid,
         doi,
@@ -339,9 +371,21 @@ export class PubMedProvider implements MetadataProvider {
   ): ProviderResult {
     const rawTitle =
       typeof item.title === 'string' ? item.title : 'Untitled PubMed Article';
-    const title = rawTitle.replace(/\.$/, '').trim();
+    const title = (cleanBibliographicText(rawTitle) || rawTitle)
+      .replace(/\.$/, '')
+      .trim();
 
+    // eSummary author names are Medline/Vancouver style ("Smith JA");
+    // collective (group) authors are stored as single-field creators.
     const authors: string[] = [];
+    const creators: Array<{
+      orderIndex: number;
+      creatorType: string;
+      firstName?: string;
+      lastName?: string;
+      fullName: string;
+      fieldMode?: number;
+    }> = [];
     if (Array.isArray(item.authors)) {
       for (const a of item.authors) {
         if (
@@ -349,15 +393,49 @@ export class PubMedProvider implements MetadataProvider {
           typeof a === 'object' &&
           typeof (a as { name?: string }).name === 'string'
         ) {
-          authors.push((a as { name: string }).name.trim());
+          const rawName = (a as { name: string }).name.trim();
+          if (!rawName) continue;
+          const authType = String(
+            (a as { authtype?: string }).authtype || '',
+          ).toLowerCase();
+          if (authType === 'collectivename') {
+            authors.push(rawName);
+            creators.push({
+              orderIndex: creators.length,
+              creatorType: 'author',
+              lastName: rawName,
+              fullName: rawName,
+              fieldMode: 1,
+            });
+            continue;
+          }
+          const parsed = parseCreatorString(rawName, creators.length, 'author');
+          const fullName = parsed.fullName || rawName;
+          authors.push(fullName);
+          creators.push({
+            orderIndex: creators.length,
+            creatorType: 'author',
+            firstName: parsed.firstName || undefined,
+            lastName: parsed.lastName || rawName,
+            fullName,
+            fieldMode: parsed.fieldMode ?? 0,
+          });
         }
       }
     }
 
     let year: number | null = null;
-    if (typeof item.pubdate === 'string') {
-      const match = item.pubdate.match(/^(\d{4})/);
+    let publicationDate: string | undefined;
+    const rawPubDate =
+      typeof item.pubdate === 'string'
+        ? item.pubdate
+        : typeof item.epubdate === 'string'
+          ? item.epubdate
+          : undefined;
+    if (rawPubDate) {
+      const match = rawPubDate.match(/^(\d{4})/);
       if (match) year = Number(match[1]);
+      publicationDate = this.parseMedlineDate(rawPubDate);
     }
 
     let doi: string | undefined;
@@ -392,13 +470,12 @@ export class PubMedProvider implements MetadataProvider {
     const sourceStr = typeof item.source === 'string' ? item.source : undefined;
     const volumeStr = typeof item.volume === 'string' ? item.volume : undefined;
     const issueStr = typeof item.issue === 'string' ? item.issue : undefined;
-    const pagesStr = typeof item.pages === 'string' ? item.pages : undefined;
+    // Medline abbreviates page ranges ("857-63" → "857-863")
+    const pagesStr =
+      typeof item.pages === 'string'
+        ? normalizePageRange(item.pages)
+        : undefined;
     const issnStr = typeof item.issn === 'string' ? item.issn : undefined;
-    const creators = authors.map((name, idx) => ({
-      orderIndex: idx,
-      creatorType: 'author',
-      fullName: name,
-    }));
 
     const rawAbstract =
       typeof item.abstract === 'string'
@@ -419,6 +496,8 @@ export class PubMedProvider implements MetadataProvider {
         authors,
         creators,
         year,
+        publicationDate,
+        date: publicationDate,
         pmid: cleanPmid,
         pmcid,
         doi,
@@ -449,5 +528,46 @@ export class PubMedProvider implements MetadataProvider {
       fetchedAt: new Date().toISOString(),
       rawVersion,
     };
+  }
+
+  /**
+   * Parses Medline/eSummary dates ("2020 Jan 15", "2020 Jan", "2020 Jan-Feb",
+   * "2020 Spring", "2020") into ISO-like "YYYY[-MM[-DD]]". Falls back to the
+   * raw string when the format is not recognized.
+   */
+  private parseMedlineDate(raw: string): string | undefined {
+    const str = raw.trim();
+    if (!str) return undefined;
+    const MONTHS: Record<string, string> = {
+      jan: '01',
+      feb: '02',
+      mar: '03',
+      apr: '04',
+      may: '05',
+      jun: '06',
+      jul: '07',
+      aug: '08',
+      sep: '09',
+      oct: '10',
+      nov: '11',
+      dec: '12',
+    };
+    const iso = str.match(/^(\d{4})[/-](\d{1,2})(?:[/-](\d{1,2}))?/);
+    if (iso) {
+      const m = iso[2].padStart(2, '0');
+      return iso[3]
+        ? `${iso[1]}-${m}-${iso[3].padStart(2, '0')}`
+        : `${iso[1]}-${m}`;
+    }
+    const med = str.match(
+      /^(\d{4})(?:\s+([A-Za-z]{3})[a-z]*(?:\s+(\d{1,2}))?)?/,
+    );
+    if (!med) return str;
+    const year = med[1];
+    const month = med[2] ? MONTHS[med[2].toLowerCase()] : undefined;
+    if (!month) return med[2] ? str : year;
+    return med[3]
+      ? `${year}-${month}-${med[3].padStart(2, '0')}`
+      : `${year}-${month}`;
   }
 }

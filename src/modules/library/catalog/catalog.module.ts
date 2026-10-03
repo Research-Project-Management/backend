@@ -4,12 +4,28 @@ import { SyncModule } from '../sync/sync.module';
 import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
 
 // Controllers
-import { ItemController, ItemCurationController } from './items.controller';
-import { CollectionController } from './collections.controller';
+import {
+  ItemController,
+  ProjectItemController,
+  ItemCurationController,
+} from './items.controller';
+import { ProjectItemCurationController } from './item-curation.controller';
+import {
+  CollectionController,
+  ProjectCollectionController,
+} from './collections.controller';
 import { TagController } from './tags.controller';
 import { TypeController } from './types.controller';
-import { StateController, StateBatchController } from './state.controller';
-import { SavedSearchesController } from './saved-searches.controller';
+import {
+  StateController,
+  ProjectStateController,
+  StateBatchController,
+  ProjectStateBatchController,
+} from './state.controller';
+import {
+  SavedSearchesController,
+  ProjectSavedSearchesController,
+} from './saved-searches.controller';
 import { NoteController } from './notes.controller';
 
 // Services (Application & Domain Services)
@@ -67,6 +83,8 @@ import { DeleteItemUseCase } from './core/use-cases/delete-item.use-case';
 import { RestoreItemUseCase } from './core/use-cases/restore-item.use-case';
 import { PurgeItemUseCase } from './core/use-cases/purge-item.use-case';
 import { BulkPurgeItemsUseCase } from './core/use-cases/bulk-purge-items.use-case';
+import { BulkTrashItemsUseCase } from './core/use-cases/bulk-trash-items.use-case';
+import { BulkRestoreItemsUseCase } from './core/use-cases/bulk-restore-items.use-case';
 import { ConvertItemTypeUseCase } from './core/use-cases/convert-item-type.use-case';
 import { ImportItemsToProjectUseCase } from './core/use-cases/import-items-to-project.use-case';
 import { SetMyPublicationUseCase } from './core/use-cases/set-my-publication.use-case';
@@ -132,13 +150,19 @@ import {
   imports: [CoreModule, SyncModule, SharedKernelModule],
   controllers: [
     ItemCurationController,
+    ProjectItemCurationController,
     ItemController,
+    ProjectItemController,
     CollectionController,
+    ProjectCollectionController,
     TagController,
     TypeController,
     StateController,
+    ProjectStateController,
     StateBatchController,
+    ProjectStateBatchController,
     SavedSearchesController,
+    ProjectSavedSearchesController,
     NoteController,
   ],
   providers: [
@@ -241,6 +265,8 @@ import {
     RestoreItemUseCase,
     PurgeItemUseCase,
     BulkPurgeItemsUseCase,
+    BulkTrashItemsUseCase,
+    BulkRestoreItemsUseCase,
     ConvertItemTypeUseCase,
     ImportItemsToProjectUseCase,
     SetMyPublicationUseCase,

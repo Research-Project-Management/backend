@@ -41,7 +41,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
     );
     if (!raw) return null;
 
-    const flattened = ItemsMapper.mapFlattenedState(raw, userId) as any;
+    const flattened = ItemsMapper.mapFlattenedState(raw, userId);
     if (!flattened) return null;
 
     return ItemAggregate.reconstitute({

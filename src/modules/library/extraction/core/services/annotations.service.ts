@@ -17,10 +17,7 @@ import {
   BatchAnnotationsResult,
 } from '../domain/annotations.types';
 import { AnnotationNormalizer } from '../adapters/annotation.normalizer';
-import {
-  TransactionService,
-  TransactionHelpers,
-} from '../../../sync';
+import { TransactionService, TransactionHelpers } from '../../../sync';
 import { AttachmentsService } from './attachments.service';
 import type {
   UpsertSyncAnnotationCommand,

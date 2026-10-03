@@ -28,6 +28,7 @@ export interface FormattedChatSession {
     role: string;
     content: string;
     sources?: unknown;
+    attachments?: unknown;
     widgets?: unknown;
     createdAt: string;
   }>;

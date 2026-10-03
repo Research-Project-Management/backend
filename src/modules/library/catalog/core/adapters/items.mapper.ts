@@ -226,11 +226,31 @@ export class ItemMapper {
     // Explicit projection of known academic fields from extraFields (legacy fallback for old records
     // that were stored before dedicated DB columns existed).
     // New records will have these as proper DB columns — these fallbacks handle pre-migration data.
-    if (it.citationCount === undefined || it.citationCount === null) {
-      it.citationCount = extraFields.citationCount ?? null;
+    if (
+      it.citationCount === undefined ||
+      it.citationCount === null ||
+      it.citationCount === 0 ||
+      String(it.citationCount) === '0'
+    ) {
+      const parsedCit = extraFields.citationCount
+        ? Number(extraFields.citationCount)
+        : null;
+      it.citationCount = parsedCit && parsedCit > 0 ? parsedCit : null;
+    } else if (Number(it.citationCount) <= 0) {
+      it.citationCount = null;
     }
-    if (it.referenceCount === undefined || it.referenceCount === null) {
-      it.referenceCount = extraFields.referenceCount ?? null;
+    if (
+      it.referenceCount === undefined ||
+      it.referenceCount === null ||
+      it.referenceCount === 0 ||
+      String(it.referenceCount) === '0'
+    ) {
+      const parsedRef = extraFields.referenceCount
+        ? Number(extraFields.referenceCount)
+        : null;
+      it.referenceCount = parsedRef && parsedRef > 0 ? parsedRef : null;
+    } else if (Number(it.referenceCount) <= 0) {
+      it.referenceCount = null;
     }
     if (!it.openAccessPdfUrl)
       it.openAccessPdfUrl = extraFields.openAccessPdfUrl ?? null;
@@ -321,16 +341,55 @@ export class ItemMapper {
     }
     // abstractNote is the Zotero alias for abstract; keep them in sync from the cleaned value.
     it.abstractNote = it.abstract ?? null;
+    if (
+      it.year !== undefined &&
+      it.year !== null &&
+      (it.year === 0 || String(it.year) === '0' || Number(it.year) <= 0)
+    ) {
+      it.year = null;
+    }
     it.date =
       it.date || it.publicationDate || (it.year ? String(it.year) : null);
+    if (it.date === '0' || it.date === '0000') {
+      it.date = null;
+    }
     if (it.volume !== undefined && it.volume !== null) {
-      it.volume = String(it.volume);
+      const volStr = String(it.volume).trim();
+      it.volume = volStr === '0' || volStr === '' ? null : volStr;
     }
     if (it.issue !== undefined && it.issue !== null) {
-      it.issue = String(it.issue);
+      const issueStr = String(it.issue).trim();
+      it.issue = issueStr === '0' || issueStr === '' ? null : issueStr;
     }
     if (it.pages !== undefined && it.pages !== null) {
-      it.pages = String(it.pages);
+      const pagesStr = String(it.pages).trim();
+      it.pages = pagesStr === '0' || pagesStr === '' ? null : pagesStr;
+    }
+    if (it.edition !== undefined && it.edition !== null) {
+      const edStr = String(it.edition).trim();
+      it.edition = edStr === '0' || edStr === '' ? null : edStr;
+    }
+    if (it.numPages !== undefined && it.numPages !== null) {
+      const npStr = String(it.numPages).trim();
+      it.numPages =
+        npStr === '0' || npStr === ''
+          ? null
+          : isNaN(Number(npStr))
+            ? npStr
+            : Number(npStr) > 0
+              ? Number(npStr)
+              : null;
+    }
+    if (it.numberOfPages !== undefined && it.numberOfPages !== null) {
+      const nopStr = String(it.numberOfPages).trim();
+      it.numberOfPages =
+        nopStr === '0' || nopStr === ''
+          ? null
+          : isNaN(Number(nopStr))
+            ? nopStr
+            : Number(nopStr) > 0
+              ? Number(nopStr)
+              : null;
     }
 
     // Legacy cleanup: If callNumber has arXiv:xxx, clean it and ensure it.arxivId is populated

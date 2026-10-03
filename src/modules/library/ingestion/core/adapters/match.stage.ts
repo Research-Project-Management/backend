@@ -53,7 +53,7 @@ export class MatchStage {
     proposed: ItemMetadata,
   ): Promise<DuplicateMatchResult> {
     const proposedDoi = proposed.doi?.toLowerCase().trim();
-    let scopeFilter: Record<string, any> = {};
+    let scopeFilter: Record<string, any> | null = null;
 
     if (typeof scope === 'object' && scope !== null) {
       if (scope.projectId && isUUID(scope.projectId)) {
@@ -62,7 +62,22 @@ export class MatchStage {
         scopeFilter = { userId: scope.userId };
       }
     } else if (typeof scope === 'string' && isUUID(scope)) {
-      scopeFilter = { OR: [{ projectId: scope }, { userId: scope }] };
+      // Wrapped in AND so that later `OR` keys in the where clauses (arXiv
+      // variants, title pre-filter) cannot overwrite the tenant restriction
+      // when spread together.
+      scopeFilter = {
+        AND: [{ OR: [{ projectId: scope }, { userId: scope }] }],
+      };
+    }
+
+    // Fail closed: without a valid tenant scope, never match globally across
+    // tenants (a cross-tenant match could lead ENRICH_EXISTING to patch a
+    // foreign item). Treat as no match so the caller creates a new item.
+    if (!scopeFilter) {
+      this.logger.warn(
+        'MatchStage invoked without a valid userId/projectId scope; skipping duplicate matching',
+      );
+      return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
     }
 
     // ── Stage 1: Exact Identifier lookups (DOI, arXiv, PMID, ISBN) ───────────
@@ -70,7 +85,7 @@ export class MatchStage {
       const doiMatch = await this.prisma.item.findFirst({
         where: {
           ...scopeFilter,
-          doi: proposedDoi,
+          doi: { equals: proposedDoi, mode: 'insensitive' },
           deletedAt: null,
         },
         select: { id: true, title: true, doi: true },

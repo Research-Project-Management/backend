@@ -22,9 +22,28 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
   let mockGetUseCase: { execute: jest.Mock };
   let mockListUseCase: { execute: jest.Mock };
 
+  let mockImportUseCase: { execute: jest.Mock };
+  let mockPurgeUseCase: { execute: jest.Mock };
+  let mockBulkPurgeUseCase: { execute: jest.Mock };
+  let mockItemsService: { getMetadataSources: jest.Mock };
+
   const validUuid = '11111111-1111-4111-8111-111111111111';
 
   beforeEach(async () => {
+    mockImportUseCase = {
+      execute: jest.fn().mockResolvedValue({ importedCount: 1 }),
+    };
+    mockPurgeUseCase = { execute: jest.fn().mockResolvedValue(undefined) };
+    mockBulkPurgeUseCase = {
+      execute: jest.fn().mockResolvedValue({ purgedCount: 1 }),
+    };
+    mockItemsService = {
+      getMetadataSources: jest.fn().mockResolvedValue({
+        count: 1,
+        sources: [{ sourceProvider: 'arxiv' }],
+      }),
+    };
+
     mockCreateUseCase = {
       execute: jest.fn().mockResolvedValue({
         id: validUuid,
@@ -101,6 +120,12 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
       mockRestoreUseCase as any,
       mockGetUseCase as any,
       mockListUseCase as any,
+      mockImportUseCase as any,
+      mockPurgeUseCase as any,
+      mockBulkPurgeUseCase as any,
+      {} as any,
+      {} as any,
+      mockItemsService as any,
     );
   });
 
@@ -238,9 +263,11 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
       mockRestoreUseCase as any,
       mockGetUseCase as any,
       mockListUseCase as any,
-      undefined,
-      undefined,
-      undefined,
+      mockImportUseCase as any,
+      mockPurgeUseCase as any,
+      mockBulkPurgeUseCase as any,
+      {} as any,
+      {} as any,
       mockItemsService as any,
     );
 

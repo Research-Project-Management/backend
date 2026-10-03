@@ -410,20 +410,15 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         adapter = new PluggableLibrarySyncAdapter();
       });
 
-      it('should list mock collections', async () => {
+      it('should not return mock collections when no library is wired', async () => {
         const collections = await adapter.listCollections('user-1');
-        expect(collections).toHaveLength(2);
-        expect(collections[0].id).toBe('coll-default');
-        expect(collections[0].name).toContain('Zotero');
+        expect(collections).toEqual([]);
       });
 
-      it('should fetch valid collection BibTeX', async () => {
-        const bib = await adapter.fetchCollectionBibtex(
-          'user-1',
-          'coll-default',
-        );
-        expect(bib).toContain('vaswani2017attention');
-        expect(bib).toContain('goodfellow2016deep');
+      it('should never emit hard-coded mock BibTeX', async () => {
+        await expect(
+          adapter.fetchCollectionBibtex('user-1', 'coll-default'),
+        ).rejects.toThrow('Collection coll-default not found');
       });
 
       it('should throw error for non-existent collection', async () => {

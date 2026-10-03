@@ -5,6 +5,16 @@
 
 import { CitationKeyVo } from '../value-objects/citation-key.vo';
 import { AuthorListVo } from '../value-objects/author-list.vo';
+import { toBibtexValue } from '../utils/bibtex-value.utils';
+
+/**
+ * How field values should be treated when serializing:
+ * - 'latex' (default): values are already valid BibTeX/LaTeX (e.g. parsed from a .bib file)
+ *   and are emitted verbatim to avoid double escaping.
+ * - 'plain': values are plain text from external metadata (CrossRef/arXiv/DB) and are
+ *   escaped + case-protected via toBibtexValue().
+ */
+export type BibValueFormat = 'latex' | 'plain';
 
 export interface BibEntryProps {
   id?: string;
@@ -12,6 +22,7 @@ export interface BibEntryProps {
   entryType: string;
   fields: Record<string, string>;
   rawBibtex?: string;
+  valueFormat?: BibValueFormat;
 }
 
 export class BibEntry {
@@ -25,6 +36,7 @@ export class BibEntry {
   public readonly journal?: string;
   public readonly doi?: string;
   public readonly rawBibtex: string;
+  public readonly valueFormat: BibValueFormat;
 
   constructor(props: BibEntryProps) {
     this.id =
@@ -34,6 +46,7 @@ export class BibEntry {
         ? props.key
         : CitationKeyVo.create(props.key);
     this.entryType = props.entryType.trim().toLowerCase();
+    this.valueFormat = props.valueFormat ?? 'latex';
 
     const normalizedFields = new Map<string, string>();
     for (const [k, v] of Object.entries(props.fields)) {
@@ -79,7 +92,10 @@ export class BibEntry {
   private generateBibtex(): string {
     const lines = [`@${this.entryType}{${this.key.value},`];
     for (const [k, v] of this.fields.entries()) {
-      lines.push(`  ${k} = {${v}},`);
+      const value =
+        this.valueFormat === 'plain' ? toBibtexValue(v, { field: k }) : v;
+      if (!value) continue;
+      lines.push(`  ${k} = {${value}},`);
     }
     lines.push('}');
     return lines.join('\n');

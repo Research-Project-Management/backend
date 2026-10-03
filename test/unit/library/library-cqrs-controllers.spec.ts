@@ -1,3 +1,4 @@
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { AttachmentsController } from '@/modules/library/extraction/attachments.controller';
 import { IngestionController } from '@/modules/library/ingestion/ingestion.controller';
 import { NotesController } from '@/modules/library/catalog/notes.controller';
@@ -523,19 +524,11 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       expect(res).toEqual({ deleted: true, id: 'note-1' });
     });
 
-    it('should support legacy constructor with NotesService fallback', async () => {
-      const mockLegacyService = {
-        listNotes: jest.fn().mockResolvedValue([{ id: 'legacy-note' }]),
-        getNote: jest.fn().mockResolvedValue({ id: 'legacy-note' }),
-      };
-      const legacyController = new NotesController(mockLegacyService as any);
-      const res = await legacyController.listNotes('user-1');
-      expect(mockLegacyService.listNotes).toHaveBeenCalledWith(
-        'user-1',
-        undefined,
-        undefined,
-      );
-      expect(res).toEqual([{ id: 'legacy-note' }]);
+    it('should throw NotFoundException when note is not found', async () => {
+      mockGetNoteUseCase.execute.mockResolvedValueOnce(null);
+      await expect(
+        controller.getNote('user-1', 'nonexistent-id'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -673,24 +666,11 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       expect(res).toEqual({ imported: 3 });
     });
 
-    it('should support legacy constructor with AnnotationsService fallback', async () => {
-      const mockLegacyService = {
-        getAnnotationsByAttachment: jest
-          .fn()
-          .mockResolvedValue([{ id: 'legacy-annot' }]),
-      };
-      const legacyController = new AnnotationsController(
-        mockLegacyService as any,
-        mockPdfImporterService as any,
-      );
-      const res = await legacyController.listAnnotations('user-1', 'att-1');
-      expect(mockLegacyService.getAnnotationsByAttachment).toHaveBeenCalledWith(
-        'user-1',
-        'att-1',
-        undefined,
-        undefined,
-      );
-      expect(res).toEqual([{ id: 'legacy-annot' }]);
+    it('should throw NotFoundException when annotation deletion fails', async () => {
+      mockDeleteAnnotationUseCase.execute.mockResolvedValueOnce(false);
+      await expect(
+        controller.deleteAnnotation('user-1', 'att-1', 'nonexistent-annot'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

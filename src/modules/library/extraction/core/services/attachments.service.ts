@@ -9,10 +9,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, AttachmentType } from '@prisma/client';
 import { createHash } from 'crypto';
-import {
-  TransactionService,
-  TransactionHelpers,
-} from '../../../sync';
+import { TransactionService, TransactionHelpers } from '../../../sync';
 import {
   CreateAttachmentInput,
   ReplaceAttachmentFileInput,

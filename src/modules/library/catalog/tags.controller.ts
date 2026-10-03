@@ -11,7 +11,6 @@ import {
   HttpStatus,
   NotFoundException,
   Query,
-  Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TagsService } from './core/services/tags.service';
@@ -31,14 +30,13 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class TagController {
   constructor(
-    @Optional() private readonly tagsService?: TagsService,
-    @Optional() private readonly listTagsUseCase?: ListTagsUseCase,
-    @Optional() private readonly createTagUseCase?: CreateTagUseCase,
-    @Optional() private readonly deleteTagUseCase?: DeleteTagUseCase,
-    @Optional()
-    private readonly deleteAutomaticTagsUseCase?: DeleteAutomaticTagsUseCase,
-    @Optional() private readonly assignTagUseCase?: AssignTagUseCase,
-    @Optional() private readonly detachTagUseCase?: DetachTagUseCase,
+    private readonly listTagsUseCase: ListTagsUseCase,
+    private readonly createTagUseCase: CreateTagUseCase,
+    private readonly deleteTagUseCase: DeleteTagUseCase,
+    private readonly deleteAutomaticTagsUseCase: DeleteAutomaticTagsUseCase,
+    private readonly assignTagUseCase: AssignTagUseCase,
+    private readonly detachTagUseCase: DetachTagUseCase,
+    private readonly tagsService: TagsService,
   ) {}
 
   @Get()
@@ -51,18 +49,12 @@ export class TagController {
     @Query('includeInactive') includeInactive?: string,
   ) {
     const projectId = routeProjectId ?? queryProjectId;
-    if (this.listTagsUseCase) {
-      return this.listTagsUseCase.execute({
-        userId,
-        options: {
-          includeInactive: includeInactive === 'true',
-          projectId,
-        },
-      });
-    }
-    return this.tagsService!.getTags(userId, {
-      includeInactive: includeInactive === 'true',
-      projectId,
+    return this.listTagsUseCase.execute({
+      userId,
+      options: {
+        includeInactive: includeInactive === 'true',
+        projectId,
+      },
     });
   }
 
@@ -76,24 +68,15 @@ export class TagController {
     @Param('projectId') routeProjectId?: string,
   ) {
     const projectId = routeProjectId ?? body.projectId;
-    if (this.createTagUseCase) {
-      return this.createTagUseCase.execute({
-        userId,
-        name: body.name,
-        options: {
-          color: body.color,
-          type: body.type,
-          projectId,
-        },
-      });
-    }
-    return this.tagsService!.createOrGetTag(
+    return this.createTagUseCase.execute({
       userId,
-      body.name,
-      body.color,
-      body.type,
-      projectId,
-    );
+      name: body.name,
+      options: {
+        color: body.color,
+        type: body.type,
+        projectId,
+      },
+    });
   }
 
   @Delete('automatic')
@@ -106,10 +89,7 @@ export class TagController {
     @Query('projectId') queryProjectId?: string,
   ) {
     const projectId = routeProjectId ?? queryProjectId;
-    if (this.deleteAutomaticTagsUseCase) {
-      return this.deleteAutomaticTagsUseCase.execute({ userId, projectId });
-    }
-    return this.tagsService!.deleteAutomaticTags(userId, projectId);
+    return this.deleteAutomaticTagsUseCase.execute({ userId, projectId });
   }
 
   @Patch(':tagId')
@@ -124,7 +104,7 @@ export class TagController {
     @Query('projectId') queryProjectId?: string,
   ) {
     const projectId = routeProjectId ?? queryProjectId;
-    const updated = await this.tagsService!.updateTag(
+    const updated = await this.tagsService.updateTag(
       userId,
       tagId,
       {
@@ -148,9 +128,11 @@ export class TagController {
     @Query('projectId') queryProjectId?: string,
   ) {
     const projectId = routeProjectId ?? queryProjectId;
-    const deleted = this.deleteTagUseCase
-      ? await this.deleteTagUseCase.execute({ userId, tagId, projectId })
-      : await this.tagsService!.deleteTag(userId, tagId, projectId);
+    const deleted = await this.deleteTagUseCase.execute({
+      userId,
+      tagId,
+      projectId,
+    });
     if (!deleted) {
       throw new NotFoundException(`Tag ${tagId} not found`);
     }
@@ -165,11 +147,7 @@ export class TagController {
     @Param('tagId') tagId: string,
     @Param('itemId') itemId: string,
   ) {
-    if (this.assignTagUseCase) {
-      return this.assignTagUseCase.execute({ userId, tagId, itemId });
-    }
-    await this.tagsService!.assignTag(userId, tagId, itemId);
-    return { success: true };
+    return this.assignTagUseCase.execute({ userId, tagId, itemId });
   }
 
   @Delete(':tagId/items/:itemId')
@@ -181,11 +159,7 @@ export class TagController {
     @Param('tagId') tagId: string,
     @Param('itemId') itemId: string,
   ) {
-    if (this.detachTagUseCase) {
-      await this.detachTagUseCase.execute({ userId, tagId, itemId });
-      return;
-    }
-    await this.tagsService!.removeTag(userId, tagId, itemId);
+    await this.detachTagUseCase.execute({ userId, tagId, itemId });
   }
 }
 

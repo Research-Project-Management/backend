@@ -14,6 +14,12 @@ import { IntegrationsRepository } from '@/modules/integrations/integrations.repo
 import { ZoteroProvider } from '@/modules/integrations/providers/zotero.provider';
 import { MendeleyProvider } from '@/modules/integrations/providers/mendeley.provider';
 import { decryptToken } from '@/modules/integrations/utils/integration-crypto.utils';
+import {
+  escapeLatex,
+  formatBibtexName,
+  sanitizeCitationKey,
+  toBibtexValue,
+} from '../../domain/utils/bibtex-value.utils';
 
 @Injectable()
 export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
@@ -29,49 +35,6 @@ export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
     @Optional()
     private readonly mendeleyProvider?: MendeleyProvider,
   ) {}
-
-  private readonly defaultCollections: LibraryCollectionSummary[] = [
-    {
-      id: 'coll-default',
-      name: 'My Library (Zotero Sample)',
-      itemCount: 2,
-    },
-    {
-      id: 'coll-ai-papers',
-      name: 'Artificial Intelligence & Deep Learning',
-      itemCount: 1,
-    },
-  ];
-
-  private readonly mockBibtexData = new Map<string, string>([
-    [
-      'coll-default',
-      `@article{vaswani2017attention,
-  title = {Attention is all you need},
-  author = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N and Kaiser, {\\L}ukasz and Polosukhin, Illia},
-  journal = {Advances in neural information processing systems},
-  volume = {30},
-  year = {2017}
-}
-
-@book{goodfellow2016deep,
-  title = {Deep Learning},
-  author = {Goodfellow, Ian and Bengio, Yoshua and Courville, Aaron},
-  publisher = {MIT Press},
-  year = {2016}
-}`,
-    ],
-    [
-      'coll-ai-papers',
-      `@inproceedings{he2016deep,
-  title = {Deep residual learning for image recognition},
-  author = {He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
-  booktitle = {Proceedings of the IEEE conference on computer vision and pattern recognition},
-  pages = {770--778},
-  year = {2016}
-}`,
-    ],
-  ]);
 
   public async listCollections(
     userId: string,
@@ -174,11 +137,8 @@ export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
       }
     }
 
-    if (results.length > 0) {
-      return results;
-    }
-
-    return [...this.defaultCollections];
+    // No hard-coded sample collections: only real remote / local collections are listed.
+    return results;
   }
 
   public async fetchCollectionBibtex(
@@ -239,96 +199,286 @@ export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
       );
     }
 
-    // 3. Check local Flux database collections
-    if (this.prisma) {
-      try {
-        const collectionItems = await this.prisma.collectionItem.findMany({
-          where: {
-            collectionId,
-            collection: {
-              userId,
-              deletedAt: null,
-            },
-          },
-          include: {
-            item: {
-              include: {
-                contributors: {
-                  orderBy: { orderIndex: 'asc' },
-                },
-              },
-            },
-          },
-        });
-
-        if (collectionItems.length > 0) {
-          const bibEntries = collectionItems
-            .map((ci) => this.formatItemToBibtex(ci.item))
-            .filter(Boolean);
-          if (bibEntries.length > 0) {
-            return bibEntries.join('\n\n');
-          }
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `Failed to query collection items for collection ${collectionId}: ${msg}`,
-        );
-      }
-    }
-
-    // 3. Fallback to mock data if present
-    const data = this.mockBibtexData.get(collectionId);
-    if (!data) {
+    // 3. Local Flux database collections (no mock fallback)
+    if (!this.prisma) {
       throw new Error(`Collection ${collectionId} not found`);
     }
-    return data;
+
+    const collection = await this.prisma.collection.findFirst({
+      where: { id: collectionId, userId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!collection) {
+      throw new Error(`Collection ${collectionId} not found`);
+    }
+
+    const collectionItems = await this.prisma.collectionItem.findMany({
+      where: {
+        collectionId,
+        item: { deletedAt: null },
+      },
+      include: {
+        item: {
+          include: {
+            contributors: {
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+        },
+      },
+    });
+
+    // Empty collection -> empty BibTeX stream (sync becomes a no-op).
+    return collectionItems
+      .map((ci) => this.formatItemToBibtex(ci.item as unknown as DbLibraryItem))
+      .filter(Boolean)
+      .join('\n\n');
   }
 
-  private formatItemToBibtex(item: {
-    id: string;
-    itemType?: string | null;
-    citationKey?: string | null;
-    title?: string | null;
-    publicationTitle?: string | null;
-    year?: number | string | null;
-    doi?: string | null;
-    url?: string | null;
-    contributors?: Array<{
-      orderIndex?: number;
-      lastName?: string | null;
-      firstName?: string | null;
-    }>;
-  }): string {
-    const typeMap: Record<string, string> = {
-      journalArticle: 'article',
-      book: 'book',
-      bookSection: 'incollection',
-      conferencePaper: 'inproceedings',
-      thesis: 'phdthesis',
-      report: 'techreport',
-      webpage: 'misc',
+  /**
+   * Serializes a Flux library item (Zotero-schema item types + metadata JSON)
+   * into a BibTeX entry. All values are escaped through toBibtexValue().
+   */
+  private formatItemToBibtex(item: DbLibraryItem): string {
+    const meta = collectMetadata(item.metadata);
+    const get = (...keys: string[]): string | undefined => {
+      for (const k of keys) {
+        const v = meta[k.toLowerCase()];
+        if (v !== undefined && v !== null && String(v).trim() !== '') {
+          return String(v).trim();
+        }
+      }
+      return undefined;
     };
-    const bibType = typeMap[item.itemType || ''] || 'misc';
-    const citeKey =
-      item.citationKey || `item_${item.id.replace(/-/g, '').substring(0, 8)}`;
-    const authors = (item.contributors || [])
-      .map((c) => {
-        if (c.lastName && c.firstName) return `${c.lastName}, ${c.firstName}`;
-        return c.lastName || c.firstName || '';
-      })
+
+    const itemType = item.itemType || 'journalArticle';
+    const container = item.publicationTitle || get('publicationTitle');
+    const fields: Array<[string, string | undefined]> = [];
+    let bibType = 'misc';
+
+    // --- Creators -------------------------------------------------------
+    const contributors = [...(item.contributors || [])].sort(
+      (a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0),
+    );
+    const SECONDARY_ROLES = new Set([
+      'editor',
+      'serieseditor',
+      'translator',
+      'bookauthor',
+      'reviewedauthor',
+      'contributor',
+      'commenter',
+    ]);
+    const nameOf = (c: DbContributor) =>
+      formatBibtexName({
+        lastName: c.lastName || (c.fieldMode === 1 ? c.fullName : null),
+        firstName: c.firstName,
+        fieldMode: c.fieldMode,
+      }) || (c.fullName ? escapeLatex(c.fullName.trim()) : '');
+    const authors = contributors
+      .filter(
+        (c) => !SECONDARY_ROLES.has((c.creatorType || 'author').toLowerCase()),
+      )
+      .map(nameOf)
+      .filter(Boolean)
+      .join(' and ');
+    const editors = contributors
+      .filter((c) => (c.creatorType || '').toLowerCase() === 'editor')
+      .map(nameOf)
       .filter(Boolean)
       .join(' and ');
 
-    const fields: string[] = [];
-    if (item.title) fields.push(`  title = {${item.title}}`);
-    if (authors) fields.push(`  author = {${authors}}`);
-    if (item.publicationTitle)
-      fields.push(`  journal = {${item.publicationTitle}}`);
-    if (item.year) fields.push(`  year = {${item.year}}`);
-    if (item.doi) fields.push(`  doi = {${item.doi}}`);
-    if (item.url) fields.push(`  url = {${item.url}}`);
+    // --- Type-specific fields ------------------------------------------
+    switch (itemType) {
+      case 'journalArticle':
+      case 'magazineArticle':
+      case 'newspaperArticle':
+        bibType = 'article';
+        fields.push(['journal', container]);
+        break;
+      case 'conferencePaper':
+        bibType = 'inproceedings';
+        fields.push([
+          'booktitle',
+          get('proceedingsTitle') || container || get('conferenceName'),
+        ]);
+        fields.push(['publisher', get('publisher')]);
+        fields.push(['address', get('place')]);
+        break;
+      case 'book':
+        bibType = 'book';
+        fields.push(['publisher', get('publisher')]);
+        fields.push(['address', get('place')]);
+        fields.push(['edition', get('edition')]);
+        fields.push(['series', get('series')]);
+        break;
+      case 'bookSection':
+        bibType = 'incollection';
+        fields.push(['booktitle', get('bookTitle') || container]);
+        fields.push(['publisher', get('publisher')]);
+        fields.push(['address', get('place')]);
+        fields.push(['edition', get('edition')]);
+        fields.push(['series', get('series')]);
+        break;
+      case 'thesis': {
+        const thesisType = get('thesisType', 'type') || '';
+        bibType = /master|magister|\bm\.?\s?(?:sc|a|s|eng|phil)\b/i.test(
+          thesisType,
+        )
+          ? 'mastersthesis'
+          : 'phdthesis';
+        fields.push(['school', get('university', 'institution', 'publisher')]);
+        fields.push(['address', get('place')]);
+        break;
+      }
+      case 'report':
+        bibType = 'techreport';
+        fields.push([
+          'institution',
+          get('institution', 'publisher') || container,
+        ]);
+        fields.push(['number', get('reportNumber', 'number')]);
+        fields.push(['type', get('reportType')]);
+        fields.push(['address', get('place')]);
+        break;
+      case 'preprint': {
+        bibType = 'misc';
+        const arxivId = extractArxivId(
+          get('arxivId', 'archiveID', 'archiveId'),
+          item.doi,
+          item.url,
+        );
+        if (arxivId) {
+          fields.push(['eprint', arxivId]);
+          fields.push(['archiveprefix', 'arXiv']);
+          fields.push(['primaryclass', get('primaryClass', 'primaryCategory')]);
+        } else {
+          fields.push(['howpublished', get('repository') || container]);
+        }
+        break;
+      }
+      case 'webpage':
+      case 'blogPost':
+      case 'forumPost':
+        bibType = 'misc';
+        fields.push(['howpublished', get('websiteTitle') || container]);
+        break;
+      default:
+        bibType = 'misc';
+        fields.push(['howpublished', container]);
+        fields.push(['publisher', get('publisher')]);
+        break;
+    }
 
-    return `@${bibType}{${citeKey},\n${fields.join(',\n')}\n}`;
+    // --- Common fields -------------------------------------------------
+    const pages = get('pages');
+    const accessDate = get('accessDate');
+    const common: Array<[string, string | undefined]> = [
+      ['volume', get('volume')],
+      ['number', itemType === 'report' ? undefined : get('issue')],
+      [
+        'pages',
+        pages ? pages.replace(/\s*[-\u2010-\u2015]+\s*/g, '--') : undefined,
+      ],
+      ['year', item.year != null ? String(item.year) : get('year')],
+      ['issn', get('ISSN')],
+      ['isbn', get('ISBN')],
+      ['doi', item.doi || get('DOI')],
+      ['url', item.url || get('url')],
+      [
+        'urldate',
+        accessDate && /^\d{4}-\d{2}-\d{2}/.test(accessDate)
+          ? accessDate.slice(0, 10)
+          : undefined,
+      ],
+    ];
+
+    const citeKey =
+      sanitizeCitationKey(item.citationKey || '') ||
+      `item_${item.id.replace(/-/g, '').substring(0, 8)}`;
+
+    const lines: string[] = [];
+    if (authors) lines.push(`  author = {${authors}}`);
+    if (editors) lines.push(`  editor = {${editors}}`);
+    const title = toBibtexValue(item.title, { field: 'title' });
+    if (title) lines.push(`  title = {${title}}`);
+
+    const seen = new Set<string>(['author', 'editor', 'title']);
+    for (const [name, raw] of [...fields, ...common]) {
+      if (seen.has(name)) continue;
+      const value = toBibtexValue(raw, { field: name });
+      if (!value) continue;
+      seen.add(name);
+      lines.push(`  ${name} = {${value}}`);
+    }
+
+    return `@${bibType}{${citeKey},\n${lines.join(',\n')}\n}`;
   }
+}
+
+interface DbContributor {
+  orderIndex?: number | null;
+  lastName?: string | null;
+  firstName?: string | null;
+  fullName?: string | null;
+  fieldMode?: number | null;
+  creatorType?: string | null;
+}
+
+interface DbLibraryItem {
+  id: string;
+  itemType?: string | null;
+  citationKey?: string | null;
+  title?: string | null;
+  publicationTitle?: string | null;
+  year?: number | string | null;
+  doi?: string | null;
+  url?: string | null;
+  metadata?: unknown;
+  contributors?: DbContributor[];
+}
+
+/**
+ * Flattens item.metadata (and a nested `extraFields` object if present) into a
+ * lower-cased key map so Zotero field names match regardless of casing (ISSN/issn).
+ */
+function collectMetadata(raw: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const add = (obj: unknown) => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      if (v === null || v === undefined || typeof v === 'object') continue;
+      const key = k.toLowerCase();
+      if (!(key in out)) out[key] = v;
+    }
+  };
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    add(raw);
+    add((raw as Record<string, unknown>).extraFields);
+  }
+  return out;
+}
+
+/** Extracts a bare arXiv identifier from an archive ID, arXiv DOI or arxiv.org URL. */
+function extractArxivId(
+  archiveId?: string | null,
+  doi?: string | null,
+  url?: string | null,
+): string | undefined {
+  const fromArchive = archiveId?.match(/^(?:arxiv:)?\s*(\S+)$/i)?.[1];
+  if (
+    archiveId &&
+    /arxiv/i.test(archiveId) &&
+    fromArchive &&
+    /\d/.test(fromArchive)
+  ) {
+    return fromArchive;
+  }
+  if (archiveId && /^\d{4}\.\d{4,5}(v\d+)?$/.test(archiveId)) return archiveId;
+  const fromDoi = doi?.match(/10\.48550\/arxiv\.(.+)$/i)?.[1];
+  if (fromDoi) return fromDoi;
+  const fromUrl = url?.match(
+    /arxiv\.org\/(?:abs|pdf)\/([^\s?#]+?)(?:\.pdf)?$/i,
+  )?.[1];
+  return fromUrl || undefined;
 }

@@ -126,11 +126,11 @@ export function toItemResultDto(aggregate: ItemAggregate): ItemResultDto {
         ? aggregate.identifiers
         : (fields.identifiers ?? []),
     isMyPublication:
-      (aggregate as any).isMyPublication !== undefined
-        ? Boolean((aggregate as any).isMyPublication)
-        : Boolean(fields.isMyPublication),
-    relations: (aggregate as any).relations ?? fields.relations ?? [],
-    seeAlso: (aggregate as any).seeAlso ?? fields.seeAlso ?? [],
+      fields.isMyPublication !== undefined
+        ? Boolean(fields.isMyPublication)
+        : Boolean(aggregate.fields?.isMyPublication),
+    relations: fields.relations ?? aggregate.fields?.relations ?? [],
+    seeAlso: fields.seeAlso ?? aggregate.fields?.seeAlso ?? [],
     // Zotero-compatible meta envelope
     meta: buildMetaEnvelope(aggregate, fields),
   };

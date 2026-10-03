@@ -5,7 +5,10 @@ import { ExtractionRepository } from './extraction.repository';
 import { PdfProvider } from './pdf.provider';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { OutboxEvent, Prisma } from '@prisma/client';
-import { OutboxDispatchHandler, IdempotentConsumerService } from '../../../sync';
+import {
+  OutboxDispatchHandler,
+  IdempotentConsumerService,
+} from '../../../sync';
 import { AttachmentStorageException } from '../domain/attachments.types';
 import {
   parseCreatorString,

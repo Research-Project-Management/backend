@@ -12,7 +12,6 @@ import {
   ProviderName,
   ProviderResult,
   ResolvedMetadata,
-  QueryType,
 } from '../domain/metadata.types';
 import { QueryClassifier } from '../adapters/query.classifier';
 import {
@@ -125,26 +124,11 @@ export class MetadataService implements MetadataPort {
       }
     }
 
-    // 4.5 Tier 3: Local Database Historical Resolution (0ms fallback if item already exists in local DB)
-    if (!request.forceRefresh && this.ingestionRepo) {
-      const localResolved = await this.resolveFromLocalDatabase(
-        classified.type,
-        classified.clean,
-        cleanQuery,
-        canonicalId,
-      );
-      if (localResolved) {
-        // Cache in L1/L2
-        await this.cache.set(cacheKey, localResolved, classified.type);
-        this.logResolution({
-          queryType: classified.type,
-          outcome: 'found',
-          cacheOutcome: 'local_db_hit',
-          durationMs: Date.now() - startedAt,
-        });
-        return { ...localResolved, cached: true };
-      }
-    }
+    // NOTE: A former "Tier 3" local-database shortcut was removed here. It
+    // looked up items by identifier across ALL tenants (no user/project
+    // filter) and cached the result in the shared metadata cache as if it were
+    // provider-authoritative. External providers are the source of record;
+    // user-owned items must never feed the shared resolution cache.
 
     // 5. Routing tiers
     const tiers = MetadataRoutingPolicy.getTiers(classified.type);
@@ -385,87 +369,5 @@ export class MetadataService implements MetadataPort {
 
     const similarity = matches / qTokens.length;
     return similarity >= 0.5;
-  }
-
-  private async resolveFromLocalDatabase(
-    type: string,
-    cleanQuery: string,
-    rawQuery: string,
-    canonicalId: string,
-  ): Promise<ResolvedMetadata | null> {
-    if (!this.ingestionRepo) return null;
-
-    try {
-      const item = await this.ingestionRepo.findItemByIdentifier(
-        type,
-        cleanQuery,
-      );
-
-      if (!item || !item.title) return null;
-
-      const authors = item.contributors.map(
-        (c) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-      );
-      const creators = item.contributors.map((c) => ({
-        creatorType: (c.creatorType || 'author') as any,
-        fullName:
-          c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-        firstName: c.firstName || '',
-        lastName: c.lastName || '',
-      }));
-
-      const meta = (item.metadata as any) ?? {};
-      const openAccessPdfUrl = meta.openAccessPdfUrl || undefined;
-
-      const finalMetadata: ItemMetadata = {
-        title: item.title,
-        abstract: item.abstract || undefined,
-        authors: authors.length > 0 ? authors : undefined,
-        creators: creators.length > 0 ? creators : undefined,
-        year: item.year || undefined,
-        publicationDate: meta.publicationDate || undefined,
-        journal: meta.publicationTitle || meta.journal || undefined,
-        publisher: meta.publisher || undefined,
-        volume: meta.volume || undefined,
-        issue: meta.issue || undefined,
-        pages: meta.pages || undefined,
-        doi: item.doi || undefined,
-        arxivId: meta.arxivId || undefined,
-        pmid: meta.pmid || undefined,
-        isbn: meta.isbn || undefined,
-        openAccessPdfUrl,
-        provenance: {
-          originProvider: 'local_database',
-          resolvedAt: new Date().toISOString(),
-          canonicalId,
-          confidenceScore: 0.95,
-          isOpenAccess: Boolean(openAccessPdfUrl),
-          openAccessPdfUrl,
-        },
-      };
-
-      const fieldProvenance: Record<string, FieldProvenance> = {
-        title: {
-          provider: 'local_database' as any,
-          fetchedAt: item.createdAt.toISOString(),
-          identifier: canonicalId,
-          confidence: 0.95,
-        },
-      };
-
-      return {
-        query: rawQuery,
-        queryType: type as QueryType,
-        canonicalId,
-        metadata: finalMetadata,
-        provenance: fieldProvenance,
-        cached: true,
-        resolvedAt: new Date().toISOString(),
-        policyVersion: METADATA_POLICY_VERSION,
-      };
-    } catch (err: any) {
-      this.logger.debug(`Local DB resolution skipped: ${err?.message}`);
-      return null;
-    }
   }
 }

@@ -203,10 +203,13 @@ export class StructureController {
     try {
       const rootDoc = await this.structureService.getRootDoc(projectId);
       if (!rootDoc) {
-        throw new RootDocNotFoundError(projectId);
+        return null;
       }
       return rootDoc.toJSON();
     } catch (err) {
+      if (err instanceof RootDocNotFoundError) {
+        return null;
+      }
       this.handleError(err);
     }
   }

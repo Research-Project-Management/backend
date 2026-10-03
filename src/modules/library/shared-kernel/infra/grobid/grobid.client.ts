@@ -1,5 +1,7 @@
+import * as crypto from 'crypto';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ResilienceRegistryService } from '../../resilience/resilience-registry.service';
+import { RedisCacheService } from '@/core/cache/redis.service';
 
 export interface GrobidCreator {
   fullName: string;
@@ -132,7 +134,13 @@ export class GrobidClient {
   constructor(
     @Optional()
     private readonly resilienceRegistry?: ResilienceRegistryService,
+    @Optional()
+    private readonly redis?: RedisCacheService,
   ) {}
+
+  private computeHash(buffer: Buffer): string {
+    return crypto.createHash('sha256').update(buffer).digest('hex');
+  }
 
   private get baseUrl(): string {
     return (
@@ -164,6 +172,23 @@ export class GrobidClient {
   ): Promise<GrobidHeaderResult | null> {
     if (!this.enabled) return null;
 
+    const hash = this.computeHash(buffer);
+    const cacheKey = `grobid:header:${hash}`;
+
+    if (this.redis && this.redis.isReady()) {
+      return this.redis.wrap<GrobidHeaderResult | null>(
+        cacheKey,
+        () => this.executeProcessHeader(buffer),
+        7 * 86400,
+      );
+    }
+
+    return this.executeProcessHeader(buffer);
+  }
+
+  private async executeProcessHeader(
+    buffer: Buffer,
+  ): Promise<GrobidHeaderResult | null> {
     const executeCall = async (): Promise<GrobidHeaderResult | null> => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -242,6 +267,23 @@ export class GrobidClient {
   async processReferences(buffer: Buffer): Promise<GrobidReference[]> {
     if (!this.enabled) return [];
 
+    const hash = this.computeHash(buffer);
+    const cacheKey = `grobid:refs:${hash}`;
+
+    if (this.redis && this.redis.isReady()) {
+      return this.redis.wrap<GrobidReference[]>(
+        cacheKey,
+        () => this.executeProcessReferences(buffer),
+        7 * 86400,
+      );
+    }
+
+    return this.executeProcessReferences(buffer);
+  }
+
+  private async executeProcessReferences(
+    buffer: Buffer,
+  ): Promise<GrobidReference[]> {
     const executeCall = async (): Promise<GrobidReference[]> => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -361,6 +403,23 @@ export class GrobidClient {
   ): Promise<GrobidFulltextResult | null> {
     if (!this.enabled) return null;
 
+    const hash = this.computeHash(buffer);
+    const cacheKey = `grobid:fulltext:${hash}`;
+
+    if (this.redis && this.redis.isReady()) {
+      return this.redis.wrap<GrobidFulltextResult | null>(
+        cacheKey,
+        () => this.executeProcessFulltext(buffer),
+        7 * 86400,
+      );
+    }
+
+    return this.executeProcessFulltext(buffer);
+  }
+
+  private async executeProcessFulltext(
+    buffer: Buffer,
+  ): Promise<GrobidFulltextResult | null> {
     const executeCall = async (): Promise<GrobidFulltextResult | null> => {
       const controller = new AbortController();
       const timeout = setTimeout(
@@ -469,16 +528,28 @@ export class GrobidClient {
       rawTei: teiXml,
     };
 
-    // Title
+    // CRITICAL: Restrict header metadata parsing to <teiHeader>...</teiHeader>.
+    // In fulltext TEI, the XML contains thousands of lines of body and references
+    // (<listBibl><biblStruct>...</biblStruct></listBibl>).
+    // Without isolating <teiHeader>, regexes for <author>, <title>, and <idno type="DOI">
+    // will match all authors, titles, and DOIs from the bibliography references!
+    const headerMatch = teiXml.match(
+      /<teiHeader\b[^>]*>([\s\S]*?)<\/teiHeader>/i,
+    );
+    const scopeXml = headerMatch ? headerMatch[1] : teiXml;
+
+    // Title: handle nested child tags (<hi>, <sub>, <sup>, etc.)
     const titleMatch =
-      teiXml.match(/<title[^>]*level="a"[^>]*>([^<]+)<\/title>/i) ??
-      teiXml.match(/<title[^>]*>([^<]+)<\/title>/i);
+      scopeXml.match(/<title[^>]*level="a"[^>]*>([\s\S]*?)<\/title>/i) ??
+      scopeXml.match(/<title[^>]*type="main"[^>]*>([\s\S]*?)<\/title>/i) ??
+      scopeXml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     if (titleMatch?.[1]) {
-      result.title = this.cleanText(titleMatch[1]);
+      const cleanTitleContent = titleMatch[1].replace(/<[^>]+>/g, ' ');
+      result.title = this.cleanText(cleanTitleContent);
     }
 
     // Abstract (high-precision zoning, multi-paragraph, structured abstract parsing)
-    const abstractData = this.extractTeiAbstract(teiXml);
+    const abstractData = this.extractTeiAbstract(scopeXml);
     if (abstractData) {
       result.abstract = abstractData.fullText;
       result.abstractParagraphs = abstractData.paragraphs;
@@ -486,13 +557,15 @@ export class GrobidClient {
     }
 
     // DOI
-    const doiMatch = teiXml.match(/<idno[^>]*type="DOI"[^>]*>([^<]+)<\/idno>/i);
+    const doiMatch = scopeXml.match(
+      /<idno[^>]*type="DOI"[^>]*>([^<]+)<\/idno>/i,
+    );
     if (doiMatch?.[1]) {
       result.doi = doiMatch[1].trim();
     }
 
     // ArXiv ID
-    const arxivMatch = teiXml.match(
+    const arxivMatch = scopeXml.match(
       /<idno[^>]*type="arXiv"[^>]*>([^<]+)<\/idno>/i,
     );
     if (arxivMatch?.[1]) {
@@ -500,7 +573,7 @@ export class GrobidClient {
     }
 
     // Publication Date and Year (from normalized ISO-8601 when attribute)
-    const dateMatch = teiXml.match(/<date[^>]*when="([^"]+)"/i);
+    const dateMatch = scopeXml.match(/<date[^>]*when="([^"]+)"/i);
     if (dateMatch?.[1]) {
       result.publicationDate = dateMatch[1];
       const parsedYear = parseInt(dateMatch[1].slice(0, 4), 10);
@@ -510,7 +583,7 @@ export class GrobidClient {
     }
 
     // Journal
-    const journalMatch = teiXml.match(
+    const journalMatch = scopeXml.match(
       /<title[^>]*level="j"[^>]*>([^<]+)<\/title>/i,
     );
     if (journalMatch?.[1]) {
@@ -518,7 +591,7 @@ export class GrobidClient {
     }
 
     // Monograph / Book / Proceedings Title
-    const bookTitleMatch = teiXml.match(
+    const bookTitleMatch = scopeXml.match(
       /<title[^>]*level="m"[^>]*>([^<]+)<\/title>/i,
     );
     if (bookTitleMatch?.[1]) {
@@ -526,21 +599,21 @@ export class GrobidClient {
     }
 
     // Conference Meeting Name
-    const meetingMatch = teiXml.match(/<meeting[^>]*>([^<]+)<\/meeting>/i);
+    const meetingMatch = scopeXml.match(/<meeting[^>]*>([^<]+)<\/meeting>/i);
     if (meetingMatch?.[1]) {
       result.conferenceName = this.cleanText(meetingMatch[1]);
     }
 
     // Publisher & Publication Place
-    const publisherMatch = teiXml.match(
+    const publisherMatch = scopeXml.match(
       /<publisher[^>]*>([^<]+)<\/publisher>/i,
     );
     if (publisherMatch?.[1]) {
       result.publisher = this.cleanText(publisherMatch[1]);
     }
     const pubPlaceMatch =
-      teiXml.match(/<pubPlace[^>]*>([^<]+)<\/pubPlace>/i) ??
-      teiXml.match(
+      scopeXml.match(/<pubPlace[^>]*>([^<]+)<\/pubPlace>/i) ??
+      scopeXml.match(
         /<address[^>]*>[\s\S]*?<settlement[^>]*>([^<]+)<\/settlement>[\s\S]*?<\/address>/i,
       );
     if (pubPlaceMatch?.[1]) {
@@ -548,24 +621,24 @@ export class GrobidClient {
     }
 
     // Volume, Issue, Pages
-    const volMatch = teiXml.match(
+    const volMatch = scopeXml.match(
       /<biblScope[^>]*unit="volume"[^>]*>([^<]+)<\/biblScope>/i,
     );
     if (volMatch?.[1]) {
       result.volume = this.cleanText(volMatch[1]);
     }
 
-    const issueMatch = teiXml.match(
+    const issueMatch = scopeXml.match(
       /<biblScope[^>]*unit="issue"[^>]*>([^<]+)<\/biblScope>/i,
     );
     if (issueMatch?.[1]) {
       result.issue = this.cleanText(issueMatch[1]);
     }
 
-    const pageMatch = teiXml.match(
+    const pageMatch = scopeXml.match(
       /<biblScope[^>]*unit="page"[^>]*>([^<]+)<\/biblScope>/i,
     );
-    const pageFromMatch = teiXml.match(
+    const pageFromMatch = scopeXml.match(
       /<biblScope[^>]*unit="page"[^>]*from="([^"]*)"(?:\s+to="([^"]*)")?/i,
     );
     if (pageMatch?.[1]) {
@@ -577,13 +650,13 @@ export class GrobidClient {
     }
 
     // ISSN & ISBN
-    const issnMatch = teiXml.match(
+    const issnMatch = scopeXml.match(
       /<idno[^>]*type="ISSN"[^>]*>([^<]+)<\/idno>/i,
     );
     if (issnMatch?.[1]) {
       result.issn = issnMatch[1].trim();
     }
-    const isbnMatch = teiXml.match(
+    const isbnMatch = scopeXml.match(
       /<idno[^>]*type="ISBN"[^>]*>([^<]+)<\/idno>/i,
     );
     if (isbnMatch?.[1]) {
@@ -596,7 +669,7 @@ export class GrobidClient {
       /<author(?:\s+role="([^"]*)")?[^>]*>([\s\S]*?)<\/author>/gi;
     let aMatch: RegExpExecArray | null;
 
-    while ((aMatch = authorRegex.exec(teiXml)) !== null) {
+    while ((aMatch = authorRegex.exec(scopeXml)) !== null) {
       const roleAttr = aMatch[1];
       const block = aMatch[2];
 
@@ -673,7 +746,7 @@ export class GrobidClient {
     const keywords: string[] = [];
     const kwRegex = /<term>([^<]+)<\/term>/gi;
     let kwMatch: RegExpExecArray | null;
-    while ((kwMatch = kwRegex.exec(teiXml)) !== null) {
+    while ((kwMatch = kwRegex.exec(scopeXml)) !== null) {
       const kw = this.cleanText(kwMatch[1]);
       if (kw) keywords.push(kw);
     }
@@ -683,7 +756,7 @@ export class GrobidClient {
     const notes: Array<{ content: string; type?: string }> = [];
     const noteRegex = /<note\b([^>]*)>([\s\S]*?)<\/note>/gi;
     let nMatch: RegExpExecArray | null;
-    while ((nMatch = noteRegex.exec(teiXml)) !== null) {
+    while ((nMatch = noteRegex.exec(scopeXml)) !== null) {
       const attrs = nMatch[1];
       const typeAttr =
         attrs.match(/\btype=["']([^"']*)["']/i)?.[1] ||

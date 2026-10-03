@@ -750,21 +750,34 @@ export class IngestionRepository {
   }
 
   // ── Local Metadata Identifier Lookup ────────────────────────────────────
+  /**
+   * Tenant-scoped lookup of an Item by external identifier.
+   * A scope is REQUIRED: items are user-owned and must never be resolved
+   * across tenants. Returns null (fail closed) when no userId is supplied.
+   */
   async findItemByIdentifier(
     type: string,
     cleanQuery: string,
+    scope: { userId: string; projectId?: string | null },
     tx?: Prisma.TransactionClient,
   ) {
+    if (!scope?.userId) return null;
     const client = this.getClient(tx);
     let whereClause: any = null;
     if (type === 'DOI') {
-      whereClause = { doi: cleanQuery, deletedAt: null };
+      whereClause = {
+        doi: { equals: cleanQuery, mode: 'insensitive' },
+        deletedAt: null,
+      };
     } else if (type === 'ARXIV') {
       whereClause = { arxivId: cleanQuery, deletedAt: null };
     } else if (type === 'PMID') {
       whereClause = { pmid: cleanQuery, deletedAt: null };
     }
     if (!whereClause) return null;
+
+    whereClause.userId = scope.userId;
+    if (scope.projectId) whereClause.projectId = scope.projectId;
 
     return client.item.findFirst({
       where: whereClause,

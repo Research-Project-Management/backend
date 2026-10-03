@@ -8,7 +8,9 @@ import { OutboxWorker } from '../sync';
 // Presentation
 import {
   AttachmentController,
+  ProjectAttachmentController,
   AttachmentStorageController,
+  ProjectAttachmentStorageController,
 } from './attachments.controller';
 
 // Facades
@@ -85,7 +87,9 @@ import { HttpCatalogGatewayAdapter } from './core/adapters/http-catalog-gateway.
   imports: [CoreModule, StorageModule, SyncModule, SharedKernelModule],
   controllers: [
     AttachmentStorageController,
+    ProjectAttachmentStorageController,
     AttachmentController,
+    ProjectAttachmentController,
     AnnotationController,
   ],
   providers: [

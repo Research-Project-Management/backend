@@ -108,10 +108,32 @@ export class StreamController {
         }
       }
 
-      const result = await this.streamBinaryUseCase.execute(
-        fileId,
-        rangeHeader,
-      );
+      const ifNoneMatch = req.headers?.['if-none-match'];
+      const result =
+        ifNoneMatch !== undefined
+          ? await this.streamBinaryUseCase.execute(
+              fileId,
+              rangeHeader,
+              ifNoneMatch,
+            )
+          : await this.streamBinaryUseCase.execute(fileId, rangeHeader);
+
+      // RFC 7232 Conditional Request Evaluation (304 Not Modified)
+      if (
+        result.statusCode === HttpStatus.NOT_MODIFIED ||
+        (result.etag &&
+          ifNoneMatch &&
+          ifNoneMatch === result.etag &&
+          !rangeHeader)
+      ) {
+        res.status(HttpStatus.NOT_MODIFIED);
+        if (result.etag) {
+          res.header('ETag', result.etag);
+        }
+        res.header('Cache-Control', 'private, no-cache, must-revalidate');
+        res.header('Vary', 'Authorization, Cookie, If-None-Match');
+        return res.send();
+      }
 
       // Security hardening against Stored XSS
       const isDangerous = isDangerousInlineMime(result.mimeType);
@@ -128,11 +150,11 @@ export class StreamController {
       res.header('Accept-Ranges', 'bytes');
       res.header('X-Content-Type-Options', 'nosniff');
       res.header('X-Frame-Options', 'SAMEORIGIN');
-      res.header(
-        'Cache-Control',
-        'private, no-cache, no-store, must-revalidate',
-      );
-      res.header('Vary', 'Authorization, Cookie');
+      if (result.etag) {
+        res.header('ETag', result.etag);
+      }
+      res.header('Cache-Control', 'private, no-cache, must-revalidate');
+      res.header('Vary', 'Authorization, Cookie, If-None-Match');
 
       if (isDangerous) {
         res.header('Content-Security-Policy', "default-src 'none'; sandbox");
@@ -227,6 +249,19 @@ export class StreamController {
           .send({ statusCode: 404, message: 'File not found in storage' });
       }
 
+      const rawEtag = (output as any)?.ETag;
+      const r2Etag = rawEtag
+        ? `"${String(rawEtag).replace(/"/g, '')}"`
+        : undefined;
+      const ifNoneMatch = req.headers?.['if-none-match'];
+      if (r2Etag && ifNoneMatch && ifNoneMatch === r2Etag && !rangeHeader) {
+        res.status(HttpStatus.NOT_MODIFIED);
+        res.header('ETag', r2Etag);
+        res.header('Cache-Control', 'private, no-cache, must-revalidate');
+        res.header('Vary', 'If-None-Match');
+        return res.send();
+      }
+
       const contentType = output.ContentType || 'application/octet-stream';
       const isDangerous = isDangerousInlineMime(contentType);
       const isDownloadEndpoint = req.url.includes('/download');
@@ -237,6 +272,11 @@ export class StreamController {
       res.header('Accept-Ranges', 'bytes');
       res.header('X-Content-Type-Options', 'nosniff');
       res.header('X-Frame-Options', 'SAMEORIGIN');
+      if (r2Etag) {
+        res.header('ETag', r2Etag);
+      }
+      res.header('Cache-Control', 'private, no-cache, must-revalidate');
+      res.header('Vary', 'If-None-Match');
 
       if (isDangerous) {
         res.header('Content-Security-Policy', "default-src 'none'; sandbox");

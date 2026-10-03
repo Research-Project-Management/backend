@@ -397,6 +397,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
     let storageController: AttachmentStorageController;
     let mockAttachmentsService: any;
     let mockWebSnapshotService: any;
+    let mockGetThumbnailUseCase: any;
 
     beforeEach(() => {
       mockAttachmentsService = {
@@ -408,20 +409,25 @@ describe('Library Attachments & Storage Integration Suite', () => {
       mockWebSnapshotService = {
         captureAndAttach: jest.fn(),
       };
+      mockGetThumbnailUseCase = {
+        execute: jest.fn().mockResolvedValue({
+          buffer: Buffer.from('WEBP_STREAM_DATA'),
+          mimeType: 'image/webp',
+        }),
+      };
       storageController = new AttachmentStorageController(
         mockStoragePort,
-        undefined,
-        mockAttachmentsService,
+        {} as any,
       );
       controller = new AttachmentsController(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        mockGetThumbnailUseCase as any,
         mockWebSnapshotService,
         mockAttachmentsService,
       );
@@ -486,7 +492,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
     });
 
     it('should stream thumbnail with WebP mimeType and 24h cache headers', async () => {
-      mockAttachmentsService.getThumbnail = jest.fn().mockResolvedValue({
+      mockGetThumbnailUseCase.execute.mockResolvedValue({
         buffer: Buffer.from('WEBP_STREAM_DATA'),
         mimeType: 'image/webp',
       });
@@ -504,11 +510,11 @@ describe('Library Attachments & Storage Integration Suite', () => {
         'proj-456',
       );
 
-      expect(mockAttachmentsService.getThumbnail).toHaveBeenCalledWith(
-        'user-1',
-        'att-thumb-1',
-        'proj-456',
-      );
+      expect(mockGetThumbnailUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        attachmentId: 'att-thumb-1',
+        projectId: 'proj-456',
+      });
       expect(mockRes.header).toHaveBeenCalledWith('Content-Type', 'image/webp');
       expect(mockRes.header).toHaveBeenCalledWith(
         'Cache-Control',

@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Body,
   Param,
   Req,
@@ -237,5 +238,19 @@ export class AiController {
     const query = req.query as Record<string, string>;
     const projectId = query?.projectId || query?.project_id;
     return this.aiService.getDocument(userId, docId, projectId);
+  }
+
+  @Delete('documents/:docId')
+  @ApiOperation({
+    summary: 'Delete document from vector store',
+  })
+  async deleteDocument(
+    @CurrentUser('id') userId: string,
+    @Param('docId') docId: string,
+    @Req() req: FastifyRequest,
+  ) {
+    const query = req.query as Record<string, string>;
+    const projectId = query?.projectId || query?.project_id;
+    return this.aiService.deleteDocument(userId, docId, projectId);
   }
 }

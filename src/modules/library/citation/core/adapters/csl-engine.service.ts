@@ -52,12 +52,12 @@ export class CslEngineService implements OnModuleInit {
       cslItem.title ||
       '';
     const date = cslItem.issued?.['date-parts']?.[0]?.[0] || '';
-    const ver =
-      cslItem.version ||
-      (cslItem as any)._version ||
-      (cslItem as any)._updatedAt ||
-      '';
-    return `${rawId}::${style}::${date}::${ver}`;
+    // Include BOTH version and updatedAt: `version` can be overwritten by the
+    // item's own edition/software version (CslJsonMapper), which would otherwise
+    // hide updatedAt and serve stale renders after the item is edited.
+    const ver = cslItem.version || (cslItem as any)._version || '';
+    const updated = (cslItem as any)._updatedAt || '';
+    return `${rawId}::${style}::${date}::${ver}::${updated}`;
   }
 
   private setCache(

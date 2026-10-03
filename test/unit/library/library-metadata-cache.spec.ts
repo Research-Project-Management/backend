@@ -138,41 +138,14 @@ describe('Multi-Tier Metadata Cache & Local Database Resolution', () => {
       );
     });
 
-    it('should resolve paper from local database (Item) in 0ms without hitting external network', async () => {
+    it('should isolate tenant data and not resolve from unscoped local database into shared cache', async () => {
       const doi = '10.1016/j.cell.2020.05.001';
-      mockPrisma.item.findFirst.mockResolvedValue({
-        id: 'item-saved-1',
-        title: 'Structures of SARS-CoV-2 Spike Glycoprotein',
-        abstract: 'Cryo-EM structures of the SARS-CoV-2 S trimer.',
-        year: 2020,
-        publicationTitle: 'Cell',
-        publisher: 'Elsevier',
-        doi,
-        pmid: '32407669',
-        createdAt: new Date(),
-        contributors: [
-          { fullName: 'David Veesler', orderIndex: 0, creatorType: 'author' },
-        ],
-      });
 
       const resolved = await service.resolve({ query: doi, queryType: 'DOI' });
 
-      expect(resolved).not.toBeNull();
-      expect(resolved?.metadata.title).toBe(
-        'Structures of SARS-CoV-2 Spike Glycoprotein',
-      );
-      expect(resolved?.metadata.year).toBe(2020);
-      expect(resolved?.metadata.provenance?.originProvider).toBe(
-        'local_database',
-      );
+      expect(resolved).toBeNull();
+      expect(mockPrisma.item.findFirst).not.toHaveBeenCalled();
       expect(mockExecutor.execute).not.toHaveBeenCalled();
-
-      // Subsequent call should hit L1 memory cache
-      const cachedResolved = await service.resolve({
-        query: doi,
-        queryType: 'DOI',
-      });
-      expect(cachedResolved?.cached).toBe(true);
     });
   });
 });

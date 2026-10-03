@@ -31,7 +31,10 @@ import {
 } from './ingestion.facade';
 
 // ── 1. Ingestion Pipeline ─────────────────────────────────────────────────
-import { IngestionController } from './ingestion.controller';
+import {
+  IngestionController,
+  ProjectIngestionController,
+} from './ingestion.controller';
 import { IngestionService } from './core/services/ingestion.service';
 import { IngestionRepository } from './core/adapters/ingestion.repository';
 import { IdempotencyRepository } from './core/adapters/idempotency.repository';
@@ -150,7 +153,12 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
       { name: LIBRARY_INGESTION_QUEUE_CAPTURE },
     ),
   ],
-  controllers: [IngestionController, CurationController, RetractionController],
+  controllers: [
+    IngestionController,
+    ProjectIngestionController,
+    CurationController,
+    RetractionController,
+  ],
   providers: [
     // Facade
     IngestionFacade,

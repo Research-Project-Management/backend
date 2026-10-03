@@ -12,6 +12,7 @@ import {
   IsInt,
   IsUUID,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateNodeDto {
@@ -35,6 +36,9 @@ export class CreateNodeDto {
   parentId?: string | null;
 
   @ApiProperty({ enum: ['FOLDER', 'DOC', 'FILE'], default: 'DOC' })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toUpperCase() : value,
+  )
   @IsEnum(['FOLDER', 'DOC', 'FILE'])
   type!: 'FOLDER' | 'DOC' | 'FILE';
 

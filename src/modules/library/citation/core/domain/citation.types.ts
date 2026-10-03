@@ -40,6 +40,10 @@ export interface CitationItemInput {
   city?: string | null;
   edition?: string | null;
   abstract?: string | null;
+  /** Last modification timestamp; used to invalidate the CSL engine render cache. */
+  updatedAt?: Date | string | null;
+  /** Optional optimistic-lock / revision number; also part of the render cache key. */
+  version?: number | string | null;
 }
 
 export interface FormattedCitationResult {

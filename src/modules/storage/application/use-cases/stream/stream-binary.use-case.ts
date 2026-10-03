@@ -17,6 +17,7 @@ export interface StreamBinaryOutput {
   contentLength: number;
   contentRange?: string;
   filename: string;
+  etag?: string;
 }
 
 @Injectable()
@@ -32,6 +33,7 @@ export class StreamBinaryUseCase {
   async execute(
     nodeId: string,
     rangeHeader?: string,
+    ifNoneMatch?: string,
   ): Promise<StreamBinaryOutput> {
     const node = await this.nodeRepo.findById(nodeId);
     if (!node || node.isTrashed()) {
@@ -50,6 +52,22 @@ export class StreamBinaryUseCase {
     }
 
     const totalSize = Number(blob.sizeBytes);
+    const etag = blob.contentHash?.toHex
+      ? `"${blob.contentHash.toHex()}"`
+      : undefined;
+
+    // RFC 7232 Short-Circuit: Zero driver network/disk I/O on 304 Not Modified
+    if (etag && ifNoneMatch && ifNoneMatch === etag && !rangeHeader) {
+      return {
+        stream: null as any,
+        statusCode: 304,
+        mimeType: node.mimeType,
+        contentLength: 0,
+        filename: node.name,
+        etag,
+      };
+    }
+
     const byteRange = ByteRange.parse(rangeHeader, totalSize);
 
     if (byteRange) {
@@ -65,6 +83,7 @@ export class StreamBinaryUseCase {
         contentLength: byteRange.length,
         contentRange: byteRange.getContentRangeHeader(),
         filename: node.name,
+        etag,
       };
     }
 
@@ -76,6 +95,7 @@ export class StreamBinaryUseCase {
       mimeType: node.mimeType,
       contentLength: totalSize,
       filename: node.name,
+      etag,
     };
   }
 }

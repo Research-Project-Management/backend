@@ -449,6 +449,45 @@ describe('Storage & File Security Suite', () => {
       expect(headers['Content-Disposition']).toContain('attachment');
     });
 
+    it('should return 304 Not Modified when client sends matching If-None-Match header', async () => {
+      const mockEtag =
+        '"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"';
+      mockStreamBinaryUseCase.execute.mockResolvedValue({
+        statusCode: 200,
+        mimeType: 'application/pdf',
+        contentLength: 2048,
+        filename: 'cached_paper.pdf',
+        stream: Readable.from(['fake-pdf']),
+        etag: mockEtag,
+      });
+
+      const headers: Record<string, string> = {};
+      const mockReq: any = {
+        url: '/api/files/test-pdf-id/content',
+        headers: { 'if-none-match': mockEtag },
+        query: {},
+        ip: '127.0.0.1',
+        user: { id: 'user-001' },
+      };
+      const mockRes: any = {
+        status: jest.fn().mockReturnThis(),
+        header: jest.fn((key: string, val: any) => {
+          headers[key] = val;
+          return mockRes;
+        }),
+        send: jest.fn(),
+      };
+
+      await controller.streamFile('test-pdf-id', mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(304);
+      expect(headers['ETag']).toBe(mockEtag);
+      expect(headers['Cache-Control']).toBe(
+        'private, no-cache, must-revalidate',
+      );
+      expect(mockRes.send).toHaveBeenCalledWith();
+    });
+
     it('should block path traversal attempts in streamR2File (SEC-002)', async () => {
       const mockReq: any = {
         url: '/api/files/r2/..%2F..%2Fetc%2Fpasswd',

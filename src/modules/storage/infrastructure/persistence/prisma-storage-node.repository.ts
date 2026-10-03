@@ -101,7 +101,10 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
       const orderDir = filter.sortOrder === 'desc' ? 'desc' : 'asc';
       if (filter.sortBy === 'updatedAt' || filter.sortBy === 'updated_at') {
         orderBy = [{ isFolder: 'desc' }, { updatedAt: orderDir }];
-      } else if (filter.sortBy === 'createdAt' || filter.sortBy === 'created_at') {
+      } else if (
+        filter.sortBy === 'createdAt' ||
+        filter.sortBy === 'created_at'
+      ) {
         orderBy = [{ isFolder: 'desc' }, { createdAt: orderDir }];
       } else if (filter.sortBy === 'size') {
         orderBy = [{ isFolder: 'desc' }, { size: orderDir }];

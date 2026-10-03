@@ -113,7 +113,7 @@ export class DocstoreController {
     }
   }
 
-  @Get('doc/:docId')
+  @Get(['doc/:docId', ':docId'])
   @ApiOperation({ summary: 'Get single document with lines and version' })
   async getDoc(
     @Param('projectId') projectId: string,
@@ -129,7 +129,7 @@ export class DocstoreController {
     }
   }
 
-  @Get('doc/:docId/deleted')
+  @Get(['doc/:docId/deleted', ':docId/deleted'])
   @ApiOperation({ summary: 'Check if document is marked as deleted' })
   async isDocDeleted(
     @Param('projectId') projectId: string,
@@ -143,7 +143,7 @@ export class DocstoreController {
     }
   }
 
-  @Get('doc/:docId/raw')
+  @Get(['doc/:docId/raw', ':docId/raw'])
   @ApiOperation({ summary: 'Get raw document text as text/plain' })
   async getRawDoc(
     @Param('projectId') projectId: string,
@@ -158,7 +158,7 @@ export class DocstoreController {
     }
   }
 
-  @Get('doc/:docId/peek')
+  @Get(['doc/:docId/peek', ':docId/peek'])
   @ApiOperation({ summary: 'Peek document without unarchiving from S3' })
   async peekDoc(
     @Param('projectId') projectId: string,
@@ -192,7 +192,7 @@ export class DocstoreController {
     }
   }
 
-  @Post('doc/:docId')
+  @Post(['doc/:docId', ':docId'])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update document lines with OCC revision check' })
   async updateDoc(
@@ -234,7 +234,7 @@ export class DocstoreController {
     }
   }
 
-  @Patch('doc/:docId')
+  @Patch(['doc/:docId', ':docId'])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Patch document metadata or soft-delete' })
   async patchDoc(
@@ -249,7 +249,7 @@ export class DocstoreController {
     }
   }
 
-  @Delete('doc/:docId')
+  @Delete(['doc/:docId', ':docId'])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary:

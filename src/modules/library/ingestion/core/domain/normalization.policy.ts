@@ -14,6 +14,9 @@ import {
   splitAuthorString,
   normalizeAcademicTitleCase,
   normalizeItemType,
+  normalizePageRange,
+  isInstitutionName,
+  stripLatexBraces as stripLatexBracesMathAware,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 import { normalizeTags as canonicalNormalizeTags } from '../../../shared-kernel/utils/tag.utils';
 
@@ -119,7 +122,7 @@ export class NormalizationPolicy {
       if (cleanDate) {
         result.publicationDate = cleanDate;
         if (!result.year) {
-          const match = cleanDate.match(/\b(19|20)\d{2}\b/);
+          const match = cleanDate.match(/\b(?:1\d{3}|20\d{2})\b/);
           if (match) result.year = parseInt(match[0], 10);
         }
       }
@@ -200,7 +203,7 @@ export class NormalizationPolicy {
     }
 
     const pages = this.cleanString(raw.pages);
-    if (pages) result.pages = pages.replace(/--/g, '-');
+    if (pages) result.pages = normalizePageRange(pages) || pages;
 
     // 8. Abstract — Zotero canonical field is 'abstractNote'; we store in DB as 'abstract'.
     // Prefer the longer/richer of the two raw sources, clean it once, then sync both fields.
@@ -328,7 +331,7 @@ export class NormalizationPolicy {
 
     for (const field of ['citationCount', 'referenceCount'] as const) {
       const value = raw[field];
-      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
         result[field] = value;
       }
     }
@@ -453,8 +456,14 @@ export class NormalizationPolicy {
     return cleaned;
   }
 
+  /**
+   * Strips LaTeX braces outside math segments ($...$, \(...\), ...).
+   * Braces cannot be reliably attributed to BibTeX vs. other sources at this
+   * stage, so the math-aware shared implementation is used to keep formulas
+   * such as "$\mathcal{O}(n^{2})$" intact.
+   */
   private stripLatexBraces(str: string): string {
-    return str.replace(/[{}]/g, '').trim();
+    return stripLatexBracesMathAware(str);
   }
 
   private normalizeCreators(
@@ -463,28 +472,64 @@ export class NormalizationPolicy {
     editorsInput?: string[],
   ): CreatorInput[] {
     const list: CreatorInput[] = [];
-    const known = new Set<string>();
 
     const append = (creator: CreatorInput) => {
       const creatorType = (creator.creatorType as CreatorType) || 'author';
       let firstName = (creator.firstName || '').trim();
       let lastName = (creator.lastName || '').trim();
       let fullName = (creator.fullName || creator.name || '').trim();
+      let fieldMode: number | undefined = creator.fieldMode;
+
+      // Single-field creators (organizations, fieldMode = 1) are stored verbatim
+      // in lastName and never split or re-parsed.
+      if (fieldMode === 1) {
+        const single = this.cleanString(lastName || fullName || firstName);
+        if (!single) return;
+        list.push({
+          creatorType,
+          name: single,
+          fullName: single,
+          lastName: single,
+          fieldMode: 1,
+        });
+        return;
+      }
+
+      // Organization check BEFORE composite splitting so that names like
+      // "Bill & Melinda Gates Foundation" are not split on "and"/"&".
+      const looksLikeOrg =
+        !firstName && !!fullName && isInstitutionName(fullName);
 
       // If fullName has a composite delimiter, split into multiple creators
-      if (fullName && (fullName.includes(';') || /\s+and\s+/i.test(fullName))) {
-        for (const part of splitAuthorString(fullName)) {
-          append({ creatorType, fullName: part });
+      if (
+        fullName &&
+        !looksLikeOrg &&
+        !firstName &&
+        !lastName &&
+        (fullName.includes(';') || /\s+(?:and|&)\s+/i.test(fullName))
+      ) {
+        const parts = splitAuthorString(fullName);
+        if (parts.length > 1) {
+          for (const part of parts) {
+            append({ creatorType, fullName: part });
+          }
+          return;
         }
-        return;
       }
 
       // If fullName has a comma (e.g. "Einstein, Albert") or only fullName is supplied, parse it
       if (fullName && (fullName.includes(',') || (!firstName && !lastName))) {
         const parsed = parseCreatorString(fullName, 0, creatorType);
-        firstName = parsed.firstName || firstName;
-        lastName = parsed.lastName || lastName;
-        fullName = parsed.fullName || fullName;
+        if (parsed.fieldMode === 1) {
+          fieldMode = 1;
+          firstName = '';
+          lastName = parsed.lastName || fullName;
+          fullName = parsed.fullName || fullName;
+        } else {
+          firstName = parsed.firstName || firstName;
+          lastName = parsed.lastName || lastName;
+          fullName = parsed.fullName || fullName;
+        }
       } else if (!fullName && (firstName || lastName)) {
         fullName = `${firstName} ${lastName}`.trim();
       }
@@ -496,31 +541,33 @@ export class NormalizationPolicy {
       if (!cleanFull && !cleanFirst && !cleanLast) return;
 
       const effectiveName = cleanFull || `${cleanFirst} ${cleanLast}`.trim();
-      const dedupKey =
-        cleanLast || cleanFirst
-          ? `${creatorType}:${cleanLast.toLowerCase()}:${cleanFirst.toLowerCase()}`
-          : `${creatorType}:${effectiveName.toLowerCase()}`;
 
-      if (known.has(dedupKey)) return;
-      known.add(dedupKey);
-
+      // NOTE: no de-duplication here — two co-authors may legitimately share
+      // the same name within a single source list (Zotero keeps both).
       list.push({
         creatorType,
         name: effectiveName,
         fullName: effectiveName,
-        firstName: cleanFirst || undefined,
-        lastName: cleanLast || undefined,
+        firstName: fieldMode === 1 ? undefined : cleanFirst || undefined,
+        lastName: cleanLast || (fieldMode === 1 ? effectiveName : undefined),
+        fieldMode: fieldMode === 1 ? 1 : 0,
       });
     };
 
-    if (Array.isArray(creatorsInput) && creatorsInput.length > 0) {
-      for (const c of creatorsInput) {
+    const hasStructuredCreators =
+      Array.isArray(creatorsInput) && creatorsInput.length > 0;
+
+    if (hasStructuredCreators) {
+      for (const c of creatorsInput!) {
         if (!c || typeof c !== 'object') continue;
         append(c);
       }
     }
 
-    if (Array.isArray(authorsInput)) {
+    // authors[] is a flattened projection of creators[]; only use it as a
+    // fallback when no structured creators were supplied, otherwise names
+    // would be merged twice (or same-name co-authors wrongly collapsed).
+    if (!hasStructuredCreators && Array.isArray(authorsInput)) {
       for (const a of authorsInput) {
         for (const author of splitAuthorString(a)) {
           const cleanA = this.cleanString(author);
@@ -532,12 +579,17 @@ export class NormalizationPolicy {
             fullName: parsed.fullName,
             firstName: parsed.firstName,
             lastName: parsed.lastName,
+            fieldMode: parsed.fieldMode,
           });
         }
       }
     }
 
-    if (Array.isArray(editorsInput)) {
+    const hasStructuredEditors =
+      hasStructuredCreators &&
+      creatorsInput!.some((c) => c && c.creatorType === 'editor');
+
+    if (!hasStructuredEditors && Array.isArray(editorsInput)) {
       for (const editor of editorsInput) {
         for (const singleEditor of splitAuthorString(editor)) {
           const cleanEditor = this.cleanString(singleEditor);
@@ -549,6 +601,7 @@ export class NormalizationPolicy {
             fullName: parsed.fullName,
             firstName: parsed.firstName,
             lastName: parsed.lastName,
+            fieldMode: parsed.fieldMode,
           });
         }
       }

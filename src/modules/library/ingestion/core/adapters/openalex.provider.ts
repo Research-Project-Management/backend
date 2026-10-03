@@ -14,8 +14,12 @@ import {
   normalizePmid,
   normalizeTags,
   cleanAbstractText,
+  cleanBibliographicText,
+  titleSimilarity,
+  TITLE_MATCH_THRESHOLD,
 } from './metadata.utils';
 import { ProviderFetchError } from '../services/metadata-executor.service';
+import { normalizePageRange } from '../../../shared-kernel/utils/bibliographic.utils';
 
 @Injectable()
 export class OpenAlexProvider implements MetadataProvider {
@@ -240,7 +244,7 @@ export class OpenAlexProvider implements MetadataProvider {
     const cleanTitle = title.trim();
     if (!cleanTitle) return null;
 
-    let url = `${this.BASE_URL}?filter=title.search:${encodeURIComponent(cleanTitle)}&per-page=1&mailto=${encodeURIComponent(this.mailto)}`;
+    let url = `${this.BASE_URL}?filter=title.search:${encodeURIComponent(cleanTitle)}&per-page=5&mailto=${encodeURIComponent(this.mailto)}`;
     if (this.apiKey) {
       url += `&api_key=${encodeURIComponent(this.apiKey)}`;
     }
@@ -281,12 +285,31 @@ export class OpenAlexProvider implements MetadataProvider {
     }
 
     const payload = json as { results?: Array<Record<string, unknown>> } | null;
-    const item = payload?.results?.[0];
-    if (!item || typeof item.title !== 'string') return null;
+    const results = payload?.results || [];
+
+    let item: Record<string, unknown> | undefined;
+    let bestScore = 0;
+    for (const candidate of results) {
+      if (typeof candidate.title !== 'string') continue;
+      const score = titleSimilarity(cleanTitle, candidate.title);
+      if (score > bestScore) {
+        item = candidate;
+        bestScore = score;
+      }
+    }
+    if (!item || bestScore < TITLE_MATCH_THRESHOLD) {
+      this.logger.debug(
+        `OpenAlex title search rejected for "${cleanTitle}" (best similarity ${bestScore.toFixed(2)})`,
+      );
+      return null;
+    }
 
     const itemDoi = typeof item.doi === 'string' ? item.doi : '';
-    const doi = normalizeDoi(itemDoi) || cleanTitle;
-    return this.transformPayload(item, doi, 0.75);
+    // Never fall back to the query title as an identifier — it used to leak
+    // into the DOI field downstream.
+    const identifier =
+      normalizeDoi(itemDoi) || (typeof item.id === 'string' ? item.id : '');
+    return this.transformPayload(item, identifier, 0.75);
   }
 
   private transformPayload(
@@ -295,8 +318,14 @@ export class OpenAlexProvider implements MetadataProvider {
     confidence: number,
   ): ProviderResult {
     const rawTitle =
-      typeof item.title === 'string' ? item.title.trim() : 'Untitled Paper';
-    const title = rawTitle || 'Untitled Paper';
+      typeof item.title === 'string'
+        ? item.title
+        : typeof item.display_name === 'string'
+          ? item.display_name
+          : '';
+    // Strip inline markup (<i>, <sub>, <sup> → Unicode where possible) and
+    // decode entities; casing is kept verbatim.
+    const title = cleanBibliographicText(rawTitle) || 'Untitled Paper';
 
     const authors: string[] = [];
     if (Array.isArray(item.authorships)) {
@@ -322,6 +351,7 @@ export class OpenAlexProvider implements MetadataProvider {
             host_organization_name?: string;
             issn_l?: string;
             issn?: string[];
+            type?: string;
           };
           pdf_url?: string;
           landing_page_url?: string;
@@ -329,16 +359,63 @@ export class OpenAlexProvider implements MetadataProvider {
       | undefined;
     const hostVenue = item.host_venue as { display_name?: string } | undefined;
 
-    const journal =
+    const sourceName =
       primLoc?.source?.display_name || hostVenue?.display_name || undefined;
+    const rawSourceType = primLoc?.source?.type;
+    const sourceType =
+      typeof rawSourceType === 'string' ? rawSourceType.toLowerCase() : '';
 
-    let itemType = 'journalArticle';
-    const typeStr = typeof item.type === 'string' ? item.type : '';
-    if (typeStr === 'book' || typeStr === 'monograph') itemType = 'book';
-    else if (typeStr === 'book-chapter') itemType = 'bookSection';
-    else if (typeStr === 'proceedings-article') itemType = 'conferencePaper';
-    else if (typeStr === 'preprint') itemType = 'preprint';
-    else if (typeStr === 'dataset') itemType = 'dataset';
+    const typeStr =
+      typeof item.type === 'string' ? item.type.toLowerCase() : '';
+    const typeCrossref =
+      typeof item.type_crossref === 'string'
+        ? item.type_crossref.toLowerCase()
+        : '';
+    const OPENALEX_TYPE_MAP: Record<string, string> = {
+      article: 'journalArticle',
+      review: 'journalArticle',
+      letter: 'journalArticle',
+      editorial: 'journalArticle',
+      erratum: 'journalArticle',
+      retraction: 'journalArticle',
+      'journal-article': 'journalArticle',
+      'proceedings-article': 'conferencePaper',
+      'book-chapter': 'bookSection',
+      book: 'book',
+      monograph: 'book',
+      dissertation: 'thesis',
+      report: 'report',
+      dataset: 'dataset',
+      standard: 'standard',
+      preprint: 'preprint',
+      'posted-content': 'preprint',
+      'reference-entry': 'encyclopediaArticle',
+    };
+
+    // Real preprints only: OpenAlex type preprint/posted-content, or a generic
+    // article whose primary location is a repository (arXiv, bioRxiv, SSRN...).
+    // Theses/datasets/reports hosted in institutional repositories keep their type.
+    const isPreprint =
+      typeStr === 'preprint' ||
+      typeStr === 'posted-content' ||
+      typeCrossref === 'posted-content' ||
+      (sourceType === 'repository' &&
+        (!typeStr || typeStr === 'article' || typeStr === 'other'));
+
+    let itemType: string;
+    if (isPreprint) {
+      itemType = 'preprint';
+    } else if (
+      typeCrossref === 'proceedings-article' ||
+      (typeStr === 'article' && sourceType === 'conference')
+    ) {
+      itemType = 'conferencePaper';
+    } else if (typeStr) {
+      itemType = OPENALEX_TYPE_MAP[typeStr] || 'document';
+    } else {
+      itemType = 'journalArticle';
+    }
+    const journal = isPreprint ? undefined : sourceName;
 
     // Decode inverted index abstract
     let abstract: string | undefined;
@@ -371,21 +448,27 @@ export class OpenAlexProvider implements MetadataProvider {
       first_page?: string;
       last_page?: string;
     };
-    const pages = biblio.first_page
-      ? biblio.last_page && biblio.last_page !== biblio.first_page
-        ? `${biblio.first_page}-${biblio.last_page}`
-        : biblio.first_page
-      : undefined;
+    const pages = normalizePageRange(
+      biblio.first_page
+        ? biblio.last_page && biblio.last_page !== biblio.first_page
+          ? `${biblio.first_page}-${biblio.last_page}`
+          : biblio.first_page
+        : undefined,
+    );
     const publisher = primLoc?.source?.host_organization_name || undefined;
     const issn =
       primLoc?.source?.issn_l || primLoc?.source?.issn?.[0] || undefined;
 
     const citationCount =
-      typeof item.cited_by_count === 'number' ? item.cited_by_count : undefined;
+      typeof item.cited_by_count === 'number' && item.cited_by_count > 0
+        ? item.cited_by_count
+        : undefined;
     const referenceCount =
-      typeof item.referenced_works_count === 'number'
+      typeof item.referenced_works_count === 'number' &&
+      item.referenced_works_count > 0
         ? item.referenced_works_count
-        : Array.isArray(item.referenced_works)
+        : Array.isArray(item.referenced_works) &&
+            item.referenced_works.length > 0
           ? item.referenced_works.length
           : undefined;
 
@@ -448,9 +531,12 @@ export class OpenAlexProvider implements MetadataProvider {
         ? item.publication_date
         : undefined;
 
-    const isPreprint = itemType === 'preprint' || Boolean(rawArxiv);
+    // Repository name only for real preprints (normalize arXiv's
+    // "arXiv (Cornell University)" display name to "arXiv").
     const preprintRepo = isPreprint
-      ? journal || publisher || 'arXiv'
+      ? rawArxiv || /arxiv/i.test(sourceName || '')
+        ? 'arXiv'
+        : sourceName || undefined
       : undefined;
 
     return {
@@ -465,12 +551,12 @@ export class OpenAlexProvider implements MetadataProvider {
         arxivId: rawArxiv,
         pmid: rawPmid,
         journal,
-        publicationTitle: journal || preprintRepo,
+        publicationTitle: journal,
         volume: biblio.volume || undefined,
         issue: biblio.issue || undefined,
         pages,
-        publisher: isPreprint ? preprintRepo || 'arXiv' : publisher,
-        repository: isPreprint ? preprintRepo || 'arXiv' : undefined,
+        publisher: isPreprint ? undefined : publisher,
+        repository: preprintRepo,
         archiveId: rawArxiv
           ? `arXiv:${rawArxiv.replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '')}`
           : undefined,
