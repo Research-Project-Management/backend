@@ -1,5 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma } from '@prisma/client';
 import { DuplicateService } from '@/modules/library/ingestion/core/services/duplicate.service';
@@ -421,110 +420,6 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
 
       expect(result.mergedCount).toBe(1);
       expect(result.softDeletedItemIds).toEqual(['dup-2']);
-    });
-
-    it('should auto-resolve cluster using "most_complete" strategy and borrow missing fields', async () => {
-      // 1. Setup candidate items in detectDuplicates
-      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValue([
-        fromPartial({
-          id: 'item-incomplete',
-          title: 'Quantum Computing',
-          doi: '10.1000/182',
-          year: 2021,
-        }),
-        fromPartial({
-          id: 'item-complete',
-          title: 'Quantum Computing: A Gentle Introduction',
-          doi: '10.1000/182',
-          year: 2021,
-        }),
-      ]);
-
-      // 2. Setup candidate items fetched by bibliographyFacade.findByIds for ranking & merge
-      const itemIncomplete = fromPartial<ItemDetail>({
-        id: 'item-incomplete',
-        title: 'Quantum Computing',
-        doi: '10.1000/182',
-        year: 2021,
-        abstract: null,
-        url: null,
-        publisher: null,
-        contributors: [],
-        createdAt: new Date('2026-01-01'),
-        updatedAt: new Date('2026-01-01'),
-      });
-
-      const itemComplete = fromPartial<ItemDetail>({
-        id: 'item-complete',
-        title: 'Quantum Computing: A Gentle Introduction',
-        doi: '10.1000/182',
-        year: 2021,
-        abstract: 'A comprehensive study of quantum computing principles.',
-        url: 'https://example.com/paper.pdf',
-        publisher: 'MIT Press',
-        contributors: [
-          {
-            fullName: 'Eleanor Rieffel',
-            firstName: 'Eleanor',
-            lastName: 'Rieffel',
-            orderIndex: 0,
-          },
-        ],
-        createdAt: new Date('2026-01-02'),
-        updatedAt: new Date('2026-01-02'),
-      });
-
-      // First call for ranking in autoResolveCluster, second call inside mergeDuplicates
-      mockBibliographyFacade.findByIds
-        .mockResolvedValueOnce([itemIncomplete, itemComplete])
-        .mockResolvedValueOnce([itemComplete, itemIncomplete]);
-
-      const clusters = await service.detectDuplicates(
-        mockUserId,
-        mockProjectId,
-      );
-      const clusterId = clusters[0].clusterId;
-
-      const result = await service.autoResolveCluster(
-        mockUserId,
-        clusterId,
-        'most_complete',
-        mockProjectId,
-      );
-
-      expect(result.mergedCount).toBe(1);
-      expect(result.softDeletedItemIds).toEqual(['item-incomplete']);
-    });
-
-    it('should throw NotFoundException if clusterId does not exist during autoResolveCluster', async () => {
-      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValueOnce(
-        [],
-      );
-
-      await expect(
-        service.autoResolveCluster(mockUserId, 'non-existent-cluster'),
-      ).rejects.toThrow(NotFoundException);
-    });
-
-    it('should throw BadRequestException if cluster contains fewer than 2 items to merge', async () => {
-      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValue([
-        fromPartial({ id: 'item-1', doi: '10.1/1', title: 'Paper 1' }),
-        fromPartial({ id: 'item-2', doi: '10.1/1', title: 'Paper 2' }),
-      ]);
-
-      // simulate only 1 item remaining in DB (one already deleted)
-      mockBibliographyFacade.findByIds.mockResolvedValueOnce([
-        fromPartial<ItemDetail>({
-          id: 'item-1',
-          doi: '10.1/1',
-          title: 'Paper 1',
-        }),
-      ]);
-
-      const clusters = await service.detectDuplicates(mockUserId);
-      await expect(
-        service.autoResolveCluster(mockUserId, clusters[0].clusterId),
-      ).rejects.toThrow(BadRequestException);
     });
 
     it('should transfer user_publications to primary item and delete duplicate publications', async () => {

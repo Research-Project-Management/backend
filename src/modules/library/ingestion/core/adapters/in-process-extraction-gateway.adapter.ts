@@ -4,62 +4,42 @@ import {
   IExtractionGatewayPort,
 } from '../ports/extraction-gateway.port';
 import {
-  CONTENT_FACADE,
-  IContentFacade,
-  READER_FACADE,
-  IReaderFacade,
+  EXTRACTION_FACADE,
+  IExtractionFacade,
 } from '../../../extraction/extraction.facade';
 
 /**
- * In-process adapter connecting Ingestion to Extraction/Reader via ContentFacade.
+ * In-process adapter connecting Ingestion to Extraction via ExtractionFacade.
  * When separating into independent microservices, this adapter is replaced by HttpExtractionGatewayAdapter.
  */
 @Injectable()
 export class InProcessExtractionGatewayAdapter implements IExtractionGatewayPort {
   constructor(
     @Optional()
-    @Inject(CONTENT_FACADE)
-    private readonly contentFacade?: IContentFacade,
-    @Optional()
-    @Inject(READER_FACADE)
-    private readonly readerFacade?: IReaderFacade,
+    @Inject(EXTRACTION_FACADE)
+    private readonly extractionFacade?: IExtractionFacade,
   ) {}
 
   extractDocumentFromBuffer(buffer: Buffer, options?: any) {
-    if (this.contentFacade?.extractDocumentFromBuffer) {
-      return this.contentFacade.extractDocumentFromBuffer(buffer, options);
-    }
-    return Promise.resolve(null);
+    if (!this.extractionFacade) return Promise.resolve(null);
+    return this.extractionFacade.extractDocumentFromBuffer(buffer, options);
   }
 
   extractMetadataFromBuffer(buffer: Buffer) {
-    if (this.contentFacade?.extractMetadataFromBuffer) {
-      return Promise.resolve(
-        this.contentFacade.extractMetadataFromBuffer(buffer),
-      );
-    }
-    return Promise.resolve(null);
+    if (!this.extractionFacade) return Promise.resolve(null);
+    return Promise.resolve(
+      this.extractionFacade.extractMetadataFromBuffer(buffer),
+    );
   }
 
   captureWebSnapshot(url: string, itemId: string, userId: string) {
-    if (this.contentFacade?.captureWebSnapshot) {
-      return this.contentFacade.captureWebSnapshot(url, itemId, userId);
-    }
-    return Promise.resolve(null);
+    if (!this.extractionFacade) return Promise.resolve(null);
+    return this.extractionFacade.captureWebSnapshot(url, itemId, userId);
   }
 
   createAttachment(data: any, projectId?: string) {
-    if (this.contentFacade?.createAttachment) {
-      return this.contentFacade.createAttachment(data, projectId);
-    }
-    return Promise.resolve(null);
-  }
-
-  createNote(userId: string, data: any) {
-    if (this.contentFacade?.createNote) {
-      return this.contentFacade.createNote(userId, data);
-    }
-    return Promise.resolve(null);
+    if (!this.extractionFacade) return Promise.resolve(null);
+    return this.extractionFacade.createAttachment(data, projectId);
   }
 
   reassignContentToItem(
@@ -67,13 +47,11 @@ export class InProcessExtractionGatewayAdapter implements IExtractionGatewayPort
     primaryItemId: string,
     tx?: any,
   ) {
-    if (this.readerFacade?.reassignContentToItem) {
-      return this.readerFacade.reassignContentToItem(
-        duplicateItemIds,
-        primaryItemId,
-        tx,
-      );
-    }
-    return Promise.resolve();
+    if (!this.extractionFacade) return Promise.resolve();
+    return this.extractionFacade.reassignContentToItem(
+      duplicateItemIds,
+      primaryItemId,
+      tx,
+    );
   }
 }

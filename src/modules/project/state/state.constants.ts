@@ -24,7 +24,7 @@ export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
     name: 'Thẩm định & Phê duyệt',
     description:
       'Đề cương đang được hội đồng khoa học, hội đồng đạo đức hoặc tổ chức tài trợ xem xét, thẩm định tính khả thi.',
-    color: '#8b5cf6',
+    color: '#0d9488',
     sequence: 1,
     isDefault: false,
   },
@@ -32,7 +32,7 @@ export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
     name: 'Triển khai & Thực nghiệm',
     description:
       'Đội ngũ đang tích cực thu thập dữ liệu, chạy mô phỏng, thí nghiệm và phân tích kết quả.',
-    color: '#f59e0b',
+    color: '#d97706',
     sequence: 2,
     isDefault: false,
   },
@@ -48,7 +48,7 @@ export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
     name: 'Nghiệm thu & Đánh giá',
     description:
       'Phản biện độc lập, đánh giá kết quả và bảo vệ trước hội đồng nghiệm thu.',
-    color: '#a855f7',
+    color: '#4f46e5',
     sequence: 4,
     isDefault: false,
   },
@@ -56,7 +56,7 @@ export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
     name: 'Hoàn thành & Lưu trữ',
     description:
       'Đề tài đã nghiệm thu thành công, nộp lưu chiểu báo cáo, công bố dữ liệu và bài báo chính thức.',
-    color: '#10b981',
+    color: '#1a7f37',
     sequence: 5,
     isDefault: false,
   },
@@ -72,7 +72,7 @@ export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
     name: 'Hủy bỏ',
     description:
       'Đề tài bị đình chỉ hoặc chấm dứt do không khả thi, vi phạm quy chế hoặc thay đổi định hướng.',
-    color: '#ef4444',
+    color: '#9ca3af',
     sequence: 7,
     isDefault: false,
   },

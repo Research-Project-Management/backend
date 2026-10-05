@@ -111,9 +111,6 @@ export const VENUE_FIELD_MAP: Record<string, string> = {
   videoRecordingFormat: 'videoRecordingFormat',
 };
 
-/** @deprecated Renamed to VENUE_FIELD_MAP to avoid collision with schema.constants.ts export. */
-export const BASE_FIELD_MAPPINGS = VENUE_FIELD_MAP;
-
 export const ITEM_COLUMN_METADATA_FIELDS = [
   'title',
   'itemType',

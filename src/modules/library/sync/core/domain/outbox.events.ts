@@ -48,9 +48,6 @@ export const LIBRARY_EVENT_TYPES = {
   READING_STATE_UPDATED: 'library.reading.updated',
 } as const;
 
-/** @deprecated Use LIBRARY_EVENT_TYPES instead */
-export const SYNC_EVENT_TYPES = LIBRARY_EVENT_TYPES;
-
 export type LibraryEventType =
   (typeof LIBRARY_EVENT_TYPES)[keyof typeof LIBRARY_EVENT_TYPES];
 

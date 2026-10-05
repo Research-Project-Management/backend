@@ -23,12 +23,7 @@ import { InProcessExtractionGatewayAdapter } from './core/adapters/in-process-ex
 import { HttpExtractionGatewayAdapter } from './core/adapters/http-extraction-gateway.adapter';
 
 // Facade
-import {
-  IngestionFacade,
-  INGESTION_FACADE,
-  ProcessingFacade,
-  PROCESSING_FACADE,
-} from './ingestion.facade';
+import { IngestionFacade, INGESTION_FACADE } from './ingestion.facade';
 
 // ── 1. Ingestion Pipeline ─────────────────────────────────────────────────
 import {
@@ -164,10 +159,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     IngestionFacade,
     {
       provide: INGESTION_FACADE,
-      useExisting: IngestionFacade,
-    },
-    {
-      provide: PROCESSING_FACADE,
       useExisting: IngestionFacade,
     },
 
@@ -308,8 +299,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     // Facade
     IngestionFacade,
     INGESTION_FACADE,
-    ProcessingFacade,
-    PROCESSING_FACADE,
 
     // Ports
     INGESTION_RUN_REPOSITORY_PORT,

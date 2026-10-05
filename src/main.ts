@@ -1,4 +1,5 @@
 import 'dotenv/config';
+// In-process worker enabled trigger
 
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports

@@ -13,7 +13,7 @@ import {
   TransactionHelpers,
 } from '@/modules/library/sync/core/adapters/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { BIBLIOGRAPHY_FACADE } from '@/modules/library/catalog/catalog.facade';
+import { CATALOG_FACADE } from '@/modules/library/catalog/catalog.facade';
 
 describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';
@@ -62,7 +62,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
           { provide: TransactionService, useValue: mockLibraryTx },
           { provide: PrismaService, useValue: {} },
           {
-            provide: BIBLIOGRAPHY_FACADE,
+            provide: CATALOG_FACADE,
             useValue: {
               itemExists: jest.fn().mockResolvedValue(true),
               getItem: jest.fn().mockResolvedValue({

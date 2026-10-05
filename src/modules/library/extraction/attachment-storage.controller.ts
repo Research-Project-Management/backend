@@ -466,23 +466,6 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
     );
   }
 
-  /**
-   * Compatibility alias for getPresignedUploadUrl
-   */
-  async presign(
-    userId: string,
-    dto: PresignUploadDto,
-    paramProjectId?: string,
-    queryProjectId?: string,
-  ) {
-    return this.getPresignedUploadUrl(
-      userId,
-      dto,
-      paramProjectId,
-      queryProjectId,
-    );
-  }
-
   @Post(['attachments/presign/complete', 'presign/complete'])
   @ApiOperation({ summary: 'Complete personal presigned upload' })
   async completePresign(

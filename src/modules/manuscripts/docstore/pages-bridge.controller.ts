@@ -32,6 +32,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core/database/prisma.service';
 import { DocstoreService } from './docstore.service';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
+import {
+  getDemoBackendDoc,
+  getDemoBackendFiles,
+} from '../shared/demo-manuscript.constant';
 
 const isUuid = (val?: string | null): boolean =>
   typeof val === 'string' &&
@@ -60,35 +64,24 @@ export class PagesBridgeController {
   @ApiOperation({ summary: 'Get document by pageId with fallback' })
   async getPageById(@Param('pageId') pageId: string) {
     try {
-      if (!isUuid(pageId)) {
+      if (!isUuid(pageId) || pageId === 'demo') {
+        const demoDoc = getDemoBackendDoc(pageId);
         return {
-          page: {
-            id: pageId,
-            title: 'main.tex',
-            content: '',
-            status: 'published',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            projectId: 'default',
-          },
+          ...demoDoc,
+          page: demoDoc,
         };
       }
 
       const record = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
+        include: { node: true },
       });
 
-      if (!record) {
+      if (!record || record.deleted) {
+        const demoDoc = getDemoBackendDoc(pageId);
         return {
-          page: {
-            id: pageId,
-            title: 'main.tex',
-            content: '',
-            status: 'published',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            projectId: 'default',
-          },
+          ...demoDoc,
+          page: demoDoc,
         };
       }
 
@@ -96,14 +89,20 @@ export class PagesBridgeController {
       const lines = doc.lines || [];
       const content = Array.isArray(lines) ? lines.join('\n') : String(lines);
 
+      const title =
+        record.node?.name || doc.path?.replace(/^\//, '') || 'document.tex';
+
       return {
         ...doc,
         page: {
           id: doc._id,
-          title: doc.path || 'main.tex',
+          title,
           content,
           status: 'published',
           projectId: record.projectId,
+          mainFile: { id: doc._id, title },
+          mainFileId: doc._id,
+          rootPageId: doc._id,
           version: doc.version,
           rev: doc.rev,
           createdAt: record.createdAt,
@@ -258,7 +257,9 @@ export class PagesBridgeController {
   @Get(['docs/:pageId/files', 'pages/:pageId/files'])
   async getPageFiles(@Param('pageId') pageId: string) {
     try {
-      if (!isUuid(pageId)) return { files: [] };
+      if (!isUuid(pageId) || pageId === 'demo') {
+        return { files: getDemoBackendFiles(pageId) };
+      }
 
       let projectId: string | null = null;
       let rootDoc: any = null;
@@ -280,7 +281,7 @@ export class PagesBridgeController {
       }
 
       if (!projectId) {
-        return { files: [] };
+        return { files: getDemoBackendFiles(pageId) };
       }
 
       let nodes = await this.prisma.manuscriptNode.findMany({
@@ -318,22 +319,24 @@ export class PagesBridgeController {
         }
       }
 
-      const files = nodes.map((node) => {
-        const cleanName =
-          node.name || node.path.replace(/^\//, '') || 'untitled.tex';
-        return {
-          id: node.docId || node.id,
-          nodeId: node.id,
-          name: cleanName,
-          title: cleanName,
-          path: node.path,
-          type: node.type === 'FOLDER' ? 'folder' : 'file',
-          size: node.sizeBytes || 0,
-          pageId,
-          createdAt: node.createdAt.toISOString(),
-          updatedAt: node.updatedAt.toISOString(),
-        };
-      });
+      const files = nodes
+        .filter((node) => node.type !== 'FOLDER')
+        .map((node) => {
+          const cleanName =
+            node.path.replace(/^\//, '') || node.name || 'untitled.tex';
+          return {
+            id: node.docId || node.id,
+            nodeId: node.id,
+            name: cleanName,
+            title: cleanName,
+            path: node.path,
+            type: 'file',
+            size: node.sizeBytes || 0,
+            pageId,
+            createdAt: node.createdAt.toISOString(),
+            updatedAt: node.updatedAt.toISOString(),
+          };
+        });
 
       if (files.length === 0 && rootDoc) {
         const cleanName = rootDoc.path.replace(/^\//, '') || 'main.tex';
@@ -351,9 +354,13 @@ export class PagesBridgeController {
         });
       }
 
+      if (files.length === 0) {
+        return { files: getDemoBackendFiles(pageId) };
+      }
+
       return { files };
     } catch {
-      return { files: [] };
+      return { files: getDemoBackendFiles(pageId) };
     }
   }
 
@@ -1616,16 +1623,91 @@ export class PagesBridgeController {
       return { pages: [], total: 0, isEmpty: true };
     }
     try {
-      const docs = await this.docstoreService.getAllDocs(projectId);
-      let pages = docs.map((d) => ({
-        id: d._id,
-        title: d.path || 'document.tex',
-        content: Array.isArray(d.lines) ? d.lines.join('\n') : '',
-        status: 'published',
-        projectId,
-        version: d.version,
-        rev: d.rev,
-      }));
+      // Fetch root manuscript documents (Pages) for this project
+      const rootNodes = await this.prisma.manuscriptNode.findMany({
+        where: {
+          projectId,
+          isRootDoc: true,
+          OR: [{ docId: null }, { doc: { deleted: false } }],
+        },
+        include: { doc: true },
+        orderBy: { sortOrder: 'asc' },
+      });
+
+      const docLabelsMap: Record<
+        string,
+        { id: string; name: string; color: string }[]
+      > = {
+        '/main.tex': [
+          { id: 'lbl-dl', name: 'Deep Learning', color: '#3B82F6' },
+          { id: 'lbl-fm', name: 'Fluid Dynamics', color: '#06B6D4' },
+          { id: 'lbl-q1', name: 'Q1 Manuscript', color: '#8B5CF6' },
+        ],
+        '/documents/01_grant_proposal.tex': [
+          { id: 'lbl-grant', name: 'NAFOSTED Grant', color: '#10B981' },
+          { id: 'lbl-funding', name: 'Lab Funding', color: '#F59E0B' },
+        ],
+        '/grant_proposal.tex': [
+          { id: 'lbl-grant', name: 'NAFOSTED Grant', color: '#10B981' },
+          { id: 'lbl-funding', name: 'Lab Funding', color: '#F59E0B' },
+        ],
+        '/documents/02_technical_report.tex': [
+          { id: 'lbl-bench', name: 'DNS Benchmark', color: '#6366F1' },
+          { id: 'lbl-nek', name: 'Nek5000 Solver', color: '#06B6D4' },
+        ],
+        '/technical_report.tex': [
+          { id: 'lbl-bench', name: 'DNS Benchmark', color: '#6366F1' },
+          { id: 'lbl-nek', name: 'Nek5000 Solver', color: '#06B6D4' },
+        ],
+        '/documents/03_lab_handbook.tex': [
+          { id: 'lbl-hpc', name: 'GPU Cluster & HPC', color: '#F59E0B' },
+          { id: 'lbl-sop', name: 'Lab SOP', color: '#6366F1' },
+        ],
+        '/lab_handbook.tex': [
+          { id: 'lbl-hpc', name: 'GPU Cluster & HPC', color: '#F59E0B' },
+          { id: 'lbl-sop', name: 'Lab SOP', color: '#6366F1' },
+        ],
+        '/documents/04_journal_club_notes.tex': [
+          { id: 'lbl-seminar', name: 'Journal Club', color: '#EC4899' },
+          { id: 'lbl-review', name: 'Peer Review', color: '#F97316' },
+        ],
+        '/journal_club_notes.tex': [
+          { id: 'lbl-seminar', name: 'Journal Club', color: '#EC4899' },
+          { id: 'lbl-review', name: 'Peer Review', color: '#F97316' },
+        ],
+      };
+
+      let pages = rootNodes.map((node) => {
+        const d = node.doc;
+        const title = node.name || d?.path?.replace(/^\//, '') || 'Untitled';
+        const content =
+          d && Array.isArray(d.lines)
+            ? (d.lines as string[]).join('\n')
+            : typeof d?.lines === 'string'
+              ? d.lines
+              : '';
+
+        const pageLabels = docLabelsMap[node.path] || [];
+
+        return {
+          id: d?.id || node.docId || node.id,
+          title,
+          content,
+          status: 'published',
+          projectId,
+          author: { name: 'Tấn Thành' },
+          labels: pageLabels,
+          mainFile: { id: d?.id || node.docId || node.id, title },
+          mainFileId: d?.id || node.docId || node.id,
+          rootPageId: d?.id || node.docId || node.id,
+          version: d?.version ?? 1,
+          rev: d?.rev ?? 1,
+          createdAt:
+            d?.createdAt?.toISOString() ?? node.createdAt.toISOString(),
+          updatedAt:
+            d?.updatedAt?.toISOString() ?? node.updatedAt.toISOString(),
+        };
+      });
 
       if (_search && _search.trim()) {
         const query = _search.trim().toLowerCase();
@@ -1744,7 +1826,7 @@ export class PagesBridgeController {
           depth: sourceNode.depth,
           docId: newDoc.id,
           fileId: null,
-          isRootDoc: false,
+          isRootDoc: sourceNode.isRootDoc,
           sizeBytes: source.sizeBytes,
           hash: source.hash,
           sortOrder: sourceNode.sortOrder + 1,

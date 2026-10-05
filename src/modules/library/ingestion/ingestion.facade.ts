@@ -5,7 +5,6 @@ import { QualityService } from './core/services/quality.service';
 import { RetractionService } from './core/services/retraction.service';
 
 export const INGESTION_FACADE = 'INGESTION_FACADE';
-export const PROCESSING_FACADE = INGESTION_FACADE;
 
 export interface IIngestionFacade {
   submitIngestion(envelope: any): Promise<any>;
@@ -18,8 +17,6 @@ export interface IIngestionFacade {
     projectId?: string,
   ): Promise<any>;
 }
-
-export type IProcessingFacade = IIngestionFacade;
 
 /**
  * Public Facade for Ingestion Bounded Context (Supporting Domain).
@@ -63,5 +60,3 @@ export class IngestionFacade implements IIngestionFacade {
     return this.retractionService.checkItem(userId, itemId, projectId);
   }
 }
-
-export { IngestionFacade as ProcessingFacade };

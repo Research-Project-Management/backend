@@ -8,8 +8,6 @@ import { WebSnapshotService } from './core/adapters/web-snapshot.service';
 import { AnnotationsService } from './core/services/annotations.service';
 
 export const EXTRACTION_FACADE = 'EXTRACTION_FACADE';
-export const READER_FACADE = EXTRACTION_FACADE;
-export const CONTENT_FACADE = EXTRACTION_FACADE;
 
 export interface IExtractionFacade {
   getItemAttachments(userId: string, itemId: string): Promise<any>;
@@ -31,53 +29,41 @@ export interface IExtractionFacade {
     primaryItemId: string,
     tx?: any,
   ): Promise<void>;
-  // Reader backwards compatibility methods
-  listNotes?(
-    userId: string,
-    itemId?: string,
-    projectId?: string,
-  ): Promise<any[]>;
-  getNote?(userId: string, noteId: string, projectId?: string): Promise<any>;
-  createNote?(userId: string, data: any): Promise<any>;
-  getAnnotationsByAttachment?(
+  // Annotation delegation methods
+  getAnnotationsByAttachment(
     userId: string,
     attachmentId: string,
   ): Promise<any[]>;
-  extractNotesFromAnnotations?(userId: string, itemId: string): Promise<any>;
-  // Annotation CRUD methods (moved from Catalog to Extraction domain)
-  getAnnotationsByAttachmentFull?(
+  getAnnotationsByAttachmentFull(
     userId: string,
     attachmentId: string,
     pageIndex?: number,
     type?: any,
   ): Promise<any[]>;
-  getAnnotation?(
+  getAnnotation(
     userId: string,
     annotationId: string,
     projectId?: string,
   ): Promise<any | null>;
-  createAnnotation?(userId: string, data: any): Promise<any>;
-  updateAnnotation?(
+  createAnnotation(userId: string, data: any): Promise<any>;
+  updateAnnotation(
     userId: string,
     annotationId: string,
     expectedVersion: number,
     data: any,
   ): Promise<any>;
-  deleteAnnotation?(
+  deleteAnnotation(
     userId: string,
     annotationId: string,
     expectedVersion?: number,
   ): Promise<boolean>;
-  batchUpsertAnnotations?(
+  batchUpsertAnnotations(
     userId: string,
     attachmentId: string,
     data: any,
   ): Promise<any>;
-  listAnnotations?(userId: string, filters?: any): Promise<any[]>;
+  listAnnotations(userId: string, filters?: any): Promise<any[]>;
 }
-
-export type IReaderFacade = IExtractionFacade;
-export type IContentFacade = IExtractionFacade;
 
 @Injectable()
 export class ExtractionFacade implements IExtractionFacade {
@@ -253,5 +239,3 @@ export class ExtractionFacade implements IExtractionFacade {
     return [];
   }
 }
-
-export { ExtractionFacade as ReaderFacade, ExtractionFacade as ContentFacade };

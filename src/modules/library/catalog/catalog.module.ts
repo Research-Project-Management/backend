@@ -127,12 +127,7 @@ import { GetNoteUseCase } from './core/use-cases/get-note.use-case';
 import { ListNotesUseCase } from './core/use-cases/list-notes.use-case';
 
 // Facade
-import {
-  CatalogFacade,
-  CATALOG_FACADE,
-  BibliographyFacade,
-  BIBLIOGRAPHY_FACADE,
-} from './catalog.facade';
+import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
 
 /**
  * Dedicated Catalog Core Hexagonal Module.
@@ -170,10 +165,6 @@ import {
     CatalogFacade,
     {
       provide: CATALOG_FACADE,
-      useExisting: CatalogFacade,
-    },
-    {
-      provide: BIBLIOGRAPHY_FACADE,
       useExisting: CatalogFacade,
     },
 
@@ -311,7 +302,6 @@ import {
   exports: [
     CatalogFacade,
     CATALOG_FACADE,
-    BIBLIOGRAPHY_FACADE,
     ItemsService,
     ItemSyncDelegate,
     CollectionsService,

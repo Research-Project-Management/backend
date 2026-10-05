@@ -468,7 +468,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
     it('should provide presigned upload URL via storagePort', async () => {
       const projId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
-      const res = await storageController.presign(
+      const res = await storageController.getPresignedUploadUrl(
         'user-1',
         {
           filename: 'big_dataset.pdf',

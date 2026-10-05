@@ -15,7 +15,6 @@ import { sanitizeItemTitle } from '../../../shared-kernel/utils/bibliographic.ut
 import { TransactionService, TransactionHelpers } from '../../../sync';
 import {
   LIBRARY_EVENT_TYPES,
-  SYNC_EVENT_TYPES,
   LibraryItemSource,
   buildItemCreatedOutboxPayload,
 } from '../../../sync/core/domain/outbox.events';

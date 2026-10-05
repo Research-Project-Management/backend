@@ -2,8 +2,8 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import {
-  CONTENT_FACADE,
-  IContentFacade,
+  EXTRACTION_FACADE,
+  IExtractionFacade,
 } from '@/modules/library/extraction/extraction.facade';
 import { EngineService } from '../../engine/engine.service';
 import { ScientificChunkingService } from './scientific-chunking.service';
@@ -16,7 +16,8 @@ export class DocumentAiIngestionService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
-    @Inject(CONTENT_FACADE) private readonly contentFacade: IContentFacade,
+    @Inject(EXTRACTION_FACADE)
+    private readonly extractionFacade: IExtractionFacade,
     private readonly chunkingService: ScientificChunkingService,
     private readonly engineService: EngineService,
   ) {}
@@ -79,9 +80,10 @@ export class DocumentAiIngestionService {
       }
 
       // 3. Extract text and academic metadata (unpdf + Grobid)
-      const extractedDoc = await this.contentFacade.extractDocumentFromBuffer(
-        storageFile.buffer,
-      );
+      const extractedDoc =
+        await this.extractionFacade.extractDocumentFromBuffer(
+          storageFile.buffer,
+        );
 
       // 4. Perform scientific semantic chunking
       const chunks = this.chunkingService.chunkPdfDocument(extractedDoc, {

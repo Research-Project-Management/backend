@@ -181,10 +181,21 @@ export class CoreRepository {
    * Find single project by ID with members, labels, and metadata.
    */
   async findProjectById(projectId: string): Promise<ProjectWithMembers | null> {
-    if (!isUuid(projectId)) return null;
+    const trimmed = (projectId || '').trim();
+    if (!trimmed) return null;
+
+    const where: Prisma.ProjectWhereInput = isUuid(trimmed)
+      ? { id: trimmed, deletedAt: null }
+      : {
+          deletedAt: null,
+          OR: [
+            { identifier: { equals: trimmed, mode: 'insensitive' } },
+            { name: { equals: trimmed, mode: 'insensitive' } },
+          ],
+        };
 
     const project = await this.prisma.project.findFirst({
-      where: { id: projectId, deletedAt: null },
+      where,
       include: {
         createdBy: { select: USER_SELECT },
         members: {

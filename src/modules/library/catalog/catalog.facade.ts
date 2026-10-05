@@ -98,8 +98,6 @@ export interface ICatalogFacade {
   createNote?(userId: string, data: any): Promise<any>;
 }
 
-export type IBibliographyFacade = ICatalogFacade;
-
 /**
  * Public Facade for Catalog Bounded Context (Core Domain).
  * Shields catalog internal repositories and submodules from external callers.
@@ -365,5 +363,4 @@ export class CatalogFacade implements ICatalogFacade {
   }
 }
 
-export { CatalogFacade as BibliographyFacade };
 export type { DuplicateCandidateItem };

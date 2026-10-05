@@ -1,5 +1,4 @@
-// Utilities & Scope (exported first to prevent circular dependency timing issues)
-export * from './utils/project-scope.utils';
+// Utilities (exported first to prevent circular dependency timing issues)
 export * from './utils/bibliographic.utils';
 export * from './utils/tag.utils';
 

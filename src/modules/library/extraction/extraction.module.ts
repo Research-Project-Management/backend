@@ -14,14 +14,7 @@ import {
 } from './attachments.controller';
 
 // Facades
-import {
-  ExtractionFacade,
-  EXTRACTION_FACADE,
-  ReaderFacade,
-  READER_FACADE,
-  ContentFacade,
-  CONTENT_FACADE,
-} from './extraction.facade';
+import { ExtractionFacade, EXTRACTION_FACADE } from './extraction.facade';
 
 // Services & Infrastructure
 import { AttachmentsService } from './core/services/attachments.service';
@@ -99,14 +92,6 @@ import { HttpCatalogGatewayAdapter } from './core/adapters/http-catalog-gateway.
       provide: EXTRACTION_FACADE,
       useExisting: ExtractionFacade,
     },
-    {
-      provide: READER_FACADE,
-      useExisting: ExtractionFacade,
-    },
-    {
-      provide: CONTENT_FACADE,
-      useExisting: ExtractionFacade,
-    },
 
     AttachmentsRepository,
     ExtractionRepository,
@@ -165,8 +150,6 @@ import { HttpCatalogGatewayAdapter } from './core/adapters/http-catalog-gateway.
   exports: [
     ExtractionFacade,
     EXTRACTION_FACADE,
-    READER_FACADE,
-    CONTENT_FACADE,
     AttachmentsService,
     PdfProvider,
     OcrProvider,

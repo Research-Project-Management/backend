@@ -128,27 +128,6 @@ export class LibraryFacade implements ILibraryFacade {
     return this.extractionFacade;
   }
 
-  // Backwards compatibility getters
-  get bibliographyFacade(): CatalogFacade | undefined {
-    return this.catalogFacade;
-  }
-
-  get contentFacade(): ExtractionFacade | undefined {
-    return this.extractionFacade;
-  }
-
-  get readerFacade(): ExtractionFacade | undefined {
-    return this.extractionFacade;
-  }
-
-  get search(): SearchFacade | undefined {
-    return this.searchFacade;
-  }
-
-  get citation(): CitationFacade | undefined {
-    return this.citationFacade;
-  }
-
   async exportBibByCitationKeys(
     userId: string,
     citeKeys: string[],
@@ -194,8 +173,8 @@ export class LibraryFacade implements ILibraryFacade {
     // Scatter-gather across Bounded Contexts (Microservices-Ready)
     const [catalogItem, attachmentsRes, notes] = await Promise.all([
       this.catalogFacade.getItem(userId, itemId, projectId),
-      this.contentFacade
-        ? this.contentFacade.getItemAttachments(userId, itemId)
+      this.extractionFacade
+        ? this.extractionFacade.getItemAttachments(userId, itemId)
         : Promise.resolve({ attachments: [] }),
       this.catalogFacade.listNotes
         ? this.catalogFacade.listNotes(userId, itemId, projectId)
@@ -352,10 +331,10 @@ export class LibraryFacade implements ILibraryFacade {
     buffer: Buffer,
     options?: any,
   ): Promise<ExtractedPdfDocument> {
-    if (!this.contentFacade) {
-      throw new Error('ContentFacade is not initialized in LibraryFacade');
+    if (!this.extractionFacade) {
+      throw new Error('ExtractionFacade is not initialized in LibraryFacade');
     }
-    return this.contentFacade.extractDocumentFromBuffer(buffer, options);
+    return this.extractionFacade.extractDocumentFromBuffer(buffer, options);
   }
 
   async getSyncVersion(

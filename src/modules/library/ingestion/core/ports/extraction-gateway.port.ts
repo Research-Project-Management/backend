@@ -4,7 +4,7 @@
  * Defines the contract through which Ingestion interacts with Content / Extraction Bounded Context.
  * Decouples Ingestion from direct in-process Reader/Extraction dependencies.
  *
- * In a monolith: implemented by InProcessExtractionGatewayAdapter (delegates to ContentFacade / ReaderFacade).
+ * In a monolith: implemented by InProcessExtractionGatewayAdapter (delegates to ExtractionFacade).
  * In microservices: implemented by HttpExtractionGatewayAdapter (remote REST / gRPC call).
  */
 
@@ -19,7 +19,6 @@ export interface IExtractionGatewayPort {
     userId: string,
   ): Promise<any>;
   createAttachment?(data: any, projectId?: string): Promise<any>;
-  createNote?(userId: string, data: any): Promise<any>;
   reassignContentToItem?(
     duplicateItemIds: string[],
     primaryItemId: string,
