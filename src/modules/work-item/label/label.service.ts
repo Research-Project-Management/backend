@@ -383,9 +383,14 @@ export class LabelService {
 
     const createdLabels: Label[] = [];
     if (toCreate.length > 0) {
-      for (const item of toCreate) {
-        const created = await this.labelRepository.create(item);
-        createdLabels.push(created);
+      if (typeof this.labelRepository.createBatch === 'function') {
+        const batchCreated = await this.labelRepository.createBatch(toCreate);
+        createdLabels.push(...batchCreated);
+      } else {
+        for (const item of toCreate) {
+          const created = await this.labelRepository.create(item);
+          createdLabels.push(created);
+        }
       }
     }
 
@@ -575,9 +580,14 @@ export class LabelService {
 
     const createdLabels: Label[] = [];
     if (toCreate.length > 0) {
-      for (const item of toCreate) {
-        const created = await this.labelRepository.create(item);
-        createdLabels.push(created);
+      if (typeof this.labelRepository.createBatch === 'function') {
+        const batchCreated = await this.labelRepository.createBatch(toCreate);
+        createdLabels.push(...batchCreated);
+      } else {
+        for (const item of toCreate) {
+          const created = await this.labelRepository.create(item);
+          createdLabels.push(created);
+        }
       }
     }
 

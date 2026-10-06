@@ -31,5 +31,5 @@ export interface IStorageNodeRepository {
   restoreSubtree(rootNodeId: string): Promise<number>;
   findSubtreeNodes(rootNodeId: string): Promise<StorageNode[]>;
   findExpiredTrash(daysOld: number, limit: number): Promise<StorageNode[]>;
-  isDescendant(rootNodeId: string, candidateId: string): Promise<boolean>;
+  isDescendant?(rootNodeId: string, candidateId: string): Promise<boolean>;
 }

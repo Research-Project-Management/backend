@@ -133,7 +133,7 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
         id: template.id,
         versionId: template.versionId,
         name: template.name,
-        category: template.category,
+        category: this.toPrismaCategory(template.category),
         description: template.description,
         compiler: template.compiler,
         imageName: template.imageName,
@@ -208,5 +208,21 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
       createdAt: new Date(record.createdAt),
       updatedAt: new Date(record.updatedAt),
     });
+  }
+
+  private toPrismaCategory(
+    category: TemplateCategoryString,
+  ): ManuscriptTemplateCategory {
+    switch (category) {
+      case 'journal':
+      case 'conference':
+      case 'thesis':
+      case 'cv':
+      case 'presentation':
+      case 'report':
+        return category as ManuscriptTemplateCategory;
+      default:
+        return ManuscriptTemplateCategory.other;
+    }
   }
 }
