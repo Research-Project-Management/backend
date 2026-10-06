@@ -46,12 +46,26 @@ export class RankHandler {
       columnId: targetColumn,
     });
 
-    return otherWorkItems.map((item, index) => ({
-      id: item.id,
-      rank: index,
-      columnId: targetColumn,
-      completed: isDoneFn(targetColumn),
-    }));
+    const isTargetDone = isDoneFn(targetColumn);
+    const updates: RankUpdateItem[] = [];
+
+    for (let index = 0; index < otherWorkItems.length; index++) {
+      const item = otherWorkItems[index];
+      const isMovedItem = item.id === workItemId;
+      const rankChanged = item.rank !== index;
+      const columnChanged = item.columnId !== targetColumn;
+
+      if (isMovedItem || rankChanged || columnChanged) {
+        updates.push({
+          id: item.id,
+          rank: index,
+          columnId: targetColumn,
+          completed: isTargetDone,
+        });
+      }
+    }
+
+    return updates;
   }
 }
 

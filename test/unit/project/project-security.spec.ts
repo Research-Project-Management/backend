@@ -30,6 +30,7 @@ describe('Project Module Security & SSOT Suite', () => {
       mockRepo = {
         findByTokenHash: jest.fn().mockResolvedValue(null),
         findProjectByIdOrIdentifier: jest.fn(),
+        findProjectByLinkToken: jest.fn().mockResolvedValue(null),
         findMember: jest.fn().mockResolvedValue(null),
         findPendingByProjectAndEmail: jest.fn().mockResolvedValue(null),
         addProjectMember: jest.fn().mockResolvedValue({}),

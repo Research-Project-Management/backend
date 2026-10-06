@@ -8,11 +8,19 @@ import { ItemResultDto, toItemResultDto } from '../../dto/item-result.dto';
 export interface ListItemsQuery {
   userId: string;
   view?:
-    'all' | 'recent' | 'unfiled' | 'trash' | 'my-publications' | 'publications';
+    | 'all'
+    | 'recent'
+    | 'unfiled'
+    | 'trash'
+    | 'my-publications'
+    | 'publications'
+    | 'starred'
+    | 'retracted';
   collectionId?: string;
   tagId?: string;
   search?: string;
   limit?: number;
+  page?: number;
   cursor?: string;
   projectId?: string;
   orderBy?: string;
@@ -22,6 +30,8 @@ export interface ListItemsQuery {
   toYear?: number;
   readStatus?: string;
   hasFile?: boolean;
+  hasNotes?: boolean;
+  tag?: string;
   fields?: string[];
 }
 
@@ -52,8 +62,10 @@ export class ListItemsUseCase {
       view: query.view,
       collectionId: query.collectionId,
       tagId: query.tagId,
+      tag: query.tag,
       search: query.search,
       limit: query.limit,
+      page: query.page,
       cursor: query.cursor,
       projectId: query.projectId,
       orderBy: query.orderBy,
@@ -63,6 +75,7 @@ export class ListItemsUseCase {
       toYear: query.toYear,
       readStatus: query.readStatus,
       hasFile: query.hasFile,
+      hasNotes: query.hasNotes,
     });
 
     const fieldSet =

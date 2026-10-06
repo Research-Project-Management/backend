@@ -36,6 +36,7 @@ export class ExportImportService {
       projectId,
       projectName: query?.projectName,
       includePdf: query?.includePdf,
+      cleanArxiv: query?.cleanArxiv,
     });
   }
 

@@ -33,8 +33,22 @@ import {
   SendUpdateDto,
   CursorUpdateDto,
   DocSyncDto,
+  ProjectChatSendDto,
+  ProjectChatHistoryDto,
 } from './dto/client-event.dto';
 import { YjsDocManagerAdapter } from './core/adapters/crdt/yjs-doc-manager.adapter';
+
+export interface ProjectChatMessage {
+  id: string;
+  projectId: string;
+  userId: string;
+  userName: string;
+  userColor?: string;
+  userAvatar?: string;
+  text: string;
+  replyToId?: string;
+  createdAt: string;
+}
 
 @Injectable()
 @WebSocketGateway({
@@ -51,6 +65,7 @@ export class ManuscriptRealtimeGateway
   server!: Server;
 
   private readonly logger = new Logger(ManuscriptRealtimeGateway.name);
+  private readonly projectChatStore = new Map<string, ProjectChatMessage[]>();
 
   constructor(
     private readonly joinProjectUseCase: JoinProjectUseCase,
@@ -212,6 +227,39 @@ export class ManuscriptRealtimeGateway
     @MessageBody() dto: JoinDocDto,
   ) {
     try {
+      const prevDocId = client.data?.activeDocId;
+      const prevProjectId = client.data?.projectId || dto.projectId;
+
+      // Automatically leave previous doc if switching files on the same socket
+      if (
+        prevDocId &&
+        (prevDocId !== dto.docId || prevProjectId !== dto.projectId)
+      ) {
+        await this.leaveDocUseCase
+          .execute({
+            projectId: prevProjectId,
+            docId: prevDocId,
+            socketId: client.id,
+          })
+          .catch(() => {});
+        client.leave(`doc:${prevProjectId}:${prevDocId}`);
+
+        if (this.yjsDocManager) {
+          const room = this.server?.sockets?.adapter?.rooms?.get(
+            `doc:${prevProjectId}:${prevDocId}`,
+          );
+          if (!room || room.size === 0) {
+            this.yjsDocManager
+              .evictDoc(prevProjectId, prevDocId)
+              .catch(() => {});
+          } else {
+            this.yjsDocManager
+              .flushDoc(prevProjectId, prevDocId)
+              .catch(() => {});
+          }
+        }
+      }
+
       const result = await this.joinDocUseCase.execute({
         projectId: dto.projectId,
         docId: dto.docId,
@@ -219,6 +267,7 @@ export class ManuscriptRealtimeGateway
       });
 
       client.data.activeDocId = dto.docId;
+      client.data.projectId = dto.projectId;
       client.join(`doc:${dto.projectId}:${dto.docId}`);
 
       if (this.yjsDocManager) {
@@ -304,9 +353,15 @@ export class ManuscriptRealtimeGateway
     @MessageBody() dto: CursorUpdateDto,
   ) {
     try {
+      const projectId = dto.projectId || client.data?.projectId;
+      const docId = dto.docId || client.data?.activeDocId;
+      if (!projectId || !docId) {
+        return { success: false, error: 'Missing projectId or docId' };
+      }
+
       const presence = await this.broadcastCursorUseCase.execute({
-        projectId: dto.projectId,
-        docId: dto.docId,
+        projectId,
+        docId,
         socketId: client.id,
         cursor: dto.cursor,
       });
@@ -432,6 +487,66 @@ export class ManuscriptRealtimeGateway
       });
 
       return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message };
+    }
+  }
+
+  @SubscribeMessage('project:chat:send')
+  public async handleSendChatMessage(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() dto: ProjectChatSendDto,
+  ) {
+    try {
+      const projectId = dto.projectId || client.data?.projectId;
+      if (!projectId || !dto.text?.trim()) {
+        return { success: false, error: 'Missing projectId or empty text' };
+      }
+
+      const msg: ProjectChatMessage = {
+        id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        projectId,
+        userId: client.data?.userId || 'unknown',
+        userName: client.data?.name || 'Collaborator',
+        userColor: client.data?.color,
+        userAvatar: client.data?.avatar,
+        text: dto.text.trim(),
+        replyToId: dto.replyToId,
+        createdAt: new Date().toISOString(),
+      };
+
+      const history = this.projectChatStore.get(projectId) || [];
+      history.push(msg);
+      if (history.length > 200) {
+        history.shift();
+      }
+      this.projectChatStore.set(projectId, history);
+
+      this.broadcasterAdapter.broadcastToProject(
+        projectId,
+        'project:chat:message',
+        msg,
+      );
+
+      return { success: true, message: msg };
+    } catch (err: any) {
+      return { success: false, error: err?.message };
+    }
+  }
+
+  @SubscribeMessage('project:chat:history')
+  public async handleGetChatHistory(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() dto: ProjectChatHistoryDto,
+  ) {
+    try {
+      const projectId = dto.projectId || client.data?.projectId;
+      if (!projectId) {
+        return { success: false, error: 'Missing projectId' };
+      }
+
+      const messages = this.projectChatStore.get(projectId) || [];
+      return { success: true, messages };
     } catch (err: any) {
       return { success: false, error: err?.message };
     }

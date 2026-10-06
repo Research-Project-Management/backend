@@ -147,9 +147,26 @@ export class ExportImportController {
     summary: 'List all academic starter templates in the catalog',
   })
   @ApiResponse({ status: 200, type: [TemplateResponseDto] })
-  public async listTemplates(): Promise<TemplateResponseDto[]> {
+  public async listTemplates(
+    @Query('category') category?: string,
+    @Query('search') search?: string,
+  ): Promise<TemplateResponseDto[]> {
     try {
-      return await this.service.listTemplates();
+      let templates = await this.service.listTemplates();
+      if (category && category !== 'all') {
+        const cat = category.toLowerCase().trim();
+        templates = templates.filter((t) => t.category?.toLowerCase() === cat);
+      }
+      if (search && search.trim()) {
+        const q = search.toLowerCase().trim();
+        templates = templates.filter(
+          (t) =>
+            t.title?.toLowerCase().includes(q) ||
+            t.description?.toLowerCase().includes(q) ||
+            t.author?.toLowerCase().includes(q),
+        );
+      }
+      return templates;
     } catch (err) {
       this.handleError(err);
     }

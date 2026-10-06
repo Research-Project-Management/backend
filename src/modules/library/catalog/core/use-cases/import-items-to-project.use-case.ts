@@ -64,25 +64,44 @@ export class ImportItemsToProjectUseCase {
       );
     }
 
+    // Batch fetch source items in parallel instead of sequential roundtrips
+    const sourceItems = (
+      await Promise.all(
+        itemIds.map((itemId) => this.itemRepo.findById(userId, itemId)),
+      )
+    ).filter((item): item is NonNullable<typeof item> => item !== null);
+
+    if (sourceItems.length === 0) {
+      return { success: true, importedCount: 0 };
+    }
+
+    // Prefetch existing target project items to build O(1) in-memory deduplication lookup sets
+    const existingInProject = await this.itemRepo.findMany(userId, {
+      projectId,
+      limit: 1000,
+    });
+
+    const existingDois = new Set<string>();
+    const existingCitationKeys = new Set<string>();
+    const existingTitles = new Set<string>();
+
+    for (const it of existingInProject.items) {
+      if (it.doi) existingDois.add(it.doi.toLowerCase().trim());
+      if (it.citationKey) existingCitationKeys.add(it.citationKey.trim());
+      if (it.title) existingTitles.add(it.title.toLowerCase().trim());
+    }
+
     let importedCount = 0;
 
-    for (const itemId of itemIds) {
-      const source = await this.itemRepo.findById(userId, itemId);
-      if (!source) continue;
+    for (const source of sourceItems) {
+      const normDoi = source.doi ? source.doi.toLowerCase().trim() : null;
+      const normKey = source.citationKey ? source.citationKey.trim() : null;
+      const normTitle = source.title ? source.title.toLowerCase().trim() : null;
 
-      // Check if item already exists in target project
-      const existingInProject = await this.itemRepo.findMany(userId, {
-        projectId,
-        search: source.doi || source.citationKey || source.title,
-        limit: 10,
-      });
-
-      const isDuplicate = existingInProject.items.some(
-        (it) =>
-          (source.doi && it.doi === source.doi) ||
-          (source.citationKey && it.citationKey === source.citationKey) ||
-          it.title === source.title,
-      );
+      const isDuplicate =
+        (normDoi && existingDois.has(normDoi)) ||
+        (normKey && existingCitationKeys.has(normKey)) ||
+        (normTitle && existingTitles.has(normTitle));
 
       if (isDuplicate) {
         continue;
@@ -100,6 +119,11 @@ export class ImportItemsToProjectUseCase {
         publicationTitle: source.publicationTitle,
         fields: source.fields,
       });
+
+      // Track newly created item to prevent duplicates within the same batch
+      if (normDoi) existingDois.add(normDoi);
+      if (normKey) existingCitationKeys.add(normKey);
+      if (normTitle) existingTitles.add(normTitle);
 
       importedCount++;
     }

@@ -80,13 +80,23 @@ export class ZoteroTranslatorClient {
   private get baseUrl(): string {
     return (
       process.env.ZOTERO_TRANSLATOR_URL?.replace(/\/$/, '') ??
-      'http://localhost:1969'
+      (process.env.NODE_ENV === 'production'
+        ? 'http://translator:1969'
+        : 'http://localhost:1969')
     );
   }
 
   private get enabled(): boolean {
     const val = process.env.ZOTERO_TRANSLATOR_ENABLED;
-    return val !== 'false' && val !== '0';
+    if (val === 'false' || val === '0') return false;
+    if (val === 'true' || val === '1') return true;
+    if (
+      !process.env.ZOTERO_TRANSLATOR_URL &&
+      process.env.NODE_ENV === 'production'
+    ) {
+      return false;
+    }
+    return true;
   }
 
   private get timeoutMs(): number {

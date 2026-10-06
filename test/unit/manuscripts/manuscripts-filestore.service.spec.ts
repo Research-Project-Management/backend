@@ -190,6 +190,7 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       headUseCase,
       deleteUseCase,
       signedUrlUseCase,
+      filestoreService,
     );
   });
 

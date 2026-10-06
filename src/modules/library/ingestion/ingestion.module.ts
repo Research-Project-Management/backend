@@ -84,6 +84,7 @@ import { RetractionRepository } from './core/adapters/retraction.repository';
 import { RetractionScannerProvider } from './core/adapters/retraction-scanner.provider';
 import { RetractionDatabaseService } from './core/services/retraction-database.service';
 import { RetractionSyncService } from './core/services/retraction-sync.service';
+import { RetractionItemEventsSubscriber } from './core/adapters/retraction-item-events.subscriber';
 
 // ── Clean Architecture — Ingestion Run Port & Use Cases ──────────────────
 import { INGESTION_RUN_REPOSITORY_PORT } from './core/ports/ingestion-run-repository.port';
@@ -271,6 +272,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     RetractionDatabaseService,
     RetractionScannerProvider,
     RetractionSyncService,
+    RetractionItemEventsSubscriber,
 
     // ── CAPTURE Sub-Domain (Network-bound — isolated queue) ────────────────
     // Index: ingestion/core/use-cases/capture/

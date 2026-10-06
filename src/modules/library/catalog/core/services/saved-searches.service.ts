@@ -131,13 +131,17 @@ export class SavedSearchesService {
       effectiveProjectId || savedSearch.projectId || undefined;
     const where = this.evaluator.compile(userId, conditions, queryProjectId);
 
-    const sortBy = (dto.sortBy || savedSearch.sortBy || 'dateAdded') as any;
+    let rawSortBy = dto.sortBy || savedSearch.sortBy || 'dateAdded';
+    if (rawSortBy === 'createdAt') rawSortBy = 'dateAdded';
+    if (rawSortBy === 'authors') rawSortBy = 'creator';
+    const sortBy = rawSortBy as any;
     const sortOrder = (dto.sortOrder || savedSearch.sortOrder || 'desc') as any;
 
     const [count, results] = await Promise.all([
       this.repo.countMatchingItems(where),
       this.repo.findMatchingItems(where, {
         limit: dto.limit,
+        page: dto.page,
         cursor: dto.cursor,
         sortBy,
         sortOrder,

@@ -82,7 +82,9 @@ export abstract class BaseItemController {
         | 'unfiled'
         | 'trash'
         | 'my-publications'
-        | 'publications';
+        | 'publications'
+        | 'starred'
+        | 'retracted';
       collectionId?: string;
       tagId?: string;
       search?: string;
@@ -108,6 +110,7 @@ export abstract class BaseItemController {
       tagId: query?.tagId,
       search: query?.search,
       cursor: query?.cursor,
+      page: query?.page,
       limit: query?.limit,
       orderBy: query?.orderBy,
       orderDirection: query?.orderDirection,
@@ -116,6 +119,8 @@ export abstract class BaseItemController {
       toYear: query?.toYear,
       readStatus: query?.readStatus,
       hasFile: query?.hasFile,
+      hasNotes: query?.hasNotes,
+      tag: query?.tag,
       fields: fieldsList,
       projectId,
     });
@@ -457,7 +462,9 @@ export class ItemController extends BaseItemController {
         | 'unfiled'
         | 'trash'
         | 'my-publications'
-        | 'publications';
+        | 'publications'
+        | 'starred'
+        | 'retracted';
       collectionId?: string;
       tagId?: string;
       search?: string;
@@ -696,7 +703,9 @@ export class ProjectItemController extends BaseItemController {
         | 'unfiled'
         | 'trash'
         | 'my-publications'
-        | 'publications';
+        | 'publications'
+        | 'starred'
+        | 'retracted';
       collectionId?: string;
       tagId?: string;
       search?: string;

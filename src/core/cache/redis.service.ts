@@ -208,6 +208,38 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async getBuffer(key: string): Promise<Buffer | null> {
+    if (this.isReady() && this.redisClient) {
+      try {
+        return await this.redisClient.getBuffer(key);
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Cache getBuffer failed for key "${key}": ${getErrorMessage(err)}`,
+        );
+      }
+    }
+    return null;
+  }
+
+  async setBuffer(
+    key: string,
+    value: Buffer,
+    ttlSeconds?: number,
+  ): Promise<void> {
+    if (!this.isReady() || !this.redisClient) return;
+    try {
+      if (ttlSeconds && ttlSeconds > 0) {
+        await this.redisClient.set(key, value, 'EX', ttlSeconds);
+      } else {
+        await this.redisClient.set(key, value);
+      }
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Cache setBuffer failed for key "${key}": ${getErrorMessage(err)}`,
+      );
+    }
+  }
+
   async del(key: string): Promise<void> {
     this.memoryCache.delete(key);
     if (!this.isReady() || !this.redisClient) return;

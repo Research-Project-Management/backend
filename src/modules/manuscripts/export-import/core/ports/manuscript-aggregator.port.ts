@@ -16,5 +16,6 @@ export abstract class IManuscriptAggregatorPort {
   abstract collectProjectEntries(
     projectId: string,
     includePdf?: boolean,
+    cleanArxiv?: boolean,
   ): Promise<ExportableFileEntry[]>;
 }

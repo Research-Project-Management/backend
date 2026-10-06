@@ -199,7 +199,48 @@ export class InvitationService {
       return this.acceptInvitation(invitation.id, user);
     }
 
-    // 2. Try finding project by identifier (e.g. "BIO", "DLGA") or ID
+    // 2. Try finding project by active link sharing token (Overleaf Parity)
+    const linkProject = await this.repository.findProjectByLinkToken(trimmed);
+    if (linkProject) {
+      const settings = (linkProject.settings as any)?.linkSharing;
+      if (!settings || !settings.enabled) {
+        throw new ForbiddenException(
+          'Link sharing has been disabled for this project',
+        );
+      }
+
+      const isEdit = settings.editToken === trimmed;
+      const targetRole = isEdit ? Role.contributor : Role.reviewer;
+
+      const existingMember = await this.repository.findMember(
+        linkProject.id,
+        user.id,
+      );
+      if (existingMember) {
+        return {
+          message: 'You are already a member of this project',
+          projectId: linkProject.id,
+          project: linkProject,
+        };
+      }
+
+      await this.repository.addProjectMember(
+        linkProject.id,
+        user.id,
+        targetRole,
+      );
+      await this.invalidateInvitationCaches(linkProject.id, user.id);
+
+      return {
+        message: isEdit
+          ? 'Successfully joined project with edit access'
+          : 'Successfully joined project with view-only access',
+        projectId: linkProject.id,
+        project: linkProject,
+      };
+    }
+
+    // 3. Try finding project by identifier (e.g. "BIO", "DLGA") or ID
     const project = await this.repository.findProjectByIdOrIdentifier(trimmed);
     if (!project) {
       throw new NotFoundException('Project or invite code not found');
@@ -382,6 +423,93 @@ export class InvitationService {
 
     return {
       message: 'Invitation revoked successfully',
+    };
+  }
+
+  /**
+   * Get link sharing settings for a project.
+   */
+  async getLinkSharing(projectId: string) {
+    const project =
+      await this.repository.findProjectByIdOrIdentifier(projectId);
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const settings = ((project as any).settings || {}) as Record<string, any>;
+    const linkSharing = settings.linkSharing;
+
+    if (linkSharing && typeof linkSharing === 'object') {
+      return {
+        enabled: Boolean(linkSharing.enabled),
+        editToken: linkSharing.editToken || randomBytes(16).toString('hex'),
+        readOnlyToken:
+          linkSharing.readOnlyToken || randomBytes(16).toString('hex'),
+      };
+    }
+
+    return {
+      enabled: false,
+      editToken: randomBytes(16).toString('hex'),
+      readOnlyToken: randomBytes(16).toString('hex'),
+    };
+  }
+
+  /**
+   * Toggle link sharing on or off, optionally regenerating tokens.
+   */
+  async toggleLinkSharing(
+    projectId: string,
+    enabled: boolean,
+    regenerate: boolean = false,
+  ) {
+    const project =
+      await this.repository.findProjectByIdOrIdentifier(projectId);
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const currentSettings = ((project as any).settings || {}) as Record<
+      string,
+      any
+    >;
+    const currentLinkSharing = (currentSettings.linkSharing || {}) as Record<
+      string,
+      any
+    >;
+
+    const editToken =
+      regenerate || !currentLinkSharing.editToken
+        ? randomBytes(16).toString('hex')
+        : currentLinkSharing.editToken;
+
+    const readOnlyToken =
+      regenerate || !currentLinkSharing.readOnlyToken
+        ? randomBytes(16).toString('hex')
+        : currentLinkSharing.readOnlyToken;
+
+    const updatedLinkSharing = {
+      enabled,
+      editToken,
+      readOnlyToken,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const newSettings = {
+      ...currentSettings,
+      linkSharing: updatedLinkSharing,
+    };
+
+    await this.repository.updateProjectSettings(project.id, newSettings);
+
+    if (this.cache) {
+      await this.cache.del(CACHE_KEYS.detail(project.id)).catch(() => {});
+    }
+
+    return {
+      enabled,
+      editToken,
+      readOnlyToken,
     };
   }
 }

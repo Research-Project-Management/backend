@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../../core/database/prisma.service';
 import { isUUID } from 'class-validator';
 import {
@@ -11,6 +12,25 @@ const isValidId = (val?: unknown): val is string =>
   typeof val === 'string' &&
   Boolean(val) &&
   (process.env.NODE_ENV === 'test' || isUUID(val));
+
+/**
+ * Filter matching Zotero's retraction checking constraint:
+ * Only papers with a non-empty DOI or PMID are eligible for retraction audits.
+ */
+const RETRACTION_IDENTIFIER_FILTER = {
+  OR: [
+    {
+      doi: { not: null },
+      NOT: { doi: '' },
+    },
+    {
+      metadata: {
+        path: ['pmid'],
+        not: Prisma.AnyNull,
+      },
+    },
+  ],
+};
 
 @Injectable()
 export class RetractionRepository {
@@ -46,7 +66,9 @@ export class RetractionRepository {
     const items = await this.prisma.item.findMany({
       where: {
         ...scopeWhere,
-        ...(itemIds && itemIds.length > 0 ? { id: { in: itemIds } } : {}),
+        ...(itemIds && itemIds.length > 0
+          ? { id: { in: itemIds } }
+          : RETRACTION_IDENTIFIER_FILTER),
       },
       select: {
         id: true,
@@ -56,20 +78,22 @@ export class RetractionRepository {
       },
     });
 
-    return items.map((item) => {
-      const meta = (item.metadata as any) ?? {};
-      return {
-        id: item.id,
-        title: item.title,
-        doi: item.doi,
-        pmid: meta.pmid ?? null,
-        isRetracted: Boolean(meta.isRetracted),
-        retractionNature: meta.retractionNature ?? null,
-        retractionCheckedAt: meta.retractionCheckedAt
-          ? new Date(meta.retractionCheckedAt)
-          : null,
-      };
-    });
+    return items
+      .map((item) => {
+        const meta = (item.metadata as any) ?? {};
+        return {
+          id: item.id,
+          title: item.title,
+          doi: item.doi,
+          pmid: meta.pmid ?? null,
+          isRetracted: Boolean(meta.isRetracted),
+          retractionNature: meta.retractionNature ?? null,
+          retractionCheckedAt: meta.retractionCheckedAt
+            ? new Date(meta.retractionCheckedAt)
+            : null,
+        };
+      })
+      .filter((item) => Boolean(item.doi?.trim() || item.pmid?.trim()));
   }
 
   async findStaleItemsForSync(
@@ -82,9 +106,7 @@ export class RetractionRepository {
     const items = await this.prisma.item.findMany({
       where: {
         ...scopeWhere,
-        NOT: {
-          AND: [{ doi: null }, { title: '' }],
-        },
+        ...RETRACTION_IDENTIFIER_FILTER,
       },
       select: {
         id: true,
@@ -110,6 +132,7 @@ export class RetractionRepository {
             : null,
         };
       })
+      .filter((item) => Boolean(item.doi?.trim() || item.pmid?.trim()))
       .filter(
         (i) => !i.retractionCheckedAt || i.retractionCheckedAt < staleBefore,
       )
@@ -207,9 +230,7 @@ export class RetractionRepository {
     const items = await this.prisma.item.findMany({
       where: {
         deletedAt: null,
-        NOT: {
-          AND: [{ doi: null }, { title: '' }],
-        },
+        ...RETRACTION_IDENTIFIER_FILTER,
       },
       select: {
         id: true,
@@ -239,6 +260,7 @@ export class RetractionRepository {
             : null,
         };
       })
+      .filter((item) => Boolean(item.doi?.trim() || item.pmid?.trim()))
       .filter(
         (i) => !i.retractionCheckedAt || i.retractionCheckedAt < staleBefore,
       )

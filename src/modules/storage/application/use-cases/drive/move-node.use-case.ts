@@ -40,18 +40,28 @@ export class MoveNodeUseCase {
         );
       }
 
-      // If moving a folder, ensure target parent is not a descendant of this folder
+      // If moving a folder, ensure target parent is not a descendant of this folder (Recursive CTE)
       if (node.isFolder) {
-        let curr: StorageNode | null = targetParent;
-        const visited = new Set<string>([nodeId]);
-        while (curr && curr.parentId) {
-          if (visited.has(curr.parentId)) {
-            throw new BadRequestException(
-              'Cannot move a folder into its own subfolder (circular hierarchy detected)',
-            );
+        let isCyclic = false;
+        if (typeof this.nodeRepo.isDescendant === 'function') {
+          isCyclic = await this.nodeRepo.isDescendant(nodeId, newParentId);
+        } else {
+          let curr: StorageNode | null = targetParent;
+          const visited = new Set<string>([nodeId]);
+          while (curr && curr.parentId) {
+            if (visited.has(curr.parentId)) {
+              isCyclic = true;
+              break;
+            }
+            visited.add(curr.parentId);
+            curr = await this.nodeRepo.findById(curr.parentId);
           }
-          visited.add(curr.parentId);
-          curr = await this.nodeRepo.findById(curr.parentId);
+        }
+
+        if (isCyclic) {
+          throw new BadRequestException(
+            'Cannot move a folder into its own subfolder (circular hierarchy detected)',
+          );
         }
       }
     }

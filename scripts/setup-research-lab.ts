@@ -4,7 +4,6 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
-import { getDemoBackendFiles } from '../src/modules/manuscripts/shared/demo-manuscript.constant';
 
 const pool = new Pool({
   connectionString:

@@ -136,18 +136,36 @@ export class SavedSearchRepository {
   ) {
     const limit = Math.min(options.limit ?? 50, 100);
 
-    const orderBy: Prisma.ItemOrderByWithRelationInput =
-      options.sortBy === 'year'
-        ? { year: options.sortOrder || 'desc' }
-        : options.sortBy === 'title'
-          ? { title: options.sortOrder || 'asc' }
-          : { createdAt: options.sortOrder || 'desc' };
+    const sortDir = options.sortOrder || 'desc';
+    let orderBy: Prisma.ItemOrderByWithRelationInput;
+
+    if (options.sortBy === 'year') {
+      orderBy = { year: sortDir };
+    } else if (options.sortBy === 'title') {
+      orderBy = { title: options.sortOrder || 'asc' };
+    } else if (
+      options.sortBy === 'creator' ||
+      (options.sortBy as any) === 'authors'
+    ) {
+      orderBy = { firstAuthor: options.sortOrder || 'asc' };
+    } else if ((options.sortBy as any) === 'updatedAt') {
+      orderBy = { updatedAt: sortDir };
+    } else {
+      orderBy = { createdAt: sortDir };
+    }
+
+    const page = options.page && options.page > 0 ? options.page : 1;
+    const skip = options.cursor ? 1 : page > 1 ? (page - 1) * limit : undefined;
 
     const items = await this.prisma.item.findMany({
       where,
       orderBy,
       take: limit + 1,
-      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
+      ...(options.cursor
+        ? { cursor: { id: options.cursor }, skip: 1 }
+        : page > 1
+          ? { skip }
+          : {}),
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
         attachments: { take: 5 },

@@ -4,6 +4,7 @@ import {
   Optional,
   forwardRef,
   Inject,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import {
   IProjectInstantiatorPort,
@@ -87,14 +88,13 @@ export class ManuscriptInstantiatorAdapter implements IProjectInstantiatorPort {
               role: 'owner',
             },
           })
-          .catch(() => {
-            // ignore if already added or in mock
-          });
+          .catch(() => {});
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.debug(
-        `Prisma project creation skipped or failed (mock/fallback mode): ${msg}`,
+      this.logger.error(`Prisma project creation failed: ${msg}`);
+      throw new InternalServerErrorException(
+        `Failed to create project from template: ${msg}`,
       );
     }
 

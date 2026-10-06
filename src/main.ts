@@ -3,9 +3,16 @@ import 'dotenv/config';
 
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('tsconfig-paths/register');
+  const tsConfigPaths = require('tsconfig-paths');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require('path');
+  const isDist = __dirname.includes('dist');
+  tsConfigPaths.register({
+    baseUrl: isDist ? __dirname : path.resolve(__dirname, '..'),
+    paths: isDist ? { '@/*': ['*'] } : { '@/*': ['src/*'] },
+  });
 } catch {
-  // tsconfig-paths is only required during development when paths are not rewritten by tsc-alias
+  // tsconfig-paths fallback
 }
 import { NestFactory } from '@nestjs/core';
 import {

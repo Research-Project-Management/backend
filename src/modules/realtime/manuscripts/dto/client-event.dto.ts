@@ -147,3 +147,23 @@ export class DocSyncDto {
   @IsNotEmpty()
   data!: any;
 }
+
+export class ProjectChatSendDto {
+  @IsString()
+  @IsNotEmpty()
+  projectId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  text!: string;
+
+  @IsOptional()
+  @IsString()
+  replyToId?: string;
+}
+
+export class ProjectChatHistoryDto {
+  @IsString()
+  @IsNotEmpty()
+  projectId!: string;
+}

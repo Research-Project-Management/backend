@@ -12,7 +12,20 @@ export interface TemplateFileSpec {
 export interface CreateProjectTemplateProps {
   id: string;
   title: string;
-  category: 'article' | 'conference' | 'thesis' | 'presentation' | 'report';
+  category:
+    | 'journal'
+    | 'article'
+    | 'conference'
+    | 'thesis'
+    | 'presentation'
+    | 'report'
+    | 'book'
+    | 'letter'
+    | 'assignment'
+    | 'poster'
+    | 'cv'
+    | 'other'
+    | string;
   description: string;
   author: string;
   thumbnailUrl?: string | null;

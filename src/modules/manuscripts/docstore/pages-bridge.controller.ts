@@ -32,12 +32,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core/database/prisma.service';
 import { DocstoreService } from './docstore.service';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
-import {
-  getDemoBackendDoc,
-  getDemoBackendFiles,
-} from '../shared/demo-manuscript.constant';
 
-const isUuid = (val?: string | null): boolean =>
+const isUuid = (val?: string | null): val is string =>
   typeof val === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
@@ -61,28 +57,42 @@ export class PagesBridgeController {
    * GET /api/pages/:pageId
    */
   @Get(['docs/:pageId', 'pages/:pageId'])
-  @ApiOperation({ summary: 'Get document by pageId with fallback' })
+  @ApiOperation({ summary: 'Get document by pageId from database' })
   async getPageById(@Param('pageId') pageId: string) {
     try {
-      if (!isUuid(pageId) || pageId === 'demo') {
-        const demoDoc = getDemoBackendDoc(pageId);
-        return {
-          ...demoDoc,
-          page: demoDoc,
-        };
+      let record = null;
+
+      if (isUuid(pageId)) {
+        record = await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+          include: { node: true },
+        });
+
+        // If pageId was actually a projectId, fetch its root document
+        if (!record || record.deleted) {
+          const rootNode = await this.prisma.manuscriptNode.findFirst({
+            where: { projectId: pageId, isRootDoc: true },
+          });
+          if (rootNode?.docId) {
+            record = await this.prisma.manuscriptDoc.findUnique({
+              where: { id: rootNode.docId },
+              include: { node: true },
+            });
+          }
+        }
+      } else {
+        // Query by path or filename
+        record = await this.prisma.manuscriptDoc.findFirst({
+          where: {
+            OR: [{ path: `/${pageId}` }, { path: pageId }],
+            deleted: false,
+          },
+          include: { node: true },
+        });
       }
 
-      const record = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-        include: { node: true },
-      });
-
       if (!record || record.deleted) {
-        const demoDoc = getDemoBackendDoc(pageId);
-        return {
-          ...demoDoc,
-          page: demoDoc,
-        };
+        throw new NotFoundException(`Document ${pageId} not found`);
       }
 
       const doc = await this.docstoreService.getDoc(record.projectId, pageId);
@@ -109,18 +119,9 @@ export class PagesBridgeController {
           updatedAt: record.updatedAt,
         },
       };
-    } catch {
-      return {
-        page: {
-          id: pageId,
-          title: 'main.tex',
-          content: '',
-          status: 'published',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          projectId: 'default',
-        },
-      };
+    } catch (err) {
+      if (err instanceof NotFoundException) throw err;
+      throw new NotFoundException(`Document ${pageId} not found`);
     }
   }
 
@@ -140,96 +141,68 @@ export class PagesBridgeController {
       version?: number;
     },
   ) {
-    try {
-      if (!isUuid(pageId)) {
-        return {
-          page: {
-            id: pageId,
-            title: body.title || 'main.tex',
-            content: body.content || '',
-            status: 'published',
-            updatedAt: new Date().toISOString(),
-          },
-        };
-      }
-
-      const record = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-      });
-
-      if (!record) {
-        return {
-          page: {
-            id: pageId,
-            title: body.title || 'main.tex',
-            content: body.content || '',
-            status: 'published',
-            updatedAt: new Date().toISOString(),
-          },
-        };
-      }
-
-      const lines =
-        body.lines ||
-        (typeof body.content === 'string' ? body.content.split('\n') : []);
-
-      const result = await this.docstoreService.updateDoc(
-        record.projectId,
-        pageId,
-        {
-          lines,
-          version: (body.version ?? record.version) + 1,
-        },
-      );
-
-      const updatedLines = result.doc.lines || [];
-      const content = Array.isArray(updatedLines)
-        ? updatedLines.join('\n')
-        : String(updatedLines);
-
-      // Broadcast real-time content notification to collaborating peers
-      if (this.realtimeService && record.projectId) {
-        try {
-          this.realtimeService.broadcastEvent(
-            record.projectId,
-            'doc:content-updated',
-            {
-              docId: pageId,
-              version: result.doc.version,
-              rev: result.doc.rev,
-              content,
-              updatedAt: new Date().toISOString(),
-            },
-          );
-        } catch {
-          // Non-blocking real-time broadcast error ignored
-        }
-      }
-
-      return {
-        ...result,
-        page: {
-          id: result.doc.id,
-          title: body.title || result.doc.path || 'main.tex',
-          content,
-          status: 'published',
-          projectId: record.projectId,
-          version: result.doc.version,
-          rev: result.doc.rev,
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    } catch {
-      return {
-        page: {
-          id: pageId,
-          title: body.title || 'main.tex',
-          content: body.content || '',
-          status: 'published',
-          updatedAt: new Date().toISOString(),
-        },
-      };
+    if (!isUuid(pageId)) {
+      throw new BadRequestException('A valid UUID is required for pageId');
     }
+
+    const record = await this.prisma.manuscriptDoc.findUnique({
+      where: { id: pageId },
+    });
+
+    if (!record || record.deleted) {
+      throw new NotFoundException(`Document ${pageId} not found`);
+    }
+
+    const lines =
+      body.lines ||
+      (typeof body.content === 'string' ? body.content.split('\n') : []);
+
+    const result = await this.docstoreService.updateDoc(
+      record.projectId,
+      pageId,
+      {
+        lines,
+        version: (body.version ?? record.version) + 1,
+      },
+    );
+
+    const updatedLines = result.doc.lines || [];
+    const content = Array.isArray(updatedLines)
+      ? updatedLines.join('\n')
+      : String(updatedLines);
+
+    // Broadcast real-time content notification to collaborating peers
+    if (this.realtimeService && record.projectId) {
+      try {
+        this.realtimeService.broadcastEvent(
+          record.projectId,
+          'doc:content-updated',
+          {
+            docId: pageId,
+            version: result.doc.version,
+            rev: result.doc.rev,
+            content,
+            updatedAt: new Date().toISOString(),
+          },
+        );
+      } catch {
+        // Non-blocking real-time broadcast error ignored
+      }
+    }
+
+    return {
+      ...result,
+      page: {
+        id: result.doc.id,
+        title: body.title || result.doc.path || 'main.tex',
+        content,
+        status: 'published',
+        projectId: record.projectId,
+        version: result.doc.version,
+        rev: result.doc.rev,
+        updatedAt: new Date().toISOString(),
+      },
+    };
   }
 
   /**
@@ -257,8 +230,8 @@ export class PagesBridgeController {
   @Get(['docs/:pageId/files', 'pages/:pageId/files'])
   async getPageFiles(@Param('pageId') pageId: string) {
     try {
-      if (!isUuid(pageId) || pageId === 'demo') {
-        return { files: getDemoBackendFiles(pageId) };
+      if (!isUuid(pageId)) {
+        return { files: [] };
       }
 
       let projectId: string | null = null;
@@ -281,7 +254,7 @@ export class PagesBridgeController {
       }
 
       if (!projectId) {
-        return { files: getDemoBackendFiles(pageId) };
+        return { files: [] };
       }
 
       let nodes = await this.prisma.manuscriptNode.findMany({
@@ -319,19 +292,27 @@ export class PagesBridgeController {
         }
       }
 
+      const docMap = new Map<string, any>(allDocs.map((d) => [d.id, d]));
+
       const files = nodes
         .filter((node) => node.type !== 'FOLDER')
         .map((node) => {
           const cleanName =
             node.path.replace(/^\//, '') || node.name || 'untitled.tex';
+          const targetDoc = node.docId ? docMap.get(node.docId) : null;
+          const docLines = targetDoc?.lines || [];
+          const content = Array.isArray(docLines)
+            ? docLines.join('\n')
+            : String(docLines || '');
           return {
             id: node.docId || node.id,
             nodeId: node.id,
             name: cleanName,
             title: cleanName,
             path: node.path,
+            content,
             type: 'file',
-            size: node.sizeBytes || 0,
+            size: node.sizeBytes || (targetDoc?.sizeBytes ?? 0),
             pageId,
             createdAt: node.createdAt.toISOString(),
             updatedAt: node.updatedAt.toISOString(),
@@ -340,12 +321,17 @@ export class PagesBridgeController {
 
       if (files.length === 0 && rootDoc) {
         const cleanName = rootDoc.path.replace(/^\//, '') || 'main.tex';
+        const rootLines = rootDoc.lines || [];
+        const content = Array.isArray(rootLines)
+          ? rootLines.join('\n')
+          : String(rootLines || '');
         files.push({
           id: rootDoc.id,
           nodeId: rootDoc.id,
           name: cleanName,
           title: cleanName,
           path: rootDoc.path,
+          content,
           type: 'file',
           size: rootDoc.sizeBytes || 0,
           pageId,
@@ -355,12 +341,12 @@ export class PagesBridgeController {
       }
 
       if (files.length === 0) {
-        return { files: getDemoBackendFiles(pageId) };
+        return { files: [] };
       }
 
       return { files };
     } catch {
-      return { files: getDemoBackendFiles(pageId) };
+      return { files: [] };
     }
   }
 
@@ -398,20 +384,9 @@ export class PagesBridgeController {
     }
 
     if (!projectId) {
-      const mockId = `file-${Date.now()}`;
-      return {
-        file: {
-          id: mockId,
-          title: cleanName,
-          name: cleanName,
-          path: `/${cleanName}`,
-          type: 'file',
-          pageId,
-          content,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      };
+      throw new NotFoundException(
+        `Project not found for document or page ${pageId}`,
+      );
     }
 
     const createdDoc = await this.docstoreService.createDoc(projectId, {
@@ -474,7 +449,7 @@ export class PagesBridgeController {
         page: t.docId,
         projectPageId: t.docId,
         author: {
-          id: t.createdById || 'user-1',
+          id: t.createdById || 'anonymous',
           name: 'Collaborator',
           avatar: '',
         },
@@ -485,7 +460,7 @@ export class PagesBridgeController {
         replies: (t.replies || []).map((r) => ({
           id: r.id,
           author: {
-            id: r.createdById || 'user-1',
+            id: r.createdById || 'anonymous',
             name: 'Collaborator',
             avatar: '',
           },
@@ -514,7 +489,7 @@ export class PagesBridgeController {
     @Req() req: any,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
-    let projectId = 'default';
+    let projectId: string | null = null;
     if (isUuid(pageId)) {
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
@@ -523,55 +498,44 @@ export class PagesBridgeController {
       if (doc?.projectId) projectId = doc.projectId;
     }
 
-    try {
-      if (isUuid(pageId) && isUuid(projectId)) {
-        const thread = await this.prisma.manuscriptCommentThread.create({
-          data: {
-            docId: pageId,
-            projectId,
-            quote: body.content,
-            startLine: body.line ?? 1,
-            startCol: 0,
-            endLine: body.lineEnd ?? body.line ?? 1,
-            endCol: 0,
-            createdById: isUuid(userId) ? userId : null,
-          },
-        });
-
-        return {
-          comment: {
-            id: thread.id,
-            page: pageId,
-            projectPageId: pageId,
-            author: { id: userId || 'user-1', name: 'Collaborator' },
-            content: thread.quote || '',
-            line: thread.startLine,
-            lineEnd: thread.endLine,
-            status: 'open',
-            replies: [],
-            createdAt: thread.createdAt.toISOString(),
-            updatedAt: thread.updatedAt.toISOString(),
-          },
-        };
-      }
-    } catch {
-      // Fallback response
+    if (!isUuid(pageId) || !projectId) {
+      throw new BadRequestException(
+        'Valid pageId and associated project required to create a comment',
+      );
     }
 
-    const mockId = `cmt-${Date.now()}`;
+    const authorName =
+      req?.user?.name || req?.user?.email?.split('@')[0] || 'Collaborator';
+
+    const thread = await this.prisma.manuscriptCommentThread.create({
+      data: {
+        docId: pageId,
+        projectId,
+        quote: body.content,
+        startLine: body.line ?? 1,
+        startCol: 0,
+        endLine: body.lineEnd ?? body.line ?? 1,
+        endCol: 0,
+        createdById: isUuid(userId) ? userId : null,
+      },
+    });
+
     return {
       comment: {
-        id: mockId,
+        id: thread.id,
         page: pageId,
         projectPageId: pageId,
-        author: { id: userId || 'user-1', name: 'Collaborator' },
-        content: body.content || '',
-        line: body.line ?? 1,
-        lineEnd: body.lineEnd ?? body.line ?? 1,
+        author: {
+          id: userId || thread.createdById || 'anonymous',
+          name: authorName,
+        },
+        content: thread.quote || '',
+        line: thread.startLine,
+        lineEnd: thread.endLine,
         status: 'open',
         replies: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: thread.createdAt.toISOString(),
+        updatedAt: thread.updatedAt.toISOString(),
       },
     };
   }
@@ -588,60 +552,48 @@ export class PagesBridgeController {
     @Param('commentId') commentId: string,
     @Body() body: { content?: string; status?: 'open' | 'resolved' },
   ) {
-    if (isUuid(commentId)) {
-      try {
-        const updated = await this.prisma.manuscriptCommentThread.update({
-          where: { id: commentId },
-          data: {
-            ...(body.content !== undefined ? { quote: body.content } : {}),
-            ...(body.status !== undefined
-              ? { isResolved: body.status === 'resolved' }
-              : {}),
-          },
-          include: { replies: true },
-        });
-
-        return {
-          comment: {
-            id: updated.id,
-            page: updated.docId,
-            projectPageId: updated.docId,
-            author: {
-              id: updated.createdById || 'user-1',
-              name: 'Collaborator',
-            },
-            content: updated.quote || '',
-            line: updated.startLine,
-            lineEnd: updated.endLine,
-            status: updated.isResolved ? 'resolved' : 'open',
-            replies: (updated.replies || []).map((r) => ({
-              id: r.id,
-              author: { id: r.createdById || 'user-1', name: 'Collaborator' },
-              content: r.content,
-              createdAt: r.createdAt.toISOString(),
-            })),
-            createdAt: updated.createdAt.toISOString(),
-            updatedAt: updated.updatedAt.toISOString(),
-          },
-        };
-      } catch {
-        // Continue to fallback
-      }
+    if (!isUuid(commentId)) {
+      throw new BadRequestException('A valid UUID is required for commentId');
     }
 
-    return {
-      comment: {
-        id: commentId,
-        page: 'default',
-        author: { id: 'user-1', name: 'Collaborator' },
-        content: body.content || '',
-        line: 1,
-        status: body.status || 'open',
-        replies: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-    };
+    try {
+      const updated = await this.prisma.manuscriptCommentThread.update({
+        where: { id: commentId },
+        data: {
+          ...(body.content !== undefined ? { quote: body.content } : {}),
+          ...(body.status !== undefined
+            ? { isResolved: body.status === 'resolved' }
+            : {}),
+        },
+        include: { replies: true },
+      });
+
+      return {
+        comment: {
+          id: updated.id,
+          page: updated.docId,
+          projectPageId: updated.docId,
+          author: {
+            id: updated.createdById || 'anonymous',
+            name: 'Collaborator',
+          },
+          content: updated.quote || '',
+          line: updated.startLine,
+          lineEnd: updated.endLine,
+          status: updated.isResolved ? 'resolved' : 'open',
+          replies: (updated.replies || []).map((r) => ({
+            id: r.id,
+            author: { id: r.createdById || 'anonymous', name: 'Collaborator' },
+            content: r.content,
+            createdAt: r.createdAt.toISOString(),
+          })),
+          createdAt: updated.createdAt.toISOString(),
+          updatedAt: updated.updatedAt.toISOString(),
+        },
+      };
+    } catch {
+      throw new NotFoundException(`Comment thread ${commentId} not found`);
+    }
   }
 
   /**
@@ -679,64 +631,60 @@ export class PagesBridgeController {
     @Req() req: any,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
-    if (isUuid(commentId)) {
-      try {
-        await this.prisma.manuscriptCommentReply.create({
-          data: {
-            threadId: commentId,
-            content: body.content,
-            createdById: isUuid(userId) ? userId : null,
-          },
-        });
-
-        const thread = await this.prisma.manuscriptCommentThread.findUnique({
-          where: { id: commentId },
-          include: { replies: { orderBy: { createdAt: 'asc' } } },
-        });
-
-        if (thread) {
-          return {
-            comment: {
-              id: thread.id,
-              page: thread.docId,
-              projectPageId: thread.docId,
-              author: {
-                id: thread.createdById || 'user-1',
-                name: 'Collaborator',
-              },
-              content: thread.quote || '',
-              line: thread.startLine,
-              lineEnd: thread.endLine,
-              status: thread.isResolved ? 'resolved' : 'open',
-              replies: (thread.replies || []).map((r) => ({
-                id: r.id,
-                author: { id: r.createdById || 'user-1', name: 'Collaborator' },
-                content: r.content,
-                createdAt: r.createdAt.toISOString(),
-              })),
-              createdAt: thread.createdAt.toISOString(),
-              updatedAt: thread.updatedAt.toISOString(),
-            },
-          };
-        }
-      } catch {
-        // Fallback
-      }
+    if (!isUuid(commentId)) {
+      throw new BadRequestException('A valid UUID is required for commentId');
     }
 
-    return {
-      comment: {
-        id: commentId,
-        content: '',
-        replies: [
-          {
-            id: `rep-${Date.now()}`,
-            content: body.content,
-            createdAt: new Date().toISOString(),
+    try {
+      await this.prisma.manuscriptCommentReply.create({
+        data: {
+          threadId: commentId,
+          content: body.content,
+          createdById: isUuid(userId) ? userId : null,
+        },
+      });
+
+      const thread = await this.prisma.manuscriptCommentThread.findUnique({
+        where: { id: commentId },
+        include: { replies: { orderBy: { createdAt: 'asc' } } },
+      });
+
+      if (!thread) {
+        throw new NotFoundException(`Comment thread ${commentId} not found`);
+      }
+
+      return {
+        comment: {
+          id: thread.id,
+          page: thread.docId,
+          projectPageId: thread.docId,
+          author: {
+            id: thread.createdById || 'anonymous',
+            name: 'Collaborator',
           },
-        ],
-      },
-    };
+          content: thread.quote || '',
+          line: thread.startLine,
+          lineEnd: thread.endLine,
+          status: thread.isResolved ? 'resolved' : 'open',
+          replies: (thread.replies || []).map((r) => ({
+            id: r.id,
+            author: { id: r.createdById || 'anonymous', name: 'Collaborator' },
+            content: r.content,
+            createdAt: r.createdAt.toISOString(),
+          })),
+          createdAt: thread.createdAt.toISOString(),
+          updatedAt: thread.updatedAt.toISOString(),
+        },
+      };
+    } catch (err) {
+      if (
+        err instanceof NotFoundException ||
+        err instanceof BadRequestException
+      ) {
+        throw err;
+      }
+      throw new NotFoundException(`Comment thread ${commentId} not found`);
+    }
   }
 
   /**
@@ -773,42 +721,43 @@ export class PagesBridgeController {
     @Body() body: { resolved?: boolean },
   ) {
     const isResolved = body.resolved ?? true;
-    if (isUuid(commentId)) {
-      try {
-        const thread = await this.prisma.manuscriptCommentThread.update({
-          where: { id: commentId },
-          data: { isResolved },
-          include: { replies: true },
-        });
-
-        return {
-          comment: {
-            id: thread.id,
-            page: thread.docId,
-            projectPageId: thread.docId,
-            author: {
-              id: thread.createdById || 'user-1',
-              name: 'Collaborator',
-            },
-            content: thread.quote || '',
-            line: thread.startLine,
-            lineEnd: thread.endLine,
-            status: thread.isResolved ? 'resolved' : 'open',
-            replies: (thread.replies || []).map((r) => ({
-              id: r.id,
-              author: { id: r.createdById || 'user-1', name: 'Collaborator' },
-              content: r.content,
-              createdAt: r.createdAt.toISOString(),
-            })),
-            createdAt: thread.createdAt.toISOString(),
-            updatedAt: thread.updatedAt.toISOString(),
-          },
-        };
-      } catch {
-        // Fallback
-      }
+    if (!isUuid(commentId)) {
+      throw new BadRequestException('A valid UUID is required for commentId');
     }
-    return { success: true };
+
+    try {
+      const thread = await this.prisma.manuscriptCommentThread.update({
+        where: { id: commentId },
+        data: { isResolved },
+        include: { replies: true },
+      });
+
+      return {
+        comment: {
+          id: thread.id,
+          page: thread.docId,
+          projectPageId: thread.docId,
+          author: {
+            id: thread.createdById || 'anonymous',
+            name: 'Collaborator',
+          },
+          content: thread.quote || '',
+          line: thread.startLine,
+          lineEnd: thread.endLine,
+          status: thread.isResolved ? 'resolved' : 'open',
+          replies: (thread.replies || []).map((r) => ({
+            id: r.id,
+            author: { id: r.createdById || 'anonymous', name: 'Collaborator' },
+            content: r.content,
+            createdAt: r.createdAt.toISOString(),
+          })),
+          createdAt: thread.createdAt.toISOString(),
+          updatedAt: thread.updatedAt.toISOString(),
+        },
+      };
+    } catch {
+      throw new NotFoundException(`Comment thread ${commentId} not found`);
+    }
   }
 
   // ─── 3. TRACK CHANGES / REVIEW SUGGESTIONS ───────────────────────────────────
@@ -829,17 +778,18 @@ export class PagesBridgeController {
       const records = await this.prisma.manuscriptTrackChange.findMany({
         where,
         orderBy: { createdAt: 'desc' },
+        take: 5000,
       });
 
       const suggestions = records.map((s) => ({
         id: s.id,
         pageId: s.docId,
         projectPageId: s.docId,
-        authorId: s.createdById || 'user-1',
+        authorId: s.createdById || 'anonymous',
         author: {
-          id: s.createdById || 'user-1',
+          id: s.createdById || 'anonymous',
           name: 'Collaborator',
-          email: 'collaborator@flux.ai',
+          email: '',
         },
         type: s.type,
         originalText: s.type === 'delete' ? s.text : '',
@@ -874,7 +824,7 @@ export class PagesBridgeController {
     @Req() req: any,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
-    let projectId = 'default';
+    let projectId: string | null = null;
     if (isUuid(pageId)) {
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
@@ -886,71 +836,51 @@ export class PagesBridgeController {
     const type = body.type === 'delete' ? 'delete' : 'insert';
     const text = body.suggestedText || body.originalText || '';
 
-    try {
-      if (isUuid(pageId) && isUuid(projectId)) {
-        const record = await this.prisma.manuscriptTrackChange.create({
-          data: {
-            docId: pageId,
-            projectId,
-            type,
-            status: 'pending',
-            text,
-            startLine: body.fromLine ?? 1,
-            startCol: body.fromColumn ?? 0,
-            endLine: body.toLine ?? body.fromLine ?? 1,
-            endCol: body.toColumn ?? 0,
-            createdById: isUuid(userId) ? userId : null,
-          },
-        });
-
-        return {
-          suggestion: {
-            id: record.id,
-            pageId: record.docId,
-            authorId: userId || 'user-1',
-            author: {
-              id: userId || 'user-1',
-              name: 'Collaborator',
-              email: 'collaborator@flux.ai',
-            },
-            type: record.type,
-            originalText: record.type === 'delete' ? record.text : '',
-            suggestedText: record.type === 'insert' ? record.text : '',
-            fromLine: record.startLine,
-            fromColumn: record.startCol,
-            toLine: record.endLine,
-            toColumn: record.endCol,
-            status: record.status,
-            createdAt: record.createdAt.toISOString(),
-            updatedAt: record.updatedAt.toISOString(),
-          },
-        };
-      }
-    } catch {
-      // Fallback
+    if (!isUuid(pageId) || !projectId) {
+      throw new BadRequestException(
+        'Valid pageId and associated project required to create a suggestion',
+      );
     }
 
-    const mockId = `sug-${Date.now()}`;
+    const authorName =
+      req?.user?.name || req?.user?.email?.split('@')[0] || 'Collaborator';
+    const authorEmail = req?.user?.email || '';
+
+    const record = await this.prisma.manuscriptTrackChange.create({
+      data: {
+        docId: pageId,
+        projectId,
+        type: type as any,
+        status: 'pending',
+        text,
+        startLine: body.fromLine ?? 1,
+        startCol: body.fromColumn ?? 0,
+        endLine: body.toLine ?? body.fromLine ?? 1,
+        endCol: body.toColumn ?? 0,
+        createdById: isUuid(userId) ? userId : null,
+      },
+    });
+
     return {
       suggestion: {
-        id: mockId,
-        pageId,
-        authorId: userId || 'user-1',
+        id: record.id,
+        pageId: record.docId,
+        authorId: userId || 'anonymous',
         author: {
-          id: userId || 'user-1',
-          name: 'Collaborator',
-          email: 'collaborator@flux.ai',
+          id: userId || 'anonymous',
+          name: authorName,
+          email: authorEmail,
         },
-        type,
-        originalText: type === 'delete' ? text : '',
-        suggestedText: type === 'insert' ? text : '',
-        fromLine: body.fromLine ?? 1,
-        fromColumn: body.fromColumn ?? 0,
-        toLine: body.toLine ?? body.fromLine ?? 1,
-        toColumn: body.toColumn ?? 0,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        type: record.type,
+        originalText: record.type === 'delete' ? record.text : '',
+        suggestedText: record.type === 'insert' ? record.text : '',
+        fromLine: record.startLine,
+        fromColumn: record.startCol,
+        toLine: record.endLine,
+        toColumn: record.endCol,
+        status: record.status,
+        createdAt: record.createdAt.toISOString(),
+        updatedAt: record.updatedAt.toISOString(),
       },
     };
   }
@@ -1080,6 +1010,7 @@ export class PagesBridgeController {
         where: { projectId },
         include: { labels: true },
         orderBy: { version: 'desc' },
+        take: 500,
       });
 
       const versions = snapshots.map((s) => ({
@@ -1087,7 +1018,7 @@ export class PagesBridgeController {
         title: `v${s.version} Snapshot`,
         label: s.labels?.[0]?.label || s.summary || `Version ${s.version}`,
         fileName: 'main.tex',
-        savedBy: { id: s.createdById || 'user-1', name: 'Collaborator' },
+        savedBy: { id: s.createdById || 'anonymous', name: 'Collaborator' },
         createdAt: s.createdAt.toISOString(),
       }));
       return { versions };
@@ -1121,7 +1052,7 @@ export class PagesBridgeController {
           title: `v${s.version} Snapshot`,
           label: s.labels?.[0]?.label || s.summary || `Version ${s.version}`,
           fileName: 'main.tex',
-          savedBy: { id: s.createdById || 'user-1', name: 'Collaborator' },
+          savedBy: { id: s.createdById || 'anonymous', name: 'Collaborator' },
           createdAt: s.createdAt.toISOString(),
           content: typeof s.files === 'object' ? JSON.stringify(s.files) : '',
         },
@@ -1152,47 +1083,39 @@ export class PagesBridgeController {
       projectId = doc?.projectId;
     }
 
-    if (projectId && isUuid(projectId)) {
-      try {
-        const count = await this.prisma.manuscriptSnapshot.count({
-          where: { projectId },
-        });
-        const snap = await this.prisma.manuscriptSnapshot.create({
-          data: {
-            projectId,
-            version: count + 1,
-            summary: body.label || 'Manual Snapshot',
-            createdById: isUuid(userId) ? userId : null,
-            files: body.content ? { 'main.tex': body.content } : {},
-          },
-        });
-        return {
-          version: {
-            id: snap.id,
-            title: `v${snap.version} Snapshot`,
-            label: body.label || `Version ${snap.version}`,
-            fileName: 'main.tex',
-            savedBy: { id: userId || 'user-1', name: 'Collaborator' },
-            createdAt: snap.createdAt.toISOString(),
-            content: body.content || '',
-          },
-        };
-      } catch {
-        // Fallback
-      }
+    if (!projectId || !isUuid(projectId)) {
+      throw new NotFoundException(`Project not found for doc ${pageId}`);
     }
 
-    return {
-      version: {
-        id: `v-${Date.now()}`,
-        title: 'Snapshot',
-        label: body.label || 'Manual Snapshot',
-        fileName: 'main.tex',
-        savedBy: { id: userId || 'user-1', name: 'Collaborator' },
-        createdAt: new Date().toISOString(),
-        content: body.content || '',
-      },
-    };
+    try {
+      const count = await this.prisma.manuscriptSnapshot.count({
+        where: { projectId },
+      });
+      const snap = await this.prisma.manuscriptSnapshot.create({
+        data: {
+          projectId,
+          version: count + 1,
+          summary: body.label || 'Manual Snapshot',
+          createdById: isUuid(userId) ? userId : null,
+          files: body.content ? { 'main.tex': body.content } : {},
+        },
+      });
+      return {
+        version: {
+          id: snap.id,
+          title: `v${snap.version} Snapshot`,
+          label: body.label || `Version ${snap.version}`,
+          fileName: 'main.tex',
+          savedBy: { id: userId || 'anonymous', name: 'Collaborator' },
+          createdAt: snap.createdAt.toISOString(),
+          content: body.content || '',
+        },
+      };
+    } catch (err) {
+      throw new InternalServerErrorException(
+        'Failed to create snapshot version',
+      );
+    }
   }
 
   /**
@@ -1389,28 +1312,24 @@ export class PagesBridgeController {
   @Post(['docs/:pageId/export', 'pages/:pageId/export'])
   @HttpCode(HttpStatus.OK)
   async exportDocument(@Param('pageId') pageId: string) {
-    let content = '';
-    let filename = 'document.tex';
-    const mimeType = 'application/x-tex';
-
-    if (isUuid(pageId)) {
-      try {
-        const doc = await this.prisma.manuscriptDoc.findUnique({
-          where: { id: pageId },
-        });
-        if (doc) {
-          filename = doc.path || 'document.tex';
-          const lines = doc.lines as string[] | undefined;
-          content = Array.isArray(lines) ? lines.join('\n') : '';
-        }
-      } catch {
-        // Fallback
-      }
+    if (!isUuid(pageId)) {
+      throw new BadRequestException('A valid UUID is required for pageId');
     }
+
+    const doc = await this.prisma.manuscriptDoc.findUnique({
+      where: { id: pageId },
+    });
+    if (!doc || doc.deleted) {
+      throw new NotFoundException(`Document ${pageId} not found`);
+    }
+
+    const filename = doc.path?.replace(/^\//, '') || 'document.tex';
+    const lines = doc.lines as string[] | undefined;
+    const content = Array.isArray(lines) ? lines.join('\n') : '';
 
     return {
       filename,
-      mimeType,
+      mimeType: 'application/x-tex',
       content,
       isBase64: false,
       sizeBytes: Buffer.byteLength(content, 'utf8'),
@@ -1442,11 +1361,13 @@ export class PagesBridgeController {
 
     try {
       const docs = await this.prisma.manuscriptDoc.findMany({
-        where: { projectId },
+        where: { projectId, deleted: false },
+        select: { id: true, path: true, lines: true },
       });
 
       const results = [];
       let totalMatches = 0;
+      const q = body.caseSensitive ? query : query.toLowerCase();
 
       for (const doc of docs) {
         const lines = (doc.lines as string[]) || [];
@@ -1455,7 +1376,6 @@ export class PagesBridgeController {
         for (let i = 0; i < lines.length; i++) {
           const lineStr = lines[i] || '';
           const target = body.caseSensitive ? lineStr : lineStr.toLowerCase();
-          const q = body.caseSensitive ? query : query.toLowerCase();
           const matchStart = target.indexOf(q);
 
           if (matchStart !== -1) {
@@ -1531,72 +1451,372 @@ export class PagesBridgeController {
   @HttpCode(HttpStatus.CREATED)
   async createProjectPage(
     @Param('projectId') projectId: string,
-    @Body() body: { title?: string; content?: string; status?: string },
+    @Body()
+    body: {
+      title?: string;
+      content?: string;
+      status?: string;
+      labels?: string[];
+      labelIds?: string[];
+      templateType?: string;
+    },
     @Req() req: any,
   ) {
     const title = body?.title || 'main.tex';
-    const content = body?.content || '';
+    let content = body?.content || '';
     const userId = req?.user?.id || req?.user?.sub || null;
 
-    if (isUuid(projectId)) {
+    const labelIds: string[] = Array.isArray(body?.labels)
+      ? body.labels
+      : Array.isArray(body?.labelIds)
+        ? body.labelIds
+        : [];
+
+    let attachedLabels: { id: string; name: string; color: string }[] = [];
+    if (labelIds.length > 0) {
       try {
-        const doc = await this.docstoreService.createDoc(projectId, {
-          path: title.startsWith('/') ? title : `/${title}`,
-          text: content,
-          version: 1,
+        const found = await this.prisma.label.findMany({
+          where: { id: { in: labelIds } },
         });
-
-        // Ensure a corresponding manuscriptNode exists in the file tree
-        try {
-          await this.prisma.manuscriptNode.create({
-            data: {
-              projectId,
-              name: title.replace(/^\//, ''),
-              path: title.startsWith('/') ? title : `/${title}`,
-              type: 'DOC',
-              docId: doc._id,
-              isRootDoc: true,
-              sizeBytes: Buffer.byteLength(content, 'utf8'),
-            },
+        if (found.length > 0) {
+          attachedLabels = found.map((l) => ({
+            id: l.id,
+            name: l.name,
+            color: l.color,
+          }));
+        } else {
+          const foundWork = await this.prisma.workItemLabel.findMany({
+            where: { id: { in: labelIds } },
           });
-        } catch {
-          // ignore duplicate path conflicts
+          attachedLabels = foundWork.map((l) => ({
+            id: l.id,
+            name: l.name,
+            color: l.color,
+          }));
         }
-
-        return {
-          page: {
-            id: doc._id,
-            title: doc.path.replace(/^\//, ''),
-            content,
-            status: body?.status || 'draft',
-            projectId,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          mainFile: { id: doc._id, title: doc.path.replace(/^\//, '') },
-          rootPageId: doc._id,
-          mainFileId: doc._id,
-        };
       } catch {
-        // Fallback
+        // Fallback silently if labels query fails
       }
     }
 
-    const mockId = `page-${Date.now()}`;
+    if (!isUuid(projectId)) {
+      throw new BadRequestException(
+        'A valid UUID projectId is required to create a project page',
+      );
+    }
+
+    // Mirror Overleaf Project Initialization:
+    if (body?.templateType === 'example') {
+      content = await this.buildExampleProjectTemplate(
+        projectId,
+        title,
+        userId,
+      );
+      await this.ensureExampleReferencesBib(projectId);
+    } else if (!content.trim()) {
+      content = await this.buildBlankProjectTemplate(projectId, title, userId);
+    }
+
+    // Ensure project settings are configured with Overleaf standard defaults
+    try {
+      const proj = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { settings: true },
+      });
+      const settings = (proj?.settings as Record<string, any>) || {};
+      if (!settings.manuscript) {
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: {
+            settings: {
+              ...settings,
+              manuscript: {
+                compiler: 'pdflatex',
+                mainFile: title.replace(/^\//, ''),
+                spellCheckLanguage: 'en_US',
+                texLiveVersion: '2024',
+              },
+            },
+          },
+        });
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    const doc = await this.docstoreService.createDoc(projectId, {
+      path: title.startsWith('/') ? title : `/${title}`,
+      text: content,
+      version: 1,
+      ranges: { labelIds, labels: attachedLabels },
+    });
+
+    // Ensure a corresponding manuscriptNode exists in the file tree
+    try {
+      await this.prisma.manuscriptNode.create({
+        data: {
+          projectId,
+          name: title.replace(/^\//, ''),
+          path: title.startsWith('/') ? title : `/${title}`,
+          type: 'DOC',
+          docId: doc._id,
+          isRootDoc: true,
+          sizeBytes: Buffer.byteLength(content, 'utf8'),
+        },
+      });
+    } catch {
+      // ignore duplicate path conflicts
+    }
+
     return {
       page: {
-        id: mockId,
-        title,
+        id: doc._id,
+        title: doc.path.replace(/^\//, ''),
         content,
         status: body?.status || 'draft',
         projectId,
+        labels: attachedLabels,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
-      mainFile: { id: mockId, title },
-      rootPageId: mockId,
-      mainFileId: mockId,
+      mainFile: { id: doc._id, title: doc.path.replace(/^\//, '') },
+      rootPageId: doc._id,
+      mainFileId: doc._id,
     };
+  }
+
+  /**
+   * Builds the default main document exactly like Overleaf's "Blank Project"
+   * (services/web/app/templates/project_files/mainbasic.tex):
+   *   \title{<project_name>} \author{<first> <last>} \date{<Month> <Year>}
+   */
+  private async buildBlankProjectTemplate(
+    projectId: string,
+    title: string,
+    userId: string | null,
+  ): Promise<string> {
+    const escapeTex = (s: string) =>
+      s.replace(/([\\{}$&#%_^~])/g, (m) =>
+        m === '\\'
+          ? '\\textbackslash{}'
+          : m === '~'
+            ? '\\textasciitilde{}'
+            : m === '^'
+              ? '\\textasciicircum{}'
+              : `\\${m}`,
+      );
+
+    let projectName = '';
+    let authorName = '';
+    try {
+      const [project, user] = await Promise.all([
+        this.prisma.project.findUnique({
+          where: { id: projectId },
+          select: { name: true },
+        }),
+        userId && isUuid(userId)
+          ? this.prisma.user.findUnique({
+              where: { id: userId },
+              select: {
+                email: true,
+                profile: { select: { name: true } },
+              },
+            })
+          : Promise.resolve(null),
+      ]);
+      projectName = project?.name ?? '';
+      authorName = user?.profile?.name || user?.email?.split('@')[0] || '';
+    } catch {
+      // Metadata is cosmetic; never block page creation
+    }
+
+    const fileBase = title.replace(/^\//, '').replace(/\.tex$/i, '');
+    const docTitle =
+      fileBase && fileBase !== 'main' ? fileBase : projectName || 'Untitled';
+    const now = new Date();
+    const month = now.toLocaleString('en-US', { month: 'long' });
+
+    return [
+      '\\documentclass{article}',
+      '\\usepackage{graphicx} % Required for inserting images',
+      '',
+      `\\title{${escapeTex(docTitle)}}`,
+      `\\author{${escapeTex(authorName)}}`,
+      `\\date{${month} ${now.getFullYear()}}`,
+      '',
+      '\\begin{document}',
+      '',
+      '\\maketitle',
+      '',
+      '\\section{Introduction}',
+      '',
+      '\\end{document}',
+      '',
+    ].join('\n');
+  }
+
+  /**
+   * Builds the comprehensive document matching Overleaf's "Example Project"
+   * containing sections, math equations, tables, figures, and bibliographic citations.
+   */
+  private async buildExampleProjectTemplate(
+    projectId: string,
+    title: string,
+    userId: string | null,
+  ): Promise<string> {
+    const escapeTex = (s: string) =>
+      s.replace(/([\\{}$&#%_^~])/g, (m) =>
+        m === '\\'
+          ? '\\textbackslash{}'
+          : m === '~'
+            ? '\\textasciitilde{}'
+            : m === '^'
+              ? '\\textasciicircum{}'
+              : `\\${m}`,
+      );
+
+    let projectName = '';
+    let authorName = '';
+    try {
+      const [project, user] = await Promise.all([
+        this.prisma.project.findUnique({
+          where: { id: projectId },
+          select: { name: true },
+        }),
+        userId && isUuid(userId)
+          ? this.prisma.user.findUnique({
+              where: { id: userId },
+              select: {
+                email: true,
+                profile: { select: { name: true } },
+              },
+            })
+          : Promise.resolve(null),
+      ]);
+      projectName = project?.name ?? '';
+      authorName = user?.profile?.name || user?.email?.split('@')[0] || '';
+    } catch {
+      // Non-blocking
+    }
+
+    const fileBase = title.replace(/^\//, '').replace(/\.tex$/i, '');
+    const docTitle =
+      fileBase && fileBase !== 'main' ? fileBase : projectName || 'Untitled';
+    const now = new Date();
+    const month = now.toLocaleString('en-US', { month: 'long' });
+
+    return [
+      '\\documentclass{article}',
+      '\\usepackage{graphicx} % Required for inserting images',
+      '\\usepackage{amsmath,amssymb}',
+      '\\usepackage{cite}',
+      '',
+      `\\title{${escapeTex(docTitle)}}`,
+      `\\author{${escapeTex(authorName)}}`,
+      `\\date{${month} ${now.getFullYear()}}`,
+      '',
+      '\\begin{document}',
+      '',
+      '\\maketitle',
+      '',
+      '\\begin{abstract}',
+      'This document serves as an example starter project, illustrating standard LaTeX typesetting including mathematical notation, tabular structures, and automated reference citations.',
+      '\\end{abstract}',
+      '',
+      '\\section{Introduction}',
+      'LaTeX is widely used in academia and technical fields for producing structured, professional documents. This example introduces foundational capabilities that can be extended for papers, theses, or technical reports.',
+      '',
+      '\\section{Mathematical Formulations}',
+      'Mathematical expressions can appear inline, such as $E = mc^2$ or $\\sum_{k=1}^{\\infty} \\frac{1}{k^2} = \\frac{\\pi^2}{6}$.',
+      '',
+      'Key formulations can also be displayed in numbered equation environments:',
+      '\\begin{equation}',
+      '\\label{eq:fourier}',
+      '\\hat{f}(\\xi) = \\int_{-\\infty}^{\\infty} f(x) e^{-2\\pi i x \\xi} dx',
+      '\\end{equation}',
+      'Equation~\\eqref{eq:fourier} defines the continuous Fourier transform.',
+      '',
+      '\\section{Data Presentation}',
+      'Table~\\ref{tab:benchmarks} demonstrates a clean numerical layout for experimental results.',
+      '',
+      '\\begin{table}[htbp]',
+      '\\centering',
+      '\\caption{Comparative performance metrics across evaluation trials.}',
+      '\\label{tab:benchmarks}',
+      '\\begin{tabular}{lccc}',
+      '\\hline',
+      '\\textbf{Model} & \\textbf{Precision (\\%)} & \\textbf{Recall (\\%)} & \\textbf{F1-Score} \\\\',
+      '\\hline',
+      'Baseline & 84.2 & 81.7 & 0.829 \\\\',
+      'Flux Engine & \\textbf{92.5} & \\textbf{90.1} & \\textbf{0.913} \\\\',
+      '\\hline',
+      '\\end{tabular}',
+      '\\end{table}',
+      '',
+      '\\section{Citations and References}',
+      'Referencing external sources is essential in academic writing. You can cite bibliography entries defined in the companion \\texttt{references.bib} file, such as \\cite{knuth1984texbook} and \\cite{lamport1994latex}.',
+      '',
+      '\\bibliographystyle{plain}',
+      '\\bibliography{references}',
+      '',
+      '\\end{document}',
+      '',
+    ].join('\n');
+  }
+
+  /**
+   * Automatically creates references.bib in the project if it does not already exist
+   */
+  private async ensureExampleReferencesBib(projectId: string): Promise<void> {
+    const bibPath = '/references.bib';
+    try {
+      const existing = await this.prisma.manuscriptNode.findFirst({
+        where: {
+          projectId,
+          path: bibPath,
+        },
+      });
+      if (!existing) {
+        const bibContent = [
+          '@book{knuth1984texbook,',
+          '  author    = {Donald E. Knuth},',
+          '  title     = {The {\\TeX}book},',
+          '  year      = {1984},',
+          '  publisher = {Addison-Wesley},',
+          '  address   = {Reading, Massachusetts}',
+          '}',
+          '',
+          '@book{lamport1994latex,',
+          '  author    = {Leslie Lamport},',
+          '  title     = {{\\LaTeX}: A Document Preparation System},',
+          '  year      = {1994},',
+          '  publisher = {Addison-Wesley},',
+          '  edition   = {Second}',
+          '}',
+          '',
+        ].join('\n');
+
+        const createdDoc = await this.docstoreService.createDoc(projectId, {
+          path: bibPath,
+          text: bibContent,
+          version: 1,
+        });
+
+        await this.prisma.manuscriptNode.create({
+          data: {
+            projectId,
+            name: 'references.bib',
+            path: bibPath,
+            type: 'DOC',
+            docId: createdDoc._id,
+            isRootDoc: false,
+            sizeBytes: Buffer.byteLength(bibContent, 'utf8'),
+          },
+        });
+      }
+    } catch {
+      // Non-fatal if companion creation fails
+    }
   }
 
   /**
@@ -1634,48 +1854,24 @@ export class PagesBridgeController {
         orderBy: { sortOrder: 'asc' },
       });
 
-      const docLabelsMap: Record<
-        string,
-        { id: string; name: string; color: string }[]
-      > = {
-        '/main.tex': [
-          { id: 'lbl-dl', name: 'Deep Learning', color: '#3B82F6' },
-          { id: 'lbl-fm', name: 'Fluid Dynamics', color: '#06B6D4' },
-          { id: 'lbl-q1', name: 'Q1 Manuscript', color: '#8B5CF6' },
-        ],
-        '/documents/01_grant_proposal.tex': [
-          { id: 'lbl-grant', name: 'NAFOSTED Grant', color: '#10B981' },
-          { id: 'lbl-funding', name: 'Lab Funding', color: '#F59E0B' },
-        ],
-        '/grant_proposal.tex': [
-          { id: 'lbl-grant', name: 'NAFOSTED Grant', color: '#10B981' },
-          { id: 'lbl-funding', name: 'Lab Funding', color: '#F59E0B' },
-        ],
-        '/documents/02_technical_report.tex': [
-          { id: 'lbl-bench', name: 'DNS Benchmark', color: '#6366F1' },
-          { id: 'lbl-nek', name: 'Nek5000 Solver', color: '#06B6D4' },
-        ],
-        '/technical_report.tex': [
-          { id: 'lbl-bench', name: 'DNS Benchmark', color: '#6366F1' },
-          { id: 'lbl-nek', name: 'Nek5000 Solver', color: '#06B6D4' },
-        ],
-        '/documents/03_lab_handbook.tex': [
-          { id: 'lbl-hpc', name: 'GPU Cluster & HPC', color: '#F59E0B' },
-          { id: 'lbl-sop', name: 'Lab SOP', color: '#6366F1' },
-        ],
-        '/lab_handbook.tex': [
-          { id: 'lbl-hpc', name: 'GPU Cluster & HPC', color: '#F59E0B' },
-          { id: 'lbl-sop', name: 'Lab SOP', color: '#6366F1' },
-        ],
-        '/documents/04_journal_club_notes.tex': [
-          { id: 'lbl-seminar', name: 'Journal Club', color: '#EC4899' },
-          { id: 'lbl-review', name: 'Peer Review', color: '#F97316' },
-        ],
-        '/journal_club_notes.tex': [
-          { id: 'lbl-seminar', name: 'Journal Club', color: '#EC4899' },
-          { id: 'lbl-review', name: 'Peer Review', color: '#F97316' },
-        ],
-      };
+      // Fetch project to retrieve creator details if present
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: {
+          id: true,
+          createdBy: {
+            select: {
+              id: true,
+              email: true,
+              profile: { select: { name: true } },
+            },
+          },
+        },
+      });
+      const authorName =
+        project?.createdBy?.profile?.name ||
+        project?.createdBy?.email?.split('@')[0] ||
+        'Author';
 
       let pages = rootNodes.map((node) => {
         const d = node.doc;
@@ -1687,7 +1883,8 @@ export class PagesBridgeController {
               ? d.lines
               : '';
 
-        const pageLabels = docLabelsMap[node.path] || [];
+        const ranges = (d?.ranges as any) || {};
+        const pageLabels = Array.isArray(ranges.labels) ? ranges.labels : [];
 
         return {
           id: d?.id || node.docId || node.id,
@@ -1695,7 +1892,7 @@ export class PagesBridgeController {
           content,
           status: 'published',
           projectId,
-          author: { name: 'Tấn Thành' },
+          author: { name: authorName },
           labels: pageLabels,
           mainFile: { id: d?.id || node.docId || node.id, title },
           mainFileId: d?.id || node.docId || node.id,
@@ -1756,6 +1953,176 @@ export class PagesBridgeController {
       }
     }
     return { success: true };
+  }
+
+  /**
+   * GET /api/v1/manuscripts/docs/:pageId/deleted-files
+   * GET /api/pages/:pageId/deleted-files
+   */
+  @Get(['docs/:pageId/deleted-files', 'pages/:pageId/deleted-files'])
+  @ApiOperation({ summary: 'Get list of deleted/trashed files in project' })
+  async getDeletedFiles(@Param('pageId') pageId: string) {
+    let projectId: string | null = null;
+    if (isUuid(pageId)) {
+      const doc = await this.prisma.manuscriptDoc.findUnique({
+        where: { id: pageId },
+      });
+      if (doc) {
+        projectId = doc.projectId;
+      } else {
+        const project = await this.prisma.project.findUnique({
+          where: { id: pageId },
+        });
+        if (project) projectId = project.id;
+      }
+    }
+
+    if (!projectId) {
+      return { files: [] };
+    }
+
+    // 1. Fetch deleted manuscript docs
+    const deletedDocs = await this.prisma.manuscriptDoc.findMany({
+      where: { projectId, deleted: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    // 2. Fetch deleted filestore binary files
+    const deletedFiles = await this.prisma.manuscriptFile.findMany({
+      where: { projectId, deleted: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const files = [
+      ...deletedDocs.map((d) => ({
+        id: d.id,
+        pageId,
+        title: d.path?.replace(/^\//, '') || 'document.tex',
+        path: d.path,
+        type: 'DOC',
+        createdAt: d.createdAt,
+        updatedAt: d.updatedAt,
+      })),
+      ...deletedFiles.map((f) => ({
+        id: f.id,
+        pageId,
+        title: f.name,
+        path: `/${f.name}`,
+        type: 'FILE',
+        size: Number(f.sizeBytes || 0),
+        createdAt: f.createdAt,
+        updatedAt: f.updatedAt,
+      })),
+    ];
+
+    return { files };
+  }
+
+  /**
+   * POST /api/v1/manuscripts/docs/:pageId/restore
+   * POST /api/pages/:pageId/restore
+   */
+  @Post(['docs/:pageId/restore', 'pages/:pageId/restore'])
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Restore a soft-deleted document or file' })
+  async restorePage(@Param('pageId') pageId: string) {
+    if (!isUuid(pageId)) {
+      throw new BadRequestException('A valid UUID is required for pageId');
+    }
+
+    // 1. Check if it's a manuscriptDoc
+    const doc = await this.prisma.manuscriptDoc.findUnique({
+      where: { id: pageId },
+    });
+
+    if (doc) {
+      await this.docstoreService.patchDoc(doc.projectId, pageId, {
+        deleted: false,
+      });
+
+      // Restore or create tree node if missing
+      const cleanPath = doc.path.startsWith('/') ? doc.path : `/${doc.path}`;
+      const cleanName = doc.path.replace(/^\//, '') || 'restored.tex';
+      let existingNode = await this.prisma.manuscriptNode.findFirst({
+        where: { projectId: doc.projectId, docId: doc.id },
+      });
+
+      if (!existingNode) {
+        existingNode = await this.prisma.manuscriptNode.create({
+          data: {
+            projectId: doc.projectId,
+            name: cleanName,
+            path: cleanPath,
+            type: 'DOC',
+            docId: doc.id,
+            sizeBytes: doc.sizeBytes || 0,
+          },
+        });
+      }
+
+      this.realtimeService?.broadcastFileTreeChange(doc.projectId, {
+        action: 'create',
+        node: existingNode,
+      });
+
+      const lines = doc.lines || [];
+      const content = Array.isArray(lines) ? lines.join('\n') : String(lines);
+
+      return {
+        success: true,
+        page: {
+          id: doc.id,
+          title: cleanName,
+          content,
+          projectId: doc.projectId,
+        },
+      };
+    }
+
+    // 2. Check if it's a manuscriptFile
+    const file = await this.prisma.manuscriptFile.findUnique({
+      where: { id: pageId },
+    });
+
+    if (file) {
+      await this.prisma.manuscriptFile.update({
+        where: { id: pageId },
+        data: { deleted: false },
+      });
+
+      let existingNode = await this.prisma.manuscriptNode.findFirst({
+        where: { projectId: file.projectId, fileId: file.id },
+      });
+
+      if (!existingNode) {
+        existingNode = await this.prisma.manuscriptNode.create({
+          data: {
+            projectId: file.projectId,
+            name: file.name,
+            path: `/${file.name}`,
+            type: 'FILE',
+            fileId: file.id,
+            sizeBytes: Number(file.sizeBytes || 0),
+          },
+        });
+      }
+
+      this.realtimeService?.broadcastFileTreeChange(file.projectId, {
+        action: 'create',
+        node: existingNode,
+      });
+
+      return {
+        success: true,
+        page: {
+          id: file.id,
+          title: file.name,
+          projectId: file.projectId,
+        },
+      };
+    }
+
+    throw new NotFoundException(`Item ${pageId} not found to restore`);
   }
 
   /**
@@ -1870,7 +2237,15 @@ export class PagesBridgeController {
     'projects/:projectId/docs/:pageId/labels',
     'projects/:projectId/pages/:pageId/labels',
   ])
-  async getPageLabels() {
+  async getPageLabels(@Param('pageId') pageId: string) {
+    if (isUuid(pageId)) {
+      const doc = await this.prisma.manuscriptDoc.findUnique({
+        where: { id: pageId },
+      });
+      const ranges = (doc?.ranges as any) || {};
+      const labels = ranges.labels || [];
+      return { labels };
+    }
     return { labels: [] };
   }
 
@@ -1878,7 +2253,45 @@ export class PagesBridgeController {
     'projects/:projectId/docs/:pageId/labels',
     'projects/:projectId/pages/:pageId/labels',
   ])
-  async assignPageLabels(@Body() _body: any) {
+  async assignPageLabels(
+    @Param('pageId') pageId: string,
+    @Body() body: { labelIds?: string[] },
+  ) {
+    if (isUuid(pageId) && Array.isArray(body?.labelIds)) {
+      let labels: { id: string; name: string; color: string }[] = [];
+      try {
+        const found = await this.prisma.label.findMany({
+          where: { id: { in: body.labelIds } },
+        });
+        if (found.length > 0) {
+          labels = found.map((l) => ({
+            id: l.id,
+            name: l.name,
+            color: l.color,
+          }));
+        } else {
+          const foundWork = await this.prisma.workItemLabel.findMany({
+            where: { id: { in: body.labelIds } },
+          });
+          labels = foundWork.map((l) => ({
+            id: l.id,
+            name: l.name,
+            color: l.color,
+          }));
+        }
+      } catch {
+        // Fallback
+      }
+
+      await this.prisma.manuscriptDoc
+        .update({
+          where: { id: pageId },
+          data: { ranges: { labelIds: body.labelIds, labels } },
+        })
+        .catch(() => null);
+
+      return { labels };
+    }
     return { labels: [] };
   }
 
@@ -1886,15 +2299,38 @@ export class PagesBridgeController {
     'projects/:projectId/docs/:pageId/labels',
     'projects/:projectId/pages/:pageId/labels',
   ])
-  async replacePageLabels(@Body() _body: any) {
-    return { labels: [] };
+  async replacePageLabels(
+    @Param('pageId') pageId: string,
+    @Body() body: { labelIds?: string[] },
+  ) {
+    return this.assignPageLabels(pageId, body);
   }
 
   @Delete([
     'projects/:projectId/docs/:pageId/labels/:labelId',
     'projects/:projectId/pages/:pageId/labels/:labelId',
   ])
-  async removePageLabel() {
+  async removePageLabel(
+    @Param('pageId') pageId: string,
+    @Param('labelId') labelId: string,
+  ) {
+    if (isUuid(pageId)) {
+      const doc = await this.prisma.manuscriptDoc.findUnique({
+        where: { id: pageId },
+      });
+      const ranges = (doc?.ranges as any) || {};
+      const labels = (ranges.labels || []).filter((l: any) => l.id !== labelId);
+      const labelIds = (ranges.labelIds || []).filter(
+        (id: string) => id !== labelId,
+      );
+      await this.prisma.manuscriptDoc
+        .update({
+          where: { id: pageId },
+          data: { ranges: { labelIds, labels } },
+        })
+        .catch(() => null);
+      return { labels };
+    }
     return { labels: [] };
   }
 }

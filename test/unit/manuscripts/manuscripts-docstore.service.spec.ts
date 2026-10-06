@@ -83,7 +83,7 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
         return results;
       }),
       create: jest.fn(async ({ data }: any) => {
-        const id = data.id || `doc-${Date.now()}-${Math.random()}`;
+        const id = data.id || require('crypto').randomUUID();
         const record = {
           id,
           projectId: data.projectId,

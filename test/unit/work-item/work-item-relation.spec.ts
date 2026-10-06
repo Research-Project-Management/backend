@@ -27,6 +27,7 @@ describe('WorkItem Relation Service & DAG Cycle Detection', () => {
       findWorkItemsByIds: jest.fn(),
       updateWorkItemRelations: jest.fn(),
       executeTransaction: jest.fn(),
+      findProjectGraphEdges: jest.fn().mockResolvedValue([]),
     };
 
     relationService = new RelationService(mockRelationRepository);
@@ -66,6 +67,9 @@ describe('WorkItem Relation Service & DAG Cycle Detection', () => {
 
     // When checking path from item-A to item-B:
     // item-A already blocks item-B in the database
+    mockRelationRepository.findProjectGraphEdges.mockResolvedValue([
+      { sourceId: 'item-A', targetId: 'item-B' },
+    ]);
     mockPrisma.workItemRelation.findMany.mockImplementation((args: any) => {
       const orClauses = args.where?.OR || [];
       const isCheckingA = orClauses.some((c: any) => c.sourceId === 'item-A');
@@ -92,6 +96,10 @@ describe('WorkItem Relation Service & DAG Cycle Detection', () => {
     );
 
     // Existing graph: A -> B -> C
+    mockRelationRepository.findProjectGraphEdges.mockResolvedValue([
+      { sourceId: 'item-A', targetId: 'item-B' },
+      { sourceId: 'item-B', targetId: 'item-C' },
+    ]);
     mockPrisma.workItemRelation.findMany.mockImplementation((args: any) => {
       const orClauses = args.where?.OR || [];
       if (orClauses.some((c: any) => c.sourceId === 'item-A')) {
@@ -120,6 +128,7 @@ describe('WorkItem Relation Service & DAG Cycle Detection', () => {
     mockRelationRepository.findWorkItem.mockImplementation((id: string) =>
       Promise.resolve({ id, projectId: 'proj-1', relations: [] }),
     );
+    mockRelationRepository.findProjectGraphEdges.mockResolvedValue([]);
     mockPrisma.workItemRelation.findMany.mockResolvedValue([]);
 
     const result = await relationService.addRelation('item-A', {

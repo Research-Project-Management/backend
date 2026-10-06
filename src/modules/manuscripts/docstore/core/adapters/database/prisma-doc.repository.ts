@@ -54,6 +54,17 @@ export class PrismaDocRepository implements IDocRepository {
     projectId: string,
     docId: string,
   ): Promise<TextDoc | null> {
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (
+      !projectId ||
+      !docId ||
+      !uuidRegex.test(projectId) ||
+      !uuidRegex.test(docId)
+    ) {
+      return null;
+    }
+
     const record = await this.prisma.manuscriptDoc.findFirst({
       where: {
         id: docId,

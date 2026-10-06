@@ -102,18 +102,84 @@ export class RelationService {
 
   /**
    * Check if a directed path exists between startId and goalId for a given relation type semantics.
-   * For 'blocks': an edge X -> Y exists if:
-   *   1. WorkItemRelation has (sourceId: X, targetId: Y, type: 'blocks') OR (sourceId: Y, targetId: X, type: 'blocked_by')
-   *   2. Or in JSON relations: item X has targetWorkItemId: Y with type: 'blocks'
+  /**
+   * Check if a directed path exists between startId and goalId for a given relation type semantics.
+   * Uses an in-memory BFS over the project graph to eliminate O(V) database roundtrips.
    */
   private async hasDirectedPath(
     startId: string,
     goalId: string,
     relationCategory: 'blocks' | 'duplicate_of',
-    maxDepth = 30,
+    projectId?: string,
+    maxDepth = 50,
   ): Promise<boolean> {
     if (startId === goalId) return true;
 
+    let edges: Array<{ sourceId: string; targetId: string }> = [];
+
+    if (
+      this.relationRepository &&
+      typeof this.relationRepository.findProjectGraphEdges === 'function' &&
+      projectId
+    ) {
+      edges = await this.relationRepository.findProjectGraphEdges(
+        projectId,
+        relationCategory,
+      );
+    } else if (this.relationRepository?.prisma) {
+      // Fallback for mock environments or if projectId is not provided
+      return this.fallbackHasDirectedPath(
+        startId,
+        goalId,
+        relationCategory,
+        maxDepth,
+      );
+    }
+
+    // Build adjacency list: sourceId -> Set<targetId>
+    const adj = new Map<string, Set<string>>();
+    for (const edge of edges) {
+      if (!edge.sourceId || !edge.targetId || edge.sourceId === edge.targetId) {
+        continue;
+      }
+      let neighbors = adj.get(edge.sourceId);
+      if (!neighbors) {
+        neighbors = new Set<string>();
+        adj.set(edge.sourceId, neighbors);
+      }
+      neighbors.add(edge.targetId);
+    }
+
+    const visited = new Set<string>([startId]);
+    const queue: { id: string; depth: number }[] = [{ id: startId, depth: 0 }];
+
+    while (queue.length > 0) {
+      const { id: currentId, depth } = queue.shift()!;
+      if (depth >= maxDepth) break;
+
+      const neighbors = adj.get(currentId);
+      if (!neighbors) continue;
+
+      for (const nextId of neighbors) {
+        if (nextId === goalId) {
+          return true;
+        }
+        if (!visited.has(nextId)) {
+          visited.add(nextId);
+          queue.push({ id: nextId, depth: depth + 1 });
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private async fallbackHasDirectedPath(
+    startId: string,
+    goalId: string,
+    relationCategory: 'blocks' | 'duplicate_of',
+    maxDepth = 30,
+  ): Promise<boolean> {
     const visited = new Set<string>([startId]);
     const queue: { id: string; depth: number }[] = [{ id: startId, depth: 0 }];
 
@@ -142,7 +208,6 @@ export class RelationService {
           }
         }
 
-        // Also check JSON relations on currentId as fallback
         const currentItem =
           await this.relationRepository.prisma.workItem.findUnique({
             where: { id: currentId },
@@ -228,12 +293,13 @@ export class RelationService {
       );
     }
 
-    // DAG Cycle Detection
+    // DAG Cycle Detection (Single-query graph BFS)
     if (addRelationDto.type === 'blocks') {
       const wouldCycle = await this.hasDirectedPath(
         targetItem.id,
         sourceItem.id,
         'blocks',
+        sourceItem.projectId,
       );
       if (wouldCycle) {
         throw new BadRequestException(
@@ -245,6 +311,7 @@ export class RelationService {
         sourceItem.id,
         targetItem.id,
         'blocks',
+        sourceItem.projectId,
       );
       if (wouldCycle) {
         throw new BadRequestException(
@@ -256,6 +323,7 @@ export class RelationService {
         targetItem.id,
         sourceItem.id,
         'duplicate_of',
+        sourceItem.projectId,
       );
       if (wouldCycle) {
         throw new BadRequestException(

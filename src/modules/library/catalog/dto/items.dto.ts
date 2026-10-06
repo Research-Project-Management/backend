@@ -9,7 +9,7 @@ import {
   Min,
   Max,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { PartialType, ApiProperty } from '@nestjs/swagger';
 
 export class CreatorDto {
@@ -450,6 +450,12 @@ export class CursorPaginationQueryDto {
   @Type(() => Number)
   @IsNumber()
   @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
   @Max(100)
   limit?: number = 50;
 
@@ -465,6 +471,7 @@ export class CursorPaginationQueryDto {
     | 'firstAuthor'
     | 'authors'
     | 'publication'
+    | 'deletedAt'
     | (string & {});
 
   @IsOptional()
@@ -494,9 +501,26 @@ export class CursorPaginationQueryDto {
   readStatus?: string;
 
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return undefined;
+  })
   @IsBoolean()
   hasFile?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return undefined;
+  })
+  @IsBoolean()
+  hasNotes?: boolean;
+
+  @IsOptional()
+  @IsString()
+  tag?: string;
 }
 
 export interface CursorPaginatedResult<T> {

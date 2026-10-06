@@ -23,6 +23,7 @@ export interface ActiveDocSession {
   docId: string;
   flushTimeout?: NodeJS.Timeout;
   lastActiveAt: number;
+  firstUnflushedAt?: number;
 }
 
 export interface SyncMessageResult {
@@ -38,8 +39,17 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
   // Active in-memory documents: `${projectId}:${docId}` -> ActiveDocSession
   private readonly activeDocs = new Map<string, ActiveDocSession>();
 
+  // Single-Flight Request Coalescing Map (Matteo Collina async-cache-dedupe pattern)
+  // Prevents race conditions when multiple concurrent users/sockets open the same document simultaneously
+  private readonly inFlightDocInits = new Map<
+    string,
+    Promise<ActiveDocSession>
+  >();
+
   // Debounce delay before flushing Y.Doc text to persistent Docstore (ms)
   private readonly FLUSH_DEBOUNCE_MS = 2000;
+  // Bounded delay: force flush at least once every 10s during continuous typing
+  private readonly MAX_FLUSH_DELAY_MS = 10000;
   // TTL for Redis binary CRDT snapshot (7 days)
   private readonly REDIS_SNAPSHOT_TTL_SECONDS = 7 * 24 * 3600;
 
@@ -127,65 +137,93 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
       return existing;
     }
 
-    const doc = new Y.Doc();
-    const yText = doc.getText('latex');
+    const inFlight = this.inFlightDocInits.get(key);
+    if (inFlight) {
+      return inFlight;
+    }
 
-    // 1. Try to load cached binary state vector from Redis
-    let loadedFromRedis = false;
-    if (this.redis && this.redis.isReady()) {
+    const initPromise = (async () => {
       try {
-        const client = this.redis.getClient();
-        if (client) {
-          const snapshotBase64 = await client.get(
-            this.redisKey(projectId, docId),
-          );
-          if (snapshotBase64) {
-            const buffer = Buffer.from(snapshotBase64, 'base64');
-            Y.applyUpdate(doc, buffer, 'redis-init');
-            loadedFromRedis = true;
-            this.logger.debug(`Hydrated Y.Doc from Redis cache: ${key}`);
+        const doc = new Y.Doc();
+        const yText = doc.getText('latex');
+
+        // 1. Try to load cached binary state vector from Redis
+        let loadedFromRedis = false;
+        if (this.redis && this.redis.isReady()) {
+          try {
+            const rawBuffer = await this.redis.getBuffer(
+              this.redisKey(projectId, docId),
+            );
+            if (rawBuffer && rawBuffer.length > 0) {
+              try {
+                Y.applyUpdate(doc, rawBuffer, 'redis-init');
+                loadedFromRedis = true;
+                this.logger.debug(
+                  `Hydrated Y.Doc from Redis binary cache: ${key} (${rawBuffer.length} bytes)`,
+                );
+              } catch {
+                // Backward compatibility: fallback if legacy snapshot was stored as base64 string
+                const base64Str = rawBuffer.toString('utf-8');
+                const legacyBuffer = Buffer.from(base64Str, 'base64');
+                Y.applyUpdate(doc, legacyBuffer, 'redis-init');
+                loadedFromRedis = true;
+                this.logger.debug(
+                  `Hydrated Y.Doc from Redis legacy base64 cache: ${key}`,
+                );
+              }
+            }
+          } catch (err: any) {
+            this.logger.warn(
+              `Failed to read Y.Doc from Redis: ${err?.message}`,
+            );
           }
         }
-      } catch (err: any) {
-        this.logger.warn(`Failed to read Y.Doc from Redis: ${err?.message}`);
-      }
-    }
 
-    // 2. If not in Redis, load baseline raw text from Docstore
-    if (!loadedFromRedis && this.docstoreService) {
-      try {
-        const rawText = await this.docstoreService.getRawDoc(projectId, docId);
-        if (rawText && rawText.length > 0) {
-          doc.transact(() => {
-            yText.insert(0, rawText);
-          }, 'docstore-init');
-          this.logger.debug(
-            `Hydrated Y.Doc from Docstore baseline (${rawText.length} chars): ${key}`,
-          );
+        // 2. If not in Redis, load baseline raw text from Docstore
+        if (!loadedFromRedis && this.docstoreService) {
+          try {
+            const rawText = await this.docstoreService.getRawDoc(
+              projectId,
+              docId,
+            );
+            if (rawText && rawText.length > 0) {
+              doc.transact(() => {
+                yText.insert(0, rawText);
+              }, 'docstore-init');
+              this.logger.debug(
+                `Hydrated Y.Doc from Docstore baseline (${rawText.length} chars): ${key}`,
+              );
+            }
+          } catch (err: any) {
+            this.logger.debug(
+              `Docstore baseline not found for ${key}, starting with empty doc: ${err?.message}`,
+            );
+          }
         }
-      } catch (err: any) {
-        this.logger.debug(
-          `Docstore baseline not found for ${key}, starting with empty doc: ${err?.message}`,
-        );
+
+        const session: ActiveDocSession = {
+          doc,
+          yText,
+          projectId,
+          docId,
+          lastActiveAt: Date.now(),
+        };
+
+        // 3. Setup update listener to cache in Redis and schedule flush
+        doc.on('update', (update: Uint8Array, origin: any) => {
+          if (origin === 'redis-init' || origin === 'docstore-init') return;
+          this.handleDocUpdated(projectId, docId, session);
+        });
+
+        this.activeDocs.set(key, session);
+        return session;
+      } finally {
+        this.inFlightDocInits.delete(key);
       }
-    }
+    })();
 
-    const session: ActiveDocSession = {
-      doc,
-      yText,
-      projectId,
-      docId,
-      lastActiveAt: Date.now(),
-    };
-
-    // 3. Setup update listener to cache in Redis and schedule flush
-    doc.on('update', (update: Uint8Array, origin: any) => {
-      if (origin === 'redis-init' || origin === 'docstore-init') return;
-      this.handleDocUpdated(projectId, docId, session);
-    });
-
-    this.activeDocs.set(key, session);
-    return session;
+    this.inFlightDocInits.set(key, initPromise);
+    return initPromise;
   }
 
   /**
@@ -201,42 +239,53 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     const session = await this.getOrCreateDoc(projectId, docId);
     const rawBytes = this.normalizeToUint8Array(data);
 
-    const decoder = decoding.createDecoder(rawBytes);
-    const encoder = encoding.createEncoder();
-
-    // Use standard y-protocols sync handler
-    const msgType = syncProtocol.readSyncMessage(
-      decoder,
-      encoder,
-      session.doc,
-      origin,
-    );
-
-    let reply: Buffer | null = null;
-    if (encoding.length(encoder) > 0) {
-      reply = Buffer.from(encoding.toUint8Array(encoder));
+    if (!rawBytes || rawBytes.length === 0) {
+      return { reply: null, broadcastUpdate: null };
     }
 
-    // If client sent an update (SyncStep2 or Update), prepare broadcast update buffer
-    let broadcastUpdate: Buffer | null = null;
-    if (
-      msgType === syncProtocol.messageYjsUpdate ||
-      msgType === syncProtocol.messageYjsSyncStep2
-    ) {
-      const updateEncoder = encoding.createEncoder();
-      // Re-encode as messageYjsUpdate for room broadcast
-      const rawUpdate = this.extractRawUpdateIfPresent(rawBytes, msgType);
-      if (rawUpdate) {
-        syncProtocol.writeUpdate(updateEncoder, rawUpdate);
-        broadcastUpdate = Buffer.from(encoding.toUint8Array(updateEncoder));
+    try {
+      const decoder = decoding.createDecoder(rawBytes);
+      const encoder = encoding.createEncoder();
+
+      // Use standard y-protocols sync handler
+      const msgType = syncProtocol.readSyncMessage(
+        decoder,
+        encoder,
+        session.doc,
+        origin,
+      );
+
+      let reply: Buffer | null = null;
+      if (encoding.length(encoder) > 0) {
+        reply = Buffer.from(encoding.toUint8Array(encoder));
       }
-    }
 
-    return {
-      reply,
-      broadcastUpdate,
-      msgType,
-    };
+      // If client sent an update (SyncStep2 or Update), prepare broadcast update buffer
+      let broadcastUpdate: Buffer | null = null;
+      if (
+        msgType === syncProtocol.messageYjsUpdate ||
+        msgType === syncProtocol.messageYjsSyncStep2
+      ) {
+        const updateEncoder = encoding.createEncoder();
+        // Re-encode as messageYjsUpdate for room broadcast
+        const rawUpdate = this.extractRawUpdateIfPresent(rawBytes, msgType);
+        if (rawUpdate) {
+          syncProtocol.writeUpdate(updateEncoder, rawUpdate);
+          broadcastUpdate = Buffer.from(encoding.toUint8Array(updateEncoder));
+        }
+      }
+
+      return {
+        reply,
+        broadcastUpdate,
+        msgType,
+      };
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to decode or process sync message for ${projectId}:${docId}: ${err?.message}`,
+      );
+      return { reply: null, broadcastUpdate: null };
+    }
   }
 
   /**
@@ -251,11 +300,15 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     const session = await this.getOrCreateDoc(projectId, docId);
     const rawVector = this.normalizeToUint8Array(stateVector);
 
-    const encoder = encoding.createEncoder();
-    syncProtocol.writeSyncStep2(encoder, session.doc, rawVector);
-    syncProtocol.writeSyncStep1(encoder, session.doc);
-
-    return Buffer.from(encoding.toUint8Array(encoder));
+    try {
+      const encoder = encoding.createEncoder();
+      syncProtocol.writeSyncStep2(encoder, session.doc, rawVector);
+      syncProtocol.writeSyncStep1(encoder, session.doc);
+      return Buffer.from(encoding.toUint8Array(encoder));
+    } catch (err: any) {
+      this.logger.warn(`handleSyncStep1 error: ${err?.message}`);
+      return Buffer.alloc(0);
+    }
   }
 
   /**
@@ -270,9 +323,29 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
   ): Promise<void> {
     const session = await this.getOrCreateDoc(projectId, docId);
     const rawUpdate = this.normalizeToUint8Array(update);
+    if (!rawUpdate || rawUpdate.length === 0) return;
 
-    const decoder = decoding.createDecoder(rawUpdate);
-    syncProtocol.readSyncStep2(decoder, session.doc, origin);
+    // 1. Try applying directly as raw Y.Doc binary update
+    try {
+      Y.applyUpdate(session.doc, rawUpdate, origin);
+      return;
+    } catch {
+      // Not raw update bytes, fall through
+    }
+
+    // 2. Try decoding as y-protocols sync step 2 message
+    try {
+      const decoder = decoding.createDecoder(rawUpdate);
+      const firstByte = decoding.readVarUint(decoder);
+      if (firstByte === syncProtocol.messageYjsSyncStep2) {
+        syncProtocol.readSyncStep2(decoder, session.doc, origin);
+        return;
+      }
+      const retryDecoder = decoding.createDecoder(rawUpdate);
+      syncProtocol.readSyncStep2(retryDecoder, session.doc, origin);
+    } catch (err: any) {
+      this.logger.warn(`handleSyncStep2 error: ${err?.message}`);
+    }
   }
 
   /**
@@ -287,14 +360,20 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
   ): Promise<Buffer> {
     const session = await this.getOrCreateDoc(projectId, docId);
     const rawBytes = this.normalizeToUint8Array(update);
+    if (!rawBytes || rawBytes.length === 0) return Buffer.alloc(0);
 
-    // Apply incremental update
-    Y.applyUpdate(session.doc, rawBytes, origin);
+    try {
+      // Apply incremental update
+      Y.applyUpdate(session.doc, rawBytes, origin);
 
-    // Re-package as standard sync update frame for room broadcast
-    const encoder = encoding.createEncoder();
-    syncProtocol.writeUpdate(encoder, rawBytes);
-    return Buffer.from(encoding.toUint8Array(encoder));
+      // Re-package as standard sync update frame for room broadcast
+      const encoder = encoding.createEncoder();
+      syncProtocol.writeUpdate(encoder, rawBytes);
+      return Buffer.from(encoding.toUint8Array(encoder));
+    } catch (err: any) {
+      this.logger.warn(`handleSyncUpdate error: ${err?.message}`);
+      return Buffer.alloc(0);
+    }
   }
 
   /**
@@ -317,21 +396,17 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
       clearTimeout(session.flushTimeout);
       session.flushTimeout = undefined;
     }
+    session.firstUnflushedAt = undefined;
 
     try {
-      // 1. Cache binary update in Redis
+      // 1. Cache binary update in Redis (raw Buffer: zero Base64 overhead, 33% memory saving)
       if (this.redis && this.redis.isReady()) {
-        const client = this.redis.getClient();
-        if (client) {
-          const binarySnapshot = Y.encodeStateAsUpdate(session.doc);
-          const base64 = Buffer.from(binarySnapshot).toString('base64');
-          await client.set(
-            this.redisKey(projectId, docId),
-            base64,
-            'EX',
-            this.REDIS_SNAPSHOT_TTL_SECONDS,
-          );
-        }
+        const binarySnapshot = Y.encodeStateAsUpdate(session.doc);
+        await this.redis.setBuffer(
+          this.redisKey(projectId, docId),
+          Buffer.from(binarySnapshot),
+          this.REDIS_SNAPSHOT_TTL_SECONDS,
+        );
       }
 
       // 2. Persist raw text to Docstore
@@ -377,7 +452,27 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     docId: string,
     session: ActiveDocSession,
   ): void {
-    session.lastActiveAt = Date.now();
+    const now = Date.now();
+    session.lastActiveAt = now;
+    if (!session.firstUnflushedAt) {
+      session.firstUnflushedAt = now;
+    }
+
+    const elapsedSinceFirstUnflushed = now - session.firstUnflushedAt;
+
+    // If continuous updates exceed bounded delay (10s), flush immediately to guarantee persistence
+    if (elapsedSinceFirstUnflushed >= this.MAX_FLUSH_DELAY_MS) {
+      if (session.flushTimeout) {
+        clearTimeout(session.flushTimeout);
+        session.flushTimeout = undefined;
+      }
+      this.flushDoc(projectId, docId).catch((err) => {
+        this.logger.warn(
+          `Bounded flush failed for ${projectId}:${docId}: ${err?.message}`,
+        );
+      });
+      return;
+    }
 
     // Schedule debounced flush to Redis cache and Docstore
     if (session.flushTimeout) {

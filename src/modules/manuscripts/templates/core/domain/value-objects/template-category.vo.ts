@@ -1,20 +1,28 @@
 export type TemplateCategoryString =
   | 'journal'
-  | 'conference'
-  | 'thesis'
-  | 'cv'
+  | 'book'
+  | 'letter'
+  | 'assignment'
+  | 'poster'
   | 'presentation'
   | 'report'
+  | 'cv'
+  | 'thesis'
+  | 'conference'
   | 'other';
 
 export class TemplateCategoryVo {
   private static readonly VALID_CATEGORIES = new Set<string>([
     'journal',
-    'conference',
-    'thesis',
-    'cv',
+    'book',
+    'letter',
+    'assignment',
+    'poster',
     'presentation',
     'report',
+    'cv',
+    'thesis',
+    'conference',
     'other',
   ]);
 

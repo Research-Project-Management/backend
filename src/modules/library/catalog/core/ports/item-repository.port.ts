@@ -8,6 +8,7 @@ export interface FindManyItemsOptions {
   tagId?: string;
   search?: string;
   limit?: number;
+  page?: number;
   cursor?: string;
   projectId?: string;
   orderBy?: string;
@@ -17,6 +18,8 @@ export interface FindManyItemsOptions {
   toYear?: number;
   readStatus?: string;
   hasFile?: boolean;
+  hasNotes?: boolean;
+  tag?: string;
 }
 
 export interface PaginatedItemsResult {

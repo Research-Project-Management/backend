@@ -52,6 +52,9 @@ export interface ILabelRepository {
   createMany?(
     data: Prisma.WorkItemLabelUncheckedCreateInput[],
   ): Promise<{ count: number }>;
+  createBatch?(
+    data: Prisma.WorkItemLabelUncheckedCreateInput[],
+  ): Promise<Label[]>;
   update(
     labelId: string,
     data: Prisma.WorkItemLabelUncheckedUpdateInput,

@@ -91,8 +91,16 @@ export function isConditionGroup(
 
 export interface ExecuteSavedSearchOptions {
   limit?: number;
+  page?: number;
   cursor?: string;
-  sortBy?: 'dateAdded' | 'year' | 'title' | 'creator';
+  sortBy?:
+    | 'dateAdded'
+    | 'createdAt'
+    | 'year'
+    | 'title'
+    | 'creator'
+    | 'authors'
+    | 'updatedAt';
   sortOrder?: 'asc' | 'desc';
 }
 

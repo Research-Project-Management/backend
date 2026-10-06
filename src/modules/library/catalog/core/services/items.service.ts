@@ -361,7 +361,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
         | 'unfiled'
         | 'trash'
         | 'my-publications'
-        | 'publications';
+        | 'publications'
+        | 'starred'
+        | 'retracted';
       collectionId?: string;
       tagId?: string;
       search?: string;
@@ -399,8 +401,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
 
     const queryOptions = { ...options, userId };
     const isInitialPage = !options.cursor;
+    const shouldCount = isInitialPage;
     const [totalCount, rawItems] = await Promise.all([
-      isInitialPage
+      shouldCount
         ? this.query.count(userId, queryOptions)
         : Promise.resolve(undefined),
       this.query.findMany(userId, {

@@ -20,8 +20,18 @@ export interface RetractionSyncResult {
   newlyRetracted: number;
   stillClean: number;
   skippedManual: number;
+  /** Items with no DOI/PMID or whose lookup could not be completed; status left unchanged. */
+  skippedUnverified: number;
   failed: number;
   durationMs: number;
+}
+
+interface SyncCandidate {
+  id: string;
+  doi?: string | null;
+  pmid?: string | null;
+  isRetracted?: boolean | null;
+  retractionNature?: string | null;
 }
 
 @Injectable()
@@ -79,7 +89,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     const startTime = Date.now();
     const maxDays = options?.maxDays ?? 14;
     const limit = options?.limit ?? 200;
-    const concurrency = Math.max(1, Math.min(options?.concurrency ?? 3, 5));
+    const concurrency = this.resolveConcurrency(options);
 
     const staleBefore = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000);
     const items = await this.repo.findGlobalStaleItemsForSync(
@@ -87,69 +97,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
       limit,
     );
 
-    let scanned = 0;
-    let newlyRetracted = 0;
-    let stillClean = 0;
-    let skippedManual = 0;
-    let failed = 0;
-
-    for (let i = 0; i < items.length; i += concurrency) {
-      const chunk = items.slice(i, i + concurrency);
-      await Promise.all(
-        chunk.map(async (item) => {
-          if (item.isRetracted && item.retractionNature === 'manual') {
-            skippedManual++;
-            return;
-          }
-
-          try {
-            const scanResult = await this.scanner.scan(
-              item.doi,
-              item.pmid,
-              item.title,
-            );
-            const now = new Date();
-
-            if (scanResult) {
-              if (!item.isRetracted) newlyRetracted++;
-              await this.repo.updateItemRetraction(
-                item.id,
-                true,
-                scanResult.nature,
-                scanResult,
-                now,
-              );
-            } else {
-              stillClean++;
-              await this.repo.updateItemRetraction(
-                item.id,
-                false,
-                null,
-                null,
-                now,
-              );
-            }
-            scanned++;
-          } catch (err: any) {
-            this.logger.warn(
-              `Failed to sync retraction status for item ${item.id}: ${err?.message || err}`,
-            );
-            failed++;
-          }
-        }),
-      );
-    }
-
-    const durationMs = Date.now() - startTime;
-    return {
-      totalEligible: items.length,
-      scanned,
-      newlyRetracted,
-      stillClean,
-      skippedManual,
-      failed,
-      durationMs,
-    };
+    return this.processItems(items, concurrency, startTime);
   }
 
   /**
@@ -164,7 +112,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     const startTime = Date.now();
     const maxDays = options?.maxDays ?? 14;
     const limit = options?.limit ?? 100;
-    const concurrency = Math.max(1, Math.min(options?.concurrency ?? 3, 5));
+    const concurrency = this.resolveConcurrency(options);
 
     const staleBefore = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000);
 
@@ -175,17 +123,39 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
       limit,
     );
 
-    let scanned = 0;
-    let newlyRetracted = 0;
-    let stillClean = 0;
-    let skippedManual = 0;
-    let failed = 0;
-
     this.logger.log(
       `Starting retraction delta sync: found ${items.length} eligible stale item(s) (stale threshold: ${maxDays} days, concurrency: ${concurrency})`,
     );
 
-    // Chunk-based concurrency processing
+    const result = await this.processItems(items, concurrency, startTime);
+
+    this.logger.log(
+      `Retraction delta sync finished in ${result.durationMs}ms: scanned=${result.scanned}, newlyRetracted=${result.newlyRetracted}, clean=${result.stillClean}, skippedManual=${result.skippedManual}, skippedUnverified=${result.skippedUnverified}, failed=${result.failed}`,
+    );
+
+    return result;
+  }
+
+  private resolveConcurrency(options?: RetractionSyncOptions): number {
+    return Math.max(1, Math.min(options?.concurrency ?? 3, 5));
+  }
+
+  /**
+   * Shared chunked-concurrency processor. Matches by DOI/PMID only; manual
+   * flags are preserved and unverifiable items keep their stored status.
+   */
+  private async processItems(
+    items: SyncCandidate[],
+    concurrency: number,
+    startTime: number,
+  ): Promise<RetractionSyncResult> {
+    let scanned = 0;
+    let newlyRetracted = 0;
+    let stillClean = 0;
+    let skippedManual = 0;
+    let skippedUnverified = 0;
+    let failed = 0;
+
     for (let i = 0; i < items.length; i += concurrency) {
       const chunk = items.slice(i, i + concurrency);
       await Promise.all(
@@ -197,25 +167,20 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
           }
 
           try {
-            const scanResult = await this.scanner.scan(
-              item.doi,
-              item.pmid,
-              item.title,
-            );
+            const result = await this.scanner.lookup(item.doi, item.pmid);
             const now = new Date();
 
-            if (scanResult) {
-              if (!item.isRetracted) {
-                newlyRetracted++;
-              }
+            if (result.status === 'retracted') {
+              if (!item.isRetracted) newlyRetracted++;
               await this.repo.updateItemRetraction(
                 item.id,
                 true,
-                scanResult.nature,
-                scanResult,
+                result.details.nature,
+                result.details,
                 now,
               );
-            } else {
+              scanned++;
+            } else if (result.status === 'clean') {
               stillClean++;
               await this.repo.updateItemRetraction(
                 item.id,
@@ -224,22 +189,19 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
                 null,
                 now,
               );
+              scanned++;
+            } else {
+              skippedUnverified++;
             }
-            scanned++;
           } catch (err: any) {
             failed++;
             this.logger.warn(
-              `Error during sync scan for item ${item.id} (${item.doi || item.title}): ${err?.message}`,
+              `Failed to sync retraction status for item ${item.id} (${item.doi || item.pmid || 'no identifier'}): ${err?.message || err}`,
             );
           }
         }),
       );
     }
-
-    const durationMs = Date.now() - startTime;
-    this.logger.log(
-      `Retraction delta sync finished in ${durationMs}ms: scanned=${scanned}, newlyRetracted=${newlyRetracted}, clean=${stillClean}, skippedManual=${skippedManual}, failed=${failed}`,
-    );
 
     return {
       totalEligible: items.length,
@@ -247,8 +209,9 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
       newlyRetracted,
       stillClean,
       skippedManual,
+      skippedUnverified,
       failed,
-      durationMs,
+      durationMs: Date.now() - startTime,
     };
   }
 }

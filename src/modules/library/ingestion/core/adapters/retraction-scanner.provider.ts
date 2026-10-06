@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../../../core/database/prisma.service';
-import { RetractionDetails } from '../domain/retraction.types';
+import {
+  RetractionDetails,
+  RetractionLookupResult,
+} from '../domain/retraction.types';
 import { RetractionDatabaseService } from '../services/retraction-database.service';
 import {
   getAcademicContactEmail,
@@ -17,80 +20,63 @@ export class RetractionScannerProvider {
   ) {}
 
   /**
-   * Scans a DOI and/or title for retraction markers.
-   * Checks local Retraction Watch dataset & in-memory index first (0ms),
-   * then title heuristics, then external provider.
+   * Compatibility wrapper: returns retraction details, or null when the item is
+   * not (known to be) retracted. Use `lookup()` when the caller must tell
+   * "verified clean" apart from "could not be verified".
    */
   async scan(
     doi?: string | null,
     pmid?: string | null,
-    title?: string | null,
+    _title?: string | null,
   ): Promise<RetractionDetails | null> {
+    const result = await this.lookup(doi, pmid);
+    return result.status === 'retracted' ? result.details : null;
+  }
+
+  /**
+   * Looks a paper up by DOI and/or PMID only (same matching keys as Zotero).
+   * Order: local Retraction Watch dataset / in-memory index, then Crossref.
+   *
+   * - `retracted`: a retraction notice was found.
+   * - `clean`: positively verified as not retracted.
+   * - `unknown`: no identifier, or the lookup could not be completed
+   *   (offline, timeout, non-200). Callers must NOT overwrite stored status.
+   */
+  async lookup(
+    doi?: string | null,
+    pmid?: string | null,
+  ): Promise<RetractionLookupResult> {
     const cleanDoiVal = doi?.trim().toLowerCase();
     const cleanPmidVal = pmid?.trim();
 
-    // 1. Check local Retraction Watch dataset & in-memory fast index
-    if (cleanDoiVal || cleanPmidVal) {
-      const localResult = await this.retractionDb.checkRetraction(
-        cleanDoiVal,
-        cleanPmidVal,
-      );
-
-      if (localResult === false) {
-        // Confirmed clean via verified cache / known non-retracted paper
-        return null;
-      }
-
-      if (localResult) {
-        // Confirmed retracted from Retraction Watch seed dataset or local DB
-        return localResult;
-      }
+    if (!cleanDoiVal && !cleanPmidVal) {
+      return { status: 'unknown' };
     }
 
-    // 2. Check title heuristics (many publishers or databases prepend "RETRACTED:" or "WITHDRAWN:")
-    if (title) {
-      const lowerTitle = title.trim().toLowerCase();
-      if (
-        lowerTitle.startsWith('retracted:') ||
-        lowerTitle.startsWith('retraction:') ||
-        lowerTitle.startsWith('withdrawn:') ||
-        lowerTitle.includes('(retracted)') ||
-        lowerTitle.includes('[retracted]')
-      ) {
-        return {
-          nature: 'retraction',
-          reason: 'Identified from publication title notation',
-          source: 'manual',
-        };
-      }
-      if (
-        lowerTitle.startsWith('expression of concern:') ||
-        lowerTitle.includes('expression of concern')
-      ) {
-        return {
-          nature: 'expression_of_concern',
-          reason: 'Identified from publication title notation',
-          source: 'manual',
-        };
-      }
-    }
+    // 1. Local Retraction Watch dataset & in-memory fast index
+    const localResult = await this.retractionDb.checkRetraction(
+      cleanDoiVal,
+      cleanPmidVal,
+    );
+    if (localResult === false) return { status: 'clean' };
+    if (localResult) return { status: 'retracted', details: localResult };
 
-    // 3. Online Scan via Crossref / OpenAlex if DOI is available
+    // 2. Online scan via Crossref (requires a DOI)
     if (cleanDoiVal) {
       try {
         const { retraction, isVerifiedClean } =
           await this.queryOnlineRetraction(cleanDoiVal);
         if (retraction) {
-          // Save to local retraction database
           await this.retractionDb.saveRetraction(
             cleanDoiVal,
             retraction,
             cleanPmidVal,
           );
-          return retraction;
-        } else if (isVerifiedClean) {
-          // Record as verified clean only when online API successfully returned 200 with no retraction notices
+          return { status: 'retracted', details: retraction };
+        }
+        if (isVerifiedClean) {
           await this.retractionDb.saveClean(cleanDoiVal, cleanPmidVal);
+          return { status: 'clean' };
         }
       } catch (err: any) {
         this.logger.debug(
@@ -99,7 +85,7 @@ export class RetractionScannerProvider {
       }
     }
 
-    return null;
+    return { status: 'unknown' };
   }
 
   private async queryOnlineRetraction(doi: string): Promise<{

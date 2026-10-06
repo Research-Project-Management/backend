@@ -34,6 +34,7 @@ import { GetSignedDownloadUrlUseCase } from './core/use-cases/get-signed-downloa
 import { ManuscriptFileResponseDto } from './dto/file-response.dto';
 import { FileNotFoundException } from './core/domain/exceptions/file-not-found.exception';
 import { InvalidByteRangeException } from './core/domain/exceptions/invalid-byte-range.exception';
+import { FilestoreService } from './filestore.service';
 
 @ApiTags('Manuscripts - Filestore & Assets')
 @ApiBearerAuth('JWT-auth')
@@ -51,6 +52,7 @@ export class FilestoreController {
     private readonly headUseCase: GetManuscriptFileHeadUseCase,
     private readonly deleteUseCase: DeleteManuscriptFileUseCase,
     private readonly signedUrlUseCase: GetSignedDownloadUrlUseCase,
+    private readonly filestoreService: FilestoreService,
   ) {}
 
   @Post()
@@ -127,6 +129,67 @@ export class FilestoreController {
       }
       throw err;
     }
+  }
+
+  @Get()
+  public async listFiles(
+    @Param('projectId') projectId: string,
+  ): Promise<ManuscriptFileResponseDto[]> {
+    const files = await this.filestoreService.listFiles(projectId);
+    return files.map((f) => ManuscriptFileResponseDto.fromEntity(f));
+  }
+
+  @Get('raw')
+  public async streamFileByPath(
+    @Param('projectId') projectId: string,
+    @Query('path') queryPath: string | undefined,
+    @Query('name') queryName: string | undefined,
+    @Headers('range') rangeHeader: string | undefined,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Res() res: FastifyReply,
+  ): Promise<void> {
+    const rawPath = queryPath || queryName;
+    if (!rawPath) {
+      throw new BadRequestException(
+        'Query parameter "path" or "name" is required.',
+      );
+    }
+    const cleanPath = rawPath.replace(/^\//, '').trim();
+    const leafName = cleanPath.split('/').pop() || cleanPath;
+
+    let file = await this.filestoreService.findByProjectAndName(
+      projectId,
+      cleanPath,
+    );
+    if (!file && leafName !== cleanPath) {
+      file = await this.filestoreService.findByProjectAndName(
+        projectId,
+        leafName,
+      );
+    }
+    if (!file) {
+      // Try common LaTeX image extensions if omitted in \includegraphics{...}
+      const extensions = ['.png', '.jpg', '.jpeg', '.pdf', '.svg', '.eps'];
+      for (const ext of extensions) {
+        file = await this.filestoreService.findByProjectAndName(
+          projectId,
+          cleanPath + ext,
+        );
+        if (file) break;
+        file = await this.filestoreService.findByProjectAndName(
+          projectId,
+          leafName + ext,
+        );
+        if (file) break;
+      }
+    }
+    if (!file) {
+      throw new NotFoundException(
+        `File asset "${rawPath}" not found in project ${projectId}.`,
+      );
+    }
+
+    return this.streamFile(projectId, file.id, rangeHeader, userAgent, res);
   }
 
   @Get(':fileId')

@@ -34,9 +34,9 @@ export class ResolveRootDocUseCase {
     if (!node) {
       throw new NodeNotFoundError(nodeId);
     }
-    if (!node.isDoc()) {
+    if (!node.isDoc() && !node.name.toLowerCase().endsWith('.tex')) {
       throw new Error(
-        `Cannot set node of type ${node.type} as root document. Must be DOC.`,
+        `Cannot set node of type ${node.type} as root document. Must be a LaTeX document (.tex).`,
       );
     }
 

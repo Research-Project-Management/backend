@@ -80,6 +80,15 @@ export class LabelRepository implements ILabelRepository {
     });
   }
 
+  async createBatch(
+    items: Prisma.WorkItemLabelUncheckedCreateInput[],
+  ): Promise<Label[]> {
+    if (items.length === 0) return [];
+    return this.prisma.$transaction(
+      items.map((data) => this.prisma.workItemLabel.create({ data })),
+    );
+  }
+
   async update(
     labelId: string,
     data: Prisma.WorkItemLabelUncheckedUpdateInput,

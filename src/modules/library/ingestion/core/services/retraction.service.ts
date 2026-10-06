@@ -54,36 +54,49 @@ export class RetractionService {
       };
     }
 
-    const scanResult = await this.scanner.scan(
-      item.doi,
-      meta.pmid ?? null,
-      item.title,
-    );
+    const lookup = await this.scanner.lookup(item.doi, meta.pmid ?? null);
     const now = new Date();
 
-    if (scanResult) {
+    if (lookup.status === 'retracted') {
       await this.repo.updateItemRetraction(
         itemId,
         true,
-        scanResult.nature,
-        scanResult,
+        lookup.details.nature,
+        lookup.details,
         now,
       );
       return {
         itemId,
         isRetracted: true,
-        nature: scanResult.nature,
-        details: scanResult,
+        status: 'retracted',
+        nature: lookup.details.nature,
+        details: lookup.details,
         checkedAt: now,
       };
-    } else {
+    }
+
+    if (lookup.status === 'clean') {
       await this.repo.updateItemRetraction(itemId, false, null, null, now);
       return {
         itemId,
         isRetracted: false,
+        status: 'clean',
         checkedAt: now,
       };
     }
+
+    // Unknown (no DOI/PMID, offline, timeout): keep the stored status and
+    // do not bump retractionCheckedAt.
+    return {
+      itemId,
+      isRetracted: Boolean(meta.isRetracted),
+      status: 'unknown',
+      nature: meta.retractionNature ?? undefined,
+      details: meta.retractionDetails || undefined,
+      checkedAt: meta.retractionCheckedAt
+        ? new Date(meta.retractionCheckedAt)
+        : now,
+    };
   }
 
   async checkLibrary(
@@ -103,22 +116,23 @@ export class RetractionService {
         continue;
       }
       try {
-        const result = await this.scanner.scan(item.doi, item.pmid, item.title);
+        const result = await this.scanner.lookup(item.doi, item.pmid);
         const now = new Date();
-        if (result) {
+        if (result.status === 'retracted') {
           if (!item.isRetracted) {
             newlyRetracted++;
           }
           await this.repo.updateItemRetraction(
             item.id,
             true,
-            result.nature,
-            result,
+            result.details.nature,
+            result.details,
             now,
           );
-        } else {
+        } else if (result.status === 'clean') {
           await this.repo.updateItemRetraction(item.id, false, null, null, now);
         }
+        // unknown: leave stored status untouched
       } catch (err: any) {
         this.logger.warn(`Error scanning item ${item.id}: ${err?.message}`);
       }

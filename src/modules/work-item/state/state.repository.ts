@@ -51,20 +51,19 @@ export class StateRepository implements IStateRepository {
   }
 
   async seedDefaultStates(projectId: string): Promise<void> {
-    for (const s of DEFAULT_WORK_ITEM_STATES) {
-      await this.prismaService.workItemState.create({
-        data: {
-          name: s.name,
-          color: s.color,
-          icon: s.icon || getStateDefaultIcon(s.group),
-          group: s.group,
-          sequence: s.sequence,
-          isDefault: s.isDefault,
-          description: s.description || '',
-          projectId,
-        },
-      });
-    }
+    await this.prismaService.workItemState.createMany({
+      data: DEFAULT_WORK_ITEM_STATES.map((s) => ({
+        name: s.name,
+        color: s.color,
+        icon: s.icon || getStateDefaultIcon(s.group),
+        group: s.group,
+        sequence: s.sequence,
+        isDefault: s.isDefault,
+        description: s.description || '',
+        projectId,
+      })),
+      skipDuplicates: true,
+    });
   }
 
   async saveProjectStates(

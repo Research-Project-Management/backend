@@ -343,13 +343,17 @@ export class QueryRepository {
         | 'trash'
         | 'my-publications'
         | 'publications'
-        | 'starred';
+        | 'starred'
+        | 'retracted';
       userId?: string;
       collectionId?: string;
       tagId?: string;
+      tag?: string;
       search?: string;
       hasFile?: boolean;
+      hasNotes?: boolean;
       limit?: number;
+      page?: number;
       cursor?: string;
       projectId?: string;
       orderBy?: string;
@@ -471,6 +475,11 @@ export class QueryRepository {
         },
         orderBy: [{ lastReadAt: 'desc' }, { itemId: 'desc' }],
         take: limit + 1,
+        ...(options.cursor
+          ? { skip: 1 }
+          : options.page && options.page > 1
+            ? { skip: (options.page - 1) * limit }
+            : {}),
       });
 
       return userStates
@@ -486,6 +495,8 @@ export class QueryRepository {
       sortField = 'firstAuthor';
     } else if (sortField === 'publication') {
       sortField = 'publicationTitle';
+    } else if (sortField === 'dateDeleted') {
+      sortField = 'deletedAt';
     }
     const sortDir = options.orderDirection === 'asc' ? 'asc' : 'desc';
     const allowedSortFields = [
@@ -496,6 +507,7 @@ export class QueryRepository {
       'citationKey',
       'publicationTitle',
       'firstAuthor',
+      'deletedAt',
     ];
     const safeSortField = allowedSortFields.includes(sortField)
       ? sortField
@@ -505,10 +517,17 @@ export class QueryRepository {
       { id: sortDir },
     ];
 
+    const page = options.page && options.page > 0 ? options.page : 1;
+    const skip = options.cursor ? 1 : page > 1 ? (page - 1) * limit : undefined;
+
     return client.item.findMany({
       where: this.buildWhereClause(userId, options),
       take: limit + 1,
-      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
+      ...(options.cursor
+        ? { cursor: { id: options.cursor }, skip: 1 }
+        : page > 1
+          ? { skip }
+          : {}),
       orderBy: orderByClause,
       include: itemInclude,
     });
@@ -528,11 +547,14 @@ export class QueryRepository {
         | 'trash'
         | 'my-publications'
         | 'publications'
-        | 'starred';
+        | 'starred'
+        | 'retracted';
       collectionId?: string;
       tagId?: string;
+      tag?: string;
       search?: string;
       hasFile?: boolean;
+      hasNotes?: boolean;
       projectId?: string;
       itemType?: string;
       type?: string;
@@ -570,11 +592,23 @@ export class QueryRepository {
         });
       } else if (view === 'starred') {
         where.states = { some: { userId, isStarred: true } };
+      } else if (view === 'retracted') {
+        andConditions.push({
+          metadata: { path: ['isRetracted'], equals: true },
+        });
       }
     }
 
     if (options.hasFile !== undefined) {
       where.hasFile = options.hasFile;
+    }
+
+    if (options.hasNotes !== undefined) {
+      if (options.hasNotes) {
+        where.noteCount = { gt: 0 };
+      } else {
+        where.noteCount = 0;
+      }
     }
 
     if (options.collectionId) {
@@ -583,6 +617,24 @@ export class QueryRepository {
 
     if (options.tagId) {
       where.itemTags = { some: { tagId: options.tagId } };
+    }
+
+    if (options.tag) {
+      const tagNames = options.tag
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+      if (tagNames.length > 0) {
+        where.itemTags = {
+          some: {
+            tag: {
+              OR: tagNames.map((name) => ({
+                name: { equals: name, mode: 'insensitive' as const },
+              })),
+            },
+          },
+        };
+      }
     }
 
     const itemType = options.itemType || options.type;
@@ -677,12 +729,21 @@ export class QueryRepository {
         | 'trash'
         | 'my-publications'
         | 'publications'
-        | 'starred';
+        | 'starred'
+        | 'retracted';
       userId?: string;
       collectionId?: string;
       tagId?: string;
+      tag?: string;
       search?: string;
+      hasFile?: boolean;
+      hasNotes?: boolean;
       projectId?: string;
+      itemType?: string;
+      type?: string;
+      fromYear?: number;
+      toYear?: number;
+      readStatus?: string;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<number> {

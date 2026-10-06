@@ -10,6 +10,10 @@ import { StructureService } from '@/modules/manuscripts/structure/structure.serv
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { DocumentUpdaterService } from '@/modules/manuscripts/document-updater/document-updater.service';
+import { mapWithConcurrency } from '@/core/utils/concurrency.util';
+import type { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
+
+const COLLECT_CONCURRENCY = 6;
 
 @Injectable()
 export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
@@ -40,49 +44,57 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
     const nodes = await this.structureService.getAllNodes(projectId);
     const filesMap = new Map<string, FileSnapshotVo>();
 
-    for (const node of nodes) {
-      if (node.isFolder()) {
-        continue;
-      }
-
-      if (node.isDoc() && node.docId) {
-        try {
-          const doc = await this.docstoreService.getDoc(projectId, node.docId);
-          const vo = FileSnapshotVo.createDoc(
-            node.path,
-            node.docId,
-            doc.lines || [''],
-            doc.hash || '',
-            node.isRootDoc,
-          );
-          filesMap.set(vo.path, vo);
-        } catch (error) {
-          this.logger.error(
-            `Error collecting doc ${node.docId} at path ${node.path}: ${error}`,
-          );
+    const collected = await mapWithConcurrency<
+      ManuscriptNodeEntity,
+      FileSnapshotVo | null
+    >(
+      nodes.filter((n) => !n.isFolder()),
+      COLLECT_CONCURRENCY,
+      async (node: ManuscriptNodeEntity): Promise<FileSnapshotVo | null> => {
+        if (node.isDoc() && node.docId) {
+          try {
+            const doc = await this.docstoreService.getDoc(
+              projectId,
+              node.docId,
+            );
+            return FileSnapshotVo.createDoc(
+              node.path,
+              node.docId,
+              doc.lines || [''],
+              doc.hash || '',
+              node.isRootDoc,
+            );
+          } catch (error) {
+            this.logger.error(
+              `Error collecting doc ${node.docId} at path ${node.path}: ${error}`,
+            );
+          }
+        } else if (node.type === 'FILE' && node.fileId) {
+          try {
+            const fileMeta = await this.filestoreService.getFileMetadata(
+              projectId,
+              node.fileId,
+            );
+            const hashString = fileMeta.hash
+              ? fileMeta.hash.getValue()
+              : node.hash || '';
+            return FileSnapshotVo.createFile(
+              node.path,
+              node.fileId,
+              hashString,
+              fileMeta.sizeBytes || node.sizeBytes || 0,
+            );
+          } catch (error) {
+            this.logger.error(
+              `Error collecting file ${node.fileId} at path ${node.path}: ${error}`,
+            );
+          }
         }
-      } else if (node.type === 'FILE' && node.fileId) {
-        try {
-          const fileMeta = await this.filestoreService.getFileMetadata(
-            projectId,
-            node.fileId,
-          );
-          const hashString = fileMeta.hash
-            ? fileMeta.hash.getValue()
-            : node.hash || '';
-          const vo = FileSnapshotVo.createFile(
-            node.path,
-            node.fileId,
-            hashString,
-            fileMeta.sizeBytes || node.sizeBytes || 0,
-          );
-          filesMap.set(vo.path, vo);
-        } catch (error) {
-          this.logger.error(
-            `Error collecting file ${node.fileId} at path ${node.path}: ${error}`,
-          );
-        }
-      }
+        return null;
+      },
+    );
+    for (const vo of collected) {
+      if (vo) filesMap.set(vo.path, vo);
     }
 
     return filesMap;

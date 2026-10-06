@@ -5,7 +5,7 @@ import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
 import { SCHEMA_V42_DATA } from '../src/modules/library/shared-kernel/types/schema.constants';
-import { getDemoBackendFiles } from '../src/modules/manuscripts/shared/demo-manuscript.constant';
+import { seedLibrary } from './seed-library';
 
 const pool = new Pool({
   connectionString:
@@ -1868,7 +1868,10 @@ async function main() {
 
   console.log(`📌 Created 6 personal stickies for ${userThanh.email}.`);
 
-  // 11. Invalidate Redis Caches
+  // 11. Seed Rich Academic Library Dataset & Contexts
+  await seedLibrary();
+
+  // 12. Invalidate Redis Caches
   try {
     const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
     const keys = await redis.keys('*work-item*');

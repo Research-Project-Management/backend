@@ -12,6 +12,7 @@ export interface ExportProjectZipInput {
   projectId: string;
   projectName?: string;
   includePdf?: boolean;
+  cleanArxiv?: boolean;
 }
 
 export interface ExportProjectZipOutput {
@@ -31,11 +32,17 @@ export class ExportProjectZipUseCase {
   public async execute(
     input: ExportProjectZipInput,
   ): Promise<ExportProjectZipOutput> {
-    const { projectId, projectName, includePdf = false } = input;
+    const {
+      projectId,
+      projectName,
+      includePdf = false,
+      cleanArxiv = false,
+    } = input;
 
     const files = await this.aggregator.collectProjectEntries(
       projectId,
       includePdf,
+      cleanArxiv,
     );
 
     // If project is brand new and has no entries yet, supply a default main.tex
@@ -52,10 +59,15 @@ export class ExportProjectZipUseCase {
     const zipBuffer = this.zipEngine.buildZip(files);
 
     const hasPdf = files.some((f) => f.path.toLowerCase().endsWith('.pdf'));
+    const resolvedName = cleanArxiv
+      ? projectName?.startsWith('arxiv-')
+        ? projectName
+        : `arxiv-${projectName || 'manuscript'}`
+      : projectName;
 
     const manifest = new ArchiveManifest({
       projectId,
-      projectName,
+      projectName: resolvedName,
       fileCount: files.length,
       totalSizeBytes: zipBuffer.length,
       hasCompiledPdf: hasPdf,

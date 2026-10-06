@@ -9,6 +9,9 @@ import { IDocRepository } from '../ports/doc-repository.port';
 import { TextDoc } from '../domain/text-doc.entity';
 import { GetDocUseCase } from './get-doc.use-case';
 import { WorkspaceFile } from '@/modules/manuscripts/clsi/core/ports/workspace.port';
+import { mapWithConcurrency } from '@/core/utils/concurrency.util';
+
+const COLD_HYDRATION_CONCURRENCY = 8;
 
 @Injectable()
 export class GetAllDocsUseCase {
@@ -23,13 +26,17 @@ export class GetAllDocsUseCase {
     const docs = await this.docRepository.getAllDocs(projectId);
 
     // If any document is in Cold Storage, hydrate it
-    const hydratedDocs = await Promise.all(
-      docs.map(async (doc) => {
+    // Bounded so a project with many archived docs cannot exhaust the
+    // object-store / DB connection pool.
+    const hydratedDocs = await mapWithConcurrency<TextDoc, TextDoc>(
+      docs,
+      COLD_HYDRATION_CONCURRENCY,
+      async (doc: TextDoc) => {
         if (doc.inStorage) {
           return await this.getDocUseCase.execute(projectId, doc.id);
         }
         return doc;
-      }),
+      },
     );
 
     return hydratedDocs;

@@ -107,12 +107,33 @@ export class ExecuteSavedSearchQueryDto {
   limit?: number = 50;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
   @IsString()
   cursor?: string;
 
   @IsOptional()
-  @IsIn(['dateAdded', 'year', 'title', 'creator'])
-  sortBy?: 'dateAdded' | 'year' | 'title' | 'creator';
+  @IsIn([
+    'dateAdded',
+    'createdAt',
+    'year',
+    'title',
+    'creator',
+    'authors',
+    'updatedAt',
+  ])
+  sortBy?:
+    | 'dateAdded'
+    | 'createdAt'
+    | 'year'
+    | 'title'
+    | 'creator'
+    | 'authors'
+    | 'updatedAt';
 
   @IsOptional()
   @IsIn(['asc', 'desc'])

@@ -357,6 +357,9 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
             userId: aggregate.userId,
             projectId: aggregate.projectId,
             version: aggregate.version,
+            ...(Array.isArray((event as any).updatedFields)
+              ? { updatedFields: (event as any).updatedFields }
+              : {}),
             ...(options?.correlationId
               ? { correlationId: options.correlationId }
               : {}),

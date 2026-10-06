@@ -27,6 +27,17 @@ export class ProjectAccessVerifierAdapter extends IProjectAccessVerifierPort {
       return { canRead: true, canWrite: true, role: 'contributor' };
     }
 
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (
+      !projectId ||
+      !userId ||
+      !uuidRegex.test(projectId) ||
+      !uuidRegex.test(userId)
+    ) {
+      return { canRead: false, canWrite: false, role: 'none' };
+    }
+
     try {
       // 1. Check if user is project owner
       const project = await this.prisma.project.findUnique({

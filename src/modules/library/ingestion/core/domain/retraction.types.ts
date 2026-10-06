@@ -12,9 +12,16 @@ export interface RetractionDetails {
   source: RetractionSource;
 }
 
+export type RetractionLookupResult =
+  | { status: 'retracted'; details: RetractionDetails }
+  | { status: 'clean' }
+  | { status: 'unknown' };
+
 export interface RetractionCheckResult {
   itemId: string;
   isRetracted: boolean;
+  /** `unknown` = could not be verified; stored status was left untouched. */
+  status?: 'retracted' | 'clean' | 'unknown';
   nature?: RetractionNature;
   details?: RetractionDetails;
   checkedAt: Date;

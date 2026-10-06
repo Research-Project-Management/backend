@@ -18,6 +18,7 @@ import {
 import { InvitationService } from './invitation.service';
 import { CreateProjectInvitationDto } from './dto/create-invitation.dto';
 import { JoinByCodeDto } from './dto/join-by-code.dto';
+import { ToggleLinkSharingDto } from './dto/toggle-link-sharing.dto';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { VerifiedEmailGuard } from '@/modules/identity/auth';
@@ -117,5 +118,33 @@ export class InvitationController {
     @Param('invitationId') invitationId: string,
   ) {
     return this.invitationService.revokeInvitation(projectId, invitationId);
+  }
+
+  // ─── 3. Overleaf Parity Link Sharing ────────────────────────────────────────
+
+  @Get(':projectId/link-sharing')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator')
+  @ApiOperation({ summary: 'Get link sharing settings for a project' })
+  @ApiResponse({ status: 200, description: 'Project link sharing settings' })
+  async getLinkSharing(@Param('projectId') projectId: string) {
+    return this.invitationService.getLinkSharing(projectId);
+  }
+
+  @Post(':projectId/link-sharing')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner')
+  @ApiOperation({ summary: 'Toggle or regenerate link sharing for a project' })
+  @ApiResponse({ status: 200, description: 'Updated link sharing settings' })
+  async toggleLinkSharing(
+    @Param('projectId') projectId: string,
+    @Body() dto: ToggleLinkSharingDto,
+  ) {
+    return this.invitationService.toggleLinkSharing(
+      projectId,
+      dto.enabled,
+      dto.regenerate,
+    );
   }
 }

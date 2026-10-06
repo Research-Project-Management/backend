@@ -39,6 +39,12 @@ import {
   CompilePipelineResult,
 } from './core/pipeline/compile-pipeline';
 import { CompileFairQueue } from './core/pipeline/compile-fair-queue';
+import {
+  planDbFileSet,
+  planInlineFileSet,
+  linesToText,
+  PlannedFileSet,
+} from './core/pipeline/compile-fileset';
 import { SyncTexUseCase } from './core/pipeline/synctex.use-case';
 import { WordCountUseCase } from './core/pipeline/word-count.use-case';
 import {
@@ -80,6 +86,10 @@ export class ClsiService {
   private readonly workspace: OverleafIncrementalWorkspace;
   private readonly pipeline: CompilePipeline;
   private readonly fairQueue = new CompileFairQueue();
+  private readonly inFlightBuilds = new Map<
+    string,
+    Promise<ClsiCompileResult>
+  >();
   private readonly synctexUseCase: SyncTexUseCase;
   private readonly wordCountUseCase: WordCountUseCase;
   private readonly diskUsageCleaner: DiskUsageCleaner;
@@ -142,41 +152,146 @@ export class ClsiService {
       .digest('hex');
   }
 
+  /**
+   * Resolve the owning project when only a page/doc id was supplied.
+   */
+  private async resolveProjectId(dto: CompileManuscriptDto): Promise<string> {
+    const projectId = dto.projectId || dto.project_id || '';
+    if (projectId) return projectId;
+
+    const pageId = dto.pageId || dto.page_id;
+    if (pageId && this.prisma) {
+      try {
+        const pageDoc = await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+          select: { projectId: true },
+        });
+        if (pageDoc?.projectId) return pageDoc.projectId;
+      } catch {
+        /* fall through to default project */
+      }
+    }
+    return 'default';
+  }
+
+  /**
+   * Plans the compile file set from lightweight metadata (no document bodies are read),
+   * so the cache can be consulted before any heavy I/O happens.
+   */
+  private async planFiles(
+    projectId: string,
+    dto: CompileManuscriptDto,
+  ): Promise<PlannedFileSet> {
+    const incomingFiles = { ...(dto.files || {}) };
+    const mainFile = dto.main_file || 'main.tex';
+    const source = dto.source || '';
+
+    if (this.prisma && projectId !== 'default') {
+      try {
+        const [nodes, docs] = await Promise.all([
+          this.prisma.manuscriptNode.findMany({
+            where: { projectId },
+            orderBy: { sortOrder: 'asc' },
+            select: {
+              id: true,
+              docId: true,
+              path: true,
+              name: true,
+              type: true,
+              isRootDoc: true,
+            },
+          }),
+          this.prisma.manuscriptDoc.findMany({
+            where: { projectId, deleted: false },
+            select: {
+              id: true,
+              path: true,
+              rev: true,
+              sizeBytes: true,
+              updatedAt: true,
+              inStorage: true,
+            },
+          }),
+        ]);
+        return planDbFileSet({
+          nodes,
+          docs,
+          incomingFiles,
+          source,
+          mainFile,
+          pageId: dto.pageId || dto.page_id,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Could not load project documents from database: ${msg}`,
+        );
+      }
+    }
+    return planInlineFileSet({ incomingFiles, source, mainFile });
+  }
+
+  /**
+   * Loads document bodies for DB-backed entries in ONE `id IN (…)` query. Only called on a
+   * cache miss; inline (client-supplied) entries are used as-is.
+   */
+  private async hydrateFiles(
+    plan: PlannedFileSet,
+  ): Promise<Record<string, string>> {
+    const dbIds: string[] = [];
+    let archivedWithContent = 0;
+    for (const s of plan.files.values()) {
+      if (s.kind !== 'db') continue;
+      dbIds.push(s.docId);
+      if (s.inStorage && s.sizeBytes > 0) archivedWithContent++;
+    }
+    if (archivedWithContent > 0) {
+      this.logger.warn(
+        `${archivedWithContent} cold-storage doc(s) have no inline body; compiling them as empty. Unarchive before compiling.`,
+      );
+    }
+
+    const contentById = new Map<string, string>();
+    if (dbIds.length > 0 && this.prisma) {
+      const rows = await this.prisma.manuscriptDoc.findMany({
+        where: { id: { in: dbIds } },
+        select: { id: true, lines: true },
+      });
+      for (const row of rows) contentById.set(row.id, linesToText(row.lines));
+    }
+
+    const out: Record<string, string> = {};
+    for (const [filePath, s] of plan.files) {
+      out[filePath] =
+        s.kind === 'inline' ? s.content : (contentById.get(s.docId) ?? '');
+    }
+    return out;
+  }
+
   public async compile(
     dto: CompileManuscriptDto,
     _userId?: string,
   ): Promise<ClsiCompileResult> {
-    const projectId = dto.projectId || dto.project_id || 'default';
-    const mainFile = dto.main_file || 'main.tex';
-    let source = dto.source || '';
-    const files = dto.files || {};
     const engine = dto.engine || 'pdflatex';
+    const projectId = await this.resolveProjectId(dto);
 
-    // Auto-fetch source from Docstore / Prisma if not provided
-    if (!source && (dto.pageId || dto.page_id) && this.prisma) {
-      const pageId = (dto.pageId || dto.page_id)!;
-      try {
-        const record = await this.prisma.manuscriptDoc.findUnique({
-          where: { id: pageId },
-        });
-        if (record && record.lines) {
-          source = Array.isArray(record.lines)
-            ? (record.lines as string[]).join('\n')
-            : String(record.lines);
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.debug(`Could not auto-fetch page ${pageId}: ${msg}`);
-      }
-    }
+    // Phase A — metadata only: plan the file set + content-independent fingerprint.
+    const plan = await this.planFiles(projectId, dto);
+    const cacheKey = `flux:clsi:compile:${this.hashSource(
+      [
+        projectId,
+        plan.fingerprint,
+        plan.mainFile,
+        engine,
+        dto.draft ?? false,
+        dto.syntax_only ?? dto.syntaxOnly ?? false,
+        dto.stop_on_first_error ?? false,
+      ].join('|'),
+    )}`;
+    const cacheable = !!(dto.use_cache && plan.hasMainContent);
 
-    const sourceHash = this.hashSource(
-      `${source}:${JSON.stringify(files)}:${engine}:${dto.draft ?? false}`,
-    );
-    const cacheKey = `flux:clsi:compile:${sourceHash}`;
-
-    // 1. Check Redis Cache
-    if (dto.use_cache && this.cache && source) {
+    // 1. Redis cache (consulted BEFORE any document body is loaded)
+    if (cacheable && this.cache) {
       const cached = await this.cache.get<ClsiCompileResult>(cacheKey);
       if (cached && cached.success) {
         this.metrics.record({
@@ -193,7 +308,46 @@ export class ClsiService {
       }
     }
 
-    // 2. Dispatch to Standalone CLSI Microservice if configured
+    // 2. Request coalescing (thundering herd): identical concurrent requests — e.g. several
+    //    collaborators hitting "Recompile" on the same revision — share one build.
+    if (cacheable) {
+      const inFlight = this.inFlightBuilds.get(cacheKey);
+      if (inFlight) return inFlight;
+    }
+
+    const build = this.runCompile(
+      projectId,
+      plan,
+      dto,
+      engine,
+      cacheKey,
+      _userId,
+    );
+    if (!cacheable) return build;
+
+    const tracked = build.finally(() => {
+      if (this.inFlightBuilds.get(cacheKey) === tracked) {
+        this.inFlightBuilds.delete(cacheKey);
+      }
+    });
+    this.inFlightBuilds.set(cacheKey, tracked);
+    return tracked;
+  }
+
+  private async runCompile(
+    projectId: string,
+    plan: PlannedFileSet,
+    dto: CompileManuscriptDto,
+    engine: string,
+    cacheKey: string,
+    _userId?: string,
+  ): Promise<ClsiCompileResult> {
+    // Phase B — cache miss: now (and only now) read the document bodies.
+    const mainFile = plan.mainFile;
+    const mergedFiles = await this.hydrateFiles(plan);
+    const source = mergedFiles[mainFile] ?? dto.source ?? '';
+
+    // 3. Dispatch to Standalone CLSI Microservice if configured
     if (this.remoteClsiUrl) {
       try {
         const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
@@ -216,8 +370,13 @@ export class ClsiService {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 ...dto,
+                projectId,
+                project_id: projectId,
+                mainFile,
+                main_file: mainFile,
                 source,
-                files,
+                files: mergedFiles,
+                engine,
               }),
               signal: AbortSignal.timeout(
                 dto.timeout_ms ?? dto.timeoutMs ?? 60000,
@@ -267,7 +426,7 @@ export class ClsiService {
       }
     }
 
-    // 3. Execute compilation through Fair-Queue single-flight pipeline
+    // 4. Execute compilation through Fair-Queue single-flight pipeline
     const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
     return await this.fairQueue.schedule(
       projectId,
@@ -284,7 +443,7 @@ export class ClsiService {
             stopOnFirstError: dto.stop_on_first_error,
             timeoutMs: effectiveTimeoutMs,
             source,
-            files,
+            files: mergedFiles,
             signal,
             onLogChunk,
           });
@@ -300,7 +459,7 @@ export class ClsiService {
             : 0,
         });
 
-        // 4. Cache successful results (5 mins TTL, max 2MB base64)
+        // 5. Cache successful results (5 mins TTL, max 2MB base64)
         if (
           pipelineResult.success &&
           this.cache &&
@@ -310,7 +469,7 @@ export class ClsiService {
           await this.cache.set(cacheKey, pipelineResult, 300);
         }
 
-        // 5. Broadcast live compile completion status over WebSocket
+        // 6. Broadcast live compile completion status over WebSocket
         this.realtimeService?.broadcastCompileProgress(projectId, {
           status: pipelineResult.success ? 'success' : 'failed',
           logs: pipelineResult.logs ? [pipelineResult.logs] : [],

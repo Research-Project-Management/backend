@@ -175,26 +175,29 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       expect(result?.source).toBe('retraction_watch');
     });
 
-    it('should identify retraction from title heuristics', async () => {
+    it('should NOT flag an item from its title alone (DOI/PMID matching only)', async () => {
+      const cleanDoi = '10.9999/unknown-clean-doi';
+      await retractionDb.saveClean(cleanDoi);
       const result = await scanner.scan(
-        '10.9999/unknown-clean-doi',
+        cleanDoi,
         null,
         'RETRACTED: Deep Learning for Quantum Gravity Solvers',
       );
-      expect(result).not.toBeNull();
-      expect(result?.nature).toBe('retraction');
-      expect(result?.source).toBe('manual');
+      expect(result).toBeNull();
     });
 
-    it('should identify expression of concern from title heuristics', async () => {
-      const result = await scanner.scan(
-        '10.9999/unknown-clean-doi',
-        null,
-        'Expression of Concern: Statistical anomalies in Figure 4',
-      );
-      expect(result).not.toBeNull();
-      expect(result?.nature).toBe('expression_of_concern');
-      expect(result?.source).toBe('manual');
+    it('lookup() returns unknown when the item has no DOI or PMID', async () => {
+      const result = await scanner.lookup(null, null);
+      expect(result).toEqual({ status: 'unknown' });
+    });
+
+    it('lookup() returns clean for a verified-clean DOI and retracted for a seeded DOI', async () => {
+      const cleanDoi = '10.1103/physrevlett.120.010001';
+      await retractionDb.saveClean(cleanDoi);
+      expect(await scanner.lookup(cleanDoi)).toEqual({ status: 'clean' });
+
+      const retracted = await scanner.lookup('10.1016/s0140-6736(97)11096-0');
+      expect(retracted.status).toBe('retracted');
     });
   });
 
@@ -261,12 +264,67 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       expect(batchResult.newlyRetracted).toBe(1);
     });
 
+    it('should completely ignore items without DOI or PMID during batch scan (Zotero parity)', async () => {
+      const mixedItems = [
+        {
+          id: 'item-no-ids',
+          title: 'A book chapter without DOI or PMID',
+          doi: null,
+          metadata: { pmid: null },
+          isRetracted: false,
+        },
+        {
+          id: 'item-empty-doi',
+          title: 'Item with empty string DOI',
+          doi: '',
+          metadata: {},
+          isRetracted: false,
+        },
+        {
+          id: 'item-valid',
+          title: 'Wakefield MMR Paper',
+          doi: '10.1016/s0140-6736(97)11096-0',
+          pmid: null,
+          isRetracted: false,
+        },
+      ];
+      mockPrisma.item.findMany.mockResolvedValue(mixedItems);
+      mockPrisma.item.update.mockResolvedValue({});
+
+      const batchResult = await service.checkLibrary('user-1');
+      // Only the item with valid DOI should be scanned; items without DOI/PMID are omitted
+      expect(batchResult.scanned).toBe(1);
+      expect(batchResult.newlyRetracted).toBe(1);
+    });
+
     it('should return retraction database stats and allow manual seeding', async () => {
       const stats = await service.getDatabaseStats();
       expect(stats.totalRecords).toBeGreaterThan(0);
 
       const seedResult = await service.seedDatabase(false);
       expect(seedResult.seeded).toBeGreaterThanOrEqual(0);
+    });
+
+    it('checkItem keeps the stored retracted status when the lookup is unknown', async () => {
+      const mockItem = {
+        id: 'item-unknown',
+        doi: null,
+        title: 'No identifiers',
+        metadata: {
+          pmid: null,
+          isRetracted: true,
+          retractionNature: 'retraction',
+          retractionCheckedAt: '2026-01-01T00:00:00.000Z',
+        },
+      };
+      mockPrisma.item.findFirst.mockResolvedValue(mockItem);
+      mockPrisma.item.update.mockClear();
+
+      const result = await service.checkItem('user-1', 'item-unknown');
+
+      expect(result.status).toBe('unknown');
+      expect(result.isRetracted).toBe(true);
+      expect(mockPrisma.item.update).not.toHaveBeenCalled();
     });
 
     it('should sync stale library items via syncLibrary', async () => {

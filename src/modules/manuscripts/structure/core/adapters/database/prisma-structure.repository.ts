@@ -68,7 +68,14 @@ export class PrismaStructureRepository implements IStructureRepository {
     nodeId: string,
   ): Promise<ManuscriptNodeEntity | null> {
     const raw = await this.prisma.manuscriptNode.findFirst({
-      where: { id: nodeId, projectId },
+      where: {
+        OR: [
+          { id: nodeId, projectId },
+          { docId: nodeId, projectId },
+          { id: nodeId },
+          { docId: nodeId },
+        ],
+      },
     });
     return raw ? this.mapToEntity(raw) : null;
   }
@@ -107,15 +114,29 @@ export class PrismaStructureRepository implements IStructureRepository {
   }
 
   public async setRootDoc(projectId: string, nodeId: string): Promise<void> {
+    const targetNode = await this.prisma.manuscriptNode.findFirst({
+      where: {
+        OR: [
+          { id: nodeId, projectId },
+          { docId: nodeId, projectId },
+          { id: nodeId },
+          { docId: nodeId },
+        ],
+      },
+    });
+
+    const targetId = targetNode?.id || nodeId;
+    const targetProjectId = targetNode?.projectId || projectId;
+
     await this.prisma.$transaction([
       // Unset previous root docs
       this.prisma.manuscriptNode.updateMany({
-        where: { projectId, isRootDoc: true },
+        where: { projectId: targetProjectId, isRootDoc: true },
         data: { isRootDoc: false },
       }),
       // Set new root doc
       this.prisma.manuscriptNode.update({
-        where: { id: nodeId },
+        where: { id: targetId },
         data: { isRootDoc: true },
       }),
     ]);

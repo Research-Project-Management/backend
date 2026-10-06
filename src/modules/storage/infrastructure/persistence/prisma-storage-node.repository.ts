@@ -189,4 +189,19 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     });
     return records.map((r) => StorageNodeMapper.toDomain(r));
   }
+
+  async isDescendant(
+    rootNodeId: string,
+    candidateId: string,
+  ): Promise<boolean> {
+    const result = await this.prisma.$queryRaw<Array<{ exists: boolean }>>`
+      WITH RECURSIVE ancestors AS (
+        SELECT id, parent_id FROM files WHERE id = ${candidateId}::uuid
+        UNION ALL
+        SELECT f.id, f.parent_id FROM files f JOIN ancestors a ON f.id = a.parent_id
+      )
+      SELECT EXISTS(SELECT 1 FROM ancestors WHERE id = ${rootNodeId}::uuid) AS "exists";
+    `;
+    return Boolean(result[0]?.exists);
+  }
 }

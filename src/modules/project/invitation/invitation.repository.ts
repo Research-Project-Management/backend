@@ -1,4 +1,4 @@
-﻿import { Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Role, InvitationStatus, Prisma } from '@prisma/client';
 import { isUuid } from '@/core/utils/uuid.util';
@@ -36,6 +36,7 @@ const PROJECT_SELECT = {
   avatar: true,
   description: true,
   isActive: true,
+  settings: true,
 } as const;
 
 @Injectable()
@@ -268,5 +269,62 @@ export class InvitationRepository {
         role,
       },
     });
+  }
+
+  /**
+   * Update project settings (e.g. for link sharing).
+   */
+  async updateProjectSettings(
+    projectId: string,
+    settings: Prisma.InputJsonValue,
+  ) {
+    return this.prisma.project.update({
+      where: { id: projectId },
+      data: { settings },
+      select: PROJECT_SELECT,
+    });
+  }
+
+  /**
+   * Find an active project by link sharing token (edit or view-only).
+   */
+  async findProjectByLinkToken(token: string) {
+    if (!token) return null;
+    const cleanToken = token.trim();
+    if (!cleanToken) return null;
+
+    const projects = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        name: string;
+        identifier: string;
+        avatar: string | null;
+        description: string | null;
+        is_active: boolean;
+        settings: any;
+      }>
+    >`
+      SELECT id, name, identifier, avatar, description, is_active, settings
+      FROM projects
+      WHERE deleted_at IS NULL
+        AND is_active = true
+        AND (
+          settings->'linkSharing'->>'editToken' = ${cleanToken}
+          OR settings->'linkSharing'->>'readOnlyToken' = ${cleanToken}
+        )
+      LIMIT 1
+    `;
+
+    if (!projects || projects.length === 0) return null;
+    const p = projects[0];
+    return {
+      id: p.id,
+      name: p.name,
+      identifier: p.identifier,
+      avatar: p.avatar,
+      description: p.description,
+      isActive: p.is_active,
+      settings: p.settings,
+    };
   }
 }

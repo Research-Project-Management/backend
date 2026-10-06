@@ -17,6 +17,16 @@ export class ExportZipQueryDto {
   @IsBoolean()
   includePdf?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Filter files strictly for arXiv submission (strip aux, log, out, synctex and include bbl)',
+    default: false,
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  cleanArxiv?: boolean;
+
   @ApiPropertyOptional({ description: 'Custom archive file name' })
   @IsOptional()
   @IsString()

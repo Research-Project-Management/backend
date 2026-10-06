@@ -421,7 +421,7 @@ describe('Multi-User Collaborative Simulation & Full-Scale Stress Test', () => {
     },
   };
 
-  const PROJECT_ID = 'prj-quantum-ai-collab-2026';
+  const PROJECT_ID = '0190a1b2-0000-7000-8000-000000000001';
 
   // In-memory Database mock
   const mockDbDocs = new Map<string, any>();
@@ -455,9 +455,7 @@ describe('Multi-User Collaborative Simulation & Full-Scale Stress Test', () => {
         return results;
       }),
       create: jest.fn(async ({ data }: any) => {
-        const id =
-          data.id ||
-          `doc-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+        const id = data.id || `${require('crypto').randomUUID()}`;
         const record = {
           id,
           projectId: data.projectId,

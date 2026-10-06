@@ -96,6 +96,16 @@ export class FilestoreService {
   }
 
   /**
+   * Find file by project ID and relative path / leaf name.
+   */
+  public async findByProjectAndName(
+    projectId: string,
+    name: string,
+  ): Promise<ManuscriptFile | null> {
+    return await this.repository.findByProjectAndName(projectId, name);
+  }
+
+  /**
    * Delete file.
    */
   public async deleteFile(
