@@ -112,8 +112,7 @@ export class SearchRepository implements OnModuleInit {
     const hasProject = Boolean(
       options.projectId &&
       options.projectId !== 'user' &&
-      options.projectId !== 'me' &&
-      options.projectId !== 'personal',
+      options.projectId !== 'me',
     );
     const baseFilters: string[] = [
       hasProject

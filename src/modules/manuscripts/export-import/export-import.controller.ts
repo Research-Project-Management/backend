@@ -172,6 +172,25 @@ export class ExportImportController {
     }
   }
 
+  @Get('templates/:templateId')
+  @ApiOperation({
+    summary: 'Get details and files of an academic starter template',
+  })
+  @ApiResponse({ status: 200, type: TemplateResponseDto })
+  public async getTemplate(
+    @Param('templateId') templateId: string,
+  ): Promise<TemplateResponseDto> {
+    try {
+      const template = await this.service.getTemplate(templateId);
+      if (!template) {
+        throw new NotFoundException(`Template '${templateId}' not found.`);
+      }
+      return template;
+    } catch (err) {
+      this.handleError(err);
+    }
+  }
+
   @Post(':projectId/templates/:templateId/scaffold')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
@@ -187,6 +206,68 @@ export class ExportImportController {
     try {
       const targetTemplateId = templateId || dto?.templateId || '';
       return await this.service.scaffoldTemplate(projectId, targetTemplateId);
+    } catch (err) {
+      this.handleError(err);
+    }
+  }
+
+  @Post(':projectId/import/convert')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary:
+      'Convert and import a Word (.docx) or Markdown (.md) document into the project',
+  })
+  @ApiResponse({ status: 201, type: ImportSummaryResponseDto })
+  public async convertDocument(
+    @Param('projectId') projectId: string,
+    @Req() req: FastifyRequest,
+    @Query('format') format?: 'docx' | 'md',
+  ): Promise<ImportSummaryResponseDto> {
+    try {
+      let fileBuffer: Buffer;
+      let fileName = 'document.docx';
+
+      const multipartReq = req as FastifyRequest & {
+        isMultipart?: () => boolean;
+        file?: () => Promise<
+          { filename: string; toBuffer: () => Promise<Buffer> } | undefined
+        >;
+      };
+      const isMultipart =
+        typeof multipartReq.isMultipart === 'function'
+          ? multipartReq.isMultipart()
+          : Boolean(multipartReq.isMultipart);
+
+      if (isMultipart && typeof multipartReq.file === 'function') {
+        const part = await multipartReq.file();
+        if (!part) {
+          throw new BadRequestException('No file found in multipart upload.');
+        }
+        fileName = part.filename || fileName;
+        fileBuffer = await part.toBuffer();
+      } else if (Buffer.isBuffer(req.body)) {
+        fileBuffer = req.body;
+      } else if (
+        typeof req.body === 'object' &&
+        req.body !== null &&
+        'buffer' in req.body &&
+        Buffer.isBuffer((req.body as any).buffer)
+      ) {
+        fileBuffer = (req.body as any).buffer;
+        if ('filename' in req.body) fileName = (req.body as any).filename;
+      } else {
+        throw new BadRequestException(
+          'Expected document binary payload or multipart form data.',
+        );
+      }
+
+      return await this.service.convertDocument({
+        projectId,
+        fileBuffer,
+        fileName,
+        format,
+      });
     } catch (err) {
       this.handleError(err);
     }

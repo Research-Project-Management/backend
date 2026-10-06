@@ -107,7 +107,6 @@ model WorkItemComment {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([workItemId])
   @@index([workItemId, createdAt])
   @@index([authorId])
   @@map("work_item_comments")

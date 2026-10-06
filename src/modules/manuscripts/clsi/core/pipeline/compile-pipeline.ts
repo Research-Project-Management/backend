@@ -40,9 +40,41 @@ export interface CompilePipelineRequest {
   onLogChunk?: (chunk: string) => void;
 }
 
+export interface OverleafOutputFileEntry {
+  type: string;
+  path: string;
+  url: string;
+  size?: number;
+}
+
+export interface OverleafClsiEnvelope {
+  status: 'success' | 'failure';
+  outputFiles: OverleafOutputFileEntry[];
+}
+
+function toOverleafOutputFiles(
+  projectId: string,
+  files: DiscoveredOutputFile[],
+): OverleafOutputFileEntry[] {
+  return files.map((f) => ({
+    type: f.isMainPdf
+      ? 'pdf'
+      : f.isLog
+        ? 'log'
+        : f.isSynctex
+          ? 'synctex'
+          : 'aux',
+    path: f.path,
+    url: `/api/v1/manuscripts/projects/${projectId}/artifacts/${encodeURIComponent(f.path)}`,
+    size: f.size,
+  }));
+}
+
 export type CompilePipelineResult =
   | {
       success: true;
+      status: 'success';
+      compile: OverleafClsiEnvelope;
       pdf: string;
       synctex?: string;
       logs: string;
@@ -52,6 +84,8 @@ export type CompilePipelineResult =
     }
   | {
       success: false;
+      status: 'failure';
+      compile: OverleafClsiEnvelope;
       error: string;
       pdf?: string;
       synctex?: string;
@@ -217,14 +251,46 @@ export class CompilePipeline {
                     scratchDir,
                     inputFiles,
                   );
+                  function toOverleafOutputFiles(
+                    projectId: string,
+                    files?: DiscoveredOutputFile[],
+                  ): OverleafOutputFileEntry[] {
+                    if (!files || files.length === 0) return [];
+                    return files.map((f) => {
+                      let type = 'file';
+                      if (f.isMainPdf) type = 'pdf';
+                      else if (f.isLog) type = 'log';
+                      else if (f.isSynctex) type = 'synctex.gz';
+                      else {
+                        const ext = path.extname(f.path).replace(/^\./, '');
+                        if (ext) type = ext;
+                      }
+                      return {
+                        type,
+                        path: f.path,
+                        url: `/api/v1/manuscripts/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(f.path)}`,
+                        size: f.size,
+                      };
+                    });
+                  }
+
                   const diagnostics = this.logParser.parse(logs, mainFile);
 
                   dto.onLogChunk?.(
                     '[CLSI Cache] Build up to date: 0 source files modified. Returning cached output.',
                   );
 
+                  const overleafFiles = toOverleafOutputFiles(
+                    projectId,
+                    discoveredFiles,
+                  );
                   return {
                     success: true,
+                    status: 'success',
+                    compile: {
+                      status: 'success',
+                      outputFiles: overleafFiles,
+                    },
                     pdf: pdfBase64,
                     synctex: synctexBase64 || undefined,
                     logs:
@@ -380,8 +446,17 @@ export class CompilePipeline {
               );
             } catch {}
 
+            const overleafFiles = toOverleafOutputFiles(
+              projectId,
+              discoveredFiles,
+            );
             return {
               success: true,
+              status: 'success',
+              compile: {
+                status: 'success',
+                outputFiles: overleafFiles,
+              },
               pdf: pdfBase64,
               synctex: synctexBase64 || undefined,
               logs,
@@ -395,8 +470,17 @@ export class CompilePipeline {
             await fs.unlink(buildStatePath);
           } catch {}
 
+          const overleafFiles = toOverleafOutputFiles(
+            projectId,
+            discoveredFiles,
+          );
           return {
             success: false,
+            status: 'failure',
+            compile: {
+              status: 'failure',
+              outputFiles: overleafFiles,
+            },
             error:
               diagnostics.find((d) => d.severity === 'error')?.message ||
               'LaTeX compilation failed to produce a PDF',
@@ -414,6 +498,11 @@ export class CompilePipeline {
       const stack = err instanceof Error ? err.stack : undefined;
       return {
         success: false,
+        status: 'failure',
+        compile: {
+          status: 'failure',
+          outputFiles: [],
+        },
         error: message || 'Compilation execution failed',
         logs: stack || message || '',
         durationMs: Date.now() - startTime,

@@ -63,7 +63,6 @@ model Tag {
   itemTags    ItemTag[]
 
   @@unique([userId, name, projectId])
-  @@index([userId])
   @@index([projectId, name])
   @@map("tags")
 }

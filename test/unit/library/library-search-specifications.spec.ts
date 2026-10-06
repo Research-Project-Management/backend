@@ -45,14 +45,14 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       ],
     };
 
-    it('should evaluate ScopeSpecification for personal and project libraries', () => {
-      const personalSpec = new ScopeSpecification('user-1');
-      expect(personalSpec.isSatisfiedBy(sampleItem)).toBe(true);
+    it('should evaluate ScopeSpecification for user and project libraries', () => {
+      const userSpec = new ScopeSpecification('user-1');
+      expect(userSpec.isSatisfiedBy(sampleItem)).toBe(true);
       expect(
-        personalSpec.isSatisfiedBy({ ...sampleItem, userId: 'other-user' }),
+        userSpec.isSatisfiedBy({ ...sampleItem, userId: 'other-user' }),
       ).toBe(false);
 
-      expect(personalSpec.toPrismaWhere()).toEqual({
+      expect(userSpec.toPrismaWhere()).toEqual({
         userId: 'user-1',
       });
 

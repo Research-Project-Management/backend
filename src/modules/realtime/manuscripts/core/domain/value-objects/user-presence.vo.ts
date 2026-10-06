@@ -49,4 +49,28 @@ export class UserPresenceVo {
       lastSeenAt: this.lastSeenAt.toISOString(),
     };
   }
+
+  public static fromJSON(raw: any): UserPresenceVo {
+    if (!raw) {
+      throw new Error('Cannot construct UserPresenceVo from null or undefined');
+    }
+    let cursor: CursorPositionVo | null = null;
+    if (raw.cursor) {
+      cursor = CursorPositionVo.create({
+        row: raw.cursor.row,
+        column: raw.cursor.column,
+        selection: raw.cursor.selection,
+      });
+    }
+    return new UserPresenceVo({
+      userId: raw.userId,
+      socketId: raw.socketId,
+      name: raw.name,
+      color: raw.color,
+      avatar: raw.avatar,
+      activeDocId: raw.activeDocId,
+      cursor,
+      lastSeenAt: raw.lastSeenAt ? new Date(raw.lastSeenAt) : new Date(),
+    });
+  }
 }

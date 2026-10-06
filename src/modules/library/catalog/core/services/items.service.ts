@@ -554,19 +554,35 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       data.title = cleanTitle;
     }
 
+    // 1. Resolve target itemType (from payload if provided, or from existing item in DB)
+    let targetItemType = data.itemType;
+    if (!targetItemType) {
+      const existing = await this.query.findById(
+        userId,
+        id,
+        projectId,
+        context?.tx,
+        false,
+        false,
+      );
+      if (existing) {
+        targetItemType = existing.itemType || existing.type || 'journalArticle';
+      }
+    }
+
     let updatePayload = data;
-    if (this.validator && (data.itemType || data.creators)) {
+    if (this.validator && targetItemType) {
       const valRes = this.validator.validateAndSanitizeItem(
-        data.itemType,
+        targetItemType,
         data,
       );
       updatePayload = valRes.sanitizedItem as UpdateItemData;
     } else if (
-      data.itemType &&
+      targetItemType &&
       typeof this.typesService?.isValidItemType === 'function' &&
-      !this.typesService.isValidItemType(data.itemType)
+      !this.typesService.isValidItemType(targetItemType)
     ) {
-      throw new BadRequestException(`Invalid itemType: ${data.itemType}`);
+      throw new BadRequestException(`Invalid itemType: ${targetItemType}`);
     }
 
     if (context) {

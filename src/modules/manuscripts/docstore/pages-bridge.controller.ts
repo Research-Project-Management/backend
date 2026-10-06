@@ -32,6 +32,237 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core/database/prisma.service';
 import { DocstoreService } from './docstore.service';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { PkzipEngineAdapter } from '../export-import/core/adapters/engine/pkzip-engine.adapter';
+
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function convertLatexToMarkdown(latex: string, fallbackTitle?: string): string {
+  let content = latex.replace(/\r\n/g, '\n');
+
+  // Strip LaTeX comments
+  content = content.replace(/(^|[^\\])%.*$/gm, '$1');
+
+  // Extract title if present
+  const titleMatch = content.match(/\\title\{([^}]+)\}/);
+  const title = titleMatch ? titleMatch[1].trim() : fallbackTitle || '';
+
+  // Extract body between \begin{document} and \end{document} if present
+  const docMatch = content.match(
+    /\\begin\{document\}([\s\S]*?)\\end\{document\}/,
+  );
+  if (docMatch) {
+    content = docMatch[1];
+  } else {
+    content = content.replace(/[\s\S]*?\\begin\{document\}/, '');
+  }
+
+  // Remove common commands and convert structure
+  content = content
+    .replace(/\\maketitle/g, title ? `# ${title}\n` : '')
+    .replace(/\\tableofcontents/g, '')
+    .replace(/\\newpage/g, '\n---\n')
+    .replace(/\\clearpage/g, '\n---\n')
+    .replace(/\\section\*?\{([^}]+)\}/g, '\n# $1\n')
+    .replace(/\\subsection\*?\{([^}]+)\}/g, '\n## $1\n')
+    .replace(/\\subsubsection\*?\{([^}]+)\}/g, '\n### $1\n')
+    .replace(/\\paragraph\*?\{([^}]+)\}/g, '\n#### $1\n')
+    .replace(/\\textbf\{([^}]+)\}/g, '**$1**')
+    .replace(/\\textit\{([^}]+)\}/g, '*$1*')
+    .replace(/\\emph\{([^}]+)\}/g, '*$1*')
+    .replace(/\\underline\{([^}]+)\}/g, '<u>$1</u>')
+    .replace(/\\texttt\{([^}]+)\}/g, '`$1`')
+    .replace(
+      /\\begin\{verbatim\}([\s\S]*?)\\end\{verbatim\}/g,
+      '\n```\n$1\n```\n',
+    )
+    .replace(/\\begin\{itemize\}/g, '')
+    .replace(/\\end\{itemize\}/g, '')
+    .replace(/\\begin\{enumerate\}/g, '')
+    .replace(/\\end\{enumerate\}/g, '')
+    .replace(/\\item\s*/g, '\n- ')
+    .replace(/\\href\{([^}]+)\}\{([^}]+)\}/g, '[$2]($1)')
+    .replace(/\\url\{([^}]+)\}/g, '<$1>')
+    .replace(/\\cite\{([^}]+)\}/g, '[$1]')
+    .replace(/\\ref\{([^}]+)\}/g, '$1')
+    .replace(/\\label\{([^}]+)\}/g, '')
+    .replace(/\\\\/g, '\n');
+
+  return content.trim();
+}
+
+function convertLatexToHtml(latex: string, title?: string): string {
+  const md = convertLatexToMarkdown(latex, title);
+  const docTitle = title || 'Document';
+
+  const paragraphs = md
+    .split(/\n{2,}/)
+    .map((block) => {
+      const trimmed = block.trim();
+      if (!trimmed) return '';
+      if (trimmed.startsWith('# ')) return `<h1>${trimmed.slice(2)}</h1>`;
+      if (trimmed.startsWith('## ')) return `<h2>${trimmed.slice(3)}</h2>`;
+      if (trimmed.startsWith('### ')) return `<h3>${trimmed.slice(4)}</h3>`;
+      if (trimmed.startsWith('#### ')) return `<h4>${trimmed.slice(5)}</h4>`;
+      if (trimmed.startsWith('- ')) {
+        const items = trimmed
+          .split('\n')
+          .map((line) => line.replace(/^-\s*/, '').trim())
+          .filter(Boolean)
+          .map((item) => `<li>${item}</li>`)
+          .join('');
+        return `<ul>${items}</ul>`;
+      }
+      return `<p>${trimmed.replace(/\n/g, '<br/>')}</p>`;
+    })
+    .filter(Boolean)
+    .join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeXml(docTitle)}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 840px;
+      margin: 40px auto;
+      padding: 0 24px;
+      color: #1a202c;
+    }
+    h1, h2, h3, h4 { color: #0f172a; margin-top: 1.5em; margin-bottom: 0.5em; }
+    p { margin-bottom: 1em; }
+    ul { margin: 1em 0; padding-left: 24px; }
+    li { margin-bottom: 0.5em; }
+    code { background: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  ${paragraphs}
+</body>
+</html>`;
+}
+
+function convertLatexToDocxBuffer(latex: string, title?: string): Buffer {
+  const md = convertLatexToMarkdown(latex, title);
+  const lines = md.split('\n');
+
+  const pNodes: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      pNodes.push('<w:p/>');
+      continue;
+    }
+
+    if (trimmed.startsWith('# ')) {
+      const headingText = escapeXml(trimmed.slice(2));
+      pNodes.push(`
+        <w:p>
+          <w:pPr>
+            <w:pStyle w:val="Heading1"/>
+          </w:pPr>
+          <w:r>
+            <w:rPr>
+              <w:b/>
+              <w:sz w:val="36"/>
+            </w:rPr>
+            <w:t>${headingText}</w:t>
+          </w:r>
+        </w:p>
+      `);
+    } else if (trimmed.startsWith('## ')) {
+      const headingText = escapeXml(trimmed.slice(3));
+      pNodes.push(`
+        <w:p>
+          <w:pPr>
+            <w:pStyle w:val="Heading2"/>
+          </w:pPr>
+          <w:r>
+            <w:rPr>
+              <w:b/>
+              <w:sz w:val="28"/>
+            </w:rPr>
+            <w:t>${headingText}</w:t>
+          </w:r>
+        </w:p>
+      `);
+    } else if (trimmed.startsWith('### ')) {
+      const headingText = escapeXml(trimmed.slice(4));
+      pNodes.push(`
+        <w:p>
+          <w:pPr>
+            <w:pStyle w:val="Heading3"/>
+          </w:pPr>
+          <w:r>
+            <w:rPr>
+              <w:b/>
+              <w:sz w:val="24"/>
+            </w:rPr>
+            <w:t>${headingText}</w:t>
+          </w:r>
+        </w:p>
+      `);
+    } else {
+      const escapedText = escapeXml(trimmed);
+      pNodes.push(`
+        <w:p>
+          <w:r>
+            <w:t xml:space="preserve">${escapedText}</w:t>
+          </w:r>
+        </w:p>
+      `);
+    }
+  }
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    ${pNodes.join('\n')}
+    <w:sectPr>
+      <w:pgSz w:w="12240" w:h="15840"/>
+      <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+    </w:sectPr>
+  </w:body>
+</w:document>`;
+
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`;
+
+  const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+
+  const wordRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`;
+
+  const zip = new PkzipEngineAdapter();
+  return zip.buildZip([
+    { path: '[Content_Types].xml', data: Buffer.from(contentTypesXml, 'utf8') },
+    { path: '_rels/.rels', data: Buffer.from(rootRelsXml, 'utf8') },
+    {
+      path: 'word/_rels/document.xml.rels',
+      data: Buffer.from(wordRelsXml, 'utf8'),
+    },
+    { path: 'word/document.xml', data: Buffer.from(documentXml, 'utf8') },
+  ]);
+}
 
 const isUuid = (val?: string | null): val is string =>
   typeof val === 'string' &&
@@ -95,7 +326,32 @@ export class PagesBridgeController {
         throw new NotFoundException(`Document ${pageId} not found`);
       }
 
-      const doc = await this.docstoreService.getDoc(record.projectId, pageId);
+      let doc: any;
+      if (record.inStorage) {
+        doc = await this.docstoreService.getDoc(record.projectId, record.id);
+      } else {
+        const rawLines = record.lines;
+        const lines = Array.isArray(rawLines)
+          ? (rawLines as string[])
+          : typeof rawLines === 'string'
+            ? (rawLines as string).split('\n')
+            : [];
+        doc = {
+          _id: record.id,
+          id: record.id,
+          projectId: record.projectId,
+          path: record.path,
+          lines,
+          version: record.version,
+          rev: record.rev,
+          ranges: record.ranges || {},
+          hash: record.hash,
+          sizeBytes: record.sizeBytes,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+        };
+      }
+
       const lines = doc.lines || [];
       const content = Array.isArray(lines) ? lines.join('\n') : String(lines);
 
@@ -139,6 +395,8 @@ export class PagesBridgeController {
       lines?: string[];
       title?: string;
       version?: number;
+      status?: 'draft' | 'published' | 'archived';
+      description?: string;
     },
   ) {
     if (!isUuid(pageId)) {
@@ -153,9 +411,16 @@ export class PagesBridgeController {
       throw new NotFoundException(`Document ${pageId} not found`);
     }
 
-    const lines =
-      body.lines ||
-      (typeof body.content === 'string' ? body.content.split('\n') : []);
+    const hasNewContent =
+      body.lines !== undefined || typeof body.content === 'string';
+    const lines = hasNewContent
+      ? body.lines ||
+        (typeof body.content === 'string' ? body.content.split('\n') : [])
+      : Array.isArray(record.lines)
+        ? (record.lines as string[])
+        : typeof record.lines === 'string'
+          ? (record.lines as string).split('\n')
+          : [];
 
     const result = await this.docstoreService.updateDoc(
       record.projectId,
@@ -165,6 +430,52 @@ export class PagesBridgeController {
         version: (body.version ?? record.version) + 1,
       },
     );
+
+    const cleanTitle = body.title
+      ? body.title.trim().replace(/^\//, '')
+      : undefined;
+
+    if (cleanTitle) {
+      const newPath = `/${cleanTitle}`;
+      await Promise.all([
+        this.prisma.manuscriptDoc
+          .update({
+            where: { id: pageId },
+            data: { path: newPath },
+          })
+          .catch(() => null),
+        this.prisma.manuscriptNode
+          .updateMany({
+            where: {
+              projectId: record.projectId,
+              OR: [{ docId: pageId }, { id: pageId }],
+            },
+            data: {
+              name: cleanTitle,
+              path: newPath,
+            },
+          })
+          .catch(() => null),
+      ]);
+    }
+
+    const existingRanges = (record.ranges as Record<string, any>) || {};
+    const updatedRanges = {
+      ...existingRanges,
+      ...(body.status ? { status: body.status } : {}),
+      ...(body.description !== undefined
+        ? { description: body.description }
+        : {}),
+    };
+
+    if (body.status || body.description !== undefined) {
+      await this.prisma.manuscriptDoc
+        .update({
+          where: { id: pageId },
+          data: { ranges: updatedRanges },
+        })
+        .catch(() => null);
+    }
 
     const updatedLines = result.doc.lines || [];
     const content = Array.isArray(updatedLines)
@@ -194,9 +505,10 @@ export class PagesBridgeController {
       ...result,
       page: {
         id: result.doc.id,
-        title: body.title || result.doc.path || 'main.tex',
+        title: cleanTitle || result.doc.path?.replace(/^\//, '') || 'main.tex',
+        description: body.description ?? existingRanges.description ?? '',
         content,
-        status: 'published',
+        status: body.status || existingRanges.status || 'published',
         projectId: record.projectId,
         version: result.doc.version,
         rev: result.doc.rev,
@@ -257,48 +569,72 @@ export class PagesBridgeController {
         return { files: [] };
       }
 
-      let nodes = await this.prisma.manuscriptNode.findMany({
-        where: { projectId },
-        orderBy: { sortOrder: 'asc' },
-      });
-
-      const allDocs = await this.prisma.manuscriptDoc.findMany({
-        where: { projectId, deleted: false },
-        orderBy: { createdAt: 'asc' },
-      });
+      const [nodes, allDocs] = await Promise.all([
+        this.prisma.manuscriptNode.findMany({
+          where: { projectId },
+          orderBy: { sortOrder: 'asc' },
+        }),
+        this.prisma.manuscriptDoc.findMany({
+          where: { projectId, deleted: false },
+          select: {
+            id: true,
+            path: true,
+            lines: true,
+            sizeBytes: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        }),
+      ]);
 
       const existingDocIds = new Set(nodes.map((n) => n.docId).filter(Boolean));
-      for (const d of allDocs) {
-        if (!existingDocIds.has(d.id)) {
-          try {
-            const cleanPath = d.path.startsWith('/') ? d.path : `/${d.path}`;
-            const cleanName = d.path.replace(/^\//, '') || 'main.tex';
-            const newNode = await this.prisma.manuscriptNode.create({
-              data: {
-                projectId,
-                name: cleanName,
-                path: cleanPath,
-                type: 'DOC',
-                docId: d.id,
-                isRootDoc: d.id === rootDoc?.id,
-                sizeBytes: d.sizeBytes || 0,
-              },
-            });
-            nodes.push(newNode);
-            existingDocIds.add(d.id);
-          } catch {
-            // ignore duplicate path
-          }
-        }
+      const missingDocs = allDocs.filter((d) => !existingDocIds.has(d.id));
+      if (missingDocs.length > 0) {
+        await Promise.all(
+          missingDocs.map(async (d) => {
+            try {
+              const cleanPath = d.path.startsWith('/') ? d.path : `/${d.path}`;
+              const cleanName = d.path.replace(/^\//, '') || 'main.tex';
+              const newNode = await this.prisma.manuscriptNode.create({
+                data: {
+                  projectId: projectId!,
+                  name: cleanName,
+                  path: cleanPath,
+                  type: 'DOC',
+                  docId: d.id,
+                  isRootDoc: d.id === rootDoc?.id,
+                  sizeBytes: d.sizeBytes || 0,
+                },
+              });
+              nodes.push(newNode);
+              existingDocIds.add(d.id);
+            } catch {
+              // ignore duplicate path
+            }
+          }),
+        );
       }
 
       const docMap = new Map<string, any>(allDocs.map((d) => [d.id, d]));
 
       const files = nodes
-        .filter((node) => node.type !== 'FOLDER')
+        .filter((node) => {
+          if (node.type === 'FOLDER') return false;
+          if (node.docId && !docMap.has(node.docId)) return false;
+          return true;
+        })
         .map((node) => {
-          const cleanName =
-            node.path.replace(/^\//, '') || node.name || 'untitled.tex';
+          let cleanName =
+            node.path.replace(/^\//, '') || node.name || 'main.tex';
+          if (
+            node.isRootDoc &&
+            (cleanName === 'flux' ||
+              cleanName === 'flux.tex' ||
+              cleanName === 'document.tex')
+          ) {
+            cleanName = 'main.tex';
+          }
           const targetDoc = node.docId ? docMap.get(node.docId) : null;
           const docLines = targetDoc?.lines || [];
           const content = Array.isArray(docLines)
@@ -319,8 +655,15 @@ export class PagesBridgeController {
           };
         });
 
-      if (files.length === 0 && rootDoc) {
-        const cleanName = rootDoc.path.replace(/^\//, '') || 'main.tex';
+      if (files.length === 0 && rootDoc && !rootDoc.deleted) {
+        let cleanName = rootDoc.path.replace(/^\//, '') || 'main.tex';
+        if (
+          cleanName === 'flux' ||
+          cleanName === 'flux.tex' ||
+          cleanName === 'document.tex'
+        ) {
+          cleanName = 'main.tex';
+        }
         const rootLines = rootDoc.lines || [];
         const content = Array.isArray(rootLines)
           ? rootLines.join('\n')
@@ -490,15 +833,41 @@ export class PagesBridgeController {
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
     let projectId: string | null = null;
+    let targetDocId = pageId;
+
     if (isUuid(pageId)) {
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
         select: { projectId: true },
       });
-      if (doc?.projectId) projectId = doc.projectId;
+      if (doc?.projectId) {
+        projectId = doc.projectId;
+      } else {
+        const node = await this.prisma.manuscriptNode.findUnique({
+          where: { id: pageId },
+          select: { projectId: true, docId: true },
+        });
+        if (node?.projectId) projectId = node.projectId;
+        if (node?.docId) targetDocId = node.docId;
+      }
     }
 
-    if (!isUuid(pageId) || !projectId) {
+    if (
+      !projectId &&
+      (body as any)?.projectId &&
+      isUuid((body as any).projectId)
+    ) {
+      projectId = (body as any).projectId;
+    }
+    if (
+      !projectId &&
+      req?.headers?.['x-project-id'] &&
+      isUuid(req.headers['x-project-id'])
+    ) {
+      projectId = req.headers['x-project-id'];
+    }
+
+    if (!isUuid(targetDocId) || !projectId) {
       throw new BadRequestException(
         'Valid pageId and associated project required to create a comment',
       );
@@ -509,7 +878,7 @@ export class PagesBridgeController {
 
     const thread = await this.prisma.manuscriptCommentThread.create({
       data: {
-        docId: pageId,
+        docId: targetDocId,
         projectId,
         quote: body.content,
         startLine: body.line ?? 1,
@@ -825,18 +1194,44 @@ export class PagesBridgeController {
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
     let projectId: string | null = null;
+    let targetDocId = pageId;
+
     if (isUuid(pageId)) {
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
         select: { projectId: true },
       });
-      if (doc?.projectId) projectId = doc.projectId;
+      if (doc?.projectId) {
+        projectId = doc.projectId;
+      } else {
+        const node = await this.prisma.manuscriptNode.findUnique({
+          where: { id: pageId },
+          select: { projectId: true, docId: true },
+        });
+        if (node?.projectId) projectId = node.projectId;
+        if (node?.docId) targetDocId = node.docId;
+      }
+    }
+
+    if (
+      !projectId &&
+      (body as any)?.projectId &&
+      isUuid((body as any).projectId)
+    ) {
+      projectId = (body as any).projectId;
+    }
+    if (
+      !projectId &&
+      req?.headers?.['x-project-id'] &&
+      isUuid(req.headers['x-project-id'])
+    ) {
+      projectId = req.headers['x-project-id'];
     }
 
     const type = body.type === 'delete' ? 'delete' : 'insert';
     const text = body.suggestedText || body.originalText || '';
 
-    if (!isUuid(pageId) || !projectId) {
+    if (!isUuid(targetDocId) || !projectId) {
       throw new BadRequestException(
         'Valid pageId and associated project required to create a suggestion',
       );
@@ -848,7 +1243,7 @@ export class PagesBridgeController {
 
     const record = await this.prisma.manuscriptTrackChange.create({
       data: {
-        docId: pageId,
+        docId: targetDocId,
         projectId,
         type: type as any,
         status: 'pending',
@@ -904,6 +1299,52 @@ export class PagesBridgeController {
           where: { id: suggestionId },
           data: { status: 'accepted', resolvedAt: new Date() },
         });
+
+        // Apply accepted mutation to docstore lines
+        if (record && record.docId) {
+          try {
+            const doc = await this.prisma.manuscriptDoc.findUnique({
+              where: { id: record.docId },
+              select: { lines: true, rev: true },
+            });
+            if (doc && Array.isArray(doc.lines)) {
+              const lines: string[] = doc.lines.map((l) => String(l ?? ''));
+              const lineIdx = Math.max(0, (record.startLine || 1) - 1);
+              if (record.type === 'insert') {
+                if (lineIdx < lines.length) {
+                  const currentLine = lines[lineIdx] || '';
+                  const col = Math.min(
+                    record.startCol || 0,
+                    currentLine.length,
+                  );
+                  lines[lineIdx] =
+                    currentLine.slice(0, col) +
+                    record.text +
+                    currentLine.slice(col);
+                } else {
+                  lines.push(record.text);
+                }
+              } else if (record.type === 'delete') {
+                if (lineIdx < lines.length) {
+                  const currentLine = lines[lineIdx] || '';
+                  lines[lineIdx] = currentLine.replace(record.text, '');
+                }
+              }
+              await this.prisma.manuscriptDoc.update({
+                where: { id: record.docId },
+                data: {
+                  lines,
+                  rev: (doc.rev || 0) + 1,
+                },
+              });
+            }
+          } catch (patchErr) {
+            this.logger.warn(
+              `Could not apply accepted track-change to docstore: ${patchErr}`,
+            );
+          }
+        }
+
         return { ok: true, suggestion: record };
       } catch {
         // Ignore
@@ -1311,7 +1752,10 @@ export class PagesBridgeController {
    */
   @Post(['docs/:pageId/export', 'pages/:pageId/export'])
   @HttpCode(HttpStatus.OK)
-  async exportDocument(@Param('pageId') pageId: string) {
+  async exportDocument(
+    @Param('pageId') pageId: string,
+    @Body() body?: { format?: string; includeChildren?: boolean },
+  ) {
     if (!isUuid(pageId)) {
       throw new BadRequestException('A valid UUID is required for pageId');
     }
@@ -1323,12 +1767,48 @@ export class PagesBridgeController {
       throw new NotFoundException(`Document ${pageId} not found`);
     }
 
-    const filename = doc.path?.replace(/^\//, '') || 'document.tex';
+    const format = (body?.format || 'tex').toLowerCase();
+    const rawFilename = doc.path?.replace(/^\//, '') || 'document.tex';
+    const baseName = rawFilename.replace(/\.[^/.]+$/, '');
     const lines = doc.lines as string[] | undefined;
     const content = Array.isArray(lines) ? lines.join('\n') : '';
 
+    if (format === 'docx') {
+      const docxBuffer = convertLatexToDocxBuffer(content, baseName);
+      return {
+        filename: `${baseName}.docx`,
+        mimeType:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        content: docxBuffer.toString('base64'),
+        isBase64: true,
+        sizeBytes: docxBuffer.length,
+      };
+    }
+
+    if (format === 'md' || format === 'markdown') {
+      const mdContent = convertLatexToMarkdown(content, baseName);
+      return {
+        filename: `${baseName}.md`,
+        mimeType: 'text/markdown',
+        content: mdContent,
+        isBase64: false,
+        sizeBytes: Buffer.byteLength(mdContent, 'utf8'),
+      };
+    }
+
+    if (format === 'html') {
+      const htmlContent = convertLatexToHtml(content, baseName);
+      return {
+        filename: `${baseName}.html`,
+        mimeType: 'text/html',
+        content: htmlContent,
+        isBase64: false,
+        sizeBytes: Buffer.byteLength(htmlContent, 'utf8'),
+      };
+    }
+
     return {
-      filename,
+      filename: rawFilename,
       mimeType: 'application/x-tex',
       content,
       isBase64: false,
@@ -1462,7 +1942,7 @@ export class PagesBridgeController {
     },
     @Req() req: any,
   ) {
-    const title = body?.title || 'main.tex';
+    const pageTitle = body?.title || 'Untitled';
     let content = body?.content || '';
     const userId = req?.user?.id || req?.user?.sub || null;
 
@@ -1509,12 +1989,16 @@ export class PagesBridgeController {
     if (body?.templateType === 'example') {
       content = await this.buildExampleProjectTemplate(
         projectId,
-        title,
+        pageTitle,
         userId,
       );
       await this.ensureExampleReferencesBib(projectId);
     } else if (!content.trim()) {
-      content = await this.buildBlankProjectTemplate(projectId, title, userId);
+      content = await this.buildBlankProjectTemplate(
+        projectId,
+        pageTitle,
+        userId,
+      );
     }
 
     // Ensure project settings are configured with Overleaf standard defaults
@@ -1532,7 +2016,7 @@ export class PagesBridgeController {
               ...settings,
               manuscript: {
                 compiler: 'pdflatex',
-                mainFile: title.replace(/^\//, ''),
+                mainFile: 'main.tex',
                 spellCheckLanguage: 'en_US',
                 texLiveVersion: '2024',
               },
@@ -1545,10 +2029,10 @@ export class PagesBridgeController {
     }
 
     const doc = await this.docstoreService.createDoc(projectId, {
-      path: title.startsWith('/') ? title : `/${title}`,
+      path: '/main.tex',
       text: content,
       version: 1,
-      ranges: { labelIds, labels: attachedLabels },
+      ranges: { title: pageTitle, labelIds, labels: attachedLabels },
     });
 
     // Ensure a corresponding manuscriptNode exists in the file tree
@@ -1556,8 +2040,8 @@ export class PagesBridgeController {
       await this.prisma.manuscriptNode.create({
         data: {
           projectId,
-          name: title.replace(/^\//, ''),
-          path: title.startsWith('/') ? title : `/${title}`,
+          name: 'main.tex',
+          path: '/main.tex',
           type: 'DOC',
           docId: doc._id,
           isRootDoc: true,
@@ -1571,15 +2055,18 @@ export class PagesBridgeController {
     return {
       page: {
         id: doc._id,
-        title: doc.path.replace(/^\//, ''),
+        title: pageTitle,
         content,
         status: body?.status || 'draft',
         projectId,
         labels: attachedLabels,
+        mainFile: { id: doc._id, title: 'main.tex' },
+        mainFileId: doc._id,
+        rootPageId: doc._id,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
-      mainFile: { id: doc._id, title: doc.path.replace(/^\//, '') },
+      mainFile: { id: doc._id, title: 'main.tex' },
       rootPageId: doc._id,
       mainFileId: doc._id,
     };
@@ -1843,31 +2330,32 @@ export class PagesBridgeController {
       return { pages: [], total: 0, isEmpty: true };
     }
     try {
-      // Fetch root manuscript documents (Pages) for this project
-      const rootNodes = await this.prisma.manuscriptNode.findMany({
-        where: {
-          projectId,
-          isRootDoc: true,
-          OR: [{ docId: null }, { doc: { deleted: false } }],
-        },
-        include: { doc: true },
-        orderBy: { sortOrder: 'asc' },
-      });
-
-      // Fetch project to retrieve creator details if present
-      const project = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: {
-          id: true,
-          createdBy: {
-            select: {
-              id: true,
-              email: true,
-              profile: { select: { name: true } },
+      // Fetch root manuscript documents and project details in parallel
+      const [rootNodes, project] = await Promise.all([
+        this.prisma.manuscriptNode.findMany({
+          where: {
+            projectId,
+            isRootDoc: true,
+            OR: [{ docId: null }, { doc: { deleted: false } }],
+          },
+          include: { doc: true },
+          orderBy: { sortOrder: 'asc' },
+        }),
+        this.prisma.project.findUnique({
+          where: { id: projectId },
+          select: {
+            id: true,
+            createdBy: {
+              select: {
+                id: true,
+                email: true,
+                profile: { select: { name: true } },
+              },
             },
           },
-        },
-      });
+        }),
+      ]);
+
       const authorName =
         project?.createdBy?.profile?.name ||
         project?.createdBy?.email?.split('@')[0] ||
@@ -1885,12 +2373,15 @@ export class PagesBridgeController {
 
         const ranges = (d?.ranges as any) || {};
         const pageLabels = Array.isArray(ranges.labels) ? ranges.labels : [];
+        const pageStatus = ranges.status || 'published';
+        const pageDescription = ranges.description || '';
 
         return {
           id: d?.id || node.docId || node.id,
           title,
+          description: pageDescription,
           content,
-          status: 'published',
+          status: pageStatus,
           projectId,
           author: { name: authorName },
           labels: pageLabels,
@@ -1944,9 +2435,16 @@ export class PagesBridgeController {
           where: { id: pageId },
         });
         if (doc) {
-          await this.docstoreService.patchDoc(doc.projectId, pageId, {
-            deleted: true,
-          });
+          await Promise.all([
+            this.docstoreService.patchDoc(doc.projectId, pageId, {
+              deleted: true,
+            }),
+            this.prisma.manuscriptNode
+              .deleteMany({
+                where: { projectId: doc.projectId, docId: pageId },
+              })
+              .catch(() => null),
+          ]);
         }
       } catch {
         // Fallback

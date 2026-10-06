@@ -135,7 +135,6 @@ model Label {
   projects ProjectLabel[]
 
   @@unique([userId, name], map: "uq_labels_user_name")
-  @@index([userId], map: "idx_labels_user_id")
   @@map("labels")
 }
 

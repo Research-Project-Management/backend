@@ -39,6 +39,7 @@ export interface ParsedBibtexEntry {
   arxivId?: string;
   seeAlso?: string[];
   relations?: Record<string, string | string[]>;
+  [key: string]: unknown;
 }
 
 @Injectable()
@@ -105,7 +106,25 @@ export class BibtexParser {
       if (match) year = parseInt(match[0], 10);
     }
 
+    const {
+      key: _k,
+      creators: _c,
+      tags: _t,
+      notes: _n,
+      seeAlso: _sa,
+      relations: _rel,
+      DOI: _doi,
+      ISBN: _isbn,
+      ISSN: _issn,
+      abstractNote: _an,
+      publicationTitle: _pt,
+      year: _yr,
+      date: _dt,
+      ...otherItemFields
+    } = item as any;
+
     return {
+      ...otherItemFields,
       citationKey: item.key,
       itemType: item.itemType || 'journalArticle',
       title: item.title || 'Untitled',
@@ -296,6 +315,25 @@ export class BibtexParser {
       software: 'computerProgram',
       code: 'computerProgram',
       unpublished: 'manuscript',
+      standard: 'standard',
+      dataset: 'dataset',
+      data: 'dataset',
+      hearing: 'hearing',
+      statute: 'statute',
+      bill: 'bill',
+      legislation: 'statute',
+      case: 'case',
+      jurisdiction: 'case',
+      court: 'case',
+      artwork: 'artwork',
+      audio: 'audioRecording',
+      video: 'videoRecording',
+      film: 'film',
+      movie: 'film',
+      broadcast: 'tvBroadcast',
+      podcast: 'podcast',
+      presentation: 'presentation',
+      talk: 'presentation',
     };
     return map[lower] || this.mapCslTypeToItemType(lower);
   }

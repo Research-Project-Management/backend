@@ -55,6 +55,7 @@ export interface ZoteroItem {
   dateModified?: string;
   key?: string;
   version?: number;
+  [key: string]: unknown;
 }
 
 /**

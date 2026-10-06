@@ -92,7 +92,6 @@ export function parseRunScope(
     str &&
     str !== 'user' &&
     str !== 'me' &&
-    str !== 'personal' &&
     str !== fallbackUserId &&
     isUUID(str);
   const resolvedUserId = fallbackUserId || (!isProject && str ? str : '');

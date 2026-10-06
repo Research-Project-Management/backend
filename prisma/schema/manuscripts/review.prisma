@@ -32,6 +32,7 @@ model ManuscriptTrackChange {
   updatedAt    DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([projectId, docId, status], map: "idx_manuscript_changes_lookup")
+  @@index([docId], map: "idx_manuscript_changes_doc_id")
   @@index([createdById], map: "idx_manuscript_changes_author")
   @@map("manuscript_track_changes")
 }
@@ -55,6 +56,7 @@ model ManuscriptCommentThread {
   replies ManuscriptCommentReply[]
 
   @@index([projectId, docId, isResolved], map: "idx_manuscript_comments_lookup")
+  @@index([docId], map: "idx_manuscript_comments_doc_id")
   @@index([createdById], map: "idx_manuscript_comments_author")
   @@map("manuscript_comment_threads")
 }

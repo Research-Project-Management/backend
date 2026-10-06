@@ -38,6 +38,10 @@ export interface WordCountStats {
   floats: number;
   mathInlines: number;
   mathDisplayed: number;
+  totalWords?: number;
+  charactersWithSpaces?: number;
+  charactersNoSpaces?: number;
+  rawOutput?: string;
 }
 
 export interface ILogParser {

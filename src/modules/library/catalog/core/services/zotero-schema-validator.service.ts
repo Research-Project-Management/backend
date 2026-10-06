@@ -241,6 +241,7 @@ export class ZoteroSchemaValidatorService {
 
   /**
    * Complete schema validation and sanitization pipeline for an item.
+   * Supports both complete creations and partial patch updates safely.
    */
   validateAndSanitizeItem(
     rawType: string | undefined | null,
@@ -249,20 +250,42 @@ export class ZoteroSchemaValidatorService {
     const itemType = this.validateItemType(
       rawType || rawData.itemType || rawData.type,
     );
-    const { creators, changes } = this.validateAndHarmonizeCreators(
-      itemType,
-      rawData.creators,
-    );
 
-    const dataWithCreators = {
+    let creators = rawData.creators;
+    let changes: CreatorHarmonizationChange[] = [];
+    if (rawData.creators !== undefined) {
+      const harm = this.validateAndHarmonizeCreators(
+        itemType,
+        rawData.creators,
+      );
+      creators = harm.creators;
+      changes = harm.changes;
+    }
+
+    const dataWithCreators: Record<string, any> = {
       ...rawData,
       itemType,
       type: itemType,
-      creators,
+      ...(rawData.creators !== undefined ? { creators } : {}),
     };
 
     const { cleanFields, demotedToExtra, warnings } =
       this.validateAndSanitizeFields(itemType, dataWithCreators);
+
+    // If creators was not in original rawData, do not introduce an empty creators array in partial updates
+    if (rawData.creators === undefined) {
+      delete cleanFields.creators;
+    }
+    // If itemType was not in original rawData and rawType was inferred,
+    // do not force itemType/type into cleanFields unless caller explicitly provided it
+    if (
+      rawData.itemType === undefined &&
+      rawData.type === undefined &&
+      !rawType
+    ) {
+      delete cleanFields.itemType;
+      delete cleanFields.type;
+    }
 
     return {
       valid: true,

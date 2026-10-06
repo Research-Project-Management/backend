@@ -8,6 +8,7 @@
 import { Injectable } from '@nestjs/common';
 import { ISpellEnginePort } from '../../ports/spell-engine.port';
 import { LanguageCodeVo } from '../../domain/value-objects/language-code.vo';
+import { ENGLISH_COMMON_WORDS } from './dictionaries/english-common.dictionary';
 
 @Injectable()
 export class AcademicSpellEngineAdapter implements ISpellEnginePort {
@@ -32,6 +33,17 @@ export class AcademicSpellEngineAdapter implements ISpellEnginePort {
         ? this.vietnameseDictionary
         : this.englishDictionary;
     if (dict.has(clean)) return true;
+
+    // Support hyphenated words (e.g. self-supervised, peer-review, multi-head)
+    if (clean.includes('-')) {
+      const parts = clean.split('-');
+      if (
+        parts.length > 1 &&
+        parts.every((p) => !p || this.isCorrect(p, language))
+      ) {
+        return true;
+      }
+    }
 
     // For English, test morphological inflections (plurals, past, gerund, adverbs)
     if (language.baseLanguage !== 'vi') {
@@ -1038,6 +1050,10 @@ export class AcademicSpellEngineAdapter implements ISpellEnginePort {
     ];
 
     for (const w of academicWords) {
+      this.englishDictionary.add(w.toLowerCase());
+    }
+
+    for (const w of ENGLISH_COMMON_WORDS) {
       this.englishDictionary.add(w.toLowerCase());
     }
 

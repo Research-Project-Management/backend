@@ -230,13 +230,13 @@ export class CompileFairQueue {
         `[Backpressure] Compile queue full (${err.maxQueue}) – rejecting project "${projectId}"`,
       );
       return new HttpException(
-        'Hệ thống biên dịch đang quá tải. Vui lòng thử lại sau ít giây.',
+        'Compilation queue is currently at capacity. Please try again in a moment.',
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
     if (err instanceof SemaphoreWaitTimeoutError) {
       return new HttpException(
-        'Hết thời gian chờ lượt biên dịch. Vui lòng thử lại.',
+        'Compilation request timed out waiting in queue. Please try again.',
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
@@ -269,7 +269,7 @@ export class CompileFairQueue {
 
     if (timestamps.length >= this.maxPerMinute) {
       throw new HttpException(
-        `Giới hạn biên dịch vượt quá (${this.maxPerMinute} lần/phút). Vui lòng đợi vài giây trước khi biên dịch lại.`,
+        `Compilation rate limit exceeded (${this.maxPerMinute} runs/min). Please wait a moment before recompiling.`,
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }

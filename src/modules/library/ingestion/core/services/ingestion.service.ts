@@ -222,7 +222,7 @@ export class IngestionService implements IngestionPort {
   }
 
   async getRunStatus(
-    /** scopeId: may be userId (personal library) or projectId — repo ignores it, kept for interface parity */
+    /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
     scopeId: string,
     runId: string,
   ): Promise<IngestionRunSnapshot> {
@@ -261,7 +261,7 @@ export class IngestionService implements IngestionPort {
   }
 
   async getRunProgress(
-    /** scopeId: may be userId (personal library) or projectId — repo ignores it, kept for interface parity */
+    /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
     scopeId: string,
     runId: string,
   ): Promise<{
@@ -351,7 +351,7 @@ export class IngestionService implements IngestionPort {
   }
 
   async retryRun(
-    /** scopeId: may be userId (personal library) or projectId — repo ignores it, kept for interface parity */
+    /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
     scopeId: string,
     runId: string,
   ): Promise<any> {

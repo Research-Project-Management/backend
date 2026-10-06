@@ -154,51 +154,84 @@ export class PrismaDocRepository implements IDocRepository {
     docId: string,
     data: UpdateDocData,
   ): Promise<{ doc: TextDoc; modified: boolean }> {
-    // 1. Fetch current document state to check revision for OCC
-    const current = await this.prisma.manuscriptDoc.findFirst({
-      where: { id: docId, projectId },
-    });
-
-    if (!current) {
-      throw new DocNotFoundError(
-        `Document ${docId} not found in project ${projectId}`,
-      );
+    let chars = 0;
+    const lines = data.lines;
+    for (let i = 0; i < lines.length; i++) {
+      chars += lines[i].length;
     }
+    const sizeBytes = chars + Math.max(0, lines.length - 1);
 
-    // 2. Optimistic Concurrency Control (OCC) check
-    if (data.expectedRev !== undefined && current.rev !== data.expectedRev) {
-      DocstoreMetrics.recordOccConflict();
-      throw new DocModifiedError(
-        `Optimistic concurrency conflict on doc ${docId}: expected rev ${data.expectedRev} but current is ${current.rev}`,
-        {
-          docId,
-          rev: data.expectedRev,
-          currentRev: current.rev,
+    // 1. Optimistic Concurrency Control (OCC) check if expectedRev specified
+    if (data.expectedRev !== undefined) {
+      const current = await this.prisma.manuscriptDoc.findFirst({
+        where: { id: docId, projectId },
+      });
+
+      if (!current) {
+        throw new DocNotFoundError(
+          `Document ${docId} not found in project ${projectId}`,
+        );
+      }
+
+      if (current.rev !== data.expectedRev) {
+        DocstoreMetrics.recordOccConflict();
+        throw new DocModifiedError(
+          `Optimistic concurrency conflict on doc ${docId}: expected rev ${data.expectedRev} but current is ${current.rev}`,
+          {
+            docId,
+            rev: data.expectedRev,
+            currentRev: current.rev,
+          },
+        );
+      }
+
+      const updated = await this.prisma.manuscriptDoc.update({
+        where: { id: docId },
+        data: {
+          lines: data.lines,
+          version: data.version,
+          ranges: (data.ranges ||
+            current.ranges) as unknown as Prisma.InputJsonValue,
+          hash: data.hash || current.hash,
+          sizeBytes,
+          inStorage: false,
+          storageKey: null,
+          rev: { increment: 1 },
         },
-      );
+      });
+
+      DocstoreMetrics.recordWrite(sizeBytes);
+      return { doc: this.mapToEntity(updated), modified: true };
     }
 
-    const chars = data.lines.reduce((acc, l) => acc + l.length, 0);
-    const sizeBytes = chars + Math.max(0, data.lines.length - 1);
+    // 2. Direct atomic update in 1 single roundtrip when OCC revision check is not requested
+    try {
+      const updated = await this.prisma.manuscriptDoc.update({
+        where: { id: docId },
+        data: {
+          lines: data.lines,
+          version: data.version,
+          ...(data.ranges !== undefined
+            ? { ranges: data.ranges as unknown as Prisma.InputJsonValue }
+            : {}),
+          ...(data.hash ? { hash: data.hash } : {}),
+          sizeBytes,
+          inStorage: false,
+          storageKey: null,
+          rev: { increment: 1 },
+        },
+      });
 
-    // 3. Atomic update with incremented revision
-    const updated = await this.prisma.manuscriptDoc.update({
-      where: { id: docId },
-      data: {
-        lines: data.lines,
-        version: data.version,
-        ranges: (data.ranges ||
-          current.ranges) as unknown as Prisma.InputJsonValue,
-        hash: data.hash || current.hash,
-        sizeBytes,
-        inStorage: false,
-        storageKey: null,
-        rev: { increment: 1 },
-      },
-    });
-
-    DocstoreMetrics.recordWrite(sizeBytes);
-    return { doc: this.mapToEntity(updated), modified: true };
+      DocstoreMetrics.recordWrite(sizeBytes);
+      return { doc: this.mapToEntity(updated), modified: true };
+    } catch (err: any) {
+      if (err?.code === 'P2025') {
+        throw new DocNotFoundError(
+          `Document ${docId} not found in project ${projectId}`,
+        );
+      }
+      throw err;
+    }
   }
 
   public async patchDoc(

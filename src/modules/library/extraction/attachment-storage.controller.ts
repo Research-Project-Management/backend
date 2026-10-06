@@ -414,10 +414,10 @@ export abstract class BaseAttachmentStorageController {
 }
 
 /**
- * Personal Library Storage Controller (/api/v1/library).
+ * User Library Storage Controller (/api/v1/library).
  * Guarded purely by JwtAuthGuard — scoped to authenticated user.
  */
-@ApiTags('Library Attachments - Personal Storage Gateway')
+@ApiTags('Library Attachments - User Storage Gateway')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/library')
 @UseGuards(JwtAuthGuard)
@@ -434,7 +434,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
-      'Upload a binary file directly via multipart stream to personal library',
+      'Upload a binary file directly via multipart stream to user library',
   })
   async uploadLibraryFile(
     @CurrentUser('id') userId: string,
@@ -451,7 +451,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
 
   @Post(['attachments/presign', 'presign'])
   @ApiOperation({
-    summary: 'Obtain presigned direct-upload URL for personal library',
+    summary: 'Obtain presigned direct-upload URL for user library',
   })
   async getPresignedUploadUrl(
     @CurrentUser('id') userId: string,
@@ -467,7 +467,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
   }
 
   @Post(['attachments/presign/complete', 'presign/complete'])
-  @ApiOperation({ summary: 'Complete personal presigned upload' })
+  @ApiOperation({ summary: 'Complete user presigned upload' })
   async completePresign(
     @CurrentUser('id') userId: string,
     @Body() dto: CompletePresignDto,
@@ -477,7 +477,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
   }
 
   @Post(['attachments/multipart/initiate', 'multipart/initiate'])
-  @ApiOperation({ summary: 'Initiate personal multipart upload session' })
+  @ApiOperation({ summary: 'Initiate user multipart upload session' })
   async initiateMultipart(
     @CurrentUser('id') userId: string,
     @Body() dto: InitiateMultipartDto,
@@ -490,7 +490,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
     'attachments/multipart/:sessionId/part-url',
     'multipart/:sessionId/part-url',
   ])
-  @ApiOperation({ summary: 'Get personal multipart upload part URL' })
+  @ApiOperation({ summary: 'Get user multipart upload part URL' })
   async getMultipartPartUrl(
     @CurrentUser('id') userId: string,
     @Param('sessionId') sessionId: string,
@@ -506,7 +506,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
   }
 
   @Post(['attachments/multipart/complete', 'multipart/complete'])
-  @ApiOperation({ summary: 'Complete personal multipart upload' })
+  @ApiOperation({ summary: 'Complete user multipart upload' })
   async completeMultipart(
     @CurrentUser('id') userId: string,
     @Body() dto: CompleteMultipartDto,
@@ -519,7 +519,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
     'attachments/multipart/:sessionId/abort',
     'multipart/:sessionId/abort',
   ])
-  @ApiOperation({ summary: 'Abort personal multipart upload session' })
+  @ApiOperation({ summary: 'Abort user multipart upload session' })
   async abortMultipart(
     @CurrentUser('id') userId: string,
     @Param('sessionId') sessionId: string,
@@ -529,7 +529,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
   }
 
   @Get(['attachments/files/:fileId/content', 'files/:fileId/content'])
-  @ApiOperation({ summary: 'Stream personal library file by storage file ID' })
+  @ApiOperation({ summary: 'Stream user library file by storage file ID' })
   async streamLibraryFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -541,7 +541,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
 
   @Get('attachments/:attachmentId/presigned-url')
   @ApiOperation({
-    summary: 'Get presigned download URL for personal attachment',
+    summary: 'Get presigned download URL for user attachment',
   })
   async getAttachmentPresignedUrl(
     @CurrentUser('id') userId: string,
@@ -557,7 +557,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
 
   @Get('attachments/:attachmentId/content')
   @ApiOperation({
-    summary: 'Stream personal attachment content with range support',
+    summary: 'Stream user attachment content with range support',
   })
   async streamAttachmentContent(
     @CurrentUser('id') userId: string,

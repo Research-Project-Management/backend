@@ -36,6 +36,7 @@ model ManuscriptNode {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([projectId, path], map: "uq_manuscript_nodes_project_path")
+  @@index([projectId, depth, sortOrder], map: "idx_manuscript_nodes_project_tree")
   @@index([projectId, parentId], map: "idx_manuscript_nodes_project_parent")
   @@index([projectId, type], map: "idx_manuscript_nodes_project_type")
   @@index([projectId, isRootDoc], map: "idx_manuscript_nodes_project_root")

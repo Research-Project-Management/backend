@@ -26,6 +26,7 @@ import {
   LinkGithubRepoDto,
   PushGithubDto,
   PullGithubDto,
+  ImportGithubRepoDto,
 } from './dto/github-sync.dto';
 import { IManuscriptAggregatorPort } from '@/modules/manuscripts/export-import/core/ports/manuscript-aggregator.port';
 import { IManuscriptHydratorPort } from '@/modules/manuscripts/export-import/core/ports/manuscript-hydrator.port';
@@ -514,6 +515,57 @@ export class IntegrationsService {
       branch,
       filesImported: pulledFiles.length,
       syncedAt: new Date(),
+      summary: summary.toJSON(),
+    };
+  }
+
+  async importGithubRepo(userId: string, dto: ImportGithubRepoDto) {
+    const { token, connId } = await this.getDecryptedGithubToken(userId);
+    const branch = dto.branch || 'main';
+
+    // 1. Fetch all blobs from GitHub tree
+    const pulledFiles = await this.githubProvider.pullProjectTree({
+      decryptedToken: token,
+      repoFullName: dto.repoFullName,
+      branch,
+    });
+
+    if (pulledFiles.length === 0) {
+      throw new BadRequestException(
+        `No files found in ${dto.repoFullName} on branch ${branch}.`,
+      );
+    }
+
+    // 2. Wrap into ArchiveEntryVo
+    const archiveEntries = pulledFiles.map((file) =>
+      ArchiveEntryVo.create(file.path, file.data),
+    );
+
+    // 3. Hydrate project entries
+    const summary = await this.hydrator.hydrateProjectEntries(
+      dto.projectId,
+      archiveEntries,
+      userId,
+    );
+
+    // 4. Link or update link
+    const link = await this.repo.upsertProjectLink({
+      projectId: dto.projectId,
+      userIntegrationId: connId,
+      collectionId: dto.repoFullName,
+      collectionName: dto.repoFullName,
+      targetBibFile: branch,
+    });
+    await this.repo.updateProjectLinkLastSynced(link.id);
+
+    return {
+      success: true,
+      repoFullName: dto.repoFullName,
+      branch,
+      filesImported: pulledFiles.length,
+      syncedAt: new Date(),
+      rootDocId: summary.rootDocId,
+      rootDocPath: summary.rootDocPath,
       summary: summary.toJSON(),
     };
   }

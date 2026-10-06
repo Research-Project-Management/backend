@@ -33,7 +33,7 @@ export class UpdateDocUseCase {
     projectId: string,
     docId: string,
     lines: string[],
-    version: number,
+    version?: number,
     ranges?: DocRanges,
     expectedRev?: number,
   ): Promise<UpdateDocResult> {
@@ -48,8 +48,16 @@ export class UpdateDocUseCase {
       );
     }
 
+    const resolvedVersion =
+      version !== undefined ? version : (currentDoc.version ?? 0) + 1;
+
     // 3. Skip No-op updates (Overleaf optimization)
-    const diff = NoopDiffChecker.checkDiff(currentDoc, lines, version, ranges);
+    const diff = NoopDiffChecker.checkDiff(
+      currentDoc,
+      lines,
+      resolvedVersion,
+      ranges,
+    );
     if (!diff.shouldUpdate) {
       this.logger.debug(
         `Document ${docId} lines and ranges have not changed - skipping database write`,
@@ -71,7 +79,7 @@ export class UpdateDocUseCase {
       docId,
       {
         lines,
-        version,
+        version: resolvedVersion,
         ranges,
         hash,
         expectedRev,

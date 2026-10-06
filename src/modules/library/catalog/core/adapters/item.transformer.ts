@@ -370,6 +370,32 @@ export class ItemTransformer implements IItemTransformerPort {
 
     projectedItem.extraFields = newExtraFields;
 
+    if (options.retainUnmappedInExtra !== false && droppedFields.length > 0) {
+      const extraLines: string[] = [];
+      const currentExtra = projectedItem.extra || item.extra;
+      if (
+        currentExtra &&
+        typeof currentExtra === 'string' &&
+        currentExtra.trim()
+      ) {
+        extraLines.push(currentExtra.trim());
+      }
+      for (const dropped of droppedFields) {
+        if (
+          dropped.value !== undefined &&
+          dropped.value !== null &&
+          dropped.value !== ''
+        ) {
+          extraLines.push(
+            `${dropped.label || dropped.field}: ${dropped.value}`,
+          );
+        }
+      }
+      if (extraLines.length > 0) {
+        projectedItem.extra = extraLines.join('\n');
+      }
+    }
+
     const validCreatorRoles = new Set(
       this.typesService
         .getValidCreatorTypes(targetType)

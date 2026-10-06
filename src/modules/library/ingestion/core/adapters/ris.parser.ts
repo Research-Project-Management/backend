@@ -141,7 +141,25 @@ export class RisParser {
       notes.push({ content: item.note.trim(), source: 'zotero' });
     }
 
+    const {
+      key: _k,
+      creators: _c,
+      tags: _t,
+      notes: _n,
+      seeAlso: _sa,
+      relations: _rel,
+      DOI: _doi,
+      ISBN: _isbn,
+      ISSN: _issn,
+      abstractNote: _an,
+      publicationTitle: _pt,
+      year: _yr,
+      date: _dt,
+      ...otherItemFields
+    } = item as any;
+
     return {
+      ...otherItemFields,
       title: item.title || 'Untitled',
       authors: rawAuthors,
       creators,

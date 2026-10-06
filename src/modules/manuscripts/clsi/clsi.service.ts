@@ -59,32 +59,14 @@ import {
 } from './core/adapters/artifacts/zip.util';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 
-export type ClsiCompileResult =
-  | {
-      success: true;
-      pdf: string;
-      synctex?: string;
-      logs: string;
-      diagnostics?: CompilerDiagnostic[];
-      outputFiles?: DiscoveredOutputFile[];
-      durationMs: number;
-    }
-  | {
-      success: false;
-      error: string;
-      pdf?: string;
-      synctex?: string;
-      logs: string;
-      diagnostics?: CompilerDiagnostic[];
-      outputFiles?: DiscoveredOutputFile[];
-      durationMs: number;
-    };
+export type ClsiCompileResult = CompilePipelineResult;
 
 @Injectable()
 export class ClsiService {
   private readonly logger = new Logger(ClsiService.name);
   private readonly workspace: OverleafIncrementalWorkspace;
   private readonly pipeline: CompilePipeline;
+  private readonly logParser = new OverleafLogParser();
   private readonly fairQueue = new CompileFairQueue();
   private readonly inFlightBuilds = new Map<
     string,
@@ -127,7 +109,6 @@ export class ClsiService {
     const latexmkEngine = new LatexmkEngine(runner, latexmkBin, 'pdflatex');
     const tectonicEngine = new TectonicEngine(runner, tectonicBin);
 
-    const logParser = new OverleafLogParser();
     const synctexProcessor = new SyncTexProcessor();
     const wordCounter = new TexWordCounter();
 
@@ -139,7 +120,7 @@ export class ClsiService {
       this.workspace,
       latexmkEngine,
       tectonicEngine,
-      logParser,
+      this.logParser,
     );
     this.synctexUseCase = new SyncTexUseCase(this.workspace, synctexProcessor);
     this.wordCountUseCase = new WordCountUseCase(wordCounter);
@@ -272,6 +253,30 @@ export class ClsiService {
     dto: CompileManuscriptDto,
     _userId?: string,
   ): Promise<ClsiCompileResult> {
+    // Normalize official Overleaf CLSI request envelope if provided
+    if (dto.compile) {
+      if (dto.compile.rootResourcePath && !dto.main_file) {
+        dto.main_file = dto.compile.rootResourcePath;
+      }
+      if (dto.compile.options?.compiler && !dto.engine) {
+        dto.engine = dto.compile.options.compiler as any;
+      }
+      if (dto.compile.options?.draft !== undefined && dto.draft === undefined) {
+        dto.draft = dto.compile.options.draft;
+      }
+      if (dto.compile.options?.timeout && !dto.timeout_ms) {
+        dto.timeout_ms = dto.compile.options.timeout * 1000;
+      }
+      if (dto.compile.resources) {
+        dto.files = dto.files || {};
+        for (const res of dto.compile.resources) {
+          if (res.content !== undefined) {
+            dto.files[res.path] = res.content;
+          }
+        }
+      }
+    }
+
     const engine = dto.engine || 'pdflatex';
     const projectId = await this.resolveProjectId(dto);
 
@@ -392,13 +397,104 @@ export class ClsiService {
         }
 
         if (response && response.ok) {
-          const rawResult = (await response.json()) as ClsiCompileResult & {
-            timing?: { totalMs?: number };
-          };
-          const result: ClsiCompileResult = {
-            ...rawResult,
-            durationMs: rawResult.durationMs ?? rawResult.timing?.totalMs ?? 0,
-          };
+          const rawResult = (await response.json()) as any;
+          let result: ClsiCompileResult;
+
+          if (rawResult?.compile?.status) {
+            const isSuccess = rawResult.compile.status === 'success';
+            const outputFiles: any[] = rawResult.compile.outputFiles || [];
+            const pdfEntry = outputFiles.find(
+              (f: any) => f.type === 'pdf' || f.path === 'output.pdf',
+            );
+            const logEntry = outputFiles.find(
+              (f: any) => f.type === 'log' || f.path === 'output.log',
+            );
+            const synctexEntry = outputFiles.find(
+              (f: any) =>
+                f.type === 'synctex.gz' ||
+                f.type === 'synctex' ||
+                f.path?.includes('synctex'),
+            );
+
+            let pdfBase64 = '';
+            let logsText = '';
+            let synctexBase64 = '';
+
+            if (pdfEntry?.url) {
+              try {
+                const fullUrl = pdfEntry.url.startsWith('http')
+                  ? pdfEntry.url
+                  : `${baseUrl}${pdfEntry.url}`;
+                const pdfRes = await fetch(fullUrl);
+                if (pdfRes.ok) {
+                  const buf = await pdfRes.arrayBuffer();
+                  pdfBase64 = Buffer.from(buf).toString('base64');
+                }
+              } catch {}
+            }
+            if (logEntry?.url) {
+              try {
+                const fullUrl = logEntry.url.startsWith('http')
+                  ? logEntry.url
+                  : `${baseUrl}${logEntry.url}`;
+                const logRes = await fetch(fullUrl);
+                if (logRes.ok) {
+                  logsText = await logRes.text();
+                }
+              } catch {}
+            }
+            if (synctexEntry?.url) {
+              try {
+                const fullUrl = synctexEntry.url.startsWith('http')
+                  ? synctexEntry.url
+                  : `${baseUrl}${synctexEntry.url}`;
+                const synctexRes = await fetch(fullUrl);
+                if (synctexRes.ok) {
+                  const buf = await synctexRes.arrayBuffer();
+                  synctexBase64 = Buffer.from(buf).toString('base64');
+                }
+              } catch {}
+            }
+
+            const diagnostics = this.logParser.parse(logsText, mainFile);
+            const durationMs = rawResult.timing?.totalMs ?? 0;
+
+            if (isSuccess && pdfBase64) {
+              result = {
+                success: true,
+                status: 'success',
+                compile: rawResult.compile,
+                pdf: pdfBase64,
+                synctex: synctexBase64 || undefined,
+                logs: logsText,
+                diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
+                durationMs,
+              };
+            } else {
+              result = {
+                success: false,
+                status: 'failure',
+                compile: rawResult.compile,
+                error:
+                  diagnostics.find((d: any) => d.severity === 'error')
+                    ?.message || 'LaTeX compilation failed to produce a PDF',
+                pdf: pdfBase64 || undefined,
+                synctex: synctexBase64 || undefined,
+                logs: logsText,
+                diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
+                durationMs,
+              };
+            }
+          } else {
+            result = {
+              ...rawResult,
+              status:
+                rawResult.status || (rawResult.success ? 'success' : 'failure'),
+              durationMs:
+                rawResult.durationMs ?? rawResult.timing?.totalMs ?? 0,
+            };
+          }
+
           if (
             result.success &&
             this.cache &&
@@ -426,7 +522,12 @@ export class ClsiService {
       }
     }
 
-    // 4. Execute compilation through Fair-Queue single-flight pipeline
+    // 4. Force clean scratch workspace if requested (Overleaf "Clear cached files" parity)
+    if (dto.force_clean || dto.forceClean) {
+      await this.workspace.cleanScratch(projectId);
+    }
+
+    // 5. Execute compilation through Fair-Queue single-flight pipeline
     const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
     return await this.fairQueue.schedule(
       projectId,
@@ -604,6 +705,13 @@ export class ClsiService {
 
   public async enforceScratchQuota(options?: DiskUsageOptions) {
     return this.diskUsageCleaner.enforceDiskQuota(options);
+  }
+
+  public async cleanProjectScratch(
+    projectId: string,
+  ): Promise<{ success: boolean; projectId: string }> {
+    await this.workspace.cleanScratch(projectId);
+    return { success: true, projectId };
   }
 
   public async downloadAllArtifactsZip(

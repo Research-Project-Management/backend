@@ -24,6 +24,7 @@ export interface ActiveDocSession {
   flushTimeout?: NodeJS.Timeout;
   lastActiveAt: number;
   firstUnflushedAt?: number;
+  currentVersion?: number;
 }
 
 export interface SyncMessageResult {
@@ -399,32 +400,45 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     session.firstUnflushedAt = undefined;
 
     try {
-      // 1. Cache binary update in Redis (raw Buffer: zero Base64 overhead, 33% memory saving)
+      const tasks: Promise<any>[] = [];
+
+      // 1. Cache binary update in Redis in parallel (raw Buffer: zero Base64 overhead, 33% memory saving)
       if (this.redis && this.redis.isReady()) {
         const binarySnapshot = Y.encodeStateAsUpdate(session.doc);
-        await this.redis.setBuffer(
-          this.redisKey(projectId, docId),
-          Buffer.from(binarySnapshot),
-          this.REDIS_SNAPSHOT_TTL_SECONDS,
+        tasks.push(
+          this.redis.setBuffer(
+            this.redisKey(projectId, docId),
+            Buffer.from(binarySnapshot),
+            this.REDIS_SNAPSHOT_TTL_SECONDS,
+          ),
         );
       }
 
-      // 2. Persist raw text to Docstore
+      // 2. Persist raw text to Docstore in parallel (cached version increment per session)
       if (this.docstoreService) {
         const text = session.yText.toString();
         const lines = LineArrayEngine.textToLines(text);
-        const currentDoc = await this.docstoreService
-          .getDoc(projectId, docId)
-          .catch(() => null);
-        const nextVersion = (currentDoc?.version ?? 0) + 1;
-        await this.docstoreService.updateDoc(projectId, docId, {
-          lines,
-          version: nextVersion,
-        });
-        this.logger.debug(
-          `Flushed Y.Doc to Docstore (${lines.length} lines, v${nextVersion}): ${key}`,
+        if (session.currentVersion === undefined) {
+          const currentDoc = await this.docstoreService
+            .getDoc(projectId, docId)
+            .catch(() => null);
+          session.currentVersion = currentDoc?.version ?? 0;
+        }
+        session.currentVersion += 1;
+        const nextVersion = session.currentVersion;
+
+        tasks.push(
+          this.docstoreService
+            .updateDoc(projectId, docId, { lines, version: nextVersion })
+            .then((res) => {
+              this.logger.debug(
+                `Flushed Y.Doc to Docstore (${lines.length} lines, v${res.doc?.version ?? nextVersion}): ${key}`,
+              );
+            }),
         );
       }
+
+      await Promise.all(tasks);
     } catch (err: any) {
       this.logger.error(
         `Error flushing Y.Doc ${key}: ${err?.message}`,

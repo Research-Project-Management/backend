@@ -54,6 +54,7 @@ export class LatexmkEngine implements ILatexEngine {
       '-cd',
       '-jobname=output',
       '-synctex=1',
+      '-file-line-error',
       options.stopOnFirstError ? '-halt-on-error' : '-interaction=batchmode',
       ...(options.stopOnFirstError ? [] : ['-f']),
       ...(options.syntaxOnly ? ['-draftmode'] : []),

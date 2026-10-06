@@ -7,6 +7,7 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
   Body,
   Param,
   Res,
@@ -165,6 +166,26 @@ export class ClsiController {
     @Res() res: FastifyReply,
   ) {
     return this.clsiService.downloadAllArtifactsZip(projectId, res);
+  }
+
+  @Post([
+    'v1/manuscripts/projects/:projectId/clean-aux',
+    'projects/:projectId/clsi/clean-aux',
+    'projects/:projectId/compiler/clean-aux',
+  ])
+  @Delete([
+    'v1/manuscripts/projects/:projectId/artifacts',
+    'projects/:projectId/clsi/artifacts',
+  ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Clear cached auxiliary files and compile scratch workspace for a project',
+  })
+  async cleanAuxFiles(@Param('projectId') projectId: string) {
+    return this.clsiService.cleanProjectScratch(projectId);
   }
 
   @Get(['clsi/status', 'manuscripts/clsi/status'])

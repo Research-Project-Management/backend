@@ -728,7 +728,7 @@ export class ProjectItemController extends BaseItemController {
 
   @Post('import')
   @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Import items from personal library into project' })
+  @ApiOperation({ summary: 'Import items from user library into project' })
   @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
   async importItems(
     @CurrentUser('id') userId: string,

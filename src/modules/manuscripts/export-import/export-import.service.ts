@@ -3,7 +3,7 @@
  * Facade Service orchestrating Project Archiving, ZIP Export/Import, and Template Scaffolding.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ExportProjectZipUseCase,
   ExportProjectZipOutput,
@@ -11,6 +11,10 @@ import {
 import { ImportProjectZipUseCase } from './core/use-cases/import-project-zip.use-case';
 import { ListTemplatesUseCase } from './core/use-cases/list-templates.use-case';
 import { ScaffoldTemplateUseCase } from './core/use-cases/scaffold-template.use-case';
+import {
+  ConvertDocumentUseCase,
+  ConvertDocumentInput,
+} from './core/use-cases/convert-document.use-case';
 import {
   ExportZipQueryDto,
   ImportSummaryResponseDto,
@@ -26,6 +30,8 @@ export class ExportImportService {
     private readonly importProjectZipUseCase: ImportProjectZipUseCase,
     private readonly listTemplatesUseCase: ListTemplatesUseCase,
     private readonly scaffoldTemplateUseCase: ScaffoldTemplateUseCase,
+    @Optional()
+    private readonly convertDocumentUseCase?: ConvertDocumentUseCase,
   ) {}
 
   public async exportProjectZip(
@@ -60,6 +66,14 @@ export class ExportImportService {
     return templates.map((t) => t.toJSON() as TemplateResponseDto);
   }
 
+  public async getTemplate(
+    templateId: string,
+  ): Promise<TemplateResponseDto | null> {
+    const templates = await this.listTemplatesUseCase.execute();
+    const found = templates.find((t) => t.id === templateId);
+    return found ? (found.toJSON() as TemplateResponseDto) : null;
+  }
+
   public async scaffoldTemplate(
     projectId: string,
     templateId: string,
@@ -70,6 +84,16 @@ export class ExportImportService {
       templateId,
       userId,
     });
+    return summary.toJSON() as ImportSummaryResponseDto;
+  }
+
+  public async convertDocument(
+    input: ConvertDocumentInput,
+  ): Promise<ImportSummaryResponseDto> {
+    if (!this.convertDocumentUseCase) {
+      throw new Error('ConvertDocumentUseCase is not available');
+    }
+    const summary = await this.convertDocumentUseCase.execute(input);
     return summary.toJSON() as ImportSummaryResponseDto;
   }
 }

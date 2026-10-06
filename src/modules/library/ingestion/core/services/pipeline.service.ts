@@ -65,7 +65,6 @@ function resolveScope(
     Boolean(scopeId) &&
     scopeId !== 'user' &&
     scopeId !== 'me' &&
-    scopeId !== 'personal' &&
     scopeId !== envelope.userId &&
     isUUID(scopeId);
   const userId = envelope.userId || (scopeId !== 'user' ? scopeId : 'system');

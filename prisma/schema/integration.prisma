@@ -44,7 +44,6 @@ model UserIntegration {
   projectLinks    ProjectIntegrationLink[]
 
   @@unique([userId, provider])
-  @@index([userId])
   @@index([provider])
   @@map("user_integrations")
 }
@@ -66,6 +65,5 @@ model ProjectIntegrationLink {
   updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([projectId, userIntegrationId, collectionId])
-  @@index([projectId])
   @@map("project_integration_links")
 }

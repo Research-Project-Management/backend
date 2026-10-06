@@ -56,9 +56,12 @@ export class UpdateDocDto {
   @IsArray()
   lines!: string[];
 
-  @ApiProperty({ description: 'Version sequence number' })
+  @ApiPropertyOptional({
+    description: 'Version sequence number (auto-incremented if omitted)',
+  })
+  @IsOptional()
   @IsNumber()
-  version!: number;
+  version?: number;
 
   @ApiPropertyOptional({
     description: 'Updated track changes and inline comments ranges',

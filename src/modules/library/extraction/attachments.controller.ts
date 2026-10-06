@@ -236,10 +236,10 @@ export abstract class BaseAttachmentController {
 }
 
 /**
- * Personal Library Attachments Controller (/api/v1/library).
+ * User Library Attachments Controller (/api/v1/library).
  * Guarded purely by JwtAuthGuard — scoped to authenticated user.
  */
-@ApiTags('Library Attachments - Personal Lifecycle')
+@ApiTags('Library Attachments - User Lifecycle')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/library')
 @UseGuards(JwtAuthGuard)
@@ -276,7 +276,7 @@ export class AttachmentController extends BaseAttachmentController {
     'attachments/:attachmentId/thumbnail',
     'items/:itemId/attachments/:attachmentId/thumbnail',
   ])
-  @ApiOperation({ summary: 'Get thumbnail image for a personal attachment' })
+  @ApiOperation({ summary: 'Get thumbnail image for a user attachment' })
   async getAttachmentThumbnail(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -293,7 +293,7 @@ export class AttachmentController extends BaseAttachmentController {
   }
 
   @Get('items/:itemId/attachments')
-  @ApiOperation({ summary: 'Get all attachments for a personal library item' })
+  @ApiOperation({ summary: 'Get all attachments for a user library item' })
   async getItemAttachments(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
@@ -308,7 +308,7 @@ export class AttachmentController extends BaseAttachmentController {
   }
 
   @Get(['items/:itemId/attachments/:attachmentId', 'attachments/:attachmentId'])
-  @ApiOperation({ summary: 'Get personal attachment details by ID' })
+  @ApiOperation({ summary: 'Get user attachment details by ID' })
   async getItemAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -326,7 +326,7 @@ export class AttachmentController extends BaseAttachmentController {
 
   @Post(['items/:itemId/attachments', 'attachments'])
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create and associate a new personal attachment' })
+  @ApiOperation({ summary: 'Create and associate a new user attachment' })
   async createAttachment(
     @CurrentUser('id') userId: string,
     @Param('itemId') paramItemId: string | undefined,
@@ -344,7 +344,7 @@ export class AttachmentController extends BaseAttachmentController {
 
   @Post('attachments/:attachmentId/re-extract')
   @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Trigger re-extraction on a personal attachment' })
+  @ApiOperation({ summary: 'Trigger re-extraction on a user attachment' })
   async reExtractAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -359,7 +359,7 @@ export class AttachmentController extends BaseAttachmentController {
   }
 
   @Delete('attachments/:attachmentId')
-  @ApiOperation({ summary: 'Delete a personal attachment' })
+  @ApiOperation({ summary: 'Delete a user attachment' })
   async deleteAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -375,7 +375,7 @@ export class AttachmentController extends BaseAttachmentController {
 
   @Post('attachments/:attachmentId/primary')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Set attachment as primary PDF for personal item' })
+  @ApiOperation({ summary: 'Set attachment as primary PDF for user item' })
   async setPrimaryAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -392,7 +392,7 @@ export class AttachmentController extends BaseAttachmentController {
   }
 
   @Patch('attachments/:attachmentId')
-  @ApiOperation({ summary: 'Rename personal attachment file' })
+  @ApiOperation({ summary: 'Rename user attachment file' })
   async renameAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -409,7 +409,7 @@ export class AttachmentController extends BaseAttachmentController {
   }
 
   @Post('attachments/batch-rename')
-  @ApiOperation({ summary: 'Batch rename personal attachments' })
+  @ApiOperation({ summary: 'Batch rename user attachments' })
   async batchRenameAttachments(
     @CurrentUser('id') userId: string,
     @Body() dto: BatchRenameAttachmentsDto,

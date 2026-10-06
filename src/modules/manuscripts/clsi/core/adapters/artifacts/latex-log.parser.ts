@@ -13,8 +13,11 @@ export class OverleafLogParser implements ILogParser {
   private static readonly BADBOX_REGEX =
     /(?:Overfull|Underfull)\s+\\(?:hbox|vbox)\s*\([^)]*\)\s*(?:in paragraph\s*)?at lines?\s+(\d+)(?:--\d+)?/i;
 
+  private static readonly FILE_LINE_ERROR_REGEX =
+    /^(\.{0,2}\/?[^\s:!()]+\.(?:tex|bib|sty|cls|dtx|ins)):(\d+):\s*(.+)/i;
+
   private static readonly TECTONIC_ERROR_REGEX =
-    /^error:\s+(?:([^:]+):)?(\d+):\s+(.+)/i;
+    /^error:\s*(?:([^:\s]+):(\d+):\s*)?(.+)/i;
 
   public parse(
     logText: string,
@@ -22,15 +25,57 @@ export class OverleafLogParser implements ILogParser {
   ): CompilerDiagnostic[] {
     const diagnostics: CompilerDiagnostic[] = [];
     const lines = logText.split('\n');
+    const fileStack: string[] = [];
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (!line) continue;
 
-      // 1. Tectonic CLI errors (error: file:line: message)
+      // Track TeX file open / close parentheses (Overleaf latex-log-parser parity)
+      const openMatches = line.matchAll(
+        /\((?:\.{0,2}\/)?([^\s()"]+\.(?:tex|sty|cls|bib))/g,
+      );
+      for (const m of openMatches) {
+        if (m[1]) {
+          fileStack.push(m[1].replace(/^\.\//, ''));
+        }
+      }
+      if (line.includes(')') && fileStack.length > 0) {
+        const closeCount = (line.match(/\)/g) || []).length;
+        for (let c = 0; c < Math.min(closeCount, fileStack.length); c++) {
+          fileStack.pop();
+        }
+      }
+
+      const activeFile = fileStack[fileStack.length - 1] || defaultFile;
+
+      // 1. TeX -file-line-error output (filename.tex:15: error message)
+      const fleMatch = line.match(OverleafLogParser.FILE_LINE_ERROR_REGEX);
+      if (fleMatch && fleMatch[1] && fleMatch[2] && fleMatch[3]) {
+        const errorFile = fleMatch[1].replace(/^\.\//, '').trim();
+        const errorLine = parseInt(fleMatch[2], 10);
+        const message = fleMatch[3].trim();
+        const context = lines
+          .slice(i, Math.min(i + 3, lines.length))
+          .join('\n');
+        const { code, suggestion } = this.generateSuggestion(message, context);
+
+        diagnostics.push({
+          file: errorFile,
+          line: errorLine,
+          message,
+          context,
+          severity: 'error',
+          code,
+          suggestion,
+        });
+        continue;
+      }
+
+      // 2. Tectonic CLI errors (error: file:line: message)
       const tectonicMatch = line.match(OverleafLogParser.TECTONIC_ERROR_REGEX);
       if (tectonicMatch && tectonicMatch[3]) {
-        const errorFile = tectonicMatch[1]?.trim() || defaultFile;
+        const errorFile = tectonicMatch[1]?.trim() || activeFile;
         const errorLine = parseInt(tectonicMatch[2], 10);
         const message = tectonicMatch[3].trim();
         const context = lines
@@ -50,7 +95,7 @@ export class OverleafLogParser implements ILogParser {
         continue;
       }
 
-      // 2. Standard TeX critical errors (! LaTeX Error: ...)
+      // 3. Standard TeX critical errors (! LaTeX Error: ...)
       if (line.startsWith('!')) {
         const message = line.slice(1).trim();
         let errorLine: number | null = null;
@@ -72,7 +117,7 @@ export class OverleafLogParser implements ILogParser {
         );
 
         diagnostics.push({
-          file: defaultFile,
+          file: activeFile,
           line: errorLine,
           message,
           context: resolvedContext,
@@ -83,14 +128,14 @@ export class OverleafLogParser implements ILogParser {
         continue;
       }
 
-      // 3. LaTeX Package / Class Warnings
+      // 4. LaTeX Package / Class Warnings
       const warningMatch = line.match(OverleafLogParser.LATEX_WARNING_REGEX);
       if (warningMatch && warningMatch[1]) {
         const message = warningMatch[1].trim();
         const lineNum = warningMatch[2] ? parseInt(warningMatch[2], 10) : null;
 
         diagnostics.push({
-          file: defaultFile,
+          file: activeFile,
           line: lineNum,
           message: `LaTeX Warning: ${message}`,
           context: line,
@@ -99,12 +144,12 @@ export class OverleafLogParser implements ILogParser {
         continue;
       }
 
-      // 4. Badboxes (Overfull / Underfull \hbox or \vbox)
+      // 5. Badboxes (Overfull / Underfull \hbox or \vbox)
       const badboxMatch = line.match(OverleafLogParser.BADBOX_REGEX);
       if (badboxMatch && badboxMatch[1]) {
         const lineNum = parseInt(badboxMatch[1], 10);
         diagnostics.push({
-          file: defaultFile,
+          file: activeFile,
           line: lineNum,
           message: line.trim(),
           context: line,
@@ -124,10 +169,10 @@ export class OverleafLogParser implements ILogParser {
 
     if (lowerMsg.includes('undefined control sequence')) {
       const match = context.match(/\\([a-zA-Z]+)/);
-      const command = match ? `\\${match[1]}` : 'cụm từ điều khiển này';
+      const command = match ? `\\${match[1]}` : 'this command';
       return {
         code: 'UNDEFINED_MACRO',
-        suggestion: `Lệnh "${command}" chưa được định nghĩa. Kiểm tra lại chính tả hoặc thêm \\usepackage{...} cần thiết.`,
+        suggestion: `Command "${command}" is undefined. Check spelling or add the required \\usepackage{...}.`,
       };
     }
 
@@ -135,7 +180,7 @@ export class OverleafLogParser implements ILogParser {
       return {
         code: 'MISSING_MATH_DELIMITER',
         suggestion:
-          'Ký tự toán học hoặc biến số cần được đặt trong môi trường toán ($...$ hoặc \\[...\\]).',
+          'Math characters or variables must be placed in a math environment ($...$ or \\[...\\]).',
       };
     }
 
@@ -143,7 +188,7 @@ export class OverleafLogParser implements ILogParser {
       return {
         code: 'FILE_NOT_FOUND',
         suggestion:
-          'Không tìm thấy tệp ảnh, bibliography hoặc package được gọi. Kiểm tra lại đường dẫn tệp.',
+          'File, graphic, bibliography, or package not found. Verify the file path and extension.',
       };
     }
 

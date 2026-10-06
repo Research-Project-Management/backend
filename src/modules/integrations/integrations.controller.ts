@@ -31,6 +31,7 @@ import {
   LinkGithubRepoDto,
   PushGithubDto,
   PullGithubDto,
+  ImportGithubRepoDto,
 } from './dto/github-sync.dto';
 
 @ApiTags('Integrations')
@@ -118,6 +119,17 @@ export class IntegrationsController {
     @Body() dto: PullGithubDto,
   ) {
     return await this.service.pullProjectFromGithub(userId, dto);
+  }
+
+  @Post('github/projects/import')
+  @ApiOperation({
+    summary: 'Import a GitHub repository into the project and establish a link',
+  })
+  async importGithubRepo(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ImportGithubRepoDto,
+  ) {
+    return await this.service.importGithubRepo(userId, dto);
   }
 
   // ============================================================================

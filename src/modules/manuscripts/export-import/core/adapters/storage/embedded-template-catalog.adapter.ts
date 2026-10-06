@@ -501,8 +501,8 @@ Distributed Consensus, Real-time Collaborative Systems, Scientific Typesetting E
 
 \\section{Selected Publications}
 \\begin{itemize}
-  \\item \\textbf{A. Mercer}, et al. \`\`Sub-millisecond State Convergence in Multi-Master Document Networks.'' \\textit{ACM SIGCOMM}, 2024.
-  \\item \\textbf{A. Mercer} and C. Shannon. \`\`Information-Theoretic Limits of Distributed Synchronization.'' \\textit{IEEE Transactions on Information Theory}, 2023.
+  \\item \\textbf{A. Mercer}, et al. "Sub-millisecond State Convergence in Multi-Master Document Networks." \\textit{ACM SIGCOMM}, 2024.
+  \\item \\textbf{A. Mercer} and C. Shannon. "Information-Theoretic Limits of Distributed Synchronization." \\textit{IEEE Transactions on Information Theory}, 2023.
 \\end{itemize}
 
 \\section{Honors \\& Awards}

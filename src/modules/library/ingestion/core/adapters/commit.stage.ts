@@ -252,7 +252,44 @@ export function toItemData(
     ...(metadata.system ? { system: metadata.system } : {}),
   };
 
+  const EXCLUDED_RAW_METADATA_KEYS = new Set([
+    'title',
+    'abstract',
+    'abstractNote',
+    'itemType',
+    'type',
+    'creators',
+    'authors',
+    'editors',
+    'tags',
+    'keywords',
+    'labels',
+    'notes',
+    'extraFields',
+    'seeAlso',
+    'relations',
+    'provenance',
+    'uploadedById',
+    'projectId',
+    'collectionId',
+    'collectionIds',
+  ]);
+
+  for (const [key, val] of Object.entries(metadata)) {
+    if (
+      val !== undefined &&
+      val !== null &&
+      val !== '' &&
+      !EXCLUDED_RAW_METADATA_KEYS.has(key)
+    ) {
+      if (extraFields[key] === undefined) {
+        extraFields[key] = val;
+      }
+    }
+  }
+
   return {
+    ...extraFields,
     title: metadata.title || 'Untitled Document',
     itemType: metadata.itemType || 'journalArticle',
     type: metadata.type,

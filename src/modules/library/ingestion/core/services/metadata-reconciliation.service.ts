@@ -278,7 +278,7 @@ export class ReconciliationService {
     const resolved: Partial<ItemMetadata> = {};
 
     // List of scalar and array fields to reconcile
-    const allFields: (keyof ItemMetadata)[] = [
+    const allFields: (keyof ItemMetadata & string)[] = [
       'doi',
       'arxivId',
       'pmid',

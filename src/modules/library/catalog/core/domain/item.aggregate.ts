@@ -200,6 +200,7 @@ export class ItemAggregate {
       year?: number | null;
       publicationTitle?: string | null;
       fields?: Record<string, any>;
+      replaceFields?: boolean;
       [key: string]: any;
     },
     expectedVersion?: number,
@@ -234,8 +235,20 @@ export class ItemAggregate {
       if (!trimmed) {
         throw new ItemValidationDomainException('Item type cannot be empty.');
       }
+      const previousType = this._itemType;
       this._itemType = trimmed;
       modifiedFields.push('itemType');
+      if (previousType !== trimmed) {
+        this.recordEvent(
+          new ItemTypeChangedDomainEvent(
+            this._id,
+            this._userId,
+            previousType,
+            trimmed,
+            this._projectId ?? undefined,
+          ),
+        );
+      }
     }
 
     if (changes.doi !== undefined) {
@@ -274,15 +287,52 @@ export class ItemAggregate {
       year: _y,
       publicationTitle: _pt,
       fields,
+      replaceFields,
       ...extraChanges
     } = changes;
 
     if (changes.fields !== undefined || Object.keys(extraChanges).length > 0) {
-      this._fields = {
-        ...this._fields,
-        ...(changes.fields ?? {}),
-        ...extraChanges,
-      };
+      if (replaceFields) {
+        const preservedInternalFields: Record<string, any> = {};
+        const persistentKeys = [
+          'creators',
+          'authors',
+          'contributors',
+          'tags',
+          'attachments',
+          'primaryFile',
+          'fileUrl',
+          'collections',
+          'collectionIds',
+          'collectionId',
+          'notes',
+          'readStatus',
+          'rating',
+          'lastReadAt',
+          'identifiers',
+          'isStarred',
+          'hasFile',
+          'attachmentCount',
+          'noteCount',
+          'firstAuthor',
+        ];
+        for (const pk of persistentKeys) {
+          if (this._fields[pk] !== undefined) {
+            preservedInternalFields[pk] = this._fields[pk];
+          }
+        }
+        this._fields = {
+          ...preservedInternalFields,
+          ...(changes.fields ?? {}),
+          ...extraChanges,
+        };
+      } else {
+        this._fields = {
+          ...this._fields,
+          ...(changes.fields ?? {}),
+          ...extraChanges,
+        };
+      }
       modifiedFields.push('fields');
     }
 

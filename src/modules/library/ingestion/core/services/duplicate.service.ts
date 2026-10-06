@@ -596,11 +596,31 @@ export class DuplicateService {
           },
         ];
 
+        const TOP_LEVEL_ITEM_COLUMNS = new Set([
+          'title',
+          'itemType',
+          'year',
+          'citationKey',
+          'doi',
+          'publicationTitle',
+          'abstract',
+          'url',
+        ]);
+
+        const combinedUpdates = { ...backfillFields, ...scalarSelections };
+        const topLevelData: Record<string, any> = {};
+        for (const [key, val] of Object.entries(combinedUpdates)) {
+          if (TOP_LEVEL_ITEM_COLUMNS.has(key)) {
+            topLevelData[key] = val;
+          } else {
+            primaryMeta[key] = val;
+          }
+        }
+
         const updatedPrimary = await tx.item.update({
           where: { id: primary.id },
           data: {
-            ...backfillFields,
-            ...scalarSelections,
+            ...topLevelData,
             metadata: primaryMeta,
             version: { increment: 1 },
           },

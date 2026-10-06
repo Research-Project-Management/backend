@@ -35,7 +35,7 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
 
         await client.set(
           sessionKey,
-          JSON.stringify(session.toPresenceVo().toJSON()),
+          JSON.stringify(session.toJSON()),
           'EX',
           86400,
         );
@@ -61,6 +61,23 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
         const sessionKey = `manuscript:presence:${socketId}`;
         const projectKey = `manuscript:project_rooms:${projectId}`;
 
+        // Clean up from doc room if active
+        let activeDocId = session?.activeDocId;
+        if (!activeDocId) {
+          const raw = await client.get(sessionKey);
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              activeDocId = parsed.activeDocId;
+            } catch {}
+          }
+        }
+
+        if (activeDocId) {
+          const docKey = `manuscript:doc_rooms:${projectId}:${activeDocId}`;
+          await client.srem(docKey, socketId);
+        }
+
         await client.del(sessionKey);
         await client.srem(projectKey, socketId);
       } catch (err) {
@@ -74,6 +91,46 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
   public async getProjectSessions(
     projectId: string,
   ): Promise<UserPresenceVo[]> {
+    if (this.isRedisActive()) {
+      try {
+        const client = this.redis!.getClient()!;
+        const projectKey = `manuscript:project_rooms:${projectId}`;
+        const socketIds = await client.smembers(projectKey);
+
+        if (!socketIds || socketIds.length === 0) {
+          return [];
+        }
+
+        const keys = socketIds.map((sId) => `manuscript:presence:${sId}`);
+        const rawSessions = await client.mget(...keys);
+
+        const presences: UserPresenceVo[] = [];
+        const deadSocketIds: string[] = [];
+
+        for (let i = 0; i < socketIds.length; i++) {
+          const raw = rawSessions[i];
+          const sId = socketIds[i];
+          if (raw) {
+            try {
+              presences.push(UserPresenceVo.fromJSON(JSON.parse(raw)));
+            } catch {
+              deadSocketIds.push(sId);
+            }
+          } else {
+            deadSocketIds.push(sId);
+          }
+        }
+
+        if (deadSocketIds.length > 0) {
+          await client.srem(projectKey, ...deadSocketIds).catch(() => {});
+        }
+
+        return presences;
+      } catch (err) {
+        this.logger.warn(`Redis getProjectSessions error: ${err}`);
+      }
+    }
+
     return await this.fallbackMemory.getProjectSessions(projectId);
   }
 
@@ -82,23 +139,35 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
     docId: string,
     socketId: string,
   ): Promise<UserPresenceVo[]> {
-    const presenceList = await this.fallbackMemory.joinDocRoom(
-      projectId,
-      docId,
-      socketId,
-    );
+    await this.fallbackMemory.joinDocRoom(projectId, docId, socketId);
 
     if (this.isRedisActive()) {
       try {
         const client = this.redis!.getClient()!;
         const docKey = `manuscript:doc_rooms:${projectId}:${docId}`;
         await client.sadd(docKey, socketId);
+
+        const sessionKey = `manuscript:presence:${socketId}`;
+        const raw = await client.get(sessionKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.activeDocId && parsed.activeDocId !== docId) {
+            const oldDocKey = `manuscript:doc_rooms:${projectId}:${parsed.activeDocId}`;
+            await client.srem(oldDocKey, socketId).catch(() => {});
+          }
+          parsed.activeDocId = docId;
+          parsed.cursor = null;
+          parsed.lastSeenAt = new Date().toISOString();
+          await client.set(sessionKey, JSON.stringify(parsed), 'EX', 86400);
+        }
+
+        return await this.getDocSessions(projectId, docId);
       } catch (err) {
         this.logger.warn(`Redis joinDocRoom error: ${err}`);
       }
     }
 
-    return presenceList;
+    return await this.fallbackMemory.getDocSessions(projectId, docId);
   }
 
   public async leaveDocRoom(
@@ -113,6 +182,18 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
         const client = this.redis!.getClient()!;
         const docKey = `manuscript:doc_rooms:${projectId}:${docId}`;
         await client.srem(docKey, socketId);
+
+        const sessionKey = `manuscript:presence:${socketId}`;
+        const raw = await client.get(sessionKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.activeDocId === docId) {
+            parsed.activeDocId = null;
+            parsed.cursor = null;
+            parsed.lastSeenAt = new Date().toISOString();
+            await client.set(sessionKey, JSON.stringify(parsed), 'EX', 86400);
+          }
+        }
       } catch (err) {
         this.logger.warn(`Redis leaveDocRoom error: ${err}`);
       }
@@ -123,6 +204,46 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
     projectId: string,
     docId: string,
   ): Promise<UserPresenceVo[]> {
+    if (this.isRedisActive()) {
+      try {
+        const client = this.redis!.getClient()!;
+        const docKey = `manuscript:doc_rooms:${projectId}:${docId}`;
+        const socketIds = await client.smembers(docKey);
+
+        if (!socketIds || socketIds.length === 0) {
+          return [];
+        }
+
+        const keys = socketIds.map((sId) => `manuscript:presence:${sId}`);
+        const rawSessions = await client.mget(...keys);
+
+        const presences: UserPresenceVo[] = [];
+        const deadSocketIds: string[] = [];
+
+        for (let i = 0; i < socketIds.length; i++) {
+          const raw = rawSessions[i];
+          const sId = socketIds[i];
+          if (raw) {
+            try {
+              presences.push(UserPresenceVo.fromJSON(JSON.parse(raw)));
+            } catch {
+              deadSocketIds.push(sId);
+            }
+          } else {
+            deadSocketIds.push(sId);
+          }
+        }
+
+        if (deadSocketIds.length > 0) {
+          await client.srem(docKey, ...deadSocketIds).catch(() => {});
+        }
+
+        return presences;
+      } catch (err) {
+        this.logger.warn(`Redis getDocSessions error: ${err}`);
+      }
+    }
+
     return await this.fallbackMemory.getDocSessions(projectId, docId);
   }
 
@@ -132,15 +253,52 @@ export class RedisRoomManagerAdapter extends IRoomManagerPort {
     socketId: string,
     cursor: CursorPositionVo,
   ): Promise<UserPresenceVo | null> {
-    return await this.fallbackMemory.updateSessionCursor(
+    const localPresence = await this.fallbackMemory.updateSessionCursor(
       projectId,
       docId,
       socketId,
       cursor,
     );
+
+    if (this.isRedisActive()) {
+      try {
+        const client = this.redis!.getClient()!;
+        const sessionKey = `manuscript:presence:${socketId}`;
+        const raw = await client.get(sessionKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          parsed.activeDocId = docId;
+          parsed.cursor = cursor.toJSON();
+          parsed.lastSeenAt = new Date().toISOString();
+          await client.set(sessionKey, JSON.stringify(parsed), 'EX', 86400);
+          return UserPresenceVo.fromJSON(parsed);
+        }
+      } catch (err) {
+        this.logger.warn(`Redis updateSessionCursor error: ${err}`);
+      }
+    }
+
+    return localPresence;
   }
 
   public async getSession(socketId: string): Promise<PresenceSession | null> {
-    return await this.fallbackMemory.getSession(socketId);
+    const localSession = await this.fallbackMemory.getSession(socketId);
+    if (localSession) {
+      return localSession;
+    }
+
+    if (this.isRedisActive()) {
+      try {
+        const client = this.redis!.getClient()!;
+        const raw = await client.get(`manuscript:presence:${socketId}`);
+        if (raw) {
+          return PresenceSession.fromJSON(JSON.parse(raw));
+        }
+      } catch (err) {
+        this.logger.warn(`Redis getSession error: ${err}`);
+      }
+    }
+
+    return null;
   }
 }

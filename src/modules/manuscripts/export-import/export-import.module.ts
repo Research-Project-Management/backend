@@ -14,18 +14,21 @@ import { IZipEnginePort } from './core/ports/zip-engine.port';
 import { IManuscriptAggregatorPort } from './core/ports/manuscript-aggregator.port';
 import { IManuscriptHydratorPort } from './core/ports/manuscript-hydrator.port';
 import { ITemplateCatalogPort } from './core/ports/template-catalog.port';
+import { IDocumentTranspilerPort } from './core/ports/document-transpiler.port';
 
 // Adapters
 import { PkzipEngineAdapter } from './core/adapters/engine/pkzip-engine.adapter';
 import { ManuscriptAggregatorAdapter } from './core/adapters/external/manuscript-aggregator.adapter';
 import { ManuscriptHydratorAdapter } from './core/adapters/external/manuscript-hydrator.adapter';
 import { EmbeddedTemplateCatalogAdapter } from './core/adapters/storage/embedded-template-catalog.adapter';
+import { DocumentTranspilerAdapter } from './core/adapters/transpiler/document-transpiler.adapter';
 
 // Use Cases
 import { ExportProjectZipUseCase } from './core/use-cases/export-project-zip.use-case';
 import { ImportProjectZipUseCase } from './core/use-cases/import-project-zip.use-case';
 import { ListTemplatesUseCase } from './core/use-cases/list-templates.use-case';
 import { ScaffoldTemplateUseCase } from './core/use-cases/scaffold-template.use-case';
+import { ConvertDocumentUseCase } from './core/use-cases/convert-document.use-case';
 
 // Service & Controller
 import { ExportImportService } from './export-import.service';
@@ -52,11 +55,16 @@ import { ExportImportController } from './export-import.controller';
       provide: ITemplateCatalogPort,
       useClass: EmbeddedTemplateCatalogAdapter,
     },
+    {
+      provide: IDocumentTranspilerPort,
+      useClass: DocumentTranspilerAdapter,
+    },
     // Use Cases
     ExportProjectZipUseCase,
     ImportProjectZipUseCase,
     ListTemplatesUseCase,
     ScaffoldTemplateUseCase,
+    ConvertDocumentUseCase,
     // Facade Service
     ExportImportService,
   ],

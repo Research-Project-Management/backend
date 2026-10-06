@@ -75,7 +75,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
     await this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const existing = await tx.item.findUnique({
         where: { id: aggregate.id },
-        select: { id: true, version: true, metadata: true },
+        select: { id: true, version: true, itemType: true, metadata: true },
       });
 
       const {
@@ -108,13 +108,30 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
           ? (existing.metadata as Record<string, any>)
           : {};
 
-      const metadataPayload = {
-        ...existingMeta,
-        ...restFields,
-        ...(aggregate.publicationTitle
-          ? { publicationTitle: aggregate.publicationTitle }
-          : {}),
-      };
+      const isTypeChanged =
+        domainEvents.some(
+          (e) =>
+            e.eventType === 'catalog.item.type_changed' ||
+            (e as any).eventName === 'ItemTypeChangedDomainEvent',
+        ) ||
+        (existing &&
+          existing.itemType &&
+          existing.itemType !== aggregate.itemType);
+
+      const metadataPayload = isTypeChanged
+        ? {
+            ...restFields,
+            ...(aggregate.publicationTitle
+              ? { publicationTitle: aggregate.publicationTitle }
+              : {}),
+          }
+        : {
+            ...existingMeta,
+            ...restFields,
+            ...(aggregate.publicationTitle
+              ? { publicationTitle: aggregate.publicationTitle }
+              : {}),
+          };
 
       const rawTags = _tags || _keywords || _labels;
       const contribList =

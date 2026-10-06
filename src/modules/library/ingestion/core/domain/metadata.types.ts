@@ -151,6 +151,7 @@ export interface ItemMetadata {
   retractionCheckedAt?: string;
 
   provenance?: Provenance;
+  [key: string]: unknown;
 }
 
 export type UnifiedAcademicMetadata = ItemMetadata;

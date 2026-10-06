@@ -107,6 +107,49 @@ export class PresenceSession {
     });
   }
 
+  public toJSON(): Record<string, any> {
+    return {
+      userId: this._userId,
+      socketId: this._socketId,
+      projectId: this._projectId,
+      name: this._name,
+      color: this._color,
+      avatar: this._avatar,
+      activeDocId: this._activeDocId,
+      cursor: this._cursor ? this._cursor.toJSON() : null,
+      connectedAt: this._connectedAt.toISOString(),
+      lastSeenAt: this._lastSeenAt.toISOString(),
+    };
+  }
+
+  public static fromJSON(raw: any): PresenceSession {
+    if (!raw) {
+      throw new Error(
+        'Cannot construct PresenceSession from null or undefined',
+      );
+    }
+    let cursor: CursorPositionVo | null = null;
+    if (raw.cursor) {
+      cursor = CursorPositionVo.create({
+        row: raw.cursor.row,
+        column: raw.cursor.column,
+        selection: raw.cursor.selection,
+      });
+    }
+    return new PresenceSession({
+      userId: raw.userId,
+      socketId: raw.socketId,
+      projectId: raw.projectId,
+      name: raw.name,
+      color: raw.color,
+      avatar: raw.avatar,
+      activeDocId: raw.activeDocId,
+      cursor,
+      connectedAt: raw.connectedAt ? new Date(raw.connectedAt) : new Date(),
+      lastSeenAt: raw.lastSeenAt ? new Date(raw.lastSeenAt) : new Date(),
+    });
+  }
+
   private static generateColor(seed: string): string {
     const palette = [
       '#ef4444',

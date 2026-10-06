@@ -383,6 +383,23 @@ export class CreateItemDto {
   @IsOptional() @IsString() originalPlace?: string;
   @IsOptional() @IsString() session?: string;
   @IsOptional() @IsString() history?: string;
+  @IsOptional() @IsString() caseName?: string;
+  @IsOptional() @IsString() subject?: string;
+  @IsOptional() @IsString() nameOfAct?: string;
+  @IsOptional() @IsString() number?: string;
+  @IsOptional() @IsString() country?: string;
+  @IsOptional() @IsString() priorityNumbers?: string;
+  @IsOptional() @IsString() issueDate?: string;
+  @IsOptional() @IsString() priorityDate?: string;
+  @IsOptional() @IsString() references?: string;
+  @IsOptional() @IsString() audioFileType?: string;
+  @IsOptional() @IsString() sessionTitle?: string;
+  @IsOptional() @IsString() status?: string;
+  @IsOptional() @IsString() DOI?: string;
+  @IsOptional() @IsString() ISBN?: string;
+  @IsOptional() @IsString() ISSN?: string;
+  @IsOptional() @IsString() PMID?: string;
+  @IsOptional() @IsString() PMCID?: string;
 
   @IsOptional()
   extraFields?: Record<string, unknown>;

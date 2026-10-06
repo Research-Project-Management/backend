@@ -69,6 +69,42 @@ describe('Manuscripts - ClsiService', () => {
       expect(result.stats?.headers).toBe(1);
       expect(result.stats?.mathInlines).toBe(1);
       expect(result.stats?.wordsInText).toBeGreaterThan(5);
+      expect(result.stats?.totalWords).toBeGreaterThan(5);
+    });
+
+    it('should strictly exclude content enclosed in %TC:ignore and %TC:endignore', () => {
+      const source = `
+        \\documentclass{article}
+        \\begin{document}
+        \\section{Main Section}
+        This document contains exactly ten words of body text here.
+        %TC:ignore
+        This entire block of one hundred words should be ignored by the word counter.
+        Extra words that must not be counted under any circumstances.
+        %TC:endignore
+        \\end{document}
+      `;
+      const result = service.getWordCount({ source });
+      expect(result.success).toBe(true);
+      expect(result.stats?.wordsInText).toBe(10);
+      expect(result.stats?.headers).toBe(1);
+      expect(result.stats?.wordsInHeaders).toBe(2);
+    });
+
+    it('should count footnotes and captions under words outside text', () => {
+      const source = `
+        \\documentclass{article}
+        \\begin{document}
+        Visible body text\\footnote{This footnote has five words.}
+        \\begin{figure}
+          \\caption{Figure caption with five words.}
+        \\end{figure}
+        \\end{document}
+      `;
+      const result = service.getWordCount({ source });
+      expect(result.success).toBe(true);
+      expect(result.stats?.wordsInCaptions).toBe(10);
+      expect(result.stats?.floats).toBe(1);
     });
   });
 

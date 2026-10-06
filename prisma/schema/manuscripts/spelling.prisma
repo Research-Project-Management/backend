@@ -18,7 +18,5 @@ model ManuscriptCustomWord {
 
   @@unique([projectId, word], map: "uq_custom_word_project")
   @@unique([userId, word], map: "uq_custom_word_user")
-  @@index([projectId], map: "idx_custom_words_project")
-  @@index([userId], map: "idx_custom_words_user")
   @@map("manuscript_custom_words")
 }

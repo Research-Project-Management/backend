@@ -83,7 +83,6 @@ export class ConvertItemTypeUseCase {
     const targetFields = this.typesService.getOrderedFields(command.targetType);
 
     const dynamicExtraFields: Record<string, any> = {
-      ...(aggregate.fields ?? {}),
       ...(projected.extraFields || {}),
     };
 
@@ -92,6 +91,13 @@ export class ConvertItemTypeUseCase {
       if (val !== undefined && val !== null && val !== '') {
         dynamicExtraFields[field.key] = val;
       }
+    }
+
+    if (projected.creators) {
+      dynamicExtraFields.creators = projected.creators;
+    }
+    if (projected.extra !== undefined) {
+      dynamicExtraFields.extra = projected.extra;
     }
 
     aggregate.updateMetadata(
@@ -109,6 +115,7 @@ export class ConvertItemTypeUseCase {
         abstract:
           (projected.abstract as string | undefined) ?? aggregate.abstract,
         fields: dynamicExtraFields,
+        replaceFields: true,
       },
       command.options?.expectedVersion,
     );

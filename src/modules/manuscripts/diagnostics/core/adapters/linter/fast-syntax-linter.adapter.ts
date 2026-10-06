@@ -243,7 +243,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
           line: lineNum,
           severity: DiagnosticSeverityVo.warning(),
           message:
-            'Phát hiện dấu nháy thông minh (Unicode Smart Quotes: “” hoặc ‘’). pdfTeX có thể không hiển thị được ký tự này.',
+            'Unicode smart quotes detected (“” or ‘’). pdfTeX may fail to render these characters.',
           context: rawLine.trim(),
           code: 'SMART_QUOTES',
           explanation:
@@ -251,7 +251,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
             undefined,
           quickFix: {
             description:
-              "Chuyển đổi dấu nháy Unicode thành dấu nháy chuẩn LaTeX (`` hoặc '')",
+              "Convert Unicode quotes to standard LaTeX quotes (`` or '')",
             replacementText: rawLine
               .replace(/“/g, '``')
               .replace(/”/g, "''")
@@ -286,13 +286,13 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
                 file: filename,
                 line: lineNum,
                 severity: DiagnosticSeverityVo.warning(),
-                message: `Khóa trích dẫn "${key}" không tồn tại trong danh mục tài liệu tham khảo (.bib) của dự án.`,
+                message: `Citation key "${key}" not found in project bibliography (.bib) files.`,
                 context: rawLine.trim(),
                 code: 'MISSING_CITATION_KEY',
                 explanation:
                   this.explainer?.getByCode('UNDEFINED_CITATION') || undefined,
                 quickFix: {
-                  description: `Thêm mục trích dẫn @article{${key}, ...} vào references.bib`,
+                  description: `Add bibliography entry @article{${key}, ...} to references.bib`,
                   replacementText: key,
                 },
               }),
@@ -390,7 +390,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
               column: i + 1,
               severity: DiagnosticSeverityVo.error(),
               message:
-                'Thừa dấu ngoặc nhọn đóng "}" không có dấu mở tương ứng.',
+                'Stray closing brace "}" without matching opening brace.',
               context: rawLine.trim(),
               code: 'UNBALANCED_BRACES',
               explanation:
@@ -418,14 +418,14 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
               line: lineNum,
               column: i + 1,
               severity: DiagnosticSeverityVo.error(),
-              message: `Ký tự toán học "${char}" nằm ngoài môi trường toán học. Hãy dùng $...$ hoặc escape "\\${char}".`,
+              message: `Math operator "${char}" found outside math mode. Wrap in $...$ or escape as "\\${char}".`,
               context: rawLine.trim(),
               code: 'MISSING_MATH_DELIMITER',
               explanation:
                 this.explainer?.getByCode('MISSING_MATH_DELIMITER') ||
                 undefined,
               quickFix: {
-                description: `Escape ký tự "${char}" thành "\\${char}"`,
+                description: `Escape "${char}" as "\\${char}"`,
                 replacementText: `\\${char}`,
               },
             }),
@@ -445,13 +445,13 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
                 column: i + 1,
                 severity: DiagnosticSeverityVo.error(),
                 message:
-                  'Ký tự phân cách cột "&" nằm ngoài môi trường bảng (tabular). Nếu là văn bản thường, hãy viết "\\&".',
+                  'Column delimiter "&" used outside table environment. Use "\\&" for plain-text ampersands.',
                 context: rawLine.trim(),
                 code: 'EXTRA_ALIGNMENT_TAB',
                 explanation:
                   this.explainer?.getByCode('EXTRA_ALIGNMENT_TAB') || undefined,
                 quickFix: {
-                  description: 'Escape ký tự & thành \\&',
+                  description: 'Escape & as \\&',
                   replacementText: '\\&',
                 },
               }),
@@ -482,12 +482,12 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
             file: filename,
             line: unclosed.line,
             severity: DiagnosticSeverityVo.error(),
-            message: `Môi trường \\begin{${unclosed.name}} tại dòng ${unclosed.line} chưa có \\end{${unclosed.name}} tương ứng trước khi kết thúc tệp.`,
+            message: `Environment \\begin{${unclosed.name}} on line ${unclosed.line} is not closed before end of file.`,
             code: 'UNCLOSED_ENVIRONMENT',
             explanation:
               this.explainer?.getByCode('ENVIRONMENT_MISMATCH') || undefined,
             quickFix: {
-              description: `Thêm \\end{${unclosed.name}} để đóng môi trường`,
+              description: `Add \\end{${unclosed.name}} to close environment`,
               replacementText: `\\end{${unclosed.name}}`,
             },
           }),
@@ -501,13 +501,13 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
           file: filename,
           line: lineNum,
           severity: DiagnosticSeverityVo.error(),
-          message: `Môi trường \\begin{${top.name}} (tại dòng ${top.line}) bị đóng sai bằng \\end{${endEnvName}}.`,
+          message: `Environment \\begin{${top.name}} (on line ${top.line}) was closed with mismatched \\end{${endEnvName}}.`,
           context: rawLine.trim(),
           code: 'ENVIRONMENT_MISMATCH',
           explanation:
             this.explainer?.getByCode('ENVIRONMENT_MISMATCH') || undefined,
           quickFix: {
-            description: `Sửa thành \\end{${top.name}}`,
+            description: `Change to \\end{${top.name}}`,
             replacementText: `\\end{${top.name}}`,
           },
         }),
@@ -518,7 +518,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
           file: filename,
           line: lineNum,
           severity: DiagnosticSeverityVo.error(),
-          message: `Thừa lệnh \\end{${endEnvName}} mà không có \\begin tương ứng.`,
+          message: `Stray \\end{${endEnvName}} without matching \\begin.`,
           context: rawLine.trim(),
           code: 'UNMATCHED_END_ENVIRONMENT',
           explanation:
@@ -541,12 +541,12 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
           line: unclosed.line,
           column: unclosed.col,
           severity: DiagnosticSeverityVo.error(),
-          message: `Dấu ngoặc nhọn mở "{" tại dòng ${unclosed.line} chưa được đóng bằng "}".`,
+          message: `Opening brace "{" on line ${unclosed.line} was never closed with "}".`,
           code: 'UNBALANCED_BRACES',
           explanation:
             this.explainer?.getByCode('UNBALANCED_BRACES') || undefined,
           quickFix: {
-            description: 'Thêm dấu đóng ngoặc nhọn "}"',
+            description: 'Add closing brace "}"',
             replacementText: '}',
           },
         }),
@@ -566,12 +566,12 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
           file: filename,
           line: unclosed.line,
           severity: DiagnosticSeverityVo.error(),
-          message: `Môi trường \\begin{${unclosed.name}} tại dòng ${unclosed.line} chưa có \\end{${unclosed.name}} tương ứng trước khi kết thúc tệp.`,
+          message: `Environment \\begin{${unclosed.name}} on line ${unclosed.line} is not closed before end of file.`,
           code: 'UNCLOSED_ENVIRONMENT',
           explanation:
             this.explainer?.getByCode('ENVIRONMENT_MISMATCH') || undefined,
           quickFix: {
-            description: `Thêm \\end{${unclosed.name}} ở cuối tệp`,
+            description: `Add \\end{${unclosed.name}} at end of file`,
             replacementText: `\\end{${unclosed.name}}`,
           },
         }),
@@ -590,7 +590,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
           file: filename,
           line: mathState.displayMathStartLine,
           severity: DiagnosticSeverityVo.error(),
-          message: `Khối toán học \\[ mở tại dòng ${mathState.displayMathStartLine} chưa được đóng bằng \\].`,
+          message: `Display math \\[ opened on line ${mathState.displayMathStartLine} was never closed with \\].`,
           code: 'MISSING_MATH_DELIMITER',
           explanation:
             this.explainer?.getByCode('MISSING_MATH_DELIMITER') || undefined,
@@ -604,7 +604,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
           file: filename,
           line: mathState.displayMathStartLine,
           severity: DiagnosticSeverityVo.error(),
-          message: `Khối toán học $$ mở tại dòng ${mathState.displayMathStartLine} chưa được đóng bằng $$.`,
+          message: `Display math $$ opened on line ${mathState.displayMathStartLine} was never closed with $$.`,
           code: 'MISSING_MATH_DELIMITER',
           explanation:
             this.explainer?.getByCode('MISSING_MATH_DELIMITER') || undefined,
@@ -618,7 +618,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
           file: filename,
           line: mathState.inlineMathStartLine,
           severity: DiagnosticSeverityVo.error(),
-          message: `Công thức toán inline $ mở tại dòng ${mathState.inlineMathStartLine} chưa được đóng bằng $.`,
+          message: `Inline math $ opened on line ${mathState.inlineMathStartLine} was never closed with $.`,
           code: 'MISSING_MATH_DELIMITER',
           explanation:
             this.explainer?.getByCode('MISSING_MATH_DELIMITER') || undefined,
@@ -673,8 +673,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
       appliedFixes.push({
         line: lineNum,
         rule: 'SMART_QUOTES',
-        description:
-          'Chuyển đổi dấu nháy Unicode thông minh sang dấu nháy chuẩn LaTeX',
+        description: 'Convert Unicode smart quotes to standard LaTeX quotes',
       });
       return line
         .replace(/“/g, '``')
@@ -695,7 +694,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
       appliedFixes.push({
         line: lineNum,
         rule: 'UNESCAPED_PERCENT',
-        description: 'Thêm dấu escape \\% cho ký tự phần trăm trong câu văn',
+        description: 'Escape plain-text percent symbol as \\%',
       });
       return percentFix;
     }
@@ -729,7 +728,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
       appliedFixes.push({
         line: lineNum,
         rule: 'NAKED_UNDERSCORE',
-        description: 'Escape ký tự gạch dưới "_" thành "\\_"',
+        description: 'Escape plain-text underscore "_" as "\\_"',
       });
       return fixedChars;
     }
@@ -747,7 +746,7 @@ export class FastSyntaxLinterAdapter implements ISyntaxLinterPort {
       appliedFixes.push({
         line: fixedLines.length,
         rule: 'UNCLOSED_ENVIRONMENT',
-        description: `Tự động bổ sung \\end{${env}} bị thiếu ở cuối tài liệu`,
+        description: `Automatically append missing \\end{${env}} at end of file`,
       });
     }
   }

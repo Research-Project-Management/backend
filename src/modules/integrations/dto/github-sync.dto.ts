@@ -75,3 +75,23 @@ export class PullGithubDto {
   @IsOptional()
   branch?: string;
 }
+
+export class ImportGithubRepoDto {
+  @ApiProperty({ description: 'Target Project UUID' })
+  @IsString()
+  @IsNotEmpty()
+  projectId!: string;
+
+  @ApiProperty({
+    description: 'GitHub repository full name (owner/repo)',
+    example: 'octocat/paper-draft',
+  })
+  @IsString()
+  @IsNotEmpty()
+  repoFullName!: string;
+
+  @ApiPropertyOptional({ description: 'Target branch', default: 'main' })
+  @IsString()
+  @IsOptional()
+  branch?: string;
+}

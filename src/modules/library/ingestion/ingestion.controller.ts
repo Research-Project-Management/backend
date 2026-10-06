@@ -235,10 +235,10 @@ export abstract class BaseIngestionController {
 }
 
 /**
- * Personal Library Ingestion Controller (/api/v1/library/ingestion).
+ * User Library Ingestion Controller (/api/v1/library/ingestion).
  * Guarded purely by JwtAuthGuard — scoped to authenticated user.
  */
-@ApiTags('Library Ingestion - Personal Pipeline')
+@ApiTags('Library Ingestion - User Pipeline')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/library/ingestion')
 @UseGuards(JwtAuthGuard)
@@ -265,7 +265,7 @@ export class IngestionController extends BaseIngestionController {
 
   @Post('submit')
   @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Submit item ingestion into personal library' })
+  @ApiOperation({ summary: 'Submit item ingestion into user library' })
   async submit(
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
@@ -313,7 +313,7 @@ export class IngestionController extends BaseIngestionController {
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
-    summary: 'Unified multi-source ingest into personal library',
+    summary: 'Unified multi-source ingest into user library',
   })
   async ingestUnified(
     @CurrentUser('id') userId: string,
@@ -334,7 +334,7 @@ export class IngestionController extends BaseIngestionController {
 
   @Post('capture-url')
   @ApiOperation({
-    summary: 'Capture and extract metadata from URL for personal library',
+    summary: 'Capture and extract metadata from URL for user library',
   })
   async captureUrl(
     @CurrentUser('id') userId: string,
@@ -350,7 +350,7 @@ export class IngestionController extends BaseIngestionController {
   }
 
   @Post('confirm-url')
-  @ApiOperation({ summary: 'Confirm captured URL into personal library' })
+  @ApiOperation({ summary: 'Confirm captured URL into user library' })
   async confirmUrl(
     @CurrentUser('id') userId: string,
     @Body() dto: ConfirmCapturedUrlDto,

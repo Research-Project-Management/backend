@@ -7,7 +7,7 @@ export { CompositeSpecification, QueryCriteria };
 
 /**
  * ScopeSpecification: Enforces multi-tenant isolation.
- * Resolves to projectId for collaborative workspaces, or userId for personal library.
+ * Resolves to projectId for collaborative workspaces, or userId for user library.
  */
 export class ScopeSpecification extends CompositeSpecification {
   constructor(
@@ -21,8 +21,7 @@ export class ScopeSpecification extends CompositeSpecification {
     if (
       this.projectId &&
       this.projectId !== 'user' &&
-      this.projectId !== 'me' &&
-      this.projectId !== 'personal'
+      this.projectId !== 'me'
     ) {
       return candidate?.projectId === this.projectId;
     }
@@ -33,8 +32,7 @@ export class ScopeSpecification extends CompositeSpecification {
     if (
       this.projectId &&
       this.projectId !== 'user' &&
-      this.projectId !== 'me' &&
-      this.projectId !== 'personal'
+      this.projectId !== 'me'
     ) {
       return { projectId: this.projectId };
     }

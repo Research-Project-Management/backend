@@ -105,6 +105,21 @@ export class CompileManuscriptDto {
   @IsOptional()
   use_cache?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Force clean compilation (purge aux and scratch workspace before build)',
+  })
+  @IsBoolean()
+  @IsOptional()
+  force_clean?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Force clean compilation (camelCase)',
+  })
+  @IsBoolean()
+  @IsOptional()
+  forceClean?: boolean;
+
   @ApiPropertyOptional({ description: 'Halt on first LaTeX error' })
   @IsBoolean()
   @IsOptional()
@@ -115,6 +130,26 @@ export class CompileManuscriptDto {
   })
   @IsOptional()
   files?: Record<string, string>;
+
+  @ApiPropertyOptional({
+    description: 'Official Overleaf CLSI request envelope',
+  })
+  @IsOptional()
+  compile?: {
+    options?: {
+      compiler?: string;
+      timeout?: number;
+      draft?: boolean;
+      check?: string;
+    };
+    rootResourcePath?: string;
+    resources?: Array<{
+      path: string;
+      content?: string;
+      url?: string;
+      hash?: string;
+    }>;
+  };
 }
 
 export class ClsiWordCountDto {
