@@ -17,7 +17,7 @@ import {
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/sync/services/transaction.service';
+} from '@/modules/library/shared-kernel';
 import { ITEM_EXISTENCE_PORT } from '@/modules/library/catalog/types/items.types';
 import { PrismaService } from '@/core/database/prisma.service';
 

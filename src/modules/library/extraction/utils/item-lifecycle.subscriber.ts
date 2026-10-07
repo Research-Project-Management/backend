@@ -39,7 +39,7 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
         {
           handle: async (event: OutboxEvent) => {
             await this.handleItemDeleted(
-              event.payload as BaseIntegrationEvent<ItemDeletedIntegrationPayload>,
+              event.payload as unknown as BaseIntegrationEvent<ItemDeletedIntegrationPayload>,
             );
           },
         },

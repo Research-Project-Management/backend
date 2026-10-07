@@ -2,7 +2,7 @@ import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capt
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 
 jest.mock(
-  '@/modules/library/extraction/core/adapters/web-snapshot.service',
+  '@/modules/library/extraction/services/web-snapshot.service',
   () => ({ WebSnapshotService: class WebSnapshotService {} }),
 );
 

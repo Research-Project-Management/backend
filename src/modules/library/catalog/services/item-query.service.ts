@@ -93,6 +93,18 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
       }
     }
 
+    let isCacheHit = false;
+    if (item) {
+      const isOwner = item.userId === userId;
+      const isProjectMatch = projectId && item.projectId === projectId;
+      if (!isOwner && !isProjectMatch) {
+        // Discard mismatched cached item and fall back to database query
+        item = null;
+      } else {
+        isCacheHit = true;
+      }
+    }
+
     if (!item) {
       item = await this.query.findById(userId, id, projectId);
       if (!item) return null;
@@ -106,6 +118,8 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
           );
         }
       }
+    } else if (isCacheHit) {
+      return item;
     }
 
     // Access check: verify ownership, project match, or project membership

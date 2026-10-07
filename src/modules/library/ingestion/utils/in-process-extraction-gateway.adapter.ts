@@ -18,24 +18,24 @@ export class InProcessExtractionGatewayAdapter implements IExtractionGatewayPort
   ) {}
 
   extractDocumentFromBuffer(buffer: Buffer, options?: any) {
-    if (!this.extractionFacade) return Promise.resolve(null);
+    if (!this.extractionFacade?.extractDocumentFromBuffer) return Promise.resolve(null);
     return this.extractionFacade.extractDocumentFromBuffer(buffer, options);
   }
 
   extractMetadataFromBuffer(buffer: Buffer) {
-    if (!this.extractionFacade) return Promise.resolve(null);
+    if (!this.extractionFacade?.extractMetadataFromBuffer) return Promise.resolve(null);
     return Promise.resolve(
       this.extractionFacade.extractMetadataFromBuffer(buffer),
     );
   }
 
   captureWebSnapshot(url: string, itemId: string, userId: string) {
-    if (!this.extractionFacade) return Promise.resolve(null);
+    if (!this.extractionFacade?.captureWebSnapshot) return Promise.resolve(null);
     return this.extractionFacade.captureWebSnapshot(url, itemId, userId);
   }
 
   createAttachment(data: any, projectId?: string) {
-    if (!this.extractionFacade) return Promise.resolve(null);
+    if (!this.extractionFacade?.createAttachment) return Promise.resolve(null);
     return this.extractionFacade.createAttachment(data, projectId);
   }
 
@@ -44,7 +44,7 @@ export class InProcessExtractionGatewayAdapter implements IExtractionGatewayPort
     primaryItemId: string,
     tx?: any,
   ) {
-    if (!this.extractionFacade) return Promise.resolve();
+    if (!this.extractionFacade?.reassignContentToItem) return Promise.resolve();
     return this.extractionFacade.reassignContentToItem(
       duplicateItemIds,
       primaryItemId,

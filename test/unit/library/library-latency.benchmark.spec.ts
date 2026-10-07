@@ -16,7 +16,7 @@ import { ItemQueryService } from '@/modules/library/catalog/services/item-query.
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { TransactionService } from '@/modules/library/shared-kernel';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemTransformer } from '@/modules/library/catalog/utils/item.transformer';

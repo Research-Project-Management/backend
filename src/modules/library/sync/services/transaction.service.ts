@@ -7,14 +7,13 @@ import {
   OutboxEvent,
   OutboxStatus,
 } from '@prisma/client';
-import {
-  ChangeLogRepository,
-  AppendChangeEntry,
-  RecordTombstoneEntry,
-} from '../repositories/changelog.repository';
+import { ChangeLogRepository } from '../repositories/changelog.repository';
 import {
   IUnitOfWork,
   TransactionService as SharedTransactionService,
+  TransactionHelpers,
+  AppendChangeEntry,
+  RecordTombstoneEntry,
 } from '../../shared-kernel/ports/unit-of-work.port';
 import { OutboxWorker } from './outbox.worker';
 
@@ -22,7 +21,7 @@ export type {
   AppendChangeEntry,
   RecordTombstoneEntry,
   TransactionHelpers,
-} from '../../shared-kernel/ports/unit-of-work.port';
+};
 
 @Injectable()
 export class TransactionService
@@ -35,7 +34,9 @@ export class TransactionService
     private readonly prisma: PrismaService,
     private readonly changeLogRepo: ChangeLogRepository,
     @Optional() private readonly outboxWorker?: OutboxWorker,
-  ) {}
+  ) {
+    super();
+  }
 
   async executeInTransaction<T>(
     operation: (

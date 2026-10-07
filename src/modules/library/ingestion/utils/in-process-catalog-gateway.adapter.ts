@@ -57,7 +57,7 @@ export class InProcessCatalogGatewayAdapter implements ICatalogGatewayPort {
     limit?: number,
     projectId?: string,
   ) {
-    if (!this.catalogFacade) return Promise.resolve([]);
+    if (!this.catalogFacade?.findDuplicateCandidateItems) return Promise.resolve([]);
     return this.catalogFacade.findDuplicateCandidateItems(
       userId,
       limit,
@@ -71,14 +71,14 @@ export class InProcessCatalogGatewayAdapter implements ICatalogGatewayPort {
   }
 
   mergeItems(tx: any, duplicateItemIds: string[], primaryItemId: string) {
-    if (!this.catalogFacade) {
+    if (!this.catalogFacade?.mergeItems) {
       throw new Error('CatalogGateway: CatalogFacade is unavailable');
     }
     return this.catalogFacade.mergeItems(tx, duplicateItemIds, primaryItemId);
   }
 
   findQualityAuditItems(userId: string, limit?: number, projectId?: string) {
-    if (!this.catalogFacade) return Promise.resolve([]);
+    if (!this.catalogFacade?.findQualityAuditItems) return Promise.resolve([]);
     return this.catalogFacade.findQualityAuditItems(userId, limit, projectId);
   }
 

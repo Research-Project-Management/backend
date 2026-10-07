@@ -31,8 +31,9 @@ export class PdfAnnotationImporterService {
     private readonly attachmentsRepo: AttachmentsRepository,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
     private readonly annotationsService: AnnotationsService,
+    @Optional()
     @Inject(forwardRef(() => AttachmentsService))
-    private readonly attachmentsService: AttachmentsService,
+    private readonly attachmentsService?: AttachmentsService,
   ) {}
 
   /**
@@ -44,7 +45,7 @@ export class PdfAnnotationImporterService {
     userId: string,
     attachmentId: string,
   ): Promise<ImportAnnotationsResult> {
-    await this.attachmentsService.assertAttachmentExists(attachmentId, userId);
+    await this.attachmentsService?.assertAttachmentExists(attachmentId, userId);
 
     const attachment = await this.attachmentsRepo.findUnique(attachmentId, {
       item: true,

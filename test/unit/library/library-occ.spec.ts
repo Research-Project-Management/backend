@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { PrismaService } from '@/core/database/prisma.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
-import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { TransactionService } from '@/modules/library/shared-kernel';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
 import { fromPartial } from '@total-typescript/shoehorn';
 

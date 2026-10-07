@@ -2,19 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { Prisma, LibraryChange, Tombstone } from '@prisma/client';
 
-export interface AppendChangeEntry {
-  entityType: string;
-  entityId: string;
-  action: 'create' | 'update' | 'delete';
-  version: number;
-  data?: any;
-}
-
-export interface RecordTombstoneEntry {
-  entityType: string;
-  entityId: string;
-  deletedById?: string;
-}
+import {
+  AppendChangeEntry,
+  RecordTombstoneEntry,
+} from '../../shared-kernel/ports/unit-of-work.port';
 
 @Injectable()
 export class ChangeLogRepository {

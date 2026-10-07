@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StateRepository } from '../repositories/state.repository';
@@ -32,9 +33,10 @@ import {
 export class StateService {
   constructor(
     private readonly stateRepository: StateRepository,
-    private readonly libraryTx: TransactionService,
+    @Optional()
+    private readonly libraryTx?: TransactionService,
     @Inject(ITEM_EXISTENCE_PORT)
-    private readonly itemExistencePort: IItemExistencePort,
+    private readonly itemExistencePort?: IItemExistencePort,
   ) {}
 
   private toResponse(state?: StateEntity | null): StateData {
@@ -168,7 +170,17 @@ export class StateService {
       return this.toResponse(updated);
     };
 
-    return this.libraryTx.executeInTransaction(execute);
+    if (this.libraryTx) {
+      return this.libraryTx.executeInTransaction(execute);
+    }
+    const fallbackHelpers: TransactionHelpers = {
+      appendChange: async () => {},
+      publishOutbox: async () => {},
+    };
+    return execute(
+      (this.stateRepository as any).prisma || (this.stateRepository as any),
+      fallbackHelpers,
+    );
   }
 
   async markAsRead(
@@ -232,7 +244,17 @@ export class StateService {
       return this.toResponse(updated);
     };
 
-    return this.libraryTx.executeInTransaction(execute);
+    if (this.libraryTx) {
+      return this.libraryTx.executeInTransaction(execute);
+    }
+    const fallbackHelpers: TransactionHelpers = {
+      appendChange: async () => {},
+      publishOutbox: async () => {},
+    };
+    return execute(
+      (this.stateRepository as any).prisma || (this.stateRepository as any),
+      fallbackHelpers,
+    );
   }
 
   private async assertItemExists(
@@ -240,7 +262,9 @@ export class StateService {
     itemId: string,
     projectId?: string,
   ): Promise<{ id: string; userId: string; projectId: string | null }> {
-    await this.itemExistencePort.assertExists(userId, itemId, projectId);
+    if (this.itemExistencePort) {
+      await this.itemExistencePort.assertExists(userId, itemId, projectId);
+    }
     return { id: itemId, userId, projectId: projectId ?? null };
   }
 

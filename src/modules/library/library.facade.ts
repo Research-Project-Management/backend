@@ -7,7 +7,7 @@ import { CslJsonMapper } from './citation';
 import { TransactionService } from './sync';
 import { LibraryChange, Tombstone } from '@prisma/client';
 
-import { ExtractedPdfDocument } from './extraction';
+import { ExtractedPdfDocument, AttachmentEntity } from './extraction';
 
 export interface LibraryItemSummary {
   id: string;

@@ -72,14 +72,27 @@ export abstract class BaseAttachmentStorageController {
       );
     }
 
-    return this.storagePort.uploadFile({
+    const uploadResult = await this.storagePort.uploadFile({
       userId,
       projectId,
       filename,
       mimeType,
       buffer,
-      source: 'library_upload',
+      source: 'library',
     });
+
+    return {
+      success: true,
+      ...uploadResult,
+    };
+  }
+
+  getPresignedUploadUrl(
+    userId: string,
+    dto: PresignUploadDto,
+    projectId?: string,
+  ) {
+    return this.executePresignUpload(userId, dto, projectId);
   }
 
   protected async executePresignUpload(

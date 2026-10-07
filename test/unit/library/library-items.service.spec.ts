@@ -3,7 +3,7 @@ import { fromPartial } from '@total-typescript/shoehorn';
 import { ItemsService } from '@/modules/library/catalog/services/items.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { TransactionService } from '@/modules/library/shared-kernel';
 import { PrismaService } from '@/core/database/prisma.service';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TypesService } from '@/modules/library/catalog/services/types.service';

@@ -301,6 +301,8 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     context?: Partial<ItemTransactionContext> & {
       projectId?: string;
       source?: LibraryItemSource;
+      idempotencyKey?: string;
+      correlationId?: string;
     },
     projectId?: string,
   ): Promise<any> {

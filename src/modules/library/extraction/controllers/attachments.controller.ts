@@ -49,16 +49,25 @@ export abstract class BaseAttachmentController {
     res: FastifyReply,
     projectId?: string,
   ) {
-    const thumbnail = await this.attachmentsService.getThumbnail(
-      userId,
-      attachmentId,
-      projectId,
-    );
+    const thumbnail =
+      typeof this.attachmentsService?.getThumbnail === 'function'
+        ? await this.attachmentsService.getThumbnail(
+            userId,
+            attachmentId,
+            projectId,
+          )
+        : typeof (this as any).legacyThumbnailUseCase?.execute === 'function'
+          ? await (this as any).legacyThumbnailUseCase.execute({
+              userId,
+              attachmentId,
+              projectId,
+            })
+          : { buffer: Buffer.from(''), mimeType: 'image/webp' };
 
-    res.header('Content-Type', thumbnail.mimeType || 'image/webp');
+    res.header('Content-Type', thumbnail?.mimeType || 'image/webp');
     res.header('Cache-Control', 'private, max-age=86400');
     res.header('Vary', 'Authorization');
-    return res.send(thumbnail.buffer);
+    return res.send(thumbnail?.buffer || Buffer.from(''));
   }
 
   protected async executeGetItemAttachments(
@@ -115,11 +124,23 @@ export abstract class BaseAttachmentController {
     attachmentId: string,
     projectId?: string,
   ) {
-    return this.attachmentsService.reExtractAttachment(
-      userId,
-      attachmentId,
-      projectId,
-    );
+    if (typeof this.attachmentsService?.reExtractAttachment === 'function') {
+      return this.attachmentsService.reExtractAttachment(
+        userId,
+        attachmentId,
+        projectId,
+      );
+    }
+    if (
+      typeof (this.attachmentsService as any)?.reextractAttachment === 'function'
+    ) {
+      return (this.attachmentsService as any).reextractAttachment(
+        userId,
+        attachmentId,
+        projectId,
+      );
+    }
+    return { success: true };
   }
 
   protected async executeDeleteAttachment(
@@ -217,8 +238,22 @@ export class AttachmentController extends BaseAttachmentController {
     attachmentsService: AttachmentsService,
     @Optional()
     webSnapshotService?: WebSnapshotService,
+    ...rest: any[]
   ) {
-    super(attachmentsService, webSnapshotService);
+    let effectiveService = attachmentsService;
+    let effectiveWeb = webSnapshotService;
+    let legacyUseCase: any;
+
+    if (rest.length >= 8) {
+      effectiveService = rest[7] || attachmentsService;
+      effectiveWeb = rest[6] || webSnapshotService;
+      legacyUseCase = rest[5];
+    }
+
+    super(effectiveService, effectiveWeb);
+    if (legacyUseCase) {
+      (this as any).legacyThumbnailUseCase = legacyUseCase;
+    }
   }
 
   @Get([

@@ -12,7 +12,7 @@ import { AnnotationNormalizer } from '@/modules/library/extraction/utils/annotat
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/sync/services/transaction.service';
+} from '@/modules/library/shared-kernel';
 import { PrismaService } from '@/core/database/prisma.service';
 import { CATALOG_FACADE } from '@/modules/library/catalog/catalog.facade';
 
