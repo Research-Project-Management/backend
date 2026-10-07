@@ -180,12 +180,14 @@ export class SearchEventsSubscriber implements OnModuleInit {
     this.logger.debug(
       `[SearchEvents] Cleaning up FTS index for deleted attachment ${attachmentId}`,
     );
-    try {
-      await this.searchRepo.deleteFullTextIndexByAttachmentId(attachmentId);
-    } catch (err: unknown) {
-      this.logger.error(
-        `[SearchEvents] Attachment FTS cleanup failed for ${attachmentId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
+    if (this.searchRepo) {
+      try {
+        await this.searchRepo.deleteFullTextIndexByAttachmentId(attachmentId);
+      } catch (err: unknown) {
+        this.logger.error(
+          `[SearchEvents] Attachment FTS cleanup failed for ${attachmentId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 

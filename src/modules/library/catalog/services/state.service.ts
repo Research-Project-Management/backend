@@ -173,10 +173,10 @@ export class StateService {
     if (this.libraryTx) {
       return this.libraryTx.executeInTransaction(execute);
     }
-    const fallbackHelpers: TransactionHelpers = {
-      appendChange: async () => {},
-      publishOutbox: async () => {},
-    };
+    const fallbackHelpers = {
+      appendChange: (async () => ({} as any)) as any,
+      publishOutbox: (async () => ({} as any)) as any,
+    } as TransactionHelpers;
     return execute(
       (this.stateRepository as any).prisma || (this.stateRepository as any),
       fallbackHelpers,
@@ -247,10 +247,10 @@ export class StateService {
     if (this.libraryTx) {
       return this.libraryTx.executeInTransaction(execute);
     }
-    const fallbackHelpers: TransactionHelpers = {
-      appendChange: async () => {},
-      publishOutbox: async () => {},
-    };
+    const fallbackHelpers = {
+      appendChange: (async () => ({} as any)) as any,
+      publishOutbox: (async () => ({} as any)) as any,
+    } as TransactionHelpers;
     return execute(
       (this.stateRepository as any).prisma || (this.stateRepository as any),
       fallbackHelpers,
