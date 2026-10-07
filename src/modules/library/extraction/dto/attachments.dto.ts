@@ -1,8 +1,5 @@
-﻿import { IsString, IsOptional, IsNumber, IsArray } from 'class-validator';
-import type {
-  LinkMode,
-  AttachmentType,
-} from '../core/domain/attachments.types';
+import { IsString, IsOptional, IsNumber, IsArray } from 'class-validator';
+import type { LinkMode, AttachmentType } from '../types/attachments.types';
 
 export class CreateAttachmentDto {
   @IsString()

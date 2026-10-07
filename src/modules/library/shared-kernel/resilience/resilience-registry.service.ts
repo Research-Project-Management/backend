@@ -184,41 +184,5 @@ export class ResilienceRegistryService {
         refillRatePerSec: 3,
       }),
     );
-
-    // 5. GROBID ML Sidecar: local container, max 4 concurrent requests
-    this.breakers.set(
-      'grobid',
-      new CircuitBreaker({
-        name: 'grobid',
-        failureThreshold: 3,
-        resetTimeoutMs: 15000,
-      }),
-    );
-    this.limiters.set(
-      'grobid',
-      new TokenBucketRateLimiter({
-        name: 'grobid',
-        capacity: 4,
-        refillRatePerSec: 4,
-      }),
-    );
-
-    // 6. Zotero Translation Server sidecar: local container, 700+ publisher translators
-    this.breakers.set(
-      'zotero',
-      new CircuitBreaker({
-        name: 'zotero',
-        failureThreshold: 3,
-        resetTimeoutMs: 20000,
-      }),
-    );
-    this.limiters.set(
-      'zotero',
-      new TokenBucketRateLimiter({
-        name: 'zotero',
-        capacity: 8,
-        refillRatePerSec: 4,
-      }),
-    );
   }
 }

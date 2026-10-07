@@ -45,14 +45,26 @@ export class CacheInvalidationListener {
   @OnEvent('work-item.*', { async: true })
   async handleWorkItemChanged(event: EntityChangeEvent) {
     if (event.projectId) {
+      await this.redisCache.del(`flux:wi:work-items:${event.projectId}`);
+      await this.redisCache.delPattern(
+        `flux:wi:work-items:${event.projectId}*`,
+      );
+      await this.redisCache.delPattern(
+        `flux:wi:labels:proj:${event.projectId}*`,
+      );
+      await this.redisCache.del(`flux:proj:overview:${event.projectId}`);
       await this.redisCache.delPattern(`work-items:${event.projectId}:*`);
       await this.redisCache.delPattern(
         `analytics:project:${event.projectId}:*`,
       );
     }
     if (event.entityId) {
+      await this.redisCache.del(`flux:wi:work-item:${event.entityId}`);
       await this.redisCache.del(`work_item:${event.entityId}`);
       await this.redisCache.del(`WorkItem:${event.entityId}`);
+    }
+    if (event.scopeId) {
+      await this.redisCache.delPattern(`flux:wi:labels:${event.scopeId}*`);
     }
   }
 
@@ -107,6 +119,9 @@ export class CacheInvalidationListener {
     if (event.entityId || event.projectId) {
       const pid = event.entityId || event.projectId;
       await this.redisCache.del(`project:${pid}`);
+      await this.redisCache.del(`flux:proj:overview:${pid}`);
+      await this.redisCache.del(`flux:wi:work-items:${pid}`);
+      await this.redisCache.delPattern(`flux:wi:work-items:${pid}*`);
       await this.redisCache.delPattern(`work-items:${pid}:*`);
       await this.redisCache.delPattern(`analytics:project:${pid}:*`);
     }

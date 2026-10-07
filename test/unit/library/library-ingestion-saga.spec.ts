@@ -1,10 +1,10 @@
-import { IngestionRunAggregate } from '@/modules/library/ingestion/core/domain/ingestion-run.aggregate';
-import { IngestionStatusVo } from '@/modules/library/ingestion/core/domain/ingestion-status.vo';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/types/ingestion-run.aggregate';
+import { IngestionStatusVo } from '@/modules/library/ingestion/types/ingestion-status.vo';
 import {
   IngestionSagaOrchestrator,
   IngestionSagaSession,
-} from '@/modules/library/ingestion/core/services/ingestion-saga.orchestrator';
-import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
+} from '@/modules/library/ingestion/services/ingestion-saga.orchestrator';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { ICatalogFacade } from '@/modules/library/catalog/catalog.facade';
 import { IngestionStatus } from '@prisma/client';
 
@@ -253,7 +253,7 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
 
     beforeEach(async () => {
       const imported =
-        await import('@/modules/library/ingestion/core/services/pipeline.service');
+        await import('@/modules/library/ingestion/services/pipeline.service');
       PipelineServiceClass = imported.PipelineService;
       const PipelineService = PipelineServiceClass;
 

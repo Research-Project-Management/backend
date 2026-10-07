@@ -1,17 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma, TagType } from '@prisma/client';
-import { NotesService } from '@/modules/library/catalog/core/services/notes.service';
-import { NotesRepository } from '@/modules/library/catalog/core/adapters/notes.repository';
-import { AnnotationsService } from '@/modules/library/extraction/core/services/annotations.service';
-import { AnnotationsRepository } from '@/modules/library/extraction/core/adapters/annotations.repository';
-import { TagsService } from '@/modules/library/catalog/core/services/tags.service';
-import { TagsRepository } from '@/modules/library/catalog/core/adapters/tags.repository';
-import { AttachmentsService } from '@/modules/library/extraction/core/services/attachments.service';
+import { NotesService } from '@/modules/library/catalog/services/notes.service';
+import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
+import { AnnotationsService } from '@/modules/library/extraction/services/annotations.service';
+import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
+import { TagsService } from '@/modules/library/catalog/services/tags.service';
+import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repository';
+import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
+import { AnnotationNormalizer } from '@/modules/library/extraction/utils/annotation.normalizer';
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/sync/core/adapters/transaction.service';
+} from '@/modules/library/sync/services/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import { CATALOG_FACADE } from '@/modules/library/catalog/catalog.facade';
 
@@ -285,6 +286,10 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
           },
           { provide: TransactionService, useValue: mockLibraryTx },
           { provide: AttachmentsService, useValue: attachmentsService },
+          {
+            provide: AnnotationNormalizer,
+            useValue: new AnnotationNormalizer(),
+          },
         ],
       }).compile();
 

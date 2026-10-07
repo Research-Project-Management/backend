@@ -1,6 +1,6 @@
-import { Injectable, Optional } from '@nestjs/common';
-import { CitationService } from './core/services/citation.service';
-import { ExportsService } from './core/services/exports.service';
+import { Injectable } from '@nestjs/common';
+import { CitationService } from './services/citation.service';
+import { ExportsService } from './services/exports.service';
 
 export const CITATION_FACADE = 'CITATION_FACADE';
 
@@ -21,8 +21,8 @@ export interface ICitationFacade {
 @Injectable()
 export class CitationFacade implements ICitationFacade {
   constructor(
-    @Optional() private readonly citationService?: CitationService,
-    @Optional() private readonly exportsService?: ExportsService,
+    private readonly citationService: CitationService,
+    private readonly exportsService: ExportsService,
   ) {}
 
   async formatCitation(
@@ -30,7 +30,6 @@ export class CitationFacade implements ICitationFacade {
     itemId: string,
     styleId = 'apa',
   ): Promise<any> {
-    if (!this.citationService) return null;
     return this.citationService.formatItemById(userId, itemId, styleId);
   }
 
@@ -39,7 +38,6 @@ export class CitationFacade implements ICitationFacade {
     citeKeys: string[],
     projectId?: string,
   ): Promise<{ content: string } | null> {
-    if (!this.exportsService) return null;
     const res = await this.exportsService.exportByCitationKeys(
       userId,
       citeKeys,
@@ -50,7 +48,6 @@ export class CitationFacade implements ICitationFacade {
   }
 
   async exportLibrary(userId: string, options?: any): Promise<any> {
-    if (!this.exportsService) return null;
     return this.exportsService.exportLibrary(userId, options);
   }
 }

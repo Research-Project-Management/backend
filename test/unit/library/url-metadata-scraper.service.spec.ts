@@ -1,4 +1,4 @@
-import { UrlMetadataScraperService } from '@/modules/library/ingestion/core/services/url-metadata-scraper.service';
+import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
 import { IStoragePort } from '@/modules/storage/storage.port';
 import { IExtractionFacade } from '@/modules/library/extraction/extraction.facade';

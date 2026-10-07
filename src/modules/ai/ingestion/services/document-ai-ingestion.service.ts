@@ -79,7 +79,7 @@ export class DocumentAiIngestionService {
         );
       }
 
-      // 3. Extract text and academic metadata (unpdf + Grobid)
+      // 3. Extract text and academic metadata (in-process extraction facade)
       const extractedDoc =
         await this.extractionFacade.extractDocumentFromBuffer(
           storageFile.buffer,

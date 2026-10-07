@@ -1,31 +1,26 @@
-import { Injectable, Optional, Inject } from '@nestjs/common';
-import { ItemsService } from './core/services/items.service';
-import { QueryRepository } from './core/adapters/query.repository';
-import { CollectionsService } from './core/services/collections.service';
-import { TagsService } from './core/services/tags.service';
-import { TypesService } from './core/services/types.service';
-import { StateService } from './core/services/state.service';
-import { NotesService } from './core/services/notes.service';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { ItemService } from './services/items.service';
+import { ItemQueryService } from './services/item-query.service';
+import { QueryRepository } from './repositories/query.repository';
+import { CollectionsService } from './services/collections.service';
+import { TagsService } from './services/tags.service';
+import { TypesService } from './services/types.service';
+import { StateService } from './services/state.service';
+import { NotesService } from './services/notes.service';
 import {
-  ITEM_READ_PORT,
-  ITEM_EXISTENCE_PORT,
-  IItemReadPort,
-  IItemExistencePort,
   ItemDetail,
   ItemSummary,
   DuplicateCandidateItem,
-} from './core/ports/items.ports';
-import {
-  ITEM_REPOSITORY_PORT,
-  IItemRepositoryPort,
-} from './core/ports/item-repository.port';
-import { CreateItemUseCase } from './core/use-cases/create-item.use-case';
-import { UpdateItemUseCase } from './core/use-cases/update-item.use-case';
-import { sanitizeItemTitle } from '../shared-kernel/utils/bibliographic.utils';
+  CreateItemData,
+  UpdateItemData,
+} from './types/items.types';
+import { TagEntity } from './types/tags.types';
+import { StateData } from './types/state.types';
+import { NoteEntity, CreateNoteData } from './types/notes.types';
 import { ItemFieldDefinition } from '../shared-kernel/types/schema.types';
 
 export const CATALOG_FACADE = 'CATALOG_FACADE';
-export const BIBLIOGRAPHY_FACADE = CATALOG_FACADE;
 
 export interface ICatalogFacade {
   getItem(
@@ -46,30 +41,30 @@ export interface ICatalogFacade {
   getTags(
     userId: string,
     options?: { includeInactive?: boolean; projectId?: string },
-  ): Promise<any[]>;
+  ): Promise<TagEntity[]>;
   getItemState(
     userId: string,
     itemId: string,
     projectId?: string,
-  ): Promise<any>;
+  ): Promise<StateData | null>;
   createItem(
     userId: string,
-    data: any,
+    data: CreateItemData,
     options?: any,
     projectId?: string,
   ): Promise<any>;
   updateItem(
     userId: string,
     itemId: string,
-    data: any,
-    options?: any,
+    data: UpdateItemData,
+    options?: { expectedVersion?: number; projectId?: string },
   ): Promise<any>;
   deleteItem(userId: string, itemId: string, projectId?: string): Promise<void>;
   findByIds(
     userId: string,
     itemIds: string[],
     projectId?: string,
-  ): Promise<any[]>;
+  ): Promise<ItemDetail[]>;
   countItems(userId: string, options?: any): Promise<number>;
   findMany(userId: string, options?: any): Promise<any[]>;
   validateItemType(type: string): Promise<boolean>;
@@ -86,43 +81,33 @@ export interface ICatalogFacade {
     projectId?: string,
   ): Promise<DuplicateCandidateItem[]>;
   mergeItems(
-    tx: any,
+    tx: Prisma.TransactionClient,
     duplicateItemIds: string[],
     primaryItemId: string,
   ): Promise<void>;
-  listNotes?(
+  listNotes(
     userId: string,
     itemId?: string,
     projectId?: string,
-  ): Promise<any[]>;
-  createNote?(userId: string, data: any): Promise<any>;
+  ): Promise<NoteEntity[]>;
+  createNote(userId: string, data: CreateNoteData): Promise<NoteEntity>;
 }
 
 /**
- * Public Facade for Catalog Bounded Context (Core Domain).
- * Shields catalog internal repositories and submodules from external callers.
+ * Public Facade for Catalog Bounded Context.
+ * Directly communicates with clean, modular services.
  */
 @Injectable()
 export class CatalogFacade implements ICatalogFacade {
   constructor(
-    @Inject(ITEM_READ_PORT)
-    @Optional()
-    private readonly itemReadPort?: IItemReadPort,
-    @Inject(ITEM_EXISTENCE_PORT)
-    @Optional()
-    private readonly itemExistencePort?: IItemExistencePort,
-    @Inject(ITEM_REPOSITORY_PORT)
-    @Optional()
-    private readonly itemRepo?: IItemRepositoryPort,
-    @Optional() private readonly createItemUseCase?: CreateItemUseCase,
-    @Optional() private readonly updateItemUseCase?: UpdateItemUseCase,
-    @Optional() private readonly itemsService?: ItemsService,
-    @Optional() private readonly queryRepo?: QueryRepository,
-    @Optional() private readonly collectionsService?: CollectionsService,
-    @Optional() private readonly tagsService?: TagsService,
-    @Optional() private readonly typesService?: TypesService,
-    @Optional() private readonly stateService?: StateService,
-    @Optional() private readonly notesService?: NotesService,
+    private readonly queryService: ItemQueryService,
+    private readonly itemService: ItemService,
+    private readonly queryRepo: QueryRepository,
+    private readonly collectionsService: CollectionsService,
+    private readonly tagsService: TagsService,
+    private readonly typesService: TypesService,
+    private readonly stateService: StateService,
+    private readonly notesService: NotesService,
   ) {}
 
   async getItem(
@@ -130,13 +115,7 @@ export class CatalogFacade implements ICatalogFacade {
     itemId: string,
     projectId?: string,
   ): Promise<ItemDetail | null> {
-    if (this.itemReadPort) {
-      return this.itemReadPort.findById(userId, itemId, projectId);
-    }
-    if (this.itemsService) {
-      return this.itemsService.findById(userId, itemId, projectId);
-    }
-    return null;
+    return this.queryService.findById(userId, itemId, projectId);
   }
 
   async getItemSummary(
@@ -144,13 +123,7 @@ export class CatalogFacade implements ICatalogFacade {
     itemId: string,
     projectId?: string,
   ): Promise<ItemSummary | null> {
-    if (this.itemReadPort) {
-      return this.itemReadPort.findSummaryById(userId, itemId, projectId);
-    }
-    if (this.itemsService) {
-      return this.itemsService.findSummaryById(userId, itemId, projectId);
-    }
-    return null;
+    return this.queryService.findSummaryById(userId, itemId, projectId);
   }
 
   async itemExists(
@@ -158,20 +131,13 @@ export class CatalogFacade implements ICatalogFacade {
     itemId: string,
     projectId?: string,
   ): Promise<boolean> {
-    if (this.itemExistencePort) {
-      return this.itemExistencePort.exists(userId, itemId, projectId);
-    }
-    if (this.itemsService) {
-      return this.itemsService.exists(userId, itemId, projectId);
-    }
-    return false;
+    return this.queryService.exists(userId, itemId, projectId);
   }
 
   async getTags(
     userId: string,
     options?: { includeInactive?: boolean; projectId?: string },
-  ): Promise<any[]> {
-    if (!this.tagsService) return [];
+  ): Promise<TagEntity[]> {
     return this.tagsService.getTags(userId, options);
   }
 
@@ -179,66 +145,33 @@ export class CatalogFacade implements ICatalogFacade {
     userId: string,
     itemId: string,
     projectId?: string,
-  ): Promise<any> {
-    if (!this.stateService) return null;
+  ): Promise<StateData | null> {
     return this.stateService.getState(userId, itemId, projectId);
   }
 
   async createItem(
     userId: string,
-    data: any,
+    data: CreateItemData,
     options?: any,
     projectId?: string,
   ): Promise<any> {
-    if (this.createItemUseCase) {
-      const cleanTitle = data.title ? sanitizeItemTitle(data.title) : '';
-      return this.createItemUseCase.execute({
-        userId,
-        projectId: projectId || data.projectId || undefined,
-        title: cleanTitle || data.title || 'Untitled',
-        itemType: data.itemType ?? 'journalArticle',
-        doi: data.doi,
-        citationKey: data.citationKey,
-        abstract: data.abstract,
-        year: data.year ? parseInt(data.year, 10) : undefined,
-        publicationTitle: data.publicationTitle,
-        fields: data.fields ?? data,
-      });
-    }
-    if (this.itemsService) {
-      return this.itemsService.createItem(userId, data, options, projectId);
-    }
-    throw new Error('No provider available for createItem in CatalogFacade');
+    return this.itemService.createItem(userId, data, options, projectId);
   }
 
   async updateItem(
     userId: string,
     itemId: string,
-    data: any,
-    options?: any,
+    data: UpdateItemData,
+    options?: { expectedVersion?: number; projectId?: string },
   ): Promise<any> {
-    if (this.updateItemUseCase) {
-      return this.updateItemUseCase.execute({
-        userId,
-        itemId,
-        projectId: data.projectId,
-        expectedVersion: options?.expectedVersion,
-        changes: {
-          title: data.title,
-          itemType: data.itemType,
-          doi: data.doi,
-          citationKey: data.citationKey,
-          abstract: data.abstract,
-          year: data.year ? parseInt(data.year, 10) : undefined,
-          publicationTitle: data.publicationTitle,
-          fields: data.fields ?? data,
-        },
-      });
-    }
-    if (this.itemsService) {
-      return this.itemsService.updateItem(userId, itemId, data, options);
-    }
-    throw new Error('No provider available for updateItem in CatalogFacade');
+    return this.itemService.updateItem(
+      userId,
+      itemId,
+      options?.expectedVersion,
+      data,
+      undefined,
+      options?.projectId,
+    );
   }
 
   async deleteItem(
@@ -246,45 +179,40 @@ export class CatalogFacade implements ICatalogFacade {
     itemId: string,
     projectId?: string,
   ): Promise<void> {
-    if (this.itemRepo) {
-      await this.itemRepo.delete(userId, itemId, projectId);
-    }
+    await this.itemService.deleteItem(
+      userId,
+      itemId,
+      undefined,
+      undefined,
+      projectId,
+    );
   }
 
   async findByIds(
     userId: string,
     itemIds: string[],
     projectId?: string,
-  ): Promise<any[]> {
-    if (this.itemReadPort) {
-      return this.itemReadPort.findByIds(userId, itemIds, projectId);
-    }
-    if (!this.itemsService) return [];
-    return this.itemsService.findByIds(userId, itemIds, projectId);
+  ): Promise<ItemDetail[]> {
+    return this.queryService.findByIds(userId, itemIds, projectId);
   }
 
   async countItems(userId: string, options?: any): Promise<number> {
-    if (!this.queryRepo) return 0;
     return this.queryRepo.count(userId, options || { view: 'all' });
   }
 
   async findMany(userId: string, options?: any): Promise<any[]> {
-    if (!this.queryRepo) return [];
     return this.queryRepo.findMany(userId, options);
   }
 
   validateItemType(type: string): Promise<boolean> {
-    if (!this.typesService) return Promise.resolve(true);
     return Promise.resolve(this.typesService.isValidType(type));
   }
 
   getPrimaryCreatorType(itemType: string): string {
-    if (!this.typesService) return 'author';
     return this.typesService.getPrimaryCreatorType(itemType);
   }
 
   getOrderedFields(itemType: string): ItemFieldDefinition[] {
-    if (!this.typesService) return [];
     return this.typesService.getOrderedFields(itemType);
   }
 
@@ -293,11 +221,7 @@ export class CatalogFacade implements ICatalogFacade {
     limit?: number,
     projectId?: string,
   ): Promise<any[]> {
-    if (this.itemReadPort) {
-      return this.itemReadPort.findQualityAuditItems(userId, limit, projectId);
-    }
-    if (!this.itemsService) return [];
-    return this.itemsService.findQualityAuditItems(userId, limit, projectId);
+    return this.queryService.findQualityAuditItems(userId, limit, projectId);
   }
 
   async findDuplicateCandidateItems(
@@ -305,15 +229,7 @@ export class CatalogFacade implements ICatalogFacade {
     limit?: number,
     projectId?: string,
   ): Promise<DuplicateCandidateItem[]> {
-    if (this.itemReadPort) {
-      return this.itemReadPort.findDuplicateCandidateItems(
-        userId,
-        limit,
-        projectId,
-      );
-    }
-    if (!this.itemsService) return [];
-    return this.itemsService.findDuplicateCandidateItems(
+    return this.queryService.findDuplicateCandidateItems(
       userId,
       limit,
       projectId,
@@ -321,44 +237,32 @@ export class CatalogFacade implements ICatalogFacade {
   }
 
   async mergeItems(
-    tx: any,
+    tx: Prisma.TransactionClient,
     duplicateItemIds: string[],
     primaryItemId: string,
   ): Promise<void> {
-    if (this.tagsService) {
-      await this.tagsService.mergeTagsToItem(
-        tx,
-        duplicateItemIds,
-        primaryItemId,
-      );
-    }
-    if (this.collectionsService) {
-      await this.collectionsService.transferItemMemberships(
-        duplicateItemIds,
-        primaryItemId,
-        tx,
-      );
-    }
-    if (this.stateService) {
-      await this.stateService.transferUserItemStates(
-        tx,
-        duplicateItemIds,
-        primaryItemId,
-      );
-    }
+    await this.tagsService.mergeTagsToItem(tx, duplicateItemIds, primaryItemId);
+    await this.collectionsService.transferItemMemberships(
+      duplicateItemIds,
+      primaryItemId,
+      tx,
+    );
+    await this.stateService.transferUserItemStates(
+      tx,
+      duplicateItemIds,
+      primaryItemId,
+    );
   }
 
   async listNotes(
     userId: string,
     itemId?: string,
     projectId?: string,
-  ): Promise<any[]> {
-    if (!this.notesService) return [];
+  ): Promise<NoteEntity[]> {
     return this.notesService.listNotes(userId, itemId, projectId);
   }
 
-  async createNote(userId: string, data: any): Promise<any> {
-    if (!this.notesService) return null;
+  async createNote(userId: string, data: CreateNoteData): Promise<NoteEntity> {
     return this.notesService.createNote(userId, data);
   }
 }

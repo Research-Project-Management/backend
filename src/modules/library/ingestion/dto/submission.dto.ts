@@ -13,7 +13,7 @@ import {
   SubmissionKind,
   IdentifierType,
   RecordFormat,
-} from '../core/domain/submission.types';
+} from '../types/submission.types';
 
 export class IdentifierPayloadDto {
   @IsIn(['IDENTIFIER'])

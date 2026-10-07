@@ -12,7 +12,7 @@
     "prebuild": "pnpm run clean && prisma generate",
     "dev": "nest start --watch",
     "dev:env": "node scripts/start-env.mjs",
-    "dev:infra": "docker compose up -d db redis grobid translator worker clsi",
+    "dev:infra": "docker compose up -d db redis worker clsi",
     "start:env": "node scripts/start-env.mjs",
     "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

@@ -1,21 +1,21 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { UnprocessableEntityException } from '@nestjs/common';
 import { fromPartial } from '@total-typescript/shoehorn';
-import { ItemsService } from '@/modules/library/catalog/core/services/items.service';
-import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
-import { CommandRepository } from '@/modules/library/catalog/core/adapters/command.repository';
-import { TransactionService } from '@/modules/library/sync/core/adapters/transaction.service';
+import { ItemsService } from '@/modules/library/catalog/services/items.service';
+import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
+import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
+import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { TagsService } from '@/modules/library/catalog/core/services/tags.service';
-import { TypesService } from '@/modules/library/catalog/core/services/types.service';
-import { ItemTransformer } from '@/modules/library/catalog/core/adapters/item.transformer';
+import { TagsService } from '@/modules/library/catalog/services/tags.service';
+import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { ItemTransformer } from '@/modules/library/catalog/utils/item.transformer';
 import { sanitizeItemTitle } from '@/modules/library/shared-kernel/utils/bibliographic.utils';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
-import { ItemsMapper } from '@/modules/library/catalog/core/adapters/items.mapper';
+import { ItemsMapper } from '@/modules/library/catalog/utils/items.mapper';
 import {
   resolveExtraPlainText,
   extractNonColumnExtraFields,
-} from '@/modules/library/catalog/core/adapters/command.repository';
+} from '@/modules/library/catalog/repositories/command.repository';
+import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 
 describe('Library Items — Authoritative Backend & Sanitization', () => {
   describe('sanitizeItemTitle (Domain Utility)', () => {
@@ -65,7 +65,6 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
     let commandRepo: jest.Mocked<CommandRepository>;
     let libraryTx: jest.Mocked<TransactionService>;
     let tagsService: jest.Mocked<TagsService>;
-    let moduleRef: TestingModule;
 
     const mockUserId = '11111111-1111-1111-1111-111111111111';
 
@@ -102,28 +101,34 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         invalidateTagsCache: jest.fn().mockResolvedValue(undefined),
       };
 
-      moduleRef = await Test.createTestingModule({
-        providers: [
-          ItemsService,
-          { provide: QueryRepository, useValue: mockQueryRepo },
-          { provide: CommandRepository, useValue: mockCommandRepo },
-          { provide: TransactionService, useValue: mockLibraryTx },
-          { provide: PrismaService, useValue: {} },
-          { provide: TagsService, useValue: mockTagsService },
-          { provide: TypesService, useValue: {} },
-          { provide: ItemTransformer, useValue: {} },
-        ],
-      }).compile();
+      queryRepo = mockQueryRepo as any;
+      commandRepo = mockCommandRepo as any;
+      libraryTx = mockLibraryTx as any;
+      tagsService = mockTagsService as any;
 
-      service = moduleRef.get<ItemsService>(ItemsService);
-      queryRepo = moduleRef.get(QueryRepository);
-      commandRepo = moduleRef.get(CommandRepository);
-      libraryTx = moduleRef.get(TransactionService);
-      tagsService = moduleRef.get(TagsService);
-    });
+      const mockQueryService = new ItemQueryService(queryRepo, undefined);
+      const mockValidator = {
+        validateAndSanitizeItem: jest.fn((_type, d) => ({
+          sanitizedItem: d,
+          warnings: [],
+        })),
+      };
 
-    afterEach(async () => {
-      await moduleRef?.close();
+      service = new ItemsService(
+        queryRepo,
+        commandRepo,
+        libraryTx,
+        tagsService,
+        {} as any,
+        {} as any,
+        mockQueryService as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        mockValidator as any,
+        {} as any,
+        undefined,
+      );
     });
 
     it('should throw UnprocessableEntityException when creating item with empty title', async () => {

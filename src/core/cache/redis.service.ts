@@ -327,12 +327,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     fallbackFn: () => Promise<T>,
     ttlSeconds: number = 300,
   ): Promise<T> {
-    const cached = await this.get<T>(key);
-    if (cached !== null && cached !== undefined) {
-      return cached;
-    }
-
-    // Single-Flight: Check if another request is already fetching this key
+    // Single-Flight: Check if another request is already fetching this key synchronously
     const existingInFlight = this.inFlightPromises.get(key);
     if (existingInFlight) {
       return existingInFlight as Promise<T>;
@@ -340,6 +335,11 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
 
     const fetchPromise = (async () => {
       try {
+        const cached = await this.get<T>(key);
+        if (cached !== null && cached !== undefined) {
+          return cached;
+        }
+
         const fresh = await fallbackFn();
         if (fresh !== null && fresh !== undefined) {
           await this.set(key, fresh, ttlSeconds);

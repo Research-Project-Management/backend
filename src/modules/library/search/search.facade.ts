@@ -1,5 +1,5 @@
-import { Injectable, Optional } from '@nestjs/common';
-import { SearchService } from './core/services/search.service';
+import { Injectable } from '@nestjs/common';
+import { SearchService } from './services/search.service';
 import { SearchItemsQueryDto } from './dto/search.dto';
 
 export const SEARCH_FACADE = 'SEARCH_FACADE';
@@ -26,7 +26,7 @@ export interface ISearchFacade {
 
 @Injectable()
 export class SearchFacade implements ISearchFacade {
-  constructor(@Optional() private readonly searchService?: SearchService) {}
+  constructor(private readonly searchService: SearchService) {}
 
   async search(
     userId: string,
@@ -40,8 +40,6 @@ export class SearchFacade implements ISearchFacade {
       pageCount: number;
     };
   }> {
-    if (!this.searchService)
-      return { items: [], meta: { hasNextPage: false, pageCount: 0 } };
     return this.searchService.search(userId, queryDto);
   }
 
@@ -50,11 +48,9 @@ export class SearchFacade implements ISearchFacade {
     userId?: string;
     projectId?: string;
   }): Promise<void> {
-    if (this.searchService) {
-      const scopeId = item.projectId || item.userId;
-      if (scopeId) {
-        await this.searchService.invalidateFacetsCache(scopeId);
-      }
+    const scopeId = item.projectId || item.userId;
+    if (scopeId) {
+      await this.searchService.invalidateFacetsCache(scopeId);
     }
   }
 
@@ -66,7 +62,6 @@ export class SearchFacade implements ISearchFacade {
     localIndexed: boolean;
     error?: string;
   }> {
-    if (!this.searchService) return { localIndexed: false };
     try {
       const scopeId = item.projectId || item.userId;
       if (scopeId) {

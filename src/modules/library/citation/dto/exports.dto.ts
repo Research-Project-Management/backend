@@ -1,5 +1,5 @@
 import { IsString, IsOptional, IsArray } from 'class-validator';
-import { ExportFormatType } from '../core/domain/exports.types';
+import { ExportFormatType } from '../types/exports.types';
 
 export { ExportFormatType };
 

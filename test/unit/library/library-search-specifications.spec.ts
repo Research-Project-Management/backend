@@ -7,11 +7,11 @@ import {
   CollectionSpecification,
   TagSpecification,
   TextSearchSpecification,
-} from '@/modules/library/search/core/domain/item-specifications';
-import { SearchSpecificationBuilder } from '@/modules/library/search/core/domain/search-specification.builder';
-import { SearchRepository } from '@/modules/library/search/core/adapters/search.repository';
-import { SearchService } from '@/modules/library/search/core/services/search.service';
-import { CatalogEventsSubscriber } from '@/modules/library/search/core/adapters/catalog-events.subscriber';
+} from '@/modules/library/search/types/item-specifications';
+import { SearchSpecificationBuilder } from '@/modules/library/search/types/search-specification.builder';
+import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
+import { SearchService } from '@/modules/library/search/services/search.service';
+import { CatalogEventsSubscriber } from '@/modules/library/search/services/catalog-events.subscriber';
 import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
 

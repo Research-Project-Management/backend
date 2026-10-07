@@ -116,7 +116,7 @@ async function bootstrap() {
       if (isSensitiveAuthRoute(url)) {
         return isProd ? 15 : 120;
       }
-      // Throttle sensitive scraping/URL-capture endpoints to protect Zotero Translation container (120 in dev, 30 in prod)
+      // Throttle sensitive scraping/URL-capture endpoints to protect downstream and local resources (120 in dev, 30 in prod)
       if (isSensitiveScrapeRoute(url)) {
         return isProd ? 30 : 120;
       }

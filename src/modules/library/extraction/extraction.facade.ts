@@ -1,11 +1,10 @@
-import { Injectable, Optional } from '@nestjs/common';
-import { AttachmentsService } from './core/services/attachments.service';
-import {
-  PdfProvider,
-  ExtractedPdfDocument,
-} from './core/adapters/pdf.provider';
-import { WebSnapshotService } from './core/adapters/web-snapshot.service';
-import { AnnotationsService } from './core/services/annotations.service';
+import { Injectable } from '@nestjs/common';
+import { AttachmentsService } from './services/attachments.service';
+import { PdfProvider, ExtractedPdfDocument } from './utils/pdf.provider';
+import { WebSnapshotService } from './services/web-snapshot.service';
+import { AnnotationsService } from './services/annotations.service';
+import { TrustedExtractionService } from './services/trusted-extraction.service';
+import { TrustedExtractionResult } from './types/trusted-extraction.types';
 
 export const EXTRACTION_FACADE = 'EXTRACTION_FACADE';
 
@@ -23,6 +22,10 @@ export interface IExtractionFacade {
     options?: any,
   ): Promise<ExtractedPdfDocument>;
   extractMetadataFromBuffer(buffer: Buffer): any;
+  extractTrustedMetadata(
+    buffer: Buffer,
+    preferredFilename?: string,
+  ): Promise<TrustedExtractionResult>;
   captureWebSnapshot(url: string, itemId: string, userId: string): Promise<any>;
   reassignContentToItem(
     duplicateItemIds: string[],
@@ -68,14 +71,14 @@ export interface IExtractionFacade {
 @Injectable()
 export class ExtractionFacade implements IExtractionFacade {
   constructor(
-    @Optional() private readonly attachmentsService?: AttachmentsService,
-    @Optional() private readonly pdfProvider?: PdfProvider,
-    @Optional() private readonly webSnapshotService?: WebSnapshotService,
-    @Optional() private readonly annotationsService?: AnnotationsService,
+    private readonly attachmentsService: AttachmentsService,
+    private readonly pdfProvider: PdfProvider,
+    private readonly webSnapshotService: WebSnapshotService,
+    private readonly annotationsService: AnnotationsService,
+    private readonly trustedExtractor: TrustedExtractionService,
   ) {}
 
   async getItemAttachments(userId: string, itemId: string): Promise<any> {
-    if (!this.attachmentsService) return { attachments: [], total: 0 };
     return this.attachmentsService.getItemAttachments(userId, itemId);
   }
 
@@ -85,7 +88,6 @@ export class ExtractionFacade implements IExtractionFacade {
     itemId?: string,
     projectId?: string,
   ): Promise<any> {
-    if (!this.attachmentsService) return null;
     return this.attachmentsService.getItemAttachment(
       userId,
       itemId,
@@ -95,7 +97,6 @@ export class ExtractionFacade implements IExtractionFacade {
   }
 
   async createAttachment(data: any, projectId?: string): Promise<any> {
-    if (!this.attachmentsService) return null;
     return this.attachmentsService.createAttachment(data, projectId);
   }
 
@@ -103,15 +104,18 @@ export class ExtractionFacade implements IExtractionFacade {
     buffer: Buffer,
     options?: any,
   ): Promise<ExtractedPdfDocument> {
-    if (!this.pdfProvider) {
-      throw new Error('PdfProvider is not initialized in ExtractionFacade');
-    }
     return this.pdfProvider.extractDocumentFromBuffer(buffer, options);
   }
 
   extractMetadataFromBuffer(buffer: Buffer): any {
-    if (!this.pdfProvider) return {};
     return this.pdfProvider.extractMetadataFromBuffer(buffer);
+  }
+
+  async extractTrustedMetadata(
+    buffer: Buffer,
+    preferredFilename?: string,
+  ): Promise<TrustedExtractionResult> {
+    return this.trustedExtractor.extract(buffer, preferredFilename);
   }
 
   async captureWebSnapshot(
@@ -119,11 +123,6 @@ export class ExtractionFacade implements IExtractionFacade {
     itemId: string,
     userId: string,
   ): Promise<any> {
-    if (!this.webSnapshotService) {
-      throw new Error(
-        'WebSnapshotService is not initialized in ExtractionFacade',
-      );
-    }
     return this.webSnapshotService.captureAndAttach(url, itemId, userId);
   }
 
@@ -132,13 +131,11 @@ export class ExtractionFacade implements IExtractionFacade {
     primaryItemId: string,
     tx?: any,
   ): Promise<void> {
-    if (this.attachmentsService) {
-      await this.attachmentsService.reassignToItem(
-        duplicateItemIds,
-        primaryItemId,
-        tx,
-      );
-    }
+    await this.attachmentsService.reassignToItem(
+      duplicateItemIds,
+      primaryItemId,
+      tx,
+    );
   }
 
   // ─── Annotation delegation methods ─────────────────────────────────────────
@@ -147,7 +144,6 @@ export class ExtractionFacade implements IExtractionFacade {
     userId: string,
     attachmentId: string,
   ): Promise<any[]> {
-    if (!this.annotationsService) return [];
     return this.annotationsService.getAnnotationsByAttachment(
       userId,
       attachmentId,
@@ -160,7 +156,6 @@ export class ExtractionFacade implements IExtractionFacade {
     pageIndex?: number,
     type?: any,
   ): Promise<any[]> {
-    if (!this.annotationsService) return [];
     return this.annotationsService.getAnnotationsByAttachment(
       userId,
       attachmentId,
@@ -174,12 +169,10 @@ export class ExtractionFacade implements IExtractionFacade {
     annotationId: string,
     _projectId?: string,
   ): Promise<any | null> {
-    if (!this.annotationsService) return null;
     return this.annotationsService.getAnnotation(userId, annotationId);
   }
 
   async createAnnotation(userId: string, data: any): Promise<any> {
-    if (!this.annotationsService) return null;
     return this.annotationsService.createAnnotation(userId, data);
   }
 
@@ -189,7 +182,6 @@ export class ExtractionFacade implements IExtractionFacade {
     expectedVersion: number,
     data: any,
   ): Promise<any> {
-    if (!this.annotationsService) return null;
     return this.annotationsService.updateAnnotation(
       userId,
       annotationId,
@@ -203,7 +195,6 @@ export class ExtractionFacade implements IExtractionFacade {
     annotationId: string,
     expectedVersion?: number,
   ): Promise<boolean> {
-    if (!this.annotationsService) return false;
     return this.annotationsService.deleteAnnotation(
       userId,
       annotationId,
@@ -216,9 +207,6 @@ export class ExtractionFacade implements IExtractionFacade {
     attachmentId: string,
     data: any,
   ): Promise<any> {
-    if (!this.annotationsService) {
-      return { created: [], updated: [], deleted: [] };
-    }
     return this.annotationsService.batchUpsertAnnotations(
       userId,
       attachmentId,
@@ -227,7 +215,6 @@ export class ExtractionFacade implements IExtractionFacade {
   }
 
   async listAnnotations(userId: string, filters?: any): Promise<any[]> {
-    if (!this.annotationsService) return [];
     if (filters?.attachmentId) {
       return this.annotationsService.getAnnotationsByAttachment(
         userId,

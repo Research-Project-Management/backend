@@ -4,26 +4,31 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { CitationFacade, CITATION_FACADE } from './citation.facade';
 
 // Presentation
-import { CitationController } from './citation.controller';
-import { ExportController } from './exports.controller';
+import { CitationController } from './controllers/citation.controller';
+import { ExportsController } from './controllers/exports.controller';
 
-import { CitationService } from './core/services/citation.service';
-import { DoiContentNegotiationService } from './core/adapters/doi-content-negotiation.service';
-import { CslEngineService } from './core/adapters/csl-engine.service';
-import { CslRepositoryService } from './core/adapters/csl-repository.service';
-import { CslStyleRegistry } from './core/adapters/csl-style-registry';
-import { ExportsService } from './core/services/exports.service';
-import { PdfBakerService } from './core/adapters/pdf-baker.service';
-import { FormatCitationUseCase } from './core/use-cases/format-citation.use-case';
-import { ExportLibraryUseCase } from './core/use-cases/export-library.use-case';
-import { ExportBibliographyUseCase } from './core/use-cases/export-bibliography.use-case';
-import { ExportAnnotatedPdfUseCase } from './core/use-cases/export-annotated-pdf.use-case';
-import { CslCitationEngineAdapter } from './core/adapters/csl-citation-engine.adapter';
-import { CITATION_ENGINE_PORT } from './core/ports/citation-engine.port';
-import { ExportsRepository } from './core/adapters/exports.repository';
-import { CATALOG_GATEWAY_PORT } from './core/ports/catalog-gateway.port';
-import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catalog-gateway.adapter';
-import { HttpCatalogGatewayAdapter } from './core/adapters/http-catalog-gateway.adapter';
+// Services
+import { CitationService } from './services/citation.service';
+import { DoiContentNegotiationService } from './services/doi-content-negotiation.service';
+import { CslEngineService } from './services/csl-engine.service';
+import { CslRepositoryService } from './services/csl-repository.service';
+import { ExportsService } from './services/exports.service';
+import { PdfBakerService } from './services/pdf-baker.service';
+
+// Repositories
+import { ExportsRepository } from './repositories/exports.repository';
+
+// Utils & Adapters
+import { CslStyleRegistry } from './utils/csl-style-registry';
+import { CslCitationEngineAdapter } from './utils/csl-citation-engine.adapter';
+import { InProcessCatalogGatewayAdapter } from './utils/in-process-catalog-gateway.adapter';
+import { HttpCatalogGatewayAdapter } from './utils/http-catalog-gateway.adapter';
+
+// Ports/Types
+import {
+  CITATION_ENGINE_PORT,
+  CATALOG_GATEWAY_PORT,
+} from './types/citation.types';
 
 /**
  * Citation Bounded Context Unified Module (Supporting Domain).
@@ -38,7 +43,7 @@ import { HttpCatalogGatewayAdapter } from './core/adapters/http-catalog-gateway.
  */
 @Module({
   imports: [CoreModule, CatalogModule],
-  controllers: [CitationController, ExportController],
+  controllers: [CitationController, ExportsController],
   providers: [
     CitationFacade,
     {
@@ -70,10 +75,6 @@ import { HttpCatalogGatewayAdapter } from './core/adapters/http-catalog-gateway.
       },
       inject: [InProcessCatalogGatewayAdapter, HttpCatalogGatewayAdapter],
     },
-    FormatCitationUseCase,
-    ExportLibraryUseCase,
-    ExportBibliographyUseCase,
-    ExportAnnotatedPdfUseCase,
   ],
   exports: [
     CitationFacade,
@@ -83,10 +84,6 @@ import { HttpCatalogGatewayAdapter } from './core/adapters/http-catalog-gateway.
     ExportsService,
     ExportsRepository,
     CITATION_ENGINE_PORT,
-    FormatCitationUseCase,
-    ExportLibraryUseCase,
-    ExportBibliographyUseCase,
-    ExportAnnotatedPdfUseCase,
   ],
 })
 export class CitationModule {}

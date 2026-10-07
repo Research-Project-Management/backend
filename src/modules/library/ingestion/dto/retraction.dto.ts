@@ -1,5 +1,5 @@
 import { IsString, IsOptional, IsIn, IsArray } from 'class-validator';
-import { RetractionNature } from '../core/domain/retraction.types';
+import { RetractionNature } from '../types/retraction.types';
 
 export class FlagRetractionDto {
   @IsOptional()

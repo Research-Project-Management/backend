@@ -1,7 +1,7 @@
 import { getDocumentProxy, getMeta } from 'unpdf';
-import { PdfProvider } from '@/modules/library/extraction/core/adapters/pdf.provider';
-import { OcrProvider } from '@/modules/library/extraction/core/adapters/ocr.provider';
-import { OcrSandwichPdfService } from '@/modules/library/extraction/core/adapters/ocr-sandwich-pdf.service';
+import { PdfProvider } from '@/modules/library/extraction/utils/pdf.provider';
+import { OcrProvider } from '@/modules/library/extraction/utils/ocr.provider';
+import { OcrSandwichPdfService } from '@/modules/library/extraction/services/ocr-sandwich-pdf.service';
 import { PDFDocument } from 'pdf-lib';
 
 jest.mock('unpdf', () => ({
@@ -129,7 +129,7 @@ describe('Library OCR Pipeline (Integration)', () => {
         ),
     } as any;
 
-    pdfProvider = new PdfProvider(undefined, undefined, ocrProvider);
+    pdfProvider = new PdfProvider(undefined, ocrProvider);
   });
 
   it('detects scanned page, executes OCR, generates Sandwich PDF and produces OCR provenance', async () => {

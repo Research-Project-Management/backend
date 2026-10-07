@@ -6,8 +6,8 @@ import {
   stripLatexMarkup,
   stripTagPrefixes,
 } from '@/modules/library/shared-kernel/utils/tag.utils';
-import { ItemsMapper } from '@/modules/library/catalog/core/adapters/items.mapper';
-import { toItemData } from '@/modules/library/ingestion/core/adapters/commit.stage';
+import { ItemsMapper } from '@/modules/library/catalog/utils/items.mapper';
+import { toItemData } from '@/modules/library/ingestion/stages/commit.stage';
 
 describe('Library Academic Tag Sanitizer & Normalizer', () => {
   describe('1. Scientific Acronyms & Casing Preservation', () => {

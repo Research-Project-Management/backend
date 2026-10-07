@@ -6,10 +6,10 @@ import {
   IntegrationEventBusService,
   TransactionService,
 } from '@/modules/library/sync';
-import { CatalogEventsSubscriber } from '@/modules/library/search/core/adapters/catalog-events.subscriber';
-import { ItemLifecycleSubscriber } from '@/modules/library/extraction/core/adapters/item-lifecycle.subscriber';
+import { CatalogEventsSubscriber } from '@/modules/library/search/services/catalog-events.subscriber';
+import { ItemLifecycleSubscriber } from '@/modules/library/extraction/utils/item-lifecycle.subscriber';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { SearchService } from '@/modules/library/search/core/services/search.service';
+import { SearchService } from '@/modules/library/search/services/search.service';
 import { PrismaService } from '@/core/database/prisma.service';
 
 describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', () => {

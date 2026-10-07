@@ -1,8 +1,8 @@
-import { Injectable, Optional } from '@nestjs/common';
-import { IngestionService } from './core/services/ingestion.service';
-import { DuplicateService } from './core/services/duplicate.service';
-import { QualityService } from './core/services/quality.service';
-import { RetractionService } from './core/services/retraction.service';
+import { Injectable } from '@nestjs/common';
+import { IngestionService } from './services/ingestion.service';
+import { DuplicateService } from './services/duplicate.service';
+import { QualityService } from './services/quality.service';
+import { RetractionService } from './services/retraction.service';
 
 export const INGESTION_FACADE = 'INGESTION_FACADE';
 
@@ -25,29 +25,25 @@ export interface IIngestionFacade {
 @Injectable()
 export class IngestionFacade implements IIngestionFacade {
   constructor(
-    @Optional() private readonly ingestionService?: IngestionService,
-    @Optional() private readonly duplicateService?: DuplicateService,
-    @Optional() private readonly qualityService?: QualityService,
-    @Optional() private readonly retractionService?: RetractionService,
+    private readonly ingestionService: IngestionService,
+    private readonly duplicateService: DuplicateService,
+    private readonly qualityService: QualityService,
+    private readonly retractionService: RetractionService,
   ) {}
 
   async submitIngestion(envelope: any): Promise<any> {
-    if (!this.ingestionService) return null;
     return this.ingestionService.submit(envelope);
   }
 
   async getIngestionStatus(userId: string, runId: string): Promise<any> {
-    if (!this.ingestionService) return null;
     return this.ingestionService.getRunStatus(userId, runId);
   }
 
   async findDuplicates(userId: string, projectId?: string): Promise<any[]> {
-    if (!this.duplicateService) return [];
     return this.duplicateService.detectDuplicates(userId, projectId);
   }
 
   async getQualityAudit(userId: string, projectId?: string): Promise<any> {
-    if (!this.qualityService) return null;
     return this.qualityService.getQualityAudit(userId, projectId);
   }
 
@@ -56,7 +52,6 @@ export class IngestionFacade implements IIngestionFacade {
     itemId: string,
     projectId?: string,
   ): Promise<any> {
-    if (!this.retractionService) return null;
     return this.retractionService.checkItem(userId, itemId, projectId);
   }
 }

@@ -4,9 +4,7 @@ import {
 } from '@/modules/library/shared-kernel/resilience/circuit-breaker';
 import { TokenBucketRateLimiter } from '@/modules/library/shared-kernel/resilience/rate-limiter';
 import { ResilienceRegistryService } from '@/modules/library/shared-kernel/resilience/resilience-registry.service';
-import { DoiContentNegotiationService } from '@/modules/library/citation/core/adapters/doi-content-negotiation.service';
-import { GrobidClient } from '@/modules/library/shared-kernel/infra/grobid/grobid.client';
-import { ZoteroTranslatorClient } from '@/modules/library/shared-kernel/infra/zotero/zotero-translator.client';
+import { DoiContentNegotiationService } from '@/modules/library/citation/services/doi-content-negotiation.service';
 
 describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter)', () => {
   describe('CircuitBreaker', () => {
@@ -242,115 +240,6 @@ describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter
       expect(res).toBeNull();
       expect(global.fetch).not.toHaveBeenCalled(); // Fast-failed!
       expect(durationMs).toBeLessThan(250); // Instant response when circuit is open!
-    });
-  });
-
-  describe('GrobidClient Integration', () => {
-    let registry: ResilienceRegistryService;
-    let grobid: GrobidClient;
-    const originalFetch = global.fetch;
-
-    beforeEach(() => {
-      registry = new ResilienceRegistryService();
-      registry.resetAll();
-      grobid = new GrobidClient(registry);
-    });
-
-    afterEach(() => {
-      global.fetch = originalFetch;
-    });
-
-    it('should trip grobid circuit breaker and fast-fail without network request', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-      } as any);
-
-      const grobidBreaker = registry.getCircuitBreaker('grobid');
-
-      const mockBuffer = Buffer.from('%PDF-1.4 mock');
-
-      // Fail 3 times (threshold = 3)
-      await grobid.processHeaderDocument(mockBuffer);
-      await grobid.processHeaderDocument(mockBuffer);
-      await grobid.processHeaderDocument(mockBuffer);
-
-      expect(grobidBreaker.getState()).toBe('OPEN');
-
-      // Next call fast-fails immediately
-      (global.fetch as jest.Mock).mockClear();
-      const headerResult = await grobid.processHeaderDocument(mockBuffer);
-      const refsResult = await grobid.processReferences(mockBuffer);
-      const fulltextResult = await grobid.processFulltextDocument(mockBuffer);
-
-      expect(headerResult).toBeNull();
-      expect(refsResult).toEqual([]);
-      expect(fulltextResult).toBeNull();
-      expect(global.fetch).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('ZoteroTranslatorClient Integration', () => {
-    let registry: ResilienceRegistryService;
-    let zotero: ZoteroTranslatorClient;
-    const originalFetch = global.fetch;
-
-    beforeEach(() => {
-      registry = new ResilienceRegistryService();
-      registry.resetAll();
-      zotero = new ZoteroTranslatorClient(registry);
-    });
-
-    afterEach(() => {
-      global.fetch = originalFetch;
-    });
-
-    it('should trip zotero circuit breaker on HTTP 500 errors and fast-fail subsequent requests', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-      } as any);
-
-      const zoteroBreaker = registry.getCircuitBreaker('zotero');
-
-      // Fail 3 times (threshold = 3)
-      await zotero.translateUrl('https://example.com/paper1');
-      await zotero.translateUrl('https://example.com/paper2');
-      await zotero.translateUrl('https://example.com/paper3');
-
-      expect(zoteroBreaker.getState()).toBe('OPEN');
-
-      // Subsequent calls fast-fail immediately without network calls
-      (global.fetch as jest.Mock).mockClear();
-
-      const translateRes = await zotero.translateUrl(
-        'https://example.com/paper4',
-      );
-      const importRes = await zotero.importData('@article{...}');
-      const searchRes = await zotero.searchIdentifier('10.1000/182');
-
-      expect(translateRes).toEqual([]);
-      expect(importRes).toEqual([]);
-      expect(searchRes).toEqual([]);
-      expect(global.fetch).not.toHaveBeenCalled();
-    });
-
-    it('should NOT trip circuit breaker on HTTP 501 (no translator found) or HTTP 300 (multiple choices)', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: false,
-        status: 501,
-      } as any);
-
-      const zoteroBreaker = registry.getCircuitBreaker('zotero');
-
-      // 501 is normal semantic response ("no translator"), not an infrastructure outage
-      await zotero.translateUrl('https://unknown-domain.org');
-      await zotero.translateUrl('https://unknown-domain.org');
-      await zotero.translateUrl('https://unknown-domain.org');
-      await zotero.translateUrl('https://unknown-domain.org');
-
-      expect(zoteroBreaker.getState()).toBe('CLOSED');
-      expect(zoteroBreaker.getFailures()).toBe(0);
     });
   });
 });

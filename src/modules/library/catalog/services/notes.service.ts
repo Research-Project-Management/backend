@@ -1,0 +1,385 @@
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+  Optional,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { NotesRepository } from '../repositories/notes.repository';
+import {
+  CreateNoteData,
+  UpdateNoteData,
+  ExtractLiteratureNoteResult,
+} from '../types/notes.types';
+import {
+  formatLiteratureNoteMarkdown,
+  FormatNoteOptions,
+  buildTipTapDocFromText,
+  sanitizeNoteTitle,
+  sanitizeNoteContent,
+} from '../utils/notes.utils';
+import { TransactionService, TransactionHelpers } from '../../sync';
+import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
+import type {
+  UpsertSyncNoteCommand,
+  DeleteSyncEntityCommand,
+  UpsertSyncEntityResult,
+} from '../../shared-kernel/core/types/entity-commands.types';
+import { IItemExistencePort, IItemReadPort } from '../types/items.types';
+
+@Injectable()
+export class NotesService {
+  private readonly logger = new Logger(NotesService.name);
+
+  constructor(
+    private readonly repo: NotesRepository,
+    private readonly libraryTx: TransactionService,
+    @Optional()
+    private readonly itemExistencePort?: IItemExistencePort,
+    @Optional()
+    private readonly itemReadPort?: IItemReadPort,
+  ) {}
+
+  async listNotes(userId: string, itemId?: string, projectId?: string) {
+    return this.repo.findMany(userId, itemId, projectId);
+  }
+
+  async getNote(userId: string, id: string, projectId?: string) {
+    return this.repo.findById(userId, id, undefined, projectId);
+  }
+
+  async createNote(userId: string, data: CreateNoteData) {
+    if (data.itemId && this.itemExistencePort) {
+      const exists = await this.itemExistencePort.exists(
+        userId,
+        data.itemId,
+        data.projectId,
+      );
+      if (!exists) {
+        throw new NotFoundException(`Item not found`);
+      }
+    }
+    return this.libraryTx.executeInTransaction(
+      async (tx: any, helpers: any) => {
+        const sanitizedData: CreateNoteData = {
+          ...data,
+          title: sanitizeNoteTitle(data.title),
+          contentMd:
+            data.contentMd !== undefined
+              ? sanitizeNoteContent(data.contentMd)
+              : '',
+        };
+        const note = await this.repo.create(userId, sanitizedData, tx);
+        const effectiveProjectId = sanitizedData.projectId;
+        const eventScope = { userId, projectId: effectiveProjectId };
+
+        await helpers.appendChange(eventScope, {
+          entityType: 'Note',
+          entityId: note.id,
+          action: 'create',
+          version: note.version,
+          data: note,
+        });
+
+        await helpers.publishOutbox(
+          eventScope,
+          note.id,
+          'library.note.created',
+          note,
+        );
+
+        return note;
+      },
+    );
+  }
+
+  async updateNote(
+    userId: string,
+    id: string,
+    expectedVersionOrData: number | undefined | UpdateNoteData,
+    dataOrProjectId?: UpdateNoteData | string,
+    projectId?: string,
+  ) {
+    let expectedVersion: number | undefined;
+    let data: UpdateNoteData;
+    let effectiveProjectId = projectId;
+
+    if (typeof expectedVersionOrData === 'number') {
+      expectedVersion = expectedVersionOrData;
+      data = dataOrProjectId as UpdateNoteData;
+    } else {
+      data = expectedVersionOrData as UpdateNoteData;
+      effectiveProjectId =
+        typeof dataOrProjectId === 'string' ? dataOrProjectId : projectId;
+      expectedVersion = (data as any)?.expectedVersion;
+    }
+
+    return this.libraryTx.executeInTransaction(
+      async (tx: any, helpers: any) => {
+        const sanitizedData: UpdateNoteData = {
+          ...data,
+          ...(data.title !== undefined
+            ? { title: sanitizeNoteTitle(data.title) }
+            : {}),
+          ...(data.contentMd !== undefined
+            ? { contentMd: sanitizeNoteContent(data.contentMd) }
+            : {}),
+        };
+        const updated = await this.repo.update(
+          userId,
+          id,
+          expectedVersion,
+          sanitizedData,
+          tx,
+          projectId,
+        );
+
+        const effectiveProjectId =
+          projectId || (updated as any).projectId || undefined;
+        const eventScope = { userId, projectId: effectiveProjectId };
+
+        await helpers.appendChange(eventScope, {
+          entityType: 'Note',
+          entityId: updated.id,
+          action: 'update',
+          version: updated.version,
+          data: updated,
+        });
+
+        await helpers.publishOutbox(
+          eventScope,
+          updated.id,
+          'library.note.updated',
+          updated,
+        );
+
+        return updated;
+      },
+    );
+  }
+
+  async deleteNote(
+    userId: string,
+    id: string,
+    expectedVersion?: number,
+    projectId?: string,
+  ): Promise<boolean> {
+    return this.libraryTx.executeInTransaction(
+      async (tx: any, helpers: any) => {
+        const existing = await this.repo.findById(userId, id, tx, projectId);
+        const deleted = await this.repo.softDelete(
+          userId,
+          id,
+          expectedVersion,
+          tx,
+          projectId,
+        );
+
+        if (deleted) {
+          const effectiveProjectId =
+            projectId || existing?.projectId || undefined;
+          const eventScope = { userId, projectId: effectiveProjectId };
+
+          await helpers.recordTombstone(eventScope, {
+            entityType: 'Note',
+            entityId: id,
+          });
+
+          await helpers.publishOutbox(eventScope, id, 'library.note.deleted', {
+            id,
+            deletedAt: new Date(),
+          });
+        }
+
+        return deleted;
+      },
+    );
+  }
+
+  async upsertFromSync(
+    command: UpsertSyncNoteCommand,
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+  ): Promise<UpsertSyncEntityResult> {
+    const targetUserId = command.userId || (command as any).projectId || '';
+    if (command.existingId) {
+      const existing = await tx.note.findUnique({
+        where: { id: command.existingId },
+      });
+
+      if (!existing) {
+        throw new NotFoundException(`Note ${command.existingId} not found`);
+      }
+
+      if (
+        existing.userId !== targetUserId &&
+        existing.projectId !== command.projectId
+      ) {
+        throw new ForbiddenException('Not authorized to update this note');
+      }
+
+      const mergedNoteTags =
+        command.tags !== undefined
+          ? normalizeTags(command.tags)
+          : existing.tags;
+
+      const updated = await tx.note.update({
+        where: { id: command.existingId },
+        data: {
+          contentMd: command.contentMd,
+          title: command.title,
+          tags: mergedNoteTags,
+          version: { increment: 1 },
+        },
+      });
+
+      const noteProjectId =
+        command.projectId || existing.projectId || undefined;
+      const syncScope = { userId: targetUserId, projectId: noteProjectId };
+
+      await helpers.appendChange(syncScope, {
+        entityType: 'Note',
+        entityId: updated.id,
+        action: 'update',
+        version: updated.version,
+      });
+
+      return { id: updated.id, isNew: false, version: updated.version };
+    } else {
+      const noteProjectId =
+        command.projectId || (command as any).projectId || undefined;
+      const syncScope = { userId: targetUserId, projectId: noteProjectId };
+
+      const created = await tx.note.create({
+        data: {
+          userId: targetUserId,
+          projectId: noteProjectId || null,
+          createdById: command.userId,
+          itemId: command.itemId,
+          contentMd: command.contentMd,
+          title: command.title || 'Note',
+          tags: command.tags ? normalizeTags(command.tags) : [],
+          version: 1,
+        },
+      });
+
+      await helpers.appendChange(syncScope, {
+        entityType: 'Note',
+        entityId: created.id,
+        action: 'create',
+        version: 1,
+      });
+
+      await helpers.publishOutbox(
+        syncScope,
+        created.id,
+        'library.note.created',
+        { noteId: created.id },
+      );
+
+      return { id: created.id, isNew: true, version: 1 };
+    }
+  }
+
+  async deleteFromSync(
+    command: DeleteSyncEntityCommand,
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+  ): Promise<void> {
+    const targetUserId = command.userId || (command as any).projectId || '';
+    const { entityId } = command;
+    const existing = await tx.note.findFirst({
+      where: {
+        id: entityId,
+        ...(targetUserId ? { userId: targetUserId } : {}),
+        deletedAt: null,
+      },
+    });
+    if (!existing) return;
+
+    const noteProjectId =
+      existing.projectId ||
+      command.projectId ||
+      (command as any).projectId ||
+      undefined;
+    const syncScope = { userId: targetUserId, projectId: noteProjectId };
+
+    await tx.note.updateMany({
+      where: { id: entityId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    await helpers.appendChange(syncScope, {
+      entityType: 'Note',
+      entityId,
+      action: 'delete',
+      version: existing.version + 1,
+    });
+    await helpers.recordTombstone(syncScope, {
+      entityType: 'Note',
+      entityId,
+      deletedById: targetUserId || undefined,
+    });
+  }
+
+  async reassignToItem(
+    sourceItemIds: string[],
+    targetItemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    return this.repo.reassignToItem(sourceItemIds, targetItemId, tx);
+  }
+
+  async createLiteratureNote(
+    userId: string,
+    itemId: string,
+    content: string,
+    source?: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    return this.repo.createLiteratureNote(userId, itemId, content, source, tx);
+  }
+
+  async extractNotesFromAnnotations(
+    userId: string,
+    itemId: string,
+    options?: FormatNoteOptions | string,
+  ) {
+    const opts: FormatNoteOptions =
+      typeof options === 'string' ? { projectId: options } : options || {};
+    const item = this.itemReadPort
+      ? await this.itemReadPort.findById(userId, itemId, opts.projectId)
+      : null;
+    if (!item) {
+      throw new NotFoundException(`Item ${itemId} not found`);
+    }
+
+    const annotations = await this.repo.findItemAnnotations(itemId);
+
+    if (annotations.length === 0) {
+      return {
+        success: true,
+        totalExtracted: 0,
+        message: 'No annotations found for this item',
+      };
+    }
+
+    const markdown = formatLiteratureNoteMarkdown(item, annotations, opts);
+
+    const note = await this.createNote(userId, {
+      itemId,
+      projectId: (item as any).projectId || undefined,
+      title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
+      contentMd: markdown,
+      contentJson: buildTipTapDocFromText(markdown),
+      createdById: userId,
+      tags: ['literature-note', 'highlights'],
+    });
+
+    return {
+      success: true,
+      totalExtracted: annotations.length,
+      literatureNote: note,
+    } as ExtractLiteratureNoteResult;
+  }
+}

@@ -3,21 +3,20 @@ import { CoreModule } from '../../../core/core.module';
 import { SearchFacade, SEARCH_FACADE } from './search.facade';
 
 // Presentation
-import { SearchController } from './search.controller';
+import { SearchController } from './controllers';
 
-// Application & Infrastructure (Hexagonal)
-import { SearchService } from './core/services/search.service';
-import { SearchRepository } from './core/adapters/search.repository';
-import { FullTextProvider } from './core/adapters/full-text.provider';
-import { EventHandler } from './core/adapters/event.handler';
-import { ExecuteSearchUseCase } from './core/use-cases/execute-search.use-case';
-import { PostgresFtsAdapter } from './core/adapters/search-engine.adapter';
-import { VectorSearchAdapter } from './core/adapters/vector-search.adapter';
+// Services & Infrastructure
+import { SearchService } from './services/search.service';
+import { SearchRepository } from './repositories/search.repository';
+import { FullTextProvider } from './services/full-text.provider';
+import { EventHandler } from './services/event.handler';
+import { PostgresFtsAdapter } from './services/search-engine.adapter';
+import { VectorSearchAdapter } from './services/vector-search.adapter';
 import {
   SEARCH_ENGINE_PORT,
   VECTOR_SEARCH_ENGINE_PORT,
-} from './core/ports/search-engine.port';
-import { CatalogEventsSubscriber } from './core/adapters/catalog-events.subscriber';
+} from './types/search-engine.types';
+import { CatalogEventsSubscriber } from './services/catalog-events.subscriber';
 
 /**
  * Search Bounded Context Unified Module (Generic Domain).
@@ -50,7 +49,6 @@ import { CatalogEventsSubscriber } from './core/adapters/catalog-events.subscrib
       provide: VECTOR_SEARCH_ENGINE_PORT,
       useClass: VectorSearchAdapter,
     },
-    ExecuteSearchUseCase,
     CatalogEventsSubscriber,
   ],
   exports: [

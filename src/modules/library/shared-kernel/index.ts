@@ -1,6 +1,7 @@
 // Utilities (exported first to prevent circular dependency timing issues)
 export * from './utils/bibliographic.utils';
 export * from './utils/tag.utils';
+export * from './utils/academic-regex.catalog';
 
 // Core
 export * from './core/constants/academic-client.constants';
@@ -25,6 +26,7 @@ export type {
   TagObjectInput,
   TagInput,
   CreateItemData,
+  ItemMetadata,
 } from './types/bibliographic.types';
 export { ITEM_COLUMN_METADATA_FIELDS } from './types/bibliographic.types';
 export * from './types/schema.constants';
@@ -33,10 +35,6 @@ export * from './types/schema.types';
 // Events
 export * from './events/integration-event-bus.service';
 export * from './events/integration-events';
-
-// Infra
-export * from './infra/grobid/grobid.client';
-export * from './infra/zotero/zotero-translator.client';
 
 // Resilience
 export * from './resilience/circuit-breaker';

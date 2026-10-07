@@ -1,5 +1,6 @@
-import { ItemsService } from '@/modules/library/catalog/core/services/items.service';
-import { AttachmentsService } from '@/modules/library/extraction/core/services/attachments.service';
+import { ItemService as ItemsService } from '@/modules/library/catalog/services/items.service';
+import { ItemFulltextService } from '@/modules/library/catalog/services/item-fulltext.service';
+import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { IdempotencyMiddleware } from '@/modules/library/shared-kernel/core/middlewares/idempotency.middleware';
 import { NotFoundException } from '@nestjs/common';
 import { RedisCacheService } from '@/core/cache/redis.service';
@@ -33,6 +34,11 @@ describe('Library Security Hardening & Performance Optimization', () => {
         delPattern: jest.fn(),
       };
 
+      const fulltextService = new ItemFulltextService(
+        mockQueryRepo,
+        mockCache as RedisCacheService,
+      );
+
       service = new ItemsService(
         mockQueryRepo,
         mockCommandRepo,
@@ -40,9 +46,12 @@ describe('Library Security Hardening & Performance Optimization', () => {
         {} as any,
         {} as any,
         {} as any,
-        undefined,
-        undefined,
-        undefined,
+        {} as any,
+        fulltextService,
+        undefined as any,
+        undefined as any,
+        undefined as any,
+        undefined as any,
         mockCache as RedisCacheService,
       );
     });
@@ -190,6 +199,7 @@ describe('Library Security Hardening & Performance Optimization', () => {
         {} as any,
         {} as any,
         {} as any,
+        new ItemQueryService(mockQueryRepo as any, undefined),
       );
     });
 

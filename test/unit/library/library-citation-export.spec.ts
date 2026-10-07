@@ -1,8 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
-import { ExportsService } from '@/modules/library/citation/core/services/exports.service';
-import { CitationService } from '@/modules/library/citation/core/services/citation.service';
-import { ExportsRepository } from '@/modules/library/citation/core/adapters/exports.repository';
-import { ExportBibliographyUseCase } from '@/modules/library/citation/core/use-cases/export-bibliography.use-case';
+import { ExportsService } from '@/modules/library/citation/services/exports.service';
+import { CitationService } from '@/modules/library/citation/services/citation.service';
+import { ExportsRepository } from '@/modules/library/citation/repositories/exports.repository';
 import { CitationFacade } from '@/modules/library/citation/citation.facade';
 import { LibraryFacade } from '@/modules/library/library.facade';
 
@@ -10,7 +9,6 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
   let exportsService: ExportsService;
   let exportsRepo: jest.Mocked<ExportsRepository>;
   let citationService: CitationService;
-  let exportBibliographyUseCase: ExportBibliographyUseCase;
   let citationFacade: CitationFacade;
   let libraryFacade: LibraryFacade;
 
@@ -81,8 +79,9 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     } as unknown as jest.Mocked<ExportsRepository>;
 
     citationService = new CitationService();
-    exportsService = new ExportsService(exportsRepo, citationService);
-    exportBibliographyUseCase = new ExportBibliographyUseCase(exportsService);
+    exportsService = new ExportsService(exportsRepo, citationService, {
+      burnAnnotationsToPdf: jest.fn(),
+    } as any);
     citationFacade = new CitationFacade(citationService, exportsService);
     libraryFacade = new LibraryFacade(
       undefined,
@@ -226,21 +225,14 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     });
   });
 
-  describe('ExportBibliographyUseCase (CQRS Query Handler)', () => {
-    it('should delegate query execution to ExportsService with all parameters', async () => {
-      const spy = jest.spyOn(exportsService, 'exportByCitationKeys');
-
-      const result = await exportBibliographyUseCase.execute({
-        userId: mockUserId,
-        citeKeys: ['vaswani2017attention'],
-        projectId: mockProjectId,
-      });
-
-      expect(spy).toHaveBeenCalledWith(
+  describe('ExportsService.exportByCitationKeys (On-Demand LaTeX Sync)', () => {
+    it('should query items and return formatted BibTeX with found keys', async () => {
+      const result = await exportsService.exportByCitationKeys(
         mockUserId,
         ['vaswani2017attention'],
         mockProjectId,
       );
+
       expect(result).toBeDefined();
       expect(result?.count).toBe(1);
       expect(result?.foundKeys).toEqual(['vaswani2017attention']);

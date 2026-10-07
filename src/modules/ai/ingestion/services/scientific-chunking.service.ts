@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   ExtractedPdfDocument,
   ExtractedPdfMetadata,
-} from '../../../library/extraction/core/adapters/pdf.provider';
+} from '../../../library/extraction';
 
 export interface SemanticChunk {
   chunkIndex: number;
@@ -62,7 +62,7 @@ export class ScientificChunkingService {
     const chunks: SemanticChunk[] = [];
     let chunkCounter = 0;
 
-    // 1. If GROBID extracted structured sections, leverage those directly
+    // 1. If structured sections are extracted, leverage those directly
     if (doc.sections && doc.sections.length > 0) {
       for (const section of doc.sections) {
         const sectionTitle = section.title || 'Section';

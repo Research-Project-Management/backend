@@ -8,7 +8,7 @@ import {
   Min,
   Max,
 } from 'class-validator';
-import { ReadingStatus } from '../core/domain/state.types';
+import { ReadingStatus } from '../types/state.types';
 
 export class UpdateStateDto {
   @IsOptional()

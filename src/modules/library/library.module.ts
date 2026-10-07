@@ -23,7 +23,7 @@ import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
  *
  * 1. SyncModule    — CDC, Outbox, Monotonic Sequence, TransactionService
  * 2. CatalogModule — Metadata (37 CSL Types), OCC, Collections, Tags, Notes, Annotations
- * 3. ExtractionModule — GROBID, Tesseract OCR, Sandwich PDF, Claim-Check S3
+ * 3. ExtractionModule — In-Process Trusted Extractor (XMP, Regex, Layout, MeXtract), OCR, Sandwich PDF, Claim-Check S3
  * 4. IngestionModule  — CrossRef/arXiv/PubMed Pipeline, Dedup, Retraction Watch
  * 5. SearchModule     — Postgres FTS, Semantic Vector, Event-driven Indexing
  * 6. CitationModule   — CSL Engine, 10k+ Styles, DOI Negotiation, Multi-format Exports

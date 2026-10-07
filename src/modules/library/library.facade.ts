@@ -108,24 +108,19 @@ export const LIBRARY_FACADE = 'LIBRARY_FACADE';
 @Injectable()
 export class LibraryFacade implements ILibraryFacade {
   constructor(
-    @Optional()
-    private readonly catalogFacade?: CatalogFacade,
-    @Optional()
-    private readonly extractionFacade?: ExtractionFacade,
-    @Optional()
-    private readonly searchFacade?: SearchFacade,
-    @Optional()
-    private readonly citationFacade?: CitationFacade,
-    @Optional()
-    private readonly transactionService?: TransactionService,
+    @Optional() private readonly catalogFacade?: CatalogFacade,
+    @Optional() private readonly extractionFacade?: ExtractionFacade,
+    @Optional() private readonly searchFacade?: SearchFacade,
+    @Optional() private readonly citationFacade?: CitationFacade,
+    @Optional() private readonly transactionService?: TransactionService,
   ) {}
 
-  get catalog(): CatalogFacade | undefined {
-    return this.catalogFacade;
+  get catalog(): CatalogFacade {
+    return this.catalogFacade!;
   }
 
-  get extraction(): ExtractionFacade | undefined {
-    return this.extractionFacade;
+  get extraction(): ExtractionFacade {
+    return this.extractionFacade!;
   }
 
   async exportBibByCitationKeys(
@@ -133,14 +128,8 @@ export class LibraryFacade implements ILibraryFacade {
     citeKeys: string[],
     projectId?: string,
   ): Promise<{ content: string } | null> {
-    if (this.citationFacade) {
-      return this.citationFacade.exportBibliography(
-        userId,
-        citeKeys,
-        projectId,
-      );
-    }
-    return null;
+    if (!this.citationFacade) return null;
+    return this.citationFacade.exportBibliography(userId, citeKeys, projectId);
   }
 
   async getItem(
@@ -148,7 +137,6 @@ export class LibraryFacade implements ILibraryFacade {
     itemId: string,
     projectId?: string,
   ): Promise<LibraryItemSummary | null> {
-    if (!this.catalogFacade) return null;
     const item = await this.catalogFacade.getItem(userId, itemId, projectId);
     if (!item) return null;
 
@@ -168,17 +156,11 @@ export class LibraryFacade implements ILibraryFacade {
     itemId: string,
     projectId?: string,
   ): Promise<LibraryItemDetail | null> {
-    if (!this.catalogFacade) return null;
-
     // Scatter-gather across Bounded Contexts (Microservices-Ready)
     const [catalogItem, attachmentsRes, notes] = await Promise.all([
       this.catalogFacade.getItem(userId, itemId, projectId),
-      this.extractionFacade
-        ? this.extractionFacade.getItemAttachments(userId, itemId)
-        : Promise.resolve({ attachments: [] }),
-      this.catalogFacade.listNotes
-        ? this.catalogFacade.listNotes(userId, itemId, projectId)
-        : Promise.resolve([]),
+      this.extractionFacade.getItemAttachments(userId, itemId),
+      this.catalogFacade.listNotes(userId, itemId, projectId),
     ]);
 
     if (!catalogItem) return null;
@@ -297,7 +279,6 @@ export class LibraryFacade implements ILibraryFacade {
     userId: string,
     options?: { projectId?: string },
   ): Promise<number> {
-    if (!this.catalogFacade) return 0;
     return this.catalogFacade.countItems(userId, {
       view: 'all',
       ...(options?.projectId ? { projectId: options.projectId } : {}),
@@ -309,7 +290,6 @@ export class LibraryFacade implements ILibraryFacade {
     query: string,
     projectId?: string,
   ): Promise<LibraryItemSummary[]> {
-    if (!this.catalogFacade) return [];
     const items = await this.catalogFacade.findMany(userId, {
       search: query,
       limit: 20,
@@ -331,16 +311,13 @@ export class LibraryFacade implements ILibraryFacade {
     buffer: Buffer,
     options?: any,
   ): Promise<ExtractedPdfDocument> {
-    if (!this.extractionFacade) {
-      throw new Error('ExtractionFacade is not initialized in LibraryFacade');
-    }
     return this.extractionFacade.extractDocumentFromBuffer(buffer, options);
   }
 
   async getSyncVersion(
     scope: { userId?: string; projectId?: string } | string,
   ): Promise<bigint> {
-    return this.transactionService?.getLatestSequence(scope) ?? BigInt(0);
+    return this.transactionService.getLatestSequence(scope);
   }
 
   async getSyncChanges(
@@ -348,13 +325,7 @@ export class LibraryFacade implements ILibraryFacade {
     sinceSeq: bigint = BigInt(0),
     limit: number = 100,
   ): Promise<LibraryChange[]> {
-    return (
-      (await this.transactionService?.getChangesSince(
-        scope,
-        sinceSeq,
-        limit,
-      )) ?? []
-    );
+    return this.transactionService.getChangesSince(scope, sinceSeq, limit);
   }
 
   async getSyncTombstones(
@@ -362,12 +333,6 @@ export class LibraryFacade implements ILibraryFacade {
     sinceSeq?: bigint,
     limit: number = 100,
   ): Promise<Tombstone[]> {
-    return (
-      (await this.transactionService?.getTombstonesSince(
-        scope,
-        sinceSeq,
-        limit,
-      )) ?? []
-    );
+    return this.transactionService.getTombstonesSince(scope, sinceSeq, limit);
   }
 }

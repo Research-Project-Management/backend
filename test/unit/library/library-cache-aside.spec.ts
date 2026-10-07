@@ -1,10 +1,12 @@
-import { ItemsService } from '@/modules/library/catalog/core/services/items.service';
-import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
-import { CommandRepository } from '@/modules/library/catalog/core/adapters/command.repository';
-import { TransactionService } from '@/modules/library/sync/core/adapters/transaction.service';
-import { TagsService } from '@/modules/library/catalog/core/services/tags.service';
-import { TypesService } from '@/modules/library/catalog/core/services/types.service';
-import { ItemTransformer } from '@/modules/library/catalog/core/adapters/item.transformer';
+import { ItemService as ItemsService } from '@/modules/library/catalog/services/items.service';
+import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
+import { ItemFulltextService } from '@/modules/library/catalog/services/item-fulltext.service';
+import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
+import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
+import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { TagsService } from '@/modules/library/catalog/services/tags.service';
+import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { ItemTransformer } from '@/modules/library/catalog/utils/item.transformer';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
 
@@ -110,6 +112,15 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       delPattern: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<RedisCacheService>;
 
+    const queryService = new ItemQueryService(queryRepo, cache);
+    const fulltextService = new ItemFulltextService(queryRepo, cache);
+    const mockValidator = {
+      validateAndSanitizeItem: jest.fn((_type, d) => ({
+        sanitizedItem: d,
+        warnings: [],
+      })),
+    };
+
     service = new ItemsService(
       queryRepo,
       commandRepo,
@@ -117,9 +128,12 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       tagsService,
       typesService,
       transformer,
-      undefined,
-      undefined,
-      undefined,
+      queryService,
+      fulltextService,
+      undefined as any,
+      undefined as any,
+      mockValidator as any,
+      undefined as any,
       cache,
     );
   });
@@ -201,7 +215,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       );
       expect(queryRepo.findMetadataSourceRecord).toHaveBeenCalledWith(
         mockItemId,
-        'grobid_fulltext',
+        'pdf_fulltext',
       );
       expect(cache.set).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),
@@ -340,6 +354,8 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
 
   describe('Resilience & Graceful Degradation', () => {
     it('should function smoothly without cache if RedisCacheService is not provided', async () => {
+      const bareQueryService = new ItemQueryService(queryRepo, undefined);
+      const bareFulltextService = new ItemFulltextService(queryRepo, undefined);
       const bareService = new ItemsService(
         queryRepo,
         commandRepo,
@@ -347,6 +363,8 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
         tagsService,
         typesService,
         transformer,
+        bareQueryService,
+        bareFulltextService,
       );
 
       const item = await bareService.getItem(mockUserId, mockItemId);

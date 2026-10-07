@@ -1,5 +1,5 @@
 import { getDocumentProxy, getMeta } from 'unpdf';
-import { PdfProvider } from '@/modules/library/extraction/core/adapters/pdf.provider';
+import { PdfProvider } from '@/modules/library/extraction/utils/pdf.provider';
 
 jest.mock('unpdf', () => ({
   extractText: jest.fn(),
@@ -57,7 +57,7 @@ describe('PdfProvider', () => {
         .mockResolvedValue('Scanned article text from OCR'),
     };
 
-    const provider = new PdfProvider(undefined, undefined, ocr as any);
+    const provider = new PdfProvider(undefined, ocr as any);
     const result = await provider.extractDocumentFromBuffer(
       Buffer.from('%PDF scan'),
     );

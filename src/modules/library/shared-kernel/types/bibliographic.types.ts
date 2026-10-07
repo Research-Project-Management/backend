@@ -189,3 +189,204 @@ export interface CreateItemData {
   extraFields?: Record<string, unknown>;
   [key: string]: unknown;
 }
+
+export interface ItemMetadata {
+  doi?: string;
+  arxivId?: string;
+  primaryCategory?: string;
+  pmid?: string;
+  pmcid?: string;
+  isbn?: string;
+  issn?: string;
+
+  title?: string;
+  shortTitle?: string;
+  authors?: string[];
+  creators?: CreatorCreditInput[];
+  editors?: string[];
+  year?: number | null;
+  publicationDate?: string;
+  date?: string;
+  accessedAt?: string | Date | null;
+  journal?: string;
+  journalAbbr?: string;
+  publicationTitle?: string;
+  publisher?: string;
+  place?: string;
+  volume?: string;
+  issue?: string;
+  section?: string;
+  partNumber?: string;
+  partTitle?: string;
+  series?: string;
+  seriesTitle?: string;
+  seriesText?: string;
+  seriesNumber?: string;
+  edition?: string;
+  pages?: string;
+  abstract?: string;
+  abstractNote?: string;
+  citationCount?: number;
+  referenceCount?: number;
+  language?: string;
+  url?: string;
+  pdfUrl?: string;
+  fileUrl?: string;
+  fileId?: string;
+  filename?: string;
+  openAccessPdfUrl?: string;
+  itemType?: string;
+  type?: string;
+  citationKey?: string;
+  extra?: string;
+  tags?: string[];
+  labels?: string[];
+  keywords?: string[];
+  notes?: Array<{ content: string; source?: string }>;
+  rights?: string;
+  license?: string;
+  archive?: string;
+  archiveLocation?: string;
+  archiveId?: string;
+  repository?: string;
+  genre?: string;
+  callNumber?: string;
+  libraryCatalog?: string;
+  bookTitle?: string;
+  proceedingsTitle?: string;
+  conferenceName?: string;
+  eventPlace?: string;
+  websiteTitle?: string;
+  websiteType?: string;
+  blogTitle?: string;
+  university?: string;
+  institution?: string;
+  numPages?: string | number;
+  numberOfPages?: number;
+  pageCount?: string | number;
+  explicitCitationKey?: string;
+  reportNumber?: string;
+  reportType?: string;
+  thesisType?: string;
+  versionNumber?: string;
+  patentNumber?: string;
+  applicationNumber?: string;
+  assignee?: string;
+  issuingAuthority?: string;
+  distributor?: string;
+  system?: string;
+  extraFields?: Record<string, unknown>;
+  seeAlso?: string[];
+  relations?:
+    | Record<string, string | string[]>
+    | Array<{
+        targetItemId?: string;
+        relationType?: string;
+        description?: string;
+      }>;
+
+  isRetracted?: boolean;
+  retractionNature?: string;
+  retractionDetails?: unknown;
+  retractionCheckedAt?: string;
+
+  provenance?: any;
+  [key: string]: unknown;
+}
+
+// ── Canonical Document Structure Types (Standardized In-Process Types) ────────
+export interface AcademicCreator {
+  fullName: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  email?: string;
+  affiliation?: string;
+  institution?: string;
+  department?: string;
+  country?: string;
+  isCorresponding?: boolean;
+}
+
+export interface BoundingBoxCoordinates {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface BibliographicReference {
+  id?: string;
+  title?: string;
+  authors: string[];
+  year?: number;
+  journal?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  doi?: string;
+  arxivId?: string;
+  rawCitation?: string;
+}
+
+export interface DocumentSection {
+  id?: string;
+  title: string;
+  content: string;
+  paragraphs?: string[];
+  page?: number;
+  level?: number;
+  imradCategory?:
+    | 'introduction'
+    | 'methods'
+    | 'results'
+    | 'discussion'
+    | 'conclusion'
+    | 'other';
+  coords?: BoundingBoxCoordinates;
+}
+
+export interface DocumentFigure {
+  id?: string;
+  caption?: string;
+  graphicUrl?: string;
+  coords?: BoundingBoxCoordinates;
+}
+
+export interface DocumentTable {
+  id?: string;
+  caption?: string;
+  matrix?: string[][];
+  markdown?: string;
+  coords?: BoundingBoxCoordinates;
+}
+
+export interface DocumentFormula {
+  id?: string;
+  latex?: string;
+  coords?: BoundingBoxCoordinates;
+}
+
+export interface DocumentHeaderResult {
+  title?: string;
+  authors?: string[];
+  creators?: AcademicCreator[];
+  abstract?: string;
+  doi?: string;
+  arxivId?: string;
+  year?: number;
+  publicationDate?: string;
+  journal?: string;
+  bookTitle?: string;
+  conferenceName?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  publisher?: string;
+  place?: string;
+  issn?: string;
+  isbn?: string;
+  keywords?: string[];
+  notes?: Array<{ content: string; type?: string }>;
+}

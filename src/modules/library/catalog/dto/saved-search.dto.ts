@@ -9,7 +9,7 @@ import {
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { SavedSearchConditionGroup } from '../core/domain/saved-search.types';
+import { SavedSearchConditionGroup } from '../types/saved-search.types';
 
 export class CreateSavedSearchDto {
   @IsString()

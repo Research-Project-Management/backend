@@ -47,75 +47,7 @@ services:
           - postgres
 
   # ----------------------------------------------------------------------------
-  # 2. GROBID Academic Extraction Service (CRF Model)
-  # ----------------------------------------------------------------------------
-  grobid:
-    image: lfoppiano/grobid:latest-crf
-    container_name: flux_grobid
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:${GROBID_PORT:-8070}:8070"
-    environment:
-      GROBID_SERVICE_ALLOWED_ORIGINS: "*"
-      JAVA_OPTS: "-Xmx1024m -Xms256m"
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8070/api/isalive"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
-    deploy:
-      resources:
-        limits:
-          memory: 2048M
-        reservations:
-          memory: 256M
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      flux_network:
-        aliases:
-          - grobid
-
-  # ----------------------------------------------------------------------------
-  # 3. Zotero Translation Server (Metadata, BibTeX, CSL, DOI)
-  # ----------------------------------------------------------------------------
-  translator:
-    image: zotero/translation-server:2.0.4
-    container_name: flux_zotero_ts
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:${ZOTERO_TS_PORT:-1969}:1969"
-    environment:
-      USER_AGENT: "FluxResearchPlatform/1.0 (contact@flux.app)"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:1969/ || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 45s
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 64M
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      flux_network:
-        aliases:
-          - translator
-          - zotero-translation-server
-
-  # ----------------------------------------------------------------------------
-  # 4. Redis Cache & Queue Service
+  # 2. Redis Cache & Queue Service
   # ----------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
@@ -175,20 +107,17 @@ services:
       REDIS_URL: "redis://redis:6379"
       REDIS_CACHE_URL: "redis://redis:6379"
       REDIS_QUEUE_URL: "redis://redis:6379"
-      GROBID_URL: http://grobid:8070
-      ZOTERO_TRANSLATOR_URL: http://translator:1969
       CLSI_URL: http://flux_clsi:3013
       CLIENT_URL: ${CLIENT_URL}
       ORIGINS: ${ORIGINS}
+      TRUSTED_EXTRACTION_ENABLED: "true"
+      TRUSTED_EXTRACTION_SHADOW_MODE: "${TRUSTED_SHADOW_MODE:-false}"
+      TRUSTED_EXTRACTION_CANARY_PERCENT: "100"
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-      grobid:
-        condition: service_started
-      translator:
-        condition: service_started
     deploy:
       resources:
         limits:
@@ -229,10 +158,11 @@ services:
       REDIS_URL: "redis://redis:6379"
       REDIS_CACHE_URL: "redis://redis:6379"
       REDIS_QUEUE_URL: "redis://redis:6379"
-      GROBID_URL: http://grobid:8070
-      ZOTERO_TRANSLATOR_URL: http://translator:1969
       CLSI_URL: http://flux_clsi:3013
       SKIP_MIGRATIONS: "true"
+      TRUSTED_EXTRACTION_ENABLED: "true"
+      TRUSTED_EXTRACTION_SHADOW_MODE: "${TRUSTED_SHADOW_MODE:-false}"
+      TRUSTED_EXTRACTION_CANARY_PERCENT: "100"
     depends_on:
       db:
         condition: service_healthy
