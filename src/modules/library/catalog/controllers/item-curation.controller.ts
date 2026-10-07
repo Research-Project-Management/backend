@@ -29,8 +29,7 @@ export abstract class BaseItemCurationController {
   constructor(protected readonly itemService: ItemService) {}
 
   protected async executeParseCitations(dto: ParseCitationsDto) {
-    const rawCitations =
-      (dto as any).citations || (dto as any).rawCitations || '';
+    const rawCitations = dto.citations || dto.rawCitations || '';
     const references = await this.itemService.parseCitations(rawCitations);
     return {
       success: true,

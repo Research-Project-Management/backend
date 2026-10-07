@@ -138,7 +138,7 @@ export class NoteController {
     return this.notesService.deleteNote(currentUserId, id);
   }
 
-  @Post('items/:itemId/extract-annotations')
+  @Post(['items/:itemId/extract-annotations', 'items/:itemId/from-annotations'])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Extract and compile notes from PDF annotations for an item',

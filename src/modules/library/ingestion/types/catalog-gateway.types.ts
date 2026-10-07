@@ -44,4 +44,30 @@ export interface ICatalogGatewayPort {
     itemId: string,
     projectId?: string,
   ): Promise<boolean>;
+  findMatchCandidates?(
+    scope: { userId?: string; projectId?: string | null } | string,
+    criteria: {
+      doi?: string | null;
+      arxivId?: string | null;
+      pmid?: string | null;
+      isbn?: string | null;
+      titleWords?: string[];
+      titlePrefix?: string;
+    },
+  ): Promise<{
+    exactMatch?: {
+      id: string;
+      title: string;
+      matchReason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
+      evidence: Record<string, any>;
+    } | null;
+    candidateItems: Array<{
+      id: string;
+      title: string;
+      doi: string | null;
+      year: number | null;
+      citationKey: string | null;
+      authors: string[];
+    }>;
+  }>;
 }

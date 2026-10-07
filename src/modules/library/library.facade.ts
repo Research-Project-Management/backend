@@ -58,7 +58,14 @@ export interface LibraryItemDetail extends LibraryItemSummary {
   collections: CollectionSummaryDto[];
 }
 
+export type SyncChangeDto = LibraryChange;
+export type SyncTombstoneDto = Tombstone;
+
 export interface ILibraryFacade {
+  readonly catalog?: CatalogFacade;
+  readonly extraction?: ExtractionFacade;
+  readonly citation?: CitationFacade;
+  readonly search?: SearchFacade;
   exportBibByCitationKeys(
     userId: string,
     citeKeys: string[],
@@ -91,12 +98,12 @@ export interface ILibraryFacade {
     scope: { userId?: string; projectId?: string } | string,
     sinceSeq?: bigint,
     limit?: number,
-  ): Promise<LibraryChange[]>;
+  ): Promise<SyncChangeDto[]>;
   getSyncTombstones(
     scope: { userId?: string; projectId?: string } | string,
     sinceSeq?: bigint,
     limit?: number,
-  ): Promise<Tombstone[]>;
+  ): Promise<SyncTombstoneDto[]>;
 }
 
 export const LIBRARY_FACADE = 'LIBRARY_FACADE';
@@ -115,12 +122,20 @@ export class LibraryFacade implements ILibraryFacade {
     @Optional() private readonly transactionService?: TransactionService,
   ) {}
 
-  get catalog(): CatalogFacade {
-    return this.catalogFacade!;
+  get catalog(): CatalogFacade | undefined {
+    return this.catalogFacade;
   }
 
-  get extraction(): ExtractionFacade {
-    return this.extractionFacade!;
+  get extraction(): ExtractionFacade | undefined {
+    return this.extractionFacade;
+  }
+
+  get citation(): CitationFacade | undefined {
+    return this.citationFacade;
+  }
+
+  get search(): SearchFacade | undefined {
+    return this.searchFacade;
   }
 
   async exportBibByCitationKeys(
@@ -137,6 +152,7 @@ export class LibraryFacade implements ILibraryFacade {
     itemId: string,
     projectId?: string,
   ): Promise<LibraryItemSummary | null> {
+    if (!this.catalogFacade) return null;
     const item = await this.catalogFacade.getItem(userId, itemId, projectId);
     if (!item) return null;
 
@@ -156,40 +172,53 @@ export class LibraryFacade implements ILibraryFacade {
     itemId: string,
     projectId?: string,
   ): Promise<LibraryItemDetail | null> {
+    if (!this.catalogFacade) return null;
     // Scatter-gather across Bounded Contexts (Microservices-Ready)
     const [catalogItem, attachmentsRes, notes] = await Promise.all([
       this.catalogFacade.getItem(userId, itemId, projectId),
-      this.extractionFacade.getItemAttachments(userId, itemId),
+      this.extractionFacade
+        ? this.extractionFacade.getItemAttachments(userId, itemId)
+        : Promise.resolve([]),
       this.catalogFacade.listNotes(userId, itemId, projectId),
     ]);
 
     if (!catalogItem) return null;
 
-    const rawAttachments = Array.isArray(attachmentsRes)
+    const rawAttachments: AttachmentEntity[] = Array.isArray(attachmentsRes)
       ? attachmentsRes
-      : attachmentsRes?.attachments || [];
+      : [];
 
     const attachments: AttachmentSummaryDto[] = rawAttachments.map(
-      (a: any) => ({
-        id: a.id,
-        filename: a.filename || a.title || 'untitled',
-        mimeType: a.mimeType || 'application/octet-stream',
-        size: a.size !== undefined ? a.size : null,
-        url: a.url || (a.fileId ? `/api/files/${a.fileId}/content` : null),
-        linkMode: a.linkMode || 'imported_file',
-        attachmentType: a.attachmentType || null,
+      (attachment) => ({
+        id: attachment.id,
+        filename: attachment.filename || 'untitled',
+        mimeType: attachment.mimeType || 'application/octet-stream',
+        size: attachment.size !== undefined ? attachment.size : null,
+        url:
+          attachment.url ||
+          (attachment.fileId
+            ? `/api/files/${attachment.fileId}/content`
+            : null),
+        linkMode: attachment.linkMode || 'imported_file',
+        attachmentType: attachment.attachmentType || null,
       }),
     );
 
     const rawNotes = Array.isArray(notes) ? notes : [];
-    const noteSummaries: NoteSummaryDto[] = rawNotes.map((n: any) => ({
-      id: n.id,
-      title: n.title || null,
-      content: n.content || n.contentMd || null,
-      contentMd: n.contentMd || n.content || null,
-      createdAt: n.createdAt,
-      updatedAt: n.updatedAt,
-    }));
+    const noteSummaries: NoteSummaryDto[] = rawNotes.map((note) => {
+      const untypedNote = note as {
+        content?: string | null;
+        contentMd?: string | null;
+      };
+      return {
+        id: note.id,
+        title: note.title || null,
+        content: untypedNote.content || note.contentMd || null,
+        contentMd: note.contentMd || untypedNote.content || null,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+      };
+    });
 
     interface ExtendedCatalogRelations {
       itemTags?: Array<{
@@ -223,40 +252,50 @@ export class LibraryFacade implements ILibraryFacade {
     let tags: TagSummaryDto[] = [];
     if (Array.isArray(extItem.itemTags)) {
       tags = extItem.itemTags
-        .map((it) => ({
-          id: it.tag?.id || it.tagId,
-          name: it.tag?.name || it.name || '',
-          color: it.tag?.color || null,
+        .map((itemTag) => ({
+          id: itemTag.tag?.id || itemTag.tagId,
+          name: itemTag.tag?.name || itemTag.name || '',
+          color: itemTag.tag?.color || null,
         }))
-        .filter((t: any): t is TagSummaryDto => Boolean(t.name));
+        .filter((tagSummary: any): tagSummary is TagSummaryDto =>
+          Boolean(tagSummary.name),
+        );
     } else if (Array.isArray(extItem.tags)) {
       tags = extItem.tags
-        .map((t) =>
-          typeof t === 'string'
-            ? { name: t }
-            : { id: t.id, name: t.name || t.tag || '', color: t.color || null },
+        .map((tagEntry) =>
+          typeof tagEntry === 'string'
+            ? { name: tagEntry }
+            : {
+                id: tagEntry.id,
+                name: tagEntry.name || tagEntry.tag || '',
+                color: tagEntry.color || null,
+              },
         )
-        .filter((t: any): t is TagSummaryDto => Boolean(t.name));
+        .filter((tagSummary: any): tagSummary is TagSummaryDto =>
+          Boolean(tagSummary.name),
+        );
     }
 
     let collections: CollectionSummaryDto[] = [];
     if (Array.isArray(extItem.collectionItems)) {
       collections = extItem.collectionItems
-        .filter((ci) => Boolean(ci.collection?.id || ci.collectionId))
-        .map((ci) => ({
-          id: (ci.collection?.id || ci.collectionId) as string,
-          name: ci.collection?.name || '',
-          color: ci.collection?.color || null,
-          parentId: ci.collection?.parentId || null,
+        .filter((itemRef) =>
+          Boolean(itemRef.collection?.id || itemRef.collectionId),
+        )
+        .map((itemRef) => ({
+          id: (itemRef.collection?.id || itemRef.collectionId) as string,
+          name: itemRef.collection?.name || '',
+          color: itemRef.collection?.color || null,
+          parentId: itemRef.collection?.parentId || null,
         }));
     } else if (Array.isArray(extItem.collections)) {
       collections = extItem.collections
-        .filter((c) => Boolean(c.id))
-        .map((c) => ({
-          id: c.id as string,
-          name: c.name || '',
-          color: c.color || null,
-          parentId: c.parentId || null,
+        .filter((collection) => Boolean(collection.id))
+        .map((collection) => ({
+          id: collection.id as string,
+          name: collection.name || '',
+          color: collection.color || null,
+          parentId: collection.parentId || null,
         }));
     }
 
@@ -279,6 +318,7 @@ export class LibraryFacade implements ILibraryFacade {
     userId: string,
     options?: { projectId?: string },
   ): Promise<number> {
+    if (!this.catalogFacade) return 0;
     return this.catalogFacade.countItems(userId, {
       view: 'all',
       ...(options?.projectId ? { projectId: options.projectId } : {}),
@@ -290,20 +330,21 @@ export class LibraryFacade implements ILibraryFacade {
     query: string,
     projectId?: string,
   ): Promise<LibraryItemSummary[]> {
+    if (!this.catalogFacade) return [];
     const items = await this.catalogFacade.findMany(userId, {
       search: query,
       limit: 20,
       ...(projectId ? { projectId } : {}),
     });
 
-    return items.map((it: any) => ({
-      id: it.id,
-      title: it.title,
-      doi: it.doi,
-      abstract: it.abstract,
-      year: it.year,
-      itemType: it.itemType || 'journalArticle',
-      authors: CslJsonMapper.getAuthorNames(it),
+    return items.map((catalogItem: any) => ({
+      id: catalogItem.id,
+      title: catalogItem.title,
+      doi: catalogItem.doi,
+      abstract: catalogItem.abstract,
+      year: catalogItem.year,
+      itemType: catalogItem.itemType || 'journalArticle',
+      authors: CslJsonMapper.getAuthorNames(catalogItem),
     }));
   }
 
@@ -311,12 +352,16 @@ export class LibraryFacade implements ILibraryFacade {
     buffer: Buffer,
     options?: any,
   ): Promise<ExtractedPdfDocument> {
+    if (!this.extractionFacade) {
+      throw new Error('ExtractionFacade is not available');
+    }
     return this.extractionFacade.extractDocumentFromBuffer(buffer, options);
   }
 
   async getSyncVersion(
     scope: { userId?: string; projectId?: string } | string,
   ): Promise<bigint> {
+    if (!this.transactionService) return BigInt(0);
     return this.transactionService.getLatestSequence(scope);
   }
 
@@ -324,7 +369,8 @@ export class LibraryFacade implements ILibraryFacade {
     scope: { userId?: string; projectId?: string } | string,
     sinceSeq: bigint = BigInt(0),
     limit: number = 100,
-  ): Promise<LibraryChange[]> {
+  ): Promise<SyncChangeDto[]> {
+    if (!this.transactionService) return [];
     return this.transactionService.getChangesSince(scope, sinceSeq, limit);
   }
 
@@ -332,7 +378,8 @@ export class LibraryFacade implements ILibraryFacade {
     scope: { userId?: string; projectId?: string } | string,
     sinceSeq?: bigint,
     limit: number = 100,
-  ): Promise<Tombstone[]> {
+  ): Promise<SyncTombstoneDto[]> {
+    if (!this.transactionService) return [];
     return this.transactionService.getTombstonesSince(scope, sinceSeq, limit);
   }
 }

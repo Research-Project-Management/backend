@@ -1,4 +1,4 @@
-import { OcrWorkerPoolService } from '@/modules/library/extraction/core/adapters/ocr-worker-pool.service';
+import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
 
 describe('OcrWorkerPoolService', () => {
   let service: OcrWorkerPoolService;

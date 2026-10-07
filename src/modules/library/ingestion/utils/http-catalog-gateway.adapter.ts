@@ -217,4 +217,46 @@ export class HttpCatalogGatewayAdapter implements ICatalogGatewayPort {
     const item = await this.getItem(userId, itemId, projectId);
     return item !== null;
   }
+
+  async findMatchCandidates(
+    scope: { userId?: string; projectId?: string | null } | string,
+    criteria: {
+      doi?: string | null;
+      arxivId?: string | null;
+      pmid?: string | null;
+      isbn?: string | null;
+      titleWords?: string[];
+      titlePrefix?: string;
+    },
+  ) {
+    const baseUrl = this.getBaseUrl();
+    const resolvedUserId =
+      typeof scope === 'object' && scope !== null
+        ? scope.userId || ''
+        : typeof scope === 'string'
+          ? scope
+          : '';
+    const resolvedProjectId =
+      typeof scope === 'object' && scope !== null ? scope.projectId : undefined;
+
+    const url = resolvedProjectId
+      ? `${baseUrl}/api/v1/projects/${resolvedProjectId}/library/items/match-candidates`
+      : `${baseUrl}/api/v1/library/items/match-candidates`;
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'x-user-id': resolvedUserId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(criteria),
+      });
+      if (!res.ok) return { exactMatch: null, candidateItems: [] };
+      const json = await res.json();
+      return json?.data ?? json;
+    } catch {
+      return { exactMatch: null, candidateItems: [] };
+    }
+  }
 }

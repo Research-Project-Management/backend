@@ -146,6 +146,8 @@ export abstract class BaseItemController {
       {
         projectId: effectiveProjectId,
         source: 'manual',
+        idempotencyKey,
+        correlationId,
       },
       effectiveProjectId,
     );
@@ -730,3 +732,5 @@ export class ProjectItemController extends BaseItemController {
     return this.executeBulkRestoreItems(userId, body, projectId);
   }
 }
+
+export { ItemController as ItemsController };

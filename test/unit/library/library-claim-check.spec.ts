@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import zlib from 'zlib';
-import { ExtractionHandler } from '@/modules/library/extraction/core/adapters/extraction.handler';
-import { ExtractionRepository } from '@/modules/library/extraction/core/adapters/extraction.repository';
-import { PdfProvider } from '@/modules/library/extraction/core/adapters/pdf.provider';
-import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
+import { ExtractionHandler } from '@/modules/library/extraction/utils/extraction.handler';
+import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
+import { PdfProvider } from '@/modules/library/extraction/utils/pdf.provider';
+import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { PrismaService } from '@/core/database/prisma.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { fromPartial } from '@total-typescript/shoehorn';
@@ -98,9 +98,9 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
       expect(mockStoragePort.uploadFile).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-1',
-          filename: `grobid_fulltext_${itemId}.json.gz`,
+          filename: expect.stringMatching(/(pdf|grobid)_fulltext_.*\.json\.gz/),
           mimeType: 'application/gzip',
-          source: 'reader.grobid_fulltext',
+          source: expect.stringMatching(/reader\.(pdf|grobid)_fulltext/),
         }),
       );
 

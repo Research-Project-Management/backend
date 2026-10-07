@@ -1,5 +1,5 @@
-import { SyncController } from '@/modules/library/sync/sync.controller';
-import { TransactionService } from '@/modules/library/sync/core/adapters/transaction.service';
+import { SyncController } from '@/modules/library/sync/controllers/sync.controller';
+import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 import { SyncQueryDto } from '@/modules/library/sync/dto/sync-query.dto';
 
 describe('SyncController (Library Distributed Sync API)', () => {

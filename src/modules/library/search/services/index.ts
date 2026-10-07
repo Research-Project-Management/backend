@@ -2,5 +2,4 @@ export * from './full-text.provider';
 export * from './search.service';
 export * from './search-engine.adapter';
 export * from './vector-search.adapter';
-export * from './event.handler';
-export * from './catalog-events.subscriber';
+export * from './search-events.subscriber';

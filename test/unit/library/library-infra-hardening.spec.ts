@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { OutboxWorker } from '@/modules/library/sync/core/adapters/outbox.worker';
-import { IdempotencyRepository } from '@/modules/library/ingestion/core/adapters/idempotency.repository';
-import { ChangeLogRepository } from '@/modules/library/sync/core/adapters/changelog.repository';
+import { OutboxWorker } from '@/modules/library/sync/services/outbox.worker';
+import { IdempotencyRepository } from '@/modules/library/ingestion/repositories/idempotency.repository';
+import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
 import { PrismaService } from '@/core/database/prisma.service';
 import { OutboxStatus } from '@prisma/client';
 

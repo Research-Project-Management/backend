@@ -82,7 +82,7 @@ services:
           - flux_redis
 
   # ----------------------------------------------------------------------------
-  # 5. NestJS Fastify Backend Application Service (Production Target: runner)
+  # 3. NestJS Fastify Backend Application Service (Production Target: runner)
   # ----------------------------------------------------------------------------
   be:
     profiles:
@@ -136,7 +136,7 @@ services:
           - backend
 
   # ----------------------------------------------------------------------------
-  # 6. Dedicated BullMQ Background Worker Service
+  # 4. Dedicated BullMQ Background Worker Service
   # ----------------------------------------------------------------------------
   worker:
     build:
@@ -192,7 +192,7 @@ services:
           - flux_worker
 
   # ----------------------------------------------------------------------------
-  # 7. Common LaTeX Service Interface (CLSI) Microservice
+  # 5. Common LaTeX Service Interface (CLSI) Microservice
   # ----------------------------------------------------------------------------
   clsi:
     image: ghcr.io/research-project-management/clsi:latest

@@ -26,14 +26,23 @@ export class PostgresFtsAdapter implements ISearchEnginePort {
       limit: query.limit,
     });
 
-    const hits = (raw?.items || []).map((it: any) => ({
-      id: it.id,
-      title: it.title,
-      doi: it.doi,
-      abstract: it.abstract,
-      year: it.year,
-      score: it.score ?? 1.0,
-    }));
+    const hits = (raw?.items || []).map(
+      (item: {
+        id: string;
+        title: string;
+        doi?: string | null;
+        abstract?: string | null;
+        year?: number | null;
+        score?: number;
+      }) => ({
+        id: item.id,
+        title: item.title,
+        doi: item.doi,
+        abstract: item.abstract,
+        year: item.year,
+        score: item.score ?? 1.0,
+      }),
+    );
 
     return {
       hits,

@@ -1,3 +1,4 @@
+import { Injectable } from '@nestjs/common';
 import {
   CitationStyleId,
   CitationItemInput,
@@ -92,6 +93,7 @@ export const SUPPORTED_CITATION_STYLES: ReadonlyArray<StyleSummary> = [
   },
 ];
 
+@Injectable()
 export class CslStyleRegistry {
   private readonly styleMap = new Map<CitationStyleId, StyleSummary>();
 

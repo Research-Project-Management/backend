@@ -130,8 +130,15 @@ export class CitationService {
     styleId: CitationStyleId = 'apa-7th',
   ): {
     styleId: CitationStyleId;
-    citations: Array<{ id?: string; inText: string; bibliography: string }>;
+    combinedInText: string;
     bibliographyText: string;
+    bibliographyHtml?: string;
+    citations: Array<{
+      id?: string;
+      inText: string;
+      bibliography: string;
+      bibliographyHtml?: string;
+    }>;
   } {
     const style = this.registry.getStyle(styleId);
     if (!style) {
@@ -144,8 +151,10 @@ export class CitationService {
         const res = this.cslEngine.formatBatch(cslItems, styleId);
         return {
           styleId,
-          citations: res.citations,
+          combinedInText: res.combinedInText,
           bibliographyText: res.bibliographyText,
+          bibliographyHtml: res.bibliographyHtml,
+          citations: res.citations,
         };
       } catch (err: any) {
         this.logger.warn(
@@ -160,15 +169,27 @@ export class CitationService {
         id: item.id,
         inText: res.inText || '',
         bibliography: res.bibliography || '',
+        bibliographyHtml: res.bibliographyHtml || '',
       };
     });
+
+    const isNumeric = ['ieee', 'nature', 'vancouver'].some((s) =>
+      styleId.includes(s),
+    );
+    const inTexts = citations
+      .map((c) => c.inText.replace(/^\(|\)$/g, ''))
+      .filter(Boolean);
+    const combinedInText = isNumeric
+      ? `[${citations.map((_, idx) => idx + 1).join(', ')}]`
+      : `(${inTexts.join('; ')})`;
 
     const bibliographyText = citations.map((c) => c.bibliography).join('\n\n');
 
     return {
       styleId,
-      citations,
+      combinedInText,
       bibliographyText,
+      citations,
     };
   }
 
@@ -607,58 +628,74 @@ export class CitationService {
       ? await this.catalogGateway.findByIds(userId, itemIds, projectId)
       : [];
 
-    if (this.cslEngine) {
+    let combinedInText = '';
+    let bibliographyText = '';
+    let bibliographyHtml = '';
+    const citationMap = new Map<string, FormattedCitationResult>();
+
+    // Primary Tier: Use official CSL Engine to format the entire batch together
+    // This correctly resolves author-date grouping, numeric collapsing [1]-[3], and A-Z / numeric sorting!
+    if (this.cslEngine && items.length > 0) {
       await this.cslEngine.ensureTemplate(styleId);
+      try {
+        const cslItems = items.map((it) => CslJsonMapper.toCsl(it));
+        const batchRes = this.cslEngine.formatBatch(cslItems, styleId);
+        combinedInText = batchRes.combinedInText;
+        bibliographyText = batchRes.bibliographyText;
+        bibliographyHtml = batchRes.bibliographyHtml;
+
+        for (let i = 0; i < items.length; i++) {
+          const dbItem = items[i];
+          const single = batchRes.citations[i];
+          if (single) {
+            citationMap.set(dbItem.id, {
+              styleId,
+              inText: single.inText,
+              bibliography: single.bibliography,
+              bibliographyHtml: single.bibliographyHtml,
+              source: 'csl-engine',
+            });
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `CslEngineService formatBatch error: ${err?.message || err}. Falling back to individual formatting.`,
+        );
+      }
     }
 
-    const citationMap = new Map<string, FormattedCitationResult>();
+    // Secondary Tier: Fill in any missing items that were not formatted by CslEngine
     for (let index = 0; index < items.length; index++) {
       const item: any = items[index];
+      if (citationMap.has(item.id)) continue;
+
       let formatted: FormattedCitationResult | undefined;
 
-      // Tier 1: Official In-Process CSL Engine
-      if (this.cslEngine) {
-        try {
-          const cslItem = CslJsonMapper.toCsl(item);
-          const engineRes = this.cslEngine.format(cslItem, styleId, index + 1);
-          if (engineRes && engineRes.bibliography) {
-            formatted = {
-              styleId,
-              inText: engineRes.inText,
-              bibliography: engineRes.bibliography,
-              bibliographyHtml: engineRes.bibliographyHtml,
-              source: 'csl-engine',
-            };
-          }
-        } catch (err: any) {
-          this.logger.warn(
-            `CslEngineService format error for batch item ${item.id}: ${err?.message || err}. Falling back to publisher DOI.`,
-          );
-        }
-      }
-
-      // Tier 2: Fallback to publisher DOI content negotiation
+      // Fallback to publisher DOI content negotiation
       if (
-        !formatted &&
         item.doi &&
         this.doiService &&
         styleId !== 'bibtex' &&
         styleId !== 'ris'
       ) {
-        const doiCitation = await this.doiService.resolveCitation(
-          item.doi,
-          styleId,
-        );
-        if (doiCitation) {
-          formatted = {
+        try {
+          const doiCitation = await this.doiService.resolveCitation(
+            item.doi,
             styleId,
-            inText:
-              doiCitation.inText ||
-              `(${item.contributors?.[0]?.lastName || 'Anonymous'}, ${item.year || 'n.d.'})`,
-            bibliography: doiCitation.bibliography,
-            bibliographyHtml: doiCitation.bibliographyHtml,
-            source: 'publisher',
-          };
+          );
+          if (doiCitation) {
+            formatted = {
+              styleId,
+              inText:
+                doiCitation.inText ||
+                `(${item.contributors?.[0]?.lastName || 'Anonymous'}, ${item.year || 'n.d.'})`,
+              bibliography: doiCitation.bibliography,
+              bibliographyHtml: doiCitation.bibliographyHtml,
+              source: 'publisher',
+            };
+          }
+        } catch {
+          // ignore
         }
       }
 
@@ -699,6 +736,7 @@ export class CitationService {
 
     const citations = itemIds.map((id) => ({
       itemId: id,
+      paperId: id,
       citation: citationMap.get(id) || {
         styleId,
         inText: '',
@@ -706,9 +744,35 @@ export class CitationService {
       },
     }));
 
+    if (!combinedInText && citations.length > 0) {
+      const isNumeric = [
+        'ieee',
+        'nature',
+        'vancouver',
+        'the-lancet',
+        'science',
+      ].some((s) => styleId.includes(s));
+      const inTexts = citations
+        .map((c) => c.citation?.inText?.replace(/^\(|\)$/g, ''))
+        .filter(Boolean);
+      combinedInText = isNumeric
+        ? `[${citations.map((_, idx) => idx + 1).join(', ')}]`
+        : `(${inTexts.join('; ')})`;
+    }
+
+    if (!bibliographyText && citations.length > 0) {
+      bibliographyText = citations
+        .map((c) => c.citation?.bibliography)
+        .filter(Boolean)
+        .join('\n\n');
+    }
+
     return {
       style: styleId,
       total: citations.length,
+      combinedInText,
+      bibliographyText,
+      bibliographyHtml,
       citations,
     };
   }

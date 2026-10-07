@@ -19,7 +19,7 @@ import {
   sanitizeNoteTitle,
   sanitizeNoteContent,
 } from '../utils/notes.utils';
-import { TransactionService, TransactionHelpers } from '../../sync';
+import { TransactionService, TransactionHelpers } from '../../shared-kernel';
 import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
 import type {
   UpsertSyncNoteCommand,

@@ -1,60 +1,86 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AttachmentsService } from './services/attachments.service';
 import { PdfProvider, ExtractedPdfDocument } from './utils/pdf.provider';
 import { WebSnapshotService } from './services/web-snapshot.service';
 import { AnnotationsService } from './services/annotations.service';
 import { TrustedExtractionService } from './services/trusted-extraction.service';
 import { TrustedExtractionResult } from './types/trusted-extraction.types';
+import {
+  AttachmentEntity,
+  CreateAttachmentInput,
+} from './types/attachments.types';
+import {
+  AnnotationEntity,
+  CreateAnnotationData,
+  UpdateAnnotationData,
+  BatchAnnotationsData,
+  BatchAnnotationsResult,
+  AnnotationType,
+} from './types/annotations.types';
 
 export const EXTRACTION_FACADE = 'EXTRACTION_FACADE';
 
 export interface IExtractionFacade {
-  getItemAttachments(userId: string, itemId: string): Promise<any>;
+  getItemAttachments(
+    userId: string,
+    itemId: string,
+  ): Promise<AttachmentEntity[]>;
   getItemAttachment(
     userId: string,
     attachmentId: string,
     itemId?: string,
     projectId?: string,
-  ): Promise<any>;
-  createAttachment(data: any, projectId?: string): Promise<any>;
+  ): Promise<AttachmentEntity | null>;
+  createAttachment(
+    data: CreateAttachmentInput,
+    projectId?: string,
+  ): Promise<AttachmentEntity>;
   extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: any,
+    options?: Record<string, any>,
   ): Promise<ExtractedPdfDocument>;
-  extractMetadataFromBuffer(buffer: Buffer): any;
+  extractMetadataFromBuffer(buffer: Buffer): Record<string, any>;
   extractTrustedMetadata(
     buffer: Buffer,
     preferredFilename?: string,
   ): Promise<TrustedExtractionResult>;
-  captureWebSnapshot(url: string, itemId: string, userId: string): Promise<any>;
+  captureWebSnapshot(
+    url: string,
+    itemId: string,
+    userId: string,
+  ): Promise<AttachmentEntity>;
   reassignContentToItem(
     duplicateItemIds: string[],
     primaryItemId: string,
-    tx?: any,
+    tx?: Prisma.TransactionClient,
   ): Promise<void>;
   // Annotation delegation methods
   getAnnotationsByAttachment(
     userId: string,
     attachmentId: string,
-  ): Promise<any[]>;
+  ): Promise<AnnotationEntity[]>;
   getAnnotationsByAttachmentFull(
     userId: string,
     attachmentId: string,
     pageIndex?: number,
-    type?: any,
-  ): Promise<any[]>;
+    type?: AnnotationType,
+  ): Promise<AnnotationEntity[]>;
   getAnnotation(
     userId: string,
     annotationId: string,
     projectId?: string,
-  ): Promise<any | null>;
-  createAnnotation(userId: string, data: any): Promise<any>;
+  ): Promise<AnnotationEntity | null>;
+  createAnnotation(
+    userId: string,
+    data: CreateAnnotationData,
+  ): Promise<AnnotationEntity>;
   updateAnnotation(
     userId: string,
     annotationId: string,
     expectedVersion: number,
-    data: any,
-  ): Promise<any>;
+    data: UpdateAnnotationData,
+  ): Promise<AnnotationEntity>;
   deleteAnnotation(
     userId: string,
     annotationId: string,
@@ -63,9 +89,16 @@ export interface IExtractionFacade {
   batchUpsertAnnotations(
     userId: string,
     attachmentId: string,
-    data: any,
-  ): Promise<any>;
-  listAnnotations(userId: string, filters?: any): Promise<any[]>;
+    data: BatchAnnotationsData,
+  ): Promise<BatchAnnotationsResult>;
+  listAnnotations(
+    userId: string,
+    filters?: {
+      attachmentId?: string;
+      pageIndex?: number;
+      type?: AnnotationType;
+    },
+  ): Promise<AnnotationEntity[]>;
 }
 
 @Injectable()
@@ -78,8 +111,15 @@ export class ExtractionFacade implements IExtractionFacade {
     private readonly trustedExtractor: TrustedExtractionService,
   ) {}
 
-  async getItemAttachments(userId: string, itemId: string): Promise<any> {
-    return this.attachmentsService.getItemAttachments(userId, itemId);
+  async getItemAttachments(
+    userId: string,
+    itemId: string,
+  ): Promise<AttachmentEntity[]> {
+    const res = await this.attachmentsService.getItemAttachments(
+      userId,
+      itemId,
+    );
+    return (res.attachments || []) as unknown as AttachmentEntity[];
   }
 
   async getItemAttachment(
@@ -87,27 +127,31 @@ export class ExtractionFacade implements IExtractionFacade {
     attachmentId: string,
     itemId?: string,
     projectId?: string,
-  ): Promise<any> {
-    return this.attachmentsService.getItemAttachment(
+  ): Promise<AttachmentEntity | null> {
+    const res = await this.attachmentsService.getItemAttachment(
       userId,
       itemId,
       attachmentId,
       projectId,
     );
+    return (res?.attachment || null) as unknown as AttachmentEntity | null;
   }
 
-  async createAttachment(data: any, projectId?: string): Promise<any> {
+  async createAttachment(
+    data: CreateAttachmentInput,
+    projectId?: string,
+  ): Promise<AttachmentEntity> {
     return this.attachmentsService.createAttachment(data, projectId);
   }
 
   async extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: any,
+    options?: Record<string, any>,
   ): Promise<ExtractedPdfDocument> {
     return this.pdfProvider.extractDocumentFromBuffer(buffer, options);
   }
 
-  extractMetadataFromBuffer(buffer: Buffer): any {
+  extractMetadataFromBuffer(buffer: Buffer): Record<string, any> {
     return this.pdfProvider.extractMetadataFromBuffer(buffer);
   }
 
@@ -122,14 +166,19 @@ export class ExtractionFacade implements IExtractionFacade {
     url: string,
     itemId: string,
     userId: string,
-  ): Promise<any> {
-    return this.webSnapshotService.captureAndAttach(url, itemId, userId);
+  ): Promise<AttachmentEntity> {
+    const res = await this.webSnapshotService.captureAndAttach(
+      url,
+      itemId,
+      userId,
+    );
+    return res.attachment as unknown as AttachmentEntity;
   }
 
   async reassignContentToItem(
     duplicateItemIds: string[],
     primaryItemId: string,
-    tx?: any,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
     await this.attachmentsService.reassignToItem(
       duplicateItemIds,
@@ -143,7 +192,7 @@ export class ExtractionFacade implements IExtractionFacade {
   async getAnnotationsByAttachment(
     userId: string,
     attachmentId: string,
-  ): Promise<any[]> {
+  ): Promise<AnnotationEntity[]> {
     return this.annotationsService.getAnnotationsByAttachment(
       userId,
       attachmentId,
@@ -154,8 +203,8 @@ export class ExtractionFacade implements IExtractionFacade {
     userId: string,
     attachmentId: string,
     pageIndex?: number,
-    type?: any,
-  ): Promise<any[]> {
+    type?: AnnotationType,
+  ): Promise<AnnotationEntity[]> {
     return this.annotationsService.getAnnotationsByAttachment(
       userId,
       attachmentId,
@@ -168,11 +217,14 @@ export class ExtractionFacade implements IExtractionFacade {
     userId: string,
     annotationId: string,
     _projectId?: string,
-  ): Promise<any | null> {
+  ): Promise<AnnotationEntity | null> {
     return this.annotationsService.getAnnotation(userId, annotationId);
   }
 
-  async createAnnotation(userId: string, data: any): Promise<any> {
+  async createAnnotation(
+    userId: string,
+    data: CreateAnnotationData,
+  ): Promise<AnnotationEntity> {
     return this.annotationsService.createAnnotation(userId, data);
   }
 
@@ -180,8 +232,8 @@ export class ExtractionFacade implements IExtractionFacade {
     userId: string,
     annotationId: string,
     expectedVersion: number,
-    data: any,
-  ): Promise<any> {
+    data: UpdateAnnotationData,
+  ): Promise<AnnotationEntity> {
     return this.annotationsService.updateAnnotation(
       userId,
       annotationId,
@@ -205,8 +257,8 @@ export class ExtractionFacade implements IExtractionFacade {
   async batchUpsertAnnotations(
     userId: string,
     attachmentId: string,
-    data: any,
-  ): Promise<any> {
+    data: BatchAnnotationsData,
+  ): Promise<BatchAnnotationsResult> {
     return this.annotationsService.batchUpsertAnnotations(
       userId,
       attachmentId,
@@ -214,7 +266,14 @@ export class ExtractionFacade implements IExtractionFacade {
     );
   }
 
-  async listAnnotations(userId: string, filters?: any): Promise<any[]> {
+  async listAnnotations(
+    userId: string,
+    filters?: {
+      attachmentId?: string;
+      pageIndex?: number;
+      type?: AnnotationType;
+    },
+  ): Promise<AnnotationEntity[]> {
     if (filters?.attachmentId) {
       return this.annotationsService.getAnnotationsByAttachment(
         userId,

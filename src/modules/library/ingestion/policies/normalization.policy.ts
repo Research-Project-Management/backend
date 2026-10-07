@@ -20,9 +20,9 @@ import {
   normalizeItemType,
   normalizePageRange,
   isInstitutionName,
-  stripLatexBraces as stripLatexBracesMathAware,
+  stripLatexBraces,
 } from '../../shared-kernel/utils/bibliographic.utils';
-import { normalizeTags as canonicalNormalizeTags } from '../../shared-kernel/utils/tag.utils';
+import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
 
 export class NormalizationPolicy {
   private static readonly BANNED_STRINGS = new Set([
@@ -46,9 +46,7 @@ export class NormalizationPolicy {
     if (raw.title) {
       const cleanTitle = this.cleanString(raw.title);
       if (cleanTitle) {
-        result.title = normalizeAcademicTitleCase(
-          this.stripLatexBraces(cleanTitle),
-        );
+        result.title = normalizeAcademicTitleCase(stripLatexBraces(cleanTitle));
       }
     }
 
@@ -56,7 +54,7 @@ export class NormalizationPolicy {
       const cleanShort = this.cleanString(raw.shortTitle);
       if (cleanShort) {
         result.shortTitle = normalizeAcademicTitleCase(
-          this.stripLatexBraces(cleanShort),
+          stripLatexBraces(cleanShort),
         );
       }
     }
@@ -232,7 +230,7 @@ export class NormalizationPolicy {
     if (Array.isArray(raw.labels)) rawTagList.push(...raw.labels);
 
     if (rawTagList.length > 0) {
-      const normalizedTags = this.normalizeTags(rawTagList);
+      const normalizedTags = normalizeTags(rawTagList);
       if (normalizedTags.length > 0) {
         result.tags = normalizedTags;
         result.keywords = normalizedTags;
@@ -446,10 +444,6 @@ export class NormalizationPolicy {
     return cleaned;
   }
 
-  private stripLatexBraces(str: string): string {
-    return stripLatexBracesMathAware(str);
-  }
-
   private normalizeCreators(
     creatorsInput?: CreatorInput[],
     authorsInput?: string[],
@@ -581,9 +575,5 @@ export class NormalizationPolicy {
     }
 
     return list;
-  }
-
-  private normalizeTags(tags: string[]): string[] {
-    return canonicalNormalizeTags(tags);
   }
 }

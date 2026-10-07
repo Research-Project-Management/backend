@@ -230,4 +230,27 @@ export class AttachmentsRepository {
       }
     });
   }
+
+  async deleteManyByItemId(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const result = await client.attachment.deleteMany({
+      where: { itemId },
+    });
+    return result.count;
+  }
+
+  async softDeleteByItemId(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const result = await client.attachment.updateMany({
+      where: { itemId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    return result.count;
+  }
 }

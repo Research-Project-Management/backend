@@ -1,17 +1,22 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
+import { Prisma } from '@prisma/client';
 
 /** Maximum number of items exported in a single request. */
 export const EXPORT_MAX_ITEMS = 1000;
 /** Cursor-page size used when fetching from the DB. */
 export const EXPORT_CHUNK_SIZE = 200;
 
+/**
+ * ExportsRepository — CQRS Read-Side Optimized Data Store for Bulk Citation Export.
+ * Serves read-only projection streaming to prevent N+1 queries across thousands of items.
+ */
 @Injectable()
 export class ExportsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async fetchItemsInChunks(
-    where: any,
+    where: Prisma.ItemWhereInput,
     maxItems: number = EXPORT_MAX_ITEMS,
     chunkSize: number = EXPORT_CHUNK_SIZE,
   ): Promise<{ items: any[]; truncated: boolean }> {
@@ -72,7 +77,7 @@ export class ExportsRepository {
     });
   }
 
-  async findItems(where: any, take?: number) {
+  async findItems(where: Prisma.ItemWhereInput, take?: number) {
     return this.prisma.item.findMany({
       where,
       include: {
@@ -85,7 +90,7 @@ export class ExportsRepository {
   }
 
   async findItemById(userId: string, itemId: string, projectId?: string) {
-    const scopeWhere =
+    const scopeWhere: Prisma.ItemWhereInput =
       projectId && projectId !== 'user'
         ? { projectId }
         : { userId, projectId: null };
@@ -108,7 +113,7 @@ export class ExportsRepository {
     });
   }
 
-  async findItemsByScope(scopeWhere: any) {
+  async findItemsByScope(scopeWhere: Prisma.ItemWhereInput) {
     return this.prisma.item.findMany({
       where: scopeWhere,
       include: {

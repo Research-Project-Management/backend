@@ -44,9 +44,10 @@ export interface AttachmentEntity {
   mimeType: string;
   linkMode?: LinkMode;
   attachmentType: AttachmentType;
-  uploadedAt: Date;
-  extractionStatus: AttachmentExtractionStatus;
-  extractionAttempts: number;
+  uploadedAt?: Date;
+  createdAt?: Date;
+  extractionStatus?: AttachmentExtractionStatus;
+  extractionAttempts?: number;
   extractionStartedAt?: Date | null;
   extractionCompletedAt?: Date | null;
   extractionLastError?: string | null;

@@ -73,14 +73,6 @@ export class TagController {
     });
   }
 
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Delete a tag' })
-  async deleteTag(@CurrentUser('id') userId: string, @Param('id') id: string) {
-    return this.tagsService.deleteTag(userId, id);
-  }
-
   @Delete('automatic')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete all automatic tags' })
@@ -93,23 +85,36 @@ export class TagController {
     return this.tagsService.deleteAutomaticTags(userId, projectId);
   }
 
-  @Post('items/:itemId/assign')
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({ summary: 'Delete a tag' })
+  async deleteTag(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return this.tagsService.deleteTag(userId, id);
+  }
+
+  @Post([':tagId/items/:itemId', 'items/:itemId/assign'])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Assign a tag to an item' })
   async assignTag(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    @Body() body: { tagId: string; type?: string },
+    @Param('tagId') paramTagId?: string,
+    @Body() body?: { tagId?: string; type?: string },
   ) {
+    const effectiveTagId = paramTagId || body?.tagId;
+    if (!effectiveTagId) {
+      throw new BadRequestException('tagId is required');
+    }
     return this.tagsService.assignTagToItem(
       userId,
       itemId,
-      body.tagId,
-      body.type as TagType | undefined,
+      effectiveTagId,
+      body?.type as TagType | undefined,
     );
   }
 
-  @Delete('items/:itemId/tags/:tagId')
+  @Delete([':tagId/items/:itemId', 'items/:itemId/tags/:tagId'])
   @HttpCode(HttpStatus.NO_CONTENT)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Detach a tag from an item' })

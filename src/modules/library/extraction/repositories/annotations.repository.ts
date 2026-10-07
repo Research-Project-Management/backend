@@ -9,7 +9,7 @@ import {
   UpsertAnnotationItem,
   BatchAnnotationsResult,
 } from '../types/annotations.types';
-import { buildAnnotationSortIndex } from '../utils/sort-index.util';
+import { buildAnnotationSortIndex } from '../../shared-kernel';
 
 export { AnnotationEntity, CreateAnnotationData, UpdateAnnotationData };
 
@@ -284,5 +284,32 @@ export class AnnotationsRepository {
     }
 
     return { created, updated, deleted };
+  }
+
+  async deleteManyByItemId(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const result = await client.annotation.deleteMany({
+      where: { attachment: { itemId } },
+    });
+    return result.count;
+  }
+
+  async softDeleteByAttachmentIds(
+    attachmentIds: string[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    if (!attachmentIds || attachmentIds.length === 0) return 0;
+    const client = this.getClient(tx);
+    const result = await client.annotation.updateMany({
+      where: {
+        attachmentId: { in: attachmentIds },
+        deletedAt: null,
+      },
+      data: { deletedAt: new Date() },
+    });
+    return result.count;
   }
 }

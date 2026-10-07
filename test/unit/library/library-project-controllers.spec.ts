@@ -1,13 +1,13 @@
 import { ProjectItemController } from '@/modules/library/catalog/items.controller';
-import { ProjectCollectionController } from '@/modules/library/catalog/collections.controller';
-import { ProjectItemCurationController } from '@/modules/library/catalog/item-curation.controller';
-import { ProjectSavedSearchesController } from '@/modules/library/catalog/saved-searches.controller';
+import { ProjectCollectionController } from '@/modules/library/catalog/controllers/collections.controller';
+import { ProjectItemCurationController } from '@/modules/library/catalog/controllers/item-curation.controller';
+import { ProjectSavedSearchesController } from '@/modules/library/catalog/controllers/saved-searches.controller';
 import {
   ProjectStateController,
   ProjectStateBatchController,
-} from '@/modules/library/catalog/state.controller';
-import { ProjectAttachmentController } from '@/modules/library/extraction/attachments.controller';
-import { ProjectIngestionController } from '@/modules/library/ingestion/ingestion.controller';
+} from '@/modules/library/catalog/controllers/state.controller';
+import { ProjectAttachmentController } from '@/modules/library/extraction/controllers/attachments.controller';
+import { ProjectIngestionController } from '@/modules/library/ingestion/controllers/ingestion.controller';
 
 describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)', () => {
   const sampleProjectId = '11111111-2222-4333-8444-555555555555';
@@ -16,54 +16,39 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
 
   describe('ProjectItemController', () => {
     let controller: ProjectItemController;
-    let mockListUseCase: { execute: jest.Mock };
-    let mockGetUseCase: { execute: jest.Mock };
-    let mockCreateUseCase: { execute: jest.Mock };
+    let mockItemService: {
+      listItems: jest.Mock;
+      getItem: jest.Mock;
+      createItem: jest.Mock;
+    };
 
     beforeEach(() => {
-      mockListUseCase = {
-        execute: jest.fn().mockResolvedValue({
+      mockItemService = {
+        listItems: jest.fn().mockResolvedValue({
           items: [{ id: sampleItemId, title: 'Project Paper' }],
-          pagination: { hasNextPage: false, totalCount: 1 },
+          meta: { hasNextPage: false, totalCount: 1 },
         }),
-      };
-      mockGetUseCase = {
-        execute: jest.fn().mockResolvedValue({
+        getItem: jest.fn().mockResolvedValue({
           id: sampleItemId,
           title: 'Project Paper',
         }),
-      };
-      mockCreateUseCase = {
-        execute: jest.fn().mockResolvedValue({
+        createItem: jest.fn().mockResolvedValue({
           id: sampleItemId,
           title: 'New Paper',
         }),
       };
 
-      controller = new ProjectItemController(
-        mockCreateUseCase as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        mockGetUseCase as any,
-        mockListUseCase as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-      );
+      controller = new ProjectItemController(mockItemService as any);
     });
 
-    it('should pass projectId strictly to listItemsUseCase', async () => {
+    it('should pass projectId strictly to listItems', async () => {
       const result = await controller.listItems(sampleUserId, sampleProjectId, {
         view: 'all',
       });
 
-      expect(mockListUseCase.execute).toHaveBeenCalledWith(
+      expect(mockItemService.listItems).toHaveBeenCalledWith(
+        sampleUserId,
         expect.objectContaining({
-          userId: sampleUserId,
           projectId: sampleProjectId,
           view: 'all',
         }),
@@ -71,60 +56,55 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
       expect(result.items.length).toBe(1);
     });
 
-    it('should pass projectId strictly to getItemUseCase', async () => {
+    it('should pass projectId strictly to getItem', async () => {
       const item = await controller.getItem(
         sampleItemId,
         sampleUserId,
         sampleProjectId,
       );
 
-      expect(mockGetUseCase.execute).toHaveBeenCalledWith({
-        userId: sampleUserId,
-        itemId: sampleItemId,
-        projectId: sampleProjectId,
-      });
+      expect(mockItemService.getItem).toHaveBeenCalledWith(
+        sampleUserId,
+        sampleItemId,
+        sampleProjectId,
+      );
       expect(item.id).toBe(sampleItemId);
     });
 
-    it('should pass projectId strictly to createItemUseCase', async () => {
+    it('should pass projectId strictly to createItem', async () => {
       await controller.createItem(sampleUserId, sampleProjectId, {
         title: 'New Paper',
         itemType: 'journalArticle',
-      });
+      } as any);
 
-      expect(mockCreateUseCase.execute).toHaveBeenCalledWith(
+      expect(mockItemService.createItem).toHaveBeenCalledWith(
+        sampleUserId,
         expect.objectContaining({
-          userId: sampleUserId,
-          projectId: sampleProjectId,
           title: 'New Paper',
         }),
+        expect.objectContaining({
+          projectId: sampleProjectId,
+        }),
+        sampleProjectId,
       );
     });
   });
 
   describe('ProjectCollectionController', () => {
     let controller: ProjectCollectionController;
-    let mockGetCollectionsUseCase: { execute: jest.Mock };
+    let mockCollectionsService: {
+      getCollections: jest.Mock;
+    };
 
     beforeEach(() => {
-      mockGetCollectionsUseCase = {
-        execute: jest
+      mockCollectionsService = {
+        getCollections: jest
           .fn()
           .mockResolvedValue([{ id: 'col-1', name: 'Project Collection' }]),
       };
 
       controller = new ProjectCollectionController(
-        mockGetCollectionsUseCase as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
+        mockCollectionsService as any,
       );
     });
 
@@ -134,10 +114,10 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
         sampleProjectId,
       );
 
-      expect(mockGetCollectionsUseCase.execute).toHaveBeenCalledWith({
-        userId: sampleUserId,
-        projectId: sampleProjectId,
-      });
+      expect(mockCollectionsService.getCollections).toHaveBeenCalledWith(
+        sampleUserId,
+        sampleProjectId,
+      );
       expect(result).toHaveLength(1);
     });
   });
@@ -185,8 +165,8 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
     it('should query batch states scoped strictly to projectId', async () => {
       const states = await batchController.getBatchStates(
         sampleUserId,
-        { itemIds: [sampleItemId] },
         sampleProjectId,
+        { itemIds: [sampleItemId] },
       );
 
       expect(mockStateService.getBatchStates).toHaveBeenCalledWith(
@@ -200,25 +180,20 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
 
   describe('ProjectAttachmentController', () => {
     let controller: ProjectAttachmentController;
-    let mockGetItemAttachmentsUseCase: { execute: jest.Mock };
+    let mockAttachmentsService: {
+      getItemAttachments: jest.Mock;
+    };
 
     beforeEach(() => {
-      mockGetItemAttachmentsUseCase = {
-        execute: jest.fn().mockResolvedValue({
+      mockAttachmentsService = {
+        getItemAttachments: jest.fn().mockResolvedValue({
           attachments: [{ id: 'att-1', filename: 'project-paper.pdf' }],
           total: 1,
         }),
       };
 
       controller = new ProjectAttachmentController(
-        {} as any,
-        {} as any,
-        mockGetItemAttachmentsUseCase as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
+        mockAttachmentsService as any,
       );
     });
 
@@ -229,34 +204,31 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
         sampleProjectId,
       );
 
-      expect(mockGetItemAttachmentsUseCase.execute).toHaveBeenCalledWith({
-        itemId: sampleItemId,
-        userId: sampleUserId,
-        projectId: sampleProjectId,
-      });
+      expect(mockAttachmentsService.getItemAttachments).toHaveBeenCalledWith(
+        sampleUserId,
+        sampleItemId,
+        sampleProjectId,
+      );
       expect(result.attachments).toHaveLength(1);
     });
   });
 
   describe('ProjectIngestionController', () => {
     let controller: ProjectIngestionController;
-    let mockSubmitIngestionUseCase: { execute: jest.Mock };
+    let mockIngestionService: {
+      submit: jest.Mock;
+    };
 
     beforeEach(() => {
-      mockSubmitIngestionUseCase = {
-        execute: jest.fn().mockResolvedValue({
+      mockIngestionService = {
+        submit: jest.fn().mockResolvedValue({
           runId: 'run-project-1',
           status: 'ACCEPTED',
         }),
       };
 
       controller = new ProjectIngestionController(
-        mockSubmitIngestionUseCase as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
+        mockIngestionService as any,
         {} as any,
       );
     });
@@ -273,7 +245,7 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
         sampleProjectId,
       );
 
-      expect(mockSubmitIngestionUseCase.execute).toHaveBeenCalledWith(
+      expect(mockIngestionService.submit).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: sampleUserId,
           idempotencyKey: 'idemp-proj-1',

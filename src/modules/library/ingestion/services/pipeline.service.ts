@@ -24,7 +24,7 @@ import {
   EXTRACTION_GATEWAY_PORT,
   IExtractionGatewayPort,
 } from '../types/extraction-gateway.types';
-import { LibraryItemSource } from '../../sync';
+import { LibraryItemSource } from '../../shared-kernel';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
@@ -116,8 +116,7 @@ export class PipelineService {
     @Optional()
     private readonly retractionScanner?: RetractionScannerProvider,
   ) {
-    this.orchestrator =
-      sagaOrchestrator ?? new IngestionSagaOrchestrator(repo, catalogGateway);
+    this.orchestrator = sagaOrchestrator ?? new IngestionSagaOrchestrator(repo);
   }
 
   /**

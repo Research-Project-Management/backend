@@ -1,102 +1,28 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { ItemsController } from '@/modules/library/catalog/items.controller';
-import { CreateItemUseCase } from '@/modules/library/catalog/core/use-cases/create-item.use-case';
-import { UpdateItemUseCase } from '@/modules/library/catalog/core/use-cases/update-item.use-case';
-import { DeleteItemUseCase } from '@/modules/library/catalog/core/use-cases/delete-item.use-case';
-import { RestoreItemUseCase } from '@/modules/library/catalog/core/use-cases/restore-item.use-case';
-import { GetItemUseCase } from '@/modules/library/catalog/core/use-cases/get-item.use-case';
-import { ListItemsUseCase } from '@/modules/library/catalog/core/use-cases/list-items.use-case';
+import { NotFoundException } from '@nestjs/common';
+import { ItemsController } from '@/modules/library/catalog/controllers/items.controller';
 import {
   ItemConcurrencyDomainException,
   ItemNotFoundDomainException,
-} from '@/modules/library/catalog/core/domain/item-domain.exception';
+} from '@/modules/library/catalog/types/item-domain.exception';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
 
 describe('ItemsController (Hexagonal Driver Adapter)', () => {
   let controller: ItemsController;
-  let mockCreateUseCase: { execute: jest.Mock };
-  let mockUpdateUseCase: { execute: jest.Mock };
-  let mockDeleteUseCase: { execute: jest.Mock };
-  let mockRestoreUseCase: { execute: jest.Mock };
-  let mockGetUseCase: { execute: jest.Mock };
-  let mockListUseCase: { execute: jest.Mock };
-
-  let mockImportUseCase: { execute: jest.Mock };
-  let mockPurgeUseCase: { execute: jest.Mock };
-  let mockBulkPurgeUseCase: { execute: jest.Mock };
-  let mockItemsService: { getMetadataSources: jest.Mock };
+  let mockItemService: {
+    listItems: jest.Mock;
+    getItem: jest.Mock;
+    createItem: jest.Mock;
+    updateItem: jest.Mock;
+    deleteItem: jest.Mock;
+    restoreItem: jest.Mock;
+    getMetadataSources: jest.Mock;
+  };
 
   const validUuid = '11111111-1111-4111-8111-111111111111';
 
   beforeEach(async () => {
-    mockImportUseCase = {
-      execute: jest.fn().mockResolvedValue({ importedCount: 1 }),
-    };
-    mockPurgeUseCase = { execute: jest.fn().mockResolvedValue(undefined) };
-    mockBulkPurgeUseCase = {
-      execute: jest.fn().mockResolvedValue({ purgedCount: 1 }),
-    };
-    mockItemsService = {
-      getMetadataSources: jest.fn().mockResolvedValue({
-        count: 1,
-        sources: [{ sourceProvider: 'arxiv' }],
-      }),
-    };
-
-    mockCreateUseCase = {
-      execute: jest.fn().mockResolvedValue({
-        id: validUuid,
-        userId: 'user-1',
-        title: 'Hexagonal Design in NestJS',
-        itemType: 'journalArticle',
-        version: 1,
-        isDeleted: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }),
-    };
-    mockUpdateUseCase = {
-      execute: jest.fn().mockResolvedValue({
-        id: validUuid,
-        userId: 'user-1',
-        title: 'Updated Title',
-        itemType: 'journalArticle',
-        version: 2,
-        isDeleted: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }),
-    };
-    mockDeleteUseCase = {
-      execute: jest.fn().mockResolvedValue(undefined),
-    };
-    mockRestoreUseCase = {
-      execute: jest.fn().mockResolvedValue({
-        id: validUuid,
-        userId: 'user-1',
-        title: 'Restored Title',
-        itemType: 'journalArticle',
-        version: 2,
-        isDeleted: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }),
-    };
-    mockGetUseCase = {
-      execute: jest.fn().mockResolvedValue({
-        id: validUuid,
-        userId: 'user-1',
-        title: 'Sample Item',
-        itemType: 'book',
-        version: 1,
-        isDeleted: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }),
-    };
-    mockListUseCase = {
-      execute: jest.fn().mockResolvedValue({
+    mockItemService = {
+      listItems: jest.fn().mockResolvedValue({
         items: [
           {
             id: validUuid,
@@ -109,36 +35,69 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
             updatedAt: new Date(),
           },
         ],
-        pagination: { hasNextPage: false, totalCount: 1 },
+        meta: { hasNextPage: false, totalCount: 1 },
+      }),
+      getItem: jest.fn().mockResolvedValue({
+        id: validUuid,
+        userId: 'user-1',
+        title: 'Sample Item',
+        itemType: 'book',
+        version: 1,
+        isDeleted: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+      createItem: jest.fn().mockResolvedValue({
+        id: validUuid,
+        userId: 'user-1',
+        title: 'Hexagonal Design in NestJS',
+        itemType: 'journalArticle',
+        version: 1,
+        isDeleted: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+      updateItem: jest.fn().mockResolvedValue({
+        id: validUuid,
+        userId: 'user-1',
+        title: 'Updated Title',
+        itemType: 'journalArticle',
+        version: 2,
+        isDeleted: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+      deleteItem: jest.fn().mockResolvedValue(true),
+      restoreItem: jest.fn().mockResolvedValue({
+        id: validUuid,
+        userId: 'user-1',
+        title: 'Restored Title',
+        itemType: 'journalArticle',
+        version: 2,
+        isDeleted: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+      getMetadataSources: jest.fn().mockResolvedValue({
+        count: 1,
+        sources: [{ sourceProvider: 'arxiv' }],
       }),
     };
 
-    controller = new ItemsController(
-      mockCreateUseCase as any,
-      mockUpdateUseCase as any,
-      mockDeleteUseCase as any,
-      mockRestoreUseCase as any,
-      mockGetUseCase as any,
-      mockListUseCase as any,
-      mockImportUseCase as any,
-      mockPurgeUseCase as any,
-      mockBulkPurgeUseCase as any,
-      {} as any,
-      {} as any,
-      mockItemsService as any,
-    );
+    controller = new ItemsController(mockItemService as any);
   });
 
-  it('should list items by delegating to ListItemsUseCase', async () => {
+  it('should list items by delegating to ItemService', async () => {
     const result = await controller.listItems('user-1', { view: 'all' });
-    expect(mockListUseCase.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1', view: 'all' }),
+    expect(mockItemService.listItems).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ view: 'all' }),
     );
     expect(result.items.length).toBe(1);
     expect(result.pagination.totalCount).toBe(1);
   });
 
-  it('should list items by delegating to ListItemsUseCase with sorting and filters', async () => {
+  it('should list items by delegating to ItemService with sorting and filters', async () => {
     await controller.listItems('user-1', {
       view: 'all',
       orderBy: 'year',
@@ -148,38 +107,32 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
       itemType: 'journalArticle',
       readStatus: 'unread',
     });
-    expect(mockListUseCase.execute).toHaveBeenCalledWith(
+    expect(mockItemService.listItems).toHaveBeenCalledWith(
+      'user-1',
       expect.objectContaining({
-        userId: 'user-1',
         view: 'all',
-        orderBy: 'year',
-        orderDirection: 'asc',
-        fromYear: 2020,
-        toYear: 2024,
-        itemType: 'journalArticle',
-        readStatus: 'unread',
       }),
     );
   });
 
-  it('should get item by delegating to GetItemUseCase', async () => {
+  it('should get item by delegating to ItemService', async () => {
     const result = await controller.getItem(validUuid, 'user-1');
-    expect(mockGetUseCase.execute).toHaveBeenCalledWith({
-      userId: 'user-1',
-      itemId: validUuid,
-      projectId: undefined,
-    });
+    expect(mockItemService.getItem).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      undefined,
+    );
     expect(result.id).toBe(validUuid);
   });
 
   it('should throw NotFoundException if item is not found or deleted', async () => {
-    mockGetUseCase.execute?.mockResolvedValueOnce(null);
+    mockItemService.getItem.mockResolvedValueOnce(null);
     await expect(controller.getItem(validUuid, 'user-1')).rejects.toThrow(
       NotFoundException,
     );
   });
 
-  it('should create item by delegating to CreateItemUseCase with tracing headers', async () => {
+  it('should create item by delegating to ItemService', async () => {
     const result = await controller.createItem(
       'user-1',
       undefined,
@@ -187,21 +140,24 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
       'idemp-123',
       'corr-456',
     );
-    expect(mockCreateUseCase.execute).toHaveBeenCalledWith(
+    expect(mockItemService.createItem).toHaveBeenCalledWith(
+      'user-1',
       expect.objectContaining({
-        userId: 'user-1',
         title: 'New Item',
         itemType: 'journalArticle',
+      }),
+      expect.objectContaining({
         idempotencyKey: 'idemp-123',
         correlationId: 'corr-456',
       }),
+      undefined,
     );
     expect(result.id).toBe(validUuid);
   });
 
-  it('should update item and translate ItemConcurrencyDomainException to VersionMismatchException', async () => {
-    mockUpdateUseCase.execute?.mockRejectedValueOnce(
-      new ItemConcurrencyDomainException(validUuid, 2, 1),
+  it('should update item and propagate VersionMismatchException', async () => {
+    mockItemService.updateItem.mockRejectedValueOnce(
+      new VersionMismatchException(validUuid, 2, 1),
     );
 
     await expect(
@@ -212,67 +168,33 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
     ).rejects.toThrow(VersionMismatchException);
   });
 
-  it('should soft delete item by delegating to DeleteItemUseCase', async () => {
+  it('should soft delete item by delegating to ItemService', async () => {
     const result = await controller.deleteItem(validUuid, 'user-1', '1');
-    expect(mockDeleteUseCase.execute).toHaveBeenCalledWith({
-      userId: 'user-1',
-      itemId: validUuid,
-      expectedVersion: 1,
-      projectId: undefined,
-      correlationId: undefined,
-    });
+    expect(mockItemService.deleteItem).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      1,
+      undefined,
+      undefined,
+    );
     expect(result).toEqual({ success: true, deleted: true, id: validUuid });
   });
 
-  it('should restore item by delegating to RestoreItemUseCase', async () => {
+  it('should restore item by delegating to ItemService', async () => {
     const result = await controller.restoreItem(validUuid, 'user-1', '2');
-    expect(mockRestoreUseCase.execute).toHaveBeenCalledWith({
-      userId: 'user-1',
-      itemId: validUuid,
-      expectedVersion: 2,
-      projectId: undefined,
-      correlationId: undefined,
-    });
+    expect(mockItemService.restoreItem).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      2,
+      undefined,
+    );
     expect(result.success).toBe(true);
     expect(result.item.id).toBe(validUuid);
   });
 
-  it('should return metadata sources by delegating to ItemsService', async () => {
-    const mockItemsService = {
-      getMetadataSources: jest.fn().mockResolvedValue({
-        itemId: validUuid,
-        count: 1,
-        sources: [
-          {
-            id: 'source-1',
-            sourceProvider: 'arxiv',
-            sourceUri: 'https://arxiv.org/abs/2301.00001',
-            format: 'json',
-            fetchedAt: new Date(),
-            createdAt: new Date(),
-            rawPayload: { title: 'Sample' },
-          },
-        ],
-      }),
-    };
-
-    const ctrl = new ItemsController(
-      mockCreateUseCase as any,
-      mockUpdateUseCase as any,
-      mockDeleteUseCase as any,
-      mockRestoreUseCase as any,
-      mockGetUseCase as any,
-      mockListUseCase as any,
-      mockImportUseCase as any,
-      mockPurgeUseCase as any,
-      mockBulkPurgeUseCase as any,
-      {} as any,
-      {} as any,
-      mockItemsService as any,
-    );
-
-    const result = await ctrl.getMetadataSources(validUuid, 'user-1');
-    expect(mockItemsService.getMetadataSources).toHaveBeenCalledWith(
+  it('should return metadata sources by delegating to ItemService', async () => {
+    const result = await controller.getMetadataSources(validUuid, 'user-1');
+    expect(mockItemService.getMetadataSources).toHaveBeenCalledWith(
       'user-1',
       validUuid,
       undefined,

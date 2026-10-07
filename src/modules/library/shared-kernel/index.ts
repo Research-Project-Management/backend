@@ -2,6 +2,8 @@
 export * from './utils/bibliographic.utils';
 export * from './utils/tag.utils';
 export * from './utils/academic-regex.catalog';
+export * from './utils/sort-index.utils';
+export * from './utils/tiptap.utils';
 
 // Core
 export * from './core/constants/academic-client.constants';
@@ -35,6 +37,10 @@ export * from './types/schema.types';
 // Events
 export * from './events/integration-event-bus.service';
 export * from './events/integration-events';
+export * from './events/library-events';
+
+// Ports
+export * from './ports';
 
 // Resilience
 export * from './resilience/circuit-breaker';

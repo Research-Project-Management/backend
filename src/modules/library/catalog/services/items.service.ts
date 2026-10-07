@@ -27,7 +27,7 @@ import {
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
   LibraryItemSource,
-} from '../../sync';
+} from '../../shared-kernel';
 import {
   CursorPaginatedResult,
   DocumentFulltextResponse,
@@ -55,8 +55,8 @@ import { ItemTypeConversionService } from './item-type-conversion.service';
 import { ItemCurationService } from './item-curation.service';
 
 /** Transaction context passed to write methods for composing operations within a parent transaction. */
-export interface ItemTransactionContext {
-  tx: Prisma.TransactionClient;
+export interface ItemTransactionContext<TTx = Prisma.TransactionClient> {
+  tx: TTx;
   helpers: TransactionHelpers;
 }
 
@@ -100,6 +100,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
         this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
         this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
         this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(id)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
       ];
       if (userId) {
         tasks.push(

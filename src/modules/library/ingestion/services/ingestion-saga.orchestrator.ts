@@ -1,11 +1,7 @@
-import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { IngestionRunAggregate } from '../types/ingestion-run.aggregate';
 import { IngestionStageName } from '../types/ingestion-domain.event';
 import { IngestionRepository } from '../repositories/ingestion.repository';
-import {
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
-} from '../types/catalog-gateway.types';
 import { IngestionStatus, Prisma } from '@prisma/client';
 
 export interface ExecuteStepOptions<T> {
@@ -177,12 +173,7 @@ export class IngestionSagaSession {
 export class IngestionSagaOrchestrator {
   private readonly logger = new Logger(IngestionSagaOrchestrator.name);
 
-  constructor(
-    private readonly repo: IngestionRepository,
-    @Optional()
-    @Inject(CATALOG_GATEWAY_PORT)
-    private readonly catalogGateway?: ICatalogGatewayPort,
-  ) {}
+  constructor(private readonly repo: IngestionRepository) {}
 
   /**
    * Creates a new isolated Saga execution session for a pipeline run.

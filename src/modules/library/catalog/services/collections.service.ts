@@ -7,7 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { TransactionHelpers } from '../../sync';
+import type { TransactionHelpers } from '../../shared-kernel';
 import type {
   UpsertSyncCollectionCommand,
   DeleteSyncEntityCommand,
@@ -83,6 +83,11 @@ export class CollectionsService {
       );
     }
     return fetchCollections();
+  }
+
+  async findAll(userId: string, projectId?: string): Promise<any[]> {
+    const res = await this.getCollections(userId, projectId);
+    return res.collections;
   }
 
   async getCollectionTree(

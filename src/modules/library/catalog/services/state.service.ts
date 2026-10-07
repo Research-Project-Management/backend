@@ -17,7 +17,7 @@ import {
   TransactionService,
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
-} from '../../sync';
+} from '../../shared-kernel';
 import { ITEM_EXISTENCE_PORT, IItemExistencePort } from '../types/items.types';
 import {
   toStateResponse,

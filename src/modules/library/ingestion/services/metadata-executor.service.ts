@@ -550,3 +550,5 @@ export class ExecutorService {
 }
 
 export { ExecutorService as ProviderExecutor };
+export const MetadataExecutorService = ExecutorService;
+export type MetadataExecutorService = ExecutorService;

@@ -364,9 +364,15 @@ export class CslEngineService implements OnModuleInit {
     styleId: string = 'apa',
   ): {
     styleId: string;
-    citations: Array<{ id: string; inText: string; bibliography: string }>;
+    combinedInText: string;
     bibliographyText: string;
     bibliographyHtml: string;
+    citations: Array<{
+      id: string;
+      inText: string;
+      bibliography: string;
+      bibliographyHtml?: string;
+    }>;
   } {
     this.initTemplates();
     const normalizedStyle = this.normalizeStyle(styleId);
@@ -374,6 +380,7 @@ export class CslEngineService implements OnModuleInit {
     if (cslItems.length === 0) {
       return {
         styleId: normalizedStyle,
+        combinedInText: '',
         citations: [],
         bibliographyText: '',
         bibliographyHtml: '',
@@ -385,10 +392,12 @@ export class CslEngineService implements OnModuleInit {
       const bibliographyText = bibs.join('\n\n');
       return {
         styleId: 'bibtex',
+        combinedInText: `\\cite{${cslItems.map((item) => item.id).join(', ')}}`,
         citations: cslItems.map((item, idx) => ({
           id: item.id,
           inText: `\\cite{${item.id}}`,
           bibliography: bibs[idx],
+          bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(bibs[idx])}</pre>`,
         })),
         bibliographyText,
         bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(bibliographyText)}</pre>`,
@@ -400,10 +409,12 @@ export class CslEngineService implements OnModuleInit {
       const bibliographyText = riss.join('\n\n');
       return {
         styleId: 'ris',
+        combinedInText: cslItems.map((item) => item.title).join('; '),
         citations: cslItems.map((item, idx) => ({
           id: item.id,
           inText: item.title,
           bibliography: riss[idx],
+          bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(riss[idx])}</pre>`,
         })),
         bibliographyText,
         bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(bibliographyText)}</pre>`,
@@ -434,11 +445,41 @@ export class CslEngineService implements OnModuleInit {
           id: item.id,
           inText: single.inText,
           bibliography: single.bibliography,
+          bibliographyHtml: single.bibliographyHtml,
         };
       });
 
+      let combinedInText = '';
+      try {
+        combinedInText = cite
+          .format('citation', {
+            template: normalizedStyle,
+            lang: 'en-US',
+          })
+          .trim();
+      } catch {
+        const isNumeric = [
+          'vancouver',
+          'nature',
+          'science',
+          'ieee',
+          'the-lancet',
+          'pnas',
+          'plos',
+        ].some((s) => normalizedStyle.includes(s));
+        if (isNumeric) {
+          combinedInText = `[${cslItems.map((_, i) => i + 1).join(', ')}]`;
+        } else {
+          const inTexts = citations
+            .map((c) => c.inText.replace(/^\(|\)$/g, ''))
+            .filter(Boolean);
+          combinedInText = `(${inTexts.join('; ')})`;
+        }
+      }
+
       return {
         styleId: normalizedStyle,
+        combinedInText,
         citations,
         bibliographyText,
         bibliographyHtml,
@@ -450,10 +491,29 @@ export class CslEngineService implements OnModuleInit {
           id: item.id,
           inText: single.inText,
           bibliography: single.bibliography,
+          bibliographyHtml: single.bibliographyHtml,
         };
       });
+
+      const isNumeric = [
+        'vancouver',
+        'nature',
+        'science',
+        'ieee',
+        'the-lancet',
+        'pnas',
+        'plos',
+      ].some((s) => normalizedStyle.includes(s));
+      const inTexts = citations
+        .map((c) => c.inText.replace(/^\(|\)$/g, ''))
+        .filter(Boolean);
+      const combinedInText = isNumeric
+        ? `[${cslItems.map((_, i) => i + 1).join(', ')}]`
+        : `(${inTexts.join('; ')})`;
+
       return {
         styleId: normalizedStyle,
+        combinedInText,
         citations,
         bibliographyText: citations.map((c) => c.bibliography).join('\n\n'),
         bibliographyHtml: '',

@@ -64,9 +64,11 @@ export class ItemFulltextService {
       throw new NotFoundException(`Item ${id} not found or access denied`);
     }
 
-    // 1. Look for authoritative pdf_fulltext (or legacy grobid_fulltext) record via QueryRepository
+    // 1. Look for authoritative pdf_fulltext, trusted_extraction, or ocr record via QueryRepository
     const fulltextRecord =
       (await this.query.findMetadataSourceRecord(id, 'pdf_fulltext')) ||
+      (await this.query.findMetadataSourceRecord(id, 'trusted_extraction')) ||
+      (await this.query.findMetadataSourceRecord(id, 'ocr')) ||
       (await this.query.findMetadataSourceRecord(id, 'grobid_fulltext'));
 
     let result: DocumentFulltextResponse;
@@ -85,11 +87,10 @@ export class ItemFulltextService {
         references: Array.isArray(payload.references) ? payload.references : [],
       };
     } else {
-      // 2. Fallback to grobid header record if available via QueryRepository
-      const headerRecord = await this.query.findMetadataSourceRecord(
-        id,
-        'grobid',
-      );
+      // 2. Fallback to header/metadata extraction record if available
+      const headerRecord =
+        (await this.query.findMetadataSourceRecord(id, 'trusted_extraction')) ||
+        (await this.query.findMetadataSourceRecord(id, 'grobid'));
 
       if (
         headerRecord?.rawPayload &&

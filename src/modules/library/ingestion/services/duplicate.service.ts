@@ -6,7 +6,7 @@ import {
   Inject,
   Optional,
 } from '@nestjs/common';
-import { TransactionService, LIBRARY_EVENT_TYPES } from '../../sync';
+import { TransactionService, LIBRARY_EVENT_TYPES } from '../../shared-kernel';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,

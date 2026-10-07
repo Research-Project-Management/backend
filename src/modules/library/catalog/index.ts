@@ -55,3 +55,6 @@ export * from './utils/tree.engine';
 export * from './utils/condition-evaluator.engine';
 export * from './utils/items.mapper';
 export * from './utils/item.transformer';
+export * from './utils/notes.utils';
+export * from './utils/collections.utils';
+export * from './utils/state.utils';

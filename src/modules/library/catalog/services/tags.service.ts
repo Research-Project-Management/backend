@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, TagType } from '@prisma/client';
 import { TagsRepository } from '../repositories/tags.repository';
-import { TransactionService } from '../../sync';
+import { TransactionService } from '../../shared-kernel';
 import {
   normalizeTags,
   cleanSingleTag,

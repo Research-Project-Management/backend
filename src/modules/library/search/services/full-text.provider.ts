@@ -37,11 +37,11 @@ export class FullTextProvider {
       // Batch insert new page indexes atomically
       if (pages.length > 0) {
         await tx.fullTextIndex.createMany({
-          data: pages.map((p) => ({
+          data: pages.map((page) => ({
             attachmentId,
-            pageIndex: p.pageIndex,
-            textContent: (p.textContent || '').replace(/\0/g, ''),
-            charOffset: p.charOffset ?? 0,
+            pageIndex: page.pageIndex,
+            textContent: (page.textContent || '').replace(/\0/g, ''),
+            charOffset: page.charOffset ?? 0,
           })),
         });
       }
@@ -67,10 +67,10 @@ export class FullTextProvider {
       orderBy: { pageIndex: 'asc' },
     });
 
-    const pages: PageTextExtraction[] = dbPages.map((p) => ({
-      pageIndex: p.pageIndex,
-      textContent: p.textContent,
-      charOffset: p.charOffset,
+    const pages: PageTextExtraction[] = dbPages.map((dbPage) => ({
+      pageIndex: dbPage.pageIndex,
+      textContent: dbPage.textContent,
+      charOffset: dbPage.charOffset,
     }));
 
     const matches: PageAnchorMatch[] = [];

@@ -9,8 +9,8 @@ set -e
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
-# 1. If node is available on host, execute the Node.js orchestrator
-if command -v node >/dev/null 2>&1; then
+# 1. If node and start-env.mjs are available, execute the Node.js orchestrator
+if command -v node >/dev/null 2>&1 && [ -f "$DIR/scripts/start-env.mjs" ]; then
     exec node "$DIR/scripts/start-env.mjs" "$@"
 fi
 
@@ -33,7 +33,7 @@ if [ "$IS_VPS" = true ]; then
     echo "=============================================================="
     echo "🚀 [FLUX BACKEND - VPS PRODUCTION MODE]"
     echo "=============================================================="
-    echo "Starting ALL services in Docker (DB, Redis, Grobid, Zotero, Backend, Worker)..."
+    echo "Starting ALL services in Docker (DB, Redis, Backend, Worker, CLSI)..."
     echo ""
 
     docker compose --profile prod up -d
@@ -56,20 +56,19 @@ else
     echo "Stopping any conflicting Docker backend container (port 3000)..."
     docker stop flux_backend 2>/dev/null || true
 
-    echo "Starting Docker services (db, redis, grobid, translator, worker)..."
-    docker compose up -d db redis grobid translator worker
+    echo "Starting Docker services (db, redis, worker, clsi)..."
+    docker compose up -d db redis worker clsi
 
     echo ""
     echo "🔍 Docker Services Status:"
-    docker compose ps db redis grobid translator worker
+    docker compose ps db redis worker clsi
 
     echo ""
     echo "=============================================================="
     echo "✨ Local Dev Environment Ready!"
     echo "   - PostgreSQL:     127.0.0.1:5433 (Docker)"
     echo "   - Redis:          127.0.0.1:6379 (Docker)"
-    echo "   - GROBID:         127.0.0.1:8070 (Docker)"
-    echo "   - Zotero TS:      127.0.0.1:1969 (Docker)"
+    echo "   - CLSI Compiler:  127.0.0.1:3013 (Docker)"
     echo "   - BullMQ Worker:  flux_backend_worker (Docker)"
     echo "   - Backend Port:   Port 3000 is FREE for local dev"
     echo "--------------------------------------------------------------"

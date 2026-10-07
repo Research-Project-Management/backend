@@ -55,30 +55,33 @@ export class ItemMapper {
     }
 
     if (Array.isArray(it.attachments)) {
-      it.attachments = it.attachments.map((att: any) => {
-        if (!att || typeof att !== 'object') return att;
-        const normalizedAtt = { ...att };
-        const attMeta =
-          typeof normalizedAtt.metadata === 'object' &&
-          normalizedAtt.metadata !== null
-            ? normalizedAtt.metadata
+      it.attachments = it.attachments.map((attachment: any) => {
+        if (!attachment || typeof attachment !== 'object') return attachment;
+        const normalizedAttachment = { ...attachment };
+        const attachmentMetadata =
+          typeof normalizedAttachment.metadata === 'object' &&
+          normalizedAttachment.metadata !== null
+            ? normalizedAttachment.metadata
             : {};
-        normalizedAtt.title =
-          normalizedAtt.title || attMeta.title || normalizedAtt.filename || '';
+        normalizedAttachment.title =
+          normalizedAttachment.title ||
+          attachmentMetadata.title ||
+          normalizedAttachment.filename ||
+          '';
 
-        if (normalizedAtt.fileId) {
-          const canonicalUrl = getFileContentPath(normalizedAtt.fileId);
-          normalizedAtt.url = canonicalUrl;
-          if (Array.isArray(normalizedAtt.revisions)) {
-            normalizedAtt.revisions = normalizedAtt.revisions.map(
-              (rev: any) => ({
-                ...rev,
+        if (normalizedAttachment.fileId) {
+          const canonicalUrl = getFileContentPath(normalizedAttachment.fileId);
+          normalizedAttachment.url = canonicalUrl;
+          if (Array.isArray(normalizedAttachment.revisions)) {
+            normalizedAttachment.revisions = normalizedAttachment.revisions.map(
+              (revision: any) => ({
+                ...revision,
                 url: canonicalUrl,
               }),
             );
           }
         }
-        return normalizedAtt;
+        return normalizedAttachment;
       });
     }
 
@@ -1134,9 +1137,11 @@ export class ItemMapper {
 
     if (statesArr) {
       userState = userId
-        ? statesArr.find((u: any) => u.userId === userId) || statesArr[0]
+        ? statesArr.find((stateRecord: any) => stateRecord.userId === userId) ||
+          statesArr[0]
         : statesArr[0];
     }
+
     const { userStates: _userStates, states: _states, ...rest } = normalized;
     return {
       ...rest,

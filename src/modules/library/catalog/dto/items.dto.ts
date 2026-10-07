@@ -10,7 +10,7 @@ import {
   Max,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { PartialType, ApiProperty } from '@nestjs/swagger';
+import { PartialType, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreatorDto {
   @IsOptional()
@@ -652,14 +652,22 @@ export interface DocumentFulltextResponse {
 }
 
 export class ParseCitationsDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     description:
-      'Raw unformatted citation text or multi-line bibliography string to parse via GROBID CRF',
+      'Raw unformatted citation text or multi-line bibliography string to parse via citation parser',
     example:
       'Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017). Attention is all you need. Advances in neural information processing systems, 30.',
   })
+  @IsOptional()
   @IsString()
-  citations!: string;
+  citations?: string;
+
+  @ApiPropertyOptional({
+    description: 'Alias for citations',
+  })
+  @IsOptional()
+  @IsString()
+  rawCitations?: string;
 }
 
 export class BulkPurgeItemsDto {

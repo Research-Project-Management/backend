@@ -8,7 +8,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma, AttachmentType } from '@prisma/client';
-import { TransactionService, TransactionHelpers } from '../../sync';
+import { TransactionService, TransactionHelpers } from '../../shared-kernel';
 import {
   CreateAttachmentInput,
   ReplaceAttachmentFileInput,
@@ -44,7 +44,7 @@ import {
   resolveFileExtension,
   sanitizeFilenameStem,
   DEFAULT_RENAME_PATTERN,
-} from '../utils/renamer.util';
+} from '../utils/renamer.utils';
 import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
@@ -587,9 +587,13 @@ export class AttachmentsService {
   async reassignToItem(
     sourceItemIds: (ItemId | string)[],
     targetItemId: ItemId | string,
-    tx: Prisma.TransactionClient,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    await this.repo.reassignToItem(sourceItemIds, targetItemId, tx);
+    await this.repo.reassignToItem(
+      sourceItemIds as string[],
+      targetItemId as string,
+      tx,
+    );
   }
 
   async assertAttachmentExists(

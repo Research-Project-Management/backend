@@ -3,10 +3,7 @@ import {
   EXTRACTION_GATEWAY_PORT,
   IExtractionGatewayPort,
 } from '../types/extraction-gateway.types';
-import {
-  EXTRACTION_FACADE,
-  IExtractionFacade,
-} from '../../extraction/extraction.facade';
+import { EXTRACTION_FACADE, IExtractionFacade } from '../../shared-kernel';
 
 /**
  * In-process adapter connecting Ingestion to Extraction via ExtractionFacade.

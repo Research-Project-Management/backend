@@ -1216,12 +1216,11 @@ export class QueryRepository {
   }
 
   async findQualityAuditItems(
-    userId: string,
+    userId?: string,
     limit: number = 2000,
     projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    if (!isUuid(userId)) return [];
     const projectId =
       typeof projectIdOrTx === 'string' && isUuid(projectIdOrTx)
         ? projectIdOrTx
@@ -1229,9 +1228,14 @@ export class QueryRepository {
     const client = this.getClient(
       typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
     );
-    const scopeWhere: Prisma.ItemWhereInput = projectId
-      ? { projectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
+    let scopeWhere: Prisma.ItemWhereInput = { deletedAt: null };
+    if (projectId) {
+      scopeWhere = { projectId, deletedAt: null };
+    } else if (userId && isUuid(userId)) {
+      scopeWhere = { userId, projectId: null, deletedAt: null };
+    } else if (userId && !isUuid(userId)) {
+      return [];
+    }
 
     return client.item.findMany({
       where: scopeWhere,
@@ -1253,12 +1257,11 @@ export class QueryRepository {
   }
 
   async findDuplicateCandidateItems(
-    userId: string,
+    userId?: string,
     limit?: number,
     projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    if (!isUuid(userId)) return [];
     const projectId =
       typeof projectIdOrTx === 'string' && isUuid(projectIdOrTx)
         ? projectIdOrTx
@@ -1266,9 +1269,14 @@ export class QueryRepository {
     const client = this.getClient(
       typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
     );
-    const scopeWhere: Prisma.ItemWhereInput = projectId
-      ? { projectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
+    let scopeWhere: Prisma.ItemWhereInput = { deletedAt: null };
+    if (projectId) {
+      scopeWhere = { projectId, deletedAt: null };
+    } else if (userId && isUuid(userId)) {
+      scopeWhere = { userId, projectId: null, deletedAt: null };
+    } else if (userId && !isUuid(userId)) {
+      return [];
+    }
 
     return client.item.findMany({
       where: scopeWhere,
@@ -1339,6 +1347,18 @@ export class QueryRepository {
     return client.project.findUnique({
       where: { id: projectId },
       include: { members: true },
+    });
+  }
+
+  async findProjectMember(
+    projectId: string,
+    userId: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    if (!isUuid(projectId) || !isUuid(userId)) return null;
+    const client = this.getClient(tx);
+    return client.projectMember.findFirst({
+      where: { projectId, userId },
     });
   }
 
@@ -1470,5 +1490,202 @@ export class QueryRepository {
         notesList: { where: { deletedAt: null } },
       },
     });
+  }
+
+  async findMatchCandidates(
+    scope: { userId?: string; projectId?: string | null } | string,
+    criteria: {
+      doi?: string | null;
+      arxivId?: string | null;
+      pmid?: string | null;
+      isbn?: string | null;
+      titleWords?: string[];
+      titlePrefix?: string;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<{
+    exactMatch?: {
+      id: string;
+      title: string;
+      matchReason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
+      evidence: Record<string, any>;
+    } | null;
+    candidateItems: Array<{
+      id: string;
+      title: string;
+      doi: string | null;
+      year: number | null;
+      citationKey: string | null;
+      authors: string[];
+    }>;
+  }> {
+    let scopeWhere: Prisma.ItemWhereInput | null = null;
+    if (typeof scope === 'object' && scope !== null) {
+      if (scope.projectId && isUuid(scope.projectId)) {
+        scopeWhere = { projectId: scope.projectId, deletedAt: null };
+      } else if (scope.userId && isUuid(scope.userId)) {
+        scopeWhere = { userId: scope.userId, projectId: null, deletedAt: null };
+      }
+    } else if (typeof scope === 'string' && isUuid(scope)) {
+      scopeWhere = {
+        deletedAt: null,
+        OR: [{ projectId: scope }, { userId: scope }],
+      };
+    }
+
+    if (!scopeWhere) {
+      return { exactMatch: null, candidateItems: [] };
+    }
+
+    const client = this.getClient(tx);
+
+    // 1. Exact DOI match
+    if (criteria.doi?.trim()) {
+      const cleanDoi = criteria.doi.trim().toLowerCase();
+      const match = await client.item.findFirst({
+        where: {
+          ...scopeWhere,
+          doi: { equals: cleanDoi, mode: 'insensitive' },
+        },
+        select: { id: true, title: true, doi: true },
+      });
+      if (match) {
+        return {
+          exactMatch: {
+            id: match.id,
+            title: match.title,
+            matchReason: 'DOI_EXACT',
+            evidence: { doi: cleanDoi },
+          },
+          candidateItems: [],
+        };
+      }
+    }
+
+    // 2. Exact arXiv ID match
+    if (criteria.arxivId?.trim()) {
+      const cleanArxiv = criteria.arxivId.trim();
+      const baseArxiv = cleanArxiv.replace(/v\d+$/i, '');
+      const match = await client.item.findFirst({
+        where: {
+          ...scopeWhere,
+          OR: [
+            { metadata: { path: ['arxivId'], equals: cleanArxiv } },
+            { metadata: { path: ['arxivId'], equals: baseArxiv } },
+          ],
+        },
+        select: { id: true, title: true },
+      });
+      if (match) {
+        return {
+          exactMatch: {
+            id: match.id,
+            title: match.title,
+            matchReason: 'ARXIV_EXACT',
+            evidence: { arxivId: cleanArxiv },
+          },
+          candidateItems: [],
+        };
+      }
+    }
+
+    // 3. Exact PMID match
+    if (criteria.pmid?.trim()) {
+      const cleanPmid = criteria.pmid.trim();
+      const match = await client.item.findFirst({
+        where: {
+          ...scopeWhere,
+          metadata: { path: ['pmid'], equals: cleanPmid },
+        },
+        select: { id: true, title: true },
+      });
+      if (match) {
+        return {
+          exactMatch: {
+            id: match.id,
+            title: match.title,
+            matchReason: 'PMID_EXACT',
+            evidence: { pmid: cleanPmid },
+          },
+          candidateItems: [],
+        };
+      }
+    }
+
+    // 4. Exact ISBN match
+    if (criteria.isbn?.trim()) {
+      const cleanIsbn = criteria.isbn.replace(/[-\s]/g, '').trim();
+      const match = await client.item.findFirst({
+        where: {
+          ...scopeWhere,
+          metadata: { path: ['isbn'], equals: cleanIsbn },
+        },
+        select: { id: true, title: true },
+      });
+      if (match) {
+        return {
+          exactMatch: {
+            id: match.id,
+            title: match.title,
+            matchReason: 'ISBN_EXACT',
+            evidence: { isbn: cleanIsbn },
+          },
+          candidateItems: [],
+        };
+      }
+    }
+
+    // 5. Title candidate filter
+    const words = (criteria.titleWords || [])
+      .filter((w) => w.length >= 3)
+      .slice(0, 3);
+    let titleCondition: Prisma.ItemWhereInput | null = null;
+    if (words.length > 0) {
+      titleCondition = {
+        OR: words.map((w) => ({ title: { contains: w, mode: 'insensitive' } })),
+      };
+    } else if (criteria.titlePrefix && criteria.titlePrefix.length > 3) {
+      titleCondition = {
+        title: {
+          contains: criteria.titlePrefix.substring(0, 10),
+          mode: 'insensitive',
+        },
+      };
+    }
+
+    if (!titleCondition) {
+      return { exactMatch: null, candidateItems: [] };
+    }
+
+    const items = await client.item.findMany({
+      where: {
+        ...scopeWhere,
+        ...titleCondition,
+      },
+      select: {
+        id: true,
+        title: true,
+        doi: true,
+        year: true,
+        citationKey: true,
+        contributors: {
+          select: { fullName: true },
+          orderBy: { orderIndex: 'asc' },
+        },
+      },
+      take: 200,
+    });
+
+    return {
+      exactMatch: null,
+      candidateItems: items.map((it: any) => ({
+        id: it.id,
+        title: it.title,
+        doi: it.doi,
+        year: it.year,
+        citationKey: it.citationKey,
+        authors: it.contributors.map((c: any) => c.fullName),
+      })),
+    };
   }
 }

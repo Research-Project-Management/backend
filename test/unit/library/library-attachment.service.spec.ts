@@ -24,15 +24,15 @@ jest.mock('@mozilla/readability', () => ({
 }));
 
 import { fromPartial, fromAny } from '@total-typescript/shoehorn';
-import { AttachmentsService } from '@/modules/library/extraction/core/services/attachments.service';
-import { WebSnapshotService } from '@/modules/library/extraction/core/adapters/web-snapshot.service';
+import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
+import { WebSnapshotService } from '@/modules/library/extraction/services/web-snapshot.service';
 import {
   AttachmentsController,
   AttachmentStorageController,
-} from '@/modules/library/extraction/attachments.controller';
-import { IdentifyStage } from '@/modules/library/ingestion/core/adapters/identify.stage';
-import { ExtractionHandler } from '@/modules/library/extraction/core/adapters/extraction.handler';
-import { CommandRepository } from '@/modules/library/catalog/core/adapters/command.repository';
+} from '@/modules/library/extraction/controllers';
+import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
+import { ExtractionHandler } from '@/modules/library/extraction/utils/extraction.handler';
+import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { IStoragePort } from '@/modules/storage/storage.port';
 
 describe('Library Attachments & Storage Integration Suite', () => {

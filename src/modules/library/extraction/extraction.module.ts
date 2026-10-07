@@ -1,9 +1,11 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Module, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
 import { StorageModule } from '../../storage/storage.module';
-import { SyncModule } from '../sync/sync.module';
-import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
-import { OutboxWorker } from '../sync';
+import {
+  SharedKernelModule,
+  IOutboxRegistry,
+  OUTBOX_REGISTRY_PORT,
+} from '../shared-kernel';
 
 // Presentation
 import {
@@ -61,7 +63,7 @@ import { ATTACHMENT_REPOSITORY_PORT } from './types/attachments.types';
 import { ANNOTATION_REPOSITORY_PORT } from './types/annotations.types';
 
 @Module({
-  imports: [CoreModule, StorageModule, SyncModule, SharedKernelModule],
+  imports: [CoreModule, StorageModule, SharedKernelModule],
   controllers: [
     AttachmentStorageController,
     ProjectAttachmentStorageController,
@@ -161,14 +163,19 @@ import { ANNOTATION_REPOSITORY_PORT } from './types/annotations.types';
 })
 export class ExtractionModule implements OnModuleInit {
   constructor(
-    private readonly outboxWorker: OutboxWorker,
-    private readonly extractionHandler: ExtractionHandler,
+    @Optional()
+    @Inject(OUTBOX_REGISTRY_PORT)
+    private readonly outboxWorker?: IOutboxRegistry,
+    @Optional()
+    private readonly extractionHandler?: ExtractionHandler,
   ) {}
 
   onModuleInit() {
-    this.outboxWorker.registerHandler(
-      EXTRACTION_EVENT_TYPES.EXTRACTION_REQUESTED,
-      this.extractionHandler,
-    );
+    if (this.outboxWorker && this.extractionHandler) {
+      this.outboxWorker.registerHandler(
+        EXTRACTION_EVENT_TYPES.EXTRACTION_REQUESTED,
+        this.extractionHandler,
+      );
+    }
   }
 }

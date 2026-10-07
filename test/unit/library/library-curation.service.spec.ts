@@ -1,27 +1,27 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma } from '@prisma/client';
-import { DuplicateService } from '@/modules/library/ingestion/core/services/duplicate.service';
+import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/sync/core/adapters/transaction.service';
+} from '@/modules/library/shared-kernel';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
-} from '@/modules/library/ingestion/core/ports/catalog-gateway.port';
+} from '@/modules/library/ingestion/types/catalog-gateway.types';
 import {
   EXTRACTION_GATEWAY_PORT,
   IExtractionGatewayPort,
-} from '@/modules/library/ingestion/core/ports/extraction-gateway.port';
-import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
-import { ItemDetail } from '@/modules/library/catalog/core/ports/items.ports';
+} from '@/modules/library/ingestion/types/extraction-gateway.types';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
+import { ItemDetail } from '@/modules/library/catalog/types/items.types';
 import {
   normalizeTitleForDedupe,
   extractFirstAuthorFamily,
   generateDedupeBucketKey,
-} from '@/modules/library/ingestion/core/adapters/curation.utils';
+} from '@/modules/library/ingestion/utils/deduplication.utils';
 
 describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';

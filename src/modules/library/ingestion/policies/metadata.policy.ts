@@ -1,5 +1,6 @@
 import { BaseDomainException } from '../../shared-kernel/core/errors/domain.exception';
 import { ProviderName, QueryType } from '../types/metadata.types';
+import { SsrfGuardService } from '../../shared-kernel/core/services/ssrf-guard.service';
 
 export class SsrfBlockedDomainException extends BaseDomainException {
   constructor(message: string) {
@@ -94,6 +95,28 @@ export class MetadataRoutingPolicy {
     }
   }
 
+  /**
+   * Primary asynchronous URL safety verification delegating to the comprehensive
+   * DNS-resolving SsrfGuardService when available, falling back to synchronous validation.
+   */
+  static async assertSafeUrl(
+    rawUrl: string,
+    ssrfGuard?: SsrfGuardService,
+  ): Promise<void> {
+    if (ssrfGuard) {
+      try {
+        await ssrfGuard.assertSafeUrl(rawUrl);
+        return;
+      } catch (err: any) {
+        throw new SsrfBlockedDomainException(
+          err?.message ||
+            'SSRF Protection: Destination blocked by security policy',
+        );
+      }
+    }
+    this.validateUrl(rawUrl);
+  }
+
   static validateUrl(rawUrl: string): void {
     let parsed: URL;
     try {
@@ -108,14 +131,29 @@ export class MetadataRoutingPolicy {
       );
     }
 
+    // Disallow userinfo (e.g. http://attacker.com:pass@127.0.0.1) used for destination obfuscation
+    if (parsed.username || parsed.password) {
+      throw new SsrfBlockedDomainException(
+        'SSRF Protection: URLs containing credentials are not permitted.',
+      );
+    }
+
     const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
+    // Check against standard blocked pattern regexes
     for (const pattern of SSRF_BLOCKED_PATTERNS) {
       if (pattern.test(hostname)) {
         throw new SsrfBlockedDomainException(
           `SSRF Protection: Blocked request to restricted host "${hostname}"`,
         );
       }
+    }
+
+    // Check decimal/octal/hex integer encoded IPs (e.g., 2130706433, 0x7f000001, 017700000001)
+    if (/^(0x[0-9a-f]+|\d+)$/i.test(hostname)) {
+      throw new SsrfBlockedDomainException(
+        `SSRF Protection: Blocked numeric/hexadecimal IP notation "${hostname}"`,
+      );
     }
   }
 }

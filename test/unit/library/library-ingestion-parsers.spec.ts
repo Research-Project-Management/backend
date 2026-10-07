@@ -1,7 +1,7 @@
 ﻿import { Test, TestingModule } from '@nestjs/testing';
-import { DoiParser } from '@/modules/library/ingestion/core/adapters/doi.parser';
-import { BibtexParser } from '@/modules/library/ingestion/core/adapters/bibtex.parser';
-import { IngestionValidationException } from '@/modules/library/ingestion/core/domain/ingestion.errors';
+import { DoiParser } from '@/modules/library/ingestion/parsers/doi.parser';
+import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
+import { IngestionValidationException } from '@/modules/library/ingestion/types/ingestion.errors';
 
 describe('Library Ingestion Parsers (DoiParser & BibtexParser)', () => {
   let doiParser: DoiParser;

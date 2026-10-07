@@ -1,16 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { IngestionService } from '@/modules/library/ingestion/core/services/ingestion.service';
-import { IdentifyStage } from '@/modules/library/ingestion/core/adapters/identify.stage';
-import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
-import { PipelineService } from '@/modules/library/ingestion/core/services/pipeline.service';
-import { QueueService } from '@/modules/library/ingestion/core/services/queue.service';
-import { UrlCaptureService } from '@/modules/library/ingestion/core/services/url-capture.service';
-import { DoiParser } from '@/modules/library/ingestion/core/adapters/doi.parser';
-import { BibtexParser } from '@/modules/library/ingestion/core/adapters/bibtex.parser';
-import { RisParser } from '@/modules/library/ingestion/core/adapters/ris.parser';
-import { NormalizationPolicy } from '@/modules/library/ingestion/core/domain/normalization.policy';
+import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
+import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
+import { PipelineService } from '@/modules/library/ingestion/services/pipeline.service';
+import { QueueService } from '@/modules/library/ingestion/services/queue.service';
+import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
+import { DoiParser } from '@/modules/library/ingestion/parsers/doi.parser';
+import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
+import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
+import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/core/domain/submission.types';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 import zlib from 'zlib';
 
 describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {

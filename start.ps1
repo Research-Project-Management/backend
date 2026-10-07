@@ -24,8 +24,8 @@ if ($running -match "flux_backend") {
 }
 
 # Start infra services, worker and clsi in Docker
-docker compose up -d db redis grobid translator worker clsi
-docker compose ps db redis grobid translator worker clsi
+docker compose up -d db redis worker clsi
+docker compose ps db redis worker clsi
 
 # Start CLSI compiler container if present
 $allContainers = docker ps -a --format "{{.Names}}" 2>$null
@@ -41,8 +41,6 @@ Write-Host "`n==============================================================" -F
 Write-Host "✨ Local Dev Environment Ready!" -ForegroundColor Green
 Write-Host "   - PostgreSQL:     127.0.0.1:5433 (Docker)" -ForegroundColor Green
 Write-Host "   - Redis:          127.0.0.1:6379 (Docker)" -ForegroundColor Green
-Write-Host "   - GROBID:         127.0.0.1:8070 (Docker)" -ForegroundColor Green
-Write-Host "   - Zotero TS:      127.0.0.1:1969 (Docker)" -ForegroundColor Green
 Write-Host "   - CLSI Compiler:  127.0.0.1:3013 (Docker)" -ForegroundColor Green
 Write-Host "   - BullMQ Worker:  flux_backend_worker (Docker)" -ForegroundColor Green
 Write-Host "   - Backend Port:   Port 3000 is FREE for local dev" -ForegroundColor Green

@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../../core/database/prisma.service';
 import {
   RetractionDetails,
   RetractionLookupResult,
@@ -14,10 +13,7 @@ import {
 export class RetractionScannerProvider {
   private readonly logger = new Logger(RetractionScannerProvider.name);
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly retractionDb: RetractionDatabaseService,
-  ) {}
+  constructor(private readonly retractionDb: RetractionDatabaseService) {}
 
   /**
    * Compatibility wrapper: returns retraction details, or null when the item is

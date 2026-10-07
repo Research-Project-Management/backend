@@ -1,9 +1,9 @@
 import { FileHashVo } from '@/modules/library/extraction/core/domain/file-hash.vo';
 import { MimeTypeVo } from '@/modules/library/extraction/core/domain/mime-type.vo';
 import { AttachmentAggregate } from '@/modules/library/extraction/core/domain/attachment.aggregate';
-import { IngestionStatusVo } from '@/modules/library/ingestion/core/domain/ingestion-status.vo';
-import { IngestionRunAggregate } from '@/modules/library/ingestion/core/domain/ingestion-run.aggregate';
-import { SearchQueryVo } from '@/modules/library/search/core/domain/search-query.vo';
+import { IngestionStatusVo } from '@/modules/library/ingestion/types/ingestion-status.vo';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/types/ingestion-run.aggregate';
+import { SearchQueryVo } from '@/modules/library/search/types/search-query.vo';
 import { CitationStyleVo } from '@/modules/library/citation/core/domain/citation-style.vo';
 import { ExecuteSearchUseCase } from '@/modules/library/search/core/use-cases/execute-search.use-case';
 import { FormatCitationUseCase } from '@/modules/library/citation/core/use-cases/format-citation.use-case';

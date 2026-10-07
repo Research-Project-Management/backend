@@ -1,5 +1,5 @@
-import { UrlCaptureService } from '@/modules/library/ingestion/core/services/url-capture.service';
-import { IngestionRepository } from '@/modules/library/ingestion/core/adapters/ingestion.repository';
+import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 
 jest.mock(
   '@/modules/library/extraction/core/adapters/web-snapshot.service',

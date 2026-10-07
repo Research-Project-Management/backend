@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Global, Module, OnModuleInit } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { CoreModule as AppCoreModule } from '../../../core/core.module';
@@ -17,6 +17,10 @@ import { IntegrationEventBusService } from './services/integration-event-bus.ser
 import { INTEGRATION_EVENT_BUS } from '../shared-kernel/events/integration-events';
 import { EVENT_PUBLISHER_PORT } from './types/event-publisher.types';
 import { UNIT_OF_WORK_PORT } from './types/unit-of-work.types';
+import {
+  OUTBOX_REGISTRY_PORT,
+  IDEMPOTENT_CONSUMER_PORT,
+} from '../shared-kernel';
 import { OutboxMetrics } from './services/outbox.metrics';
 import { LIBRARY_EVENT_TYPES } from './types/outbox.events';
 import { SyncController } from './controllers/sync.controller';
@@ -39,6 +43,7 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
  * - types/
  * - utils/
  */
+@Global()
 @Module({
   imports: [
     ConfigModule,
@@ -55,8 +60,16 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
       provide: UNIT_OF_WORK_PORT,
       useExisting: TransactionService,
     },
+    {
+      provide: TransactionService,
+      useExisting: TransactionService,
+    },
     ChangeLogRepository,
     OutboxWorker,
+    {
+      provide: OUTBOX_REGISTRY_PORT,
+      useExisting: OutboxWorker,
+    },
     OutboxDispatcher,
     {
       provide: EVENT_PUBLISHER_PORT,
@@ -65,6 +78,10 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
     OutboxMetrics,
     ...syncWorkerProviders,
     IdempotentConsumerService,
+    {
+      provide: IDEMPOTENT_CONSUMER_PORT,
+      useExisting: IdempotentConsumerService,
+    },
     IntegrationEventBusService,
     {
       provide: INTEGRATION_EVENT_BUS,
@@ -76,10 +93,12 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
     UNIT_OF_WORK_PORT,
     ChangeLogRepository,
     OutboxWorker,
+    OUTBOX_REGISTRY_PORT,
     OutboxDispatcher,
     EVENT_PUBLISHER_PORT,
     OutboxMetrics,
     IdempotentConsumerService,
+    IDEMPOTENT_CONSUMER_PORT,
     IntegrationEventBusService,
     INTEGRATION_EVENT_BUS,
     SharedKernelModule,

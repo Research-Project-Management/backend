@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { ItemMetadata } from '../types/metadata.types';
 import { DuplicateMatchResult } from '../types/metadata-candidate.types';
@@ -8,6 +8,10 @@ import {
 } from '../policies/duplicate.policy';
 import { tokenizeTitleWords } from '../utils/deduplication.utils';
 import { isUUID } from 'class-validator';
+import {
+  CATALOG_GATEWAY_PORT,
+  ICatalogGatewayPort,
+} from '../types/catalog-gateway.types';
 
 @Injectable()
 export class MatchStage {
@@ -36,24 +40,88 @@ export class MatchStage {
   ]);
 
   constructor(
-    private readonly prisma: PrismaService,
     private readonly duplicatePolicy: DuplicatePolicy,
+    @Optional()
+    @Inject(CATALOG_GATEWAY_PORT)
+    private readonly catalogGateway?: ICatalogGatewayPort,
+    @Optional()
+    private readonly prisma?: PrismaService,
   ) {}
 
   /**
    * Evaluates potential duplicate matches against existing Items in the workspace.
    *
    * Strategy:
-   *  1. Fast-path: exact DOI lookup (O(1) with index). Exits immediately on hit.
-   *  2. Fuzzy: DB pre-filter by first significant title word (insensitive contains),
-   *     then in-memory Jaccard similarity on the reduced candidate set.
-   *     This keeps fuzzy matching accurate without loading the entire workspace.
+   *  1. Encapsulated Gateway Port: queries catalog via CATALOG_GATEWAY_PORT (findMatchCandidates)
+   *     respecting bounded context boundaries.
+   *  2. Fast-path: exact DOI/arXiv/PMID/ISBN lookup (O(1) with index). Exits immediately on hit.
+   *  3. Fuzzy: Pre-filter by title keywords, then in-memory Jaccard similarity.
    */
   async execute(
     scope: { userId?: string; projectId?: string | null } | string,
     proposed: ItemMetadata,
   ): Promise<DuplicateMatchResult> {
     const proposedDoi = proposed.doi?.toLowerCase().trim();
+    const rawArxiv = proposed.arxivId || (proposed as any).metadata?.arxivId;
+    const cleanArxiv = rawArxiv ? String(rawArxiv).trim() : undefined;
+    const rawPmid = proposed.pmid || (proposed as any).metadata?.pmid;
+    const cleanPmid = rawPmid ? String(rawPmid).trim() : undefined;
+    const rawIsbn = proposed.isbn || (proposed as any).metadata?.isbn;
+    const cleanIsbn = rawIsbn
+      ? String(rawIsbn).replace(/[-\s]/g, '').trim()
+      : undefined;
+    const proposedTitle = proposed.title?.trim();
+    const significantWords =
+      proposedTitle && proposedTitle.length > 5
+        ? tokenizeTitleWords(proposedTitle)
+            .filter((w) => w.length >= 3)
+            .slice(0, 3)
+        : [];
+
+    // ── Primary Path: Query Catalog via Hexagonal Gateway Port ──────────────
+    if (this.catalogGateway?.findMatchCandidates) {
+      const matchResult = await this.catalogGateway.findMatchCandidates(scope, {
+        doi: proposedDoi,
+        arxivId: cleanArxiv,
+        pmid: cleanPmid,
+        isbn: cleanIsbn,
+        titleWords: significantWords,
+        titlePrefix: proposedTitle,
+      });
+
+      if (matchResult.exactMatch) {
+        return {
+          matchType: 'EXACT',
+          confidence: 1.0,
+          targetItemId: matchResult.exactMatch.id,
+          targetItemTitle: matchResult.exactMatch.title,
+          matchReason: matchResult.exactMatch.matchReason as any,
+          evidence: matchResult.exactMatch.evidence,
+        };
+      }
+
+      if (matchResult.candidateItems && matchResult.candidateItems.length > 0) {
+        return this.duplicatePolicy.evaluate(
+          proposed,
+          matchResult.candidateItems,
+        );
+      }
+
+      return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
+    }
+
+    // ── Fallback Path: Direct DB Query (Preserved for legacy test contexts) ─
+    if (!this.prisma) {
+      this.logger.warn(
+        'MatchStage invoked without catalogGateway or prisma; skipping duplicate matching',
+      );
+      return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
+    }
+
+    this.logger.warn(
+      'MatchStage falling back to direct Prisma queries. Inject CATALOG_GATEWAY_PORT for DDD compliance.',
+    );
+
     let scopeFilter: Record<string, any> | null = null;
 
     if (typeof scope === 'object' && scope !== null) {
@@ -97,9 +165,7 @@ export class MatchStage {
       }
     }
 
-    const rawArxiv = proposed.arxivId || (proposed as any).metadata?.arxivId;
-    if (rawArxiv) {
-      const cleanArxiv = String(rawArxiv).trim();
+    if (cleanArxiv) {
       const baseArxiv = cleanArxiv.replace(/v\d+$/i, '');
       const arxivMatch = await this.prisma.item.findFirst({
         where: {
@@ -125,9 +191,7 @@ export class MatchStage {
       }
     }
 
-    const rawPmid = proposed.pmid || (proposed as any).metadata?.pmid;
-    if (rawPmid) {
-      const cleanPmid = String(rawPmid).trim();
+    if (cleanPmid) {
       const pmidMatch = await this.prisma.item.findFirst({
         where: {
           ...scopeFilter,
@@ -149,9 +213,7 @@ export class MatchStage {
       }
     }
 
-    const rawIsbn = proposed.isbn || (proposed as any).metadata?.isbn;
-    if (rawIsbn) {
-      const cleanIsbn = String(rawIsbn).replace(/[-\s]/g, '').trim();
+    if (cleanIsbn) {
       const isbnMatch = await this.prisma.item.findFirst({
         where: {
           ...scopeFilter,
@@ -173,14 +235,9 @@ export class MatchStage {
       }
     }
 
-    const proposedTitle = proposed.title?.trim();
     if (!proposedTitle || proposedTitle.length <= 5) {
       return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
     }
-
-    const significantWords = tokenizeTitleWords(proposedTitle)
-      .filter((w) => w.length >= 3)
-      .slice(0, 3);
 
     const titleFilter =
       significantWords.length > 0

@@ -4,31 +4,30 @@
  * In a microservices or modular monolith architecture, BCs must communicate
  * through asynchronous integration events rather than direct synchronous service calls.
  */
+import { randomUUID } from 'crypto';
 
 export const INTEGRATION_EVENT_TOPICS = {
   CATALOG_ITEM_CREATED: 'library.integration.catalog.item_created',
   CATALOG_ITEM_UPDATED: 'library.integration.catalog.item_updated',
   CATALOG_ITEM_DELETED: 'library.integration.catalog.item_deleted',
+  EXTRACTION_ATTACHMENT_EXTRACTED:
+    'library.integration.extraction.attachment_extracted',
+  INGESTION_COMPLETED: 'library.integration.ingestion.completed',
+  /** @deprecated Use EXTRACTION_ATTACHMENT_EXTRACTED instead */
   CONTENT_ATTACHMENT_EXTRACTED:
-    'library.integration.content.attachment_extracted',
-  PROCESSING_INGESTION_COMPLETED:
-    'library.integration.processing.ingestion_completed',
+    'library.integration.extraction.attachment_extracted',
+  /** @deprecated Use INGESTION_COMPLETED instead */
+  PROCESSING_INGESTION_COMPLETED: 'library.integration.ingestion.completed',
 } as const;
+
+export type LibraryBoundedContext =
+  'catalog' | 'sync' | 'extraction' | 'ingestion' | 'citation' | 'search';
 
 export interface BaseIntegrationEvent<T = any> {
   readonly eventId: string;
   readonly topic: string;
   readonly occurredAt: string;
-  readonly sourceContext:
-    | 'catalog'
-    | 'content'
-    | 'processing'
-    | 'discovery'
-    | 'bibliography'
-    | 'reader'
-    | 'ingestion'
-    | 'search'
-    | 'citation';
+  readonly sourceContext: LibraryBoundedContext;
   readonly payload: T;
   readonly scope: {
     userId: string;
@@ -74,21 +73,12 @@ export interface IngestionCompletedIntegrationPayload {
 
 export function createIntegrationEvent<T>(
   topic: string,
-  sourceContext:
-    | 'catalog'
-    | 'content'
-    | 'processing'
-    | 'discovery'
-    | 'bibliography'
-    | 'reader'
-    | 'ingestion'
-    | 'search'
-    | 'citation',
+  sourceContext: LibraryBoundedContext,
   payload: T,
   scope: { userId: string; projectId?: string | null },
 ): BaseIntegrationEvent<T> {
   return {
-    eventId: crypto.randomUUID(),
+    eventId: randomUUID(),
     topic,
     occurredAt: new Date().toISOString(),
     sourceContext,

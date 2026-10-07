@@ -9,14 +9,13 @@ import { SearchController } from './controllers';
 import { SearchService } from './services/search.service';
 import { SearchRepository } from './repositories/search.repository';
 import { FullTextProvider } from './services/full-text.provider';
-import { EventHandler } from './services/event.handler';
+import { SearchEventsSubscriber } from './services/search-events.subscriber';
 import { PostgresFtsAdapter } from './services/search-engine.adapter';
 import { VectorSearchAdapter } from './services/vector-search.adapter';
 import {
   SEARCH_ENGINE_PORT,
   VECTOR_SEARCH_ENGINE_PORT,
 } from './types/search-engine.types';
-import { CatalogEventsSubscriber } from './services/catalog-events.subscriber';
 
 /**
  * Search Bounded Context Unified Module (Generic Domain).
@@ -38,7 +37,7 @@ import { CatalogEventsSubscriber } from './services/catalog-events.subscriber';
     SearchRepository,
     SearchService,
     FullTextProvider,
-    EventHandler,
+    SearchEventsSubscriber,
     PostgresFtsAdapter,
     {
       provide: SEARCH_ENGINE_PORT,
@@ -49,7 +48,6 @@ import { CatalogEventsSubscriber } from './services/catalog-events.subscriber';
       provide: VECTOR_SEARCH_ENGINE_PORT,
       useClass: VectorSearchAdapter,
     },
-    CatalogEventsSubscriber,
   ],
   exports: [
     SearchFacade,

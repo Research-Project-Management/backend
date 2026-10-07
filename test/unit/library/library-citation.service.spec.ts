@@ -1,14 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
-import { CitationService } from '@/modules/library/citation/core/services/citation.service';
+import { CitationService } from '@/modules/library/citation/services/citation.service';
 import {
   CslStyleRegistry,
   SUPPORTED_CITATION_STYLES,
-} from '@/modules/library/citation/core/adapters/csl-style-registry';
-import { CitationItemInput } from '@/modules/library/citation/core/domain/citation.types';
+} from '@/modules/library/citation/utils/csl-style-registry';
+import { CitationItemInput } from '@/modules/library/citation/types/citation.types';
+
+import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
 
 describe('Library Citation Service & CSL Style Registry', () => {
   let citationService: CitationService;
   let registry: CslStyleRegistry;
+  let cslEngine: CslEngineService;
 
   const mockItem: CitationItemInput = {
     id: 'item-1',
@@ -22,7 +25,9 @@ describe('Library Citation Service & CSL Style Registry', () => {
   };
 
   beforeEach(() => {
-    citationService = new CitationService();
+    cslEngine = new CslEngineService();
+    cslEngine.onModuleInit();
+    citationService = new CitationService({} as any, cslEngine, {} as any);
     registry = new CslStyleRegistry();
   });
 

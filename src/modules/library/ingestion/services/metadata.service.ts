@@ -28,6 +28,7 @@ import { MetadataCache } from '../repositories/metadata.cache';
 import { ReconciliationService } from './metadata-reconciliation.service';
 import { ExecutorService } from './metadata-executor.service';
 import { validateMetadata } from '../utils/metadata.validator';
+import { SsrfGuardService } from '../../shared-kernel/core/services/ssrf-guard.service';
 
 @Injectable()
 export class MetadataService implements MetadataPort {
@@ -41,6 +42,7 @@ export class MetadataService implements MetadataPort {
     private readonly reconciler: ReconciliationService,
     private readonly executor: ExecutorService,
     @Optional() private readonly ingestionRepo?: IngestionRepository,
+    @Optional() private readonly ssrfGuard?: SsrfGuardService,
   ) {
     for (const provider of providers) {
       this.providerMap.set(provider.id, provider);
@@ -66,7 +68,10 @@ export class MetadataService implements MetadataPort {
 
     // 2. SSRF check for URL queries
     if (classified.type === 'URL') {
-      MetadataRoutingPolicy.validateUrl(classified.clean);
+      await MetadataRoutingPolicy.assertSafeUrl(
+        classified.clean,
+        this.ssrfGuard,
+      );
 
       const embeddedDoi = normalizeDoi(classified.clean);
       if (embeddedDoi) {

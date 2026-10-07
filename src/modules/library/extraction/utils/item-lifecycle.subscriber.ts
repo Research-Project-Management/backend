@@ -1,25 +1,35 @@
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Optional,
+  Inject,
+} from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { OutboxWorker } from '../../sync';
+import { IOutboxRegistry, OUTBOX_REGISTRY_PORT } from '../../shared-kernel';
 import { OutboxEvent } from '@prisma/client';
 import {
   INTEGRATION_EVENT_TOPICS,
   BaseIntegrationEvent,
   ItemDeletedIntegrationPayload,
 } from '../../shared-kernel/events/integration-events';
-import { PrismaService } from '@/core/database/prisma.service';
+import { AnnotationsRepository } from '../repositories/annotations.repository';
+import { AttachmentsRepository } from '../repositories/attachments.repository';
 
 /**
  * ItemLifecycleSubscriber in Extraction Bounded Context.
- * Listens to Catalog item deletion events to clean up or soft-delete content attachments.
+ * Listens to Catalog item deletion events to clean up or soft-delete content attachments and annotations.
  */
 @Injectable()
 export class ItemLifecycleSubscriber implements OnModuleInit {
   private readonly logger = new Logger(ItemLifecycleSubscriber.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    @Optional() private readonly outboxWorker?: OutboxWorker,
+    private readonly attachmentsRepository: AttachmentsRepository,
+    private readonly annotationsRepository: AnnotationsRepository,
+    @Optional()
+    @Inject(OUTBOX_REGISTRY_PORT)
+    private readonly outboxWorker?: IOutboxRegistry,
   ) {}
 
   onModuleInit() {
@@ -28,13 +38,15 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
         INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_DELETED,
         {
           handle: async (event: OutboxEvent) => {
-            await this.handleItemDeleted(event.payload as any);
+            await this.handleItemDeleted(
+              event.payload as BaseIntegrationEvent<ItemDeletedIntegrationPayload>,
+            );
           },
         },
       );
       this.outboxWorker.registerHandler('library.item.purged', {
         handle: async (event: OutboxEvent) => {
-          await this.handleItemPurged(event.payload as any);
+          await this.handleItemPurged(event.payload);
         },
       });
     }
@@ -46,34 +58,20 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
     if (!itemId) return;
 
     this.logger.log(
-      `[ContentSubscriber] Purging attachments, notes, and annotations for purged item ${itemId}`,
+      `[ExtractionSubscriber] Purging attachments and annotations for purged item ${itemId}`,
     );
 
     try {
-      if (this.prisma?.annotation?.deleteMany) {
-        await this.prisma.annotation
-          .deleteMany({
-            where: { attachment: { itemId } },
-          })
-          .catch(() => {});
-      }
-      if (this.prisma?.attachment?.deleteMany) {
-        await this.prisma.attachment
-          .deleteMany({
-            where: { itemId },
-          })
-          .catch(() => {});
-      }
-      if (this.prisma?.note?.deleteMany) {
-        await this.prisma.note
-          .deleteMany({
-            where: { itemId },
-          })
-          .catch(() => {});
-      }
-    } catch (err: any) {
+      await this.annotationsRepository
+        .deleteManyByItemId(itemId)
+        .catch(() => {});
+      await this.attachmentsRepository
+        .deleteManyByItemId(itemId)
+        .catch(() => {});
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `[ContentSubscriber] Content cascade purge error for item ${itemId}: ${err?.message || err}`,
+        `[ExtractionSubscriber] Cascade purge error for item ${itemId}: ${errorMessage}`,
       );
     }
   }
@@ -86,45 +84,28 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
     if (!itemId) return;
 
     this.logger.log(
-      `[ContentSubscriber] Cascading soft-delete to attachments, notes, and annotations for deleted item ${itemId}`,
+      `[ExtractionSubscriber] Cascading soft-delete to attachments and annotations for deleted item ${itemId}`,
     );
 
     try {
-      const now = new Date();
-      const attachments = await this.prisma.attachment.findMany({
-        where: { itemId },
-        select: { id: true },
+      const attachments = await this.attachmentsRepository.findMany({
+        itemId,
+        deletedAt: null,
       });
-      const attachmentIds = attachments.map((a: any) => a.id);
+      const attachmentIds = (attachments || []).map(
+        (attachment: { id: string }) => attachment.id,
+      );
 
-      const performUpdates = async (tx: any) => {
-        if (attachmentIds.length > 0) {
-          await tx.annotation.updateMany({
-            where: {
-              attachmentId: { in: attachmentIds },
-              deletedAt: null,
-            },
-            data: { deletedAt: now },
-          });
-        }
-        await tx.attachment.updateMany({
-          where: { itemId, deletedAt: null },
-          data: { deletedAt: now },
-        });
-        await tx.note.updateMany({
-          where: { itemId, deletedAt: null },
-          data: { deletedAt: now },
-        });
-      };
-
-      if (typeof this.prisma.$transaction === 'function') {
-        await this.prisma.$transaction(performUpdates);
-      } else {
-        await performUpdates(this.prisma);
+      if (attachmentIds.length > 0) {
+        await this.annotationsRepository.softDeleteByAttachmentIds(
+          attachmentIds,
+        );
       }
-    } catch (err: any) {
+      await this.attachmentsRepository.softDeleteByItemId(itemId);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `[ContentSubscriber] Content cascade cleanup error for item ${itemId}: ${err?.message || err}`,
+        `[ExtractionSubscriber] Cascade cleanup error for item ${itemId}: ${errorMessage}`,
       );
     }
   }

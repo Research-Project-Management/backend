@@ -18,14 +18,14 @@ import {
   AnnotationType,
 } from '../types/annotations.types';
 import { AnnotationNormalizer } from '../utils/annotation.normalizer';
-import { TransactionService, TransactionHelpers } from '../../sync';
+import { TransactionService, TransactionHelpers } from '../../shared-kernel';
 import { AttachmentsService } from './attachments.service';
 import type {
   UpsertSyncAnnotationCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
 } from '../../shared-kernel/core/types/entity-commands.types';
-import { buildAnnotationSortIndex } from '../utils/sort-index.util';
+import { buildAnnotationSortIndex } from '../../shared-kernel';
 
 @Injectable()
 export class AnnotationsService {

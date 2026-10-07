@@ -1,12 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CommandRepository } from '@/modules/library/catalog/core/adapters/command.repository';
-import { PrismaItemRepositoryAdapter } from '@/modules/library/catalog/core/adapters/prisma-item-repository.adapter';
+import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { PrismaService } from '@/core/database/prisma.service';
-import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
-import { TransactionService } from '@/modules/library/sync/core/adapters/transaction.service';
+import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
+import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
-import { ItemConcurrencyDomainException } from '@/modules/library/catalog/core/domain/item-domain.exception';
-import { ItemAggregate } from '@/modules/library/catalog/core/domain/item.aggregate';
 import { fromPartial } from '@total-typescript/shoehorn';
 
 describe('Library OCC (Optimistic Concurrency Control) Pattern', () => {
@@ -157,95 +154,6 @@ describe('Library OCC (Optimistic Concurrency Control) Pattern', () => {
 
       await expect(repo.softDelete(userId, itemId, 1)).rejects.toThrow(
         VersionMismatchException,
-      );
-    });
-  });
-
-  describe('PrismaItemRepositoryAdapter OCC', () => {
-    let adapter: PrismaItemRepositoryAdapter;
-    let mockTx: any;
-    let mockLibraryTx: any;
-
-    beforeEach(async () => {
-      mockTx = {
-        item: {
-          updateMany: jest.fn(),
-          findUnique: jest.fn(),
-        },
-      };
-
-      mockLibraryTx = {
-        executeInTransaction: jest.fn().mockImplementation(async (fn) => {
-          const helpers = {
-            publishOutbox: jest.fn(),
-          };
-          return fn(mockTx, helpers);
-        }),
-      };
-
-      adapter = new PrismaItemRepositoryAdapter(
-        fromPartial<QueryRepository>({}),
-        fromPartial<CommandRepository>({}),
-        fromPartial<PrismaService>({}),
-        mockLibraryTx,
-      );
-    });
-
-    it('should atomically check expectedPreviousVersion and increment on save', async () => {
-      const aggregate = ItemAggregate.reconstitute({
-        id: itemId,
-        userId,
-        title: 'Original',
-        itemType: 'journalArticle',
-        version: 1,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      aggregate.updateMetadata({ title: 'New Title' });
-      expect(aggregate.version).toBe(2);
-
-      mockTx.item.findUnique.mockResolvedValue({
-        id: itemId,
-        version: 1,
-        metadata: {},
-      });
-      mockTx.item.updateMany.mockResolvedValue({ count: 1 });
-
-      await adapter.save(aggregate);
-
-      expect(mockTx.item.updateMany).toHaveBeenCalledWith({
-        where: {
-          id: itemId,
-          version: 1,
-        },
-        data: expect.objectContaining({
-          title: 'New Title',
-          version: 2,
-        }),
-      });
-    });
-
-    it('should throw ItemConcurrencyDomainException when concurrent save occurred', async () => {
-      const aggregate = ItemAggregate.reconstitute({
-        id: itemId,
-        userId,
-        title: 'Original',
-        itemType: 'journalArticle',
-        version: 1,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      aggregate.updateMetadata({ title: 'New Title' });
-
-      mockTx.item.findUnique
-        .mockResolvedValueOnce({ id: itemId, version: 1, metadata: {} })
-        .mockResolvedValueOnce({ version: 3 });
-      mockTx.item.updateMany.mockResolvedValue({ count: 0 });
-
-      await expect(adapter.save(aggregate)).rejects.toThrow(
-        ItemConcurrencyDomainException,
       );
     });
   });

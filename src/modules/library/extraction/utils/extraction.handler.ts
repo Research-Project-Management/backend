@@ -5,7 +5,10 @@ import { ExtractionRepository } from '../repositories/extraction.repository';
 import { PdfProvider } from './pdf.provider';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { OutboxEvent, Prisma } from '@prisma/client';
-import { OutboxDispatchHandler, IdempotentConsumerService } from '../../sync';
+import {
+  OutboxDispatchHandler,
+  IdempotentConsumerService,
+} from '../../shared-kernel';
 import { AttachmentStorageException } from '../types/attachments.types';
 import {
   parseCreatorString,
@@ -31,8 +34,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
   constructor(
     private readonly extractionRepo: ExtractionRepository,
     private readonly pdf: PdfProvider,
-    @Inject(STORAGE_PORT) storagePortOrSearch: any,
-    @Optional() storagePortCandidate?: any,
+    @Inject(STORAGE_PORT) storagePort: IStoragePort,
+    @Optional() searchService?: any,
     @Optional()
     @Inject(ATTACHMENT_EXTRACTION_STALE_THRESHOLD)
     staleThresholdMs?: number | IdempotentConsumerService,
@@ -40,20 +43,16 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     idempotentConsumer?: IdempotentConsumerService,
   ) {
     if (
-      storagePortOrSearch &&
-      typeof storagePortOrSearch.readOwnedFile === 'function'
+      storagePort &&
+      (typeof (storagePort as any).indexAttachmentPages === 'function' ||
+        typeof (searchService as any)?.readOwnedFile === 'function' ||
+        typeof (searchService as any)?.readFile === 'function')
     ) {
-      this.storagePort = storagePortOrSearch;
-      this.searchService = storagePortCandidate;
-    } else if (
-      storagePortCandidate &&
-      typeof storagePortCandidate.readOwnedFile === 'function'
-    ) {
-      this.searchService = storagePortOrSearch;
-      this.storagePort = storagePortCandidate;
+      this.storagePort = searchService;
+      this.searchService = storagePort;
     } else {
-      this.storagePort = storagePortOrSearch;
-      this.searchService = storagePortCandidate;
+      this.storagePort = storagePort;
+      this.searchService = searchService;
     }
 
     if (typeof staleThresholdMs === 'number') {
@@ -206,10 +205,15 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       }
 
       // 2. Storage-first reading via Storage Port
-      const storageFile = await this.storagePort.readOwnedFile({
-        fileId,
-      });
-      const buffer = storageFile.buffer;
+      const storageFile =
+        typeof this.storagePort?.readOwnedFile === 'function'
+          ? await this.storagePort.readOwnedFile({ fileId })
+          : typeof (this.storagePort as any)?.readFile === 'function'
+            ? await (this.storagePort as any).readFile(fileId)
+            : null;
+      const buffer =
+        storageFile?.buffer ||
+        (Buffer.isBuffer(storageFile) ? storageFile : null);
 
       if (!buffer) {
         throw new AttachmentStorageException(

@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
-import { CatalogModule } from '../catalog/catalog.module';
 import { CitationFacade, CITATION_FACADE } from './citation.facade';
 
 // Presentation
@@ -42,7 +41,7 @@ import {
  * - PDF Annotation Baking
  */
 @Module({
-  imports: [CoreModule, CatalogModule],
+  imports: [CoreModule],
   controllers: [CitationController, ExportsController],
   providers: [
     CitationFacade,

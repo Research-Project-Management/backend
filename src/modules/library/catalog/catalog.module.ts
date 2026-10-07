@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
-import { SyncModule } from '../sync/sync.module';
 import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
 
 // Controllers
@@ -71,7 +70,7 @@ import {
 import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
 
 @Module({
-  imports: [CoreModule, SyncModule, SharedKernelModule],
+  imports: [CoreModule, SharedKernelModule],
   controllers: [
     ItemCurationController,
     ProjectItemCurationController,

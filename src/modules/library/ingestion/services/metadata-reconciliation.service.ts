@@ -555,3 +555,6 @@ export class ReconciliationService {
     return null;
   }
 }
+
+export const MetadataReconciliationService = ReconciliationService;
+export type MetadataReconciliationService = ReconciliationService;

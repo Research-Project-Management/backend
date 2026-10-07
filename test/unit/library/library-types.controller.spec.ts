@@ -1,7 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { TypesController } from '@/modules/library/catalog/types.controller';
-import { TypesService } from '@/modules/library/catalog/core/services/types.service';
-import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/core/services/zotero-schema-validator.service';
+import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 
 describe('TypesController & Zotero Schema Endpoints', () => {
   let controller: TypesController;

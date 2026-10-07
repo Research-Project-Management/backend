@@ -12,6 +12,16 @@ export interface CompletenessAnalysis {
   totalFieldsCount: number;
 }
 
+export interface QualityAuditReport {
+  totalItems: number;
+  averageQualityScore: number;
+  healthReport: {
+    missingDoi: number;
+    missingAbstract: number;
+    missingYear: number;
+  };
+}
+
 @Injectable()
 export class QualityService {
   private readonly logger = new Logger(QualityService.name);

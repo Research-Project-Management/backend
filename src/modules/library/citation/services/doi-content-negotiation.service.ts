@@ -24,17 +24,40 @@ export class DoiContentNegotiationService {
     private readonly resilienceRegistry?: ResilienceRegistryService,
   ) {}
 
-  // In-memory cache with TTL (24 hours)
+  // In-memory cache with TTL (24 hours) and bounded LRU pruning
   private readonly cache = new Map<
     string,
     { result: DoiCitationResult; expiresAt: number }
   >();
 
-  // In-memory metadata cache with TTL (24 hours)
+  // In-memory metadata cache with TTL (24 hours) and bounded LRU pruning
   private readonly metaCache = new Map<
     string,
     { result: ReferenceData; expiresAt: number }
   >();
+
+  private setWithLru<T>(
+    map: Map<string, { result: T; expiresAt: number }>,
+    key: string,
+    result: T,
+    ttlMs: number = 24 * 60 * 60 * 1000,
+    maxSize: number = 2000,
+  ): void {
+    if (map.has(key)) {
+      map.delete(key);
+    } else if (map.size >= maxSize) {
+      const now = Date.now();
+      let evicted = 0;
+      for (const [k, v] of map.entries()) {
+        if (v.expiresAt <= now || evicted < 10) {
+          map.delete(k);
+          evicted++;
+        }
+        if (map.size < maxSize) break;
+      }
+    }
+    map.set(key, { result, expiresAt: Date.now() + ttlMs });
+  }
 
   private readonly STYLE_ACCEPT_MAP: Record<string, string> = {
     apa: 'text/bibliography; style=apa',
@@ -147,17 +170,8 @@ export class DoiContentNegotiationService {
           source: 'publisher',
         };
 
-        // Cache for 24h
-        this.cache.set(cacheKey, {
-          result,
-          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-        });
-
-        // Cleanup cache if too large
-        if (this.cache.size > 2000) {
-          const oldestKey = this.cache.keys().next().value;
-          if (oldestKey) this.cache.delete(oldestKey);
-        }
+        // Cache for 24h with bounded LRU eviction
+        this.setWithLru(this.cache, cacheKey, result);
 
         return result;
       } catch (err: any) {
@@ -264,16 +278,8 @@ export class DoiContentNegotiationService {
         if (!result || !result.title || result.title === 'Untitled')
           return null;
 
-        // Cache metadata
-        this.metaCache.set(doi, {
-          result,
-          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-        });
-
-        if (this.metaCache.size > 2000) {
-          const oldestKey = this.metaCache.keys().next().value;
-          if (oldestKey) this.metaCache.delete(oldestKey);
-        }
+        // Cache metadata with bounded LRU eviction
+        this.setWithLru(this.metaCache, doi, result);
 
         return result;
       } catch (err: any) {

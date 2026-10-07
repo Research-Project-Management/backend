@@ -3,7 +3,7 @@ import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
 } from '../types/catalog-gateway.types';
-import { CATALOG_FACADE, ICatalogFacade } from '../../catalog/catalog.facade';
+import { CATALOG_FACADE, ICatalogFacade } from '../../shared-kernel';
 
 /**
  * In-process adapter connecting Extraction to Catalog via CatalogFacade.

@@ -322,12 +322,18 @@ export class AttachmentController extends BaseAttachmentController {
     );
   }
 
-  @Post('attachments/:attachmentId/primary')
+  @Post([
+    'attachments/:attachmentId/primary',
+    'attachments/:attachmentId/set-primary',
+    'items/:itemId/attachments/:attachmentId/primary',
+    'items/:itemId/attachments/:attachmentId/set-primary',
+  ])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Set attachment as primary PDF for user item' })
   async setPrimaryAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
+    @Param('itemId') paramItemId?: string,
     @Query('itemId') queryItemId?: string,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
@@ -335,12 +341,17 @@ export class AttachmentController extends BaseAttachmentController {
     return this.executeSetPrimaryAttachment(
       userId,
       attachmentId,
-      queryItemId,
+      paramItemId || queryItemId,
       paramProjectId || queryProjectId,
     );
   }
 
-  @Patch('attachments/:attachmentId')
+  @Patch([
+    'attachments/:attachmentId',
+    'attachments/:attachmentId/rename',
+    'items/:itemId/attachments/:attachmentId',
+    'items/:itemId/attachments/:attachmentId/rename',
+  ])
   @ApiOperation({ summary: 'Rename user attachment file' })
   async renameAttachment(
     @CurrentUser('id') userId: string,
@@ -372,7 +383,7 @@ export class AttachmentController extends BaseAttachmentController {
     );
   }
 
-  @Post('items/:itemId/snapshot')
+  @Post(['items/:itemId/snapshot', 'items/:itemId/attachments/snapshot'])
   @ApiOperation({
     summary: 'Capture and archive a web snapshot for an item URL',
   })
@@ -494,7 +505,12 @@ export class ProjectAttachmentController extends BaseAttachmentController {
     return this.executeDeleteAttachment(userId, attachmentId, projectId);
   }
 
-  @Post('attachments/:attachmentId/primary')
+  @Post([
+    'attachments/:attachmentId/primary',
+    'attachments/:attachmentId/set-primary',
+    'items/:itemId/attachments/:attachmentId/primary',
+    'items/:itemId/attachments/:attachmentId/set-primary',
+  ])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Set attachment as primary PDF for project item' })
@@ -503,17 +519,23 @@ export class ProjectAttachmentController extends BaseAttachmentController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Param('projectId', new ParseUUIDPipe()) projectId: string,
+    @Param('itemId') paramItemId?: string,
     @Query('itemId') queryItemId?: string,
   ) {
     return this.executeSetPrimaryAttachment(
       userId,
       attachmentId,
-      queryItemId,
+      paramItemId || queryItemId,
       projectId,
     );
   }
 
-  @Patch('attachments/:attachmentId')
+  @Patch([
+    'attachments/:attachmentId',
+    'attachments/:attachmentId/rename',
+    'items/:itemId/attachments/:attachmentId',
+    'items/:itemId/attachments/:attachmentId/rename',
+  ])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Rename project attachment file' })
   @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
@@ -538,7 +560,7 @@ export class ProjectAttachmentController extends BaseAttachmentController {
     return this.executeBatchRenameAttachments(userId, dto, projectId);
   }
 
-  @Post('items/:itemId/snapshot')
+  @Post(['items/:itemId/snapshot', 'items/:itemId/attachments/snapshot'])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Capture and archive a web snapshot for a project item URL',
@@ -552,3 +574,5 @@ export class ProjectAttachmentController extends BaseAttachmentController {
     return this.executeCaptureWebSnapshot(userId, itemId, body);
   }
 }
+
+export { AttachmentController as AttachmentsController };

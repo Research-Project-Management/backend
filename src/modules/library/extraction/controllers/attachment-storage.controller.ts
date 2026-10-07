@@ -531,7 +531,7 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
     );
   }
 
-  @Get('files/:fileId')
+  @Get(['files/:fileId', 'files/:fileId/content'])
   @ApiOperation({ summary: 'Stream binary content directly by fileId' })
   async streamLibraryFile(
     @CurrentUser('id') userId: string,
@@ -712,7 +712,7 @@ export class ProjectAttachmentStorageController extends BaseAttachmentStorageCon
     return this.executeAbortMultipart(userId, sessionId, projectId);
   }
 
-  @Get('files/:fileId')
+  @Get(['files/:fileId', 'files/:fileId/content'])
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Stream binary content directly by fileId' })
   @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })

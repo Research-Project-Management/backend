@@ -199,7 +199,7 @@ export class ZoteroSchemaValidatorService {
 
       demotedToExtra[key] = value;
       const warningMsg = `[SchemaTrace] Field '${key}' is not part of Zotero schema for itemType '${itemType}'; safely demoting to 'extra'`;
-      this.logger.warn(warningMsg);
+      this.logger.debug(warningMsg);
       warnings.push(warningMsg);
 
       if (
@@ -250,14 +250,6 @@ export class ZoteroSchemaValidatorService {
 
     if (rawData.creators === undefined) {
       delete cleanFields.creators;
-    }
-    if (
-      rawData.itemType === undefined &&
-      rawData.type === undefined &&
-      !rawType
-    ) {
-      delete cleanFields.itemType;
-      delete cleanFields.type;
     }
 
     return {

@@ -49,21 +49,17 @@ const COLOR_LABEL_MAP: Record<string, string> = {
   '#aaaaaa': '⬜ Notes',
 };
 
+import { parseAnnotationSortIndex as canonicalParseAnnotationSortIndex } from '../../shared-kernel/utils/sort-index.utils';
+
 export function parseAnnotationSortIndex(
   sortIndex: string | null | undefined,
 ): {
   y: number;
   x: number;
 } {
-  if (!sortIndex) return { y: 0, x: 0 };
-  const parts = sortIndex.split('|');
-  if (parts.length < 3) return { y: 0, x: 0 };
-  const y = parseFloat(parts[1] ?? '0');
-  const x = parseFloat(parts[2] ?? '0');
-  return {
-    y: isNaN(y) ? 0 : y,
-    x: isNaN(x) ? 0 : x,
-  };
+  const parsed = canonicalParseAnnotationSortIndex(sortIndex);
+  if (!parsed) return { y: 0, x: 0 };
+  return { y: parsed.y, x: parsed.x };
 }
 
 import {

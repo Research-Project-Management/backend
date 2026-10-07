@@ -3,7 +3,7 @@ import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
 } from '../types/catalog-gateway.types';
-import { CATALOG_FACADE, ICatalogFacade } from '../../catalog/catalog.facade';
+import { CATALOG_FACADE, ICatalogFacade } from '../../shared-kernel';
 
 /**
  * In-process adapter connecting Ingestion to Catalog via CatalogFacade.
@@ -110,5 +110,22 @@ export class InProcessCatalogGatewayAdapter implements ICatalogGatewayPort {
       return this.catalogFacade.itemExists(userId, itemId, projectId);
     }
     return Promise.resolve(false);
+  }
+
+  async findMatchCandidates(
+    scope: { userId?: string; projectId?: string | null } | string,
+    criteria: {
+      doi?: string | null;
+      arxivId?: string | null;
+      pmid?: string | null;
+      isbn?: string | null;
+      titleWords?: string[];
+      titlePrefix?: string;
+    },
+  ) {
+    if (this.catalogFacade?.findMatchCandidates) {
+      return this.catalogFacade.findMatchCandidates(scope, criteria);
+    }
+    return { exactMatch: null, candidateItems: [] };
   }
 }

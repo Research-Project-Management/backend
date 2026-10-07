@@ -51,8 +51,8 @@ export class DuplicatePolicy {
     if (proposed.title && proposed.title.trim().length > 5) {
       for (const item of existingItems) {
         if (!item.title) continue;
-        const sim = this.calculateTitleSimilarity(proposed.title, item.title);
-        if (sim >= 0.88) {
+        const similarity = calculateTitleSimilarity(proposed.title, item.title);
+        if (similarity >= 0.88) {
           // Same title! Check secondary signals (year or first author)
           const yearMatch =
             proposed.year && item.year && proposed.year === item.year;
@@ -61,7 +61,7 @@ export class DuplicatePolicy {
             proposed.authors.length > 0 &&
             item.authors &&
             item.authors.length > 0 &&
-            this.firstAuthorMatches(proposed.authors[0], item.authors[0]);
+            firstAuthorMatches(proposed.authors[0], item.authors[0]);
 
           if (yearMatch || authorMatch) {
             return {
@@ -87,17 +87,5 @@ export class DuplicatePolicy {
       confidence: 0.0,
       matchReason: 'NONE',
     };
-  }
-
-  private normalizeTitle(title?: string | null): string {
-    return normalizeTitleForDedupe(title);
-  }
-
-  private calculateTitleSimilarity(a: string, b: string): number {
-    return calculateTitleSimilarity(a, b);
-  }
-
-  private firstAuthorMatches(a: string, b: string): boolean {
-    return firstAuthorMatches(a, b);
   }
 }

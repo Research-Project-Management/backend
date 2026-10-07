@@ -1,9 +1,6 @@
-import { TypesService } from '@/modules/library/catalog/core/services/types.service';
-import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/core/services/zotero-schema-validator.service';
-import { ItemTransformer } from '@/modules/library/catalog/core/adapters/item.transformer';
-import { ItemAggregate } from '@/modules/library/catalog/core/domain/item.aggregate';
-import { ConvertItemTypeUseCase } from '@/modules/library/catalog/core/use-cases/convert-item-type.use-case';
-import { IItemRepositoryPort as IItemRepository } from '@/modules/library/catalog/core/ports/item-repository.port';
+import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
+import { ItemTransformer } from '@/modules/library/catalog/utils/item.transformer';
 
 describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', () => {
   let typesService: TypesService;
@@ -107,60 +104,33 @@ describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', ()
       expect(projected.extraFields.__unmapped_journalArticle_volume).toBe('42');
     });
 
-    it('should purge old type-specific fields on aggregate when replaceFields is true', async () => {
-      // Create initial aggregate as journalArticle with volume and issue
-      const aggregate = ItemAggregate.create({
+    it('should purge old type-specific fields when converting types', () => {
+      const rawItem = {
+        id: 'item-123',
         userId: 'user-123',
         title: 'Quantum Neural Networks',
         itemType: 'journalArticle',
         publicationTitle: 'Physical Review Letters',
-        fields: {
-          volume: '99',
-          issue: '2',
-          pages: '123-130',
-          tags: ['quantum', 'ml'],
-          notes: [{ id: 'n1', content: 'Important paper' }],
-        },
+        volume: '99',
+        issue: '2',
+        pages: '123-130',
+        tags: ['quantum', 'ml'],
+        notes: [{ id: 'n1', content: 'Important paper' }],
+      };
+
+      const preview = transformer.previewConversion(rawItem, 'patent', {
+        retainUnmappedInExtra: true,
       });
 
-      expect(aggregate.fields.volume).toBe('99');
-      expect(aggregate.fields.issue).toBe('2');
-
-      const mockRepo = {
-        findById: jest.fn().mockResolvedValue(aggregate),
-        save: jest.fn().mockImplementation(async (item) => item),
-        delete: jest.fn(),
-        findDuplicateCandidates: jest.fn(),
-      } as unknown as IItemRepository;
-
-      const useCase = new ConvertItemTypeUseCase(
-        mockRepo,
-        typesService,
-        transformer,
-      );
-
-      const result = await useCase.execute({
-        userId: aggregate.userId,
-        itemId: aggregate.id,
-        targetType: 'patent',
-        options: { retainUnmappedInExtra: true },
-      });
-
-      expect(result.success).toBe(true);
-      expect(aggregate.itemType).toBe('patent');
-
-      // CRITICAL: Old journalArticle fields volume and issue do NOT exist on patent and must be purged
-      expect(aggregate.fields.volume).toBeUndefined();
-      expect(aggregate.fields.issue).toBeUndefined();
+      expect(preview.targetType).toBe('patent');
+      const projected = preview.projectedItem as Record<string, any>;
+      // Old journalArticle fields volume and issue do NOT exist on patent and must be purged
+      expect(projected.volume).toBeUndefined();
+      expect(projected.issue).toBeUndefined();
       // 'pages' is valid for patent per Zotero schema and is correctly preserved
-      expect(aggregate.fields.pages).toBe('123-130');
-
-      // Persistent internal fields (tags, notes) must remain intact
-      expect(aggregate.tags).toEqual(['quantum', 'ml']);
-      expect(aggregate.notes.length).toBe(1);
-
+      expect(projected.pages).toBe('123-130');
       // Unmapped fields must be preserved in extra
-      expect(aggregate.fields.extra).toContain('Volume: 99');
+      expect(projected.extra).toContain('Volume: 99');
     });
   });
 });

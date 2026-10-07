@@ -4,7 +4,7 @@
  * Provides bridge for Zotero (via official API v3) and Flux Library integration.
  */
 
-import { Injectable, Optional, Logger } from '@nestjs/common';
+import { Injectable, Optional, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   ILibrarySyncPort,
@@ -14,6 +14,7 @@ import { IntegrationsRepository } from '@/modules/integrations/integrations.repo
 import { ZoteroProvider } from '@/modules/integrations/providers/zotero.provider';
 import { MendeleyProvider } from '@/modules/integrations/providers/mendeley.provider';
 import { decryptToken } from '@/modules/integrations/utils/integration-crypto.utils';
+import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
 import {
   escapeLatex,
   formatBibtexName,
@@ -34,6 +35,9 @@ export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
     private readonly zoteroProvider?: ZoteroProvider,
     @Optional()
     private readonly mendeleyProvider?: MendeleyProvider,
+    @Optional()
+    @Inject(LIBRARY_FACADE)
+    private readonly libraryFacade?: ILibraryFacade,
   ) {}
 
   public async listCollections(
@@ -103,8 +107,25 @@ export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
       }
     }
 
-    // 3. Fetch local Flux library collections from database
-    if (this.prisma) {
+    // 3. Fetch local Flux library collections via LibraryFacade (or fallback to DB)
+    if (this.libraryFacade?.catalog) {
+      try {
+        const collections =
+          await this.libraryFacade.catalog.listCollections(userId);
+        for (const c of collections || []) {
+          results.push({
+            id: c.id,
+            name: c.name,
+            itemCount:
+              (c as any)._count?.collectionItems ?? (c as any).itemCount ?? 0,
+          });
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to list collections via LibraryFacade: ${err?.message}`,
+        );
+      }
+    } else if (this.prisma) {
       try {
         const collections = await this.prisma.collection.findMany({
           where: {
@@ -199,7 +220,26 @@ export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
       );
     }
 
-    // 3. Local Flux database collections (no mock fallback)
+    // 3. Local Flux collections via LibraryFacade (or fallback to DB)
+    if (this.libraryFacade?.citation) {
+      try {
+        const exportRes = await this.libraryFacade.citation.exportLibrary(
+          userId,
+          {
+            format: 'bibtex',
+            collectionId,
+          },
+        );
+        if (exportRes?.content !== undefined) {
+          return exportRes.content;
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to export collection BibTeX via LibraryFacade: ${err?.message}`,
+        );
+      }
+    }
+
     if (!this.prisma) {
       throw new Error(`Collection ${collectionId} not found`);
     }

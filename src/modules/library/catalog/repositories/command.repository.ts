@@ -293,6 +293,16 @@ export class CommandRepository {
     return result.count > 0;
   }
 
+  async delete(
+    userId: string,
+    id: string,
+    expectedVersion?: number,
+    tx?: Prisma.TransactionClient,
+    projectId?: string,
+  ): Promise<boolean> {
+    return this.softDelete(userId, id, expectedVersion, tx, projectId);
+  }
+
   async restore(
     userId: string,
     id: string,

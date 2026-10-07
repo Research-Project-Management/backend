@@ -81,36 +81,11 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
 
   async getItem(userId: string, id: string, projectId?: string) {
     const cacheKey = LIBRARY_REDIS_KEYS.item(id);
-    if (this.cache) {
-      if (typeof this.cache.wrap === 'function') {
-        const cached = await this.cache.wrap<Record<string, any> | null>(
-          cacheKey,
-          async () => {
-            const item = await this.query.findById(userId, id, projectId);
-            return item ? this.mapFlattenedState(item, userId) : null;
-          },
-          300, // 5 min TTL
-        );
-        if (cached) {
-          const isOwner = cached.userId === userId;
-          const isProjectMatch = projectId && cached.projectId === projectId;
-          if (isOwner || isProjectMatch) {
-            return cached;
-          }
-          return null;
-        }
-        return null;
-      }
+    let item: Record<string, any> | null = null;
 
+    if (this.cache) {
       try {
-        const cached = await this.cache.get<Record<string, any>>(cacheKey);
-        if (cached) {
-          const isOwner = cached.userId === userId;
-          const isProjectMatch = projectId && cached.projectId === projectId;
-          if (isOwner || isProjectMatch) {
-            return cached;
-          }
-        }
+        item = await this.cache.get<Record<string, any>>(cacheKey);
       } catch (err: any) {
         this.logger.debug(
           `Cache lookup error for ${cacheKey}: ${err?.message || err}`,
@@ -118,21 +93,39 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
       }
     }
 
-    const item = await this.query.findById(userId, id, projectId);
-    if (!item) return null;
-    const mapped = this.mapFlattenedState(item, userId);
+    if (!item) {
+      item = await this.query.findById(userId, id, projectId);
+      if (!item) return null;
 
-    if (mapped && this.cache) {
-      try {
-        await this.cache.set(cacheKey, mapped, 300); // 5 min TTL
-      } catch (err: any) {
-        this.logger.debug(
-          `Cache set error for ${cacheKey}: ${err?.message || err}`,
-        );
+      if (this.cache) {
+        try {
+          await this.cache.set(cacheKey, item, 300); // 5 min TTL
+        } catch (err: any) {
+          this.logger.debug(
+            `Cache set error for ${cacheKey}: ${err?.message || err}`,
+          );
+        }
       }
     }
 
-    return mapped;
+    // Access check: verify ownership, project match, or project membership
+    const isOwner = item.userId === userId;
+    const isProjectMatch = projectId && item.projectId === projectId;
+    if (!isOwner && !isProjectMatch) {
+      if (item.projectId) {
+        const member = await this.query.findProjectMember(
+          item.projectId,
+          userId,
+        );
+        if (!member) return null;
+      } else {
+        return null;
+      }
+    }
+
+    // Dynamically project user-specific reading state (starred, readStatus, rating, lastReadAt)
+    // for this specific caller, preventing cross-user reading state bleed in shared workspaces.
+    return this.mapFlattenedState(item, userId);
   }
 
   async listItems(
@@ -309,7 +302,7 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
   }
 
   async findQualityAuditItems(
-    userId: string,
+    userId?: string,
     limit?: number,
     projectId?: string,
   ): Promise<QualityAuditCandidateItem[]> {
@@ -321,7 +314,7 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
   }
 
   async findDuplicateCandidateItems(
-    userId: string,
+    userId?: string,
     limit?: number,
     projectId?: string,
   ): Promise<DuplicateCandidateItem[]> {
@@ -335,12 +328,12 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
   async findCandidateItemsForQualityAudit(
     limit: number,
   ): Promise<QualityAuditCandidateItem[]> {
-    return this.findQualityAuditItems('', limit);
+    return this.findQualityAuditItems(undefined, limit);
   }
 
   async findCandidateItemsForDuplicateDetection(
     limit: number,
   ): Promise<DuplicateCandidateItem[]> {
-    return this.findDuplicateCandidateItems('', limit);
+    return this.findDuplicateCandidateItems(undefined, limit);
   }
 }

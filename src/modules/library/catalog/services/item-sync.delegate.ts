@@ -5,11 +5,12 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CommandRepository } from '../repositories/command.repository';
+import { QueryRepository } from '../repositories/query.repository';
 import {
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
-} from '../../sync';
+} from '../../shared-kernel';
 import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
 import type {
   UpsertSyncItemCommand,
@@ -19,7 +20,10 @@ import type {
 
 @Injectable()
 export class ItemSyncDelegate {
-  constructor(private readonly command: CommandRepository) {}
+  constructor(
+    private readonly command: CommandRepository,
+    private readonly query: QueryRepository,
+  ) {}
 
   async upsertFromSync(
     command: UpsertSyncItemCommand,
@@ -28,10 +32,14 @@ export class ItemSyncDelegate {
   ): Promise<UpsertSyncEntityResult> {
     const userId = command.userId;
     if (command.existingId) {
-      const existing = await tx.item.findUnique({
-        where: { id: command.existingId },
-        include: { itemTags: { include: { tag: true } } },
-      });
+      const existing = await this.query.findById(
+        userId,
+        command.existingId,
+        command.projectId,
+        tx,
+        false,
+        true,
+      );
 
       if (!existing) {
         throw new NotFoundException(`Item ${command.existingId} not found`);
@@ -54,7 +62,7 @@ export class ItemSyncDelegate {
       }
 
       const existingTagNames = (existing.itemTags || []).map(
-        (it) => it.tag.name,
+        (it: any) => it.tag?.name || it.name,
       );
       const mergedTags = normalizeTags([
         ...existingTagNames,
@@ -135,9 +143,14 @@ export class ItemSyncDelegate {
     const targetUserId = command.userId || '';
     const { entityId, reason, publishOutboxEventType, publishOutboxPayload } =
       command;
-    const existing = await tx.item.findUnique({
-      where: { id: entityId },
-    });
+    const existing = await this.query.findById(
+      targetUserId,
+      entityId,
+      (command as any).projectId,
+      tx,
+      false,
+      true,
+    );
     if (!existing) return;
 
     if (targetUserId && existing.userId && existing.userId !== targetUserId) {
@@ -150,10 +163,13 @@ export class ItemSyncDelegate {
       existing.projectId || (command as any).projectId || undefined;
     const syncScope = { userId: targetUserId, projectId: itemProjectId };
 
-    await tx.item.update({
-      where: { id: entityId },
-      data: { deletedAt: new Date() },
-    });
+    await this.command.delete(
+      targetUserId,
+      entityId,
+      undefined,
+      tx,
+      itemProjectId,
+    );
     await helpers.appendChange(syncScope, {
       entityType: 'Item',
       entityId,

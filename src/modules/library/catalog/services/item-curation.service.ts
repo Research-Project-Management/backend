@@ -11,8 +11,25 @@ import {
   TransactionService,
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
-} from '../../sync';
+} from '../../shared-kernel';
 import { ItemsMapper } from '../utils/items.mapper';
+
+let cachedCite: any = null;
+
+function getCite(): any {
+  if (cachedCite === null) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { Cite } = require('@citation-js/core');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('@citation-js/plugin-bibtex');
+      cachedCite = Cite;
+    } catch {
+      cachedCite = undefined;
+    }
+  }
+  return cachedCite;
+}
 
 /**
  * ItemCurationService — Dedicated Domain Service for Item Curation, Scholarly Enrichment,
@@ -41,23 +58,24 @@ export class ItemCurationService {
     }
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { Cite } = require('@citation-js/core');
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('@citation-js/plugin-bibtex');
+      const Cite = getCite();
+      if (!Cite) return [];
 
       const cite = new Cite(rawCitations);
       const data = cite.data || [];
-      return data.map((csl: any, index: number) => ({
+      return data.map((csl: Record<string, any>, index: number) => ({
         id: csl.id || `cite-${index + 1}`,
         rawCitation: rawCitations,
         title: csl.title || 'Untitled',
         authors: (csl.author || [])
-          .map((a: any) => {
-            if (a.literal) return a.literal.trim();
-            if (a.given && a.family) return `${a.given} ${a.family}`.trim();
-            return (a.family || a.given || '').trim();
-          })
+          .map(
+            (author: { literal?: string; given?: string; family?: string }) => {
+              if (author.literal) return author.literal.trim();
+              if (author.given && author.family)
+                return `${author.given} ${author.family}`.trim();
+              return (author.family || author.given || '').trim();
+            },
+          )
           .filter(Boolean),
         year:
           csl.issued?.['date-parts']?.[0]?.[0] != null
@@ -96,7 +114,9 @@ export class ItemCurationService {
 
     const isMember =
       project.createdById === userId ||
-      project.members.some((m: any) => m.userId === userId);
+      project.members.some(
+        (member: { userId: string }) => member.userId === userId,
+      );
 
     if (!isMember) {
       throw new ForbiddenException(
@@ -115,46 +135,53 @@ export class ItemCurationService {
     if (this.query.findDuplicatesInProject && sourceItems.length > 0) {
       const existingItems = await this.query.findDuplicatesInProject(
         projectId,
-        sourceItems.map((s) => ({
-          doi: s.doi,
-          citationKey: s.citationKey,
-          title: s.title,
+        sourceItems.map((item) => ({
+          doi: item.doi,
+          citationKey: item.citationKey,
+          title: item.title,
         })),
       );
       existingDois = new Set(
         existingItems
-          .map((e) => e.doi?.trim().toLowerCase())
-          .filter((d): d is string => Boolean(d)),
+          .map((entry) => entry.doi?.trim().toLowerCase())
+          .filter((doi): doi is string => Boolean(doi)),
       );
       existingCitationKeys = new Set(
         existingItems
-          .map((e) => e.citationKey?.trim().toLowerCase())
-          .filter((k): k is string => Boolean(k)),
+          .map((entry) => entry.citationKey?.trim().toLowerCase())
+          .filter((key): key is string => Boolean(key)),
       );
       existingTitles = new Set(
         existingItems
-          .map((e) => e.title?.trim().toLowerCase())
-          .filter((t): t is string => Boolean(t)),
+          .map((entry) => entry.title?.trim().toLowerCase())
+          .filter((title): title is string => Boolean(title)),
       );
     }
 
     for (const source of sourceItems) {
       const isBatchDuplicate =
-        (source.doi && existingDois.has(source.doi.trim().toLowerCase())) ||
-        (source.citationKey &&
-          existingCitationKeys.has(source.citationKey.trim().toLowerCase())) ||
-        (source.title && existingTitles.has(source.title.trim().toLowerCase()));
+        Boolean(
+          source.doi && existingDois.has(source.doi.trim().toLowerCase()),
+        ) ||
+        Boolean(
+          source.citationKey &&
+          existingCitationKeys.has(source.citationKey.trim().toLowerCase()),
+        ) ||
+        Boolean(
+          source.title && existingTitles.has(source.title.trim().toLowerCase()),
+        );
 
-      let existingInProject: any = isBatchDuplicate;
+      let isDuplicate = isBatchDuplicate;
       if (!isBatchDuplicate && !this.query.findDuplicatesInProject) {
-        existingInProject = await this.query.findDuplicateInProject(projectId, {
+        const found = await this.query.findDuplicateInProject(projectId, {
           doi: source.doi,
           citationKey: source.citationKey,
           title: source.title,
         });
+        isDuplicate = Boolean(found);
       }
 
-      if (existingInProject) {
+      if (isDuplicate) {
         continue;
       }
 
@@ -216,21 +243,21 @@ export class ItemCurationService {
     return {
       itemId,
       count: sources.length,
-      sources: sources.map((s) => ({
-        id: s.id,
-        sourceProvider: s.sourceProvider,
-        sourceUri: s.sourceUri,
-        format: s.format,
-        fetchedAt: s.fetchedAt,
-        createdAt: s.createdAt,
-        rawPayload: s.rawPayload,
+      sources: sources.map((source) => ({
+        id: source.id,
+        sourceProvider: source.sourceProvider,
+        sourceUri: source.sourceUri,
+        format: source.format,
+        fetchedAt: source.fetchedAt,
+        createdAt: source.createdAt,
+        rawPayload: source.rawPayload,
       })),
     };
   }
 }
 
 export function buildImportItemPayload(
-  source: any,
+  source: Record<string, any>,
   userId: string,
 ): CreateItemData {
   const primaryAttachment = source.attachments?.[0];
@@ -297,26 +324,44 @@ export function buildImportItemPayload(
     mimeType: resolvedMimeType,
     size: resolvedSize,
     fileHash: resolvedFileHash,
-    tags: source.itemTags?.map((it: any) => it.tag?.name).filter(Boolean) || [],
+    tags:
+      source.itemTags
+        ?.map((itemTag: { tag?: { name?: string } }) => itemTag.tag?.name)
+        .filter((tagName: unknown): tagName is string => Boolean(tagName)) ||
+      [],
     notes:
-      source.notesList?.map((n: any) => ({
-        title: n.title,
-        contentMd: n.contentMd,
-        content: n.contentMd,
-        tags: n.tags || [],
-      })) || [],
-    creators: source.contributors?.map((c: any) => ({
-      creatorType: c.creatorType || 'author',
-      firstName: c.firstName || '',
-      lastName: c.lastName || '',
-      fullName: c.fullName || '',
-      name: c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-      orderIndex: c.orderIndex ?? 0,
-    })),
-    identifiers: source.identifiers?.map((i: any) => ({
-      type: i.type,
-      value: i.value,
-      canonicalUri: i.canonicalUri,
-    })),
+      source.notesList?.map(
+        (note: { title?: string; contentMd?: string; tags?: string[] }) => ({
+          title: note.title,
+          contentMd: note.contentMd,
+          content: note.contentMd,
+          tags: note.tags || [],
+        }),
+      ) || [],
+    creators: source.contributors?.map(
+      (contributor: {
+        creatorType?: string;
+        firstName?: string;
+        lastName?: string;
+        fullName?: string;
+        orderIndex?: number;
+      }) => ({
+        creatorType: contributor.creatorType || 'author',
+        firstName: contributor.firstName || '',
+        lastName: contributor.lastName || '',
+        fullName: contributor.fullName || '',
+        name:
+          contributor.fullName ||
+          `${contributor.firstName || ''} ${contributor.lastName || ''}`.trim(),
+        orderIndex: contributor.orderIndex ?? 0,
+      }),
+    ),
+    identifiers: source.identifiers?.map(
+      (identifier: { type: string; value: string; canonicalUri?: string }) => ({
+        type: identifier.type,
+        value: identifier.value,
+        canonicalUri: identifier.canonicalUri,
+      }),
+    ),
   };
 }

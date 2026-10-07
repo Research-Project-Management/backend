@@ -12,28 +12,23 @@ import {
   AppendChangeEntry,
   RecordTombstoneEntry,
 } from '../repositories/changelog.repository';
-import { IUnitOfWork } from '../types/unit-of-work.types';
+import {
+  IUnitOfWork,
+  TransactionService as SharedTransactionService,
+} from '../../shared-kernel/ports/unit-of-work.port';
 import { OutboxWorker } from './outbox.worker';
 
-export interface TransactionHelpers {
-  appendChange(
-    scope: { userId?: string; projectId?: string } | string,
-    entry: AppendChangeEntry,
-  ): Promise<LibraryChange>;
-  recordTombstone(
-    scope: { userId?: string; projectId?: string } | string,
-    entry: RecordTombstoneEntry,
-  ): Promise<Tombstone>;
-  publishOutbox(
-    scope: { userId: string; projectId?: string | null } | string,
-    aggregateId: string,
-    eventType: string,
-    payload: any,
-  ): Promise<OutboxEvent>;
-}
+export type {
+  AppendChangeEntry,
+  RecordTombstoneEntry,
+  TransactionHelpers,
+} from '../../shared-kernel/ports/unit-of-work.port';
 
 @Injectable()
-export class TransactionService implements IUnitOfWork {
+export class TransactionService
+  extends SharedTransactionService
+  implements IUnitOfWork
+{
   private readonly logger = new Logger(TransactionService.name);
 
   constructor(

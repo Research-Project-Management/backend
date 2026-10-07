@@ -18,7 +18,7 @@ import {
   EXTRACTION_GATEWAY_PORT,
   IExtractionGatewayPort,
 } from '../types/extraction-gateway.types';
-import { TransactionService } from '../../sync';
+import { TransactionService } from '../../shared-kernel';
 import { createHash } from 'crypto';
 
 @Injectable()

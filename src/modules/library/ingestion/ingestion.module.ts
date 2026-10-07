@@ -1,10 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
 import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
-import { CatalogModule } from '../catalog/catalog.module';
-import { ExtractionModule } from '../extraction/extraction.module';
 import { StorageModule } from '../../storage/storage.module';
-import { SyncModule } from '../sync/sync.module';
 import { BullModule } from '@nestjs/bullmq';
 import {
   LIBRARY_INGESTION_QUEUE_PRIORITY,
@@ -102,9 +99,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     CoreModule,
     SharedKernelModule,
     StorageModule,
-    CatalogModule,
-    ExtractionModule,
-    SyncModule,
     BullModule.registerQueue(
       { name: LIBRARY_INGESTION_QUEUE_PRIORITY },
       { name: LIBRARY_INGESTION_QUEUE_STANDARD },
