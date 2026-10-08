@@ -51,6 +51,20 @@ export class AnnotationsService {
     return this.annotationsRepo.findByAttachment(attachmentId, pageIndex, type);
   }
 
+  async listAnnotations(
+    userId: string,
+    attachmentId: string,
+    filter?: { pageIndex?: number; type?: AnnotationType },
+    _projectId?: string,
+  ) {
+    return this.getAnnotationsByAttachment(
+      userId,
+      attachmentId,
+      filter?.pageIndex,
+      filter?.type,
+    );
+  }
+
   async getAnnotation(userId: string, id: string) {
     const annotation = await this.annotationsRepo.findById(id);
     if (!annotation) return null;

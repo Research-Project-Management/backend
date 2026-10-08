@@ -6,11 +6,12 @@ import {
   IntegrationEventBusService,
   TransactionService,
 } from '@/modules/library/sync';
-import { CatalogEventsSubscriber } from '@/modules/library/search/services/catalog-events.subscriber';
+import { SearchEventsSubscriber as CatalogEventsSubscriber } from '@/modules/library/search/services/search-events.subscriber';
 import { ItemLifecycleSubscriber } from '@/modules/library/extraction/utils/item-lifecycle.subscriber';
+import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
+import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SearchService } from '@/modules/library/search/services/search.service';
-import { PrismaService } from '@/core/database/prisma.service';
 
 describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', () => {
   describe('Integration Events Factory', () => {
@@ -116,30 +117,31 @@ describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', ()
     });
   });
 
-  describe('Content Bounded Context - ItemLifecycleSubscriber', () => {
-    let mockPrisma: any;
+  describe('Extraction Bounded Context - ItemLifecycleSubscriber', () => {
+    let mockAttachmentsRepo: Partial<jest.Mocked<AttachmentsRepository>>;
+    let mockAnnotationsRepo: Partial<jest.Mocked<AnnotationsRepository>>;
     let subscriber: ItemLifecycleSubscriber;
 
     beforeEach(() => {
-      mockPrisma = {
-        attachment: {
-          findMany: jest
-            .fn()
-            .mockResolvedValue([{ id: 'att-1' }, { id: 'att-2' }]),
-          updateMany: jest.fn().mockResolvedValue({ count: 2 }),
-        },
-        annotation: {
-          updateMany: jest.fn().mockResolvedValue({ count: 5 }),
-        },
-        note: {
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
+      mockAttachmentsRepo = {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'att-1' }, { id: 'att-2' }]),
+        softDeleteByItemId: jest.fn().mockResolvedValue(2),
+        deleteManyByItemId: jest.fn().mockResolvedValue(2),
+      };
+      mockAnnotationsRepo = {
+        softDeleteByAttachmentIds: jest.fn().mockResolvedValue(5),
+        deleteManyByItemId: jest.fn().mockResolvedValue(5),
       };
 
-      subscriber = new ItemLifecycleSubscriber(mockPrisma as PrismaService);
+      subscriber = new ItemLifecycleSubscriber(
+        mockAttachmentsRepo as unknown as AttachmentsRepository,
+        mockAnnotationsRepo as unknown as AnnotationsRepository,
+      );
     });
 
-    it('should soft-delete associated attachments, notes, and annotations on CATALOG_ITEM_DELETED event', async () => {
+    it('should soft-delete associated attachments and annotations on CATALOG_ITEM_DELETED event', async () => {
       const event = createIntegrationEvent(
         INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_DELETED,
         'catalog',
@@ -149,22 +151,27 @@ describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', ()
 
       await subscriber.handleItemDeleted(event);
 
-      expect(mockPrisma.attachment.findMany).toHaveBeenCalledWith({
-        where: { itemId: 'item-del-1' },
-        select: { id: true },
+      expect(mockAttachmentsRepo.findMany).toHaveBeenCalledWith({
+        itemId: 'item-del-1',
+        deletedAt: null,
       });
-      expect(mockPrisma.annotation.updateMany).toHaveBeenCalledWith({
-        where: { attachmentId: { in: ['att-1', 'att-2'] }, deletedAt: null },
-        data: { deletedAt: expect.any(Date) },
-      });
-      expect(mockPrisma.attachment.updateMany).toHaveBeenCalledWith({
-        where: { itemId: 'item-del-1', deletedAt: null },
-        data: { deletedAt: expect.any(Date) },
-      });
-      expect(mockPrisma.note.updateMany).toHaveBeenCalledWith({
-        where: { itemId: 'item-del-1', deletedAt: null },
-        data: { deletedAt: expect.any(Date) },
-      });
+      expect(
+        mockAnnotationsRepo.softDeleteByAttachmentIds,
+      ).toHaveBeenCalledWith(['att-1', 'att-2']);
+      expect(mockAttachmentsRepo.softDeleteByItemId).toHaveBeenCalledWith(
+        'item-del-1',
+      );
+    });
+
+    it('should purge associated attachments and annotations on library.item.purged event', async () => {
+      await subscriber.handleItemPurged({ id: 'item-del-1' });
+
+      expect(mockAnnotationsRepo.deleteManyByItemId).toHaveBeenCalledWith(
+        'item-del-1',
+      );
+      expect(mockAttachmentsRepo.deleteManyByItemId).toHaveBeenCalledWith(
+        'item-del-1',
+      );
     });
   });
 });

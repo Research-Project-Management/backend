@@ -9,6 +9,7 @@ import { StructureModule } from '../structure/structure.module';
 import { DocstoreModule } from '../docstore/docstore.module';
 import { PrismaModule } from '@/core/database/prisma.module';
 import { IntegrationsModule } from '@/modules/integrations/integrations.module';
+import { LibraryModule } from '@/modules/library/library.module';
 
 // Controllers & Service
 import {
@@ -53,6 +54,7 @@ import { SyncLibraryCollectionUseCase } from './core/use-cases/sync-library-coll
     DocstoreModule,
     PrismaModule,
     forwardRef(() => IntegrationsModule),
+    forwardRef(() => LibraryModule),
   ],
   controllers: [CitationsController, CitationsUtilityController],
   providers: [

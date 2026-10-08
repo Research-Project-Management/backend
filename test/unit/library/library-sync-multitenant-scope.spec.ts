@@ -15,6 +15,7 @@ import {
 } from '@/modules/library/shared-kernel';
 import { PrismaService } from '@/core/database/prisma.service';
 import { CATALOG_FACADE } from '@/modules/library/catalog/catalog.facade';
+import { ITEM_EXISTENCE_PORT } from '@/modules/library/catalog/types/items.types';
 
 describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';
@@ -70,6 +71,12 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
                 id: mockItemId,
                 projectId: mockProjectId,
               }),
+            },
+          },
+          {
+            provide: ITEM_EXISTENCE_PORT,
+            useValue: {
+              exists: jest.fn().mockResolvedValue(true),
             },
           },
         ],

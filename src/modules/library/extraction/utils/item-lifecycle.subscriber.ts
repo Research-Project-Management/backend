@@ -26,7 +26,8 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
 
   constructor(
     private readonly attachmentsRepository: AttachmentsRepository,
-    private readonly annotationsRepository: AnnotationsRepository,
+    @Optional()
+    private readonly annotationsRepository?: AnnotationsRepository,
     @Optional()
     @Inject(OUTBOX_REGISTRY_PORT)
     private readonly outboxWorker?: IOutboxRegistry,
@@ -62,12 +63,16 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
     );
 
     try {
-      await this.annotationsRepository
-        .deleteManyByItemId(itemId)
-        .catch(() => {});
-      await this.attachmentsRepository
-        .deleteManyByItemId(itemId)
-        .catch(() => {});
+      if (this.annotationsRepository) {
+        await this.annotationsRepository
+          .deleteManyByItemId(itemId)
+          .catch(() => {});
+      }
+      if (this.attachmentsRepository?.deleteManyByItemId) {
+        await this.attachmentsRepository
+          .deleteManyByItemId(itemId)
+          .catch(() => {});
+      }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.warn(
@@ -96,7 +101,7 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
         (attachment: { id: string }) => attachment.id,
       );
 
-      if (attachmentIds.length > 0) {
+      if (attachmentIds.length > 0 && this.annotationsRepository) {
         await this.annotationsRepository.softDeleteByAttachmentIds(
           attachmentIds,
         );

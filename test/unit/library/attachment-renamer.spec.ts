@@ -3,7 +3,7 @@ import {
   extractAuthorTokens,
   sanitizeFilenameStem,
   DEFAULT_RENAME_PATTERN,
-} from '@/modules/library/extraction/utils/renamer.util';
+} from '@/modules/library/extraction/utils/renamer.utils';
 
 describe('Attachment Renamer Utility Spec (Zotero 7 Official Standard)', () => {
   it('should format filename with official Zotero 7 default template {{ firstCreator suffix=" - " }}{{ year suffix=" - " }}{{ title truncate="100" }}', () => {

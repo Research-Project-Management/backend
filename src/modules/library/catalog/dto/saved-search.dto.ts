@@ -9,7 +9,10 @@ import {
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { SavedSearchConditionGroup } from '../types/saved-search.types';
+import {
+  SavedSearchConditionGroup,
+  SavedSearchScopeOptions,
+} from '../types/saved-search.types';
 
 export class CreateSavedSearchDto {
   @IsString()
@@ -29,6 +32,10 @@ export class CreateSavedSearchDto {
 
   @IsObject()
   conditions!: SavedSearchConditionGroup;
+
+  @IsOptional()
+  @IsObject()
+  scopeOptions?: SavedSearchScopeOptions;
 
   @IsOptional()
   @IsIn(['AND', 'OR'])
@@ -73,6 +80,10 @@ export class UpdateSavedSearchDto {
   conditions?: SavedSearchConditionGroup;
 
   @IsOptional()
+  @IsObject()
+  scopeOptions?: SavedSearchScopeOptions;
+
+  @IsOptional()
   @IsIn(['AND', 'OR'])
   conjunction?: 'AND' | 'OR';
 
@@ -92,6 +103,10 @@ export class UpdateSavedSearchDto {
 export class PreviewSavedSearchDto {
   @IsObject()
   conditions!: SavedSearchConditionGroup;
+
+  @IsOptional()
+  @IsObject()
+  scopeOptions?: SavedSearchScopeOptions;
 
   @IsOptional()
   @IsString()

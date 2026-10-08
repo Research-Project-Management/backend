@@ -75,7 +75,8 @@ const TEST_PAPERS: PaperTestCase[] = [
   {
     id: 6,
     category: 'Astrophysics / Gravitational Waves',
-    expectedTitleSnippet: 'Observation of Gravitational Waves from a Binary Black Hole Merger',
+    expectedTitleSnippet:
+      'Observation of Gravitational Waves from a Binary Black Hole Merger',
     channel: 'DOI',
     query: '10.1103/PhysRevLett.116.061102',
     notes: 'Physical Review Letters (1,000+ authors multi-author stress test)',
@@ -100,7 +101,8 @@ const TEST_PAPERS: PaperTestCase[] = [
   {
     id: 9,
     category: 'Structural Biology / AlphaFold2',
-    expectedTitleSnippet: 'Highly accurate protein structure prediction with AlphaFold',
+    expectedTitleSnippet:
+      'Highly accurate protein structure prediction with AlphaFold',
     channel: 'DOI',
     query: '10.1038/s41586-021-03819-2',
     notes: 'Nature DeepMind AlphaFold landmark paper',
@@ -116,7 +118,8 @@ const TEST_PAPERS: PaperTestCase[] = [
   {
     id: 11,
     category: 'Medicine / mRNA Vaccine',
-    expectedTitleSnippet: 'Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine',
+    expectedTitleSnippet:
+      'Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine',
     channel: 'DOI',
     query: '10.1056/NEJMoa2034577',
     notes: 'New England Journal of Medicine (NEJM) landmark clinical trial',
@@ -151,7 +154,8 @@ const TEST_PAPERS: PaperTestCase[] = [
     expectedTitleSnippet: 'Ileal-lymphoid-nodular hyperplasia',
     channel: 'DOI',
     query: '10.1016/S0140-6736(97)11096-0',
-    notes: 'Famous Wakefield Lancet 1998 retracted paper (Retraction Watch test)',
+    notes:
+      'Famous Wakefield Lancet 1998 retracted paper (Retraction Watch test)',
     expectedRetracted: true,
   },
 ];
@@ -186,14 +190,18 @@ function formatFirstAuthor(authors?: any[]): string {
     return first.given ? `${first.given} ${first.family}` : first.family;
   }
   if (first.lastName) {
-    return first.firstName ? `${first.firstName} ${first.lastName}` : first.lastName;
+    return first.firstName
+      ? `${first.firstName} ${first.lastName}`
+      : first.lastName;
   }
   return 'Unknown';
 }
 
 async function runBenchmark() {
   console.log('='.repeat(95));
-  console.log('FLUX ACADEMIC BENCHMARK: Ingesting & Extracting 15 Official Landmark Papers');
+  console.log(
+    'FLUX ACADEMIC BENCHMARK: Ingesting & Extracting 15 Official Landmark Papers',
+  );
   console.log('='.repeat(95));
 
   const crossref = new CrossRefProvider();
@@ -201,7 +209,8 @@ async function runBenchmark() {
   const doiParser = new DoiParser();
   const extractor = new TrustedExtractionService();
   const normalizer = new NormalizationPolicy();
-  const typesService = new (require('../src/modules/library/catalog/services/types.service').TypesService)();
+  const typesService =
+    new (require('../src/modules/library/catalog/services/types.service').TypesService)();
   const validator = new ZoteroSchemaValidatorService(typesService);
   const mockRetractionRepo = {
     countRetractionRecords: async () => 0,
@@ -215,7 +224,9 @@ async function runBenchmark() {
 
   for (const testCase of TEST_PAPERS) {
     const start = Date.now();
-    console.log(`\n[${testCase.id}/15] Testing [${testCase.channel}] ${testCase.category}...`);
+    console.log(
+      `\n[${testCase.id}/15] Testing [${testCase.channel}] ${testCase.category}...`,
+    );
     console.log(`      Query: ${testCase.query}`);
 
     let metadata: ItemMetadata = {};
@@ -269,7 +280,9 @@ async function runBenchmark() {
           }
         }
       } else if (testCase.channel === 'PDF_UPLOAD') {
-        console.log(`      Downloading PDF binary stream from ${testCase.query}...`);
+        console.log(
+          `      Downloading PDF binary stream from ${testCase.query}...`,
+        );
         const fetchRes = await fetch(testCase.query, {
           headers: { 'User-Agent': 'FluxAcademicBench/1.0' },
         });
@@ -278,7 +291,9 @@ async function runBenchmark() {
         }
         const arrayBuf = await fetchRes.arrayBuffer();
         const buffer = Buffer.from(arrayBuf);
-        console.log(`      Downloaded ${buffer.byteLength} bytes. Executing 4-Tier In-Process Extraction...`);
+        console.log(
+          `      Downloaded ${buffer.byteLength} bytes. Executing 4-Tier In-Process Extraction...`,
+        );
 
         const extractRes = await extractor.extract(buffer, 'paper.pdf');
         metadata = extractRes.metadata;
@@ -323,8 +338,13 @@ async function runBenchmark() {
       const normalized = normalizer.normalize(metadata);
 
       // Validate against CSL 1.0.2 Schema
-      const itemType = validator.validateItemType(normalized.itemType || 'journalArticle');
-      const sanitized = validator.validateAndSanitizeFields(itemType, normalized);
+      const itemType = validator.validateItemType(
+        normalized.itemType || 'journalArticle',
+      );
+      const sanitized = validator.validateAndSanitizeFields(
+        itemType,
+        normalized,
+      );
       const cslValid = Boolean(itemType && sanitized.cleanFields);
 
       const latencyMs = Date.now() - start;
@@ -341,7 +361,7 @@ async function runBenchmark() {
         extractedTitle: normalized.title || '(No Title)',
         authorsCount: normalized.authors?.length || 0,
         firstAuthor,
-        year: normalized.year,
+        year: normalized.year != null ? normalized.year : undefined,
         doi: normalized.doi,
         journal: normalized.journal || normalized.publicationTitle,
         cslItemType: itemType,
@@ -352,11 +372,17 @@ async function runBenchmark() {
 
       console.log(`      ✅ Success (${latencyMs}ms) via ${engineUsed}`);
       console.log(`         Title: "${normalized.title}"`);
-      console.log(`         Authors: ${normalized.authors?.length} (First: ${firstAuthor})`);
-      console.log(`         Year: ${normalized.year} | DOI: ${normalized.doi || 'N/A'} | Venue: ${normalized.journal || normalized.publicationTitle || 'N/A'}`);
+      console.log(
+        `         Authors: ${normalized.authors?.length} (First: ${firstAuthor})`,
+      );
+      console.log(
+        `         Year: ${normalized.year} | DOI: ${normalized.doi || 'N/A'} | Venue: ${normalized.journal || normalized.publicationTitle || 'N/A'}`,
+      );
       console.log(`         CSL Schema Valid: ${cslValid ? 'YES' : 'NO'}`);
       if (retractionStatus === 'RETRACTED') {
-        console.log(`         ⚠️ RETRACTION DETECTED: Paper is formally flagged as RETRACTED!`);
+        console.log(
+          `         ⚠️ RETRACTION DETECTED: Paper is formally flagged as RETRACTED!`,
+        );
       }
     } catch (err: any) {
       const latencyMs = Date.now() - start;
@@ -390,19 +416,30 @@ async function runBenchmark() {
     results.reduce((acc, r) => acc + r.latencyMs, 0) / results.length,
   );
   console.log(`Total Papers Tested: ${results.length}`);
-  console.log(`Success Rate:        ${passedCount}/${results.length} (${((passedCount / results.length) * 100).toFixed(1)}%)`);
+  console.log(
+    `Success Rate:        ${passedCount}/${results.length} (${((passedCount / results.length) * 100).toFixed(1)}%)`,
+  );
   console.log(`Average Latency:     ${avgLatency} ms`);
   console.log('='.repeat(95));
 
   // Markdown Table Output
-  console.log('\n### BẢNG KẾT QUẢ THỰC NGHIỆM CHI TIẾT 15 BÀI BÁO KHOA HỌC CHÍNH THỐNG:\n');
-  console.log('| # | Lĩnh vực | Kênh nạp | Tiêu đề trích xuất | Tác giả | Năm | DOI / Identifier | Phân loại CSL | Trạng thái | Thời gian |');
+  console.log(
+    '\n### BẢNG KẾT QUẢ THỰC NGHIỆM CHI TIẾT 15 BÀI BÁO KHOA HỌC CHÍNH THỐNG:\n',
+  );
+  console.log(
+    '| # | Lĩnh vực | Kênh nạp | Tiêu đề trích xuất | Tác giả | Năm | DOI / Identifier | Phân loại CSL | Trạng thái | Thời gian |',
+  );
   console.log('|---|---|---|---|---|---|---|---|---|---|');
   for (const r of results) {
     const status = r.success ? '✅ Thành công' : '❌ Thất bại';
-    const authors = r.authorsCount > 1 ? `${r.firstAuthor} et al. (${r.authorsCount})` : `${r.firstAuthor || 'N/A'}`;
+    const authors =
+      r.authorsCount > 1
+        ? `${r.firstAuthor} et al. (${r.authorsCount})`
+        : `${r.firstAuthor || 'N/A'}`;
     const doiOrId = r.doi || r.query;
-    console.log(`| ${r.id} | ${r.category} | ${r.channel} | "${r.extractedTitle.slice(0, 35)}..." | ${authors} | ${r.year || 'N/A'} | \`${doiOrId}\` | \`${r.cslItemType || 'N/A'}\` | ${status} | ${r.latencyMs}ms |`);
+    console.log(
+      `| ${r.id} | ${r.category} | ${r.channel} | "${r.extractedTitle.slice(0, 35)}..." | ${authors} | ${r.year || 'N/A'} | \`${doiOrId}\` | \`${r.cslItemType || 'N/A'}\` | ${status} | ${r.latencyMs}ms |`,
+    );
   }
 }
 

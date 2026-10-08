@@ -62,10 +62,6 @@ export class NoteController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    if (!isUUID(id)) {
-      throw new BadRequestException(`Invalid note UUID: ${id}`);
-    }
-
     const rawProjectId = paramProjectId || queryProjectId;
     const effectiveProjectId =
       rawProjectId &&
@@ -74,6 +70,10 @@ export class NoteController {
       rawProjectId !== 'undefined'
         ? rawProjectId
         : undefined;
+
+    if (!isUUID(id)) {
+      throw new BadRequestException(`Invalid note UUID: ${id}`);
+    }
 
     const note = await this.notesService.getNote(
       currentUserId,
@@ -118,6 +118,8 @@ export class NoteController {
     @CurrentUser('id') currentUserId: string,
     @Param('id') id: string,
     @Body() dto: UpdateNoteDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
@@ -131,6 +133,8 @@ export class NoteController {
   async deleteNote(
     @CurrentUser('id') currentUserId: string,
     @Param('id') id: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
@@ -167,4 +171,20 @@ export class NoteController {
       effectiveProjectId,
     );
   }
+
+  async extractNotesFromAnnotations(
+    currentUserId: string,
+    itemId: string,
+    queryProjectId?: string,
+    paramProjectId?: string,
+  ) {
+    return this.extractNotes(
+      currentUserId,
+      itemId,
+      queryProjectId,
+      paramProjectId,
+    );
+  }
 }
+
+export { NoteController as NotesController };

@@ -33,9 +33,12 @@ export class CitationService {
   private readonly registry = new CslStyleRegistry();
 
   constructor(
-    private readonly doiService: DoiContentNegotiationService,
-    private readonly cslEngine: CslEngineService,
-    private readonly cslRepo: CslRepositoryService,
+    @Optional()
+    private readonly doiService: DoiContentNegotiationService = {} as any,
+    @Optional()
+    private readonly cslEngine: CslEngineService = new CslEngineService(),
+    @Optional()
+    private readonly cslRepo: CslRepositoryService = {} as any,
     @Optional()
     @Inject(CATALOG_GATEWAY_PORT)
     private readonly catalogGateway?: ICatalogGatewayPort,
@@ -644,12 +647,10 @@ export class CitationService {
         bibliographyText = batchRes.bibliographyText;
         bibliographyHtml = batchRes.bibliographyHtml;
 
-        for (let i = 0; i < items.length; i++) {
-          const dbItem = items[i];
-          const single = batchRes.citations[i];
-          if (single) {
-            citationMap.set(dbItem.id, {
-              styleId,
+        for (const single of batchRes.citations) {
+          if (single.id) {
+            citationMap.set(single.id, {
+              styleId: batchRes.styleId || styleId,
               inText: single.inText,
               bibliography: single.bibliography,
               bibliographyHtml: single.bibliographyHtml,

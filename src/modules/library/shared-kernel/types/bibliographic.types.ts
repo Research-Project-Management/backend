@@ -332,8 +332,9 @@ export interface BibliographicReference {
 
 export interface DocumentSection {
   id?: string;
+  num?: string;
   title: string;
-  content: string;
+  content?: string;
   paragraphs?: string[];
   page?: number;
   level?: number;

@@ -114,7 +114,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     // Pre-populate with seed records
     await retractionDb.importRecords(retractionWatchSeed as any);
 
-    scanner = new RetractionScannerProvider(mockPrisma, retractionDb);
+    scanner = new RetractionScannerProvider(retractionDb);
     syncService = new RetractionSyncService(repo, scanner, retractionDb);
     service = new RetractionService(repo, scanner, retractionDb, syncService);
   });

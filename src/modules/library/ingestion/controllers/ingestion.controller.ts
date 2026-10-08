@@ -210,6 +210,7 @@ export abstract class BaseIngestionController {
     projectId?: string,
   ) {
     const effectiveScopeId = projectId || dto.projectId || userId;
+
     return this.urlCaptureService.confirmCapturedUrl(
       effectiveScopeId,
       userId,

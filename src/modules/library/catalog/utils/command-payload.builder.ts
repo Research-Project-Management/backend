@@ -1078,7 +1078,8 @@ export async function buildCommandCreateInput(
   const createData: any = {
     userId,
     title: sanitizeItemTitle(data.title) || 'Untitled Item',
-    type: data.type ?? data.itemType ?? 'journalArticle',
+    itemType: data.itemType ?? data.type ?? 'journalArticle',
+    ...(resolvedPubTitle ? { publicationTitle: resolvedPubTitle } : {}),
     year: data.year ?? null,
     doi: cleanDoi,
     abstract: data.abstract ?? data.abstractNote ?? '',
@@ -1503,7 +1504,8 @@ export function buildCommandUpdateInput(
       data.title !== undefined
         ? sanitizeItemTitle(data.title) || existing.title
         : existing.title,
-    type: data.type ?? data.itemType ?? existing.type ?? existing.itemType,
+    itemType: data.itemType ?? data.type ?? existing.itemType ?? existing.type,
+    ...(rawPubTitle !== undefined ? { publicationTitle: rawPubTitle } : {}),
     year:
       data.year !== undefined
         ? data.year

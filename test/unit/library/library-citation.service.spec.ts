@@ -32,10 +32,11 @@ describe('Library Citation Service & CSL Style Registry', () => {
   });
 
   describe('CslStyleRegistry', () => {
-    it('should list all 9 canonical styles', () => {
+    it('should list all canonical styles including Vietnamese academic standards', () => {
       const styles = registry.listStyles();
-      expect(styles).toHaveLength(9);
+      expect(styles).toHaveLength(12);
       expect(styles.map((s) => s.id)).toEqual([
+        'auto',
         'apa-7th',
         'ieee',
         'mla-9th',
@@ -44,6 +45,8 @@ describe('Library Citation Service & CSL Style Registry', () => {
         'harvard',
         'nature',
         'vancouver',
+        'tcvn',
+        'tcvn-numeric',
         'ris',
       ]);
     });

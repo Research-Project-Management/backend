@@ -12,21 +12,7 @@ import {
 @Injectable()
 export class RetractionScannerProvider {
   private readonly logger = new Logger(RetractionScannerProvider.name);
-  private readonly retractionDb: RetractionDatabaseService;
-
-  constructor(
-    retractionDbOrPrisma: any,
-    optionalRetractionDb?: any,
-  ) {
-    if (
-      optionalRetractionDb &&
-      typeof optionalRetractionDb.checkRetraction === 'function'
-    ) {
-      this.retractionDb = optionalRetractionDb;
-    } else {
-      this.retractionDb = retractionDbOrPrisma;
-    }
-  }
+  constructor(private readonly retractionDb: RetractionDatabaseService) {}
 
   /**
    * Compatibility wrapper: returns retraction details, or null when the item is

@@ -77,7 +77,10 @@ export class SearchEventsSubscriber implements OnModuleInit {
     );
 
     try {
-      if (scopeId) {
+      if (
+        scopeId &&
+        typeof this.searchService?.invalidateFacetsCache === 'function'
+      ) {
         await this.searchService.invalidateFacetsCache(scopeId);
       }
     } catch (err: unknown) {
@@ -111,7 +114,10 @@ export class SearchEventsSubscriber implements OnModuleInit {
           ),
       );
     }
-    if (scopeId) {
+    if (
+      scopeId &&
+      typeof this.searchService?.invalidateFacetsCache === 'function'
+    ) {
       cleanupTasks.push(
         this.searchService
           .invalidateFacetsCache(scopeId)
@@ -159,7 +165,10 @@ export class SearchEventsSubscriber implements OnModuleInit {
       }
     }
     const scopeId = event.scopeId;
-    if (scopeId) {
+    if (
+      scopeId &&
+      typeof this.searchService?.invalidateFacetsCache === 'function'
+    ) {
       try {
         await this.searchService.invalidateFacetsCache(scopeId);
       } catch (err: unknown) {

@@ -40,6 +40,7 @@ export interface SavedSearchCollection {
 }
 
 export type SavedSearchField =
+  | 'anyField'
   | 'title'
   | 'abstract'
   | 'creator'
@@ -51,13 +52,28 @@ export type SavedSearchField =
   | 'rating'
   | 'doi'
   | 'isbn'
+  | 'issn'
   | 'hasAttachment'
   | 'dateAdded'
   | 'dateModified'
   | 'publicationTitle'
+  | 'publisher'
+  | 'place'
+  | 'volume'
+  | 'issue'
+  | 'pages'
+  | 'series'
+  | 'url'
   | 'attachmentContent'
+  | 'attachmentFilename'
   | 'noteContent'
-  | 'url';
+  | 'callNumber'
+  | 'archive'
+  | 'archiveLocation'
+  | 'shortTitle'
+  | 'rights'
+  | 'extra'
+  | (string & {});
 
 export type SavedSearchOperator =
   | 'is'
@@ -69,18 +85,27 @@ export type SavedSearchOperator =
   | 'isGreaterThan'
   | 'isLessThan'
   | 'isBetween'
+  | 'isInTheLast'
   | 'isPresent'
   | 'isAbsent';
+
+export interface SavedSearchScopeOptions {
+  searchSubcollections?: boolean;
+  showOnlyTopLevel?: boolean;
+  includeParentsAndChildren?: boolean;
+}
 
 export interface SavedSearchCondition {
   field: SavedSearchField;
   operator: SavedSearchOperator;
-  value?: string | number | boolean | (string | number)[];
+  value?:
+    string | number | boolean | (string | number)[] | Record<string, unknown>;
 }
 
 export interface SavedSearchConditionGroup {
   conjunction: 'AND' | 'OR';
   conditions: (SavedSearchCondition | SavedSearchConditionGroup)[];
+  scopeOptions?: SavedSearchScopeOptions;
 }
 
 export function isConditionGroup(

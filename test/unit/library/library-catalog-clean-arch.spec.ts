@@ -4,7 +4,7 @@ import { ItemAggregate } from '@/modules/library/catalog/core/domain/item.aggreg
 import {
   ItemConcurrencyDomainException,
   ItemValidationDomainException,
-} from '@/modules/library/catalog/types/item-domain.exception';
+} from '@/modules/library/catalog/core/domain/item-domain.exception';
 import { CreateItemUseCase } from '@/modules/library/catalog/core/use-cases/create-item.use-case';
 import { UpdateItemUseCase } from '@/modules/library/catalog/core/use-cases/update-item.use-case';
 import { DeleteItemUseCase } from '@/modules/library/catalog/core/use-cases/delete-item.use-case';

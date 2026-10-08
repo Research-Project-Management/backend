@@ -56,13 +56,7 @@ export abstract class BaseAttachmentController {
             attachmentId,
             projectId,
           )
-        : typeof (this as any).legacyThumbnailUseCase?.execute === 'function'
-          ? await (this as any).legacyThumbnailUseCase.execute({
-              userId,
-              attachmentId,
-              projectId,
-            })
-          : { buffer: Buffer.from(''), mimeType: 'image/webp' };
+        : { buffer: Buffer.from(''), mimeType: 'image/webp' };
 
     res.header('Content-Type', thumbnail?.mimeType || 'image/webp');
     res.header('Cache-Control', 'private, max-age=86400');
@@ -132,7 +126,8 @@ export abstract class BaseAttachmentController {
       );
     }
     if (
-      typeof (this.attachmentsService as any)?.reextractAttachment === 'function'
+      typeof (this.attachmentsService as any)?.reextractAttachment ===
+      'function'
     ) {
       return (this.attachmentsService as any).reextractAttachment(
         userId,
@@ -238,22 +233,8 @@ export class AttachmentController extends BaseAttachmentController {
     attachmentsService: AttachmentsService,
     @Optional()
     webSnapshotService?: WebSnapshotService,
-    ...rest: any[]
   ) {
-    let effectiveService = attachmentsService;
-    let effectiveWeb = webSnapshotService;
-    let legacyUseCase: any;
-
-    if (rest.length >= 8) {
-      effectiveService = rest[7] || attachmentsService;
-      effectiveWeb = rest[6] || webSnapshotService;
-      legacyUseCase = rest[5];
-    }
-
-    super(effectiveService, effectiveWeb);
-    if (legacyUseCase) {
-      (this as any).legacyThumbnailUseCase = legacyUseCase;
-    }
+    super(attachmentsService, webSnapshotService);
   }
 
   @Get([

@@ -1,4 +1,4 @@
-import { ProjectItemController } from '@/modules/library/catalog/items.controller';
+import { ProjectItemController } from '@/modules/library/catalog/controllers/items.controller';
 import { ProjectCollectionController } from '@/modules/library/catalog/controllers/collections.controller';
 import { ProjectItemCurationController } from '@/modules/library/catalog/controllers/item-curation.controller';
 import { ProjectSavedSearchesController } from '@/modules/library/catalog/controllers/saved-searches.controller';

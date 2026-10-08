@@ -25,9 +25,13 @@ export class SavedSearchesService {
 
   async create(userId: string, dto: CreateSavedSearchDto, projectId?: string) {
     const effectiveProjectId = projectId || dto.projectId;
+    if (dto.scopeOptions && dto.conditions) {
+      dto.conditions.scopeOptions =
+        dto.conditions.scopeOptions || dto.scopeOptions;
+    }
     let initialCount = 0;
     try {
-      const where = this.evaluator.compile(
+      const where = await this.evaluator.compile(
         userId,
         dto.conditions,
         effectiveProjectId,
@@ -68,9 +72,13 @@ export class SavedSearchesService {
 
     // If conditions changed, recalculate cached count
     if (dto.conditions) {
+      if (dto.scopeOptions) {
+        dto.conditions.scopeOptions =
+          dto.conditions.scopeOptions || dto.scopeOptions;
+      }
       try {
         const effectiveProjectId = projectId || existing.projectId || undefined;
-        const where = this.evaluator.compile(
+        const where = await this.evaluator.compile(
           userId,
           dto.conditions,
           effectiveProjectId,
@@ -100,8 +108,13 @@ export class SavedSearchesService {
       throw new BadRequestException('Conditions must be provided for preview');
     }
 
+    if (dto.scopeOptions && dto.conditions) {
+      dto.conditions.scopeOptions =
+        dto.conditions.scopeOptions || dto.scopeOptions;
+    }
+
     const effectiveProjectId = projectId || dto.projectId;
-    const where = this.evaluator.compile(
+    const where = await this.evaluator.compile(
       userId,
       dto.conditions,
       effectiveProjectId,
@@ -129,7 +142,11 @@ export class SavedSearchesService {
 
     const queryProjectId =
       effectiveProjectId || savedSearch.projectId || undefined;
-    const where = this.evaluator.compile(userId, conditions, queryProjectId);
+    const where = await this.evaluator.compile(
+      userId,
+      conditions,
+      queryProjectId,
+    );
 
     let rawSortBy = dto.sortBy || savedSearch.sortBy || 'dateAdded';
     if (rawSortBy === 'createdAt') rawSortBy = 'dateAdded';

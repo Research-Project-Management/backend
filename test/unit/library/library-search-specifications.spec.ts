@@ -11,7 +11,7 @@ import {
 import { SearchSpecificationBuilder } from '@/modules/library/search/types/search-specification.builder';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import { SearchService } from '@/modules/library/search/services/search.service';
-import { CatalogEventsSubscriber } from '@/modules/library/search/services/catalog-events.subscriber';
+import { SearchEventsSubscriber as CatalogEventsSubscriber } from '@/modules/library/search/services/search-events.subscriber';
 import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
 

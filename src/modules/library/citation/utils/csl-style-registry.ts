@@ -29,6 +29,13 @@ export interface StyleSummary {
  */
 export const SUPPORTED_CITATION_STYLES: ReadonlyArray<StyleSummary> = [
   {
+    id: 'auto',
+    name: 'Tự động nhận diện (Auto-Detect)',
+    shortTitle: 'Tự động',
+    category: 'author-date',
+    isPrimary: true,
+  },
+  {
     id: 'apa-7th',
     name: 'American Psychological Association 7th edition',
     shortTitle: 'APA',
@@ -85,6 +92,20 @@ export const SUPPORTED_CITATION_STYLES: ReadonlyArray<StyleSummary> = [
     isPrimary: false,
   },
   {
+    id: 'tcvn',
+    name: 'Tiêu chuẩn Việt Nam (TCVN / Bộ Giáo dục & Đào tạo)',
+    shortTitle: 'TCVN',
+    category: 'author-date',
+    isPrimary: true,
+  },
+  {
+    id: 'tcvn-numeric',
+    name: 'Tiêu chuẩn Việt Nam (TCVN - Đánh số)',
+    shortTitle: 'TCVN (Số)',
+    category: 'numeric',
+    isPrimary: false,
+  },
+  {
     id: 'ris',
     name: 'Research Information Systems (RIS)',
     shortTitle: 'RIS',
@@ -120,6 +141,27 @@ export class CslStyleRegistry {
       id: 'chicago-author-date',
       name: 'Chicago (Author-Date)',
       shortTitle: 'Chicago',
+      category: 'author-date',
+      isPrimary: false,
+    });
+    this.styleMap.set('tcvn-author-date', {
+      id: 'tcvn-author-date',
+      name: 'Tiêu chuẩn Việt Nam (TCVN / Bộ Giáo dục & Đào tạo)',
+      shortTitle: 'TCVN',
+      category: 'author-date',
+      isPrimary: true,
+    });
+    this.styleMap.set('bo-giao-duc', {
+      id: 'bo-giao-duc',
+      name: 'Bộ Giáo dục & Đào tạo (Việt Nam)',
+      shortTitle: 'Bộ GD&ĐT',
+      category: 'author-date',
+      isPrimary: false,
+    });
+    this.styleMap.set('vietnam', {
+      id: 'vietnam',
+      name: 'Tiêu chuẩn Việt Nam (TCVN)',
+      shortTitle: 'TCVN',
       category: 'author-date',
       isPrimary: false,
     });

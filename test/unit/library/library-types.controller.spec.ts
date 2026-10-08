@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import { TypesController } from '@/modules/library/catalog/types.controller';
+import { TypesController } from '@/modules/library/catalog/controllers/types.controller';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 

@@ -659,7 +659,7 @@ export interface ItemDetail extends ItemMetadata {
   deletedAt?: Date | null;
 }
 
-export interface ItemAggregate {
+export interface LegacyItemAggregate {
   id?: string;
   authors?: string[];
   creators?: any[];

@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ForbiddenException,
   Optional,
+  Inject,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { NotesRepository } from '../repositories/notes.repository';
@@ -26,7 +27,12 @@ import type {
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
 } from '../../shared-kernel/core/types/entity-commands.types';
-import { IItemExistencePort, IItemReadPort } from '../types/items.types';
+import {
+  ITEM_EXISTENCE_PORT,
+  ITEM_READ_PORT,
+  IItemExistencePort,
+  IItemReadPort,
+} from '../types/items.types';
 
 @Injectable()
 export class NotesService {
@@ -36,8 +42,10 @@ export class NotesService {
     private readonly repo: NotesRepository,
     private readonly libraryTx: TransactionService,
     @Optional()
+    @Inject(ITEM_EXISTENCE_PORT)
     private readonly itemExistencePort?: IItemExistencePort,
     @Optional()
+    @Inject(ITEM_READ_PORT)
     private readonly itemReadPort?: IItemReadPort,
   ) {}
 

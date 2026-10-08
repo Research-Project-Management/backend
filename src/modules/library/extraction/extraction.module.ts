@@ -1,6 +1,7 @@
 import { Module, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
 import { StorageModule } from '../../storage/storage.module';
+import { CatalogModule } from '../catalog/catalog.module';
 import {
   SharedKernelModule,
   IOutboxRegistry,
@@ -63,7 +64,7 @@ import { ATTACHMENT_REPOSITORY_PORT } from './types/attachments.types';
 import { ANNOTATION_REPOSITORY_PORT } from './types/annotations.types';
 
 @Module({
-  imports: [CoreModule, StorageModule, SharedKernelModule],
+  imports: [CoreModule, StorageModule, SharedKernelModule, CatalogModule],
   controllers: [
     AttachmentStorageController,
     ProjectAttachmentStorageController,

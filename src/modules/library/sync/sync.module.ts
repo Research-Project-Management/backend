@@ -6,6 +6,7 @@ import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
 
 import { LIBRARY_OUTBOX_QUEUE } from './types/outbox.constants';
 import { OutboxQueueConsumer } from './services/outbox-queue.consumer';
+import { TransactionService as SharedTransactionService } from '../shared-kernel/ports/unit-of-work.port';
 import { TransactionService } from './services/transaction.service';
 import { ChangeLogRepository } from './repositories/changelog.repository';
 import { OutboxWorker } from './services/outbox.worker';
@@ -61,7 +62,7 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
       useExisting: TransactionService,
     },
     {
-      provide: TransactionService,
+      provide: SharedTransactionService,
       useExisting: TransactionService,
     },
     ChangeLogRepository,
@@ -90,6 +91,7 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
   ],
   exports: [
     TransactionService,
+    SharedTransactionService,
     UNIT_OF_WORK_PORT,
     ChangeLogRepository,
     OutboxWorker,

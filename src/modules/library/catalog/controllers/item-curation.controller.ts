@@ -26,38 +26,10 @@ import { ItemService } from '../services/items.service';
  * Shared Base Adapter for Library Item Curation & Scholarly Enrichment.
  */
 export abstract class BaseItemCurationController {
-  protected legacyUseCases?: {
-    getFulltextUseCase?: any;
-    parseCitationsUseCase?: any;
-    reindexItemUseCase?: any;
-    convertItemTypeUseCase?: any;
-    previewTypeConversionUseCase?: any;
-    manageRelationsUseCase?: any;
-    setMyPublicationUseCase?: any;
-    getItemUseCase?: any;
-  };
-
-  constructor(
-    protected readonly itemService: ItemService,
-    legacyUseCases?: any,
-  ) {
-    this.legacyUseCases = legacyUseCases;
-  }
+  constructor(protected readonly itemService: ItemService) {}
 
   protected async executeParseCitations(dto: ParseCitationsDto) {
     const rawCitations = dto.citations || dto.rawCitations || '';
-    if (this.legacyUseCases?.parseCitationsUseCase) {
-      const res = await this.legacyUseCases.parseCitationsUseCase.execute({
-        rawCitations,
-      });
-      return {
-        success: true,
-        count: res.count,
-        references: res.references,
-        citations: res.references,
-        ...res,
-      };
-    }
     const references = await this.itemService.parseCitations(rawCitations);
     return {
       success: true,
@@ -72,14 +44,6 @@ export abstract class BaseItemCurationController {
     userId: string,
     projectId?: string,
   ) {
-    if (this.legacyUseCases?.getFulltextUseCase) {
-      const fulltext = await this.legacyUseCases.getFulltextUseCase.execute({
-        userId,
-        itemId: id,
-        projectId,
-      });
-      return { success: true, data: fulltext, ...fulltext };
-    }
     const fulltext = await this.itemService.getFulltext(userId, id, projectId);
     return { success: true, data: fulltext, ...fulltext };
   }
@@ -89,13 +53,6 @@ export abstract class BaseItemCurationController {
     userId: string,
     projectId?: string,
   ) {
-    if (this.legacyUseCases?.reindexItemUseCase) {
-      return this.legacyUseCases.reindexItemUseCase.execute({
-        userId,
-        itemId: id,
-        projectId,
-      });
-    }
     return this.itemService.reindexItem(userId, id, projectId);
   }
 
@@ -105,26 +62,6 @@ export abstract class BaseItemCurationController {
     body: { targetType: string; retainUnmappedInExtra?: boolean },
     projectId?: string,
   ) {
-    if (this.legacyUseCases?.previewTypeConversionUseCase) {
-      const item = this.legacyUseCases.getItemUseCase
-        ? await this.legacyUseCases.getItemUseCase.execute({
-            userId,
-            itemId: id,
-            projectId,
-          })
-        : await this.itemService.getItem(userId, id, projectId);
-      if (!item) {
-        throw new NotFoundException(`Item ${id} not found in library`);
-      }
-      const preview = this.legacyUseCases.previewTypeConversionUseCase.execute({
-        item,
-        targetType: body.targetType,
-        options: {
-          retainUnmappedInExtra: body.retainUnmappedInExtra ?? true,
-        },
-      });
-      return { success: true, preview, data: preview };
-    }
     const item = await this.itemService.getItem(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in library`);
@@ -157,25 +94,6 @@ export abstract class BaseItemCurationController {
           ? parseInt(ifMatch.replace(/["']/g, ''), 10)
           : undefined;
 
-    if (this.legacyUseCases?.convertItemTypeUseCase) {
-      const res = await this.legacyUseCases.convertItemTypeUseCase.execute({
-        userId,
-        itemId: id,
-        targetType: body?.targetType || 'journalArticle',
-        options: {
-          expectedVersion,
-          retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
-        },
-        projectId,
-      });
-      return {
-        success: true,
-        data: res.item,
-        item: res.item,
-        conversionReport: res.conversionReport,
-      };
-    }
-
     const result = await this.itemService.convertItemType(
       userId,
       id,
@@ -199,13 +117,6 @@ export abstract class BaseItemCurationController {
     userId: string,
     projectId?: string,
   ) {
-    if (this.legacyUseCases?.manageRelationsUseCase) {
-      return this.legacyUseCases.manageRelationsUseCase.getRelatedItems({
-        id,
-        userId,
-        projectId,
-      });
-    }
     return this.itemService.getRelatedItems(userId, id, projectId);
   }
 
@@ -220,17 +131,6 @@ export abstract class BaseItemCurationController {
     userId: string,
     projectId?: string,
   ) {
-    if (this.legacyUseCases?.manageRelationsUseCase) {
-      return this.legacyUseCases.manageRelationsUseCase.linkItems({
-        sourceItemId: id,
-        targetItemId: body.targetItemId,
-        targetItemIds: body.targetItemIds,
-        relationType: body.relationType,
-        note: body.note,
-        userId,
-        projectId,
-      });
-    }
     return this.itemService.linkItems(userId, id, body, projectId);
   }
 
@@ -240,39 +140,15 @@ export abstract class BaseItemCurationController {
     userId: string,
     projectId?: string,
   ) {
-    if (this.legacyUseCases?.manageRelationsUseCase) {
-      return this.legacyUseCases.manageRelationsUseCase.unlinkItems({
-        sourceItemId: id,
-        targetItemId,
-        userId,
-        projectId,
-      });
-    }
     return this.itemService.unlinkItems(userId, id, targetItemId, projectId);
   }
 
   protected async executeMarkMyPublication(id: string, userId: string) {
-    if (this.legacyUseCases?.setMyPublicationUseCase) {
-      const item = await this.legacyUseCases.setMyPublicationUseCase.execute({
-        userId,
-        itemId: id,
-        isMyPublication: true,
-      });
-      return { success: true, data: item, item };
-    }
     const item = await this.itemService.setMyPublication(userId, id, true);
     return { success: true, data: item, item };
   }
 
   protected async executeUnmarkMyPublication(id: string, userId: string) {
-    if (this.legacyUseCases?.setMyPublicationUseCase) {
-      const item = await this.legacyUseCases.setMyPublicationUseCase.execute({
-        userId,
-        itemId: id,
-        isMyPublication: false,
-      });
-      return { success: true, data: item, item };
-    }
     const item = await this.itemService.setMyPublication(userId, id, false);
     return { success: true, data: item, item };
   }
@@ -287,21 +163,8 @@ export abstract class BaseItemCurationController {
 @Controller(['api/v1/library/items', 'api/v1/me/library/items'])
 @UseGuards(JwtAuthGuard)
 export class ItemCurationController extends BaseItemCurationController {
-  constructor(...args: any[]) {
-    if (args.length > 1 || (args[0] && typeof args[0].execute === 'function')) {
-      super({} as any, {
-        getFulltextUseCase: args[0],
-        parseCitationsUseCase: args[1],
-        reindexItemUseCase: args[2],
-        convertItemTypeUseCase: args[3],
-        previewTypeConversionUseCase: args[4],
-        manageRelationsUseCase: args[5],
-        setMyPublicationUseCase: args[6],
-        getItemUseCase: args[7],
-      });
-    } else {
-      super(args[0]);
-    }
+  constructor(itemService: ItemService) {
+    super(itemService);
   }
 
   @Post('citations/parse')

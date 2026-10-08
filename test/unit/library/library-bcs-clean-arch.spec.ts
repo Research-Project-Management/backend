@@ -7,7 +7,7 @@ import { SearchQueryVo } from '@/modules/library/search/types/search-query.vo';
 import { CitationStyleVo } from '@/modules/library/citation/core/domain/citation-style.vo';
 import { ExecuteSearchUseCase } from '@/modules/library/search/core/use-cases/execute-search.use-case';
 import { FormatCitationUseCase } from '@/modules/library/citation/core/use-cases/format-citation.use-case';
-import { ISearchEnginePort } from '@/modules/library/search/core/ports/search-engine.port';
+import { ISearchEnginePort } from '@/modules/library/search/types/search-engine.types';
 import { ICitationEnginePort } from '@/modules/library/citation/core/ports/citation-engine.port';
 
 describe('Reader, Ingestion, Search & Citation Bounded Contexts - Clean Architecture & DDD', () => {

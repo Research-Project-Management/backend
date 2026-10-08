@@ -22,51 +22,57 @@ export const EXTRACTION_EVENT_TYPES = {
 export const ATTACHMENT_EXTRACTION_STALE_THRESHOLD =
   'ATTACHMENT_EXTRACTION_STALE_THRESHOLD';
 
+export interface IAttachmentSearchIndexer {
+  indexAttachmentPages?(attachmentId: string, pages: any[]): Promise<void>;
+}
+
 @Injectable()
 export class ExtractionHandler implements OutboxDispatchHandler {
   private readonly logger = new Logger(ExtractionHandler.name);
   private readonly maxAttempts = 3;
   private readonly staleThresholdMs: number;
   private readonly storagePort: IStoragePort;
-  private readonly searchService?: any;
+  private readonly searchIndexer?: IAttachmentSearchIndexer;
   private readonly idempotentConsumer?: IdempotentConsumerService;
 
   constructor(
     private readonly extractionRepo: ExtractionRepository,
     private readonly pdf: PdfProvider,
     @Inject(STORAGE_PORT) storagePort: IStoragePort,
-    @Optional() searchService?: any,
+    @Optional()
+    searchIndexerOrThreshold?: IAttachmentSearchIndexer | number,
     @Optional()
     @Inject(ATTACHMENT_EXTRACTION_STALE_THRESHOLD)
-    staleThresholdMs?: number | IdempotentConsumerService,
+    staleThresholdOrIdempotent?: number | IdempotentConsumerService,
     @Optional()
     idempotentConsumer?: IdempotentConsumerService,
   ) {
-    if (
-      storagePort &&
-      (typeof (storagePort as any).indexAttachmentPages === 'function' ||
-        typeof (searchService as any)?.readOwnedFile === 'function' ||
-        typeof (searchService as any)?.readFile === 'function')
-    ) {
-      this.storagePort = searchService;
-      this.searchService = storagePort;
-    } else {
-      this.storagePort = storagePort;
-      this.searchService = searchService;
-    }
+    this.storagePort = storagePort;
 
-    if (typeof staleThresholdMs === 'number') {
-      this.staleThresholdMs = staleThresholdMs;
-      this.idempotentConsumer = idempotentConsumer;
-    } else if (
-      staleThresholdMs &&
-      typeof (staleThresholdMs as any).executeIdempotent === 'function'
-    ) {
-      this.staleThresholdMs = 5 * 60 * 1000;
-      this.idempotentConsumer = staleThresholdMs;
+    if (typeof searchIndexerOrThreshold === 'number') {
+      this.staleThresholdMs = searchIndexerOrThreshold;
+      this.idempotentConsumer =
+        typeof (staleThresholdOrIdempotent as any)?.executeIdempotent ===
+        'function'
+          ? (staleThresholdOrIdempotent as IdempotentConsumerService)
+          : idempotentConsumer;
     } else {
-      this.staleThresholdMs = 5 * 60 * 1000;
-      this.idempotentConsumer = idempotentConsumer;
+      this.searchIndexer = searchIndexerOrThreshold;
+      if (typeof staleThresholdOrIdempotent === 'number') {
+        this.staleThresholdMs = staleThresholdOrIdempotent;
+        this.idempotentConsumer = idempotentConsumer;
+      } else if (
+        staleThresholdOrIdempotent &&
+        typeof (staleThresholdOrIdempotent as any).executeIdempotent ===
+          'function'
+      ) {
+        this.staleThresholdMs = 5 * 60 * 1000;
+        this.idempotentConsumer =
+          staleThresholdOrIdempotent as IdempotentConsumerService;
+      } else {
+        this.staleThresholdMs = 5 * 60 * 1000;
+        this.idempotentConsumer = idempotentConsumer;
+      }
     }
   }
 
@@ -224,9 +230,9 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       // 3. Extract text and per-page structures
       const doc = await this.pdf.extractDocumentFromBuffer(buffer);
 
-      // 4. Atomically index pages idempotently
-      if (doc.pages.length > 0) {
-        await this.searchService.indexAttachmentPages(attachment.id, doc.pages);
+      // 4. Atomically index pages idempotently if search indexer is available
+      if (doc.pages.length > 0 && this.searchIndexer?.indexAttachmentPages) {
+        await this.searchIndexer.indexAttachmentPages(attachment.id, doc.pages);
       }
 
       // 4.1. Store OCR provenance and quality stats if any pages were OCR'd
@@ -420,16 +426,23 @@ export class ExtractionHandler implements OutboxDispatchHandler {
               /\.pdf$/i.test(currentTitle) ||
               /^10\.\d{4,9}\//.test(currentTitle));
 
+          const existingMeta =
+            typeof attachment.item?.metadata === 'object' &&
+            attachment.item?.metadata !== null
+              ? (attachment.item.metadata as Record<string, any>)
+              : {};
+          const metaPatch: Record<string, any> = {};
+          if (doc.references && doc.references.length > 0) {
+            metaPatch.referenceCount = doc.references.length;
+          }
+          if (doc.metadata?.arxivId) {
+            metaPatch.arxivId = doc.metadata.arxivId;
+          }
+
           const itemPatch: Prisma.ItemUpdateInput = {
-            ...(doc.references && doc.references.length > 0
-              ? { referenceCount: doc.references.length }
-              : {}),
             ...(shouldUpdateTitle ? { title: doc.metadata.title } : {}),
             ...(!attachment.item?.doi && doc.metadata?.doi
               ? { doi: doc.metadata.doi }
-              : {}),
-            ...(!attachment.item?.arxivId && doc.metadata?.arxivId
-              ? { arxivId: doc.metadata.arxivId }
               : {}),
             ...(!attachment.item?.abstract && doc.metadata?.abstract
               ? { abstract: doc.metadata.abstract }
@@ -440,6 +453,14 @@ export class ExtractionHandler implements OutboxDispatchHandler {
             ...(!attachment.item?.publicationTitle && doc.metadata?.journal
               ? {
                   publicationTitle: doc.metadata.journal,
+                }
+              : {}),
+            ...(Object.keys(metaPatch).length > 0
+              ? {
+                  metadata: {
+                    ...existingMeta,
+                    ...metaPatch,
+                  } as Prisma.InputJsonValue,
                 }
               : {}),
           };

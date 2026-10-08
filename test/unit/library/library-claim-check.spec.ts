@@ -80,9 +80,6 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
         mockExtractionRepo,
         mockPdf,
         mockStoragePort,
-        fromPartial({
-          indexAttachmentPages: jest.fn().mockResolvedValue(undefined),
-        }),
       );
     });
 

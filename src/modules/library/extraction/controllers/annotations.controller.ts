@@ -61,6 +61,7 @@ export class AnnotationsController {
     @Param('attachmentId') attachmentId: string,
     @Query('pageIndex') pageIndexRaw?: string,
     @Query('type') type?: AnnotationType,
+    @Query('projectId') projectId?: string,
   ) {
     let pageIndex: number | undefined;
     if (pageIndexRaw !== undefined) {
@@ -75,6 +76,17 @@ export class AnnotationsController {
     if (type !== undefined && !Object.values(AnnotationType).includes(type)) {
       throw new BadRequestException(
         `type must be one of: ${Object.values(AnnotationType).join(', ')}`,
+      );
+    }
+
+    if (
+      typeof (this.annotationsService as any).listAnnotations === 'function'
+    ) {
+      return (this.annotationsService as any).listAnnotations(
+        userId,
+        attachmentId,
+        { pageIndex, type },
+        projectId,
       );
     }
 
@@ -101,6 +113,7 @@ export class AnnotationsController {
         'Authentication required to create annotations',
       );
     }
+
     const createData = {
       attachmentId,
       type: body.type,
@@ -228,6 +241,7 @@ export class AnnotationsController {
     if (!userId) {
       throw new UnauthorizedException('Authentication required');
     }
+
     return this.pdfAnnotationImporterService.importFromAttachment(
       userId,
       attachmentId,

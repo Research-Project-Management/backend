@@ -314,9 +314,41 @@ export class CslJsonMapper {
 
     // 2. Two-field creator with lastName / firstName
     if (contrib.lastName && contrib.lastName.trim()) {
+      const rawLast = contrib.lastName.trim();
+      const rawFirst = contrib.firstName ? contrib.firstName.trim() : '';
+
+      // Case A: Full name mistakenly entered entirely into lastName with empty firstName
+      if (!rawFirst && rawLast.includes(' ')) {
+        const parsed = this.parseStringName(rawLast);
+        if (contrib.shortName && contrib.shortName.trim()) {
+          parsed.short = contrib.shortName.trim();
+        }
+        return parsed;
+      }
+
+      // Case B: Inverted entry from Western forms (firstName has Vietnamese surname, lastName is given name)
+      // e.g. firstName = "Nguyễn Văn", lastName = "An"
+      if (rawFirst && !rawFirst.includes(',')) {
+        const firstParts = rawFirst.split(/\s+/);
+        const lastParts = rawLast.split(/\s+/);
+        if (
+          firstParts.length >= 1 &&
+          lastParts.length === 1 &&
+          this.VIETNAMESE_SURNAMES.has(firstParts[0].toLowerCase()) &&
+          !this.VIETNAMESE_SURNAMES.has(lastParts[0].toLowerCase())
+        ) {
+          const reconstructed = `${rawFirst} ${rawLast}`;
+          const parsed = this.parseStringName(reconstructed);
+          if (contrib.shortName && contrib.shortName.trim()) {
+            parsed.short = contrib.shortName.trim();
+          }
+          return parsed;
+        }
+      }
+
       const cslName: CslName = {
-        family: contrib.lastName.trim(),
-        given: contrib.firstName ? contrib.firstName.trim() : undefined,
+        family: rawLast,
+        given: rawFirst || undefined,
       };
       if (contrib.shortName && contrib.shortName.trim()) {
         cslName.short = contrib.shortName.trim();
@@ -347,22 +379,271 @@ export class CslJsonMapper {
     return { family: 'Anonymous' };
   }
 
+  // Common Vietnamese Surnames (Accented & Unaccented ASCII)
+  private static readonly VIETNAMESE_SURNAMES = new Set([
+    // Accented Unicode
+    'nguyễn',
+    'trần',
+    'lê',
+    'phạm',
+    'hoàng',
+    'huỳnh',
+    'phan',
+    'vũ',
+    'võ',
+    'đặng',
+    'bùi',
+    'đỗ',
+    'hồ',
+    'ngô',
+    'dương',
+    'lý',
+    'đinh',
+    'đoàn',
+    'lâm',
+    'trịnh',
+    'mai',
+    'đào',
+    'cao',
+    'hà',
+    'lưu',
+    'lương',
+    'thái',
+    'tạ',
+    'phùng',
+    'tô',
+    'vương',
+    'chu',
+    'châu',
+    'tống',
+    'quách',
+    'triệu',
+    'nghiêm',
+    'hứa',
+    'khổng',
+    'diệp',
+    'nhan',
+    'tăng',
+    'thạch',
+    'tiêu',
+    'lục',
+    'mã',
+    'chử',
+    'kiều',
+    'doãn',
+    'cù',
+    'bạch',
+    'ân',
+    'bàng',
+    'trương',
+    'tôn',
+    'quản',
+    'đậu',
+    'nông',
+    'lại',
+    'phí',
+    'la',
+
+    // Unaccented ASCII
+    'nguyen',
+    'tran',
+    'le',
+    'pham',
+    'hoang',
+    'huynh',
+    'phan',
+    'vu',
+    'vo',
+    'dang',
+    'bui',
+    'do',
+    'ho',
+    'ngo',
+    'duong',
+    'ly',
+    'dinh',
+    'doan',
+    'lam',
+    'trinh',
+    'mai',
+    'dao',
+    'cao',
+    'ha',
+    'luu',
+    'luong',
+    'thai',
+    'ta',
+    'phung',
+    'to',
+    'vuong',
+    'chu',
+    'chau',
+    'tong',
+    'quach',
+    'trieu',
+    'nghiem',
+    'hua',
+    'khong',
+    'diep',
+    'nhan',
+    'tang',
+    'thach',
+    'tieu',
+    'luc',
+    'ma',
+    'kieu',
+    'doan',
+    'cu',
+    'bach',
+    'truong',
+    'ton',
+    'quan',
+    'dau',
+    'nong',
+    'lai',
+    'phi',
+  ]);
+
+  // Common Compound Vietnamese Surnames (Họ kép)
+  private static readonly VIETNAMESE_COMPOUND_SURNAMES = new Set([
+    'nguyễn phúc',
+    'nguyễn phước',
+    'nguyễn đình',
+    'nguyễn hữu',
+    'nguyễn huy',
+    'nguyễn bá',
+    'nguyễn đức',
+    'nguyễn cảnh',
+    'nguyễn khắc',
+    'nguyễn khoa',
+    'nguyễn trần',
+    'trần hưng',
+    'trần đắc',
+    'trần đình',
+    'phan huy',
+    'phan bội',
+    'ngô thì',
+    'ngô đình',
+    'hoàng văn',
+    'nguyen phuc',
+    'nguyen phuoc',
+    'nguyen dinh',
+    'nguyen huu',
+    'nguyen huy',
+    'nguyen ba',
+    'nguyen duc',
+    'nguyen canh',
+    'nguyen khac',
+    'nguyen khoa',
+    'nguyen tran',
+    'tran hung',
+    'tran dac',
+    'tran dinh',
+    'phan huy',
+    'phan boi',
+    'ngo thi',
+    'ngo dinh',
+    'hoang van',
+  ]);
+
+  /**
+   * Evaluates if a tokenized name sequence follows Vietnamese naming order.
+   */
+  private static isVietnameseName(parts: string[]): boolean {
+    if (parts.length < 2) return false;
+    const firstLower = parts[0].toLowerCase();
+
+    if (!this.VIETNAMESE_SURNAMES.has(firstLower)) {
+      return false;
+    }
+
+    // Has Vietnamese diacritics anywhere in the full string -> Definitely Vietnamese
+    const hasDiacritics =
+      /[àáảãạăắằẳẵặâấầẩẫậđèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]/i.test(
+        parts.join(' '),
+      );
+    if (hasDiacritics) return true;
+
+    // Strongly distinct Vietnamese surnames with high specificity
+    const distinctVnSurnames = new Set([
+      'nguyen',
+      'tran',
+      'pham',
+      'huynh',
+      'hoang',
+      'trinh',
+      'luong',
+      'phung',
+      'vuong',
+      'quach',
+      'trieu',
+      'nghiem',
+      'khong',
+      'doan',
+      'dinh',
+      'dang',
+      'bui',
+      'ngo',
+      'duong',
+      'ly',
+      'truong',
+      'vu',
+      'vo',
+    ]);
+    if (distinctVnSurnames.has(firstLower)) {
+      return true;
+    }
+
+    // Typical Vietnamese name length (3-4 words)
+    if (parts.length >= 3) {
+      return true;
+    }
+
+    const commonMiddleNames = new Set([
+      'van',
+      'thi',
+      'duc',
+      'dinh',
+      'huu',
+      'ngoc',
+      'quoc',
+      'xuan',
+      'thanh',
+      'minh',
+      'hai',
+      'anh',
+      'tuan',
+      'hung',
+      'phuong',
+      'trong',
+      'cong',
+      'ba',
+      'chi',
+      'kim',
+    ]);
+    if (parts.length === 2 && commonMiddleNames.has(parts[1].toLowerCase())) {
+      return true;
+    }
+
+    return false;
+  }
+
   /**
    * Parses a single text name into CSL family/given format.
-   * Recognizes institutional authors or "Last, First" vs "First Last".
+   * Recognizes institutional authors, Vietnamese naming order, and "Last, First" vs "First Last".
    */
   public static parseStringName(raw: string): CslName {
     const trimmed = (raw || '').trim().replace(/\s+/g, ' ');
     if (!trimmed) return { family: 'Anonymous' };
 
-    // Check if institution (e.g. "Google DeepMind", "World Health Organization")
+    // Check if institution (English + Vietnamese)
     const institutionalPattern =
-      /(organization|consortium|association|institute|university|laboratory|committee|team|group|corporation|inc\.|llc|agency|openai|google|microsoft|meta)/i;
+      /(organization|consortium|association|institute|university|laboratory|committee|team|group|corporation|inc\.|llc|agency|department|ministry|academy|bureau|council|center|centre|foundation|society|openai|google|microsoft|meta|deepmind|who|unesco|ieee|acm|đại học|học viện|viện|trung tâm|bộ giáo dục|bộ y tế|bộ khoa học|tổng cục|cục|sở|ngân hàng|ban quản lý|hội đồng|liên minh)/i;
     if (institutionalPattern.test(trimmed) && !trimmed.includes(',')) {
       return { literal: trimmed };
     }
 
-    // Comma-separated: "Preskill, John"
+    // Comma-separated: "Preskill, John" or "Nguyen, Van An"
     if (trimmed.includes(',')) {
       const parts = trimmed.split(',').map((p) => p.trim());
       return {
@@ -371,12 +652,32 @@ export class CslJsonMapper {
       };
     }
 
-    // Standard "First Last"
+    // Single-word author: "Plato", "Aristotle"
     const parts = trimmed.split(' ');
     if (parts.length === 1) {
       return { family: parts[0] };
     }
 
+    // Vietnamese name recognition (Họ [Đệm] Tên -> Family: Họ, Given: Đệm Tên)
+    if (this.isVietnameseName(parts)) {
+      // Check compound surname if 3+ words
+      if (parts.length >= 3) {
+        const potentialCompound = `${parts[0]} ${parts[1]}`.toLowerCase();
+        if (this.VIETNAMESE_COMPOUND_SURNAMES.has(potentialCompound)) {
+          return {
+            family: `${parts[0]} ${parts[1]}`,
+            given: parts.slice(2).join(' ') || undefined,
+          };
+        }
+      }
+
+      return {
+        family: parts[0],
+        given: parts.slice(1).join(' ') || undefined,
+      };
+    }
+
+    // Standard Western "First Last" fallback
     const family = parts.pop() || 'Anonymous';
     const given = parts.join(' ');
     return { family, given };

@@ -78,11 +78,15 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     private readonly typesService: TypesService,
     private readonly transformer: ItemTransformer,
     private readonly queryService: ItemQueryService,
-    private readonly fulltextService: ItemFulltextService,
-    private readonly typeConversionService: ItemTypeConversionService,
-    private readonly curationService: ItemCurationService,
-    private readonly validator: ZoteroSchemaValidatorService,
-    private readonly syncDelegate: ItemSyncDelegate,
+    @Optional()
+    private readonly fulltextService: ItemFulltextService = {} as any,
+    @Optional()
+    private readonly typeConversionService: ItemTypeConversionService = {} as any,
+    @Optional()
+    private readonly curationService: ItemCurationService = {} as any,
+    @Optional()
+    private readonly validator: ZoteroSchemaValidatorService = {} as any,
+    @Optional() private readonly syncDelegate: ItemSyncDelegate = {} as any,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 

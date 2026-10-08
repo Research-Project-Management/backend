@@ -73,6 +73,7 @@ export class CommandRepository {
       client,
       projectId,
     );
+    delete (createData as any).type;
 
     const item = await client.item.create({
       data: createData,
@@ -183,6 +184,7 @@ export class CommandRepository {
     if (expectedVersion !== undefined) {
       delete (updateData as any).version;
     }
+    delete (updateData as any).type;
 
     const updated = await client.item.update({
       where: { id },

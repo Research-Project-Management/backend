@@ -1,5 +1,5 @@
 import { XmpParser } from '@/modules/library/extraction/extractors/xmp.parser';
-import { AcademicRegexCatalog } from '@/modules/library/extraction/extractors/academic-regex.catalog';
+import { AcademicRegexCatalog } from '@/modules/library/shared-kernel/utils/academic-regex.catalog';
 import { MetadataQualityGate } from '@/modules/library/extraction/extractors/metadata-quality.gate';
 import { LayoutHeuristicExtractor } from '@/modules/library/extraction/extractors/layout-heuristic.extractor';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';

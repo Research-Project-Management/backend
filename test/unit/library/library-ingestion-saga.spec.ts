@@ -138,7 +138,6 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       };
       orchestrator = new IngestionSagaOrchestrator(
         mockRepo as IngestionRepository,
-        mockCatalogFacade as ICatalogFacade,
       );
     });
 
@@ -314,7 +313,7 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         createNote: jest.fn().mockResolvedValue({ id: 'note-1' }),
       };
 
-      orchestrator = new IngestionSagaOrchestrator(mockRepo, mockCatalogFacade);
+      orchestrator = new IngestionSagaOrchestrator(mockRepo);
 
       pipelineService = new PipelineService(
         mockRepo,

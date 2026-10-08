@@ -5,8 +5,8 @@ import {
 } from '@test/factories';
 import { createMockPrismaService, createMockRedisService } from '@test/mocks';
 import { ItemAggregate } from '@/modules/library/catalog/core/domain/item.aggregate';
-import { CslEngineService } from '@/modules/library/citation/core/adapters/csl-engine.service';
-import { CslJsonMapper } from '@/modules/library/citation/core/adapters/csl-json.mapper';
+import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
+import { CslJsonMapper } from '@/modules/library/citation/utils/csl-json.mapper';
 
 describe('⚡ Production Readiness Golden-Path Smoke Test Suite', () => {
   let mockPrisma: ReturnType<typeof createMockPrismaService>;

@@ -58,3 +58,17 @@ export * from './utils/item.transformer';
 export * from './utils/notes.utils';
 export * from './utils/collections.utils';
 export * from './utils/state.utils';
+
+// Domain Models, Aggregates & Ports
+export * from './core/domain/item.aggregate';
+export * from './core/domain/collection.aggregate';
+export * from './core/domain/tag.aggregate';
+export {
+  NoteEntity as NoteDomainEntity,
+  NoteAggregate,
+} from './core/domain/note.entity';
+export * from './core/domain/citation-key.vo';
+export * from './core/domain/doi.vo';
+export * from './core/domain/item-domain.event';
+export * from './core/domain/item-domain.exception';
+export * from './core/ports/item-repository.port';

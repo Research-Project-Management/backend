@@ -1,25 +1,25 @@
-import { ItemCurationController } from '@/modules/library/catalog/item-curation.controller';
+import { ItemCurationController } from '@/modules/library/catalog/controllers/item-curation.controller';
 
 describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapter)', () => {
   let controller: ItemCurationController;
-  let mockGetFulltextUseCase: { execute: jest.Mock };
-  let mockParseCitationsUseCase: { execute: jest.Mock };
-  let mockReindexItemUseCase: { execute: jest.Mock };
-  let mockConvertItemTypeUseCase: { execute: jest.Mock };
-  let mockPreviewTypeConversionUseCase: { execute: jest.Mock };
-  let mockManageRelationsUseCase: {
+  let mockItemService: {
+    getFulltext: jest.Mock;
+    parseCitations: jest.Mock;
+    reindexItem: jest.Mock;
+    getItem: jest.Mock;
+    previewTypeConversion: jest.Mock;
+    convertItemType: jest.Mock;
     getRelatedItems: jest.Mock;
     linkItems: jest.Mock;
     unlinkItems: jest.Mock;
+    setMyPublication: jest.Mock;
   };
-  let mockSetMyPublicationUseCase: { execute: jest.Mock };
-  let mockGetItemUseCase: { execute: jest.Mock };
 
   const validUuid = '11111111-1111-4111-8111-111111111111';
 
   beforeEach(() => {
-    mockGetFulltextUseCase = {
-      execute: jest.fn().mockResolvedValue({
+    mockItemService = {
+      getFulltext: jest.fn().mockResolvedValue({
         title: 'Attention Is All You Need',
         sections: [],
         figures: [],
@@ -27,100 +27,79 @@ describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapt
         formulas: [],
         references: [],
       }),
-    };
-    mockParseCitationsUseCase = {
-      execute: jest.fn().mockResolvedValue({
-        count: 1,
-        references: [
+      parseCitations: jest
+        .fn()
+        .mockResolvedValue([
           { title: 'Attention Is All You Need', authors: ['Vaswani'] },
-        ],
-      }),
-    };
-    mockReindexItemUseCase = {
-      execute: jest.fn().mockResolvedValue({
+        ]),
+      reindexItem: jest.fn().mockResolvedValue({
         success: true,
         message: 'Item reindexed in vector and fulltext index',
       }),
-    };
-    mockConvertItemTypeUseCase = {
-      execute: jest.fn().mockResolvedValue({
+      getItem: jest.fn().mockResolvedValue({
+        id: validUuid,
+        title: 'Test Paper',
+      }),
+      previewTypeConversion: jest.fn().mockReturnValue({
+        targetType: 'book',
+        mappedFields: { title: 'Test Paper' },
+        unmappedFields: {},
+      }),
+      convertItemType: jest.fn().mockResolvedValue({
         item: { id: validUuid, itemType: 'book' },
         conversionReport: {
           mappedFields: ['title', 'authors'],
           unmappedFields: [],
         },
       }),
-    };
-    mockPreviewTypeConversionUseCase = {
-      execute: jest.fn().mockReturnValue({
-        targetType: 'book',
-        mappedFields: { title: 'Test Paper' },
-        unmappedFields: {},
-      }),
-    };
-    mockManageRelationsUseCase = {
       getRelatedItems: jest
         .fn()
         .mockResolvedValue([{ id: 'rel-1', title: 'Related Paper' }]),
       linkItems: jest.fn().mockResolvedValue({ success: true, linkCount: 1 }),
       unlinkItems: jest.fn().mockResolvedValue({ success: true }),
-    };
-    mockSetMyPublicationUseCase = {
-      execute: jest
+      setMyPublication: jest
         .fn()
-        .mockResolvedValue({ id: validUuid, isMyPublication: true }),
-    };
-    mockGetItemUseCase = {
-      execute: jest
-        .fn()
-        .mockResolvedValue({ id: validUuid, title: 'Test Paper' }),
+        .mockImplementation((userId, id, isMyPublication) =>
+          Promise.resolve({ id, isMyPublication }),
+        ),
     };
 
-    controller = new ItemCurationController(
-      mockGetFulltextUseCase as any,
-      mockParseCitationsUseCase,
-      mockReindexItemUseCase as any,
-      mockConvertItemTypeUseCase as any,
-      mockPreviewTypeConversionUseCase as any,
-      mockManageRelationsUseCase as any,
-      mockSetMyPublicationUseCase as any,
-      mockGetItemUseCase as any,
-    );
+    controller = new ItemCurationController(mockItemService as any);
   });
 
-  it('should parse citations using ParseCitationsUseCase', async () => {
+  it('should parse citations using ItemService', async () => {
     const res = await controller.parseCitations({
       citations: 'Vaswani et al., 2017. Attention Is All You Need.',
     });
     expect(res.success).toBe(true);
     expect(res.count).toBe(1);
-    expect(mockParseCitationsUseCase.execute).toHaveBeenCalledWith({
-      rawCitations: 'Vaswani et al., 2017. Attention Is All You Need.',
-    });
+    expect(mockItemService.parseCitations).toHaveBeenCalledWith(
+      'Vaswani et al., 2017. Attention Is All You Need.',
+    );
   });
 
-  it('should get fulltext using GetFulltextUseCase', async () => {
+  it('should get fulltext using ItemService', async () => {
     const res = await controller.getFulltext(validUuid, 'user-1', 'proj-1');
     expect(res.success).toBe(true);
     expect(res.data.title).toBe('Attention Is All You Need');
-    expect(mockGetFulltextUseCase.execute).toHaveBeenCalledWith({
-      userId: 'user-1',
-      itemId: validUuid,
-      projectId: 'proj-1',
-    });
+    expect(mockItemService.getFulltext).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      'proj-1',
+    );
   });
 
-  it('should trigger reindexing using ReindexItemUseCase', async () => {
+  it('should trigger reindexing using ItemService', async () => {
     const res = await controller.reindexItem(validUuid, 'user-1', 'proj-1');
     expect(res.success).toBe(true);
-    expect(mockReindexItemUseCase.execute).toHaveBeenCalledWith({
-      userId: 'user-1',
-      itemId: validUuid,
-      projectId: 'proj-1',
-    });
+    expect(mockItemService.reindexItem).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      'proj-1',
+    );
   });
 
-  it('should preview type conversion using PreviewTypeConversionUseCase', async () => {
+  it('should preview type conversion using ItemService', async () => {
     const res = await controller.previewTypeConversion(
       validUuid,
       'user-1',
@@ -129,9 +108,14 @@ describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapt
     );
     expect(res.success).toBe(true);
     expect(res.preview.targetType).toBe('book');
+    expect(mockItemService.getItem).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      'proj-1',
+    );
   });
 
-  it('should execute convertItemType using ConvertItemTypeUseCase', async () => {
+  it('should execute convertItemType using ItemService', async () => {
     const res = await controller.convertItemType(
       validUuid,
       'user-1',
@@ -141,16 +125,15 @@ describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapt
     );
     expect(res.success).toBe(true);
     expect(res.item.itemType).toBe('book');
-    expect(mockConvertItemTypeUseCase.execute).toHaveBeenCalledWith({
-      userId: 'user-1',
-      itemId: validUuid,
-      targetType: 'book',
-      options: {
+    expect(mockItemService.convertItemType).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      'book',
+      {
         expectedVersion: undefined,
         retainUnmappedInExtra: true,
       },
-      projectId: 'proj-1',
-    });
+    );
   });
 
   it('should manage relations (get, link, unlink)', async () => {
@@ -160,6 +143,11 @@ describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapt
       'proj-1',
     );
     expect(related).toHaveLength(1);
+    expect(mockItemService.getRelatedItems).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      'proj-1',
+    );
 
     const linked = await controller.linkItems(
       validUuid,
@@ -168,6 +156,12 @@ describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapt
       'proj-1',
     );
     expect(linked.success).toBe(true);
+    expect(mockItemService.linkItems).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      { targetItemId: 'target-uuid', relationType: 'cites' },
+      'proj-1',
+    );
 
     const unlinked = await controller.unlinkItems(
       validUuid,
@@ -176,27 +170,29 @@ describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapt
       'proj-1',
     );
     expect(unlinked.success).toBe(true);
+    expect(mockItemService.unlinkItems).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      'target-uuid',
+      'proj-1',
+    );
   });
 
-  it('should mark and unmark my publication using SetMyPublicationUseCase', async () => {
+  it('should mark and unmark my publication using ItemService', async () => {
     const marked = await controller.markMyPublication(validUuid, 'user-1');
     expect(marked.success).toBe(true);
-    expect(mockSetMyPublicationUseCase.execute).toHaveBeenCalledWith({
-      userId: 'user-1',
-      itemId: validUuid,
-      isMyPublication: true,
-    });
+    expect(mockItemService.setMyPublication).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      true,
+    );
 
-    mockSetMyPublicationUseCase.execute.mockResolvedValueOnce({
-      id: validUuid,
-      isMyPublication: false,
-    });
     const unmarked = await controller.unmarkMyPublication(validUuid, 'user-1');
     expect(unmarked.success).toBe(true);
-    expect(mockSetMyPublicationUseCase.execute).toHaveBeenCalledWith({
-      userId: 'user-1',
-      itemId: validUuid,
-      isMyPublication: false,
-    });
+    expect(mockItemService.setMyPublication).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      false,
+    );
   });
 });

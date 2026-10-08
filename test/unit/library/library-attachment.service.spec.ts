@@ -405,31 +405,21 @@ describe('Library Attachments & Storage Integration Suite', () => {
         getItemAttachments: jest.fn(),
         createAttachment: jest.fn(),
         deleteAttachment: jest.fn(),
-      };
-      mockWebSnapshotService = {
-        captureAndAttach: jest.fn(),
-      };
-      mockGetThumbnailUseCase = {
-        execute: jest.fn().mockResolvedValue({
+        getThumbnail: jest.fn().mockResolvedValue({
           buffer: Buffer.from('WEBP_STREAM_DATA'),
           mimeType: 'image/webp',
         }),
+      };
+      mockWebSnapshotService = {
+        captureAndAttach: jest.fn(),
       };
       storageController = new AttachmentStorageController(
         mockStoragePort,
         {} as any,
       );
       controller = new AttachmentsController(
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        mockGetThumbnailUseCase as any,
-        mockWebSnapshotService,
-        mockAttachmentsService,
+        mockAttachmentsService as any,
+        mockWebSnapshotService as any,
       );
     });
 
@@ -492,7 +482,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
     });
 
     it('should stream thumbnail with WebP mimeType and 24h cache headers', async () => {
-      mockGetThumbnailUseCase.execute.mockResolvedValue({
+      mockAttachmentsService.getThumbnail.mockResolvedValue({
         buffer: Buffer.from('WEBP_STREAM_DATA'),
         mimeType: 'image/webp',
       });
@@ -510,11 +500,11 @@ describe('Library Attachments & Storage Integration Suite', () => {
         'proj-456',
       );
 
-      expect(mockGetThumbnailUseCase.execute).toHaveBeenCalledWith({
-        userId: 'user-1',
-        attachmentId: 'att-thumb-1',
-        projectId: 'proj-456',
-      });
+      expect(mockAttachmentsService.getThumbnail).toHaveBeenCalledWith(
+        'user-1',
+        'att-thumb-1',
+        'proj-456',
+      );
       expect(mockRes.header).toHaveBeenCalledWith('Content-Type', 'image/webp');
       expect(mockRes.header).toHaveBeenCalledWith(
         'Cache-Control',
@@ -706,7 +696,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
       handler = new ExtractionHandler(
         mockExtractionRepo,
         mockPdf,
-        mockSearch,
         mockStoragePort,
       );
     });

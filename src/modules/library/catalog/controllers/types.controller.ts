@@ -118,3 +118,5 @@ export class TypeController {
     };
   }
 }
+
+export { TypeController as TypesController };
