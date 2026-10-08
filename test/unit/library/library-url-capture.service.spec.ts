@@ -1,10 +1,9 @@
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 
-jest.mock(
-  '@/modules/library/extraction/services/web-snapshot.service',
-  () => ({ WebSnapshotService: class WebSnapshotService {} }),
-);
+jest.mock('@/modules/library/extraction/services/web-snapshot.service', () => ({
+  WebSnapshotService: class WebSnapshotService {},
+}));
 
 describe('UrlCaptureService', () => {
   it('binds personal capture tokens to the current user scope', async () => {

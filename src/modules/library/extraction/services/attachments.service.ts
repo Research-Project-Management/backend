@@ -589,11 +589,7 @@ export class AttachmentsService {
     targetItemId: ItemId | string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    await this.repo.reassignToItem(
-      sourceItemIds as string[],
-      targetItemId as string,
-      tx,
-    );
+    await this.repo.reassignToItem(sourceItemIds, targetItemId, tx);
   }
 
   async assertAttachmentExists(

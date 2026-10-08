@@ -49,7 +49,7 @@ export class CitationFacade implements ICitationFacade {
       styleId,
       index,
       projectId,
-    ) as Promise<FormattedCitationResult>;
+    );
   }
 
   async exportBibliography(
@@ -68,7 +68,7 @@ export class CitationFacade implements ICitationFacade {
 
   async exportLibrary(
     userId: string,
-    options: ExportLibraryDto = { format: 'bibtex' } as ExportLibraryDto,
+    options: ExportLibraryDto = { format: 'bibtex' },
   ): Promise<ExportResult> {
     return this.exportsService.exportLibrary(userId, options);
   }

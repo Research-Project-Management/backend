@@ -95,7 +95,7 @@ export class MatchStage {
           confidence: 1.0,
           targetItemId: matchResult.exactMatch.id,
           targetItemTitle: matchResult.exactMatch.title,
-          matchReason: matchResult.exactMatch.matchReason as any,
+          matchReason: matchResult.exactMatch.matchReason,
           evidence: matchResult.exactMatch.evidence,
         };
       }

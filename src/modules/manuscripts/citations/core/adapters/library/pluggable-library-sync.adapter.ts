@@ -116,8 +116,7 @@ export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
           results.push({
             id: c.id,
             name: c.name,
-            itemCount:
-              (c as any)._count?.collectionItems ?? (c as any).itemCount ?? 0,
+            itemCount: c._count?.collectionItems ?? c.itemCount ?? 0,
           });
         }
       } catch (err: any) {

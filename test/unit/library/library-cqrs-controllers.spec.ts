@@ -526,7 +526,7 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         'user-1',
         'att-1',
         '0',
-        'highlight' as any,
+        'highlight',
       );
       expect(
         mockAnnotationsService.getAnnotationsByAttachment,

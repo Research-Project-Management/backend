@@ -67,8 +67,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           'function'
       ) {
         this.staleThresholdMs = 5 * 60 * 1000;
-        this.idempotentConsumer =
-          staleThresholdOrIdempotent as IdempotentConsumerService;
+        this.idempotentConsumer = staleThresholdOrIdempotent;
       } else {
         this.staleThresholdMs = 5 * 60 * 1000;
         this.idempotentConsumer = idempotentConsumer;
@@ -460,7 +459,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
                   metadata: {
                     ...existingMeta,
                     ...metaPatch,
-                  } as Prisma.InputJsonValue,
+                  },
                 }
               : {}),
           };

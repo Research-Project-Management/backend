@@ -317,11 +317,10 @@ export class DuplicateService {
     const duplicates = items.filter((it: any) => it.id !== dto.primaryItemId);
 
     // Zotero-Invariant: Items to be merged must be of the same item type (pane.item.duplicates.onlySameItemType)
-    const primaryType =
-      primary.itemType || (primary as any).type || 'journalArticle';
+    const primaryType = primary.itemType || primary.type || 'journalArticle';
     const hasDifferentType = duplicates.some(
       (dup: any) =>
-        (dup.itemType || (dup as any).type || 'journalArticle') !== primaryType,
+        (dup.itemType || dup.type || 'journalArticle') !== primaryType,
     );
     if (hasDifferentType) {
       throw new BadRequestException(

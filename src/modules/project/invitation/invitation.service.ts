@@ -202,7 +202,7 @@ export class InvitationService {
     // 2. Try finding project by active link sharing token (Overleaf Parity)
     const linkProject = await this.repository.findProjectByLinkToken(trimmed);
     if (linkProject) {
-      const settings = (linkProject.settings as any)?.linkSharing;
+      const settings = linkProject.settings?.linkSharing;
       if (!settings || !settings.enabled) {
         throw new ForbiddenException(
           'Link sharing has been disabled for this project',

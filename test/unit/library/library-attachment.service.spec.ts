@@ -418,8 +418,8 @@ describe('Library Attachments & Storage Integration Suite', () => {
         {} as any,
       );
       controller = new AttachmentsController(
-        mockAttachmentsService as any,
-        mockWebSnapshotService as any,
+        mockAttachmentsService,
+        mockWebSnapshotService,
       );
     });
 

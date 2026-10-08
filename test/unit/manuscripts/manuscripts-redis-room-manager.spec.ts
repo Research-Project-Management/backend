@@ -131,7 +131,7 @@ describe('RedisRoomManagerAdapter (Distributed Presence)', () => {
         getClient: () => mockClient,
       };
 
-      adapter = new RedisRoomManagerAdapter(mockRedisCacheService as any);
+      adapter = new RedisRoomManagerAdapter(mockRedisCacheService);
     });
 
     it('synchronizes presence sessions across simulated pods via Redis SMEMBERS & MGET', async () => {

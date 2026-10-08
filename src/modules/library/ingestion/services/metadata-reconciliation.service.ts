@@ -351,7 +351,7 @@ export class ReconciliationService {
         userOverrides[field] !== null &&
         userOverrides[field] !== ''
       ) {
-        resolved[field] = this.cloneValue(userOverrides[field]) as any;
+        resolved[field] = this.cloneValue(userOverrides[field]);
         assertions.push({
           field,
           value: this.cloneValue(userOverrides[field]),
@@ -456,7 +456,7 @@ export class ReconciliationService {
 
       const winner = fieldVariants[0];
 
-      resolved[field] = this.cloneValue(winner.val) as any;
+      resolved[field] = this.cloneValue(winner.val);
       assertions.push({
         field,
         value: this.cloneValue(winner.val),

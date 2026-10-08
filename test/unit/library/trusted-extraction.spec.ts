@@ -513,7 +513,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
         resolve: jest.fn(),
       };
 
-      const enrichStage = new EnrichStage(mockMetadataService as any);
+      const enrichStage = new EnrichStage(mockMetadataService);
 
       const candidates: MetadataCandidate[] = [
         {

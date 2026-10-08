@@ -18,19 +18,22 @@ export class InProcessExtractionGatewayAdapter implements IExtractionGatewayPort
   ) {}
 
   extractDocumentFromBuffer(buffer: Buffer, options?: any) {
-    if (!this.extractionFacade?.extractDocumentFromBuffer) return Promise.resolve(null);
+    if (!this.extractionFacade?.extractDocumentFromBuffer)
+      return Promise.resolve(null);
     return this.extractionFacade.extractDocumentFromBuffer(buffer, options);
   }
 
   extractMetadataFromBuffer(buffer: Buffer) {
-    if (!this.extractionFacade?.extractMetadataFromBuffer) return Promise.resolve(null);
+    if (!this.extractionFacade?.extractMetadataFromBuffer)
+      return Promise.resolve(null);
     return Promise.resolve(
       this.extractionFacade.extractMetadataFromBuffer(buffer),
     );
   }
 
   captureWebSnapshot(url: string, itemId: string, userId: string) {
-    if (!this.extractionFacade?.captureWebSnapshot) return Promise.resolve(null);
+    if (!this.extractionFacade?.captureWebSnapshot)
+      return Promise.resolve(null);
     return this.extractionFacade.captureWebSnapshot(url, itemId, userId);
   }
 

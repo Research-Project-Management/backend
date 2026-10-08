@@ -26,6 +26,19 @@ export class DockerSandboxRunner implements ISandboxRunner {
     args: string[],
     options: ProcessExecutionOptions,
   ): Promise<ProcessExecutionResult> {
+    const envArgs: string[] = [];
+    if (options.env) {
+      for (const [k, v] of Object.entries(options.env)) {
+        if (v !== undefined) {
+          const containerVal =
+            typeof v === 'string'
+              ? v.split(options.cwd).join('/compile').replace(/\\/g, '/')
+              : String(v);
+          envArgs.push('-e', `${k}=${containerVal}`);
+        }
+      }
+    }
+
     const dockerArgs = [
       'run',
       '--rm',
@@ -39,6 +52,7 @@ export class DockerSandboxRunner implements ISandboxRunner {
       `${options.cwd}:/compile:rw`,
       '-w',
       '/compile',
+      ...envArgs,
       this.dockerImage,
       command,
       ...args,

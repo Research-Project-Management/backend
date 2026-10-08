@@ -69,7 +69,12 @@ export interface PlannedFileSet {
 const sha256 = (s: string) =>
   crypto.createHash('sha256').update(s, 'utf8').digest('hex');
 
-const stripLeadingSlash = (p: string) => p.replace(/^\//, '');
+const sanitizeRelativePath = (p: string) =>
+  p
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^(\.\/)+/, '')
+    .replace(/^\/+/, '');
 
 const inlineSource = (content: string): FileSource => ({
   kind: 'inline',
@@ -98,7 +103,9 @@ export function fingerprintFileSet(files: Map<string, FileSource>): string {
 /** Plan for a project persisted in the database (metadata-only, no content read). */
 export function planDbFileSet(input: FileSetInput): PlannedFileSet {
   const { nodes, docs, incomingFiles, source, pageId } = input;
-  let mainFile = input.mainFile;
+  let mainFile = input.mainFile
+    ? sanitizeRelativePath(input.mainFile)
+    : 'main.tex';
 
   const docById = new Map(docs.map((d) => [d.id, d]));
   const idToPath = new Map<string, string>();
@@ -108,7 +115,7 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
   for (const node of nodes) {
     if (node.type === 'FOLDER') continue;
     const cleanPath =
-      stripLeadingSlash(node.path || '') || node.name || 'untitled.tex';
+      sanitizeRelativePath(node.path || '') || node.name || 'untitled.tex';
     if (node.docId) idToPath.set(node.docId, cleanPath);
     idToPath.set(node.id, cleanPath);
 
@@ -118,24 +125,33 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
   }
 
   for (const doc of docs) {
-    const cleanPath = stripLeadingSlash(doc.path || '');
+    const cleanPath = sanitizeRelativePath(doc.path || '');
     if (cleanPath && !files.has(cleanPath)) files.set(cleanPath, dbSource(doc));
     idToPath.set(doc.id, cleanPath);
   }
 
   // Client-side buffers (unsaved edits) take precedence over persisted content.
   for (const [key, content] of Object.entries(incomingFiles)) {
-    files.set(idToPath.get(key) ?? key, inlineSource(content));
+    const rawClean = sanitizeRelativePath(key);
+    const targetPath = idToPath.get(key) ?? idToPath.get(rawClean) ?? rawClean;
+    files.set(targetPath, inlineSource(content));
   }
 
-  if (detectedRootPath) {
+  if (mainFile && files.has(mainFile) && !isEmpty(files.get(mainFile))) {
+    // Retain client-specified mainFile if present in project
+  } else if (detectedRootPath) {
     mainFile = detectedRootPath;
   } else if (!isEmpty(files.get('main.tex'))) {
     mainFile = 'main.tex';
   }
 
   const mainWasEmpty = isEmpty(files.get(mainFile));
-  const pagePath = pageId ? idToPath.get(pageId) : undefined;
+  const cleanPageId = pageId ? sanitizeRelativePath(pageId) : undefined;
+  const pagePath = pageId
+    ? (idToPath.get(pageId) ??
+      idToPath.get(cleanPageId!) ??
+      (cleanPageId && files.has(cleanPageId) ? cleanPageId : undefined))
+    : undefined;
 
   if (pagePath && pagePath !== mainFile) {
     // Client is editing a child sub-file: its buffer is that file's content.
@@ -160,16 +176,19 @@ export function planInlineFileSet(input: {
 }): PlannedFileSet {
   const files = new Map<string, FileSource>();
   for (const [key, content] of Object.entries(input.incomingFiles)) {
-    files.set(key, inlineSource(content));
+    const cleanKey = sanitizeRelativePath(key);
+    files.set(cleanKey, inlineSource(content));
   }
-  if (input.source && isEmpty(files.get(input.mainFile))) {
-    files.set(input.mainFile, inlineSource(input.source));
+  const cleanMain =
+    sanitizeRelativePath(input.mainFile || 'main.tex') || 'main.tex';
+  if (input.source && isEmpty(files.get(cleanMain))) {
+    files.set(cleanMain, inlineSource(input.source));
   }
   return {
-    mainFile: input.mainFile,
+    mainFile: cleanMain,
     files,
     fingerprint: fingerprintFileSet(files),
-    hasMainContent: !isEmpty(files.get(input.mainFile)),
+    hasMainContent: !isEmpty(files.get(cleanMain)),
   };
 }
 

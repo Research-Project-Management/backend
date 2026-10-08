@@ -48,10 +48,10 @@ describe('Library Security Hardening & Performance Optimization', () => {
         {} as any,
         {} as any,
         fulltextService,
-        undefined as any,
-        undefined as any,
-        undefined as any,
-        undefined as any,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
         mockCache as RedisCacheService,
       );
     });
@@ -199,7 +199,7 @@ describe('Library Security Hardening & Performance Optimization', () => {
         {} as any,
         {} as any,
         {} as any,
-        new ItemQueryService(mockQueryRepo as any, undefined),
+        new ItemQueryService(mockQueryRepo, undefined),
       );
     });
 

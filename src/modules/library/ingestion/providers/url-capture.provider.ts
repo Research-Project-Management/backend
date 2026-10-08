@@ -252,7 +252,7 @@ export class UrlCaptureProvider {
     return {
       title: scraped.title || 'Web Page',
       url: fallbackUrl,
-      itemType: itemType as any,
+      itemType: itemType,
       authors: authors.length > 0 ? authors : undefined,
       creators: creators.length > 0 ? creators : undefined,
       doi: scraped.doi,

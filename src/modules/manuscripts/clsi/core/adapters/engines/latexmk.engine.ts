@@ -62,11 +62,31 @@ export class LatexmkEngine implements ILatexEngine {
       options.mainFile,
     ];
 
+    // Ensure TeX, BibTeX, and Biber search subdirectories recursively (.//:)
+    // Overleaf CLSI parity: Resolves \input{sections/intro}, \input{intro}, \includegraphics{fig}
+    const cwdPath = path.resolve(options.cwd);
+    const texInputs =
+      process.platform === 'win32'
+        ? `.;${cwdPath}\\//;${options.env?.TEXINPUTS || ''}`
+        : `.:${cwdPath}//:${options.env?.TEXINPUTS || ''}`;
+    const bibInputs =
+      process.platform === 'win32'
+        ? `.;${cwdPath}\\//;${options.env?.BIBINPUTS || ''}`
+        : `.:${cwdPath}//:${options.env?.BIBINPUTS || ''}`;
+
+    const envWithInputs = {
+      ...(options.env || {}),
+      TEXINPUTS: texInputs,
+      BIBINPUTS: bibInputs,
+      BSTINPUTS: bibInputs,
+    };
+
     const execResult = await this.runner.run(this.binaryPath, args, {
       cwd: options.cwd,
       timeoutMs: options.timeoutMs ?? 240000,
       signal: options.signal,
       onLogChunk: options.onLogChunk,
+      env: envWithInputs,
     });
 
     const durationMs = Date.now() - startTime;

@@ -56,7 +56,7 @@ export class TagController {
       userId,
       dto.name,
       dto.color,
-      dto.type as TagType | undefined,
+      dto.type,
       projectId,
     );
   }

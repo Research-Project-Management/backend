@@ -57,7 +57,8 @@ export class InProcessCatalogGatewayAdapter implements ICatalogGatewayPort {
     limit?: number,
     projectId?: string,
   ) {
-    if (!this.catalogFacade?.findDuplicateCandidateItems) return Promise.resolve([]);
+    if (!this.catalogFacade?.findDuplicateCandidateItems)
+      return Promise.resolve([]);
     return this.catalogFacade.findDuplicateCandidateItems(
       userId,
       limit,

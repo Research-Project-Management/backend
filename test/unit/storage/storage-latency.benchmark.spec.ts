@@ -141,7 +141,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         completeMultipartUpload: jest.fn(),
         abortMultipartUpload: jest.fn(),
         listUploadedParts: jest.fn(),
-      } as any;
+      };
 
       streamBinaryUseCase = new StreamBinaryUseCase(
         mockDriver,
@@ -413,7 +413,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         completeMultipartUpload: jest.fn(),
         abortMultipartUpload: jest.fn(),
         listUploadedParts: jest.fn(),
-      } as any;
+      };
 
       mockBlobRepo = {
         findByHash: jest.fn().mockImplementation(async (hash: ContentHash) => {

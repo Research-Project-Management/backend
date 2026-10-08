@@ -134,7 +134,7 @@ export class ExtractionFacade implements IExtractionFacade {
       attachmentId,
       projectId,
     );
-    return (res?.attachment || null) as unknown as AttachmentEntity | null;
+    return res?.attachment || null;
   }
 
   async createAttachment(
@@ -172,7 +172,7 @@ export class ExtractionFacade implements IExtractionFacade {
       itemId,
       userId,
     );
-    return res.attachment as unknown as AttachmentEntity;
+    return res.attachment;
   }
 
   async reassignContentToItem(

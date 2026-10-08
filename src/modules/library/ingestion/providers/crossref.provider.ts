@@ -391,7 +391,7 @@ export class CrossRefProvider implements MetadataProvider {
     const eventPlace = cleanBibliographicText(rawEventPlace);
     const publisherLocation = cleanBibliographicText(
       typeof message['publisher-location'] === 'string'
-        ? (message['publisher-location'] as string)
+        ? message['publisher-location']
         : undefined,
     );
     const place = publisherLocation || eventPlace;

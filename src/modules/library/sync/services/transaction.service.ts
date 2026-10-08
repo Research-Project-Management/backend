@@ -17,11 +17,7 @@ import {
 } from '../../shared-kernel/ports/unit-of-work.port';
 import { OutboxWorker } from './outbox.worker';
 
-export type {
-  AppendChangeEntry,
-  RecordTombstoneEntry,
-  TransactionHelpers,
-};
+export type { AppendChangeEntry, RecordTombstoneEntry, TransactionHelpers };
 
 @Injectable()
 export class TransactionService

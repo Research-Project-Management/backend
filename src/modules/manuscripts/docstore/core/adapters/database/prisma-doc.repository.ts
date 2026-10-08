@@ -211,9 +211,7 @@ export class PrismaDocRepository implements IDocRepository {
         data: {
           lines: data.lines,
           version: data.version,
-          ...(data.ranges !== undefined
-            ? { ranges: data.ranges as unknown as Prisma.InputJsonValue }
-            : {}),
+          ...(data.ranges !== undefined ? { ranges: data.ranges } : {}),
           ...(data.hash ? { hash: data.hash } : {}),
           sizeBytes,
           inStorage: false,

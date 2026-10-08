@@ -369,11 +369,11 @@ export class PdfProvider {
       engineUsed: trustedResult?.provenance?.engineUsed,
     };
 
-    let references: BibliographicReference[] = [];
-    let sections: DocumentSection[] = [];
-    let figures: DocumentFigure[] = [];
-    let tables: DocumentTable[] = [];
-    let formulas: DocumentFormula[] = [];
+    const references: BibliographicReference[] = [];
+    const sections: DocumentSection[] = [];
+    const figures: DocumentFigure[] = [];
+    const tables: DocumentTable[] = [];
+    const formulas: DocumentFormula[] = [];
 
     let searchablePdfBuffer: Buffer | undefined;
 

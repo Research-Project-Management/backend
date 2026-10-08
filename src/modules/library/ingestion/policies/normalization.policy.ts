@@ -528,7 +528,7 @@ export class NormalizationPolicy {
       Array.isArray(creatorsInput) && creatorsInput.length > 0;
 
     if (hasStructuredCreators) {
-      for (const c of creatorsInput!) {
+      for (const c of creatorsInput) {
         if (!c || typeof c !== 'object') continue;
         append(c);
       }
@@ -554,7 +554,7 @@ export class NormalizationPolicy {
 
     const hasStructuredEditors =
       hasStructuredCreators &&
-      creatorsInput!.some((c) => c && c.creatorType === 'editor');
+      creatorsInput.some((c) => c && c.creatorType === 'editor');
 
     if (!hasStructuredEditors && Array.isArray(editorsInput)) {
       for (const editor of editorsInput) {

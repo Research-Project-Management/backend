@@ -75,7 +75,7 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
       await controller.createItem(sampleUserId, sampleProjectId, {
         title: 'New Paper',
         itemType: 'journalArticle',
-      } as any);
+      });
 
       expect(mockItemService.createItem).toHaveBeenCalledWith(
         sampleUserId,

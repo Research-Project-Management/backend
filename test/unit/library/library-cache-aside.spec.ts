@@ -93,7 +93,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
         };
         return callback({} as any, helpers as any);
       }),
-    } as unknown as jest.Mocked<TransactionService>;
+    };
 
     tagsService = {
       invalidateTagsCache: jest.fn().mockResolvedValue(undefined),
@@ -130,10 +130,10 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       transformer,
       queryService,
       fulltextService,
-      undefined as any,
-      undefined as any,
+      undefined,
+      undefined,
       mockValidator as any,
-      undefined as any,
+      undefined,
       cache,
     );
   });

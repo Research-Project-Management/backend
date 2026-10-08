@@ -181,7 +181,7 @@ export abstract class BaseItemController {
       userId,
       id,
       expectedVersion,
-      updateData as any,
+      updateData,
       undefined,
       projectId,
     );

@@ -7,9 +7,9 @@ if (rawZoteroSchema && (rawZoteroSchema as any).itemTypes) {
   for (const itemTypeDef of Object.values(
     (rawZoteroSchema as any).itemTypes,
   ) as any[]) {
-    if (Array.isArray(itemTypeDef.fields)) {
+    if (Array.isArray(itemTypeDef?.fields)) {
       for (const fieldDef of itemTypeDef.fields) {
-        if (fieldDef.field) ALL_ZOTERO_SCHEMA_FIELDS.push(fieldDef.field);
+        if (fieldDef?.field) ALL_ZOTERO_SCHEMA_FIELDS.push(fieldDef.field);
       }
     }
   }

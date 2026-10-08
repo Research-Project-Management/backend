@@ -103,7 +103,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
 
       queryRepo = mockQueryRepo as any;
       commandRepo = mockCommandRepo as any;
-      libraryTx = mockLibraryTx as any;
+      libraryTx = mockLibraryTx;
       tagsService = mockTagsService as any;
 
       const mockQueryService = new ItemQueryService(queryRepo, undefined);
@@ -121,7 +121,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         tagsService,
         {} as any,
         {} as any,
-        mockQueryService as any,
+        mockQueryService,
         {} as any,
         {} as any,
         {} as any,

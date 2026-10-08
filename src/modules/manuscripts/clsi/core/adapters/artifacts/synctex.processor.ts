@@ -174,12 +174,23 @@ export class SyncTexProcessor implements ISyncTexProcessor {
       this.parseRecords(synctexText);
     if (records.length === 0) return null;
 
-    const matchedInput = inputs.find(
-      (inp) =>
-        inp.path === file ||
-        inp.path.endsWith(`/${file}`) ||
-        inp.path.endsWith(`\\${file}`),
-    );
+    const cleanFile = file
+      .replace(/\\/g, '/')
+      .replace(/^(\.\/)+/, '')
+      .replace(/^\/+/, '');
+
+    const matchedInput = inputs.find((inp) => {
+      const cleanInp = inp.path
+        .replace(/\\/g, '/')
+        .replace(/^(\.\/)+/, '')
+        .replace(/^\/+/, '');
+      return (
+        cleanInp === cleanFile ||
+        cleanInp.endsWith(`/${cleanFile}`) ||
+        cleanFile.endsWith(`/${cleanInp}`) ||
+        cleanInp.split('/').pop() === cleanFile.split('/').pop()
+      );
+    });
     const targetTag = matchedInput ? matchedInput.tag : null;
 
     // Use tag-indexed records if available, otherwise fallback to full records
@@ -252,7 +263,11 @@ export class SyncTexProcessor implements ISyncTexProcessor {
     if (!closestRecord) return null;
 
     const matchedInput = inputs.find((inp) => inp.tag === closestRecord?.tag);
-    const resolvedFile = matchedInput ? matchedInput.path : 'main.tex';
+    const rawFile = matchedInput ? matchedInput.path : 'main.tex';
+    const resolvedFile = rawFile
+      .replace(/\\/g, '/')
+      .replace(/^(\.\/)+/, '')
+      .replace(/^\/+/, '');
 
     return {
       file: resolvedFile,

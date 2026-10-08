@@ -144,11 +144,11 @@ describe('Library Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         typesService,
         transformer,
         queryService,
-        undefined as any,
-        undefined as any,
-        undefined as any,
-        undefined as any,
-        undefined as any,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
         realCacheService,
       );
     });
@@ -384,11 +384,11 @@ describe('Library Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         { isValidItemType: () => true } as any,
         {} as any,
         queryService,
-        undefined as any,
-        undefined as any,
-        undefined as any,
-        undefined as any,
-        undefined as any,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
         realCacheService,
       );
     });

@@ -31,7 +31,7 @@ describe('UrlCaptureProvider (Local-First In-Process Academic Scraping)', () => 
   });
 
   it('Fast-Path: captures academic metadata directly via in-process UrlMetadataScraperService', async () => {
-    mockUrlScraper.scrape!.mockResolvedValueOnce({
+    mockUrlScraper.scrape.mockResolvedValueOnce({
       url: 'https://nature.com/articles/s41586-021-03819-2',
       isPdf: false,
       title: 'Highly accurate protein structure prediction with AlphaFold',
@@ -80,7 +80,7 @@ describe('UrlCaptureProvider (Local-First In-Process Academic Scraping)', () => 
 
   it('Fallback: handles web pages when in-process scraper returns non-academic page title', async () => {
     // In-process scraper returns minimal non-authoritative page
-    mockUrlScraper.scrape!.mockResolvedValueOnce({
+    mockUrlScraper.scrape.mockResolvedValueOnce({
       url: 'https://example.com/blog-post',
       isPdf: false,
       title: 'Generic Blog Post',
@@ -97,7 +97,7 @@ describe('UrlCaptureProvider (Local-First In-Process Academic Scraping)', () => 
   });
 
   it('Gracefully produces fallback when in-process scraper fails or returns empty', async () => {
-    mockUrlScraper.scrape!.mockRejectedValueOnce(new Error('Network offline'));
+    mockUrlScraper.scrape.mockRejectedValueOnce(new Error('Network offline'));
 
     const result = await provider.captureFromUrl(
       'https://example.com/unreachable',

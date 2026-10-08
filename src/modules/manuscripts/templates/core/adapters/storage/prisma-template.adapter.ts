@@ -220,7 +220,7 @@ export class PrismaTemplateAdapter implements ITemplateRepositoryPort {
       case 'cv':
       case 'presentation':
       case 'report':
-        return category as ManuscriptTemplateCategory;
+        return category;
       default:
         return ManuscriptTemplateCategory.other;
     }

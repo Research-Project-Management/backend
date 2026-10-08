@@ -334,7 +334,7 @@ export class PagesBridgeController {
         const lines = Array.isArray(rawLines)
           ? (rawLines as string[])
           : typeof rawLines === 'string'
-            ? (rawLines as string).split('\n')
+            ? rawLines.split('\n')
             : [];
         doc = {
           _id: record.id,
@@ -419,7 +419,7 @@ export class PagesBridgeController {
       : Array.isArray(record.lines)
         ? (record.lines as string[])
         : typeof record.lines === 'string'
-          ? (record.lines as string).split('\n')
+          ? record.lines.split('\n')
           : [];
 
     const result = await this.docstoreService.updateDoc(
@@ -598,7 +598,7 @@ export class PagesBridgeController {
               const cleanName = d.path.replace(/^\//, '') || 'main.tex';
               const newNode = await this.prisma.manuscriptNode.create({
                 data: {
-                  projectId: projectId!,
+                  projectId: projectId,
                   name: cleanName,
                   path: cleanPath,
                   type: 'DOC',
@@ -708,7 +708,7 @@ export class PagesBridgeController {
     const content = body?.content || '';
 
     let projectId: string | null = null;
-    let parentDocId = pageId;
+    const parentDocId = pageId;
 
     if (isUuid(pageId)) {
       const record = await this.prisma.manuscriptDoc.findUnique({
@@ -1213,12 +1213,8 @@ export class PagesBridgeController {
       }
     }
 
-    if (
-      !projectId &&
-      (body as any)?.projectId &&
-      isUuid((body as any).projectId)
-    ) {
-      projectId = (body as any).projectId;
+    if (!projectId && body?.projectId && isUuid(body.projectId)) {
+      projectId = body.projectId;
     }
     if (
       !projectId &&

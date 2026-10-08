@@ -397,7 +397,7 @@ export class ClsiService {
         }
 
         if (response && response.ok) {
-          const rawResult = (await response.json()) as any;
+          const rawResult = await response.json();
           let result: ClsiCompileResult;
 
           if (rawResult?.compile?.status) {

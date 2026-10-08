@@ -109,27 +109,38 @@ export class CompilePipeline {
     dto: CompilePipelineRequest,
   ): Promise<CompilePipelineResult> {
     const startTime = Date.now();
-    const projectId = dto.projectId || 'default';
-    let mainFile = dto.mainFile;
+    const cleanRelPath = (p: string) =>
+      p
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/^(\.\/)+/, '')
+        .replace(/^\/+/, '');
+
+    let mainFile = dto.mainFile ? cleanRelPath(dto.mainFile) : '';
     if (!mainFile && dto.files) {
       mainFile = TexEngineDetector.detectMainFile(dto.files) || 'main.tex';
     } else if (!mainFile) {
       mainFile = 'main.tex';
     }
 
+    mainFile = cleanRelPath(mainFile);
     if (!mainFile.endsWith('.tex')) {
       mainFile = `${mainFile}.tex`;
     }
 
     let mainSource =
-      dto.source || (dto.files ? dto.files[mainFile] : undefined) || '';
+      dto.source ||
+      (dto.files
+        ? (dto.files[mainFile] ?? dto.files[`/${mainFile}`])
+        : undefined) ||
+      '';
 
     // TeX Magic Comments & Package-based Engine Detection (Overleaf CLSI Parity)
     const engineDetect = TexEngineDetector.detect(mainSource, dto.engine);
     const resolvedEngine = engineDetect.engine;
 
     if (!dto.mainFile && engineDetect.mainFileHint) {
-      mainFile = engineDetect.mainFileHint;
+      mainFile = cleanRelPath(engineDetect.mainFileHint);
       if (!mainFile.endsWith('.tex')) mainFile = `${mainFile}.tex`;
     }
 
@@ -155,9 +166,10 @@ export class CompilePipeline {
 
     if (dto.files) {
       for (const [filePath, content] of Object.entries(dto.files)) {
-        if (filePath === mainFile) continue;
+        const cleanPath = cleanRelPath(filePath);
+        if (cleanPath === mainFile) continue;
         workspaceFiles.push({
-          path: filePath,
+          path: cleanPath,
           content,
         });
       }
@@ -166,8 +178,10 @@ export class CompilePipeline {
     if (dto.resources) {
       for (const res of dto.resources) {
         if (res.content !== undefined) {
+          const cleanPath = cleanRelPath(res.path);
+          if (cleanPath === mainFile) continue;
           workspaceFiles.push({
-            path: res.path,
+            path: cleanPath,
             content: res.content,
             hash: res.hash,
           });

@@ -51,10 +51,12 @@ export class BuildCompilerFilesUseCase {
     for (const node of nodes) {
       if (node.isFolder()) continue; // Directory nodes are represented by file paths
 
-      // Strip leading '/' for relative compiler paths inside workspace
-      const relativePath = node.path.startsWith('/')
-        ? node.path.substring(1)
-        : node.path;
+      // Strip leading '/' and './' for relative compiler paths inside workspace
+      const relativePath = node.path
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/^(\.\/)+/, '')
+        .replace(/^\/+/, '');
 
       if (node.isDoc()) {
         const docData =
@@ -78,9 +80,11 @@ export class BuildCompilerFilesUseCase {
       }
     }
 
-    const relativeRootPath = rootNode.path.startsWith('/')
-      ? rootNode.path.substring(1)
-      : rootNode.path;
+    const relativeRootPath = rootNode.path
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^(\.\/)+/, '')
+      .replace(/^\/+/, '');
 
     return {
       rootDocPath: relativeRootPath,
