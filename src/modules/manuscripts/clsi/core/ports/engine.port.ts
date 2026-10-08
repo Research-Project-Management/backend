@@ -12,6 +12,7 @@ export interface EngineRunOptions {
   draft?: boolean;
   shellEscape?: boolean;
   syntaxOnly?: boolean;
+  env?: Record<string, string>;
   onLogChunk?: (chunk: string) => void;
 }
 

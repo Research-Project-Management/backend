@@ -109,6 +109,7 @@ export class CompilePipeline {
     dto: CompilePipelineRequest,
   ): Promise<CompilePipelineResult> {
     const startTime = Date.now();
+    const projectId = dto.projectId || 'default-project';
     const cleanRelPath = (p: string) =>
       p
         .trim()
