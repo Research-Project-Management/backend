@@ -92,15 +92,50 @@ export class LatexmkEngine implements ILatexEngine {
     const durationMs = Date.now() - startTime;
 
     const pdfPath = path.join(options.cwd, 'output.pdf');
+    const mainBase = path.parse(options.mainFile).name;
+    const altPdfPath = path.join(options.cwd, `${mainBase}.pdf`);
     const synctexGzPath = path.join(options.cwd, 'output.synctex.gz');
     const synctexPlainPath = path.join(options.cwd, 'output.synctex');
 
-    const [pdfGenerated, synctexGzExists, synctexPlainExists] =
+    let [pdfGenerated, altPdfGenerated, synctexGzExists, synctexPlainExists] =
       await Promise.all([
         this.fileExists(pdfPath),
+        this.fileExists(altPdfPath),
         this.fileExists(synctexGzPath),
         this.fileExists(synctexPlainPath),
       ]);
+
+    if (!pdfGenerated && altPdfGenerated) {
+      try {
+        await fs.copyFile(altPdfPath, pdfPath);
+        pdfGenerated = true;
+      } catch {}
+    }
+
+    // Fallback: If latexmk skipped compiling because it believed targets were up-to-date,
+    // but output.pdf is actually missing on disk, force complete processing with -g.
+    if (!pdfGenerated) {
+      const forceResult = await this.runner.run(
+        this.binaryPath,
+        ['-g', ...args],
+        {
+          cwd: options.cwd,
+          timeoutMs: options.timeoutMs ?? 240000,
+          signal: options.signal,
+          onLogChunk: options.onLogChunk,
+          env: envWithInputs,
+        },
+      );
+      execResult.stdout =
+        (execResult.stdout || '') + '\n' + (forceResult.stdout || '');
+      execResult.stderr =
+        (execResult.stderr || '') + '\n' + (forceResult.stderr || '');
+      pdfGenerated = await this.fileExists(pdfPath);
+      if (!pdfGenerated && (await this.fileExists(altPdfPath))) {
+        await fs.copyFile(altPdfPath, pdfPath).catch(() => {});
+        pdfGenerated = true;
+      }
+    }
 
     return {
       exitCode: execResult.exitCode,

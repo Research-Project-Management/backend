@@ -44,7 +44,15 @@ export class FlushProjectDocsUseCase {
     const lockKey = `project:${projectId}`;
 
     // 1. Acquire project-level lock to prevent concurrent compile collisions
-    const acquired = await this.lock.acquire(lockKey, 30000);
+    const maxWaitMs = 1500;
+    const intervalMs = 100;
+    const lockWaitStart = Date.now();
+    let acquired = await this.lock.acquire(lockKey, 30000);
+    while (!acquired && Date.now() - lockWaitStart < maxWaitMs) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      acquired = await this.lock.acquire(lockKey, 30000);
+    }
+
     if (!acquired) {
       throw new DocumentLockedException(
         projectId,

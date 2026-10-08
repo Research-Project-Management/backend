@@ -205,99 +205,17 @@ export class LibraryFacade implements ILibraryFacade {
     );
 
     const rawNotes = Array.isArray(notes) ? notes : [];
-    const noteSummaries: NoteSummaryDto[] = rawNotes.map((note) => {
-      const untypedNote = note as {
-        content?: string | null;
-        contentMd?: string | null;
-      };
-      return {
-        id: note.id,
-        title: note.title || null,
-        content: untypedNote.content || note.contentMd || null,
-        contentMd: note.contentMd || untypedNote.content || null,
-        createdAt: note.createdAt,
-        updatedAt: note.updatedAt,
-      };
-    });
+    const noteSummaries: NoteSummaryDto[] = rawNotes.map((note: any) => ({
+      id: note.id,
+      title: note.title || null,
+      content: note.content || note.contentMd || null,
+      contentMd: note.contentMd || note.content || null,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+    }));
 
-    interface ExtendedCatalogRelations {
-      itemTags?: Array<{
-        tag?: { id?: string; name?: string; color?: string | null };
-        tagId?: string;
-        name?: string;
-        color?: string | null;
-      }>;
-      tags?: Array<
-        | string
-        | { id?: string; name?: string; tag?: string; color?: string | null }
-      >;
-      collectionItems?: Array<{
-        collection?: {
-          id?: string;
-          name?: string;
-          color?: string | null;
-          parentId?: string | null;
-        };
-        collectionId?: string;
-      }>;
-      collections?: Array<{
-        id?: string;
-        name?: string;
-        color?: string | null;
-        parentId?: string | null;
-      }>;
-    }
-    const extItem = catalogItem as ExtendedCatalogRelations;
-
-    let tags: TagSummaryDto[] = [];
-    if (Array.isArray(extItem.itemTags)) {
-      tags = extItem.itemTags
-        .map((itemTag) => ({
-          id: itemTag.tag?.id || itemTag.tagId,
-          name: itemTag.tag?.name || itemTag.name || '',
-          color: itemTag.tag?.color || null,
-        }))
-        .filter((tagSummary: any): tagSummary is TagSummaryDto =>
-          Boolean(tagSummary.name),
-        );
-    } else if (Array.isArray(extItem.tags)) {
-      tags = extItem.tags
-        .map((tagEntry) =>
-          typeof tagEntry === 'string'
-            ? { name: tagEntry }
-            : {
-                id: tagEntry.id,
-                name: tagEntry.name || tagEntry.tag || '',
-                color: tagEntry.color || null,
-              },
-        )
-        .filter((tagSummary: any): tagSummary is TagSummaryDto =>
-          Boolean(tagSummary.name),
-        );
-    }
-
-    let collections: CollectionSummaryDto[] = [];
-    if (Array.isArray(extItem.collectionItems)) {
-      collections = extItem.collectionItems
-        .filter((itemRef) =>
-          Boolean(itemRef.collection?.id || itemRef.collectionId),
-        )
-        .map((itemRef) => ({
-          id: (itemRef.collection?.id || itemRef.collectionId) as string,
-          name: itemRef.collection?.name || '',
-          color: itemRef.collection?.color || null,
-          parentId: itemRef.collection?.parentId || null,
-        }));
-    } else if (Array.isArray(extItem.collections)) {
-      collections = extItem.collections
-        .filter((collection) => Boolean(collection.id))
-        .map((collection) => ({
-          id: collection.id as string,
-          name: collection.name || '',
-          color: collection.color || null,
-          parentId: collection.parentId || null,
-        }));
-    }
+    const tags = this.extractTagSummaries(catalogItem);
+    const collections = this.extractCollectionSummaries(catalogItem);
 
     return {
       id: catalogItem.id,
@@ -312,6 +230,58 @@ export class LibraryFacade implements ILibraryFacade {
       tags,
       collections,
     };
+  }
+
+  private extractTagSummaries(item: any): TagSummaryDto[] {
+    if (!item) return [];
+    if (Array.isArray(item.itemTags)) {
+      return item.itemTags
+        .map((it: any) => ({
+          id: it.tag?.id || it.tagId,
+          name: it.tag?.name || it.name || '',
+          color: it.tag?.color || null,
+        }))
+        .filter((t: TagSummaryDto) => Boolean(t.name));
+    }
+    if (Array.isArray(item.tags)) {
+      return item.tags
+        .map((t: any) =>
+          typeof t === 'string'
+            ? { name: t }
+            : {
+                id: t.id,
+                name: t.name || t.tag || '',
+                color: t.color || null,
+              },
+        )
+        .filter((t: TagSummaryDto) => Boolean(t.name));
+    }
+    return [];
+  }
+
+  private extractCollectionSummaries(item: any): CollectionSummaryDto[] {
+    if (!item) return [];
+    if (Array.isArray(item.collectionItems)) {
+      return item.collectionItems
+        .filter((ci: any) => Boolean(ci.collection?.id || ci.collectionId))
+        .map((ci: any) => ({
+          id: (ci.collection?.id || ci.collectionId) as string,
+          name: ci.collection?.name || '',
+          color: ci.collection?.color || null,
+          parentId: ci.collection?.parentId || null,
+        }));
+    }
+    if (Array.isArray(item.collections)) {
+      return item.collections
+        .filter((c: any) => Boolean(c.id))
+        .map((c: any) => ({
+          id: c.id as string,
+          name: c.name || '',
+          color: c.color || null,
+          parentId: c.parentId || null,
+        }));
+    }
+    return [];
   }
 
   async countItems(

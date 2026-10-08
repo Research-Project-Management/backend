@@ -59,6 +59,9 @@ const PRE_COMPILE_PURGE_FILES = [
   'output.stderr',
   'output.synctex',
   'output.synctex.gz',
+  'output.fdb_latexmk',
+  '.fdb_latexmk',
+  'output.fls',
 ];
 
 export class OverleafIncrementalWorkspace implements IWorkspaceManager {
@@ -192,6 +195,17 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
       } catch {
         // File might not exist
       }
+    }
+
+    try {
+      const files = await fs.readdir(scratchDir);
+      for (const file of files) {
+        if (file.endsWith('.fdb_latexmk') || file.endsWith('.fls')) {
+          await fs.unlink(path.join(scratchDir, file)).catch(() => {});
+        }
+      }
+    } catch {
+      // Ignored
     }
 
     // 2. Scan workspace and remove extraneous files not in inputFiles and not in preserved whitelist
