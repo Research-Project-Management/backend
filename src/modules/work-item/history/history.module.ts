@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '@/core/database/prisma.module';
+import { PrismaModule } from '@/core';
 import { HistoryController } from './history.controller';
 import { HistoryRepository } from './history.repository';
 import { HistoryService } from './history.service';

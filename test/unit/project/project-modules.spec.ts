@@ -144,7 +144,6 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
   describe('FavoriteService', () => {
     let favoriteService: FavoriteService;
     let mockFavoriteRepo: any;
-    let mockPrisma: any;
 
     beforeEach(() => {
       mockFavoriteRepo = {
@@ -153,13 +152,9 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
         removeFavorite: jest.fn(),
         findUserFavorites: jest.fn(),
         batchCheckFavorites: jest.fn(),
+        projectExists: jest.fn().mockResolvedValue(true),
       };
-      mockPrisma = {
-        project: {
-          findUnique: jest.fn().mockResolvedValue({ id: 'proj-1' }),
-        },
-      };
-      favoriteService = new FavoriteService(mockFavoriteRepo, mockPrisma);
+      favoriteService = new FavoriteService(mockFavoriteRepo);
     });
 
     it('should toggle favorite status from false to true', async () => {
@@ -328,40 +323,15 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
   describe('TemplateService', () => {
     let templateService: TemplateService;
     let mockRepo: any;
-    let mockPrisma: any;
 
     beforeEach(() => {
       mockRepo = {
         findAccessibleTemplates: jest.fn(),
         findTemplateById: jest.fn(),
         createTemplate: jest.fn(),
+        instantiateProject: jest.fn(),
       };
-      mockPrisma = {
-        $transaction: jest.fn((cb) =>
-          cb({
-            project: {
-              create: jest.fn().mockResolvedValue({
-                id: 'new-proj-id',
-                name: 'Scrum Sprint Project',
-                identifier: 'SCRUM',
-              }),
-              update: jest.fn(),
-            },
-            workItemState: {
-              create: jest
-                .fn()
-                .mockResolvedValue({ id: 'state-1', group: 'unstarted' }),
-            },
-            workItemLabel: {
-              create: jest.fn().mockResolvedValue({ id: 'label-1' }),
-            },
-            workItem: {
-              create: jest.fn().mockResolvedValue({ id: 'wi-1' }),
-            },
-          }),
-        ),
-      };
-      templateService = new TemplateService(mockRepo, mockPrisma);
+      templateService = new TemplateService(mockRepo);
     });
 
     it('should instantiate project atomically from template with initial items', async () => {
@@ -375,6 +345,11 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
         initialLabels: [{ name: 'Bug', color: '#EF4444' }],
         initialWorkItems: [{ title: 'Setup Repository', priority: 'high' }],
       });
+      mockRepo.instantiateProject.mockResolvedValue({
+        id: 'new-proj-id',
+        name: 'Scrum Sprint Project',
+        identifier: 'SCRUM',
+      });
 
       const project = await templateService.instantiate('tpl-1', 'user-1', {
         name: 'Scrum Sprint Project',
@@ -382,7 +357,7 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
       });
 
       expect(project.id).toBe('new-proj-id');
-      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(mockRepo.instantiateProject).toHaveBeenCalled();
     });
   });
 });

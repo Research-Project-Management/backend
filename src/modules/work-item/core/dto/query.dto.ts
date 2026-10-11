@@ -14,7 +14,7 @@ import { WorkItemPriority } from '@prisma/client';
 const toArrayOrString = ({
   value,
 }: {
-  value: any;
+  value: unknown;
 }): string | string[] | undefined => {
   if (value === undefined || value === null || value === '') return undefined;
   if (Array.isArray(value)) {

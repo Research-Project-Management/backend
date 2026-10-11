@@ -15,9 +15,8 @@ import {
   UpdateLabelDto,
 } from './dto/label.dto';
 import { WorkItemLabel as Label, Prisma } from '@prisma/client';
-import { PrismaService } from '@/core/database/prisma.service';
-import { RedisCacheService } from '@/core/cache/redis.service';
-import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { RedisCacheService } from '@/core';
+import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
 import { LabelWithChildren } from './types/label.types';
 
 export const DEFAULT_LABEL_PALETTE = [
@@ -37,7 +36,6 @@ export const DEFAULT_LABEL_PALETTE = [
 export class LabelService {
   constructor(
     private readonly labelRepository: LabelRepository,
-    private readonly prisma: PrismaService,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
@@ -75,10 +73,7 @@ export class LabelService {
       if (cached) return cached;
     }
 
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true },
-    });
+    const project = await this.labelRepository.findProject(projectId);
     if (!project) {
       throw new NotFoundException(`Project not found: ${projectId}`);
     }
@@ -111,10 +106,7 @@ export class LabelService {
     userId: string,
     dto: CreateProjectLabelDto,
   ) {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true },
-    });
+    const project = await this.labelRepository.findProject(projectId);
     if (!project) {
       throw new NotFoundException(`Project not found: ${projectId}`);
     }
@@ -151,12 +143,11 @@ export class LabelService {
     // 3. Calculate sortOrder if omitted
     let sortOrder = dto.sortOrder;
     if (sortOrder === undefined) {
-      const lastLabel = await this.prisma.workItemLabel.findFirst({
-        where: { projectId },
-        orderBy: { sortOrder: 'desc' },
-        select: { sortOrder: true },
-      });
-      sortOrder = lastLabel ? lastLabel.sortOrder + 10000 : 10000;
+      const lastSortOrder = await this.labelRepository.getLastSortOrder(
+        projectId,
+        dto.parentId,
+      );
+      sortOrder = lastSortOrder !== null ? lastSortOrder + 10000 : 10000;
     }
 
     const color = dto.color?.trim() || this.pickDefaultColor();
@@ -334,12 +325,11 @@ export class LabelService {
       });
     }
 
-    const existing = await this.prisma.workItemLabel.findFirst({
-      where: {
-        createdById: userId,
-        projectId: null,
-        name: { equals: dto.name.trim(), mode: 'insensitive' },
-      },
+    const existing = await this.labelRepository.findDuplicate?.({
+      createdById: userId,
+      projectId: null,
+      name: dto.name,
+      parentId: dto.parentId,
     });
     if (existing) {
       throw new ConflictException(
@@ -378,13 +368,11 @@ export class LabelService {
       dto.name &&
       dto.name.trim().toLowerCase() !== existing.name.toLowerCase()
     ) {
-      const duplicate = await this.prisma.workItemLabel.findFirst({
-        where: {
-          createdById: userId,
-          projectId: null,
-          name: { equals: dto.name.trim(), mode: 'insensitive' },
-          id: { not: labelId },
-        },
+      const duplicate = await this.labelRepository.findDuplicate?.({
+        createdById: userId,
+        projectId: null,
+        name: dto.name,
+        excludeId: labelId,
       });
       if (duplicate) {
         throw new ConflictException(

@@ -1,13 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
 import { FavoriteRepository } from './favorite.repository';
 
 @Injectable()
 export class FavoriteService {
-  constructor(
-    private readonly favoriteRepo: FavoriteRepository,
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly favoriteRepo: FavoriteRepository) {}
 
   async getUserFavoriteProjectIds(userId: string): Promise<string[]> {
     return this.favoriteRepo.findUserFavorites(userId);
@@ -21,11 +17,8 @@ export class FavoriteService {
     projectId: string,
     userId: string,
   ): Promise<{ isFavorite: boolean }> {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true },
-    });
-    if (!project) {
+    const exists = await this.favoriteRepo.projectExists(projectId);
+    if (!exists) {
       throw new NotFoundException(`Project with ID "${projectId}" not found`);
     }
 
@@ -50,11 +43,8 @@ export class FavoriteService {
       await this.favoriteRepo.removeFavorite(projectId, userId);
       return { isFavorite: false };
     } else {
-      const project = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: { id: true },
-      });
-      if (!project) {
+      const exists = await this.favoriteRepo.projectExists(projectId);
+      if (!exists) {
         throw new NotFoundException(`Project with ID "${projectId}" not found`);
       }
       await this.favoriteRepo.addFavorite(projectId, userId);

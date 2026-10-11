@@ -47,8 +47,8 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 @Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class CoreController implements OnModuleInit, OnModuleDestroy {
-  private readonly workItemEvents$ = new Subject<any>();
-  private wildcardListener?: (event: any) => void;
+  private readonly workItemEvents$ = new Subject<Record<string, unknown>>();
+  private wildcardListener?: (event: Record<string, unknown>) => void;
 
   constructor(
     private readonly workItemService: CoreService,
@@ -57,7 +57,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     if (this.eventEmitter) {
-      this.wildcardListener = (event: any) => {
+      this.wildcardListener = (event: Record<string, unknown>) => {
         this.workItemEvents$.next(event);
       };
       this.eventEmitter.on('work-item.**', this.wildcardListener);
@@ -83,8 +83,10 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     const disconnect$ = fromEvent(req.raw, 'close');
 
     return this.workItemEvents$.pipe(
-      filter((event: any) => event?.projectId === projectId),
-      map((event: any) => ({
+      filter(
+        (event: Record<string, unknown>) => event?.projectId === projectId,
+      ),
+      map((event: Record<string, unknown>) => ({
         data: event,
       })),
       takeUntil(disconnect$),
@@ -272,7 +274,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   ) {
     const targetProjectId =
       duplicateWorkItemDto?.destinationProjectId ||
-      (duplicateWorkItemDto as any)?.projectId;
+      duplicateWorkItemDto?.projectId;
     return this.workItemService.duplicateWorkItem(
       workItemId,
       userId,

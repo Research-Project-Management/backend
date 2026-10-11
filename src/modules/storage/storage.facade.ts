@@ -164,8 +164,7 @@ export class StorageFacade implements IStoragePort {
   async linkFile(input: LinkFileInput): Promise<void> {
     const node = await this.nodeRepo.findById(input.fileId);
     if (node) {
-      (node as any)._scope = input.linkedToType as FileScope;
-      (node as any)._projectId = input.linkedToId;
+      node.setScope(input.linkedToType as FileScope, input.linkedToId);
       await this.nodeRepo.update(node);
     }
   }

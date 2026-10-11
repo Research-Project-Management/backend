@@ -52,7 +52,7 @@ export class DiagnosticItem {
       props.severity instanceof DiagnosticSeverityVo
         ? props.severity
         : DiagnosticSeverityVo.fromString(props.severity);
-    this.message = props.message.trim();
+    this.message = (props.message || '').trim();
     this.context = props.context;
     this.code = props.code;
     this.explanation = props.explanation;

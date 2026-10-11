@@ -13,6 +13,7 @@ import {
   NotFoundException,
   BadRequestException,
   ParseUUIDPipe,
+  Optional,
 } from '@nestjs/common';
 import { CreateItemData } from '../types/items.types';
 import {
@@ -33,14 +34,21 @@ import {
   BulkRestoreItemsDto,
 } from '../dto/items.dto';
 import { ItemService } from '../services/items.service';
+import { ItemQueryService } from '../services/item-query.service';
+import { ItemCurationService } from '../services/item-curation.service';
 import { VersionMismatchException } from '../../shared-kernel/core/errors/version-mismatch.exception';
 
 /**
  * Shared Base Controller for Library Items orchestration.
- * Directly communicates with ItemService for symmetrical NestJS architecture.
+ * Directly communicates with ItemService for lifecycle mutations and specialized domain services
+ * (ItemQueryService for queries, ItemCurationService for scholarly curation) to prevent indirect middleman bottlenecks.
  */
 export abstract class BaseItemController {
-  constructor(protected readonly itemService: ItemService) {}
+  constructor(
+    protected readonly itemService: ItemService,
+    @Optional() protected readonly queryService?: ItemQueryService,
+    @Optional() protected readonly curationService?: ItemCurationService,
+  ) {}
 
   protected async executeListItems(
     userId: string,
@@ -72,7 +80,7 @@ export abstract class BaseItemController {
           ? rawFields
           : undefined;
 
-    const result = await this.itemService.listItems(userId, {
+    const listOptions = {
       view: query?.view,
       collectionId: query?.collectionId,
       tagId: query?.tagId,
@@ -80,12 +88,18 @@ export abstract class BaseItemController {
       cursor: query?.cursor,
       limit: query?.limit,
       projectId,
-    });
+    };
+
+    const result = this.queryService
+      ? await this.queryService.listItems(userId, listOptions)
+      : await this.itemService.listItems(userId, listOptions);
     return { items: result.items, pagination: result.meta, meta: result.meta };
   }
 
   protected async executeGetCounts(userId: string, projectId?: string) {
-    return this.itemService.getCounts(userId, projectId);
+    return this.queryService
+      ? this.queryService.getCounts(userId, projectId)
+      : this.itemService.getCounts(userId, projectId);
   }
 
   protected async executeImportItems(
@@ -98,11 +112,17 @@ export abstract class BaseItemController {
         'Project ID is required in URL parameter to import items',
       );
     }
-    return this.itemService.importItemsToProject(
-      userId,
-      projectId,
-      body.itemIds || [],
-    );
+    return this.curationService
+      ? this.curationService.importItemsToProject(
+          userId,
+          projectId,
+          body.itemIds || [],
+        )
+      : this.itemService.importItemsToProject(
+          userId,
+          projectId,
+          body.itemIds || [],
+        );
   }
 
   protected async executeGetItem(
@@ -113,7 +133,9 @@ export abstract class BaseItemController {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
-    const item = await this.itemService.getItem(userId, id, projectId);
+    const item = this.queryService
+      ? await this.queryService.getItem(userId, id, projectId)
+      : await this.itemService.getItem(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
@@ -128,7 +150,9 @@ export abstract class BaseItemController {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
-    return this.itemService.getMetadataSources(userId, id, projectId);
+    return this.curationService
+      ? this.curationService.getMetadataSources(userId, id, projectId)
+      : this.itemService.getMetadataSources(userId, id, projectId);
   }
 
   protected async executeCreateItem(
@@ -289,8 +313,12 @@ export abstract class BaseItemController {
 @Controller(['api/v1/library/items', 'api/v1/me/library/items'])
 @UseGuards(JwtAuthGuard)
 export class ItemController extends BaseItemController {
-  constructor(itemService: ItemService) {
-    super(itemService);
+  constructor(
+    itemService: ItemService,
+    @Optional() queryService?: ItemQueryService,
+    @Optional() curationService?: ItemCurationService,
+  ) {
+    super(itemService, queryService, curationService);
   }
 
   @Get()
@@ -501,8 +529,12 @@ export class ItemController extends BaseItemController {
 @Controller('api/v1/projects/:projectId/library/items')
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class ProjectItemController extends BaseItemController {
-  constructor(itemService: ItemService) {
-    super(itemService);
+  constructor(
+    itemService: ItemService,
+    @Optional() queryService?: ItemQueryService,
+    @Optional() curationService?: ItemCurationService,
+  ) {
+    super(itemService, queryService, curationService);
   }
 
   @Get()

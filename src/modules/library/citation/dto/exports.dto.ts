@@ -1,7 +1,7 @@
 import { IsString, IsOptional, IsArray } from 'class-validator';
 import { ExportFormatType } from '../types/exports.types';
 
-export { ExportFormatType };
+export type { ExportFormatType };
 
 export class ExportLibraryDto {
   @IsString()

@@ -1,3 +1,6 @@
+import type { StateTransitionItem } from './transition.types';
+import type { PropertyHistoryItem } from './history.types';
+
 export type FeedItemType = 'comment' | 'activity' | 'transition' | 'history';
 
 export interface FeedActor {
@@ -12,10 +15,10 @@ export interface UnifiedFeedItem {
   type: FeedItemType;
   timestamp: Date;
   actor?: FeedActor | null;
-  comment?: any;
-  activity?: any;
-  transition?: any;
-  history?: any;
+  comment?: Record<string, unknown> | null;
+  activity?: Record<string, unknown> | null;
+  transition?: StateTransitionItem | null;
+  history?: PropertyHistoryItem | null;
 }
 
 export interface UnifiedFeedResponse {
@@ -24,6 +27,6 @@ export interface UnifiedFeedResponse {
   sort: 'asc' | 'desc';
   total: number;
   feed: UnifiedFeedItem[];
-  activities?: any[];
-  comments?: any[];
+  activities?: Record<string, unknown>[];
+  comments?: Record<string, unknown>[];
 }

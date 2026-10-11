@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '@/core/database/prisma.module';
+import { PrismaModule } from '@/core';
 import { ArchiveController } from './archive.controller';
 import { ArchiveRepository } from './archive.repository';
 import { ArchiveService } from './archive.service';

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, ReadStatus } from '@prisma/client';
 import zlib from 'zlib';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { isUUID } from 'class-validator';
 import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
 import { ItemSummary } from '../types/items.types';
@@ -1196,7 +1196,7 @@ export class QueryRepository {
           authors: authorNames,
           year: peerItem.year,
           doi: peerItem.doi,
-          itemType: peerItem.type,
+          itemType: peerItem.itemType,
           citationKey: peerItem.citationKey,
           relationType: effectiveRelationType,
           direction: isOutgoing ? 'outgoing' : 'incoming',

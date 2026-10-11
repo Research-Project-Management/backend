@@ -10,7 +10,7 @@ import { InvitationRepository } from './invitation.repository';
 import { CreateProjectInvitationDto } from './dto/create-invitation.dto';
 import { Role, InvitationStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '@/modules/identity/identity.facade';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
 import { CACHE_KEYS } from '../core/constants/cache.constant';
 import { PROJECT_ACCESS_REDIS_KEYS } from '../access/constants/redis.constant';
@@ -202,7 +202,15 @@ export class InvitationService {
     // 2. Try finding project by active link sharing token (Overleaf Parity)
     const linkProject = await this.repository.findProjectByLinkToken(trimmed);
     if (linkProject) {
-      const settings = linkProject.settings?.linkSharing;
+      const settings = (
+        linkProject.settings as {
+          linkSharing?: {
+            enabled?: boolean;
+            editToken?: string;
+            readOnlyToken?: string;
+          };
+        } | null
+      )?.linkSharing;
       if (!settings || !settings.enabled) {
         throw new ForbiddenException(
           'Link sharing has been disabled for this project',
@@ -292,7 +300,7 @@ export class InvitationService {
       throw new NotFoundException('Project not found');
     }
 
-    if ((project as any).isActive === false) {
+    if (project.isActive === false) {
       throw new BadRequestException(
         'Cannot send invitations for an archived or inactive project',
       );
@@ -436,8 +444,15 @@ export class InvitationService {
       throw new NotFoundException('Project not found');
     }
 
-    const settings = ((project as any).settings || {}) as Record<string, any>;
-    const linkSharing = settings.linkSharing;
+    const settings =
+      project.settings && typeof project.settings === 'object' && !Array.isArray(project.settings)
+        ? (project.settings as Record<string, unknown>)
+        : {};
+    const linkSharing = (
+      settings.linkSharing && typeof settings.linkSharing === 'object'
+        ? settings.linkSharing
+        : null
+    ) as { enabled?: boolean; editToken?: string; readOnlyToken?: string } | null;
 
     if (linkSharing && typeof linkSharing === 'object') {
       return {
@@ -469,14 +484,15 @@ export class InvitationService {
       throw new NotFoundException('Project not found');
     }
 
-    const currentSettings = ((project as any).settings || {}) as Record<
-      string,
-      any
-    >;
-    const currentLinkSharing = (currentSettings.linkSharing || {}) as Record<
-      string,
-      any
-    >;
+    const currentSettings =
+      project.settings && typeof project.settings === 'object' && !Array.isArray(project.settings)
+        ? (project.settings as Record<string, unknown>)
+        : {};
+    const currentLinkSharing = (
+      currentSettings.linkSharing && typeof currentSettings.linkSharing === 'object'
+        ? currentSettings.linkSharing
+        : {}
+    ) as { enabled?: boolean; editToken?: string; readOnlyToken?: string };
 
     const editToken =
       regenerate || !currentLinkSharing.editToken

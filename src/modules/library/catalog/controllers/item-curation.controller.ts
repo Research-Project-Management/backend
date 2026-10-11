@@ -10,6 +10,7 @@ import {
   NotFoundException,
   BadRequestException,
   ParseUUIDPipe,
+  Optional,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,16 +22,28 @@ import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { ParseCitationsDto } from '../dto/items.dto';
 import { ItemService } from '../services/items.service';
+import { ItemCurationService } from '../services/item-curation.service';
+import { ItemFulltextService } from '../services/item-fulltext.service';
+import { ItemTypeConversionService } from '../services/item-type-conversion.service';
 
 /**
  * Shared Base Adapter for Library Item Curation & Scholarly Enrichment.
+ * Directly communicates with domain-specialized services (Curation, Fulltext, TypeConversion)
+ * to avoid indirect middleman delegation bottlenecks.
  */
 export abstract class BaseItemCurationController {
-  constructor(protected readonly itemService: ItemService) {}
+  constructor(
+    protected readonly itemService: ItemService,
+    @Optional() protected readonly curationService?: ItemCurationService,
+    @Optional() protected readonly fulltextService?: ItemFulltextService,
+    @Optional() protected readonly typeConversionService?: ItemTypeConversionService,
+  ) {}
 
   protected async executeParseCitations(dto: ParseCitationsDto) {
     const rawCitations = dto.citations || dto.rawCitations || '';
-    const references = await this.itemService.parseCitations(rawCitations);
+    const references = this.curationService
+      ? await this.curationService.parseCitations(rawCitations)
+      : await this.itemService.parseCitations(rawCitations);
     return {
       success: true,
       count: references.length,
@@ -44,7 +57,9 @@ export abstract class BaseItemCurationController {
     userId: string,
     projectId?: string,
   ) {
-    const fulltext = await this.itemService.getFulltext(userId, id, projectId);
+    const fulltext = this.fulltextService
+      ? await this.fulltextService.getFulltext(userId, id, projectId)
+      : await this.itemService.getFulltext(userId, id, projectId);
     return { success: true, data: fulltext, ...fulltext };
   }
 
@@ -66,13 +81,13 @@ export abstract class BaseItemCurationController {
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
-    const preview = this.itemService.previewTypeConversion(
-      item,
-      body.targetType,
-      {
-        retainUnmappedInExtra: body.retainUnmappedInExtra ?? true,
-      },
-    );
+    const preview = this.typeConversionService
+      ? this.typeConversionService.previewTypeConversion(item, body.targetType, {
+          retainUnmappedInExtra: body.retainUnmappedInExtra ?? true,
+        })
+      : this.itemService.previewTypeConversion(item, body.targetType, {
+          retainUnmappedInExtra: body.retainUnmappedInExtra ?? true,
+        });
     return { success: true, preview, data: preview };
   }
 
@@ -94,15 +109,25 @@ export abstract class BaseItemCurationController {
           ? parseInt(ifMatch.replace(/["']/g, ''), 10)
           : undefined;
 
-    const result = await this.itemService.convertItemType(
-      userId,
-      id,
-      body?.targetType || 'journalArticle',
-      {
-        expectedVersion,
-        retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
-      },
-    );
+    const result = this.typeConversionService
+      ? await this.typeConversionService.convertItemType(
+          userId,
+          id,
+          body?.targetType || 'journalArticle',
+          {
+            expectedVersion,
+            retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
+          },
+        )
+      : await this.itemService.convertItemType(
+          userId,
+          id,
+          body?.targetType || 'journalArticle',
+          {
+            expectedVersion,
+            retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
+          },
+        );
 
     return {
       success: true,
@@ -163,8 +188,13 @@ export abstract class BaseItemCurationController {
 @Controller(['api/v1/library/items', 'api/v1/me/library/items'])
 @UseGuards(JwtAuthGuard)
 export class ItemCurationController extends BaseItemCurationController {
-  constructor(itemService: ItemService) {
-    super(itemService);
+  constructor(
+    itemService: ItemService,
+    @Optional() curationService?: ItemCurationService,
+    @Optional() fulltextService?: ItemFulltextService,
+    @Optional() typeConversionService?: ItemTypeConversionService,
+  ) {
+    super(itemService, curationService, fulltextService, typeConversionService);
   }
 
   @Post('citations/parse')
@@ -290,8 +320,13 @@ export class ItemCurationController extends BaseItemCurationController {
 @Controller('api/v1/projects/:projectId/library/items')
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class ProjectItemCurationController extends BaseItemCurationController {
-  constructor(itemService: ItemService) {
-    super(itemService);
+  constructor(
+    itemService: ItemService,
+    @Optional() curationService?: ItemCurationService,
+    @Optional() fulltextService?: ItemFulltextService,
+    @Optional() typeConversionService?: ItemTypeConversionService,
+  ) {
+    super(itemService, curationService, fulltextService, typeConversionService);
   }
 
   @Post('citations/parse')

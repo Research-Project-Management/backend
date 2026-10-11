@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { ProjectFavorite } from '@prisma/client';
 
 @Injectable()
@@ -24,6 +24,14 @@ export class FavoriteRepository {
       },
     });
     return !!fav;
+  }
+
+  async projectExists(projectId: string): Promise<boolean> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    return !!project;
   }
 
   async addFavorite(

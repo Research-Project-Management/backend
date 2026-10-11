@@ -6,7 +6,7 @@ import {
 
 @Injectable()
 export class LoggerService implements NestLoggerService {
-  private static instance: LoggerService;
+  private static readonly instances = new Map<string, LoggerService>();
   private contextName = 'Application';
   private logLevels: Set<LogLevel> = new Set([
     'log',
@@ -23,15 +23,19 @@ export class LoggerService implements NestLoggerService {
   }
 
   /**
-   * Singleton Pattern Accessor
+   * Returns a cached logger instance scoped to the specified context.
    */
-  public static getInstance(context?: string): LoggerService {
-    if (!LoggerService.instance) {
-      LoggerService.instance = new LoggerService(context);
-    } else if (context) {
-      LoggerService.instance.setContext(context);
+  public static getInstance(context: string = 'Application'): LoggerService {
+    let instance = LoggerService.instances.get(context);
+    if (!instance) {
+      instance = new LoggerService(context);
+      LoggerService.instances.set(context, instance);
     }
-    return LoggerService.instance;
+    return instance;
+  }
+
+  public forContext(context: string): LoggerService {
+    return LoggerService.getInstance(context);
   }
 
   public setContext(context: string): this {
@@ -126,5 +130,3 @@ export class LoggerService implements NestLoggerService {
     );
   }
 }
-
-export const AppLogger = LoggerService;

@@ -8,16 +8,21 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { NotificationsService } from './notifications.service';
+import { ReviewNotificationBundlingUseCase } from './core/use-cases/review-notification-bundling.use-case';
 import {
   CreateNotificationDto,
   QueryNotificationsDto,
   ParseMentionsDto,
 } from './dto/notification.dto';
+import { NotificationTypeString } from './core/domain/value-objects/notification-type.vo';
 
 @ApiTags('Notifications')
 @Controller([
@@ -28,37 +33,73 @@ import {
   'documents/notifications',
 ])
 export class NotificationsController {
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly bundling: ReviewNotificationBundlingUseCase,
+  ) {}
 
   private extractUserId(req: any): string {
     return req?.user?.id || req?.headers?.['x-user-id'] || 'anonymous-user';
   }
 
   @Get('bundles')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({
-    summary: 'Get pending 10-minute review notification bundles',
+    summary: 'Get pending review notification bundles (unread, per project)',
   })
-  async getPendingBundles() {
-    return { bundles: [] };
+  async getPendingBundles(@CurrentUser('id') userId: string) {
+    // Elapsed windows are collapsed into digests before listing.
+    await this.bundling.flushDue(userId);
+    return { bundles: await this.bundling.getPendingBundles(userId) };
   }
 
   @Post('bundles/flush')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Flush pending notification bundle' })
-  async flushBundle(@Body() _body: any) {
-    return { digest: null };
+  @ApiOperation({ summary: 'Flush pending review notifications into a digest' })
+  async flushBundle(
+    @CurrentUser('id') userId: string,
+    @Body() body: { scopeId?: string; projectId?: string },
+  ) {
+    const digest = await this.bundling.flush(
+      userId,
+      body?.projectId || body?.scopeId || undefined,
+    );
+    return { digest };
   }
 
   @Get('digests')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get digest notification history' })
-  async getDigestHistory(@Query('limit') _limit?: number) {
-    return { digests: [] };
+  async getDigestHistory(
+    @CurrentUser('id') userId: string,
+    @Query('limit') limit?: string,
+  ) {
+    const n = Number(limit) || 20;
+    return { digests: await this.bundling.listDigests(userId, n) };
   }
 
   @Get('settings')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get review notification bundling settings' })
-  async getSettings() {
-    return { settings: { enabled: false, windowMinutes: 10 } };
+  async getSettings(@CurrentUser('id') userId: string) {
+    return { settings: await this.bundling.getSettings(userId) };
+  }
+
+  @Put('settings')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update review notification bundling settings' })
+  async updateSettings(
+    @CurrentUser('id') userId: string,
+    @Body() body: { enabled?: boolean; windowMinutes?: number },
+  ) {
+    const patch: { enabled?: boolean; windowMinutes?: number } = {};
+    if (typeof body?.enabled === 'boolean') patch.enabled = body.enabled;
+    if (body?.windowMinutes !== undefined) {
+      patch.windowMinutes = Number(body.windowMinutes);
+    }
+    return { settings: await this.bundling.updateSettings(userId, patch) };
   }
 
   @Get()
@@ -102,7 +143,7 @@ export class NotificationsController {
     const notification = await this.notificationsService.createNotification({
       ...dto,
       userId,
-      type: dto.type as any,
+      type: dto.type as NotificationTypeString | undefined,
     });
     return notification.toPlain();
   }

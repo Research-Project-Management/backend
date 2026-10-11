@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { ProjectWithMembers } from '../core/types/project.type';
-import { isUuid } from '@/core/utils/uuid.util';
+import { isUuid } from '@/core';
 import { USER_SELECT, mapProjectWithMembers } from '../core/core.repository';
 
 @Injectable()

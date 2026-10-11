@@ -1,13 +1,13 @@
-﻿import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
-import { WorkItem, ProjectMember } from '@prisma/client';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '@/core';
+import { WorkItem, ProjectMember, Prisma } from '@prisma/client';
 import {
   IAssignmentRepository,
   ProjectSettingsWithAssignee,
   ELIGIBLE_ASSIGNEE_ROLES,
   Role,
 } from './types/assignment.types';
-import { isUuid } from '@/core/utils/uuid.util';
+import { isUuid } from '@/core';
 
 export type WorkItemWithProject = WorkItem & {
   /** JSON array of all assignee user IDs (multi-assignee). Prisma v6 field. */
@@ -93,6 +93,33 @@ export class AssignmentRepository implements IAssignmentRepository {
           projectId,
           userId,
         },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async findProjectMembers(
+    projectId: string,
+    userIds: string[],
+  ): Promise<ProjectMember[]> {
+    if (!userIds.length) return [];
+    return this.prismaService.projectMember.findMany({
+      where: {
+        projectId,
+        userId: { in: userIds },
       },
       include: {
         user: {
@@ -288,7 +315,7 @@ export class AssignmentRepository implements IAssignmentRepository {
     await this.prismaService.workItem.update({
       where: { id: workItemId },
       data: {
-        subscriberIds: subscriberIds as any,
+        subscriberIds: subscriberIds as Prisma.InputJsonValue,
       },
     });
   }

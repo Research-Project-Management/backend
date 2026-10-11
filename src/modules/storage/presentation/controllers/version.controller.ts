@@ -20,6 +20,8 @@ import { GetFileVersionsUseCase } from '../../application/use-cases/version/get-
 import { DownloadFileVersionUseCase } from '../../application/use-cases/version/download-file-version.use-case';
 import { RevertFileVersionUseCase } from '../../application/use-cases/version/revert-file-version.use-case';
 
+
+
 @ApiTags('Storage File Versions')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/storage/files', 'api/files', 'api/file'])
@@ -54,15 +56,13 @@ export class VersionController {
     @Req() req: FastifyRequest,
   ) {
     const isMultipart =
-      typeof (req as any).isMultipart === 'function'
-        ? (req as any).isMultipart()
-        : false;
+      typeof req.isMultipart === 'function' ? req.isMultipart() : false;
 
     if (!isMultipart) {
       throw new BadRequestException('Request must be multipart/form-data');
     }
 
-    const data = await (req as any).file();
+    const data = await req.file?.();
     if (!data) {
       throw new BadRequestException('No file uploaded');
     }
@@ -70,7 +70,10 @@ export class VersionController {
     const buffer = await data.toBuffer();
     const filename = data.filename || 'updated-file';
     const mimeType = data.mimetype || 'application/octet-stream';
-    const fields = data.fields || {};
+    const fields = (data.fields || {}) as Record<
+      string,
+      { value?: string } | undefined
+    >;
     const changeComment =
       fields.changeComment?.value ||
       fields.comment?.value ||

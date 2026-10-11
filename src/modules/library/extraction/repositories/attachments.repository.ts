@@ -1,5 +1,5 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 

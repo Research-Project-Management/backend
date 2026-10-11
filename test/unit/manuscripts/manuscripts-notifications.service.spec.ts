@@ -609,7 +609,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
         parser,
       );
 
-      controller = new NotificationsController(service);
+      controller = new NotificationsController(service, {} as any);
       overleafCompatController = new OverleafNotificationsParityController(
         service,
       );
@@ -788,7 +788,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
 
     describe('ManuscriptsNotificationsService', () => {
       it('should dispatch comment mention via specialized submodule service', async () => {
-        const notif = await service.manuscripts.notifyCommentMention({
+        const notif = await service.manuscripts!.notifyCommentMention({
           recipientUserId: 'target-author',
           actorId: 'commenter-1',
           actorName: 'Bob',
@@ -807,7 +807,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
       });
 
       it('should dispatch comment reply via specialized submodule service', async () => {
-        const notif = await service.manuscripts.notifyCommentReply({
+        const notif = await service.manuscripts!.notifyCommentReply({
           recipientUserId: 'thread-starter',
           actorId: 'replier-1',
           actorName: 'Alice',
@@ -825,7 +825,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
 
       it('should dispatch thread resolved and dismiss notifications', async () => {
         // Create a mention first
-        await service.manuscripts.notifyCommentMention({
+        await service.manuscripts!.notifyCommentMention({
           recipientUserId: 'target-author',
           actorId: 'commenter-1',
           actorName: 'Bob',
@@ -834,7 +834,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
           snippet: 'test',
         });
 
-        const notif = await service.manuscripts.notifyThreadResolved({
+        const notif = await service.manuscripts!.notifyThreadResolved({
           recipientUserId: 'thread-starter',
           actorId: 'resolver-1',
           actorName: 'Professor',
@@ -848,7 +848,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
 
         // Dismiss thread mentions
         const dismissedCount =
-          await service.manuscripts.dismissThreadNotifications(
+          await service.manuscripts!.dismissThreadNotifications(
             'th-resolve-test',
           );
         expect(dismissedCount).toBe(1);
@@ -857,7 +857,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
 
     describe('ProjectsNotificationsService', () => {
       it('should dispatch and dismiss project invitations via specialized submodule service', async () => {
-        const notif = await service.projects.notifyProjectInvitation({
+        const notif = await service.projects!.notifyProjectInvitation({
           recipientUserId: 'invitee-1',
           projectId: 'proj-invite-1',
           projectName: 'Deep Learning',
@@ -873,7 +873,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
         expect(notif.key).toBe('project_invite_proj-invite-1_invitee-1');
 
         // Dismiss invitation
-        const dismissed = await service.projects.dismissProjectInvitation(
+        const dismissed = await service.projects!.dismissProjectInvitation(
           'proj-invite-1',
           'invitee-1',
         );

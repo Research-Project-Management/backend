@@ -9,7 +9,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { IDENTITY_REDIS_KEYS } from '../../core/constants/identity.constant';
 

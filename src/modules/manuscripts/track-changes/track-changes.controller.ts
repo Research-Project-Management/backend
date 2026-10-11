@@ -168,6 +168,7 @@ export class TrackChangesController {
         projectId,
         docId,
         dto.action,
+        dto.changeIds,
         userId,
       );
     } catch (err) {

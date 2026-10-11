@@ -98,6 +98,9 @@ export class DocResponseDto {
   @ApiProperty({ description: 'Unique document identifier' })
   _id!: string;
 
+  @ApiPropertyOptional({ description: 'Alias for _id' })
+  id?: string;
+
   @ApiProperty({ description: 'Relative file path' })
   path!: string;
 

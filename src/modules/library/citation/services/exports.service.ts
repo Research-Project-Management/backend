@@ -18,7 +18,7 @@ import { ExportResult, BurnableAnnotation } from '../types/exports.types';
 import { formatCsvExport } from '../utils/exports.utils';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 
-export { BurnableAnnotation, ExportResult };
+export type { BurnableAnnotation, ExportResult };
 
 @Injectable()
 export class ExportsService {

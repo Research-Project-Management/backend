@@ -19,8 +19,8 @@ export class StorageQueueProducer {
     @InjectQueue(STORAGE_PROCESSING_QUEUE)
     private readonly queue?: Queue,
   ) {
-    if (this.queue && typeof (this.queue as any).on === 'function') {
-      (this.queue as any).on('error', (err: any) => {
+    if (this.queue && typeof this.queue.on === 'function') {
+      this.queue.on('error', (err: Error) => {
         this.logger.warn(
           `Storage Queue connection notice: ${err?.message || err}`,
         );
@@ -63,9 +63,17 @@ export class StorageQueueProducer {
       return;
     }
 
+    const queueWithScheduler = this.queue as Queue & {
+      upsertJobScheduler?(
+        id: string,
+        repeatOpt: { pattern: string },
+        job: { name: string; opts?: Record<string, unknown> },
+      ): Promise<unknown>;
+    };
+
     try {
       // 1. Trash retention: run daily at 03:00 UTC
-      await (this.queue as any).upsertJobScheduler?.(
+      await queueWithScheduler.upsertJobScheduler?.(
         'repeat-trash-retention',
         { pattern: '0 3 * * *' },
         {
@@ -78,7 +86,7 @@ export class StorageQueueProducer {
       );
 
       // 2. Multipart cleanup: run every 6 hours
-      await (this.queue as any).upsertJobScheduler?.(
+      await queueWithScheduler.upsertJobScheduler?.(
         'repeat-multipart-cleanup',
         { pattern: '0 */6 * * *' },
         {
@@ -91,7 +99,7 @@ export class StorageQueueProducer {
       );
 
       // 3. Orphan blob GC: run daily at 04:00 UTC
-      await (this.queue as any).upsertJobScheduler?.(
+      await queueWithScheduler.upsertJobScheduler?.(
         'repeat-orphan-blob',
         { pattern: '0 4 * * *' },
         {
@@ -106,9 +114,10 @@ export class StorageQueueProducer {
       this.logger.log(
         'Storage maintenance repeatable jobs registered in BullMQ (Trash Retention, Multipart Cleanup, Orphan Blob GC)',
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `Failed to schedule storage maintenance repeatable jobs: ${err?.message}`,
+        `Failed to schedule storage maintenance repeatable jobs: ${errMsg}`,
       );
     }
   }

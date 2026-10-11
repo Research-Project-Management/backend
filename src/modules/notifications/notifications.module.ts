@@ -1,5 +1,5 @@
 import { Module, Global } from '@nestjs/common';
-import { PrismaModule } from '@/core/database/prisma.module';
+import { PrismaModule } from '@/core';
 import { RealtimeModule } from '@/modules/realtime/realtime.module';
 
 // Submodules
@@ -29,6 +29,10 @@ import { GetUnreadCountUseCase } from './core/use-cases/get-unread-count.use-cas
 import { MarkNotificationReadUseCase } from './core/use-cases/mark-notification-read.use-case';
 import { MarkAllReadUseCase } from './core/use-cases/mark-all-read.use-case';
 import { DeleteNotificationUseCase } from './core/use-cases/delete-notification.use-case';
+import { ReviewNotificationBundlingUseCase } from './core/use-cases/review-notification-bundling.use-case';
+import { ReviewBundleStorePort } from './core/ports/review-bundle-store.port';
+import { PrismaReviewBundleStoreAdapter } from './core/adapters/storage/prisma-review-bundle-store.adapter';
+import { ReviewBundleFlushScheduler } from './core/adapters/scheduling/review-bundle-flush.scheduler';
 
 @Global()
 @Module({
@@ -60,6 +64,12 @@ import { DeleteNotificationUseCase } from './core/use-cases/delete-notification.
     MarkNotificationReadUseCase,
     MarkAllReadUseCase,
     DeleteNotificationUseCase,
+    ReviewNotificationBundlingUseCase,
+    ReviewBundleFlushScheduler,
+    {
+      provide: ReviewBundleStorePort,
+      useClass: PrismaReviewBundleStoreAdapter,
+    },
 
     // Root Facade Service
     NotificationsService,

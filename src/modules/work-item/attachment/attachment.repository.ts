@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { EntityType, Prisma } from '@prisma/client';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
+import { isUuid } from '@/core';
 
 const AUTHOR_SELECT = {
   id: true,
@@ -138,6 +139,119 @@ export class AttachmentRepository {
         entityType,
         entityId,
       },
+    });
+  }
+
+  async findWorkItem(workItemId: string) {
+    if (isUuid(workItemId) || !this.prisma.workItem?.findFirst) {
+      return this.prisma.workItem.findUnique({
+        where: { id: workItemId },
+        select: { id: true, projectId: true },
+      });
+    }
+    return this.prisma.workItem.findFirst({
+      where: {
+        identifier: { equals: workItemId, mode: 'insensitive' },
+        deletedAt: null,
+      },
+      select: { id: true, projectId: true },
+    });
+  }
+
+  async findWorkItemWithDetails(id: string) {
+    return this.prisma.workItem.findUnique({
+      where: { id },
+      include: {
+        assignee: {
+          select: {
+            id: true,
+            email: true,
+            profile: { select: { name: true, avatar: true } },
+          },
+        },
+        state: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            group: true,
+            sequence: true,
+          },
+        },
+        labelAssignments: {
+          select: {
+            label: { select: { id: true, name: true, color: true } },
+          },
+        },
+      },
+    });
+  }
+
+  async upsertEntityLink(
+    workItemId: string,
+    entityType: EntityType,
+    entityId: string,
+    description?: string,
+  ) {
+    if (!this.prisma.workItemEntityLink) return null;
+    return this.prisma.workItemEntityLink.upsert({
+      where: {
+        workItemId_entityType_entityId: {
+          workItemId,
+          entityType,
+          entityId,
+        },
+      },
+      create: {
+        workItemId,
+        entityType,
+        entityId,
+        description,
+      },
+      update: {
+        description,
+      },
+    });
+  }
+
+  async deleteEntityLink(
+    workItemId: string,
+    entityType: EntityType,
+    entityId: string,
+  ) {
+    if (!this.prisma.workItemEntityLink) return null;
+    return this.prisma.workItemEntityLink.deleteMany({
+      where: {
+        workItemId,
+        entityType,
+        entityId,
+      },
+    });
+  }
+
+  async findLinkedWorkItems(entityType: EntityType, entityId: string) {
+    if (!this.prisma.workItemEntityLink) return [];
+    return this.prisma.workItemEntityLink.findMany({
+      where: {
+        entityType,
+        entityId,
+      },
+      include: {
+        workItem: {
+          select: {
+            id: true,
+            identifier: true,
+            title: true,
+            columnId: true,
+            state: true,
+            priority: true,
+            projectId: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
     });
   }
 }

@@ -12,6 +12,7 @@ export interface EngineDetectionResult {
   detectedFrom: 'explicit' | 'magic-comment' | 'package-hint' | 'default';
   mainFileHint?: string;
   bibProgramHint?: 'biber' | 'bibtex';
+  requiresShellEscape?: boolean;
 }
 
 export class TexEngineDetector {

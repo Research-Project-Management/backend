@@ -11,7 +11,7 @@ import { ByteRange } from '../../../domain/value-objects/byte-range.vo';
 import { Readable } from 'node:stream';
 
 export interface StreamBinaryOutput {
-  stream: Readable;
+  stream: Readable | null;
   statusCode: number;
   mimeType: string;
   contentLength: number;
@@ -59,7 +59,7 @@ export class StreamBinaryUseCase {
     // RFC 7232 Short-Circuit: Zero driver network/disk I/O on 304 Not Modified
     if (etag && ifNoneMatch && ifNoneMatch === etag && !rangeHeader) {
       return {
-        stream: null as any,
+        stream: null,
         statusCode: 304,
         mimeType: node.mimeType,
         contentLength: 0,

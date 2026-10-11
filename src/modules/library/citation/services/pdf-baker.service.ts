@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { BurnableAnnotation } from '../types/exports.types';
 
-export { BurnableAnnotation };
+export type { BurnableAnnotation };
 
 @Injectable()
 export class PdfBakerService {

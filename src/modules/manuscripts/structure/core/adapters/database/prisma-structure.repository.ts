@@ -4,7 +4,8 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { ManuscriptNode, Prisma } from '@prisma/client';
+import { PrismaService } from '@/core';
 import {
   IStructureRepository,
   CreateNodeParams,
@@ -19,7 +20,7 @@ import { NodePathVo } from '../../domain/node-path.vo';
 export class PrismaStructureRepository implements IStructureRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  private mapToEntity(raw: any): ManuscriptNodeEntity {
+  private mapToEntity(raw: ManuscriptNode): ManuscriptNodeEntity {
     return new ManuscriptNodeEntity({
       id: raw.id,
       projectId: raw.projectId,
@@ -101,7 +102,7 @@ export class PrismaStructureRepository implements IStructureRepository {
       where: { projectId },
       orderBy: [{ depth: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
     });
-    return nodes.map((n: any) => this.mapToEntity(n));
+    return nodes.map((n) => this.mapToEntity(n));
   }
 
   public async getRootDoc(
@@ -159,7 +160,7 @@ export class PrismaStructureRepository implements IStructureRepository {
     const normDest = NodePathVo.normalize(destPath);
     const sourcePrefix = normSource + '/';
 
-    await this.prisma.$transaction(async (tx: any) => {
+    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // 1. Update the moving node itself
       await tx.manuscriptNode.update({
         where: {
@@ -233,7 +234,7 @@ export class PrismaStructureRepository implements IStructureRepository {
       },
     });
 
-    const targetIds = targets.map((t: any) => t.id);
+    const targetIds = targets.map((t) => t.id);
 
     if (targetIds.length > 0) {
       await this.prisma.manuscriptNode.deleteMany({
@@ -241,7 +242,7 @@ export class PrismaStructureRepository implements IStructureRepository {
       });
     }
 
-    return targets.map((t: any) => this.mapToEntity(t));
+    return targets.map((t) => this.mapToEntity(t));
   }
 
   public async updateSortOrder(

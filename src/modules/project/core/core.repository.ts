@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import {
   Prisma,
   Project,
@@ -12,8 +12,9 @@ import {
   ProjectOverview,
   AllocatedIdentifier,
   MinimalUser,
+  ProjectMemberWithUser,
 } from './types/project.type';
-import { isUuid } from '@/core/utils/uuid.util';
+import { isUuid } from '@/core';
 import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item';
 import { DEFAULT_PROJECT_STATES } from '../state/state.constants';
 import { deriveProjectPrefix } from './utils/identifier.util';
@@ -58,9 +59,9 @@ export function mapProjectWithMembers<
       };
     }>;
   },
->(project: T): any {
+>(project: T): ProjectWithMembers {
   return {
-    ...project,
+    ...(project as unknown as Project),
     ...(project.createdBy
       ? { createdBy: mapMinimalUser(project.createdBy) }
       : {}),
@@ -69,10 +70,10 @@ export function mapProjectWithMembers<
           members: project.members.map((m) => ({
             ...m,
             user: mapMinimalUser(m.user),
-          })),
+          })) as ProjectMemberWithUser[],
         }
       : {}),
-  };
+  } as ProjectWithMembers;
 }
 
 export interface CreateProjectInput {
@@ -337,10 +338,12 @@ export class CoreRepository {
         },
       });
       project.stateId = defaultProjectState.id;
-      (project as any).state = defaultProjectState;
     }
 
-    return mapProjectWithMembers(project);
+    return mapProjectWithMembers({
+      ...project,
+      state: defaultProjectState ?? null,
+    });
   }
 
   /**
@@ -814,23 +817,138 @@ export class CoreRepository {
     return this.prisma.project.findUnique({ where: { identifier } });
   }
 
-  async findTrashedProjectsByUser(userId: string) {
-    return this.prisma.project.findMany({
+  async duplicateProject(
+    source: NonNullable<
+      Awaited<ReturnType<CoreRepository['findProjectForDuplication']>>
+    >,
+    userId: string,
+    identifier: string,
+  ): Promise<Project> {
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Create new project
+      const newProject = await tx.project.create({
+        data: {
+          name: `${source.name} (Copy)`,
+          identifier,
+          description: source.description ?? '',
+          avatar: source.avatar ?? undefined,
+          coverImage: source.coverImage ?? undefined,
+          modules: source.modules ?? undefined,
+          createdById: userId,
+        },
+      });
+
+      // 2. Add creator as owner member
+      await tx.projectMember.create({
+        data: { projectId: newProject.id, userId, role: 'owner' },
+      });
+
+      // 3. Clone ProjectStates
+      const stateIdMap = new Map<string, string>();
+      for (const state of source.projectStates) {
+        const newState = await tx.projectState.create({
+          data: {
+            projectId: newProject.id,
+            name: state.name,
+            color: state.color,
+            description: state.description ?? '',
+            sequence: state.sequence,
+            isDefault: state.isDefault,
+          },
+        });
+        stateIdMap.set(state.id, newState.id);
+      }
+
+      // 4. Clone Manuscript Documents (map oldDocId -> newDocId)
+      const docIdMap = new Map<string, string>();
+      if (source.manuscriptDocs && source.manuscriptDocs.length > 0) {
+        for (const doc of source.manuscriptDocs) {
+          const newDoc = await tx.manuscriptDoc.create({
+            data: {
+              projectId: newProject.id,
+              path: doc.path,
+              lines: (doc.lines ?? []) as Prisma.InputJsonValue,
+              rev: 0,
+              version: 1,
+              ranges: (doc.ranges ?? {}) as Prisma.InputJsonValue,
+              hash: doc.hash,
+              sizeBytes: doc.sizeBytes,
+            },
+          });
+          docIdMap.set(doc.id, newDoc.id);
+        }
+      }
+
+      // 5. Clone Manuscript Files (map oldFileId -> newFileId, reusing CAS blob storageKey)
+      const fileIdMap = new Map<string, string>();
+      const manuscriptFiles = source.manuscriptFiles || [];
+      for (const file of manuscriptFiles) {
+        const newFile = await tx.manuscriptFile.create({
+          data: {
+            projectId: newProject.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+            hash: file.hash,
+            storageKey: file.storageKey,
+            bucketName: file.bucketName,
+            rev: 0,
+          },
+        });
+        fileIdMap.set(file.id, newFile.id);
+      }
+
+      // 6. Clone Manuscript Nodes (file tree hierarchy)
+      const nodeIdMap = new Map<string, string>();
+      const manuscriptNodes = source.manuscriptNodes || [];
+      for (const node of manuscriptNodes) {
+        const newParentId = node.parentId
+          ? nodeIdMap.get(node.parentId) || null
+          : null;
+        const newDocId = node.docId ? docIdMap.get(node.docId) || null : null;
+        const newFileId = node.fileId ? fileIdMap.get(node.fileId) || null : null;
+
+        const newNode = await tx.manuscriptNode.create({
+          data: {
+            projectId: newProject.id,
+            parentId: newParentId,
+            type: node.type,
+            name: node.name,
+            path: node.path,
+            depth: node.depth,
+            docId: newDocId,
+            fileId: newFileId,
+            isRootDoc: node.isRootDoc,
+            sizeBytes: node.sizeBytes,
+            hash: node.hash,
+            sortOrder: node.sortOrder,
+          },
+        });
+        nodeIdMap.set(node.id, newNode.id);
+      }
+
+      return newProject;
+    });
+  }
+
+  async findTrashedProjectsByUser(
+    userId: string,
+  ): Promise<ProjectWithMembers[]> {
+    const raw = await this.prisma.project.findMany({
       where: {
         deletedAt: { not: null },
         OR: [{ createdById: userId }, { members: { some: { userId } } }],
       },
       include: {
+        createdBy: {
+          select: USER_SELECT,
+        },
         members: {
           select: {
             userId: true,
             role: true,
             user: {
-              select: {
-                id: true,
-                email: true,
-                profile: { select: { name: true, avatar: true } },
-              },
+              select: USER_SELECT,
             },
           },
         },
@@ -838,6 +956,7 @@ export class CoreRepository {
       },
       orderBy: { deletedAt: 'desc' },
     });
+    return raw.map(mapProjectWithMembers);
   }
 
   async permanentDeleteProject(projectId: string) {

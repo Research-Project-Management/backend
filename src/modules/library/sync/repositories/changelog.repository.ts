@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Prisma, LibraryChange, Tombstone } from '@prisma/client';
 
 import {

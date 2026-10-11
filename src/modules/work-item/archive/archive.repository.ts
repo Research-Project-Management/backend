@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 
-import { isUuid } from '@/core/utils/uuid.util';
+import { isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
-import { USER_MINIMAL_SELECT } from '../core/types/work-item.types';
+import { USER_MINIMAL_SELECT } from '../common/types/shared.types';
 
 @Injectable()
 export class ArchiveRepository {

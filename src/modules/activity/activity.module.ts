@@ -3,7 +3,7 @@ import { ActivityController } from './activity.controller';
 import { ActivityService } from './activity.service';
 import { ActivityRepository } from './activity.repository';
 import { ActivityListener } from './activity.listener';
-import { CacheModule } from '@/core/cache/cache.module';
+import { CacheModule } from '@/core';
 
 @Module({
   imports: [CacheModule],

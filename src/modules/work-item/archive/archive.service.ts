@@ -3,17 +3,20 @@ import {
   NotFoundException,
   BadRequestException,
   Optional,
+  Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityType } from '@prisma/client';
 import { ArchiveRepository } from './archive.repository';
 import { BulkArchiveDto } from './dto/bulk-archive.dto';
-import { RedisCacheService } from '@/core/cache/redis.service';
-import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { RedisCacheService } from '@/core';
+import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 
 @Injectable()
 export class ArchiveService {
+  private readonly logger = new Logger(ArchiveService.name);
+
   constructor(
     private readonly archiveRepository: ArchiveRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
@@ -25,7 +28,7 @@ export class ArchiveService {
     projectId?: string,
   ) {
     if (!this.cache) return;
-    const promises: Promise<any>[] = [
+    const promises: Promise<void>[] = [
       this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)),
     ];
     if (projectId) {
@@ -33,7 +36,31 @@ export class ArchiveService {
         this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       );
     }
-    await Promise.all(promises).catch(() => {});
+    await Promise.all(promises).catch((err) => {
+      this.logger.warn(
+        `Failed to invalidate cache for work item ${workItemId}: ${(err as Error).message}`,
+      );
+    });
+  }
+
+  private async invalidateWorkItemsBulk(
+    workItems: Array<{ id: string; projectId?: string | null }>,
+  ) {
+    if (!this.cache) return;
+    const keys = new Set<string>();
+    for (const item of workItems) {
+      keys.add(WORK_ITEM_REDIS_KEYS.workItem(item.id));
+      if (item.projectId) {
+        keys.add(WORK_ITEM_REDIS_KEYS.projectWorkItems(item.projectId));
+        keys.add(`flux:proj:overview:${item.projectId}`);
+      }
+    }
+    const promises = Array.from(keys).map((key) => this.cache!.del(key));
+    await Promise.all(promises).catch((err) => {
+      this.logger.warn(
+        `Failed to invalidate bulk work item cache: ${(err as Error).message}`,
+      );
+    });
   }
 
   async archiveWorkItem(workItemId: string, userId: string) {
@@ -130,12 +157,7 @@ export class ArchiveService {
     }
 
     const archiveResult = await this.archiveRepository.bulkArchive(ids);
-
-    const projectIds = new Set<string>();
-    for (const workItem of workItems) {
-      if (workItem.projectId) projectIds.add(workItem.projectId);
-      await this.invalidateWorkItemCache(workItem.id, workItem.projectId);
-    }
+    await this.invalidateWorkItemsBulk(workItems);
 
     if (this.eventEmitter) {
       this.eventEmitter.emit('work-item.bulk-archived', {
@@ -174,10 +196,7 @@ export class ArchiveService {
     }
 
     const restoreResult = await this.archiveRepository.bulkRestore(ids);
-
-    for (const workItem of workItems) {
-      await this.invalidateWorkItemCache(workItem.id, workItem.projectId);
-    }
+    await this.invalidateWorkItemsBulk(workItems);
 
     if (this.eventEmitter) {
       this.eventEmitter.emit('work-item.bulk-restored', {

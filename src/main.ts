@@ -19,29 +19,40 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
-import { RedisIoAdapter } from './core/adapters/redis-io.adapter';
+import type { FastifyRequest, FastifyInstance, FastifyReply } from 'fastify';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
+import compression from '@fastify/compress';
+import { constants as zlibConstants } from 'node:zlib';
+import { randomUUID } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
+import type { Http2ServerRequest } from 'node:http2';
 import {
+  RedisIoAdapter,
   isSensitiveAuthRoute,
   isSensitiveScrapeRoute,
-} from './core/utils/rate-limit.util';
+  GlobalExceptionFilter,
+  LoggerService,
+  LoggerInterceptor,
+  TransformInterceptor,
+  IdempotencyInterceptor,
+  IdempotencyService,
+} from './core';
 import { AppModule } from './app.module';
-import { GlobalExceptionFilter } from './core/filters/exception.filter';
-import { LoggerService } from './core/logger/logger.service';
-import { LoggerInterceptor } from './core/logger/logger.interceptor';
-
 import { Reflector } from '@nestjs/core';
-import { TransformInterceptor } from './core/interceptors/transform.interceptor';
-import { IdempotencyInterceptor } from './core/idempotency/idempotency.interceptor';
-import { IdempotencyService } from './core/idempotency/idempotency.service';
+
+declare global {
+  interface BigInt {
+    toJSON(): number | string;
+  }
+}
 
 // Enable native JSON serialization for PostgreSQL BigInt types across all HTTP endpoints
-if (typeof (BigInt.prototype as any).toJSON !== 'function') {
-  (BigInt.prototype as any).toJSON = function () {
+if (typeof BigInt.prototype.toJSON !== 'function') {
+  BigInt.prototype.toJSON = function () {
     const num = Number(this);
     return Number.isSafeInteger(num) ? num : this.toString();
   };
@@ -81,7 +92,26 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ trustProxy: trustProxyConfig }),
+    new FastifyAdapter({
+      trustProxy: trustProxyConfig,
+      bodyLimit: 50 * 1024 * 1024, // 50MB for LaTeX compilation logs and large documents
+      caseSensitive: true, // Speeds up Radix Tree route lookup in find-my-way
+      pluginTimeout: 30000, // 30s timeout for async plugins initialization
+      maxParamLength: 256, // Allow long UUIDs and deep route tokens
+      requestIdHeader: 'x-request-id',
+      requestIdLogLabel: 'reqId',
+      genReqId: (req: IncomingMessage | Http2ServerRequest): string => {
+        const incoming = req.headers['x-request-id'];
+        if (
+          typeof incoming === 'string' &&
+          incoming.length > 0 &&
+          incoming.length <= 128
+        ) {
+          return incoming;
+        }
+        return randomUUID();
+      },
+    }),
     {
       logger,
       bufferLogs: true,
@@ -93,24 +123,54 @@ async function bootstrap() {
   await redisIoAdapter.connectToRedis(redisUrl);
   app.useWebSocketAdapter(redisIoAdapter);
 
+  // Fastify Engine & TCP Socket Keep-Alive Tuning (Reverse Proxy / Next.js Rewrite socket reuse)
+  const fastifyInstance = app
+    .getHttpAdapter()
+    .getInstance() as unknown as FastifyInstance;
+  if (fastifyInstance?.server) {
+    fastifyInstance.server.keepAliveTimeout = 65000; // 65s (exceeds 60s proxy timeouts)
+    fastifyInstance.server.headersTimeout = 66000; // Must be strictly greater than keepAliveTimeout
+  }
+
+  // Correlation ID Response Header (echo or propagate x-request-id across all HTTP responses)
+  fastifyInstance.addHook(
+    'onSend',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      if (request.id) {
+        reply.header('x-request-id', request.id);
+      }
+    },
+  );
+
+  // HTTP Response Compression (Brotli quality 4 + Gzip for low latency and minimal CPU overhead)
+  await fastifyInstance.register(compression, {
+    threshold: 1024, // Only compress responses >= 1KB
+    encodings: ['br', 'gzip', 'deflate'],
+    brotliOptions: {
+      params: {
+        [zlibConstants.BROTLI_PARAM_QUALITY]: 4,
+      },
+    },
+  });
+
   // Multipart file uploads (Cloudflare R2 / S3 streaming)
-  await app.register(multipart as any, {
+  await fastifyInstance.register(multipart, {
     limits: {
       fileSize: 100 * 1024 * 1024, // 100MB
     },
   });
 
   // Security Headers (Helmet)
-  await app.register(helmet as any, {
+  await fastifyInstance.register(helmet, {
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
   });
 
   // Rate Limiting (Throttle & Brute-force protection)
   const isProd = process.env.NODE_ENV === 'production';
-  await app.register(rateLimit as any, {
+  await fastifyInstance.register(rateLimit, {
     timeWindow: '1 minute',
-    max: (req: any) => {
+    max: (req: FastifyRequest) => {
       const url = req.raw?.url || '';
       // Throttle sensitive auth endpoints (120 req/min in dev, 15 req/min in prod)
       if (isSensitiveAuthRoute(url)) {
@@ -122,7 +182,7 @@ async function bootstrap() {
       }
       return isProd ? 150 : 600;
     },
-    keyGenerator: (req: any) => {
+    keyGenerator: (req: FastifyRequest) => {
       const url = req.raw?.url || '';
       if (isSensitiveAuthRoute(url)) {
         return `auth:${req.ip}`;
@@ -159,6 +219,7 @@ async function bootstrap() {
       whitelist: true,
       transform: true,
       forbidNonWhitelisted: false,
+      stopAtFirstError: true, // Fail fast on invalid inputs to save CPU cycles
       transformOptions: {
         enableImplicitConversion: true,
       },
@@ -240,6 +301,8 @@ async function bootstrap() {
       'Origin',
       'Idempotency-Key',
       'X-Idempotency-Key',
+      'x-request-id',
+      'X-Request-Id',
     ],
     exposedHeaders: [
       'Content-Range',
@@ -250,66 +313,82 @@ async function bootstrap() {
       'Content-Length',
       'Content-Disposition',
       'Accept-Ranges',
+      'x-request-id',
+      'X-Request-Id',
     ],
     credentials: true,
   });
 
-  // Graceful Shutdown on SIGTERM/SIGINT
+  // Graceful Shutdown on SIGTERM/SIGINT with clean connection draining
   app.enableShutdownHooks();
+  const handleShutdown = async (signal: string) => {
+    logger.log(`Received ${signal}. Gracefully draining connections...`);
+    try {
+      await redisIoAdapter.close();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`Error during redisIoAdapter shutdown: ${msg}`);
+    }
+  };
+  process.once('SIGTERM', () => void handleShutdown('SIGTERM'));
+  process.once('SIGINT', () => void handleShutdown('SIGINT'));
 
-  // Swagger OpenAPI Documentation
-  const config = new DocumentBuilder()
-    .setTitle('Research Project Management (RPM) API')
-    .setDescription(
-      'Enterprise RESTful API Documentation for Research Project Management. Built with NestJS 11, Fastify v5, and Prisma 7 on PostgreSQL.',
-    )
-    .setVersion('2.0.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        name: 'Authorization',
-        description: 'Enter your JWT Bearer token',
-        in: 'header',
+  // Swagger OpenAPI Documentation (enabled in development/staging, opt-in in production via ENABLE_SWAGGER=true)
+  const shouldEnableSwagger = !isProd || process.env.ENABLE_SWAGGER === 'true';
+  if (shouldEnableSwagger) {
+    const config = new DocumentBuilder()
+      .setTitle('Flux API')
+      .setDescription(
+        'Production RESTful & Realtime API for Flux — High-performance Collaborative Research & LaTeX Platform. Built with NestJS, Fastify, and Prisma on PostgreSQL.',
+      )
+      .setVersion('2.0.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          name: 'Authorization',
+          description: 'Enter your JWT Bearer token',
+          in: 'header',
+        },
+        'JWT-auth',
+      )
+      .addTag(
+        'Health',
+        'System health checks, database liveness & readiness probes',
+      )
+      .addTag('Identity', 'Authentication, OAuth2, JWT Refresh, Profile')
+      .addTag('Organization', 'Projects, Members, and Roles')
+      .addTag(
+        'Storage',
+        'Cloudflare R2 Files, Presigned URLs, Virtual Tree, Labels',
+      )
+      .addTag('Library', 'Academic Papers, CSL Metadata, BibTeX, Collections')
+      .addTag(
+        'Manuscript',
+        'LaTeX Editor Pages, Hierarchies, Snapshots, Versions',
+      )
+      .addTag('Planning', 'Work Items, Priorities, Relations, Cycles')
+      .addTag(
+        'Collaboration',
+        'Page Line Comments, WorkItem Reactions, Sticky Canvas',
+      )
+      .addTag(
+        'Intelligence',
+        'Flux-AI Proxy, Streaming Chat, RAG Document Search',
+      )
+      .addTag('Activity', 'Activity Feed, Collaboration Stream, Recent Items')
+      .addTag('Search', 'Global Search & Discovery')
+      .addTag('Analytics', 'Workload Metrics, Velocity, Overview')
+      .build();
+
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('docs', app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
       },
-      'JWT-auth',
-    )
-    .addTag(
-      'Health',
-      'System health checks, database liveness & readiness probes',
-    )
-    .addTag('Identity', 'Authentication, OAuth2, JWT Refresh, Profile')
-    .addTag('Organization', 'Projects, Members, and Roles')
-    .addTag(
-      'Storage',
-      'Cloudflare R2 Files, Presigned URLs, Virtual Tree, Labels',
-    )
-    .addTag('Library', 'Academic Papers, CSL Metadata, BibTeX, Collections')
-    .addTag(
-      'Manuscript',
-      'LaTeX Editor Pages, Hierarchies, Snapshots, Versions',
-    )
-    .addTag('Planning', 'Work Items, Priorities, Relations, Cycles')
-    .addTag(
-      'Collaboration',
-      'Page Line Comments, WorkItem Reactions, Sticky Canvas',
-    )
-    .addTag(
-      'Intelligence',
-      'Flux-AI Proxy, Streaming Chat, RAG Document Search',
-    )
-    .addTag('Activity', 'Activity Feed, Collaboration Stream, Recent Items')
-    .addTag('Search', 'Global Search & Discovery')
-    .addTag('Analytics', 'Workload Metrics, Velocity, Overview')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
-    },
-  });
+    });
+  }
 
   const port = Number(process.env.PORT) || 3000;
   const host = process.env.HOST || '0.0.0.0';
@@ -325,8 +404,9 @@ async function bootstrap() {
         `📚 Swagger Documentation ready at http://localhost:${port}/docs`,
       );
       break;
-    } catch (err: any) {
-      if (err?.code === 'EADDRINUSE') {
+    } catch (err: unknown) {
+      const errorObj = err as { code?: string; message?: string } | undefined;
+      if (errorObj?.code === 'EADDRINUSE') {
         if (attempt < maxRetries) {
           logger.warn(
             `⚠️ Port ${port} is busy (attempt ${attempt}/${maxRetries}). Retrying in ${retryDelay}ms after lingering socket release...`,
@@ -339,8 +419,10 @@ async function bootstrap() {
           `❌ Port ${port} is already in use by another process after ${maxRetries} attempts. Please terminate the lingering process or run: Get-NetTCPConnection -LocalPort ${port}`,
         );
       } else {
+        const errorMsg =
+          err instanceof Error ? err.message : String(err);
         logger.error(
-          `❌ Server failed to start on port ${port}: ${err?.message || err}`,
+          `❌ Server failed to start on port ${port}: ${errorMsg}`,
         );
       }
       process.exit(1);

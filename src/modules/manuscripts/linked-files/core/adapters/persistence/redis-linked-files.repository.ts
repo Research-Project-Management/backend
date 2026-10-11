@@ -9,7 +9,7 @@ import {
   LinkedFileEntity,
   LinkedFileProps,
 } from '../../domain/entities/linked-file.entity';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 
 @Injectable()
 export class RedisLinkedFilesRepository extends ILinkedFilesRepositoryPort {

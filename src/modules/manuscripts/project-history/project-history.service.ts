@@ -21,6 +21,7 @@ import {
   DiffResponseDto,
 } from './dto/history.dto';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { PrismaService } from '@/core';
 
 @Injectable()
 export class ProjectHistoryService {
@@ -35,6 +36,7 @@ export class ProjectHistoryService {
     private readonly deleteLabelUseCase: DeleteLabelUseCase,
     private readonly restoreVersionUseCase: RestoreVersionUseCase,
     @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   public async createSnapshot(
@@ -61,7 +63,49 @@ export class ProjectHistoryService {
 
   public async listVersions(projectId: string): Promise<VersionListItemDto[]> {
     const snapshots = await this.getVersionListUseCase.execute(projectId);
-    return snapshots.map((s) => this.toListItemDto(s));
+
+    const authorMap = new Map<string, { id: string; name: string; avatar?: string }>();
+    if (this.prisma) {
+      const userIds = Array.from(
+        new Set(
+          snapshots
+            .map((s) => s.createdById)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0)
+        )
+      );
+      if (userIds.length > 0) {
+        try {
+          const users = await this.prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: {
+              id: true,
+              profile: {
+                select: {
+                  name: true,
+                  avatar: true,
+                },
+              },
+            },
+          });
+          for (const u of users) {
+            authorMap.set(u.id, {
+              id: u.id,
+              name: u.profile?.name || 'Collaborator',
+              avatar: u.profile?.avatar || undefined,
+            });
+          }
+        } catch (err) {
+          this.logger.debug(`Failed to fetch author metadata for history: ${err}`);
+        }
+      }
+    }
+
+    return snapshots.map((s) => {
+      const author = s.createdById
+        ? authorMap.get(s.createdById) || { id: s.createdById, name: 'Collaborator' }
+        : null;
+      return this.toListItemDto(s, author);
+    });
   }
 
   public async getSnapshot(
@@ -146,13 +190,17 @@ export class ProjectHistoryService {
     };
   }
 
-  public toListItemDto(snapshot: Snapshot): VersionListItemDto {
+  public toListItemDto(
+    snapshot: Snapshot,
+    author?: { id: string; name: string; avatar?: string } | null,
+  ): VersionListItemDto {
     return {
       id: snapshot.id,
       projectId: snapshot.projectId,
       version: snapshot.version,
       summary: snapshot.summary,
       createdById: snapshot.createdById,
+      author: author ?? (snapshot.createdById ? { id: snapshot.createdById, name: 'Collaborator' } : null),
       isAutomatic: snapshot.isAutomatic,
       fileCount: snapshot.fileCount,
       labels: snapshot.labels.map((l) => this.toLabelDto(l)),

@@ -5,7 +5,7 @@
  */
 
 import { Injectable, Optional, Logger, Inject } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import {
   ILibrarySyncPort,
   LibraryCollectionSummary,
@@ -20,7 +20,7 @@ import {
   formatBibtexName,
   sanitizeCitationKey,
   toBibtexValue,
-} from '../../domain/utils/bibtex-value.utils';
+} from '../../domain/bibtex-value';
 
 @Injectable()
 export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {

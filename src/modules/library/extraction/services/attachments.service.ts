@@ -57,7 +57,7 @@ import {
   ProjectId,
 } from '../../shared-kernel/core/types/branded.types';
 
-export { CreateAttachmentInput, ReplaceAttachmentFileInput };
+export type { CreateAttachmentInput, ReplaceAttachmentFileInput };
 
 @Injectable()
 export class AttachmentsService {

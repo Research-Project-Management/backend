@@ -14,9 +14,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
-import { RedisCacheService } from '@/core/cache/redis.service';
-import { PrismaService } from '@/core/database/prisma.service';
-import { CompileManuscriptDto, ClsiWordCountDto } from './dto/clsi.dto';
+import { RedisCacheService } from '@/core';
+import { PrismaService } from '@/core';
+import {
+  CompileManuscriptDto,
+  ClsiWordCountDto,
+  ClsiCompilerEngine,
+} from './dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 import {
   SyncPoint,
@@ -58,7 +62,7 @@ import {
   createZipStreamFromDisk,
   ZipFileEntry,
   ZipDiskEntry,
-} from './core/adapters/artifacts/zip.util';
+} from './core/adapters/artifacts/zip-stream.adapter';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 
 export type ClsiCompileResult = CompilePipelineResult;
@@ -80,6 +84,7 @@ export class ClsiService {
   private readonly healthCheck: ClsiHealthCheck;
   private readonly metrics: ClsiMetrics = ClsiMetrics.getInstance();
   private readonly remoteClsiUrl?: string;
+  private readonly lastAutoSnapshotTimes = new Map<string, number>();
 
   constructor(
     private readonly configService: ConfigService,
@@ -261,7 +266,10 @@ export class ClsiService {
         dto.main_file = dto.compile.rootResourcePath;
       }
       if (dto.compile.options?.compiler && !dto.engine) {
-        dto.engine = dto.compile.options.compiler as any;
+        const rawCompiler = dto.compile.options.compiler.toLowerCase() as ClsiCompilerEngine;
+        if (Object.values(ClsiCompilerEngine).includes(rawCompiler)) {
+          dto.engine = rawCompiler;
+        }
       }
       if (dto.compile.options?.draft !== undefined && dto.draft === undefined) {
         dto.draft = dto.compile.options.draft;
@@ -577,6 +585,52 @@ export class ClsiService {
           status: pipelineResult.success ? 'success' : 'failed',
           logs: pipelineResult.logs ? [pipelineResult.logs] : [],
         });
+
+        // 7. Continuous Automated History Checkpoint (Overleaf Parity)
+        if (pipelineResult.success && this.prisma) {
+          const lastTime = this.lastAutoSnapshotTimes.get(projectId) || 0;
+          if (Date.now() - lastTime >= 30000) {
+            try {
+              const latest = await this.prisma.manuscriptSnapshot.findFirst({
+                where: { projectId },
+                orderBy: { version: 'desc' },
+                select: { version: true },
+              });
+              const nextVersion = (latest?.version ?? 0) + 1;
+              const filesJson: Record<string, any> = {};
+              for (const [p, content] of Object.entries(mergedFiles)) {
+                const text = typeof content === 'string' ? content : '';
+                filesJson[p] = {
+                  path: p,
+                  lines: text.split('\n'),
+                  content: text,
+                  type: 'doc',
+                  hash: crypto.createHash('sha256').update(text).digest('hex'),
+                };
+              }
+              await this.prisma.manuscriptSnapshot.create({
+                data: {
+                  projectId,
+                  version: nextVersion,
+                  summary: `Compilation milestone (${engine})`,
+                  createdById: _userId || null,
+                  isAutomatic: true,
+                  files: filesJson,
+                },
+              });
+              this.lastAutoSnapshotTimes.set(projectId, Date.now());
+              this.realtimeService?.broadcastSnapshotCreated(projectId, {
+                version: nextVersion,
+                summary: `Compilation milestone (${engine})`,
+                label: null,
+              });
+            } catch (snapErr) {
+              this.logger.debug(
+                `Continuous history auto-snapshot skipped for ${projectId}: ${snapErr}`,
+              );
+            }
+          }
+        }
 
         return pipelineResult;
       },

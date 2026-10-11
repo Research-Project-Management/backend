@@ -1,5 +1,5 @@
 import { Module, OnModuleInit, Optional, Inject } from '@nestjs/common';
-import { CoreModule } from '../../../core/core.module';
+import { CoreModule } from '@/core';
 import { StorageModule } from '../../storage/storage.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import {
@@ -139,8 +139,6 @@ import { ANNOTATION_REPOSITORY_PORT } from './types/annotations.types';
     PdfProvider,
     OcrProvider,
     ExtractionHandler,
-    ExtractionRepository,
-    AttachmentsRepository,
     OcrSandwichPdfService,
     OcrWorkerPoolService,
     OcrPreprocessorService,

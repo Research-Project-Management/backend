@@ -17,6 +17,7 @@ export enum ClsiCompilerEngine {
   PDFLATEX = 'pdflatex',
   XELATEX = 'xelatex',
   LUALATEX = 'lualatex',
+  LATEX = 'latex',
   TECTONIC = 'tectonic',
 }
 
@@ -120,10 +121,15 @@ export class CompileManuscriptDto {
   @IsOptional()
   forceClean?: boolean;
 
-  @ApiPropertyOptional({ description: 'Halt on first LaTeX error' })
+  @ApiPropertyOptional({ description: 'Halt on first LaTeX error (snake_case)' })
   @IsBoolean()
   @IsOptional()
   stop_on_first_error?: boolean;
+
+  @ApiPropertyOptional({ description: 'Halt on first LaTeX error (camelCase)' })
+  @IsBoolean()
+  @IsOptional()
+  stopOnFirstError?: boolean;
 
   @ApiPropertyOptional({
     description: 'Multi-file dictionary: path -> content',

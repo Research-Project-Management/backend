@@ -6,7 +6,6 @@ import {
   BadRequestException,
   Optional,
   Inject,
-  forwardRef,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AnnotationsRepository } from '../repositories/annotations.repository';
@@ -34,7 +33,6 @@ export class AnnotationsService {
   constructor(
     private readonly annotationsRepo: AnnotationsRepository,
     private readonly libraryTx: TransactionService,
-    @Inject(forwardRef(() => AttachmentsService))
     private readonly attachmentsService: AttachmentsService,
     private readonly normalizer: AnnotationNormalizer,
   ) {}

@@ -154,7 +154,7 @@ export class DraftService {
         assigneeIds: Array.isArray(draft.assigneeIds)
           ? (draft.assigneeIds as string[])
           : undefined,
-        metadata: (draft.metadata as Record<string, any>) || undefined,
+        metadata: (draft.metadata as Record<string, unknown>) || undefined,
         projectId: draft.projectId || undefined,
       },
       authorId,

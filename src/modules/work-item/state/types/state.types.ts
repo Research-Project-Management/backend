@@ -20,17 +20,17 @@ export interface WorkItemState {
   id: string;
   name: string;
   color: string;
-  icon?: string;
-  group: StateGroup;
-  description?: string;
+  icon?: string | null;
+  group: StateGroup | string;
+  description?: string | null;
   sequence: number;
   isDefault: boolean;
   // Project.workItemColumns schema
-  title?: string;
-  accentColor?: string;
+  title?: string | null;
+  accentColor?: string | null;
 }
 
-export function getStateDefaultIcon(group: StateGroup): string {
+export function getStateDefaultIcon(group: StateGroup | string): string {
   switch (group) {
     case 'backlog':
       return 'circle-dashed';

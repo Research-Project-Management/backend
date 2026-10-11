@@ -1,6 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { Prisma, ReadStatus } from '@prisma/client';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { TreeEngine } from './tree.engine';
 import {
   SavedSearchCondition,
@@ -506,7 +506,9 @@ export class ConditionEvaluatorEngine {
           return null;
         }
         const targetStatus: ReadStatus =
-          strVal === 'reading' || strVal === 'completed' ? strVal : 'unread';
+          (strVal === 'reading' || strVal === 'completed' || strVal === 'read'
+            ? strVal
+            : 'unread') as ReadStatus;
         if (operator === 'isNot') {
           if (targetStatus === 'unread') {
             return {

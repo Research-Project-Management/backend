@@ -1,5 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { EXTRACTION_FACADE, IExtractionFacade } from '@/modules/library';
 import { EngineService } from '../../engine/engine.service';
@@ -128,10 +128,14 @@ export class DocumentAiIngestionService {
         );
 
         ragDocId =
-          (uploadResult as any)?.id || (uploadResult as any)?.docId || null;
-      } catch (engineErr: any) {
+          typeof uploadResult.id === 'string'
+            ? uploadResult.id
+            : typeof uploadResult.docId === 'string'
+              ? uploadResult.docId
+              : null;
+      } catch (engineErr) {
         this.logger.warn(
-          `Flux-AI vector upload deferred for file ${fileId}: ${engineErr.message}`,
+          `Flux-AI vector upload deferred for file ${fileId}: ${String(engineErr)}`,
         );
       }
 
@@ -167,13 +171,13 @@ export class DocumentAiIngestionService {
       // 8. Propagate ragDocId and metadata to linked Library Attachment & Item if present
       if (isIndexed && ragDocId) {
         try {
-          const attachment = await (this.prisma as any).attachment?.findFirst({
+          const attachment = await this.prisma.attachment.findFirst({
             where: { fileId, deletedAt: null },
             select: { id: true, itemId: true, metadata: true },
           });
           if (attachment) {
-            const attMeta = (attachment.metadata as Record<string, any>) || {};
-            await (this.prisma as any).attachment.update({
+            const attMeta = (attachment.metadata as Record<string, unknown>) || {};
+            await this.prisma.attachment.update({
               where: { id: attachment.id },
               data: {
                 metadata: {
@@ -185,13 +189,13 @@ export class DocumentAiIngestionService {
             });
 
             if (attachment.itemId) {
-              const item = await (this.prisma as any).item?.findUnique({
+              const item = await this.prisma.item.findUnique({
                 where: { id: attachment.itemId },
                 select: { id: true, metadata: true },
               });
               if (item) {
-                const itemMeta = (item.metadata as Record<string, any>) || {};
-                await (this.prisma as any).item.update({
+                const itemMeta = (item.metadata as Record<string, unknown>) || {};
+                await this.prisma.item.update({
                   where: { id: item.id },
                   data: {
                     metadata: {
@@ -204,9 +208,9 @@ export class DocumentAiIngestionService {
               }
             }
           }
-        } catch (propagateErr: any) {
+        } catch (propagateErr) {
           this.logger.debug(
-            `Non-fatal: could not propagate ragDocId to attachment/item: ${propagateErr.message}`,
+            `Non-fatal: could not propagate ragDocId to attachment/item: ${String(propagateErr)}`,
           );
         }
       }

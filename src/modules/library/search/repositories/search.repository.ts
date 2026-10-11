@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { PrismaService } from '../../../../core/database/prisma.service';
-import { RedisCacheService } from '../../../../core/cache/redis.service';
+import { PrismaService } from '@/core';
+import { RedisCacheService } from '@/core';
 import { Prisma } from '@prisma/client';
 
 import { SearchOptions, FacetResult } from '../types/search.types';
@@ -9,7 +9,7 @@ import { buildBaseSearchWhere } from '../utils/search.utils';
 import { SearchSpecificationBuilder } from '../types/search-specification.builder';
 import { TextSearchSpecification } from '../types/item-specifications';
 
-export { SearchOptions, FacetResult };
+export type { SearchOptions, FacetResult };
 
 @Injectable()
 export class SearchRepository implements OnModuleInit {

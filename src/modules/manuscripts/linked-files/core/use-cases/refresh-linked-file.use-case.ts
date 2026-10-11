@@ -17,7 +17,7 @@ import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.serv
 import { CitationsService } from '@/modules/manuscripts/citations/citations.service';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 import { LineArrayEngine } from '@/modules/manuscripts/docstore/core/adapters/engine/line-array.engine';
-import { assertSafeExternalUrl } from '../utils/ssrf-guard.util';
+import { assertSafeExternalUrl } from '../domain/ssrf-guard';
 
 @Injectable()
 export class RefreshLinkedFileUseCase {

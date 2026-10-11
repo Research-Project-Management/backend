@@ -59,7 +59,7 @@ export class AttachmentController {
     @Req() req: FastifyRequest,
     @CurrentUser('id') userId: string,
   ) {
-    if ((req as any)?.isMultipart?.()) {
+    if ((req as FastifyRequest & { isMultipart?: () => boolean }).isMultipart?.()) {
       return this.attachmentService.uploadMultipart(req, userId);
     }
     return this.attachmentService.addAttachment(workItemId, dto, userId);

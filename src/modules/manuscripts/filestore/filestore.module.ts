@@ -5,7 +5,7 @@
 
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { PrismaModule } from '@/core/database/prisma.module';
+import { PrismaModule } from '@/core';
 import { FilestoreController } from './filestore.controller';
 import { FilestoreService } from './filestore.service';
 

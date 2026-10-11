@@ -15,7 +15,7 @@ import { StreamBinaryUseCase } from '@/modules/storage/application/use-cases/str
 import { ListDriveUseCase } from '@/modules/storage/application/use-cases/drive/list-drive.use-case';
 import { UploadDirectUseCase } from '@/modules/storage/application/use-cases/upload/upload-direct.use-case';
 import { StorageRedisCacheService } from '@/modules/storage/infrastructure/cache/storage-redis-cache.service';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { IStorageDriver } from '@/modules/storage/domain/ports/storage-driver.port';
 import { IStorageNodeRepository } from '@/modules/storage/domain/ports/storage-node.repository.port';
 import { IStorageBlobRepository } from '@/modules/storage/domain/ports/storage-blob.repository.port';

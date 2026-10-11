@@ -12,7 +12,7 @@ import {
   FlushStatusVo,
   FlushStatusEnum,
 } from '../../domain/value-objects/flush-status.vo';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 
 interface SerializedInFlightDoc {
   docId: string;

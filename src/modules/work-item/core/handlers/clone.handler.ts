@@ -1,17 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
+import { CoreRepository } from '../core.repository';
 import { IdHandler } from './id.handler';
+import type { WorkItemWithRelations } from '../types/work-item.types';
 
 @Injectable()
 export class CloneHandler {
   constructor(
     private readonly idHandler: IdHandler,
-    private readonly prisma: PrismaService,
+    private readonly repository: CoreRepository,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   async buildCloneData(
-    sourceWorkItem: any,
+    sourceWorkItem: WorkItemWithRelations,
     authorId: string,
     destinationProjectId?: string,
   ) {
@@ -20,15 +23,20 @@ export class CloneHandler {
 
     let targetColumnId = sourceWorkItem.columnId;
     if (!isSameProject) {
-      const sourceState = await this.prisma.workItemState.findUnique({
-        where: { id: sourceWorkItem.columnId },
-        select: { group: true, name: true },
-      });
+      const sourceState = this.repository?.findStateWithGroup
+        ? await this.repository.findStateWithGroup(sourceWorkItem.columnId)
+        : await this.prisma?.workItemState.findUnique({
+            where: { id: sourceWorkItem.columnId },
+            select: { group: true, name: true },
+          });
 
-      const targetStates = await this.prisma.workItemState.findMany({
-        where: { projectId: targetProjectId },
-        orderBy: { sequence: 'asc' },
-      });
+      const targetStates =
+        (this.repository?.findProjectStates
+          ? await this.repository.findProjectStates(targetProjectId)
+          : await this.prisma?.workItemState.findMany({
+              where: { projectId: targetProjectId },
+              orderBy: { sequence: 'asc' },
+            })) || [];
 
       const matchedState =
         targetStates.find(
@@ -52,10 +60,12 @@ export class CloneHandler {
 
     let isCompleted = sourceWorkItem.completed;
     if (!isSameProject && targetColumnId) {
-      const stateObj = await this.prisma.workItemState.findUnique({
-        where: { id: targetColumnId },
-        select: { group: true },
-      });
+      const stateObj = this.repository?.findStateWithGroup
+        ? await this.repository.findStateWithGroup(targetColumnId)
+        : await this.prisma?.workItemState.findUnique({
+            where: { id: targetColumnId },
+            select: { group: true },
+          });
       if (stateObj) {
         isCompleted = stateObj.group === 'completed';
       }
@@ -63,7 +73,7 @@ export class CloneHandler {
 
     const cloneData: Prisma.WorkItemUncheckedCreateInput = {
       title: `${sourceWorkItem.title} (Copy)`,
-      content: sourceWorkItem.content || sourceWorkItem.description || '',
+      content: sourceWorkItem.content ?? '',
       columnId: targetColumnId,
       rank: (sourceWorkItem.rank ?? 0) + 1,
       priority: sourceWorkItem.priority,

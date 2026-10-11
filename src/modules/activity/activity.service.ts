@@ -8,7 +8,7 @@ import { ActivityRepository } from './activity.repository';
 import { DomainActivityEvent } from './events/activity.events';
 import { EntityType } from '@prisma/client';
 import { RecentItemResponse } from './dto/activity.dto';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { ACTIVITY_REDIS_KEYS } from './constants/redis-keys.constant';
 
 function formatDuration(ms: number): string {
@@ -347,7 +347,7 @@ export class ActivityService {
       throw new NotFoundException(`Work item '${workItemId}' not found`);
     }
 
-    const states = (workItem.project as any)?.states || [];
+    const states = workItem.project?.states || [];
 
     // Find state transition events in chronological order
     const events = await this.activityRepo.findWorkItemActivityEvents(
@@ -544,7 +544,7 @@ export class ActivityService {
       this.activityRepo.findWorkItemWithProject(workItemId),
     ]);
 
-    const states = (workItem as any)?.project?.states || [];
+    const states = workItem?.project?.states || [];
 
     const unifiedItems: Array<{
       id: string;
@@ -707,8 +707,8 @@ export class ActivityService {
       const workItemIds = uniqueTargets
         .filter(
           (target) =>
-            (target.entityType as any) === 'work_item' ||
-            (target.entityType as any) === 'item',
+            (target.entityType as string) === 'work_item' ||
+            (target.entityType as string) === 'item',
         )
         .map((target) => target.entityId);
       const paperIds = uniqueTargets

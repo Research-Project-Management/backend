@@ -3,7 +3,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { StorageNode } from '../../domain/entities/storage-node.entity';
 import { FileScope } from '../../domain/value-objects/file-scope.vo';
 import { IStorageNodeRepository } from '../../domain/ports/storage-node.repository.port';

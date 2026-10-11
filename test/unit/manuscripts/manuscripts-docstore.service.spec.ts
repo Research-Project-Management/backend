@@ -15,7 +15,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { GetDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/get-doc.use-case';
 import { PeekDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/peek-doc.use-case';
 import { UpdateDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/update-doc.use-case';

@@ -36,7 +36,7 @@ export interface LinkedWorkItemSummary {
     identifier: string | null;
     title: string;
     columnId: string;
-    state?: any;
+    state?: WorkItemState | null;
     priority: WorkItemPriority;
     projectId: string;
     createdAt: Date;
@@ -160,6 +160,6 @@ export class WorkItemFacade implements IWorkItemFacade {
 
 export {
   DEFAULT_WORK_ITEM_STATES,
-  WorkItemState,
+  type WorkItemState,
 } from './state/types/state.types';
-export { WORK_ITEM_REDIS_KEYS } from './core/constants/redis-keys.constant';
+export { WORK_ITEM_REDIS_KEYS } from './common/constants/redis-keys.constant';

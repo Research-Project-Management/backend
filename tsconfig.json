@@ -19,6 +19,7 @@
     "incremental": true,
     "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo",
     "skipLibCheck": true,
+    "isolatedModules": true,
     "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,

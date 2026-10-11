@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import { VersionMismatchException } from '../../shared-kernel/core/errors/version-mismatch.exception';
 import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
 import { CreateNoteData, UpdateNoteData } from '../types/notes.types';
 
-export { CreateNoteData, UpdateNoteData };
+export type { CreateNoteData, UpdateNoteData };
 
 const isUuid = (val: unknown): val is string =>
   typeof val === 'string' && isUUID(val);

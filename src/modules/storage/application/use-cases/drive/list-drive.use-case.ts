@@ -31,31 +31,18 @@ export class ListDriveUseCase {
       Boolean(filter.sortBy);
 
     if (!isFilterActive) {
-      if (typeof (this.cache as any).wrapFolderListing === 'function') {
-        const cached = await (this.cache as any).wrapFolderListing(
-          scopeKey,
-          filter.parentId,
-          () => this.nodeRepo.list(filter),
-          120, // 2 minutes TTL
-        );
-        return {
-          nodes: cached.nodes.map((n: any) =>
-            n instanceof StorageNode ? n : new StorageNode(n),
-          ),
-          total: cached.total,
-        };
-      }
-
-      const cached = await this.cache.getFolderListing<{
-        nodes: any[];
-        total: number;
-      }>(scopeKey, filter.parentId);
-      if (cached) {
-        return {
-          nodes: cached.nodes.map((n) => new StorageNode(n)),
-          total: cached.total,
-        };
-      }
+      const cached = await this.cache.wrapFolderListing(
+        scopeKey,
+        filter.parentId,
+        () => this.nodeRepo.list(filter),
+        120, // 2 minutes TTL
+      );
+      return {
+        nodes: cached.nodes.map((n) =>
+          n instanceof StorageNode ? n : new StorageNode(n),
+        ),
+        total: cached.total,
+      };
     }
 
     const result = await this.nodeRepo.list(filter);

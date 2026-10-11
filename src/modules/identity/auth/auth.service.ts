@@ -21,8 +21,8 @@ import { AuthRepository } from './auth.repository';
 import { UserService } from '../user/user.service';
 import { AuditService } from '../audit/audit.service';
 import { AUDIT_ACTIONS } from '../audit/types/audit.type';
-import { RedisCacheService } from '@/core/cache/redis.service';
-import { PrismaService } from '@/core/database/prisma.service';
+import { RedisCacheService } from '@/core';
+import { PrismaService } from '@/core';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import {
@@ -99,17 +99,25 @@ export class AuthService {
   ): UserSummaryResponseDto | null;
   formatUser(
     user:
-      | (User & { profile?: { name: string; avatar: string | null } | null })
+      | (User & {
+          profile?: { name?: string | null; avatar?: string | null } | null;
+          name?: string | null;
+          avatar?: string | null;
+        })
       | null
       | undefined,
   ): UserSummaryResponseDto | null {
     if (!user) return null;
-    const { password: _password, profile, ...rest } = user as any;
+    const { password: _password, profile, ...rest } = user;
     return {
-      ...rest,
-      name: profile?.name ?? (user as any).name ?? 'User',
-      avatar: profile?.avatar ?? (user as any).avatar ?? null,
+      id: rest.id,
+      email: rest.email,
+      name: profile?.name ?? user.name ?? 'User',
+      avatar: profile?.avatar ?? user.avatar ?? null,
+      status: rest.status,
       isVerified: user.status === 'active',
+      createdAt: rest.createdAt,
+      updatedAt: rest.updatedAt,
     };
   }
 
@@ -149,13 +157,14 @@ export class AuthService {
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
         secret: accessTokenSecret,
-        expiresIn: (this.configService.get<string>('JWT_EXPIRES_IN') ||
-          '1h') as any,
+        expiresIn: ((this.configService.get<string>('JWT_EXPIRES_IN') ||
+          '1h') as `${number}${'s' | 'm' | 'h' | 'd'}` | number),
       }),
       this.jwtService.signAsync(payload, {
         secret: refreshTokenSecret,
-        expiresIn: (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
-          '30d') as any,
+        expiresIn: ((this.configService.get<string>(
+          'JWT_REFRESH_EXPIRES_IN',
+        ) || '30d') as `${number}${'s' | 'm' | 'h' | 'd'}` | number),
       }),
     ]);
 

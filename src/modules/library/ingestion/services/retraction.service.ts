@@ -17,6 +17,8 @@ import {
 import {
   RetractionCheckResult,
   RetractionStats,
+  RetractionDetails,
+  RetractionNature,
 } from '../types/retraction.types';
 
 @Injectable()
@@ -98,11 +100,19 @@ export class RetractionService {
       itemId,
       isRetracted: Boolean(meta.isRetracted),
       status: 'unknown',
-      nature: meta.retractionNature ?? undefined,
-      details: meta.retractionDetails || undefined,
-      checkedAt: meta.retractionCheckedAt
-        ? new Date(meta.retractionCheckedAt)
-        : now,
+      nature:
+        typeof meta.retractionNature === 'string'
+          ? (meta.retractionNature as RetractionNature)
+          : undefined,
+      details:
+        meta.retractionDetails && typeof meta.retractionDetails === 'object'
+          ? (meta.retractionDetails as RetractionDetails)
+          : undefined,
+      checkedAt:
+        typeof meta.retractionCheckedAt === 'string' ||
+        typeof meta.retractionCheckedAt === 'number'
+          ? new Date(meta.retractionCheckedAt)
+          : now,
     };
   }
 

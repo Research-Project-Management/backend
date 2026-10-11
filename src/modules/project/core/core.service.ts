@@ -7,9 +7,9 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CoreRepository } from './core.repository';
-import { Role, EntityType } from '@prisma/client';
+import { Role, EntityType, Prisma } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { CACHE_KEYS, CACHE_TTL_SECONDS } from './constants/cache.constant';
 import { CreateProjectDto } from './dto/create.dto';
 import { UpdateProjectDto } from './dto/update.dto';
@@ -22,10 +22,9 @@ import {
   ProjectPermissions,
 } from './types/project.type';
 import { calculateProjectPermissions } from './utils/permission.util';
-import { FavoriteRepository } from '../favorite/favorite.repository';
-import { LabelRepository } from '../label/label.repository';
+import { FavoriteService } from '../favorite/favorite.service';
+import { LabelService } from '../label/label.service';
 import { deriveProjectPrefix } from './utils/identifier.util';
-import { PrismaService } from '@/core/database/prisma.service';
 
 export const ALLOWED_PROJECT_MODULES = new Set([
   'overview',
@@ -52,9 +51,8 @@ export function sanitizeModules(modules?: string[]): string[] {
 export class CoreService {
   constructor(
     private readonly projectRepo: CoreRepository,
-    private readonly favoriteRepo: FavoriteRepository,
-    private readonly labelRepo: LabelRepository,
-    private readonly prisma: PrismaService,
+    private readonly favoriteService: FavoriteService,
+    private readonly labelService: LabelService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
@@ -115,7 +113,7 @@ export class CoreService {
     }
 
     // Batch check favorites for this user
-    const favoriteSet = await this.favoriteRepo.batchCheckFavorites(
+    const favoriteSet = await this.favoriteService.batchCheckFavorites(
       projects.map((p) => p.id),
       userId,
     );
@@ -194,7 +192,10 @@ export class CoreService {
       ? await this.cache.wrap(cacheKey, projectFetch, CACHE_TTL_SECONDS.DETAIL)
       : await projectFetch();
 
-    const isFavorite = await this.favoriteRepo.isFavorite(projectId, userId);
+    const isFavorite = await this.favoriteService.isProjectFavorite(
+      projectId,
+      userId,
+    );
     const yourRole = this.resolveUserRoleInProject(project, userId);
     const permissions = calculateProjectPermissions(yourRole, project.isActive);
 
@@ -341,7 +342,11 @@ export class CoreService {
 
     // Handle label assignments replacement if provided
     if (dto.labelIds !== undefined) {
-      await this.labelRepo.replaceProjectLabels(projectId, dto.labelIds);
+      await this.labelService.replaceProjectLabels(
+        projectId,
+        dto.labelIds,
+        actorId,
+      );
     }
 
     const project = await this.projectRepo.updateProject(projectId, {
@@ -366,15 +371,15 @@ export class CoreService {
         modules: sanitizeModules(dto.modules),
       }),
       ...(dto.settings !== undefined && {
-        settings: dto.settings as any,
+        settings: dto.settings as Prisma.InputJsonValue,
       }),
     });
 
     if (dto.isFavorite !== undefined && actorId) {
       if (dto.isFavorite) {
-        await this.favoriteRepo.addFavorite(projectId, actorId);
+        await this.favoriteService.addFavorite(projectId, actorId);
       } else {
-        await this.favoriteRepo.removeFavorite(projectId, actorId);
+        await this.favoriteService.removeFavorite(projectId, actorId);
       }
     }
 
@@ -639,107 +644,12 @@ export class CoreService {
       identifier = `${baseIdentifier}${suffix++}`;
     }
 
-    // 2. Create new project
-    const newProject = await this.prisma.project.create({
-      data: {
-        name: `${source.name} (Copy)`,
-        identifier,
-        description: source.description ?? '',
-        avatar: source.avatar ?? undefined,
-        coverImage: source.coverImage ?? undefined,
-        modules: source.modules ? (source.modules as any) : undefined,
-        createdById: userId,
-      },
-    });
-
-    // 3. Add creator as owner member
-    await this.prisma.projectMember.create({
-      data: { projectId: newProject.id, userId, role: 'owner' },
-    });
-
-    // 4. Clone ProjectStates
-    const stateIdMap = new Map<string, string>();
-    for (const state of source.projectStates) {
-      const newState = await this.prisma.projectState.create({
-        data: {
-          projectId: newProject.id,
-          name: state.name,
-          color: state.color,
-          description: state.description ?? '',
-          sequence: state.sequence,
-          isDefault: state.isDefault,
-        },
-      });
-      stateIdMap.set(state.id, newState.id);
-    }
-
-    // 5. Clone Manuscript Documents (map oldDocId -> newDocId)
-    const docIdMap = new Map<string, string>();
-    if (source.manuscriptDocs && source.manuscriptDocs.length > 0) {
-      for (const doc of source.manuscriptDocs) {
-        const newDoc = await this.prisma.manuscriptDoc.create({
-          data: {
-            projectId: newProject.id,
-            path: doc.path,
-            lines: (doc.lines ?? []) as any,
-            rev: 0,
-            version: 1,
-            ranges: (doc.ranges ?? {}) as any,
-            hash: doc.hash,
-            sizeBytes: doc.sizeBytes,
-          },
-        });
-        docIdMap.set(doc.id, newDoc.id);
-      }
-    }
-
-    // 6. Clone Manuscript Files (map oldFileId -> newFileId, reusing CAS blob storageKey)
-    const fileIdMap = new Map<string, string>();
-    const manuscriptFiles = (source as any).manuscriptFiles || [];
-    for (const file of manuscriptFiles) {
-      const newFile = await this.prisma.manuscriptFile.create({
-        data: {
-          projectId: newProject.id,
-          name: file.name,
-          mimeType: file.mimeType,
-          sizeBytes: file.sizeBytes,
-          hash: file.hash,
-          storageKey: file.storageKey,
-          bucketName: file.bucketName,
-          rev: 0,
-        },
-      });
-      fileIdMap.set(file.id, newFile.id);
-    }
-
-    // 7. Clone Manuscript Nodes (file tree hierarchy)
-    const nodeIdMap = new Map<string, string>();
-    const manuscriptNodes = (source as any).manuscriptNodes || [];
-    for (const node of manuscriptNodes) {
-      const newParentId = node.parentId
-        ? nodeIdMap.get(node.parentId) || null
-        : null;
-      const newDocId = node.docId ? docIdMap.get(node.docId) || null : null;
-      const newFileId = node.fileId ? fileIdMap.get(node.fileId) || null : null;
-
-      const newNode = await this.prisma.manuscriptNode.create({
-        data: {
-          projectId: newProject.id,
-          parentId: newParentId,
-          type: node.type,
-          name: node.name,
-          path: node.path,
-          depth: node.depth,
-          docId: newDocId,
-          fileId: newFileId,
-          isRootDoc: node.isRootDoc,
-          sizeBytes: node.sizeBytes,
-          hash: node.hash,
-          sortOrder: node.sortOrder,
-        },
-      });
-      nodeIdMap.set(node.id, newNode.id);
-    }
+    // 2. Clone project atomically in repository
+    const newProject = await this.projectRepo.duplicateProject(
+      source,
+      userId,
+      identifier,
+    );
 
     await this.invalidateProjectCache(newProject.id, [userId]);
 
@@ -754,22 +664,19 @@ export class CoreService {
     userId: string,
   ): Promise<{ projects: EnrichedProject[] }> {
     const projects = await this.projectRepo.findTrashedProjectsByUser(userId);
-    const enriched: EnrichedProject[] = projects.map((p: any) => ({
-      ...p,
-      yourRole:
+    const enriched: EnrichedProject[] = projects.map((p) => {
+      const yourRole =
         p.createdById === userId
           ? Role.owner
-          : (p.members?.find((m: any) => m.userId === userId)?.role ??
-            Role.reviewer),
-      permissions: calculateProjectPermissions(
-        p.createdById === userId
-          ? Role.owner
-          : (p.members?.find((m: any) => m.userId === userId)?.role ??
-              Role.reviewer),
-        p.isActive,
-      ),
-      projectLabelsList: p.labels?.map((l: any) => l.label) || [],
-    }));
+          : ((p.members?.find((m) => m.userId === userId)?.role as Role) ??
+            Role.reviewer);
+      return {
+        ...p,
+        yourRole,
+        permissions: calculateProjectPermissions(yourRole, p.isActive),
+        projectLabelsList: p.labels?.map((l) => l.label) || [],
+      };
+    });
     return { projects: enriched };
   }
 

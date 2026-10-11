@@ -1,9 +1,10 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { CoreRepository } from '../core.repository';
+import { PrismaService } from '@/core';
+import { RedisCacheService } from '@/core';
 import { isUUID } from 'class-validator';
 import { deriveProjectIdentifierPrefix } from '../utils/work-item.util';
-import { WORK_ITEM_REDIS_KEYS } from '../constants/redis-keys.constant';
+import { WORK_ITEM_REDIS_KEYS } from '../../common/constants/redis-keys.constant';
 
 export interface NextIdentifierResult {
   identifier: string;
@@ -15,8 +16,9 @@ export class IdHandler {
   private readonly logger = new Logger(IdHandler.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repository: CoreRepository,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   async nextIdentifier(projectId: string): Promise<NextIdentifierResult> {
@@ -30,6 +32,10 @@ export class IdHandler {
   }
 
   private async getProjectPrefix(projectId: string): Promise<string> {
+    if (this.repository?.findProjectPrefix) {
+      return this.repository.findProjectPrefix(projectId);
+    }
+
     const where = isUUID(projectId)
       ? { id: projectId, deletedAt: null }
       : {
@@ -37,7 +43,7 @@ export class IdHandler {
           deletedAt: null,
         };
 
-    const project = await this.prisma.project
+    const project = await this.prisma?.project
       .findFirst({
         where,
         select: { identifier: true, name: true },
@@ -72,7 +78,11 @@ export class IdHandler {
   }
 
   private async getMaxSequenceFromDb(projectId: string): Promise<number> {
-    const lastWorkItem = await this.prisma.workItem.findFirst({
+    if (this.repository?.getMaxSequence) {
+      return this.repository.getMaxSequence(projectId);
+    }
+
+    const lastWorkItem = await this.prisma?.workItem.findFirst({
       where: { projectId },
       orderBy: { sequenceNumber: 'desc' },
       select: { sequenceNumber: true },
@@ -82,7 +92,7 @@ export class IdHandler {
       return lastWorkItem.sequenceNumber;
     }
 
-    const project = await this.prisma.project
+    const project = await this.prisma?.project
       .findUnique({
         where: { id: projectId },
         select: { workItemSequence: true },

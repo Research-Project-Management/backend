@@ -9,7 +9,7 @@ import { PresenceSession } from '../../domain/entities/presence-session.entity';
 import { UserPresenceVo } from '../../domain/value-objects/user-presence.vo';
 import { CursorPositionVo } from '../../domain/value-objects/cursor-position.vo';
 import { InMemoryRoomManagerAdapter } from './in-memory-room-manager.adapter';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 
 @Injectable()
 export class RedisRoomManagerAdapter extends IRoomManagerPort {

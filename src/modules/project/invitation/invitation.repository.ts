@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Role, InvitationStatus, Prisma } from '@prisma/client';
-import { isUuid } from '@/core/utils/uuid.util';
+import { isUuid } from '@/core';
 
 const USER_SELECT = {
   id: true,
@@ -301,7 +301,7 @@ export class InvitationRepository {
         avatar: string | null;
         description: string | null;
         is_active: boolean;
-        settings: any;
+        settings: Record<string, unknown> | null;
       }>
     >`
       SELECT id, name, identifier, avatar, description, is_active, settings

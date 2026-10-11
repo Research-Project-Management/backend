@@ -8,12 +8,17 @@ import { ITrackChangesRepositoryPort } from '../ports/track-changes-repository.p
 import { AcceptChangeUseCase } from './accept-change.use-case';
 import { RejectChangeUseCase } from './reject-change.use-case';
 
-export type BatchAction = 'accept_all' | 'reject_all';
+export type BatchAction =
+  | 'accept_all'
+  | 'reject_all'
+  | 'accept_selected'
+  | 'reject_selected';
 
 export interface BatchResolveInput {
   projectId: string;
   docId: string;
   action: BatchAction;
+  changeIds?: string[];
   userId?: string | null;
 }
 
@@ -31,7 +36,7 @@ export class BatchResolveChangesUseCase {
   ) {}
 
   public async execute(input: BatchResolveInput): Promise<BatchResolveOutput> {
-    const { projectId, docId, action, userId } = input;
+    const { projectId, docId, action, changeIds, userId } = input;
 
     // Fetch all pending changes for this doc
     const pendingChanges = await this.repository.listChangesByDoc(
@@ -40,8 +45,13 @@ export class BatchResolveChangesUseCase {
       'pending',
     );
 
-    if (action === 'accept_all') {
-      for (const change of pendingChanges) {
+    const targetChanges =
+      changeIds && changeIds.length > 0
+        ? pendingChanges.filter((c) => changeIds.includes(c.id))
+        : pendingChanges;
+
+    if (action === 'accept_all' || action === 'accept_selected') {
+      for (const change of targetChanges) {
         await this.acceptChangeUseCase.execute({
           projectId,
           docId,
@@ -51,7 +61,7 @@ export class BatchResolveChangesUseCase {
       }
     } else {
       // Reject in reverse order to preserve line indices
-      const reversed = [...pendingChanges].reverse();
+      const reversed = [...targetChanges].reverse();
       for (const change of reversed) {
         await this.rejectChangeUseCase.execute({
           projectId,
@@ -63,7 +73,7 @@ export class BatchResolveChangesUseCase {
     }
 
     return {
-      resolvedCount: pendingChanges.length,
+      resolvedCount: targetChanges.length,
       action,
     };
   }

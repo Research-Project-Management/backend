@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { isUUID } from 'class-validator';
 import { DomainActivityEvent } from './events/activity.events';
 import { EntityType, ActivityEvent, Prisma } from '@prisma/client';

@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { Role, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { MemberRepository } from './member.repository';

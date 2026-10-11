@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { isUUID } from 'class-validator';
 import { Prisma, Sticky } from '@prisma/client';
 import {

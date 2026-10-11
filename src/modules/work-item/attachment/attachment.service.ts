@@ -7,11 +7,11 @@ import {
   Inject,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { FastifyRequest } from 'fastify';
+import type { FastifyRequest } from 'fastify';
 import { AttachmentRepository } from './attachment.repository';
 import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import {
   AddAttachmentDto,
   AttachPageDto,
@@ -24,8 +24,80 @@ import { PresignAttachmentDto } from './dto/presign-attachment.dto';
 import { QueryAttachmentDto } from './dto/query-attachment.dto';
 import { PresignedAttachmentResponse } from './types/attachment.types';
 import { EntityType } from '@prisma/client';
-import { isUuid } from '@/core/utils/uuid.util';
+import { isUuid } from '@/core';
 import { formatWorkItem } from '../core/utils/work-item.util';
+
+
+
+interface AttachmentMetadata {
+  pageId?: string;
+  paperId?: string;
+  fileId?: string;
+  category?: string;
+  title?: string;
+  slug?: string;
+  doi?: string;
+  citationKey?: string;
+  [key: string]: unknown;
+}
+
+interface FormattedAttachmentRecord {
+  id: string;
+  filename?: string | null;
+  url: string;
+  size?: number | null;
+  mimeType?: string | null;
+  metadata?: unknown;
+  createdAt?: Date | string | null;
+  [key: string]: unknown;
+}
+
+export interface FormattedPageAttachment {
+  id: string;
+  pageId: string;
+  title: string;
+  slug: string | null;
+  addedAt: string;
+}
+
+export interface FormattedPaperAttachment {
+  id: string;
+  paperId: string;
+  title: string;
+  doi: string | null;
+  citationKey: string | null;
+  addedAt: string;
+}
+
+export interface FormattedLinkAttachment {
+  id: string;
+  title: string;
+  url: string;
+  addedAt: string;
+}
+
+export interface FormattedFileAttachment {
+  id: string;
+  name: string;
+  url: string;
+  size?: string;
+  type?: string | null;
+  createdAt: string;
+  uploadedAt: string;
+}
+
+function getAttachmentMeta(
+  attachment: { metadata?: unknown } | null | undefined,
+): AttachmentMetadata {
+  if (
+    attachment?.metadata &&
+    typeof attachment.metadata === 'object' &&
+    !Array.isArray(attachment.metadata)
+  ) {
+    return attachment.metadata as AttachmentMetadata;
+  }
+  return {};
+}
 
 @Injectable()
 export class AttachmentService {
@@ -42,19 +114,26 @@ export class AttachmentService {
   ) {}
 
   private async findWorkItem(workItemId: string) {
-    if (isUuid(workItemId) || !this.prismaService.workItem?.findFirst) {
-      return this.prismaService.workItem.findUnique({
-        where: { id: workItemId },
+    if (this.repository.findWorkItem) {
+      const found = await this.repository.findWorkItem(workItemId);
+      if (found) return found;
+    }
+    if (this.prismaService) {
+      if (isUuid(workItemId) || !this.prismaService.workItem?.findFirst) {
+        return this.prismaService.workItem?.findUnique({
+          where: { id: workItemId },
+          select: { id: true, projectId: true },
+        });
+      }
+      return this.prismaService.workItem?.findFirst({
+        where: {
+          identifier: { equals: workItemId, mode: 'insensitive' },
+          deletedAt: null,
+        },
         select: { id: true, projectId: true },
       });
     }
-    return this.prismaService.workItem.findFirst({
-      where: {
-        identifier: { equals: workItemId, mode: 'insensitive' },
-        deletedAt: null,
-      },
-      select: { id: true, projectId: true },
-    });
+    return null;
   }
 
   /**
@@ -87,9 +166,10 @@ export class AttachmentService {
           entityType: dto.entityType,
           entityId: dto.entityId,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `storagePort.getPresignedUploadUrl failed, falling back to r2Service: ${err?.message}`,
+          `storagePort.getPresignedUploadUrl failed, falling back to r2Service: ${errorMsg}`,
         );
       }
     }
@@ -119,12 +199,11 @@ export class AttachmentService {
    * Direct multipart file upload streaming into storage and recording metadata.
    */
   async uploadMultipart(req: FastifyRequest, authorId: string) {
-    const fastifyReq = req as any;
-    if (!fastifyReq.isMultipart?.()) {
+    if (!req.isMultipart?.()) {
       throw new BadRequestException('Content-Type must be multipart/form-data');
     }
 
-    const parts = fastifyReq.parts();
+    const parts = req.parts();
     let buffer: Buffer | null = null;
     let filename = 'attachment';
     let mimeType = 'application/octet-stream';
@@ -147,8 +226,11 @@ export class AttachmentService {
     }
 
     const rawEntityType = fields.entityType || 'work_item';
+    const params = req.params as
+      | Record<string, string | undefined>
+      | undefined;
     const entityId =
-      fields.entityId || fastifyReq.params?.workItemId || fastifyReq.params?.id;
+      fields.entityId || params?.workItemId || params?.id;
     if (!entityId) {
       throw new BadRequestException(
         'entityId is required in multipart form data or URL parameter',
@@ -260,14 +342,14 @@ export class AttachmentService {
     return attachment;
   }
 
-  private formatAttachments(records: any[]) {
-    const pages: any[] = [];
-    const papers: any[] = [];
-    const files: any[] = [];
-    const links: any[] = [];
+  private formatAttachments(records: FormattedAttachmentRecord[]) {
+    const pages: FormattedPageAttachment[] = [];
+    const papers: FormattedPaperAttachment[] = [];
+    const files: FormattedFileAttachment[] = [];
+    const links: FormattedLinkAttachment[] = [];
 
     for (const r of records) {
-      const meta = (r.metadata as Record<string, any>) || {};
+      const meta = getAttachmentMeta(r);
       const category =
         meta.category ||
         (r.mimeType === 'application/x-page'
@@ -282,7 +364,7 @@ export class AttachmentService {
         pages.push({
           id: r.id,
           pageId: meta.pageId || r.id,
-          title: meta.title || r.filename,
+          title: meta.title || r.filename || 'Untitled Page',
           slug: meta.slug || null,
           addedAt: r.createdAt
             ? new Date(r.createdAt).toISOString()
@@ -292,7 +374,7 @@ export class AttachmentService {
         papers.push({
           id: r.id,
           paperId: meta.paperId || r.id,
-          title: meta.title || r.filename,
+          title: meta.title || r.filename || 'Untitled Paper',
           doi: meta.doi || null,
           citationKey: meta.citationKey || null,
           addedAt: r.createdAt
@@ -302,7 +384,7 @@ export class AttachmentService {
       } else if (category === 'link') {
         links.push({
           id: r.id,
-          title: meta.title || r.filename,
+          title: meta.title || r.filename || r.url,
           url: r.url,
           addedAt: r.createdAt
             ? new Date(r.createdAt).toISOString()
@@ -311,7 +393,7 @@ export class AttachmentService {
       } else {
         files.push({
           id: r.id,
-          name: r.filename,
+          name: r.filename || 'Unnamed File',
           url: r.url,
           size: r.size ? `${Math.round(r.size / 1024)} KB` : undefined,
           type: r.mimeType,
@@ -333,49 +415,54 @@ export class AttachmentService {
     if (!basic) {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
-    const workItem = await this.prismaService.workItem.findUnique({
-      where: { id: basic.id },
-      include: {
-        assignee: {
-          select: {
-            id: true,
-            email: true,
-            profile: {
-              select: {
-                name: true,
-                avatar: true,
-              },
-            },
-          },
-        },
-        parentWorkItem: { select: { id: true, title: true, identifier: true } },
-        childWorkItems: {
-          select: {
-            id: true,
-            title: true,
-            identifier: true,
-            columnId: true,
-            completed: true,
-            rank: true,
-            assigneeId: true,
-            assignee: {
-              select: {
-                id: true,
-                email: true,
-                profile: {
-                  select: {
-                    name: true,
-                    avatar: true,
-                  },
+    let workItem = null;
+    if (this.repository.findWorkItemWithDetails) {
+      workItem = await this.repository.findWorkItemWithDetails(basic.id);
+    } else if (this.prismaService?.workItem) {
+      workItem = await this.prismaService.workItem.findUnique({
+        where: { id: basic.id },
+        include: {
+          assignee: {
+            select: {
+              id: true,
+              email: true,
+              profile: {
+                select: {
+                  name: true,
+                  avatar: true,
                 },
               },
             },
-            dueDate: true,
           },
+          parentWorkItem: { select: { id: true, title: true, identifier: true } },
+          childWorkItems: {
+            select: {
+              id: true,
+              title: true,
+              identifier: true,
+              columnId: true,
+              completed: true,
+              rank: true,
+              assigneeId: true,
+              assignee: {
+                select: {
+                  id: true,
+                  email: true,
+                  profile: {
+                    select: {
+                      name: true,
+                      avatar: true,
+                    },
+                  },
+                },
+              },
+              dueDate: true,
+            },
+          },
+          project: { select: { id: true } },
         },
-        project: { select: { id: true } },
-      },
-    });
+      });
+    }
     if (!workItem) {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
@@ -501,7 +588,15 @@ export class AttachmentService {
       authorId,
     );
 
-    if (this.prismaService.workItemEntityLink) {
+    if (this.repository.upsertEntityLink) {
+      await this.repository
+        .upsertEntityLink(workItem.id, EntityType.page, pageId, title)
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to link page to work item ${workItem.id}: ${(err as Error).message}`,
+          );
+        });
+    } else if (this.prismaService?.workItemEntityLink) {
       await this.prismaService.workItemEntityLink
         .upsert({
           where: {
@@ -521,7 +616,11 @@ export class AttachmentService {
             description: title,
           },
         })
-        .catch(() => null);
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to link page to work item ${workItem.id}: ${(err as Error).message}`,
+          );
+        });
     }
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
@@ -549,14 +648,22 @@ export class AttachmentService {
       workItem.id,
     );
     const target = records.find(
-      (r) => r.id === pageId || (r.metadata as any)?.pageId === pageId,
+      (r) => r.id === pageId || getAttachmentMeta(r).pageId === pageId,
     );
     if (target) {
       await this.repository.delete(target.id);
     }
 
-    if (this.prismaService.workItemEntityLink) {
-      const resolvedEntityId = (target?.metadata as any)?.pageId || pageId;
+    const resolvedEntityId = getAttachmentMeta(target).pageId || pageId;
+    if (this.repository.deleteEntityLink) {
+      await this.repository
+        .deleteEntityLink(workItem.id, EntityType.page, resolvedEntityId)
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to unlink page from work item ${workItem.id}: ${(err as Error).message}`,
+          );
+        });
+    } else if (this.prismaService?.workItemEntityLink) {
       await this.prismaService.workItemEntityLink
         .deleteMany({
           where: {
@@ -565,7 +672,11 @@ export class AttachmentService {
             entityId: resolvedEntityId,
           },
         })
-        .catch(() => null);
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to unlink page from work item ${workItem.id}: ${(err as Error).message}`,
+          );
+        });
     }
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
@@ -606,7 +717,15 @@ export class AttachmentService {
       authorId,
     );
 
-    if (this.prismaService.workItemEntityLink) {
+    if (this.repository.upsertEntityLink) {
+      await this.repository
+        .upsertEntityLink(workItem.id, EntityType.paper, paperId, title)
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to link paper to work item ${workItem.id}: ${(err as Error).message}`,
+          );
+        });
+    } else if (this.prismaService?.workItemEntityLink) {
       await this.prismaService.workItemEntityLink
         .upsert({
           where: {
@@ -626,7 +745,11 @@ export class AttachmentService {
             description: title,
           },
         })
-        .catch(() => null);
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to link paper to work item ${workItem.id}: ${(err as Error).message}`,
+          );
+        });
     }
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
@@ -656,14 +779,22 @@ export class AttachmentService {
       workItem.id,
     );
     const target = records.find(
-      (r) => r.id === paperId || (r.metadata as any)?.paperId === paperId,
+      (r) => r.id === paperId || getAttachmentMeta(r).paperId === paperId,
     );
     if (target) {
       await this.repository.delete(target.id);
     }
 
-    if (this.prismaService.workItemEntityLink) {
-      const resolvedEntityId = (target?.metadata as any)?.paperId || paperId;
+    const resolvedEntityId = getAttachmentMeta(target).paperId || paperId;
+    if (this.repository.deleteEntityLink) {
+      await this.repository
+        .deleteEntityLink(workItem.id, EntityType.paper, resolvedEntityId)
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to unlink paper from work item ${workItem.id}: ${(err as Error).message}`,
+          );
+        });
+    } else if (this.prismaService?.workItemEntityLink) {
       await this.prismaService.workItemEntityLink
         .deleteMany({
           where: {
@@ -672,7 +803,11 @@ export class AttachmentService {
             entityId: resolvedEntityId,
           },
         })
-        .catch(() => null);
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to unlink paper from work item ${workItem.id}: ${(err as Error).message}`,
+          );
+        });
     }
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
@@ -739,7 +874,7 @@ export class AttachmentService {
     const target = records.find(
       (r) =>
         r.id === fileId ||
-        (r.metadata as any)?.fileId === fileId ||
+        getAttachmentMeta(r).fileId === fileId ||
         (r.url && r.url.includes(fileId)),
     );
 
@@ -815,7 +950,7 @@ export class AttachmentService {
     );
     const linkRecords = records.filter(
       (r) =>
-        (r.metadata as any)?.category === 'link' ||
+        getAttachmentMeta(r).category === 'link' ||
         r.mimeType === 'text/uri-list',
     );
 
@@ -885,23 +1020,25 @@ export class AttachmentService {
       throw new NotFoundException(`Attachment ${id} not found`);
     }
 
-    const metaFileId = (attachment.metadata as any)?.fileId;
+    const metaFileId = getAttachmentMeta(attachment).fileId;
     const urlMatch = attachment.url?.match(/\/api\/files\/([a-zA-Z0-9_-]+)/);
     const fileId = metaFileId || (urlMatch ? urlMatch[1] : undefined);
     if (fileId && this.storagePort?.deleteFile) {
       try {
         await this.storagePort.deleteFile(fileId);
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Failed to delete storage file ${fileId}: ${err?.message}`,
+          `Failed to delete storage file ${fileId}: ${errorMsg}`,
         );
       }
     } else if (attachment.storageKey && this.r2Service) {
       try {
         await this.r2Service.deleteObject(attachment.storageKey);
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Failed to delete storage object ${attachment.storageKey}: ${err.message}`,
+          `Failed to delete storage object ${attachment.storageKey}: ${errorMsg}`,
         );
       }
     }
@@ -922,7 +1059,19 @@ export class AttachmentService {
    * Retrieves all work items linked to a specific entity (e.g. page or paper).
    */
   async getWorkItemsByLinkedEntity(entityType: EntityType, entityId: string) {
-    if (!this.prismaService.workItemEntityLink) {
+    if (this.repository.findLinkedWorkItems) {
+      const links = await this.repository.findLinkedWorkItems(entityType, entityId);
+      return links.map((link) => ({
+        linkId: link.id,
+        entityType: link.entityType,
+        entityId: link.entityId,
+        description: link.description,
+        createdAt: link.createdAt,
+        workItem: link.workItem,
+      }));
+    }
+
+    if (!this.prismaService?.workItemEntityLink) {
       return [];
     }
 

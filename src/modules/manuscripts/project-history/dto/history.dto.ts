@@ -13,6 +13,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { FileDiffVo } from '../core/domain/value-objects/file-diff.vo';
 
 export class CreateSnapshotDto {
   @ApiPropertyOptional({
@@ -71,6 +72,17 @@ export class VersionLabelDto {
   createdAt!: Date;
 }
 
+export class VersionAuthorDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
+
+  @ApiPropertyOptional()
+  avatar?: string;
+}
+
 export class VersionListItemDto {
   @ApiProperty()
   id!: string;
@@ -86,6 +98,9 @@ export class VersionListItemDto {
 
   @ApiPropertyOptional()
   createdById?: string | null;
+
+  @ApiPropertyOptional({ type: VersionAuthorDto })
+  author?: VersionAuthorDto | null;
 
   @ApiProperty()
   isAutomatic!: boolean;
@@ -141,5 +156,5 @@ export class DiffResponseDto {
     description:
       'List of file-level diff results with line hunks and word highlights',
   })
-  files!: any[];
+  files!: FileDiffVo[];
 }

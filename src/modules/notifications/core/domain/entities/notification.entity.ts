@@ -9,7 +9,7 @@ export interface NotificationProps {
   projectId?: string | null;
   docId?: string | null;
   actorId?: string | null;
-  messageOpts?: Record<string, any>;
+  messageOpts?: Record<string, unknown>;
   isRead?: boolean;
   expiresAt?: Date | null;
   createdAt?: Date;
@@ -25,7 +25,7 @@ export class NotificationEntity {
   readonly projectId: string | null;
   readonly docId: string | null;
   readonly actorId: string | null;
-  readonly messageOpts: Record<string, any>;
+  readonly messageOpts: Record<string, unknown>;
   private _isRead: boolean;
   readonly expiresAt: Date | null;
   readonly createdAt: Date;

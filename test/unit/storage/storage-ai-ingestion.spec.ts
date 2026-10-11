@@ -5,7 +5,7 @@ import { FileUploadedEvent } from '@/modules/storage/domain/events/file-uploaded
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { IExtractionFacade } from '@/modules/library/extraction/extraction.facade';
 import { EngineService } from '@/modules/ai/engine/engine.service';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 
 describe('Storage AI RAG Ingestion Pipeline Suite', () => {
   let listener: FileUploadedAiListener;

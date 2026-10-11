@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { CoreModule } from '../../../core/core.module';
+import { CoreModule } from '@/core';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CitationFacade, CITATION_FACADE } from './citation.facade';
 
@@ -14,6 +14,8 @@ import { CslEngineService } from './services/csl-engine.service';
 import { CslRepositoryService } from './services/csl-repository.service';
 import { ExportsService } from './services/exports.service';
 import { PdfBakerService } from './services/pdf-baker.service';
+
+import { FormatCitationUseCase } from './core/use-cases/format-citation.use-case';
 
 // Repositories
 import { ExportsRepository } from './repositories/exports.repository';
@@ -63,6 +65,7 @@ import {
       provide: CITATION_ENGINE_PORT,
       useClass: CslCitationEngineAdapter,
     },
+    FormatCitationUseCase,
     InProcessCatalogGatewayAdapter,
     HttpCatalogGatewayAdapter,
     {
@@ -82,8 +85,8 @@ import {
     CslRepositoryService,
     CitationService,
     ExportsService,
-    ExportsRepository,
     CITATION_ENGINE_PORT,
+    FormatCitationUseCase,
   ],
 })
 export class CitationModule {}

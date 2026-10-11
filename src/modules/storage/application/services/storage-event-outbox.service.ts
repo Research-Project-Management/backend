@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { FileUploadedEvent } from '../../domain/events/file-uploaded.event';
 import { FileDownloadedEvent } from '../../domain/events/file-downloaded.event';
 import { FileTrashedEvent } from '../../domain/events/file-trashed.event';

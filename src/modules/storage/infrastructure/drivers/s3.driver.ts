@@ -368,14 +368,19 @@ export class S3StorageDriver implements IStorageDriver {
         rules: res.Rules.map((r) => ({
           id: r.ID || 'unnamed-rule',
           prefix: r.Filter?.Prefix || '',
-          status: (r.Status as any) || 'Enabled',
+          status: r.Status === 'Disabled' ? 'Disabled' : 'Enabled',
           expirationDays: r.Expiration?.Days,
           abortIncompleteMultipartUploadDays:
             r.AbortIncompleteMultipartUpload?.DaysAfterInitiation,
-          transitions: r.Transitions?.map((t) => ({
-            days: t.Days ?? 0,
-            storageClass: (t.StorageClass as any) || 'STANDARD_IA',
-          })),
+          transitions: r.Transitions?.map((t) => {
+            const sc = t.StorageClass;
+            const validClass: 'STANDARD_IA' | 'GLACIER' | 'DEEP_ARCHIVE' =
+              sc === 'GLACIER' || sc === 'DEEP_ARCHIVE' ? sc : 'STANDARD_IA';
+            return {
+              days: t.Days ?? 0,
+              storageClass: validClass,
+            };
+          }),
         })),
       };
     } catch {

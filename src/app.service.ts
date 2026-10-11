@@ -2,12 +2,12 @@ import { Injectable } from '@nestjs/common';
 
 @Injectable()
 export class AppService {
-  getHealth() {
+  getStatus() {
     return {
       status: 'ok',
-      timestamp: new Date().toISOString(),
-      service: 'research-management-api',
+      service: 'flux-api',
       version: '2.0.0',
+      timestamp: new Date().toISOString(),
     };
   }
 }

@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { WorkItem, Prisma } from '@prisma/client';
 import {
   IRelationRepository,
   WorkItemRelationItem,
 } from './types/relation.types';
-import { isUuid } from '@/core/utils/uuid.util';
+import { isUuid } from '@/core';
 
 @Injectable()
 export class RelationRepository implements IRelationRepository {
@@ -46,7 +46,9 @@ export class RelationRepository implements IRelationRepository {
     });
   }
 
-  async executeTransaction(operations: any[]): Promise<any> {
+  async executeTransaction<T = unknown>(
+    operations: Prisma.PrismaPromise<T>[],
+  ): Promise<T[]> {
     return this.prismaService.$transaction(operations);
   }
 

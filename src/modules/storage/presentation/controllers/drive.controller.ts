@@ -24,7 +24,7 @@ import { STORAGE_NODE_REPOSITORY } from '../../storage.tokens';
 import { Inject } from '@nestjs/common';
 import { StorageNode } from '../../domain/entities/storage-node.entity';
 import { FileScope } from '../../domain/value-objects/file-scope.vo';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { FilePermission } from '@prisma/client';
 import { StorageNodeMapper } from '../../infrastructure/persistence/mappers/storage-node.mapper';
 import { StorageAccessPolicy } from '../../application/policies/storage-access.policy';
@@ -68,7 +68,10 @@ export class DriveController {
       parentId: node.parentId,
       parent: node.parentId,
       url: `/api/files/${encodeURIComponent(node.id)}/content`,
-      thumbnail: (node.metadata as any)?.thumbnail || null,
+      thumbnail:
+        typeof node.metadata?.thumbnail === 'string'
+          ? node.metadata.thumbnail
+          : null,
       metaData: node.metadata || {},
       trashedAt: node.trashedAt ? node.trashedAt.toISOString() : null,
       author: {
@@ -536,15 +539,14 @@ export class DriveController {
       throw new NotFoundException('Node not found');
     }
     const currentMeta = node.metadata || {};
-    const updatedMeta = {
+    const updatedMeta: Record<string, unknown> = {
       ...currentMeta,
       ...(dto.metaData || {}),
       ...(dto.description !== undefined
         ? { description: dto.description }
         : {}),
     };
-    (node as any)._metadata = updatedMeta;
-    (node as any)._updatedAt = new Date();
+    node.updateMetadata(updatedMeta);
     await this.nodeRepo.update(node);
     return this.mapNodeToDto(node);
   }

@@ -4,7 +4,7 @@
  */
 
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '@/core/database/prisma.module';
+import { PrismaModule } from '@/core';
 import { StructureModule } from '../structure/structure.module';
 import { DocstoreModule } from '../docstore/docstore.module';
 import { FilestoreModule } from '../filestore/filestore.module';

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 
 @Injectable()
 export class StorageRedisCacheService {
@@ -35,10 +35,6 @@ export class StorageRedisCacheService {
     factory: () => Promise<T>,
     ttlSeconds = 120,
   ): Promise<T> {
-    const key = this.getTreeKey(scopeKey, parentId);
-    if (typeof (this.redis as any)?.wrap === 'function') {
-      return (this.redis as any).wrap(key, factory, ttlSeconds);
-    }
     const cached = await this.getFolderListing<T>(scopeKey, parentId);
     if (cached !== null && cached !== undefined) return cached;
     const fresh = await factory();

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import {
   IStateRepository,
   StateGroup,
@@ -187,15 +187,19 @@ export class StateRepository implements IStateRepository {
         },
       });
 
-      // 3. Update sequences of remaining states if necessary
-      for (const state of updatedStates) {
-        await transaction.workItemState.updateMany({
-          where: { id: state.id, projectId },
-          data: {
-            sequence: state.sequence,
-            isDefault: state.isDefault,
-          },
-        });
+      // 3. Update sequences of remaining states concurrently inside the transaction
+      if (updatedStates.length > 0) {
+        await Promise.all(
+          updatedStates.map((state) =>
+            transaction.workItemState.updateMany({
+              where: { id: state.id, projectId },
+              data: {
+                sequence: state.sequence,
+                isDefault: state.isDefault,
+              },
+            }),
+          ),
+        );
       }
     });
   }

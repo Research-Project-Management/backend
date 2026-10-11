@@ -25,7 +25,7 @@ import { ListLinkedFilesUseCase } from '@/modules/manuscripts/linked-files/core/
 import {
   assertSafeExternalUrl,
   isPrivateOrReservedIPv4,
-} from '@/modules/manuscripts/linked-files/core/utils/ssrf-guard.util';
+} from '@/modules/manuscripts/linked-files/core/domain/ssrf-guard';
 
 describe('Manuscripts 4 Major Backend Capabilities (Overleaf Parity)', () => {
   // =========================================================================

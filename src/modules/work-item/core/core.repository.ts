@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
-import { isUuid } from '@/core/utils/uuid.util';
+import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '@/core';
+import { isUuid } from '@/core';
 import { Prisma, WorkItem, EntityType, WorkItemPriority } from '@prisma/client';
 import {
   IWorkItemRepository,
@@ -36,8 +36,22 @@ export const BASE_WORK_ITEM_INCLUDE = {
   project: { select: { id: true } },
 } as const;
 
+interface RawAttachmentRecord {
+  id: string;
+  entityId?: string;
+  metadata?: unknown;
+  mimeType?: string | null;
+  filename?: string | null;
+  url?: string | null;
+  size?: number | null;
+  createdAt?: Date | string | null;
+  [key: string]: unknown;
+}
+
 @Injectable()
 export class CoreRepository implements IWorkItemRepository {
+  private readonly logger = new Logger(CoreRepository.name);
+
   constructor(private readonly prismaService: PrismaService) {}
 
   private async executeTx<T>(
@@ -49,24 +63,35 @@ export class CoreRepository implements IWorkItemRepository {
     return fn(this.prismaService);
   }
 
+  private async resolveCanonicalProjectId(
+    projectId: string,
+  ): Promise<string | null> {
+    if (isUuid(projectId)) {
+      return projectId;
+    }
+    const project = await this.prismaService.project
+      .findFirst({
+        where: {
+          identifier: { equals: projectId, mode: 'insensitive' },
+          deletedAt: null,
+        },
+        select: { id: true },
+      })
+      .catch((err) => {
+        this.logger.warn(
+          `Failed to resolve project identifier ${projectId}: ${(err as Error).message}`,
+        );
+        return null;
+      });
+    return project?.id ?? null;
+  }
+
   async findProjectWorkItems(
     projectId: string,
     filter?: string | WorkItemFilterOptions,
   ): Promise<WorkItemWithRelations[]> {
-    let canonicalProjectId = projectId;
-    if (!isUuid(canonicalProjectId)) {
-      const project = await this.prismaService.project
-        .findFirst({
-          where: {
-            identifier: { equals: canonicalProjectId, mode: 'insensitive' },
-            deletedAt: null,
-          },
-          select: { id: true },
-        })
-        .catch(() => null);
-      if (!project) return [];
-      canonicalProjectId = project.id;
-    }
+    const canonicalProjectId = await this.resolveCanonicalProjectId(projectId);
+    if (!canonicalProjectId) return [];
 
     const where: Prisma.WorkItemWhereInput = {
       projectId: canonicalProjectId,
@@ -330,7 +355,7 @@ export class CoreRepository implements IWorkItemRepository {
           },
           orderBy: { createdAt: 'asc' },
         });
-        const attachmentMap = new Map<string, any[]>();
+        const attachmentMap = new Map<string, RawAttachmentRecord[]>();
         for (const att of attachments) {
           const list = attachmentMap.get(att.entityId) || [];
           list.push(att);
@@ -339,7 +364,8 @@ export class CoreRepository implements IWorkItemRepository {
         for (const r of records) {
           const itemAtts = attachmentMap.get(r.id);
           if (itemAtts && itemAtts.length > 0) {
-            (r as any).attachments = this.formatEntityAttachments(itemAtts);
+            (r as WorkItemWithRelations & { attachments?: WorkItemAttachments }).attachments =
+              this.formatEntityAttachments(itemAtts);
           }
         }
       } catch {
@@ -350,17 +376,22 @@ export class CoreRepository implements IWorkItemRepository {
     return records;
   }
 
-  private formatEntityAttachments(records: any[]): WorkItemAttachments {
-    const pages: any[] = [];
-    const papers: any[] = [];
-    const files: any[] = [];
-    const links: any[] = [];
+  private formatEntityAttachments(
+    records: RawAttachmentRecord[],
+  ): WorkItemAttachments {
+    const pages: NonNullable<WorkItemAttachments['pages']> = [];
+    const papers: NonNullable<WorkItemAttachments['papers']> = [];
+    const files: NonNullable<WorkItemAttachments['files']> = [];
+    const links: NonNullable<WorkItemAttachments['links']> = [];
 
     const safeRecords = Array.isArray(records) ? records : [];
     for (const r of safeRecords) {
-      const meta = (r.metadata as Record<string, any>) || {};
+      const meta =
+        r.metadata && typeof r.metadata === 'object' && !Array.isArray(r.metadata)
+          ? (r.metadata as Record<string, unknown>)
+          : {};
       const category =
-        meta.category ||
+        (typeof meta.category === 'string' ? meta.category : undefined) ||
         (r.mimeType === 'application/x-page'
           ? 'page'
           : r.mimeType === 'application/x-paper'
@@ -372,9 +403,8 @@ export class CoreRepository implements IWorkItemRepository {
       if (category === 'page') {
         pages.push({
           id: r.id,
-          pageId: meta.pageId || r.id,
-          title: meta.title || r.filename,
-          slug: meta.slug || null,
+          title: typeof meta.title === 'string' ? meta.title : (r.filename || 'Untitled Page'),
+          slug: typeof meta.slug === 'string' ? meta.slug : null,
           addedAt: r.createdAt
             ? new Date(r.createdAt).toISOString()
             : new Date().toISOString(),
@@ -382,19 +412,17 @@ export class CoreRepository implements IWorkItemRepository {
       } else if (category === 'paper') {
         papers.push({
           id: r.id,
-          paperId: meta.paperId || r.id,
-          title: meta.title || r.filename,
-          doi: meta.doi || null,
-          citationKey: meta.citationKey || null,
+          title: typeof meta.title === 'string' ? meta.title : (r.filename || 'Untitled Paper'),
+          doi: typeof meta.doi === 'string' ? meta.doi : null,
+          citationKey: typeof meta.citationKey === 'string' ? meta.citationKey : null,
           addedAt: r.createdAt
             ? new Date(r.createdAt).toISOString()
             : new Date().toISOString(),
         });
       } else if (category === 'link') {
         links.push({
-          id: r.id,
-          title: meta.title || r.filename,
-          url: r.url,
+          title: typeof meta.title === 'string' ? meta.title : (r.filename || 'Link'),
+          url: r.url || '',
           addedAt: r.createdAt
             ? new Date(r.createdAt).toISOString()
             : new Date().toISOString(),
@@ -402,13 +430,10 @@ export class CoreRepository implements IWorkItemRepository {
       } else {
         files.push({
           id: r.id,
-          name: r.filename,
-          url: r.url,
-          size: r.size ? `${Math.round(r.size / 1024)} KB` : undefined,
-          type: r.mimeType,
-          createdAt: r.createdAt
-            ? new Date(r.createdAt).toISOString()
-            : new Date().toISOString(),
+          name: r.filename || 'file',
+          url: r.url || '',
+          size: typeof r.size === 'number' ? r.size : null,
+          type: r.mimeType || 'application/octet-stream',
           uploadedAt: r.createdAt
             ? new Date(r.createdAt).toISOString()
             : new Date().toISOString(),
@@ -432,22 +457,11 @@ export class CoreRepository implements IWorkItemRepository {
     };
 
     if (projectId) {
-      let canonicalProjectId = projectId;
-      if (!isUuid(canonicalProjectId)) {
-        const project = await this.prismaService.project
-          .findFirst({
-            where: {
-              identifier: { equals: canonicalProjectId, mode: 'insensitive' },
-              deletedAt: null,
-            },
-            select: { id: true },
-          })
-          .catch(() => null);
-        if (project) {
-          canonicalProjectId = project.id;
-        }
+      const canonicalProjectId =
+        await this.resolveCanonicalProjectId(projectId);
+      if (canonicalProjectId) {
+        where.projectId = canonicalProjectId;
       }
-      where.projectId = canonicalProjectId;
     }
 
     return this.prismaService.workItem.findMany({
@@ -503,7 +517,8 @@ export class CoreRepository implements IWorkItemRepository {
           orderBy: { createdAt: 'asc' },
         });
         if (records && records.length > 0) {
-          (item as any).attachments = this.formatEntityAttachments(records);
+          (item as WorkItemWithRelations & { attachments?: WorkItemAttachments }).attachments =
+            this.formatEntityAttachments(records);
         }
       } catch {
         // Graceful fallback
@@ -541,25 +556,32 @@ export class CoreRepository implements IWorkItemRepository {
   async createWorkItem(
     data: Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput,
   ): Promise<WorkItemWithRelations> {
-    const createData = { ...(data as any) };
+    const { columnId, ...restData } = data as (
+      | Prisma.WorkItemCreateInput
+      | Prisma.WorkItemUncheckedCreateInput
+    ) & { columnId?: string };
+    const createData = { ...restData };
     const hasRelationConnect = Boolean(
-      createData.project?.connect ||
-      createData.author?.connect ||
-      createData.assignee?.connect ||
-      createData.parentWorkItem?.connect ||
-      createData.state?.connect,
+      (createData as Prisma.WorkItemCreateInput).project?.connect ||
+      (createData as Prisma.WorkItemCreateInput).author?.connect ||
+      (createData as Prisma.WorkItemCreateInput).assignee?.connect ||
+      (createData as Prisma.WorkItemCreateInput).parentWorkItem?.connect ||
+      (createData as Prisma.WorkItemCreateInput).state?.connect,
     );
 
-    if (createData.columnId && hasRelationConnect) {
-      if (!createData.state) {
-        createData.state = { connect: { id: createData.columnId } };
+    if (columnId && hasRelationConnect) {
+      if (!(createData as Prisma.WorkItemCreateInput).state) {
+        (createData as Prisma.WorkItemCreateInput).state = {
+          connect: { id: columnId },
+        };
       }
-      delete createData.columnId;
+    } else if (columnId) {
+      (createData as Prisma.WorkItemUncheckedCreateInput).columnId = columnId;
     }
 
-    return this.executeTx(async (tx) => {
+    return this.executeTx<WorkItemWithRelations>(async (tx) => {
       const created = await tx.workItem.create({
-        data: createData,
+        data: createData as Prisma.WorkItemCreateInput,
         include: BASE_WORK_ITEM_INCLUDE,
       });
 
@@ -567,7 +589,7 @@ export class CoreRepository implements IWorkItemRepository {
       const assigneeIdsToSync: string[] = [];
       if (created.assigneeId) assigneeIdsToSync.push(created.assigneeId);
       if (Array.isArray(created.assigneeIds)) {
-        created.assigneeIds.forEach((id: any) => {
+        created.assigneeIds.forEach((id: unknown) => {
           if (typeof id === 'string' && id && !assigneeIdsToSync.includes(id)) {
             assigneeIdsToSync.push(id);
           }
@@ -585,74 +607,54 @@ export class CoreRepository implements IWorkItemRepository {
         });
       }
 
-      // Dual-write labels - batched to eliminate N+1 queries
+      // Dual-write labels
       if (
         Array.isArray(created.labels) &&
         created.labels.length > 0 &&
         tx.workItemLabel &&
         tx.workItemLabelAssignment
       ) {
-        const rawLabels: unknown[] = Array.isArray(created.labels)
-          ? (created.labels as unknown[])
-          : [];
-        const uniqueLabelNames: string[] = Array.from(
-          new Set(
-            rawLabels
-              .filter(
-                (l: unknown): l is string =>
-                  typeof l === 'string' && Boolean(l.trim()),
-              )
-              .map((l: string) => l.trim()),
-          ),
-        );
+        const projectLabels = await tx.workItemLabel.findMany({
+          where: { projectId: created.projectId },
+        });
 
-        if (uniqueLabelNames.length > 0) {
-          const existingLabels = await tx.workItemLabel.findMany({
-            where: {
-              projectId: created.projectId,
-              name: { in: uniqueLabelNames, mode: 'insensitive' },
-            },
-          });
+        const labelNameToId = new Map<string, string>();
+        for (const pl of projectLabels) {
+          labelNameToId.set(pl.name.toLowerCase(), pl.id);
+        }
 
-          const existingMap = new Map<string, any>(
-            existingLabels.map((l: any) => [l.name.toLowerCase(), l]),
-          );
-
-          const missingNames: string[] = uniqueLabelNames.filter(
-            (name: string) => !existingMap.has(name.toLowerCase()),
-          );
-
-          if (missingNames.length > 0) {
-            await tx.workItemLabel.createMany({
-              data: missingNames.map((name: string) => ({
-                name,
+        const labelsToAssign: string[] = [];
+        for (const labelName of created.labels) {
+          const lower = labelName.toLowerCase();
+          const existingId = labelNameToId.get(lower);
+          if (existingId) {
+            labelsToAssign.push(existingId);
+          } else {
+            const newLabel = await tx.workItemLabel.create({
+              data: {
                 projectId: created.projectId,
+                name: labelName,
+                color: '#6B7280',
                 createdById: created.authorId,
-              })),
-              skipDuplicates: true,
+              },
             });
+            labelNameToId.set(lower, newLabel.id);
+            labelsToAssign.push(newLabel.id);
           }
+        }
 
-          const allLabels = await tx.workItemLabel.findMany({
-            where: {
-              projectId: created.projectId,
-              name: { in: uniqueLabelNames, mode: 'insensitive' },
-            },
+        if (labelsToAssign.length > 0) {
+          await tx.workItemLabelAssignment.createMany({
+            data: labelsToAssign.map((labelId) => ({
+              workItemId: created.id,
+              labelId,
+            })),
+            skipDuplicates: true,
           });
-
-          if (allLabels.length > 0) {
-            await tx.workItemLabelAssignment.createMany({
-              data: allLabels.map((label: any) => ({
-                workItemId: created.id,
-                labelId: label.id,
-              })),
-              skipDuplicates: true,
-            });
-          }
         }
       }
 
-      return created;
+      return created as unknown as WorkItemWithRelations;
     });
   }
 
@@ -660,40 +662,48 @@ export class CoreRepository implements IWorkItemRepository {
     workItemId: string,
     data: Prisma.WorkItemUpdateInput | Prisma.WorkItemUncheckedUpdateInput,
   ): Promise<WorkItemWithRelations> {
-    const updateData = { ...(data as any) };
+    const { columnId, ...restData } = data as (
+      | Prisma.WorkItemUpdateInput
+      | Prisma.WorkItemUncheckedUpdateInput
+    ) & { columnId?: string; assigneeId?: string };
+    const updateData = { ...restData };
     const hasRelationConnect = Boolean(
-      updateData.assignee?.connect ||
-      updateData.assignee?.disconnect ||
-      updateData.parentWorkItem?.connect ||
-      updateData.parentWorkItem?.disconnect ||
-      updateData.state?.connect,
+      (updateData as Prisma.WorkItemUpdateInput).assignee?.connect ||
+      (updateData as Prisma.WorkItemUpdateInput).assignee?.disconnect ||
+      (updateData as Prisma.WorkItemUpdateInput).parentWorkItem?.connect ||
+      (updateData as Prisma.WorkItemUpdateInput).parentWorkItem?.disconnect ||
+      (updateData as Prisma.WorkItemUpdateInput).state?.connect,
     );
 
-    if (updateData.columnId && hasRelationConnect) {
-      if (!updateData.state) {
-        updateData.state = { connect: { id: updateData.columnId } };
+    if (columnId && hasRelationConnect) {
+      if (!(updateData as Prisma.WorkItemUpdateInput).state) {
+        (updateData as Prisma.WorkItemUpdateInput).state = {
+          connect: { id: columnId },
+        };
       }
-      delete updateData.columnId;
+    } else if (columnId) {
+      (updateData as Prisma.WorkItemUncheckedUpdateInput).columnId = columnId;
     }
 
-    return this.executeTx(async (tx) => {
+    return this.executeTx<WorkItemWithRelations>(async (tx) => {
       const updated = await tx.workItem.update({
         where: { id: workItemId },
-        data: updateData,
+        data: updateData as Prisma.WorkItemUpdateInput,
         include: BASE_WORK_ITEM_INCLUDE,
       });
 
       // Dual-write assignees if updated
+      const rawData = data as Record<string, unknown>;
       if (
-        (updateData.assigneeId !== undefined ||
-          updateData.assigneeIds !== undefined ||
-          updateData.assignee !== undefined) &&
+        (rawData.assigneeId !== undefined ||
+          rawData.assigneeIds !== undefined ||
+          rawData.assignee !== undefined) &&
         tx.workItemAssignee
       ) {
         const assigneeIdsToSync: string[] = [];
         if (updated.assigneeId) assigneeIdsToSync.push(updated.assigneeId);
         if (Array.isArray(updated.assigneeIds)) {
-          updated.assigneeIds.forEach((id: any) => {
+          updated.assigneeIds.forEach((id: unknown) => {
             if (
               typeof id === 'string' &&
               id &&
@@ -753,8 +763,8 @@ export class CoreRepository implements IWorkItemRepository {
             },
           });
 
-          const existingMap = new Map<string, any>(
-            existingLabels.map((l: any) => [l.name.toLowerCase(), l]),
+          const existingMap = new Map<string, (typeof existingLabels)[0]>(
+            existingLabels.map((l) => [l.name.toLowerCase(), l]),
           );
 
           const missingNames: string[] = uniqueLabelNames.filter(
@@ -781,7 +791,7 @@ export class CoreRepository implements IWorkItemRepository {
 
           if (allLabels.length > 0) {
             await tx.workItemLabelAssignment.createMany({
-              data: allLabels.map((label: any) => ({
+              data: allLabels.map((label) => ({
                 workItemId,
                 labelId: label.id,
               })),
@@ -929,7 +939,7 @@ export class CoreRepository implements IWorkItemRepository {
     workItemId: string,
     projectId: string,
     authorId: string,
-    attachments: any,
+    attachments: WorkItemAttachments | Record<string, unknown>,
   ): Promise<void> {
     if (!attachments || typeof attachments !== 'object') return;
     const records: Prisma.EntityAttachmentCreateManyInput[] = [];
@@ -1027,7 +1037,7 @@ export class CoreRepository implements IWorkItemRepository {
     workItemId: string,
     projectId: string,
     authorId?: string,
-    attachments?: any,
+    attachments?: WorkItemAttachments | Record<string, unknown>,
   ): Promise<void> {
     if (
       !attachments ||
@@ -1235,6 +1245,59 @@ export class CoreRepository implements IWorkItemRepository {
   async isProjectMember(projectId: string, userId: string): Promise<boolean> {
     const role = await this.findProjectMemberRole(projectId, userId);
     return role !== null;
+  }
+
+  async findProjectPrefix(projectId: string): Promise<string> {
+    const where = isUuid(projectId)
+      ? { id: projectId, deletedAt: null }
+      : {
+          identifier: { equals: projectId, mode: 'insensitive' as const },
+          deletedAt: null,
+        };
+
+    const project = await this.prismaService.project
+      .findFirst({
+        where,
+        select: { identifier: true, name: true },
+      })
+      .catch(() => null);
+
+    return deriveProjectIdentifierPrefix(project?.identifier, project?.name);
+  }
+
+  async getMaxSequence(projectId: string): Promise<number> {
+    const lastWorkItem = await this.prismaService.workItem.findFirst({
+      where: { projectId },
+      orderBy: { sequenceNumber: 'desc' },
+      select: { sequenceNumber: true },
+    });
+
+    if (lastWorkItem?.sequenceNumber) {
+      return lastWorkItem.sequenceNumber;
+    }
+
+    const project = await this.prismaService.project
+      .findUnique({
+        where: { id: projectId },
+        select: { workItemSequence: true },
+      })
+      .catch(() => null);
+
+    return project?.workItemSequence ?? 0;
+  }
+
+  async findStateWithGroup(stateId: string) {
+    return this.prismaService.workItemState.findUnique({
+      where: { id: stateId },
+      select: { group: true, name: true },
+    });
+  }
+
+  async findProjectStates(projectId: string) {
+    return this.prismaService.workItemState.findMany({
+      where: { projectId },
+      orderBy: { sequence: 'asc' },
+    });
   }
 }
 

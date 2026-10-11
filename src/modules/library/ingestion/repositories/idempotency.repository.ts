@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { IdempotencyRecord, Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 
@@ -9,6 +9,13 @@ export type ClaimResult =
   | { status: 'in_progress' }
   | { status: 'mismatch' };
 
+interface DriverAdapterCause {
+  constraint?: string | { fields?: string[] };
+  fields?: string[];
+  originalMessage?: string;
+  [key: string]: unknown;
+}
+
 /**
  * Helper to determine if a database error is strictly a unique constraint violation
  * on the idempotency table's (scopeId, idempotencyKey) compound key.
@@ -17,7 +24,11 @@ export function isIdempotencyUniqueViolation(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const anyErr = error as {
     code?: string;
-    meta?: { driverAdapterError?: { cause?: unknown }; target?: unknown };
+    meta?: {
+      driverAdapterError?: { cause?: DriverAdapterCause };
+      target?: unknown;
+      constraint?: string;
+    };
   };
 
   const isP2002 =
@@ -30,9 +41,17 @@ export function isIdempotencyUniqueViolation(error: unknown): boolean {
   const driverErr = anyErr?.meta?.driverAdapterError;
   const driverCause = driverErr?.cause;
 
+  const constraintFields =
+    typeof driverCause?.constraint === 'object' &&
+    driverCause.constraint !== null &&
+    'fields' in driverCause.constraint &&
+    Array.isArray(driverCause.constraint.fields)
+      ? driverCause.constraint.fields
+      : undefined;
+
   const target =
     anyErr?.meta?.target ||
-    driverCause?.constraint?.fields ||
+    constraintFields ||
     driverCause?.fields ||
     (typeof driverCause?.constraint === 'string'
       ? driverCause.constraint

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { IIngestionRunRepositoryPort } from '../types/ingestion-run-repository.types';
 import { IngestionRunAggregate } from '../types/ingestion-run.aggregate';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { IngestionStatus } from '@prisma/client';
 
 /**
@@ -13,6 +13,8 @@ export class PrismaIngestionRunRepositoryAdapter implements IIngestionRunReposit
   private readonly logger = new Logger(
     PrismaIngestionRunRepositoryAdapter.name,
   );
+
+  constructor(private readonly prisma: PrismaService) {}
 
   private extractInputParams(inputParams: unknown): {
     sourceType?: string;

@@ -1,5 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { WorkItem } from '@prisma/client';
 import { UpdateWorkItemDto } from '../dto/update.dto';
 import { mapPriority } from '../utils/work-item.util';
 
@@ -92,7 +93,7 @@ export class EventDispatcher {
   }
 
   dispatchUpdateEvents(
-    existing: any,
+    existing: WorkItem,
     updateDto: UpdateWorkItemDto,
     userId?: string,
   ) {

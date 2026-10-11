@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AnalyticsRepository } from './analytics.repository';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import {
   ProjectWorkItemDistributionDto,
   CycleAnalyticsDto,

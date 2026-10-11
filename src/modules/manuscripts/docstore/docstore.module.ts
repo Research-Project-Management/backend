@@ -5,7 +5,7 @@
 
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { PrismaModule } from '@/core/database/prisma.module';
+import { PrismaModule } from '@/core';
 import { DocstoreController } from './docstore.controller';
 import { PagesBridgeController } from './pages-bridge.controller';
 import { DocstoreService } from './docstore.service';

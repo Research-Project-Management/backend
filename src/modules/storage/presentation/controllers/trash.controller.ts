@@ -50,7 +50,10 @@ export class TrashController {
       parentId: node.parentId,
       parent: node.parentId,
       url: `/api/files/${encodeURIComponent(node.id)}/content`,
-      thumbnail: (node.metadata as any)?.thumbnail || null,
+      thumbnail:
+        typeof node.metadata?.thumbnail === 'string'
+          ? node.metadata.thumbnail
+          : null,
       metaData: node.metadata || {},
       trashedAt: node.trashedAt ? node.trashedAt.toISOString() : null,
       author: {

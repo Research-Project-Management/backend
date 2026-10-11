@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { RedisCacheService } from '../../../../core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import {
   IdempotentConsumerService as SharedIdempotentConsumerService,
   IdempotentConsumerOptions,

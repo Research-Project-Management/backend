@@ -18,7 +18,7 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { CurrentUser } from '@/modules/identity/auth/decorators/user.decorator';
 import { Public } from '@/modules/identity/auth/decorators/public.decorator';
 import { JwtAuthGuard } from '@/modules/identity/auth/guards/auth.guard';
-import { BypassEnvelope } from '@/core/decorators/bypass.decorator';
+import { BypassEnvelope } from '@/core';
 import { IntegrationsService } from './integrations.service';
 import {
   IntegrationProviderType,

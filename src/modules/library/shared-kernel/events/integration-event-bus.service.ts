@@ -4,7 +4,5 @@
  * adhering strictly to the Dependency Inversion Principle.
  */
 
-export {
-  INTEGRATION_EVENT_BUS,
-  IIntegrationEventBus,
-} from './integration-events';
+export { INTEGRATION_EVENT_BUS } from './integration-events';
+export type { IIntegrationEventBus } from './integration-events';

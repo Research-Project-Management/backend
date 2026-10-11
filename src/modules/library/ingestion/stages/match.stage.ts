@@ -1,5 +1,5 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { ItemMetadata } from '../types/metadata.types';
 import { DuplicateMatchResult } from '../types/metadata-candidate.types';
 import {

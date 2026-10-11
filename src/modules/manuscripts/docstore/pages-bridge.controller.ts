@@ -28,11 +28,26 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '@/core/database/prisma.service';
+import { Prisma, ManuscriptChangeType } from '@prisma/client';
+import { PrismaService } from '@/core';
+
+interface PageDocRanges {
+  labels?: Array<{ id: string; name?: string; color?: string }>;
+  labelIds?: string[];
+  status?: string;
+  description?: string;
+  [key: string]: unknown;
+}
 import { DocstoreService } from './docstore.service';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 import { PkzipEngineAdapter } from '../export-import/core/adapters/engine/pkzip-engine.adapter';
+import { ModuleRef } from '@nestjs/core';
+import {
+  LiveCollaborationPort,
+  LivePresenceUser,
+} from './core/ports/live-collaboration.port';
+import { computeLineDiff } from './core/domain/line-diff';
+import { buildSearchRegex, replaceInText } from './core/domain/text-replace';
 
 function escapeXml(text: string): string {
   return text
@@ -290,7 +305,40 @@ export class PagesBridgeController {
     private readonly docstoreService: DocstoreService,
     private readonly prisma: PrismaService,
     @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
+
+  private liveCollab: LiveCollaborationPort | null | undefined;
+
+  /** Resolves the realtime LiveCollaborationPort if the realtime module is loaded. */
+  private getLiveCollaboration(): LiveCollaborationPort | null {
+    if (this.liveCollab !== undefined) return this.liveCollab;
+    try {
+      this.liveCollab =
+        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ?? null;
+    } catch {
+      this.liveCollab = null;
+    }
+    return this.liveCollab;
+  }
+
+  /** Mirrors a persisted REST write into any open Yjs session (prevents split-brain). */
+  private async syncLiveDoc(
+    projectId: string,
+    docId: string,
+    lines: string[],
+  ): Promise<boolean> {
+    const live = this.getLiveCollaboration();
+    if (!live) return false;
+    try {
+      return await live.applyExternalText(projectId, docId, lines.join('\n'));
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to sync REST write into live session ${projectId}:${docId}: ${err?.message}`,
+      );
+      return false;
+    }
+  }
 
   // ─── 1. CORE DOCUMENT CONTENT & METADATA ──────────────────────────────────────
 
@@ -442,6 +490,10 @@ export class PagesBridgeController {
       },
     );
 
+    const liveSynced = hasNewContent
+      ? await this.syncLiveDoc(record.projectId, pageId, lines)
+      : false;
+
     const cleanTitle = body.title
       ? body.title.trim().replace(/^\//, '')
       : undefined;
@@ -514,6 +566,7 @@ export class PagesBridgeController {
 
     return {
       ...result,
+      liveSessionSynced: liveSynced,
       page: {
         id: result.doc.id,
         title: cleanTitle || result.doc.path?.replace(/^\//, '') || 'main.tex',
@@ -839,7 +892,13 @@ export class PagesBridgeController {
   @HttpCode(HttpStatus.CREATED)
   async createComment(
     @Param('pageId') pageId: string,
-    @Body() body: { content: string; line?: number; lineEnd?: number },
+    @Body()
+    body: {
+      content: string;
+      line?: number;
+      lineEnd?: number;
+      projectId?: string;
+    },
     @Req() req: any,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
@@ -863,12 +922,8 @@ export class PagesBridgeController {
       }
     }
 
-    if (
-      !projectId &&
-      (body as any)?.projectId &&
-      isUuid((body as any).projectId)
-    ) {
-      projectId = (body as any).projectId;
+    if (!projectId && body?.projectId && isUuid(body.projectId)) {
+      projectId = body.projectId;
     }
     if (
       !projectId &&
@@ -1341,7 +1396,10 @@ export class PagesBridgeController {
       projectId = req.headers['x-project-id'];
     }
 
-    const type = body.type === 'delete' ? 'delete' : 'insert';
+    const type: ManuscriptChangeType =
+      body.type === 'delete'
+        ? ManuscriptChangeType.delete
+        : ManuscriptChangeType.insert;
     const text = body.suggestedText || body.originalText || '';
 
     if (!isUuid(targetDocId) || !projectId) {
@@ -1358,7 +1416,7 @@ export class PagesBridgeController {
       data: {
         docId: targetDocId,
         projectId,
-        type: type as any,
+        type,
         status: 'pending',
         text,
         startLine: body.fromLine ?? 1,
@@ -1580,12 +1638,19 @@ export class PagesBridgeController {
     'pages/:pageId/suggestions/accept-all',
   ])
   @HttpCode(HttpStatus.OK)
-  async acceptAllSuggestions(@Param('pageId') pageId: string) {
+  async acceptAllSuggestions(
+    @Param('pageId') pageId: string,
+    @Body() body?: { suggestionIds?: string[] },
+  ) {
     let acceptedCount = 0;
     if (isUuid(pageId)) {
       try {
+        const whereClause: any = { docId: pageId, status: 'pending' };
+        if (body?.suggestionIds && Array.isArray(body.suggestionIds) && body.suggestionIds.length > 0) {
+          whereClause.id = { in: body.suggestionIds };
+        }
         const res = await this.prisma.manuscriptTrackChange.updateMany({
-          where: { docId: pageId, status: 'pending' },
+          where: whereClause,
           data: { status: 'accepted', resolvedAt: new Date() },
         });
         acceptedCount = res.count;
@@ -1624,12 +1689,19 @@ export class PagesBridgeController {
     'pages/:pageId/suggestions/reject-all',
   ])
   @HttpCode(HttpStatus.OK)
-  async rejectAllSuggestions(@Param('pageId') pageId: string) {
+  async rejectAllSuggestions(
+    @Param('pageId') pageId: string,
+    @Body() body?: { suggestionIds?: string[] },
+  ) {
     let rejectedCount = 0;
     if (isUuid(pageId)) {
       try {
+        const whereClause: any = { docId: pageId, status: 'pending' };
+        if (body?.suggestionIds && Array.isArray(body.suggestionIds) && body.suggestionIds.length > 0) {
+          whereClause.id = { in: body.suggestionIds };
+        }
         const res = await this.prisma.manuscriptTrackChange.updateMany({
-          where: { docId: pageId, status: 'pending' },
+          where: whereClause,
           data: { status: 'rejected', resolvedAt: new Date() },
         });
         rejectedCount = res.count;
@@ -1745,17 +1817,26 @@ export class PagesBridgeController {
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
     let projectId: string | undefined;
+    let docPath = 'main.tex';
+    let currentContent = '';
     if (isUuid(pageId)) {
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
-        select: { projectId: true },
+        select: { projectId: true, path: true, lines: true },
       });
       projectId = doc?.projectId;
+      if (doc?.path) docPath = doc.path.replace(/^\//, '') || docPath;
+      currentContent = Array.isArray(doc?.lines)
+        ? (doc!.lines as string[]).join('\n')
+        : String(doc?.lines ?? '');
     }
 
     if (!projectId || !isUuid(projectId)) {
       throw new NotFoundException(`Project not found for doc ${pageId}`);
     }
+
+    const content =
+      typeof body.content === 'string' ? body.content : currentContent;
 
     try {
       const count = await this.prisma.manuscriptSnapshot.count({
@@ -1767,7 +1848,7 @@ export class PagesBridgeController {
           version: count + 1,
           summary: body.label || 'Manual Snapshot',
           createdById: isUuid(userId) ? userId : null,
-          files: body.content ? { 'main.tex': body.content } : {},
+          files: { [docPath]: content },
         },
       });
       return {
@@ -1775,10 +1856,10 @@ export class PagesBridgeController {
           id: snap.id,
           title: `v${snap.version} Snapshot`,
           label: body.label || `Version ${snap.version}`,
-          fileName: 'main.tex',
+          fileName: docPath,
           savedBy: { id: userId || 'anonymous', name: 'Collaborator' },
           createdAt: snap.createdAt.toISOString(),
-          content: body.content || '',
+          content,
         },
       };
     } catch (err) {
@@ -1813,18 +1894,29 @@ export class PagesBridgeController {
       : null;
 
     if (doc) {
-      const restoredText = files['main.tex'] || Object.values(files)[0] || '';
-      if (restoredText) {
-        await this.prisma.manuscriptDoc.update({
-          where: { id: doc.id },
-          data: {
-            lines: restoredText.split('\n'),
-            rev: { increment: 1 },
-          },
-        });
+      if (snap.projectId !== doc.projectId) {
+        throw new BadRequestException(
+          'Version does not belong to this document project',
+        );
       }
+      const restoredText = this.pickSnapshotText(files, doc.path);
+      const lines = restoredText.split('\n');
+      await this.docstoreService.updateDoc(doc.projectId, doc.id, {
+        lines,
+        version: doc.version + 1,
+      });
+      const liveSessionSynced = await this.syncLiveDoc(
+        doc.projectId,
+        doc.id,
+        lines,
+      );
+      return {
+        success: true,
+        restoredVersion: snap.version,
+        liveSessionSynced,
+      };
     }
-    return { success: true, restoredVersion: snap.version };
+    throw new NotFoundException(`Document ${pageId} not found`);
   }
 
   /**
@@ -1884,47 +1976,96 @@ export class PagesBridgeController {
     @Query('from') from: string,
     @Query('to') to: string,
   ) {
-    const snapFrom = isUuid(from)
-      ? await this.prisma.manuscriptSnapshot.findUnique({ where: { id: from } })
+    const doc = isUuid(pageId)
+      ? await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+          select: { id: true, path: true, lines: true, projectId: true },
+        })
       : null;
-    const snapTo = isUuid(to)
-      ? await this.prisma.manuscriptSnapshot.findUnique({ where: { id: to } })
-      : null;
 
-    const filesFrom = (snapFrom?.files as Record<string, string>) || {};
-    const filesTo = (snapTo?.files as Record<string, string>) || {};
+    const loadSnap = async (id: string) => {
+      if (!isUuid(id)) return null;
+      const snap = await this.prisma.manuscriptSnapshot.findUnique({
+        where: { id },
+      });
+      if (!snap) {
+        throw new NotFoundException(`Version ${id} not found`);
+      }
+      if (doc && snap.projectId !== doc.projectId) {
+        throw new BadRequestException(
+          `Version ${id} does not belong to this document's project`,
+        );
+      }
+      return snap;
+    };
 
-    const textFrom = filesFrom['main.tex'] || Object.values(filesFrom)[0] || '';
-    const textTo = filesTo['main.tex'] || Object.values(filesTo)[0] || '';
+    const snapFrom = await loadSnap(from);
+    const snapTo = await loadSnap(to);
+    if (!snapFrom && !snapTo) {
+      throw new BadRequestException(
+        'At least one valid version id (from/to) is required',
+      );
+    }
 
-    const linesFrom = textFrom ? textFrom.split('\n') : [];
-    const linesTo = textTo ? textTo.split('\n') : [];
+    const currentText = doc
+      ? Array.isArray(doc.lines)
+        ? (doc.lines as string[]).join('\n')
+        : String(doc.lines ?? '')
+      : '';
+    const pick = (files: Record<string, string> | undefined | null) =>
+      this.pickSnapshotText(files || {}, doc?.path);
 
-    const additions = Math.max(0, linesTo.length - linesFrom.length);
-    const deletions = Math.max(0, linesFrom.length - linesTo.length);
+    // A missing side means "current document content".
+    const textFrom = snapFrom
+      ? pick(snapFrom.files as Record<string, string>)
+      : currentText;
+    const textTo = snapTo
+      ? pick(snapTo.files as Record<string, string>)
+      : currentText;
+
+    const result = computeLineDiff(textFrom, textTo, {
+      from: snapFrom ? `v${snapFrom.version}` : 'current',
+      to: snapTo ? `v${snapTo.version}` : 'current',
+    });
 
     return {
       fromVersionId: from,
       toVersionId: to,
-      diff: `--- v${snapFrom?.version ?? 'from'}\n+++ v${snapTo?.version ?? 'to'}\n@@ -1,${linesFrom.length} +1,${linesTo.length} @@`,
-      chunks: [
-        {
-          type: 'change',
-          oldStart: 1,
-          oldLines: linesFrom.length,
-          newStart: 1,
-          newLines: linesTo.length,
-          content: textTo,
-        },
-      ],
+      diff: result.unified,
+      chunks: result.hunks.map((h) => ({
+        type: 'change',
+        oldStart: h.oldStart,
+        oldLines: h.oldLines,
+        newStart: h.newStart,
+        newLines: h.newLines,
+        content: h.lines.join('\n'),
+        lines: h.lines,
+      })),
       stats: {
-        additions,
-        deletions,
-        addedLines: additions,
-        deletedLines: deletions,
-        unchangedLines: Math.min(linesFrom.length, linesTo.length),
+        additions: result.stats.additions,
+        deletions: result.stats.deletions,
+        addedLines: result.stats.additions,
+        deletedLines: result.stats.deletions,
+        unchangedLines: result.stats.unchanged,
       },
     };
+  }
+
+  /** Selects the snapshot entry for a doc path (handles leading-slash variants). */
+  private pickSnapshotText(
+    files: Record<string, string>,
+    docPath?: string | null,
+  ): string {
+    if (docPath) {
+      const bare = docPath.replace(/^\//, '');
+      const hit = files[docPath] ?? files[bare] ?? files[`/${bare}`];
+      if (typeof hit === 'string') return hit;
+      // Legacy snapshots stored a single doc under 'main.tex'.
+      const keys = Object.keys(files);
+      if (keys.length === 1 && keys[0] === 'main.tex') return files['main.tex'];
+      return '';
+    }
+    return files['main.tex'] ?? files['/main.tex'] ?? Object.values(files)[0] ?? '';
   }
 
   /**
@@ -1990,33 +2131,43 @@ export class PagesBridgeController {
       : new Date();
     if (isNaN(targetTime.getTime())) targetTime = new Date();
 
-    let projectId: string | undefined;
-    if (isUuid(pageId)) {
-      const doc = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-        select: { projectId: true },
-      });
-      projectId = doc?.projectId;
+    const doc = isUuid(pageId)
+      ? await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+          select: { projectId: true, path: true },
+        })
+      : null;
+    if (!doc) {
+      throw new NotFoundException(`Document ${pageId} not found`);
     }
 
-    if (!projectId) {
-      return { content: '', timestamp: targetTime.getTime() };
-    }
-
-    const snap = await this.prisma.manuscriptSnapshot.findFirst({
-      where: {
-        projectId,
-        createdAt: { lte: targetTime },
-      },
+    const snaps = await this.prisma.manuscriptSnapshot.findMany({
+      where: { projectId: doc.projectId, createdAt: { lte: targetTime } },
       orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    const bare = (doc.path || '').replace(/^\//, '');
+    const snap = snaps.find((s) => {
+      const files = (s.files as Record<string, string>) || {};
+      return (
+        bare in files ||
+        `/${bare}` in files ||
+        ('main.tex' in files && Object.keys(files).length === 1)
+      );
     });
 
-    const files = (snap?.files as Record<string, string>) || {};
-    const content = files['main.tex'] || Object.values(files)[0] || '';
-
+    if (!snap) {
+      return { content: '', timestamp: targetTime.getTime(), found: false };
+    }
     return {
-      content,
-      timestamp: snap?.createdAt.getTime() || targetTime.getTime(),
+      content: this.pickSnapshotText(
+        (snap.files as Record<string, string>) || {},
+        doc.path,
+      ),
+      timestamp: snap.createdAt.getTime(),
+      versionId: snap.id,
+      version: snap.version,
+      found: true,
     };
   }
 
@@ -2062,18 +2213,107 @@ export class PagesBridgeController {
     @Param('rootPageId') rootPageId: string,
     @Body() body: { dirtyFileIds?: string[]; forceAll?: boolean },
   ) {
-    const dirty = body?.dirtyFileIds || [];
-    if (isUuid(rootPageId) && this.realtimeService) {
-      this.realtimeService.broadcastEvent(rootPageId, 'compiler:sync', {
+    if (!isUuid(rootPageId)) {
+      throw new BadRequestException('A valid UUID is required for rootPageId');
+    }
+    const projectId = await this.resolveProjectId(rootPageId);
+    if (!projectId) {
+      throw new NotFoundException(`Document/project ${rootPageId} not found`);
+    }
+
+    // Only accept doc ids that really belong to this project.
+    const requested = (body?.dirtyFileIds || []).filter((id) => isUuid(id));
+    const docs = await this.prisma.manuscriptDoc.findMany({
+      where: body?.forceAll
+        ? { projectId, deleted: false }
+        : { projectId, deleted: false, id: { in: requested } },
+      select: { id: true, version: true },
+    });
+    const docIds = docs.map((d) => d.id);
+
+    // Persist any in-memory Yjs edits so the compiler reads the latest text.
+    const live = this.getLiveCollaboration();
+    const flushedLive = live ? await live.flushDocs(projectId, docIds) : [];
+
+    if (this.realtimeService) {
+      this.realtimeService.broadcastEvent(projectId, 'compiler:sync', {
         rootPageId,
-        dirtyFileIds: dirty,
+        dirtyFileIds: docIds,
         timestamp: Date.now(),
       });
     }
-    return { synced: dirty, total: dirty.length, rootPageId };
+    return {
+      synced: docIds,
+      total: docIds.length,
+      rootPageId,
+      projectId,
+      flushedLiveSessions: flushedLive,
+      rejected: requested.filter((id) => !docIds.includes(id)),
+    };
+  }
+
+  /** Resolves a projectId from a docId, or accepts a projectId directly. */
+  private async resolveProjectId(id: string): Promise<string | null> {
+    if (!isUuid(id)) return null;
+    const doc = await this.prisma.manuscriptDoc.findUnique({
+      where: { id },
+      select: { projectId: true },
+    });
+    if (doc?.projectId) return doc.projectId;
+    const node = await this.prisma.manuscriptNode.findFirst({
+      where: { projectId: id },
+      select: { projectId: true },
+    });
+    return node?.projectId ?? null;
   }
 
   // ─── 6. REAL-TIME COLLABORATION HTTP FALLBACKS ───────────────────────────────
+
+  private static readonly HTTP_PRESENCE_TTL_MS = 60_000;
+
+  /**
+   * Merged presence: WebSocket sessions (authoritative, via realtime port) plus
+   * HTTP-heartbeat clients (fallback transport), de-duplicated by userId.
+   */
+  private async collectPresence(pageId: string): Promise<{
+    users: Array<LivePresenceUser | Record<string, any>>;
+    realtimeAvailable: boolean;
+  }> {
+    const now = Date.now();
+    const byUser = new Map<string, any>();
+
+    for (const [key, user] of PagesBridgeController.activePresenceMap) {
+      if (now - user.lastSeen > PagesBridgeController.HTTP_PRESENCE_TTL_MS) {
+        PagesBridgeController.activePresenceMap.delete(key);
+      } else if (user.fileId === pageId) {
+        byUser.set(user.id, {
+          ...user,
+          userId: user.id,
+          lastHeartbeat: user.lastSeen,
+          transport: 'http',
+        });
+      }
+    }
+
+    const live = this.getLiveCollaboration();
+    if (live) {
+      const projectId = await this.resolveProjectId(pageId);
+      if (projectId) {
+        try {
+          for (const u of await live.getPresence(projectId, pageId)) {
+            byUser.set(u.userId, {
+              ...u,
+              lastHeartbeat: u.lastSeen,
+              transport: 'websocket',
+            });
+          }
+        } catch (err: any) {
+          this.logger.warn(`Live presence lookup failed: ${err?.message}`);
+        }
+      }
+    }
+    return { users: [...byUser.values()], realtimeAvailable: !!live };
+  }
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/collaboration/presence
@@ -2084,19 +2324,8 @@ export class PagesBridgeController {
     'pages/:pageId/collaboration/presence',
   ])
   async getPresence(@Param('pageId') pageId: string) {
-    const now = Date.now();
-    const active: any[] = [];
-    for (const [
-      key,
-      user,
-    ] of PagesBridgeController.activePresenceMap.entries()) {
-      if (now - user.lastSeen > 60000) {
-        PagesBridgeController.activePresenceMap.delete(key);
-      } else if (!pageId || user.fileId === pageId) {
-        active.push(user);
-      }
-    }
-    return { activeUsers: active, presence: active };
+    const { users, realtimeAvailable } = await this.collectPresence(pageId);
+    return { activeUsers: users, presence: users, realtimeAvailable };
   }
 
   /**
@@ -2113,11 +2342,13 @@ export class PagesBridgeController {
     @Body() body: any,
     @Req() req: any,
   ) {
-    const userId =
-      req?.user?.id || req?.user?.sub || body?.userId || 'anonymous-user';
+    const userId = req?.user?.id || req?.user?.sub;
+    if (!userId) {
+      throw new BadRequestException('Authenticated user required');
+    }
     const userName =
       req?.user?.name || req?.user?.email || body?.name || 'Collaborator';
-    PagesBridgeController.activePresenceMap.set(userId, {
+    PagesBridgeController.activePresenceMap.set(`${pageId}:${userId}`, {
       id: userId,
       name: userName,
       color: body?.color || '#2563EB',
@@ -2140,12 +2371,16 @@ export class PagesBridgeController {
   async leaveRoom(@Param('pageId') pageId: string, @Req() req: any) {
     const userId = req?.user?.id || req?.user?.sub;
     if (userId) {
-      PagesBridgeController.activePresenceMap.delete(userId);
+      PagesBridgeController.activePresenceMap.delete(`${pageId}:${userId}`);
     }
     return { success: true };
   }
 
   /**
+   * Server-Sent Events stream for clients without a WebSocket connection.
+   * Emits `presence` events when the merged collaborator set changes and
+   * `content-updated` events when the persisted doc version advances.
+   *
    * GET /api/v1/manuscripts/docs/:pageId/collaboration/stream
    * GET /api/v1/manuscripts/projects/:projectId/docs/:pageId/collaboration/stream
    * GET /api/pages/:pageId/collaboration/stream
@@ -2157,7 +2392,11 @@ export class PagesBridgeController {
     'pages/:pageId/collaboration/stream',
     'projects/:projectId/pages/:pageId/collaboration/stream',
   ])
-  async getStream(@Req() req: any, @Res() reply: any) {
+  async getStream(
+    @Param('pageId') pageId: string,
+    @Req() req: any,
+    @Res() reply: any,
+  ) {
     const origin =
       req.headers?.origin || req.headers?.Origin || 'http://localhost:2915';
     reply.raw.setHeader('Access-Control-Allow-Origin', origin);
@@ -2166,16 +2405,59 @@ export class PagesBridgeController {
     reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
     reply.raw.setHeader('Connection', 'keep-alive');
     reply.raw.writeHead(200);
-    reply.raw.write(': keepalive\n\n');
 
-    const interval = setInterval(() => {
+    const send = (payload: Record<string, any>) => {
+      if (reply.raw.writableEnded || reply.raw.destroyed) return;
+      reply.raw.write(
+        `data: ${JSON.stringify({ pageId, timestamp: Date.now(), ...payload })}\n\n`,
+      );
+    };
+
+    let lastPresenceKey = '';
+    let lastVersion: number | null = null;
+    let closed = false;
+
+    const tick = async () => {
+      if (closed) return;
+      try {
+        const { users } = await this.collectPresence(pageId);
+        const key = users
+          .map((u: any) => `${u.userId}:${JSON.stringify(u.cursor ?? null)}`)
+          .sort()
+          .join('|');
+        if (key !== lastPresenceKey) {
+          lastPresenceKey = key;
+          send({ type: 'presence', users });
+        }
+        if (isUuid(pageId)) {
+          const doc = await this.prisma.manuscriptDoc.findUnique({
+            where: { id: pageId },
+            select: { version: true },
+          });
+          if (doc) {
+            if (lastVersion !== null && doc.version !== lastVersion) {
+              send({ type: 'content-updated', version: doc.version });
+            }
+            lastVersion = doc.version;
+          }
+        }
+      } catch (err: any) {
+        this.logger.debug(`SSE tick failed for ${pageId}: ${err?.message}`);
+      }
+    };
+
+    await tick();
+    const poll = setInterval(() => void tick(), 3000);
+    const keepalive = setInterval(() => {
       if (!reply.raw.writableEnded && !reply.raw.destroyed) {
         reply.raw.write(': keepalive\n\n');
       }
     }, 15000);
 
     req.raw.on('close', () => {
-      clearInterval(interval);
+      closed = true;
+      clearInterval(poll);
+      clearInterval(keepalive);
     });
   }
 
@@ -2361,88 +2643,105 @@ export class PagesBridgeController {
       replaceWith: string;
       fileIds?: string[];
       caseSensitive?: boolean;
+      wholeWord?: boolean;
+      useRegex?: boolean;
     },
   ) {
     const query = body?.query;
     const replaceWith = body?.replaceWith ?? '';
-    if (!query || !isUuid(projectId)) {
-      return {
-        query: query || '',
-        replaceWith,
-        totalFilesAffected: 0,
-        totalOccurrencesReplaced: 0,
-        affectedFileIds: [],
-      };
+    if (!isUuid(projectId)) {
+      throw new BadRequestException('A valid UUID is required for projectId');
+    }
+    if (!query) {
+      throw new BadRequestException('query is required');
+    }
+    const opts = {
+      caseSensitive: !!body?.caseSensitive,
+      wholeWord: !!body?.wholeWord,
+      useRegex: !!body?.useRegex,
+    };
+    try {
+      buildSearchRegex(query, opts);
+    } catch (err: any) {
+      throw new BadRequestException(`Invalid search pattern: ${err?.message}`);
     }
 
-    try {
-      const where: any = { projectId, deleted: false };
-      if (Array.isArray(body?.fileIds) && body.fileIds.length > 0) {
-        where.id = { in: body.fileIds.filter((id) => isUuid(id)) };
-      }
+    const where: Prisma.ManuscriptDocWhereInput = { projectId, deleted: false };
+    if (Array.isArray(body?.fileIds) && body.fileIds.length > 0) {
+      where.id = { in: body.fileIds.filter((id) => isUuid(id)) };
+    }
 
-      const docs = await this.prisma.manuscriptDoc.findMany({
-        where,
-        select: { id: true, lines: true },
-      });
+    // Make sure in-memory collaborative edits are persisted before we read.
+    const candidateIds = (
+      await this.prisma.manuscriptDoc.findMany({ where, select: { id: true } })
+    ).map((d) => d.id);
+    const live = this.getLiveCollaboration();
+    if (live && candidateIds.length > 0) {
+      await live.flushDocs(projectId, candidateIds);
+    }
 
-      let totalOccurrencesReplaced = 0;
-      const affectedFileIds: string[] = [];
-      const regexFlags = body?.caseSensitive ? 'g' : 'gi';
-      const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const docs = await this.prisma.manuscriptDoc.findMany({
+      where: { id: { in: candidateIds } },
+      select: { id: true, lines: true, version: true },
+    });
 
-      for (const doc of docs) {
-        const rawContent = Array.isArray(doc.lines)
-          ? doc.lines.join('\n')
-          : (doc.lines as any) || '';
+    let totalOccurrencesReplaced = 0;
+    const affectedFileIds: string[] = [];
+    const failedFileIds: string[] = [];
 
-        const regex = new RegExp(escapedQuery, regexFlags);
-        const matches = rawContent.match(regex);
-        const count = matches ? matches.length : 0;
-        if (count > 0) {
-          const newContent = rawContent.replace(regex, replaceWith);
-          await this.prisma.manuscriptDoc.update({
-            where: { id: doc.id },
-            data: {
-              lines: newContent.split('\n'),
-              rev: { increment: 1 },
-            },
-          });
-          totalOccurrencesReplaced += count;
-          affectedFileIds.push(doc.id);
+    for (const doc of docs) {
+      const rawContent = Array.isArray(doc.lines)
+        ? (doc.lines as string[]).join('\n')
+        : String(doc.lines ?? '');
+      const { text: newContent, count } = replaceInText(
+        rawContent,
+        query,
+        replaceWith,
+        opts,
+      );
+      if (count === 0) continue;
 
-          // Broadcast real-time content notification so open tabs update instantly
-          if (this.realtimeService && projectId) {
-            try {
-              this.realtimeService.broadcastEvent(
-                projectId,
-                'doc:content-updated',
-                {
-                  docId: doc.id,
-                  content: newContent,
-                },
-              );
-            } catch {}
+      const lines = newContent.split('\n');
+      try {
+        const result = await this.docstoreService.updateDoc(projectId, doc.id, {
+          lines,
+          version: doc.version + 1,
+        });
+        await this.syncLiveDoc(projectId, doc.id, lines);
+        totalOccurrencesReplaced += count;
+        affectedFileIds.push(doc.id);
+
+        if (this.realtimeService) {
+          try {
+            this.realtimeService.broadcastEvent(
+              projectId,
+              'doc:content-updated',
+              {
+                docId: doc.id,
+                version: result.doc?.version,
+                content: newContent,
+              },
+            );
+          } catch {
+            // non-blocking
           }
         }
+      } catch (err: any) {
+        this.logger.error(
+          `Batch replace failed for doc ${doc.id}: ${err?.message}`,
+        );
+        failedFileIds.push(doc.id);
       }
-
-      return {
-        query,
-        replaceWith,
-        totalFilesAffected: affectedFileIds.length,
-        totalOccurrencesReplaced,
-        affectedFileIds,
-      };
-    } catch {
-      return {
-        query,
-        replaceWith,
-        totalFilesAffected: 0,
-        totalOccurrencesReplaced: 0,
-        affectedFileIds: [],
-      };
     }
+
+    return {
+      query,
+      replaceWith,
+      totalFilesAffected: affectedFileIds.length,
+      totalOccurrencesReplaced,
+      affectedFileIds,
+      failedFileIds,
+    };
   }
 
   // ─── 9. PROJECT DOCS CRUD & LABELS ──────────────────────────────────────────
@@ -2895,7 +3194,9 @@ export class PagesBridgeController {
               ? d.lines
               : '';
 
-        const ranges = (d?.ranges as any) || {};
+        const ranges = (d?.ranges && typeof d.ranges === 'object'
+          ? d.ranges
+          : {}) as PageDocRanges;
         const pageLabels = Array.isArray(ranges.labels) ? ranges.labels : [];
         const pageStatus = ranges.status || 'published';
         const pageDescription = ranges.description || '';
@@ -3264,7 +3565,9 @@ export class PagesBridgeController {
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
       });
-      const ranges = (doc?.ranges as any) || {};
+      const ranges = (doc?.ranges && typeof doc.ranges === 'object'
+        ? doc.ranges
+        : {}) as PageDocRanges;
       const labels = ranges.labels || [];
       return { labels };
     }
@@ -3340,8 +3643,10 @@ export class PagesBridgeController {
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
       });
-      const ranges = (doc?.ranges as any) || {};
-      const labels = (ranges.labels || []).filter((l: any) => l.id !== labelId);
+      const ranges = (doc?.ranges && typeof doc.ranges === 'object'
+        ? doc.ranges
+        : {}) as PageDocRanges;
+      const labels = (ranges.labels || []).filter((l) => l.id !== labelId);
       const labelIds = (ranges.labelIds || []).filter(
         (id: string) => id !== labelId,
       );
@@ -3354,63 +3659,5 @@ export class PagesBridgeController {
       return { labels };
     }
     return { labels: [] };
-  }
-
-  // ─── 10. NOTIFICATION BUNDLES & SETTINGS ──────────────────────────────────────
-
-  @Get([
-    'documents/notifications/bundles',
-    'api/documents/notifications/bundles',
-  ])
-  async getNotificationBundles() {
-    return { bundles: [] };
-  }
-
-  @Post([
-    'documents/notifications/bundles/flush',
-    'api/documents/notifications/bundles/flush',
-  ])
-  @HttpCode(HttpStatus.OK)
-  async flushNotificationBundles(@Body() body: any) {
-    return {
-      digest: {
-        id: `digest-${Date.now()}`,
-        timestamp: Date.now(),
-        threadCount: 0,
-        changeCount: 0,
-        threads: [],
-        changes: [],
-      },
-    };
-  }
-
-  @Get([
-    'documents/notifications/digests',
-    'api/documents/notifications/digests',
-  ])
-  async getNotificationDigests() {
-    return { digests: [] };
-  }
-
-  @Get([
-    'documents/notifications/settings',
-    'api/documents/notifications/settings',
-  ])
-  async getNotificationSettings() {
-    return { settings: { enabled: true, windowMinutes: 10 } };
-  }
-
-  @Put([
-    'documents/notifications/settings',
-    'api/documents/notifications/settings',
-  ])
-  @HttpCode(HttpStatus.OK)
-  async updateNotificationSettings(@Body() body: any) {
-    return {
-      settings: {
-        enabled: Boolean(body?.enabled ?? true),
-        windowMinutes: Number(body?.windowMinutes) || 10,
-      },
-    };
   }
 }

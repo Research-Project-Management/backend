@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { CoreModule } from '../../../core/core.module';
+import { CoreModule } from '@/core';
 import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
 import { StorageModule } from '../../storage/storage.module';
 import { CatalogModule } from '../catalog/catalog.module';
@@ -10,7 +10,7 @@ import {
   LIBRARY_INGESTION_QUEUE_STANDARD,
   LIBRARY_INGESTION_QUEUE_CAPTURE,
 } from './types/queue.constants';
-import { shouldRunWorkerConsumers } from '../../../core/utils/worker-mode.util';
+import { shouldRunWorkerConsumers } from '@/core';
 
 // Gateway Ports & Adapters
 import { CATALOG_GATEWAY_PORT } from './types/catalog-gateway.types';
@@ -247,8 +247,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     INGESTION_RUN_REPOSITORY_PORT,
     INGESTION_PORT,
     METADATA_PORT,
-    CATALOG_GATEWAY_PORT,
-    EXTRACTION_GATEWAY_PORT,
     IngestionSagaOrchestrator,
   ],
 })

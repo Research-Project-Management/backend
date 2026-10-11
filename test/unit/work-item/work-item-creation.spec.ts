@@ -1,5 +1,5 @@
 import { CoreRepository } from '@/modules/work-item/core/core.repository';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 
 describe('WorkItem Creation & State Connect Type Safety', () => {
   let repository: CoreRepository;

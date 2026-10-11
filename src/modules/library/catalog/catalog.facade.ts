@@ -19,8 +19,8 @@ import { TagEntity } from './types/tags.types';
 import { StateData } from './types/state.types';
 import { NoteEntity, CreateNoteData } from './types/notes.types';
 import { ItemFieldDefinition } from '../shared-kernel/types/schema.types';
-
-export const CATALOG_FACADE = 'CATALOG_FACADE';
+import { CATALOG_FACADE } from '../shared-kernel/ports/catalog.port';
+export { CATALOG_FACADE };
 
 export interface ICatalogFacade {
   getItem(

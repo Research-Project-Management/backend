@@ -8,7 +8,7 @@ import {
   IProjectAccessVerifierPort,
   ProjectAccessResult,
 } from '../../ports/project-access-verifier.port';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 
 @Injectable()
 export class ProjectAccessVerifierAdapter extends IProjectAccessVerifierPort {

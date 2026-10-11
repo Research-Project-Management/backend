@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WorkItemPriority } from '@prisma/client';
+import type { WorkItemAttachments } from '../types/work-item.types';
 
 export class CreateWorkItemDto {
   @ApiProperty({
@@ -133,11 +134,11 @@ export class CreateWorkItemDto {
 
   @ApiPropertyOptional({ description: 'Attachments / Links JSON array' })
   @IsOptional()
-  attachments?: any;
+  attachments?: WorkItemAttachments | Record<string, unknown>;
 
   @ApiPropertyOptional({ description: 'Relations JSON array' })
   @IsOptional()
-  relations?: any;
+  relations?: Record<string, unknown> | Array<Record<string, unknown>>;
 }
 
 export const CreateDto = CreateWorkItemDto;

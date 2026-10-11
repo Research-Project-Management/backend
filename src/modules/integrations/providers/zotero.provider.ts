@@ -7,7 +7,28 @@ import {
   OAuthInitiationResult,
   RemoteCollectionItem,
 } from './integration-provider.interface';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
+
+interface ZoteroCollectionPayload {
+  key: string;
+  data: {
+    name?: string;
+    parentCollection?: string | false | null;
+  };
+  meta?: {
+    numItems?: number;
+  };
+}
+
+interface ZoteroGroupPayload {
+  id: number | string;
+  data?: {
+    name?: string;
+  };
+  meta?: {
+    numItems?: number;
+  };
+}
 
 @Injectable()
 export class ZoteroProvider implements IIntegrationProvider {
@@ -192,8 +213,13 @@ export class ZoteroProvider implements IIntegrationProvider {
               tokenSecret = stored;
             }
           } else if (typeof stored === 'object' && stored !== null) {
-            tokenSecret = (stored as any).secret || tokenSecret;
-            resolvedUserId = (stored as any).userId;
+            const storedRecord = stored as Record<string, unknown>;
+            if (typeof storedRecord.secret === 'string') {
+              tokenSecret = storedRecord.secret;
+            }
+            if (typeof storedRecord.userId === 'string') {
+              resolvedUserId = storedRecord.userId;
+            }
           }
         }
       }
@@ -341,13 +367,17 @@ export class ZoteroProvider implements IIntegrationProvider {
           );
         }
 
-        const collections = (await response.json()) as any[];
+        const collections =
+          (await response.json()) as ZoteroCollectionPayload[];
         for (const col of collections) {
           results.push({
             id: col.key,
             name: col.data.name || 'Untitled Collection',
             itemCount: col.meta?.numItems || 0,
-            parentCollectionId: col.data.parentCollection || null,
+            parentCollectionId:
+              typeof col.data.parentCollection === 'string'
+                ? col.data.parentCollection
+                : null,
           });
         }
 
@@ -372,7 +402,7 @@ export class ZoteroProvider implements IIntegrationProvider {
         );
 
         if (groupsRes.ok) {
-          const groups = (await groupsRes.json()) as any[];
+          const groups = (await groupsRes.json()) as ZoteroGroupPayload[];
           for (const group of groups) {
             const groupId = group.id;
             const groupName = group.data?.name || `Group ${groupId}`;
@@ -395,22 +425,24 @@ export class ZoteroProvider implements IIntegrationProvider {
             );
 
             if (groupColRes.ok) {
-              const groupCols = (await groupColRes.json()) as any[];
+              const groupCols =
+                (await groupColRes.json()) as ZoteroCollectionPayload[];
               for (const col of groupCols) {
                 results.push({
                   id: `group:${groupId}:${col.key}`,
                   name: `[Group: ${groupName}] ${col.data?.name || 'Untitled'}`,
                   itemCount: col.meta?.numItems || 0,
-                  parentCollectionId: col.data?.parentCollection
-                    ? `group:${groupId}:${col.data.parentCollection}`
-                    : null,
+                  parentCollectionId:
+                    typeof col.data?.parentCollection === 'string'
+                      ? `group:${groupId}:${col.data.parentCollection}`
+                      : null,
                 });
               }
             }
           }
         }
-      } catch (groupErr: any) {
-        this.logger.warn(`Could not probe Zotero groups: ${groupErr.message}`);
+      } catch (groupErr) {
+        this.logger.warn(`Could not probe Zotero groups: ${String(groupErr)}`);
       }
 
       return results;

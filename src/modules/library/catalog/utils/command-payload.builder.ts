@@ -1,5 +1,5 @@
 import { Prisma, LinkMode, AttachmentType, TagType } from '@prisma/client';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
 import { TagInput } from '../types/tags.types';
 import {

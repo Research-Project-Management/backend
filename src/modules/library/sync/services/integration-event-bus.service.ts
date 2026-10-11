@@ -8,7 +8,8 @@ import {
 } from '../../shared-kernel/events/integration-events';
 import { TransactionHelpers } from '../../shared-kernel';
 
-export { INTEGRATION_EVENT_BUS, IIntegrationEventBus };
+export { INTEGRATION_EVENT_BUS };
+export type { IIntegrationEventBus };
 
 /**
  * IntegrationEventBusService coordinates asynchronous cross-context messaging.

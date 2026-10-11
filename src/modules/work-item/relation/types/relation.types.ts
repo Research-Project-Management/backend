@@ -61,7 +61,9 @@ export interface IRelationRepository {
     workItemId: string,
     relations: Prisma.InputJsonValue,
   ): Promise<WorkItem>;
-  executeTransaction(operations: any[]): Promise<any>;
+  executeTransaction<T = unknown>(
+    operations: Prisma.PrismaPromise<T>[],
+  ): Promise<T[]>;
   findProjectGraphEdges(
     projectId: string,
     relationCategory: 'blocks' | 'duplicate_of',

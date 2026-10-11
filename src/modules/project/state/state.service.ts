@@ -12,7 +12,7 @@ import {
   UpdateProjectStateItemDto,
   ReorderProjectStatesDto,
 } from './dto/project-state.dto';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { CACHE_KEYS } from '@/modules/project/core/constants/cache.constant';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 

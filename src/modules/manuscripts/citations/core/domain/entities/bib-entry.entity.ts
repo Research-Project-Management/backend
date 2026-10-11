@@ -5,7 +5,7 @@
 
 import { CitationKeyVo } from '../value-objects/citation-key.vo';
 import { AuthorListVo } from '../value-objects/author-list.vo';
-import { toBibtexValue } from '../utils/bibtex-value.utils';
+import { toBibtexValue } from '../bibtex-value';
 
 /**
  * How field values should be treated when serializing:

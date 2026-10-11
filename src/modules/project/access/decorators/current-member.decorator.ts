@@ -6,7 +6,7 @@ import { MemberAccessContext } from '../types/access.type';
  * Attached to request by ProjectAccessGuard.
  */
 export const CurrentMember = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): any => {
+  (_data: unknown, ctx: ExecutionContext): MemberAccessContext | null => {
     const request = ctx.switchToHttp().getRequest();
     return request.projectMember ?? null;
   },

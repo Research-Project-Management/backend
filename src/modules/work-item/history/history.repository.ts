@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { EntityType } from '@prisma/client';
-import { isUuid } from '@/core/utils/uuid.util';
+import { isUuid } from '@/core';
 
 const USER_SELECT = {
   id: true,

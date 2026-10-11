@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { isStateCompleted } from '../../state/utils/state.util';
+import { isStateCompleted } from '../../common/utils/state-completion.util';
 
 export interface RankUpdateItem {
   id: string;

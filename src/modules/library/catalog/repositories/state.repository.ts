@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Prisma, ReadStatus } from '@prisma/client';
 import { StateEntity, UpsertStateData } from '../types/state.types';
 

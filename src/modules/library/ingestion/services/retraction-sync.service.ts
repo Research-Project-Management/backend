@@ -56,13 +56,14 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     );
 
     // Initial delay of 2 minutes after boot before first background scan
-    setTimeout(() => {
+    const initTimer = setTimeout(() => {
       this.syncAllStaleItems().catch((err) => {
         this.logger.warn(
           `Initial background retraction sync error: ${err?.message}`,
         );
       });
     }, 120000);
+    initTimer.unref();
 
     this.syncTimer = setInterval(() => {
       this.syncAllStaleItems().catch((err) => {
@@ -71,6 +72,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
         );
       });
     }, intervalMs);
+    this.syncTimer.unref();
   }
 
   onModuleDestroy(): void {

@@ -5,7 +5,7 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import {
   IEEE_CSL,
   NATURE_CSL,

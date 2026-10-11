@@ -12,6 +12,7 @@ import {
   Min,
   IsOptional,
   IsBoolean,
+  IsArray,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -82,9 +83,30 @@ export class RecordChangeDto {
 }
 
 export class BatchResolveDto {
-  @ApiProperty({ enum: ['accept_all', 'reject_all'] })
-  @IsEnum(['accept_all', 'reject_all'])
-  action!: 'accept_all' | 'reject_all';
+  @ApiProperty({
+    enum: [
+      'accept_all',
+      'reject_all',
+      'accept_selected',
+      'reject_selected',
+    ],
+  })
+  @IsEnum(['accept_all', 'reject_all', 'accept_selected', 'reject_selected'])
+  action!:
+    | 'accept_all'
+    | 'reject_all'
+    | 'accept_selected'
+    | 'reject_selected';
+
+  @ApiPropertyOptional({
+    description:
+      'Specific change IDs to resolve when action is accept_selected or reject_selected',
+    type: [String],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  changeIds?: string[];
 }
 
 export class CreateCommentThreadDto {

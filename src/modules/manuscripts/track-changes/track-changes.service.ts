@@ -4,7 +4,7 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { RecordChangeUseCase } from './core/use-cases/record-change.use-case';
 import { AcceptChangeUseCase } from './core/use-cases/accept-change.use-case';
 import { RejectChangeUseCase } from './core/use-cases/reject-change.use-case';
@@ -130,6 +130,7 @@ export class TrackChangesService {
     projectId: string,
     docId: string,
     action: BatchAction,
+    changeIds?: string[],
     userId?: string | null,
   ): Promise<{ resolvedCount: number; action: BatchAction }> {
     const resolvedProjId = await this.resolveProjectId(projectId, docId);
@@ -137,6 +138,7 @@ export class TrackChangesService {
       projectId: resolvedProjId,
       docId,
       action,
+      changeIds,
       userId,
     });
   }

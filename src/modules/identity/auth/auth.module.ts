@@ -11,7 +11,7 @@ import { AuthController } from './auth.controller';
 import { AuthRepository } from './auth.repository';
 import { AuthGuard, JwtAuthGuard } from './guards/auth.guard';
 import { VerifiedEmailGuard } from './guards/verified-email.guard';
-import { CacheModule } from '@/core/cache/cache.module';
+import { CacheModule } from '@/core';
 import { UserModule } from '../user/user.module';
 import { AuditModule } from '../audit/audit.module';
 
@@ -33,7 +33,8 @@ import { AuditModule } from '../audit/audit.module';
           secret,
           signOptions: {
             expiresIn:
-              (configService.get<string>('JWT_EXPIRES_IN') as any) || '7d',
+              ((configService.get<string>('JWT_EXPIRES_IN') ||
+                '7d') as `${number}${'s' | 'm' | 'h' | 'd'}` | number),
           },
         };
       },

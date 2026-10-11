@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Prisma, AnnotationType } from '@prisma/client';
 import { VersionMismatchException } from '../../shared-kernel/core/errors/version-mismatch.exception';
 import {
@@ -11,7 +11,7 @@ import {
 } from '../types/annotations.types';
 import { buildAnnotationSortIndex } from '../../shared-kernel';
 
-export { AnnotationEntity, CreateAnnotationData, UpdateAnnotationData };
+export type { AnnotationEntity, CreateAnnotationData, UpdateAnnotationData };
 
 const ANNOTATION_SELECT = {
   id: true,

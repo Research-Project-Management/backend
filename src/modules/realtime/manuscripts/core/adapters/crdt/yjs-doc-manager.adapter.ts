@@ -12,7 +12,7 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { LineArrayEngine } from '@/modules/manuscripts/docstore/core/adapters/engine/line-array.engine';
 
@@ -422,6 +422,64 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
   public async getText(projectId: string, docId: string): Promise<string> {
     const session = await this.getOrCreateDoc(projectId, docId);
     return session.yText.toString();
+  }
+
+  /** True when a Y.Doc session for this document is currently loaded in memory. */
+  public isActive(projectId: string, docId: string): boolean {
+    return this.activeDocs.has(this.docKey(projectId, docId));
+  }
+
+  /**
+   * Applies externally-authored full text (e.g. REST PUT, batch replace) to an
+   * active Y.Doc using a minimal prefix/suffix splice. Returns a y-protocols
+   * update frame to broadcast to connected peers, or null if no session is
+   * active (Docstore is then the single source of truth) or nothing changed.
+   */
+  public replaceTextIfActive(
+    projectId: string,
+    docId: string,
+    nextText: string,
+  ): Buffer | null {
+    const session = this.activeDocs.get(this.docKey(projectId, docId));
+    if (!session) return null;
+    const current = session.yText.toString();
+    if (current === nextText) return null;
+
+    let prefix = 0;
+    const maxPrefix = Math.min(current.length, nextText.length);
+    while (prefix < maxPrefix && current[prefix] === nextText[prefix]) prefix++;
+    let suffix = 0;
+    const maxSuffix = Math.min(current.length, nextText.length) - prefix;
+    while (
+      suffix < maxSuffix &&
+      current[current.length - 1 - suffix] ===
+        nextText[nextText.length - 1 - suffix]
+    ) {
+      suffix++;
+    }
+
+    const deleteLen = current.length - prefix - suffix;
+    const insertText = nextText.slice(prefix, nextText.length - suffix);
+
+    let captured: Uint8Array | null = null;
+    // REST writer already bumped the Docstore version; re-read it on next flush.
+    session.currentVersion = undefined;
+    const capture = (update: Uint8Array) => {
+      captured = captured ? Y.mergeUpdates([captured, update]) : update;
+    };
+    session.doc.on('update', capture);
+    try {
+      session.doc.transact(() => {
+        if (deleteLen > 0) session.yText.delete(prefix, deleteLen);
+        if (insertText.length > 0) session.yText.insert(prefix, insertText);
+      }, 'rest-api');
+    } finally {
+      session.doc.off('update', capture);
+    }
+    if (!captured) return null;
+    const encoder = encoding.createEncoder();
+    syncProtocol.writeUpdate(encoder, captured);
+    return Buffer.from(encoding.toUint8Array(encoder));
   }
 
   /**

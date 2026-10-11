@@ -42,6 +42,15 @@ export * from './repositories/tags.repository';
 export * from './repositories/notes.repository';
 export * from './repositories/saved-searches.repository';
 export * from './repositories/state.repository';
+export * from './repositories/prisma-item-repository.adapter';
+
+// Clean Architecture CQRS Use Cases
+export * from './core/use-cases/create-item.use-case';
+export * from './core/use-cases/update-item.use-case';
+export * from './core/use-cases/delete-item.use-case';
+export * from './core/use-cases/get-item.use-case';
+export * from './core/use-cases/list-items.use-case';
+export * from './core/use-cases/restore-item.use-case';
 
 // Types & Utils
 export * from './types/items.types';

@@ -1,20 +1,28 @@
 import { Global, Module } from '@nestjs/common';
-import { PrismaModule } from './database/prisma.module';
-import { CacheModule } from './cache/cache.module';
+import { PrismaModule } from './infrastructure/database/prisma.module';
+import { CacheModule } from './infrastructure/redis/cache.module';
 import { LoggerModule } from './logger/logger.module';
-import { GlobalExceptionFilter } from './filters/exception.filter';
-import { TransformInterceptor } from './interceptors/transform.interceptor';
-import { IdempotencyModule } from './idempotency/idempotency.module';
+import { IdempotencyModule } from './infrastructure/idempotency/idempotency.module';
+import { HealthModule } from './infrastructure/health/health.module';
+import { GlobalExceptionFilter } from './http/filters/exception.filter';
+import { TransformInterceptor } from './http/interceptors/transform.interceptor';
 
 @Global()
 @Module({
-  imports: [PrismaModule, CacheModule, LoggerModule, IdempotencyModule],
+  imports: [
+    PrismaModule,
+    CacheModule,
+    LoggerModule,
+    IdempotencyModule,
+    HealthModule,
+  ],
   providers: [GlobalExceptionFilter, TransformInterceptor],
   exports: [
     PrismaModule,
     CacheModule,
     LoggerModule,
     IdempotencyModule,
+    HealthModule,
     GlobalExceptionFilter,
     TransformInterceptor,
   ],

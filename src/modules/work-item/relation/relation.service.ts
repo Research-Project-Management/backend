@@ -3,10 +3,11 @@ import {
   NotFoundException,
   BadRequestException,
   Optional,
+  Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { RedisCacheService } from '@/core/cache/redis.service';
-import { Prisma } from '@prisma/client';
+import { RedisCacheService } from '@/core';
+import { Prisma, WorkItemRelationType } from '@prisma/client';
 import { RelationRepository } from './relation.repository';
 import { AddRelationDto } from './dto/relation.dto';
 import {
@@ -14,7 +15,7 @@ import {
   WorkItemRelationItem,
   EnrichedRelationItem,
 } from './types/relation.types';
-import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
 import * as crypto from 'crypto';
 
 export const INVERSE_RELATION_MAP: Record<RelationType, RelationType> = {
@@ -32,6 +33,8 @@ export const INVERSE_RELATION_MAP: Record<RelationType, RelationType> = {
 
 @Injectable()
 export class RelationService {
+  private readonly logger = new Logger(RelationService.name);
+
   constructor(
     private readonly relationRepository: RelationRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
@@ -43,14 +46,18 @@ export class RelationService {
     workItemId?: string,
   ) {
     if (!this.cache) return;
-    const deletions: Promise<any>[] = [
+    const deletions: Promise<void>[] = [
       this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       this.cache.del(`flux:proj:overview:${projectId}`),
     ];
     if (workItemId) {
       deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)));
     }
-    await Promise.all(deletions).catch(() => null);
+    await Promise.all(deletions).catch((err) => {
+      this.logger.warn(
+        `Failed to invalidate work item cache: ${(err as Error).message}`,
+      );
+    });
   }
 
   async getWorkItemRelations(
@@ -383,13 +390,13 @@ export class RelationService {
           sourceId_targetId_type: {
             sourceId: sourceItem.id,
             targetId: targetItem.id,
-            type: addRelationDto.type as any,
+            type: addRelationDto.type as WorkItemRelationType,
           },
         },
         create: {
           sourceId: sourceItem.id,
           targetId: targetItem.id,
-          type: addRelationDto.type as any,
+          type: addRelationDto.type as WorkItemRelationType,
         },
         update: {},
       });

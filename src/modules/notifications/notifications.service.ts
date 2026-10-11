@@ -25,7 +25,7 @@ import { ProjectsNotificationsService } from './projects/projects-notifications.
 
 @Injectable()
 export class NotificationsService {
-  public readonly manuscripts: ManuscriptsNotificationsService;
+  public readonly manuscripts?: ManuscriptsNotificationsService | null;
   public readonly projects: ProjectsNotificationsService;
 
   constructor(
@@ -54,7 +54,7 @@ export class NotificationsService {
             this.createNotificationUseCase,
             this.deleteNotificationUseCase,
           )
-        : (null as any));
+        : null);
 
     this.projects =
       projectsNotificationsService ||

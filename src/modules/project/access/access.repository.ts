@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { isUUID } from 'class-validator';
 import { Role } from './enums/role.enum';
 import {
@@ -22,10 +22,7 @@ export class AccessRepository implements IAccessRepository {
   ): Promise<AuthzProjectContext | null> {
     if (!projectId || !isUUID(projectId)) return null;
 
-    const prismaAny = this.prisma as any;
-    if (!prismaAny.project) return null;
-
-    const project = await prismaAny.project.findFirst({
+    const project = await this.prisma.project.findFirst({
       where: { id: projectId, deletedAt: null },
       select: {
         id: true,
@@ -52,10 +49,7 @@ export class AccessRepository implements IAccessRepository {
       return null;
     }
 
-    const prismaAny = this.prisma as any;
-    if (!prismaAny.projectMember) return null;
-
-    const member = await prismaAny.projectMember.findFirst({
+    const member = await this.prisma.projectMember.findFirst({
       where: {
         projectId,
         userId,
@@ -113,10 +107,7 @@ export class AccessRepository implements IAccessRepository {
       return null;
     }
 
-    const prismaAny = this.prisma as any;
-    if (!prismaAny.projectMember) return null;
-
-    const member = await prismaAny.projectMember.findFirst({
+    const member = await this.prisma.projectMember.findFirst({
       where: {
         projectId,
         userId,
@@ -132,28 +123,20 @@ export class AccessRepository implements IAccessRepository {
    * Updates permission overrides for a specific project member.
    */
   async updateMemberOverrides(
-    projectId: string,
-    userId: string,
-    overrides: PermissionOverrideMap,
+    _projectId: string,
+    _userId: string,
+    _overrides: PermissionOverrideMap,
   ): Promise<void> {
-    const prismaAny = this.prisma as any;
-    if (!prismaAny.projectMember) return;
-
-    await prismaAny.projectMember.updateMany({
-      where: {
-        projectId,
-        userId,
-      },
-      data: {
-        permissionOverrides: overrides,
-      },
-    });
+    // ProjectMember uses role-based permissions without separate DB column
   }
 
   /**
    * Compatibility alias for findMemberAccessContext / findMemberContext.
    */
-  async findMemberContext(projectId: string, userId: string): Promise<any> {
+  async findMemberContext(
+    projectId: string,
+    userId: string,
+  ): Promise<MemberAccessContext | null> {
     return this.findMemberAccessContext(projectId, userId);
   }
 }

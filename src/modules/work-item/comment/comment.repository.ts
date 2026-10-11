@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
-import { isUuid } from '@/core/utils/uuid.util';
+import { isUuid } from '@/core';
 
 const AUTHOR_SELECT = {
   id: true,
@@ -14,7 +14,17 @@ const AUTHOR_SELECT = {
   },
 } as const;
 
-function mapCommentAuthor<T extends { author?: any }>(comment: T | null): any {
+interface CommentAuthorSource {
+  id: string;
+  email: string | null;
+  name?: string | null;
+  avatar?: string | null;
+  profile?: { name?: string | null; avatar?: string | null } | null;
+}
+
+function mapCommentAuthor<T extends { author?: CommentAuthorSource | null }>(
+  comment: T | null,
+) {
   if (!comment) return null;
   const author = comment.author
     ? {
@@ -105,7 +115,7 @@ export class CommentRepository {
     workItemId: string;
     authorId: string;
     content: string;
-    attachments?: any;
+    attachments?: Prisma.InputJsonValue;
   }) {
     const itemUuid = await this.resolveWorkItemUuid(data.workItemId);
     if (!itemUuid) {
@@ -122,7 +132,7 @@ export class CommentRepository {
         author: { select: AUTHOR_SELECT },
       },
     });
-    return mapCommentAuthor(comment);
+    return mapCommentAuthor(comment)!;
   }
 
   async updateComment(
@@ -142,7 +152,7 @@ export class CommentRepository {
         author: { select: AUTHOR_SELECT },
       },
     });
-    return mapCommentAuthor(comment);
+    return mapCommentAuthor(comment)!;
   }
 
   async deleteComment(commentId: string) {

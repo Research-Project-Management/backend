@@ -32,7 +32,7 @@ import {
   CursorPaginatedResult,
   DocumentFulltextResponse,
 } from '../dto/items.dto';
-import { RedisCacheService } from '../../../../core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '../../shared-kernel/core/constants/redis-keys.constants';
 import { TagsService } from './tags.service';
 import { TypesService } from './types.service';

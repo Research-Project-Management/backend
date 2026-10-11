@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { CreateProjectStatusUpdateDto } from './dto/create-status-update.dto';
 import { UpdateProjectStatusUpdateDto } from './dto/update-status-update.dto';
 

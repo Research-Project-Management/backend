@@ -4,7 +4,7 @@
  */
 
 import { Module, forwardRef } from '@nestjs/common';
-import { PrismaModule } from '@/core/database/prisma.module';
+import { PrismaModule } from '@/core';
 import { StructureController } from './structure.controller';
 import { StructureService } from './structure.service';
 

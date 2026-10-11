@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ChatService as ThreadService } from '@/modules/ai/chat/chat.service';
 import { ChatRepository as ThreadRepository } from '@/modules/ai/chat/chat.repository';
-import { PrismaService } from '@/core/database/prisma.service';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { PrismaService } from '@/core';
+import { RedisCacheService } from '@/core';
 import {
   NotFoundException,
   ForbiddenException,
@@ -76,7 +76,7 @@ describe('ThreadService (Server-Authoritative Invariants)', () => {
       project: {
         findFirst: jest.fn(),
       },
-      page: {
+      manuscriptDoc: {
         findFirst: jest.fn(),
         findUnique: jest.fn(),
       },
@@ -241,9 +241,9 @@ describe('ThreadService (Server-Authoritative Invariants)', () => {
 
     it('should create new page chat with sanitized page title if not found', async () => {
       repo.findPageChat.mockResolvedValue(null);
-      prisma.page.findUnique.mockResolvedValue({
+      prisma.manuscriptDoc.findUnique.mockResolvedValue({
         id: mockPageId,
-        title: 'Introduction Section',
+        path: 'Introduction Section',
         projectId: mockProjectId,
       });
       repo.createChat.mockResolvedValue({

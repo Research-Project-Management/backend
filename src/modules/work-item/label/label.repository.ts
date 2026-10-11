@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Prisma, WorkItemLabel as Label } from '@prisma/client';
 import {
   ILabelRepository,
@@ -69,6 +69,46 @@ export class LabelRepository implements ILabelRepository {
         projectId,
         name: { equals: name.trim(), mode: 'insensitive' },
         ...(excludeId && { id: { not: excludeId } }),
+      },
+    });
+  }
+
+  async findProject(projectId: string): Promise<{ id: string } | null> {
+    return this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+  }
+
+  async getLastSortOrder(
+    projectId: string,
+    parentId?: string | null,
+  ): Promise<number | null> {
+    const lastLabel = await this.prisma.workItemLabel.findFirst({
+      where: {
+        projectId,
+        parentId: parentId || null,
+      },
+      orderBy: { sortOrder: 'desc' },
+      select: { sortOrder: true },
+    });
+    return lastLabel?.sortOrder ?? null;
+  }
+
+  async findDuplicate(params: {
+    projectId: string | null;
+    name: string;
+    parentId?: string | null;
+    excludeId?: string;
+    createdById?: string;
+  }): Promise<Label | null> {
+    return this.prisma.workItemLabel.findFirst({
+      where: {
+        ...(params.excludeId && { id: { not: params.excludeId } }),
+        ...(params.createdById && { createdById: params.createdById }),
+        projectId: params.projectId,
+        name: { equals: params.name.trim(), mode: 'insensitive' },
+        parentId: params.parentId ?? null,
       },
     });
   }

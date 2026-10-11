@@ -4,7 +4,7 @@
  */
 
 import { Module, forwardRef } from '@nestjs/common';
-import { CacheModule } from '@/core/cache/cache.module';
+import { CacheModule } from '@/core';
 import { StructureModule } from '../structure/structure.module';
 import { DocstoreModule } from '../docstore/docstore.module';
 import { FilestoreModule } from '../filestore/filestore.module';

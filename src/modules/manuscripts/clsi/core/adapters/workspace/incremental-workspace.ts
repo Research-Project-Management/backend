@@ -14,7 +14,7 @@ import {
   WorkspaceSyncStats,
   AuxFileInfo,
 } from '../../ports/workspace.port';
-import { SafePathUtil } from './safe-path.util';
+import { SafePath } from './safe-path';
 
 interface ProjectManifest {
   version: number;
@@ -116,10 +116,10 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
     const newManifestFiles: Record<string, string> = {};
 
     for (const file of files) {
-      const sanitizedRelPath = SafePathUtil.sanitizeRelativePath(file.path);
+      const sanitizedRelPath = SafePath.sanitizeRelativePath(file.path);
       currentFileKeys.add(sanitizedRelPath);
 
-      const targetPath = SafePathUtil.resolveSafePath(
+      const targetPath = SafePath.resolveSafePath(
         scratchDir,
         sanitizedRelPath,
       );
@@ -155,7 +155,7 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
     for (const oldRelPath of Object.keys(manifest.files)) {
       if (!currentFileKeys.has(oldRelPath)) {
         try {
-          const oldFilePath = SafePathUtil.resolveSafePath(
+          const oldFilePath = SafePath.resolveSafePath(
             scratchDir,
             oldRelPath,
           );
@@ -339,7 +339,7 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
   ): Promise<Buffer | null> {
     const scratchDir = this.getScratchDir(projectId);
     try {
-      const safePath = SafePathUtil.resolveSafePath(scratchDir, filename);
+      const safePath = SafePath.resolveSafePath(scratchDir, filename);
       const ext = path.extname(filename).toLowerCase();
       if (!AUX_EXTENSIONS.has(ext)) {
         return null;
@@ -356,7 +356,7 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
   ): Promise<Buffer | null> {
     const scratchDir = this.getScratchDir(projectId);
     try {
-      const safePath = SafePathUtil.resolveSafePath(scratchDir, filename);
+      const safePath = SafePath.resolveSafePath(scratchDir, filename);
       return await fs.readFile(safePath);
     } catch {
       return null;

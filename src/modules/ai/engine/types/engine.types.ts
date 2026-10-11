@@ -1,6 +1,9 @@
 export interface AiMessageDto {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  attachments?: unknown;
+  sources?: unknown;
+  [key: string]: unknown;
 }
 
 export interface StreamChatPayload {

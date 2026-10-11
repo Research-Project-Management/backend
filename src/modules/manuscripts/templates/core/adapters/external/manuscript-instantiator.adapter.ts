@@ -11,7 +11,7 @@ import {
   InstantiateProjectInput,
   InstantiatedProjectResult,
 } from '../../ports/project-instantiator.port';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { StructureService } from '../../../../structure/structure.service';
 import { DocstoreService } from '../../../../docstore/docstore.service';
 

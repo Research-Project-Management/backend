@@ -12,6 +12,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
@@ -33,6 +34,21 @@ import { StorageNode } from '../../domain/entities/storage-node.entity';
 import { FileScope } from '../../domain/value-objects/file-scope.vo';
 import * as crypto from 'crypto';
 
+interface PageUploadBody {
+  filename?: string;
+  mimeType?: string;
+  fileBase64?: string;
+  parentId?: string;
+}
+
+interface UploadRequest extends FastifyRequest {
+  user?: {
+    id?: string;
+    status?: string;
+    isVerified?: boolean;
+  };
+}
+
 @ApiTags('Storage & Uploads')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/storage/files', 'api/files', 'api/file'])
@@ -50,8 +66,20 @@ export class UploadController {
   @Post('presign')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Generate presigned URL for direct upload' })
-  async presign(@CurrentUser() user: any, @Body() dto: PresignDto) {
+  async presign(
+    @CurrentUser()
+    user: {
+      id?: string;
+      sub?: string;
+      status?: string;
+      isVerified?: boolean;
+    } | null,
+    @Body() dto: PresignDto,
+  ) {
     const userId = user?.id || user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User is not authenticated');
+    }
     const isUnverified =
       user?.status === 'pending_verification' || user?.isVerified === false;
     const requestedSize = dto.size || 10 * 1024 * 1024;
@@ -109,29 +137,30 @@ export class UploadController {
   async uploadDirect(
     @CurrentUser('id') userId: string,
     @Req() req: FastifyRequest,
-    @Body() body?: any,
+    @Body() body?: Record<string, unknown>,
   ) {
+    const uploadReq = req as unknown as UploadRequest;
     // Check if request is multipart
     const isMultipart =
-      typeof (req as any).isMultipart === 'function'
-        ? (req as any).isMultipart()
+      typeof uploadReq.isMultipart === 'function'
+        ? uploadReq.isMultipart()
         : false;
     if (!isMultipart) {
       // Allow JSON createFileRecord fallback
       if (body && (body.filename || body.name)) {
         const node = new StorageNode({
           id: crypto.randomUUID(),
-          projectId: body.projectId || null,
-          name: body.filename || body.name,
+          projectId: (body.projectId as string) || null,
+          name: (body.filename as string) || (body.name as string),
           isFolder: false,
-          size: BigInt(body.size || 0),
-          mimeType: body.mimeType || 'application/octet-stream',
-          parentId: body.parentId || null,
+          size: BigInt((body.size as number | string) || 0),
+          mimeType: (body.mimeType as string) || 'application/octet-stream',
+          parentId: (body.parentId as string) || null,
           authorId: userId,
           metadata: {
             url: body.url,
             thumbnail: body.thumbnail,
-            ...(body.metaData || {}),
+            ...((body.metaData as Record<string, unknown>) || {}),
           },
         });
         const created = await this.nodeRepo.create(node);
@@ -140,13 +169,14 @@ export class UploadController {
           fileId: created.id,
           filename: created.name,
           url:
-            body.url || `/api/files/${encodeURIComponent(created.id)}/content`,
+            (body.url as string) ||
+            `/api/files/${encodeURIComponent(created.id)}/content`,
           file: {
             id: created.id,
             filename: created.name,
             size: Number(created.size),
             url:
-              body.url ||
+              (body.url as string) ||
               `/api/files/${encodeURIComponent(created.id)}/content`,
           },
         };
@@ -156,13 +186,13 @@ export class UploadController {
       );
     }
 
-    const data = await (req as any).file();
+    const data = await uploadReq.file?.();
     if (!data) {
       throw new BadRequestException('No file uploaded');
     }
 
     const buffer = await data.toBuffer();
-    const user = (req as any).user;
+    const user = uploadReq.user;
     const isUnverified =
       user?.status === 'pending_verification' || user?.isVerified === false;
 
@@ -172,7 +202,10 @@ export class UploadController {
       );
     }
 
-    const fields = data.fields || {};
+    const fields = (data.fields || {}) as Record<
+      string,
+      { value?: string } | undefined
+    >;
     const fieldFilename =
       fields.fileName?.value || fields.filename?.value || fields.name?.value;
     const filename =
@@ -185,7 +218,7 @@ export class UploadController {
 
     const UUID_REGEX =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const cleanUuid = (val: any): string | undefined => {
+    const cleanUuid = (val: unknown): string | undefined => {
       if (typeof val !== 'string') return undefined;
       const trimmed = val.trim();
       return UUID_REGEX.test(trimmed) ? trimmed : undefined;
@@ -235,19 +268,23 @@ export class UploadController {
     @Param('pageId') pageId: string,
     @CurrentUser('id') userId: string,
     @Req() req: FastifyRequest,
-    @Body() body?: any,
+    @Body() body?: PageUploadBody,
   ) {
+    const uploadReq = req as UploadRequest;
     const isMultipart =
-      typeof (req as any).isMultipart === 'function'
-        ? (req as any).isMultipart()
+      typeof uploadReq.isMultipart === 'function'
+        ? uploadReq.isMultipart()
         : false;
     if (isMultipart) {
-      const data = await (req as any).file();
+      const data = await uploadReq.file?.();
       if (!data) {
         throw new BadRequestException('No file uploaded');
       }
       const buffer = await data.toBuffer();
-      const fields = data.fields || {};
+      const fields = (data.fields || {}) as Record<
+        string,
+        { value?: string } | undefined
+      >;
       const fieldFilename =
         fields.fileName?.value || fields.filename?.value || fields.name?.value;
       const filename =

@@ -14,8 +14,8 @@ import { SecurityAuditLogEntry } from './audit/types/audit.type';
 export * from './core/interfaces/identity.interface';
 export * from './core/types/identity.type';
 export * from './core/constants/identity.constant';
+export type { SecurityAuditLogEntry } from './audit/types/audit.type';
 export {
-  SecurityAuditLogEntry,
   AUDIT_ACTIONS,
   AuditOutcome,
   AuditSeverity,

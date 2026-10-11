@@ -13,20 +13,20 @@ import {
   AppendMessagesDto,
   RenameChatDto,
 } from './dto/chat.dto';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { AI_REDIS_KEYS } from './constants/redis-keys.constant';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import {
   sanitizeChatTitle,
   sanitizeChatMessageContent,
   validateAndSanitizeRole,
 } from '../utils/ai.util';
-import { FormattedChatSession } from './types/chat.type';
+import { Prisma } from '@prisma/client';
+import { FormattedChatSession, ChatWithMessages } from './types/chat.type';
 
 export type { FormattedChatSession };
 
-function formatChat(chat: any): FormattedChatSession {
-  if (!chat) return null as any;
+function formatChat(chat: ChatWithMessages): FormattedChatSession {
   const msgs = Array.isArray(chat.messages) ? chat.messages : [];
   const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1].content || '' : '';
 
@@ -39,9 +39,9 @@ function formatChat(chat: any): FormattedChatSession {
     messageCount: msgs.length,
     lastMessage: lastMsg,
     documentIds: chat.documentIds || [],
-    createdAt: chat.createdAt?.toISOString?.() || chat.createdAt,
-    updatedAt: chat.updatedAt?.toISOString?.() || chat.updatedAt,
-    messages: msgs.map((m: any) => ({
+    createdAt: chat.createdAt?.toISOString?.() || String(chat.createdAt),
+    updatedAt: chat.updatedAt?.toISOString?.() || String(chat.updatedAt),
+    messages: msgs.map((m) => ({
       id: m.id,
       role: m.role,
       content: m.content,
@@ -51,7 +51,7 @@ function formatChat(chat: any): FormattedChatSession {
           ? m.sources
           : undefined,
       widgets: m.widgets,
-      createdAt: m.createdAt?.toISOString?.() || m.createdAt,
+      createdAt: m.createdAt?.toISOString?.() || String(m.createdAt),
     })),
   };
 }
@@ -173,17 +173,12 @@ export class ChatService {
       return formatChat(raw);
     }
 
-    const doc =
-      (await (this.prisma as any).manuscriptDoc?.findUnique?.({
-        where: { id: pageId },
-        select: { path: true, projectId: true },
-      })) ||
-      (await (this.prisma as any).page?.findUnique?.({
-        where: { id: pageId },
-        select: { title: true, projectId: true },
-      }));
+    const doc = await this.prisma.manuscriptDoc.findUnique({
+      where: { id: pageId },
+      select: { path: true, projectId: true },
+    });
 
-    const docTitle = doc?.path || doc?.title;
+    const docTitle = doc?.path;
     const title = docTitle
       ? `${sanitizeChatTitle(docTitle)} Discussion`
       : 'Manuscript Chat';
@@ -255,15 +250,10 @@ export class ChatService {
 
     // Verify document access if specified
     if (dto.pageId) {
-      const doc =
-        (await (this.prisma as any).manuscriptDoc?.findFirst?.({
-          where: { id: dto.pageId, deleted: false },
-          select: { id: true, projectId: true },
-        })) ||
-        (await (this.prisma as any).page?.findFirst?.({
-          where: { id: dto.pageId },
-          select: { id: true, projectId: true },
-        }));
+      const doc = await this.prisma.manuscriptDoc.findFirst({
+        where: { id: dto.pageId, deleted: false },
+        select: { id: true, projectId: true },
+      });
       if (!doc) {
         throw new NotFoundException('Manuscript doc not found');
       }
@@ -295,18 +285,21 @@ export class ChatService {
     });
 
     if (dto.messages && dto.messages.length > 0) {
-      const formattedMessages = dto.messages.map((m: any) => ({
+      const formattedMessages = dto.messages.map((m) => ({
         role: validateAndSanitizeRole(m.role),
         content: sanitizeChatMessageContent(m.content),
-        sources: m.attachments || m.sources,
-        widgets: m.widgets,
-        selectionContext: m.selectionContext,
+        sources: (m.attachments || m.sources) as Prisma.InputJsonValue | undefined,
+        widgets: m.widgets as Prisma.InputJsonValue | undefined,
+        selectionContext: m.selectionContext as Prisma.InputJsonValue | undefined,
       }));
       const updated = await this.chatRepo.createMessages(
         created.id,
         formattedMessages,
         dto.documentIds,
       );
+      if (!updated) {
+        throw new NotFoundException('Chat not found');
+      }
       const result = formatChat(updated);
       await this.invalidateChatCache(userId, created.id, cleanProjectId);
       return result;
@@ -331,12 +324,12 @@ export class ChatService {
       throw new UnprocessableEntityException('Messages array cannot be empty');
     }
 
-    const formattedMessages = dto.messages.map((m: any) => ({
+    const formattedMessages = dto.messages.map((m) => ({
       role: validateAndSanitizeRole(m.role),
       content: sanitizeChatMessageContent(m.content),
-      sources: m.attachments || m.sources,
-      widgets: m.widgets,
-      selectionContext: m.selectionContext,
+      sources: (m.attachments || m.sources) as Prisma.InputJsonValue | undefined,
+      widgets: m.widgets as Prisma.InputJsonValue | undefined,
+      selectionContext: m.selectionContext as Prisma.InputJsonValue | undefined,
     }));
 
     if (formattedMessages.some((m) => !m.content || !m.content.trim())) {
@@ -348,6 +341,9 @@ export class ChatService {
       formattedMessages,
       dto.documentIds,
     );
+    if (!updated) {
+      throw new NotFoundException('Chat not found');
+    }
     const result = formatChat(updated);
 
     await this.invalidateChatCache(chat.userId, chatId, chat.projectId);

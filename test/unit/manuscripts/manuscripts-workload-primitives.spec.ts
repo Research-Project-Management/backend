@@ -5,7 +5,7 @@
 import {
   mapWithConcurrency,
   mapSettledWithConcurrency,
-} from '@/core/utils/concurrency.util';
+} from '@/core';
 import {
   FairSemaphore,
   SemaphoreQueueFullError,

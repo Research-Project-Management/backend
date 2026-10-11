@@ -4,10 +4,11 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  GetObjectCommandOutput,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { getErrorMessage } from '@/core/utils/error.util';
+import { getErrorMessage } from '@/core';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -207,13 +208,13 @@ export class R2Service {
               ? stat.size - start
               : stat.size;
         return {
-          Body: stream as any,
+          Body: stream as unknown as GetObjectCommandOutput['Body'],
           ContentLength: len,
           ContentType: 'application/octet-stream',
           ContentRange: range
             ? `bytes ${start ?? 0}-${end ?? stat.size - 1}/${stat.size}`
             : undefined,
-        };
+        } as GetObjectCommandOutput;
       }
       throw s3Err;
     }

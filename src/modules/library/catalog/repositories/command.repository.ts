@@ -7,7 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma, RelationType } from '@prisma/client';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { VersionMismatchException } from '../../shared-kernel/core/errors/version-mismatch.exception';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { CreateItemData, UpdateItemData } from '../types/items.types';

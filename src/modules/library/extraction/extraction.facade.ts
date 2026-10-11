@@ -18,8 +18,8 @@ import {
   BatchAnnotationsResult,
   AnnotationType,
 } from './types/annotations.types';
-
-export const EXTRACTION_FACADE = 'EXTRACTION_FACADE';
+import { EXTRACTION_FACADE } from '../shared-kernel/ports/extraction.port';
+export { EXTRACTION_FACADE };
 
 export interface IExtractionFacade {
   getItemAttachments(

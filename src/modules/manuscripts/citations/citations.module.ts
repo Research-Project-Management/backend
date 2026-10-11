@@ -7,7 +7,7 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { StructureModule } from '../structure/structure.module';
 import { DocstoreModule } from '../docstore/docstore.module';
-import { PrismaModule } from '@/core/database/prisma.module';
+import { PrismaModule } from '@/core';
 import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 import { LibraryModule } from '@/modules/library/library.module';
 

@@ -1,5 +1,15 @@
 import { IsArray, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
+export interface IncomingChatMessage {
+  role?: string;
+  content?: string;
+  sources?: unknown;
+  attachments?: unknown;
+  widgets?: unknown;
+  selectionContext?: unknown;
+  [key: string]: unknown;
+}
+
 export class CreateChatDto {
   @IsString()
   @IsOptional()
@@ -15,7 +25,7 @@ export class CreateChatDto {
 
   @IsArray()
   @IsOptional()
-  messages?: Array<Record<string, unknown>>;
+  messages?: IncomingChatMessage[];
 
   @IsArray()
   @IsOptional()
@@ -28,7 +38,7 @@ export class CreateThreadDto extends CreateChatDto {}
 export class AppendMessagesDto {
   @IsArray()
   @IsNotEmpty({ message: 'Messages array is required' })
-  messages!: Array<Record<string, unknown>>;
+  messages!: IncomingChatMessage[];
 
   @IsArray()
   @IsOptional()

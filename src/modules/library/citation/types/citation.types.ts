@@ -1,12 +1,9 @@
-export type SupportedCitationStyle =
-  | 'apa'
-  | 'harvard'
-  | 'vancouver'
-  | 'ieee'
-  | 'chicago'
-  | 'nature'
-  | 'science'
-  | (string & {});
+import {
+  CitationStyleVo,
+  type SupportedCitationStyle,
+} from '../core/domain/citation-style.vo';
+
+export { CitationStyleVo, type SupportedCitationStyle };
 
 export type CitationStyleId =
   | 'apa'
@@ -105,43 +102,6 @@ export interface ReferenceData {
   [key: string]: unknown;
 }
 
-/**
- * CitationStyle Value Object validating academic citation styles.
- * Supports any valid style slug from the 10,000+ CSL repository.
- */
-export class CitationStyleVo {
-  private readonly _value: string;
-
-  private constructor(value: string) {
-    this._value = value;
-  }
-
-  public static create(rawStyle?: string | null): CitationStyleVo {
-    if (!rawStyle) return new CitationStyleVo('apa');
-    const cleaned = rawStyle
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]/g, '');
-    if (!cleaned) {
-      return new CitationStyleVo('apa');
-    }
-    return new CitationStyleVo(cleaned);
-  }
-
-  public get value(): string {
-    return this._value;
-  }
-
-  public equals(other?: CitationStyleVo | null): boolean {
-    if (!other) return false;
-    return this._value === other._value;
-  }
-
-  public toString(): string {
-    return this._value;
-  }
-}
-
 export const CITATION_ENGINE_PORT = Symbol('CITATION_ENGINE_PORT');
 
 export interface ICitationEnginePort {
@@ -157,6 +117,30 @@ export interface ICitationEnginePort {
   ): Promise<FormattedCitationResult[]>;
 }
 
+export interface CatalogItemCreator {
+  creatorType?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  fullName?: string | null;
+}
+
+export interface CatalogItemRecord {
+  id: string;
+  title: string;
+  itemType?: string | null;
+  doi?: string | null;
+  url?: string | null;
+  citationKey?: string | null;
+  publicationTitle?: string | null;
+  publisher?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  year?: number | null;
+  contributors?: CatalogItemCreator[] | null;
+  [key: string]: unknown;
+}
+
 export const CATALOG_GATEWAY_PORT = Symbol('CITATION_CATALOG_GATEWAY_PORT');
 
 export interface ICatalogGatewayPort {
@@ -164,11 +148,11 @@ export interface ICatalogGatewayPort {
     userId: string,
     itemId: string,
     projectId?: string,
-  ): Promise<any | null>;
+  ): Promise<CatalogItemRecord | null>;
 
   findByIds(
     userId: string,
     itemIds: string[],
     projectId?: string,
-  ): Promise<any[]>;
+  ): Promise<CatalogItemRecord[]>;
 }

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Project, ProjectState } from '@prisma/client';
 import { DEFAULT_PROJECT_STATES } from './state.constants';
 import {

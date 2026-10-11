@@ -3,7 +3,8 @@ import {
   QueryCriteria,
 } from './specification.interface';
 
-export { CompositeSpecification, QueryCriteria };
+export { CompositeSpecification };
+export type { QueryCriteria };
 
 /**
  * ScopeSpecification: Enforces multi-tenant isolation.
@@ -17,7 +18,7 @@ export class ScopeSpecification extends CompositeSpecification {
     super();
   }
 
-  isSatisfiedBy(candidate: any): boolean {
+  isSatisfiedBy(candidate: Record<string, unknown>): boolean {
     if (
       this.projectId &&
       this.projectId !== 'user' &&

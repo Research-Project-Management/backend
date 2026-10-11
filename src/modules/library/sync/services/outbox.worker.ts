@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { OutboxMetrics as SyncMetricsService } from './outbox.metrics';
 import { OutboxStatus, OutboxEvent } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -18,7 +18,7 @@ import {
 } from '../types/outbox.constants';
 
 import { OutboxDispatchHandler } from '../types/outbox.types';
-export { OutboxDispatchHandler };
+export type { OutboxDispatchHandler };
 
 @Injectable()
 export class OutboxWorker
@@ -325,6 +325,7 @@ export class OutboxWorker
     this.pollTimer = setInterval(() => {
       void this.runPollCycle();
     }, intervalMs);
+    this.pollTimer.unref();
 
     // Initial immediate cycle
     void this.runPollCycle();
@@ -674,6 +675,7 @@ export class OutboxWorker
           }
         })();
       }, heartbeatIntervalMs);
+      heartbeatTimer.unref();
 
       // 5. Execute registered handler
       try {

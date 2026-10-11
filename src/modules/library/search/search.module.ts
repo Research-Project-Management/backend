@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { CoreModule } from '../../../core/core.module';
+import { CoreModule } from '@/core';
 import { SearchFacade, SEARCH_FACADE } from './search.facade';
 
 // Presentation
@@ -16,6 +16,7 @@ import {
   SEARCH_ENGINE_PORT,
   VECTOR_SEARCH_ENGINE_PORT,
 } from './types/search-engine.types';
+import { ExecuteSearchUseCase } from './core/use-cases/execute-search.use-case';
 
 /**
  * Search Bounded Context Unified Module (Generic Domain).
@@ -48,14 +49,15 @@ import {
       provide: VECTOR_SEARCH_ENGINE_PORT,
       useClass: VectorSearchAdapter,
     },
+    ExecuteSearchUseCase,
   ],
   exports: [
     SearchFacade,
     SEARCH_FACADE,
     SearchService,
     SEARCH_ENGINE_PORT,
-    VectorSearchAdapter,
     VECTOR_SEARCH_ENGINE_PORT,
+    ExecuteSearchUseCase,
   ],
 })
 export class SearchModule {}

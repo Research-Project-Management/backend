@@ -22,7 +22,7 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import { VerifiedEmailGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { Public } from '@/modules/identity/auth';
-import { BypassEnvelope } from '@/core/decorators/bypass.decorator';
+import { BypassEnvelope } from '@/core';
 
 @ApiTags('AI - Unified Copilot')
 @ApiBearerAuth('JWT-auth')
@@ -143,16 +143,15 @@ export class AiController {
     @CurrentUser('id') userId: string,
     @Req() req: FastifyRequest,
   ) {
-    const fastifyReq = req as any;
-    if (!fastifyReq.isMultipart?.() && !fastifyReq.isMultipart) {
+    if (!req.isMultipart()) {
       throw new BadRequestException('Content-Type must be multipart/form-data');
     }
 
-    const parts = fastifyReq.parts();
+    const parts = req.parts();
     let buffer: Buffer | null = null;
     let filename = 'document';
     let mimeType = 'application/octet-stream';
-    const fields: Record<string, any> = {};
+    const fields: Record<string, string> = {};
 
     for await (const part of parts) {
       if (part.type === 'file') {
@@ -160,7 +159,7 @@ export class AiController {
         mimeType = part.mimetype;
         buffer = await part.toBuffer();
       } else {
-        fields[part.fieldname] = part.value;
+        fields[part.fieldname] = String(part.value);
       }
     }
 

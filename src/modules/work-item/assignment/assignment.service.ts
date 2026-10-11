@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { AssignmentRepository } from './assignment.repository';
 import {
   AssignWorkItemResult,
@@ -18,7 +18,7 @@ import {
   SetAssigneesDto,
   AddAssigneeDto,
 } from './dto/assignment.dto';
-import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
 
 @Injectable()
 export class AssignmentService {
@@ -368,12 +368,15 @@ export class AssignmentService {
       throw new NotFoundException('Work item not found in this project');
     }
 
-    // Validate all assignees
+    // Validate all assignees with a single batch query (eliminating N+1 query anti-pattern)
+    const members = await this.assignmentRepository.findProjectMembers(
+      projectId,
+      setAssigneesDto.assigneeIds,
+    );
+    const memberMap = new Map(members.map((m) => [m.userId, m]));
+
     for (const assigneeUserId of setAssigneesDto.assigneeIds) {
-      const member = await this.assignmentRepository.findProjectMember(
-        projectId,
-        assigneeUserId,
-      );
+      const member = memberMap.get(assigneeUserId);
       if (!member) {
         throw new BadRequestException(
           `User ${assigneeUserId} is not a member of this project`,
@@ -538,10 +541,8 @@ export class AssignmentService {
       throw new NotFoundException('Work item not found in this project');
     }
 
-    const currentSubscribers: string[] = Array.isArray(
-      (item as any).subscriberIds,
-    )
-      ? ((item as any).subscriberIds as string[])
+    const currentSubscribers: string[] = Array.isArray(item.subscriberIds)
+      ? (item.subscriberIds as string[])
       : [];
 
     if (currentSubscribers.includes(userId)) {
@@ -580,10 +581,8 @@ export class AssignmentService {
       throw new NotFoundException('Work item not found in this project');
     }
 
-    const currentSubscribers: string[] = Array.isArray(
-      (item as any).subscriberIds,
-    )
-      ? ((item as any).subscriberIds as string[])
+    const currentSubscribers: string[] = Array.isArray(item.subscriberIds)
+      ? (item.subscriberIds as string[])
       : [];
 
     const updated = currentSubscribers.filter((id) => id !== userId);

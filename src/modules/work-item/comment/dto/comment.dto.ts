@@ -10,7 +10,7 @@ export class CreateCommentDto {
   projectId?: string;
 
   @IsOptional()
-  attachments?: any[];
+  attachments?: Record<string, unknown>[];
 }
 
 export class UpdateCommentDto {
@@ -23,7 +23,7 @@ export class UpdateCommentDto {
   projectId?: string;
 
   @IsOptional()
-  attachments?: any[];
+  attachments?: Record<string, unknown>[];
 }
 
 export class AddReplyDto {

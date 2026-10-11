@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ActivityService } from './activity.service';
 import { DomainActivityEvent } from './events/activity.events';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 
 export interface WorkItemEventPayload {
   entityId?: string;
@@ -67,7 +67,7 @@ export class ActivityListener {
           actorId: event.actorId || event.authorId || '',
           projectId: event.projectId,
           field: 'state',
-          oldValue: null as any,
+          oldValue: undefined,
           newValue: event.columnId,
         });
         await this.handleGenericActivity(stateInitEvent);

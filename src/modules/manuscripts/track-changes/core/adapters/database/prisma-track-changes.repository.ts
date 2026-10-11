@@ -4,7 +4,8 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '@/core';
 import { ITrackChangesRepositoryPort } from '../../ports/track-changes-repository.port';
 import {
   TrackChange,
@@ -68,7 +69,7 @@ export class PrismaTrackChangesRepository extends ITrackChangesRepositoryPort {
     docId: string,
     status?: ChangeStatus,
   ): Promise<TrackChange[]> {
-    const where: any = { projectId, docId };
+    const where: Prisma.ManuscriptTrackChangeWhereInput = { projectId, docId };
     if (status) {
       where.status = status;
     }
@@ -138,7 +139,10 @@ export class PrismaTrackChangesRepository extends ITrackChangesRepositoryPort {
     docId: string,
     isResolved?: boolean,
   ): Promise<CommentThread[]> {
-    const where: any = { projectId, docId };
+    const where: Prisma.ManuscriptCommentThreadWhereInput = {
+      projectId,
+      docId,
+    };
     if (isResolved !== undefined) {
       where.isResolved = isResolved;
     }

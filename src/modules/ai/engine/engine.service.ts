@@ -1,14 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { FastifyReply } from 'fastify';
 import { Readable } from 'stream';
+import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
+import type { FastifyReply } from 'fastify';
 import {
   StreamChatPayload,
   SyncChatResponse,
   StreamChatOptions,
 } from './types/engine.types';
-import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
+import { getErrorMessage, tryCatch } from '@/core';
 
 @Injectable()
 export class EngineService {
@@ -201,7 +202,9 @@ export class EngineService {
     let accumulatedText = '';
     let lineBuffer = '';
 
-    const nodeStream = Readable.fromWeb(responseBody as any);
+    const nodeStream = Readable.fromWeb(
+      responseBody as unknown as NodeReadableStream,
+    );
     nodeStream.on('data', (chunk: Buffer | string) => {
       rawRes.write(chunk);
       const textChunk =

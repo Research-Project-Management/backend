@@ -9,7 +9,7 @@ import { IDocRepository } from '../ports/doc-repository.port';
 import { TextDoc } from '../domain/text-doc.entity';
 import { GetDocUseCase } from './get-doc.use-case';
 import { WorkspaceFile } from '@/modules/manuscripts/clsi/core/ports/workspace.port';
-import { mapWithConcurrency } from '@/core/utils/concurrency.util';
+import { mapWithConcurrency } from '@/core';
 
 const COLD_HYDRATION_CONCURRENCY = 8;
 

@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { IStorageQuotaRepository } from '../../domain/ports/storage-quota.repository.port';
 import { StorageQuota } from '../../domain/entities/storage-quota.entity';
 import { StorageQuotaMapper } from './mappers/storage-quota.mapper';

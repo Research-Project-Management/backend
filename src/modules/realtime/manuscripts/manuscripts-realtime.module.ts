@@ -6,8 +6,8 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
-import { PrismaModule } from '@/core/database/prisma.module';
-import { CacheModule } from '@/core/cache/cache.module';
+import { PrismaModule } from '@/core';
+import { CacheModule } from '@/core';
 import { DocumentUpdaterModule } from '@/modules/manuscripts/document-updater/document-updater.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 
@@ -35,6 +35,8 @@ import { DocumentUpdaterBridgeAdapter } from './core/adapters/external/document-
 import { ProjectAccessVerifierAdapter } from './core/adapters/external/project-access-verifier.adapter';
 import { SocketIoBroadcasterAdapter } from './core/adapters/broadcast/socket-io-broadcaster.adapter';
 import { YjsDocManagerAdapter } from './core/adapters/crdt/yjs-doc-manager.adapter';
+import { LiveCollaborationAdapter } from './core/adapters/external/live-collaboration.adapter';
+import { LiveCollaborationPort } from '@/modules/manuscripts/docstore/core/ports/live-collaboration.port';
 
 @Module({
   imports: [
@@ -82,10 +84,16 @@ import { YjsDocManagerAdapter } from './core/adapters/crdt/yjs-doc-manager.adapt
       provide: IRealtimeBroadcasterPort,
       useClass: SocketIoBroadcasterAdapter,
     },
+    LiveCollaborationAdapter,
+    {
+      provide: LiveCollaborationPort,
+      useExisting: LiveCollaborationAdapter,
+    },
   ],
   exports: [
     ManuscriptRealtimeGateway,
     YjsDocManagerAdapter,
+    LiveCollaborationPort,
     IRoomManagerPort,
     IDocumentUpdaterBridgePort,
     IProjectAccessVerifierPort,

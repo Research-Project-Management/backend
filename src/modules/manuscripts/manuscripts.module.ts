@@ -17,6 +17,7 @@ import { CitationsModule } from './citations/citations.module';
 import { SpellingModule } from './spelling/spelling.module';
 import { TemplatesModule } from './templates/templates.module';
 import { LinkedFilesModule } from './linked-files/linked-files.module';
+import { GitBridgeModule } from './git-bridge/git-bridge.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { LinkedFilesModule } from './linked-files/linked-files.module';
     SpellingModule,
     TemplatesModule,
     LinkedFilesModule,
+    GitBridgeModule,
   ],
   exports: [
     ClsiModule,

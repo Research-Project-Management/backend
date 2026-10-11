@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { IStorageBlobRepository } from '../../domain/ports/storage-blob.repository.port';
 import { StorageBlob } from '../../domain/entities/storage-blob.entity';
 import { ContentHash } from '../../domain/value-objects/content-hash.vo';

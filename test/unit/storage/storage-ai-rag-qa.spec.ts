@@ -1,7 +1,7 @@
 import { AiService } from '@/modules/ai/ai.service';
 import { EngineService } from '@/modules/ai/engine/engine.service';
 import { ThreadService } from '@/modules/ai/chat/chat.service';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
 

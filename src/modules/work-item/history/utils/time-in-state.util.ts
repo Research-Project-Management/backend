@@ -24,12 +24,22 @@ export function formatTimeInStateBadge(ms: number): string {
   return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
 }
 
+export interface StateBadgeCandidate {
+  id?: string;
+  slug?: string;
+  name?: string;
+  title?: string;
+  color?: string;
+  accentColor?: string;
+  group?: string;
+}
+
 /**
  * Resolves a state ID or slug into a StateBadge with name, color, and group.
  */
 export function resolveStateBadge(
   stateId: string | null | undefined,
-  states: any,
+  states?: StateBadgeCandidate[] | null,
 ): StateBadge {
   if (!stateId) {
     return { id: '', name: 'None', color: '#94a3b8', group: 'backlog' };
@@ -37,7 +47,7 @@ export function resolveStateBadge(
 
   const columns = Array.isArray(states) ? states : [];
   const found = columns.find(
-    (c: any) => c.id === stateId || c.slug === stateId,
+    (c) => c.id === stateId || c.slug === stateId,
   );
   if (found) {
     return {

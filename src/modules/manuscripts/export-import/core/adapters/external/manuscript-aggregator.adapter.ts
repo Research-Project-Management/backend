@@ -14,7 +14,7 @@ import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { ClsiService } from '@/modules/manuscripts/clsi/clsi.service';
 import { Readable } from 'node:stream';
-import { mapWithConcurrency } from '@/core/utils/concurrency.util';
+import { mapWithConcurrency } from '@/core';
 import type { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
 
 const COLLECT_CONCURRENCY = 6;

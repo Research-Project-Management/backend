@@ -24,11 +24,11 @@ export interface StorageNodeProps {
  */
 export class StorageNode {
   public readonly id: string;
-  public readonly projectId: string | null;
   public readonly isFolder: boolean;
   public readonly authorId: string;
   public readonly createdAt: Date;
 
+  private _projectId: string | null;
   private _parentId: string | null;
   private _name: string;
   private _size: bigint;
@@ -42,7 +42,7 @@ export class StorageNode {
 
   constructor(props: StorageNodeProps) {
     this.id = props.id;
-    this.projectId = props.projectId ?? null;
+    this._projectId = props.projectId ?? null;
     this.isFolder = props.isFolder;
     this.authorId = props.authorId;
     this.createdAt = props.createdAt ?? new Date();
@@ -59,6 +59,10 @@ export class StorageNode {
     this._metadata = props.metadata ?? {};
     this._trashedAt = props.trashedAt ?? null;
     this._updatedAt = props.updatedAt ?? new Date();
+  }
+
+  get projectId(): string | null {
+    return this._projectId;
   }
 
   get parentId(): string | null {
@@ -90,6 +94,12 @@ export class StorageNode {
   }
   get updatedAt(): Date {
     return this._updatedAt;
+  }
+
+  public setScope(scope: FileScope, projectId?: string | null): void {
+    this._scope = scope;
+    this._projectId = projectId ?? null;
+    this._updatedAt = new Date();
   }
 
   public rename(newName: string): void {

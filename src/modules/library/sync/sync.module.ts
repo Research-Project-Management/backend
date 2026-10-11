@@ -1,7 +1,7 @@
 import { Global, Module, OnModuleInit } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
-import { CoreModule as AppCoreModule } from '../../../core/core.module';
+import { CoreModule as AppCoreModule } from '@/core';
 import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
 
 import { LIBRARY_OUTBOX_QUEUE } from './types/outbox.constants';
@@ -26,7 +26,7 @@ import { OutboxMetrics } from './services/outbox.metrics';
 import { LIBRARY_EVENT_TYPES } from './types/outbox.events';
 import { SyncController } from './controllers/sync.controller';
 import { IdempotentConsumerService } from './services/idempotent-consumer.service';
-import { shouldRunWorkerConsumers } from '../../../core/utils/worker-mode.util';
+import { shouldRunWorkerConsumers } from '@/core';
 
 const syncWorkerProviders = shouldRunWorkerConsumers()
   ? [OutboxQueueConsumer]

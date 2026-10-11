@@ -16,7 +16,7 @@ import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { CitationsService } from '@/modules/manuscripts/citations/citations.service';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
-import { assertSafeExternalUrl } from '../utils/ssrf-guard.util';
+import { assertSafeExternalUrl } from '../domain/ssrf-guard';
 
 const TEXT_EXTENSIONS = new Set([
   'tex',

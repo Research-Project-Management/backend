@@ -38,6 +38,17 @@ import {
 import { FileDownloadedEvent } from '../../domain/events/file-downloaded.event';
 import { StorageAccessPolicy } from '../../application/policies/storage-access.policy';
 
+interface StreamRequest extends FastifyRequest {
+  user?: { id?: string };
+  params: {
+    fileId?: string;
+    '*'?: string;
+  };
+  query: {
+    download?: string;
+  };
+}
+
 @ApiTags('Storage & Streaming')
 @Controller(['api/v1/storage/files', 'api/files', 'api/file'])
 export class StreamController {
@@ -75,7 +86,8 @@ export class StreamController {
 
     try {
       // Access control check (SEC-004)
-      const currentUserId = (req as any).user?.id;
+      const streamReq = req as unknown as StreamRequest;
+      const currentUserId = streamReq.user?.id;
       if (this.accessPolicy && currentUserId) {
         await this.accessPolicy.assertCanAccess(currentUserId, fileId, 'read');
       } else if (this.accessPolicy && !currentUserId) {
@@ -139,8 +151,8 @@ export class StreamController {
       const isDangerous = isDangerousInlineMime(result.mimeType);
       const isDownloadEndpoint =
         req.url.includes('/download') ||
-        (req.query as any)?.download === 'true' ||
-        (req.query as any)?.download === '1';
+        streamReq.query?.download === 'true' ||
+        streamReq.query?.download === '1';
       const dispositionType =
         isDangerous || isDownloadEndpoint ? 'attachment' : 'inline';
 
@@ -179,13 +191,13 @@ export class StreamController {
           result.filename,
           result.mimeType,
           result.contentLength,
-          (req as any).user?.id || null,
+          streamReq.user?.id || null,
           req.ip,
         ),
       );
 
       return res.send(result.stream);
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof NotFoundException) {
         return res
           .status(HttpStatus.NOT_FOUND)
@@ -196,9 +208,11 @@ export class StreamController {
           .status(HttpStatus.FORBIDDEN)
           .send({ statusCode: 403, message: err.message });
       }
+      const message =
+        err instanceof Error ? err.message : 'Internal server error';
       return res
         .status(HttpStatus.INTERNAL_SERVER_ERROR)
-        .send({ statusCode: 500, message: err.message });
+        .send({ statusCode: 500, message });
     }
   }
 
@@ -211,10 +225,11 @@ export class StreamController {
     const rawUrl = req.raw?.url || req.url || '';
     const prefix = '/api/files/r2/';
     const idx = rawUrl.indexOf(prefix);
+    const streamReq = req as unknown as StreamRequest;
     const rawKey =
       idx !== -1
         ? rawUrl.slice(idx + prefix.length).split('?')[0]
-        : (req.params as any)?.['*'] || '';
+        : streamReq.params?.['*'] || '';
 
     if (!rawKey) {
       return res
@@ -249,7 +264,7 @@ export class StreamController {
           .send({ statusCode: 404, message: 'File not found in storage' });
       }
 
-      const rawEtag = (output as any)?.ETag;
+      const rawEtag = output.ETag;
       const r2Etag = rawEtag
         ? `"${String(rawEtag).replace(/"/g, '')}"`
         : undefined;

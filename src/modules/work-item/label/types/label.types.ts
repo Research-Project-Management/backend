@@ -35,6 +35,18 @@ export interface ILabelRepository {
     name: string,
     excludeId?: string,
   ): Promise<Label | null>;
+  findProject?(projectId: string): Promise<{ id: string } | null>;
+  getLastSortOrder?(
+    projectId: string,
+    parentId?: string | null,
+  ): Promise<number | null>;
+  findDuplicate?(params: {
+    projectId: string | null;
+    name: string;
+    parentId?: string | null;
+    excludeId?: string;
+    createdById?: string;
+  }): Promise<Label | null>;
   create(data: Prisma.WorkItemLabelUncheckedCreateInput): Promise<Label>;
   createMany?(
     data: Prisma.WorkItemLabelUncheckedCreateInput[],

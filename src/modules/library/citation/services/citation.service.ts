@@ -545,7 +545,7 @@ export class CitationService {
     index: number = 1,
     projectId?: string,
   ) {
-    const item: any = this.catalogGateway
+    const item = this.catalogGateway
       ? await this.catalogGateway.getItem(userId, itemId, projectId)
       : null;
 
@@ -568,9 +568,10 @@ export class CitationService {
             source: 'csl-engine',
           };
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `CslEngineService format error for item ${item.id}: ${err?.message || err}. Falling back to publisher DOI.`,
+          `CslEngineService format error for item ${item.id}: ${message}. Falling back to publisher DOI.`,
         );
       }
     }
@@ -605,12 +606,12 @@ export class CitationService {
       itemType: item.itemType || 'journalArticle',
       authors:
         item.contributors
-          ?.filter((c: any) => c.creatorType === 'author')
+          ?.filter((c) => c.creatorType === 'author')
           .map(
-            (c: any) =>
+            (c) =>
               c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
           ) || [],
-      creators: item.contributors?.map((c: any) => ({
+      creators: item.contributors?.map((c) => ({
         firstName: c.firstName || '',
         lastName: c.lastName || '',
         name: c.fullName,
@@ -679,7 +680,7 @@ export class CitationService {
 
     // Secondary Tier: Fill in any missing items that were not formatted by CslEngine
     for (let index = 0; index < items.length; index++) {
-      const item: any = items[index];
+      const item = items[index];
       if (citationMap.has(item.id)) continue;
 
       let formatted: FormattedCitationResult | undefined;
@@ -719,13 +720,13 @@ export class CitationService {
           itemType: item.itemType || 'journalArticle',
           authors:
             item.contributors
-              ?.filter((c: any) => c.creatorType === 'author')
+              ?.filter((c) => c.creatorType === 'author')
               .map(
-                (c: any) =>
+                (c) =>
                   c.fullName ||
                   `${c.firstName || ''} ${c.lastName || ''}`.trim(),
               ) || [],
-          creators: item.contributors?.map((c: any) => ({
+          creators: item.contributors?.map((c) => ({
             firstName: c.firstName || '',
             lastName: c.lastName || '',
             name: c.fullName,

@@ -18,8 +18,8 @@ export interface WorkItemDraftItem {
   dueDate: Date | null;
   labels: string[];
   assigneeId: string | null;
-  assigneeIds: any;
-  metadata: any;
+  assigneeIds: string[];
+  metadata: Record<string, unknown> | null;
   projectId: string | null;
   project?: {
     id: string;

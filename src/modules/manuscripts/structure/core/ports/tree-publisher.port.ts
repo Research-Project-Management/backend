@@ -12,7 +12,7 @@ export interface TreeMutationPayload {
   path?: string;
   oldPath?: string;
   entityType?: string;
-  data?: any;
+  data?: Record<string, unknown>;
 }
 
 export abstract class ITreePublisher {

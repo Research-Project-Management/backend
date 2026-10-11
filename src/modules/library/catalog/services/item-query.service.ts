@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { QueryRepository } from '../repositories/query.repository';
-import { RedisCacheService } from '../../../../core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '../../shared-kernel/core/constants/redis-keys.constants';
 import { ItemsMapper } from '../utils/items.mapper';
 import { CursorPaginatedResult } from '../dto/items.dto';
@@ -81,72 +81,38 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
 
   async getItem(userId: string, id: string, projectId?: string) {
     const cacheKey = LIBRARY_REDIS_KEYS.item(id);
-
-    if (this.cache) {
-      const item = await this.cache.wrap(
-        cacheKey,
-        async () => {
-          return this.query.findById(userId, id, projectId);
-        },
-        300,
-      );
-      if (!item) return null;
-
-      const isOwner = item.userId === userId;
-      const isProjectMatch = projectId && item.projectId === projectId;
-      if (isOwner || isProjectMatch) {
-        return item;
-      }
-      if (item.projectId) {
-        const member = await this.query.findProjectMember(
-          item.projectId,
-          userId,
-        );
-        if (member) return item;
-      }
-      return null;
-    }
+    const fetchRaw = () => this.query.findById(userId, id, projectId);
 
     let item: Record<string, any> | null = null;
 
     if (this.cache) {
       try {
-        item = await this.cache.get<Record<string, any>>(cacheKey);
-      } catch (err: any) {
-        this.logger.debug(
-          `Cache lookup error for ${cacheKey}: ${err?.message || err}`,
-        );
-      }
-    }
-
-    let isCacheHit = false;
-    if (item) {
-      const isOwner = item.userId === userId;
-      const isProjectMatch = projectId && item.projectId === projectId;
-      if (!isOwner && !isProjectMatch) {
-        // Discard mismatched cached item and fall back to database query
-        item = null;
-      } else {
-        isCacheHit = true;
-      }
-    }
-
-    if (!item) {
-      item = await this.query.findById(userId, id, projectId);
-      if (!item) return null;
-
-      if (this.cache) {
-        try {
-          await this.cache.set(cacheKey, item, 300); // 5 min TTL
-        } catch (err: any) {
-          this.logger.debug(
-            `Cache set error for ${cacheKey}: ${err?.message || err}`,
-          );
+        const cached = await this.cache.get<Record<string, any>>(cacheKey);
+        if (cached) {
+          const isOwner = cached.userId === userId;
+          const isProjectMatch = projectId && cached.projectId === projectId;
+          if (isOwner || isProjectMatch) {
+            return cached;
+          }
         }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Cache lookup error for ${cacheKey}: ${msg}`);
       }
-    } else if (isCacheHit) {
-      return item;
+
+      try {
+        item = await this.cache.wrap(cacheKey, fetchRaw, 300);
+      } catch {
+        item = await fetchRaw();
+      }
+      if (item && this.cache.set) {
+        await this.cache.set(cacheKey, item, 300).catch(() => undefined);
+      }
+    } else {
+      item = await fetchRaw();
     }
+
+    if (!item) return null;
 
     // Access check: verify ownership, project match, or project membership
     const isOwner = item.userId === userId;

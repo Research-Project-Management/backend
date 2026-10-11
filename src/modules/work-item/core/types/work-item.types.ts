@@ -8,17 +8,8 @@
 import { WorkItem, WorkItemPriority, Prisma } from '@prisma/client';
 
 export { WorkItemPriority };
-
-export const USER_MINIMAL_SELECT = {
-  id: true,
-  email: true,
-  profile: {
-    select: {
-      name: true,
-      avatar: true,
-    },
-  },
-} as const;
+export { USER_MINIMAL_SELECT, type UserMinimal } from '../../common/types/shared.types';
+import { USER_MINIMAL_SELECT, type UserMinimal } from '../../common/types/shared.types';
 
 export const STATE_MINIMAL_SELECT = {
   id: true,
@@ -41,13 +32,6 @@ export const CHILD_WORK_ITEM_SELECT = {
   state: { select: STATE_MINIMAL_SELECT },
   dueDate: true,
 } as const;
-
-export interface UserMinimal {
-  id: string;
-  name: string | null;
-  email: string | null;
-  avatar: string | null;
-}
 
 export interface StateMinimal {
   id: string;
@@ -148,7 +132,9 @@ export type WorkItemWithRelations = Prisma.WorkItemGetPayload<{
     };
     project: { select: { id: true } };
   };
-}>;
+}> & {
+  attachments?: WorkItemAttachments;
+};
 
 export interface WorkItemResponse {
   id: string;
@@ -253,13 +239,13 @@ export interface IWorkItemRepository {
     workItemId: string,
     projectId: string,
     authorId: string,
-    attachments: any,
+    attachments: WorkItemAttachments | Record<string, unknown>,
   ): Promise<void>;
   syncAttachments(
     workItemId: string,
     projectId: string,
     authorId?: string,
-    attachments?: any,
+    attachments?: WorkItemAttachments | Record<string, unknown>,
   ): Promise<void>;
   countProjectWorkItems(projectId: string): Promise<number>;
   disconnectParentWorkItem(workItemId: string): Promise<WorkItemWithRelations>;

@@ -139,6 +139,7 @@ export class CompilePipeline {
     // TeX Magic Comments & Package-based Engine Detection (Overleaf CLSI Parity)
     const engineDetect = TexEngineDetector.detect(mainSource, dto.engine);
     const resolvedEngine = engineDetect.engine;
+    const requiresShellEscape = Boolean(engineDetect.requiresShellEscape);
 
     if (!dto.mainFile && engineDetect.mainFileHint) {
       mainFile = cleanRelPath(engineDetect.mainFileHint);
@@ -332,14 +333,23 @@ export class CompilePipeline {
             scratchDir,
             engineDetect.bibProgramHint,
           );
-          const requiresShellEscape =
-            DraftModeManager.requiresShellEscape(mainSource);
+          const userLatexmkFile = workspaceFiles.find(
+            (f) => f.path === '.latexmkrc' || f.path === 'latexmkrc',
+          );
 
-          await BibBackendDetector.writeLatexmkrc(scratchDir, {
-            engine: resolvedEngine,
-            bibBackend,
-            shellEscape: requiresShellEscape,
-          });
+          await BibBackendDetector.writeLatexmkrc(
+            scratchDir,
+            {
+              engine: resolvedEngine,
+              bibBackend,
+              shellEscape: requiresShellEscape,
+            },
+            userLatexmkFile?.content
+              ? Buffer.isBuffer(userLatexmkFile.content)
+                ? userLatexmkFile.content.toString('utf8')
+                : String(userLatexmkFile.content)
+              : undefined,
+          );
 
           // Step 3: Engine Selection
           let engineToUse: ILatexEngine = this.latexmkEngine;

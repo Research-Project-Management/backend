@@ -13,6 +13,12 @@ export class AiMessageDto {
   @IsString()
   content!: string;
 
+  @IsOptional()
+  attachments?: unknown;
+
+  @IsOptional()
+  sources?: unknown;
+
   [key: string]: unknown;
 }
 

@@ -10,7 +10,7 @@ import { CommentThread } from '../../domain/entities/comment-thread.entity';
 import { CommentReply } from '../../domain/entities/comment-reply.entity';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 
 @Injectable()
 export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {

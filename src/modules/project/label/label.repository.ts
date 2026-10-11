@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Label, ProjectLabel } from '@prisma/client';
 import {
   CreateProjectLabelDto,

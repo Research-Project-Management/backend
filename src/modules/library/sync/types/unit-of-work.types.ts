@@ -1,7 +1,7 @@
 export {
   UNIT_OF_WORK_PORT,
-  IUnitOfWork,
-  TransactionHelpers,
-  AppendChangeEntry,
-  RecordTombstoneEntry,
+  type IUnitOfWork,
+  type TransactionHelpers,
+  type AppendChangeEntry,
+  type RecordTombstoneEntry,
 } from '../../shared-kernel/ports/unit-of-work.port';

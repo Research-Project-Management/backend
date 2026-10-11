@@ -5,7 +5,6 @@ import {
   BadRequestException,
   Inject,
   Optional,
-  forwardRef,
 } from '@nestjs/common';
 import { AnnotationsRepository } from '../repositories/annotations.repository';
 import { AttachmentsRepository } from '../repositories/attachments.repository';
@@ -27,12 +26,10 @@ export class PdfAnnotationImporterService {
 
   constructor(
     private readonly annotationsRepo: AnnotationsRepository,
-    @Inject(forwardRef(() => AttachmentsRepository))
     private readonly attachmentsRepo: AttachmentsRepository,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
     private readonly annotationsService: AnnotationsService,
     @Optional()
-    @Inject(forwardRef(() => AttachmentsService))
     private readonly attachmentsService?: AttachmentsService,
   ) {}
 

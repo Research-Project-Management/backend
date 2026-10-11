@@ -160,25 +160,7 @@ export function parseWorkItemStates(raw: unknown): WorkItemState[] {
   return result;
 }
 
-/**
- * Checks if a given state or group belongs to the completed group.
- * Only items in the 'completed' group count as completed.
- */
-export function isStateCompleted(
-  stateOrGroup?: WorkItemState | string | null,
-): boolean {
-  if (!stateOrGroup) return false;
-
-  if (typeof stateOrGroup === 'string') {
-    return stateOrGroup.toLowerCase() === 'completed';
-  }
-
-  if ('group' in stateOrGroup) {
-    return stateOrGroup.group === 'completed';
-  }
-
-  return false;
-}
+export { isStateCompleted } from '../../common/utils/state-completion.util';
 
 /**
  * Generates a URL-friendly unique slug from a state name.

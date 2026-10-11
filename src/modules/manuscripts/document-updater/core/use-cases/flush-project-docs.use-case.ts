@@ -10,7 +10,7 @@ import { IUpdaterLockPort } from '../ports/updater-lock.port';
 import { IDebounceTimerPort } from '../ports/debounce-timer.port';
 import { DocumentLockedException } from '../domain/exceptions/document-locked.exception';
 import { FlushSingleDocUseCase } from './flush-single-doc.use-case';
-import { mapSettledWithConcurrency } from '@/core/utils/concurrency.util';
+import { mapSettledWithConcurrency } from '@/core';
 
 export interface FlushProjectDocsInput {
   projectId: string;

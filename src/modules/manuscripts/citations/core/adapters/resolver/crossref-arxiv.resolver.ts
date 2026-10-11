@@ -8,7 +8,7 @@ import { IIdentifierResolverPort } from '../../ports/identifier-resolver.port';
 import { AcademicIdentifierVo } from '../../domain/value-objects/academic-identifier.vo';
 import { BibEntry } from '../../domain/entities/bib-entry.entity';
 import { RegexAstBibtexParser } from '../parser/regex-ast-bibtex.parser';
-import { sanitizeCitationKey } from '../../domain/utils/bibtex-value.utils';
+import { sanitizeCitationKey } from '../../domain/bibtex-value';
 
 /** CrossRef work type -> BibTeX entry type + container field. */
 const CROSSREF_TYPE_MAP: Record<string, { type: string; container?: string }> =

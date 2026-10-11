@@ -26,7 +26,7 @@ import {
   ItemMetadata as CanonicalItemMetadata,
 } from '../../shared-kernel';
 
-export { CreatorCreditInput, CreatorType };
+export type { CreatorCreditInput, CreatorType };
 export type CreatorInput = CreatorCreditInput;
 
 export interface Provenance {

@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
-import { ProjectTemplate, Prisma } from '@prisma/client';
-import { CreateProjectTemplateDto } from './dto/create-template.dto';
+import { PrismaService } from '@/core';
+import { ProjectTemplate, Prisma, Project, WorkItemPriority } from '@prisma/client';
+import {
+  CreateProjectTemplateDto,
+  InitialStateDto,
+  InitialLabelDto,
+  InitialWorkItemDto,
+} from './dto/create-template.dto';
+import { InstantiateProjectTemplateDto } from './dto/instantiate-template.dto';
+import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item';
 
 @Injectable()
 export class TemplateRepository {
@@ -93,6 +100,113 @@ export class TemplateRepository {
   async deleteTemplate(id: string): Promise<ProjectTemplate> {
     return this.prisma.projectTemplate.delete({
       where: { id },
+    });
+  }
+
+  async instantiateProject(
+    template: ProjectTemplate,
+    userId: string,
+    identifier: string,
+    dto: InstantiateProjectTemplateDto,
+  ): Promise<Project> {
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Create the project
+      const project = await tx.project.create({
+        data: {
+          name: dto.name.trim(),
+          identifier,
+          description: dto.description?.trim() || template.description || '',
+          avatar: template.avatar || '📁',
+          coverImage: template.coverImage || null,
+          createdById: userId,
+          templateId: template.id,
+          modules: template.defaultModules || [
+            'work_items',
+            'cycles',
+            'views',
+            'pages',
+          ],
+          members: {
+            create: {
+              userId,
+              role: 'owner',
+            },
+          },
+        },
+      });
+
+      // 2. Seed initial workflow states
+      const rawStates =
+        (template.initialStates as unknown as InitialStateDto[]) || [];
+      const statesToSeed =
+        rawStates.length > 0 ? rawStates : DEFAULT_WORK_ITEM_STATES;
+
+      const createdStates = await Promise.all(
+        statesToSeed.map((st, idx) =>
+          tx.workItemState.create({
+            data: {
+              projectId: project.id,
+              name: st.name,
+              group: st.group,
+              color: st.color || '#6B7280',
+              sequence: (idx + 1) * 10,
+            },
+          }),
+        ),
+      );
+
+      const defaultState =
+        createdStates.find((s) => s.group === 'unstarted') || createdStates[0];
+
+      // 3. Seed initial labels
+      const rawLabels =
+        (template.initialLabels as unknown as InitialLabelDto[]) || [];
+      for (const lbl of rawLabels) {
+        await tx.workItemLabel.create({
+          data: {
+            projectId: project.id,
+            name: lbl.name,
+            color: lbl.color,
+            createdById: userId,
+          },
+        });
+      }
+
+      // 4. Seed initial work items
+      const rawWorkItems =
+        (template.initialWorkItems as unknown as InitialWorkItemDto[]) || [];
+      let sequence = 0;
+
+      for (const wi of rawWorkItems) {
+        sequence++;
+        await tx.workItem.create({
+          data: {
+            projectId: project.id,
+            title: wi.title,
+            content: wi.description || '',
+            priority:
+              wi.priority &&
+              Object.values(WorkItemPriority).includes(
+                wi.priority as WorkItemPriority,
+              )
+                ? (wi.priority as WorkItemPriority)
+                : WorkItemPriority.medium,
+            columnId: defaultState?.id || '',
+            sequenceNumber: sequence,
+            authorId: userId,
+          },
+        });
+      }
+
+      // Update sequence on project
+      if (sequence > 0) {
+        await tx.project.update({
+          where: { id: project.id },
+          data: { workItemSequence: sequence },
+        });
+      }
+
+      return project;
     });
   }
 }

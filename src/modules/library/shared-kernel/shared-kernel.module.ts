@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { CoreModule as AppCoreModule } from '../../../core/core.module';
+import { CoreModule as AppCoreModule } from '@/core';
 
 // ── Core Cross-Cutting Concerns ────────────────────────────────────────
 import { SsrfGuardService } from './core/services/ssrf-guard.service';

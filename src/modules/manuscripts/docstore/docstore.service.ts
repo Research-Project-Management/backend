@@ -50,6 +50,7 @@ export class DocstoreService {
   public mapToDto(doc: TextDoc): DocResponseDto {
     return {
       _id: doc.id,
+      id: doc.id,
       path: doc.path,
       lines: doc.lines,
       rev: doc.rev,

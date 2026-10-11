@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../../../core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { normalizeAcademicTags } from '../../shared-kernel/utils/tag.utils';
 import { buildTipTapDocFromText } from '../../shared-kernel/utils/tiptap.utils';

@@ -9,11 +9,9 @@
     "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "clean": "node -e \"try { require('fs').rmSync('dist', {recursive:true,force:true,maxRetries:5,retryDelay:200}); } catch(e){}\" && echo dist cleaned",
-    "prebuild": "pnpm run clean && prisma generate",
+    "build:clean": "pnpm run clean && prisma generate && pnpm run build",
     "dev": "nest start --watch",
-    "dev:env": "node scripts/start-env.mjs",
     "dev:infra": "docker compose up -d db redis worker clsi",
-    "start:env": "node scripts/start-env.mjs",
     "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
@@ -27,9 +25,10 @@
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
     "typecheck": "tsc --noEmit",
     "test": "jest --forceExit",
+    "jest": "jest --forceExit",
     "test:changed": "jest --onlyChanged --passWithNoTests --forceExit",
+    "test:benchmark": "jest test/benchmark --testRegex=\".*\\.bench\\.ts$\" --forceExit",
     "test:smoke": "jest test/smoke --forceExit",
-    "test:help": "node scripts/test-help.mjs",
     "test:library": "jest test/unit/library --forceExit",
     "test:manuscripts": "jest test/unit/manuscripts --forceExit",
     "test:storage": "jest test/unit/storage --forceExit",
@@ -40,19 +39,14 @@
     "test:analytics": "jest test/unit/analytics --forceExit",
     "test:integrations": "jest test/unit/integrations --forceExit",
     "test:sticky": "jest test/unit/sticky --forceExit",
+    "test:notifications": "jest test/unit/notifications --forceExit",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json --forceExit",
     "test:db-suites": "jest --testPathPatterns=\"test/integration\" --runInBand --forceExit",
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
-    "codebase:sync": "node ../.agents/scripts/sync-codebase.mjs backend",
-    "typecheck": "tsc --noEmit",
-    "audit:dry": "npx --yes jscpd --threshold 5 -i \"**/*.json\" src",
-    "audit:circular": "npx --yes madge --circular --extensions ts src",
     "audit:security": "pnpm audit",
-    "audit:quality": "pnpm typecheck && pnpm audit:circular && pnpm audit:dry",
-    "sync:zotero-schema": "node scripts/sync-zotero-schema.mjs",
     "prepare": "husky"
   },
   "prisma": {
@@ -145,12 +139,7 @@
     "rootDir": ".",
     "testRegex": "test/(unit|integration|smoke|architecture|contracts)/.*\\.(spec|interface-spec)\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": [
-        "ts-jest",
-        {
-          "isolatedModules": true
-        }
-      ]
+      "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
       "src/**/*.(t|j)s"

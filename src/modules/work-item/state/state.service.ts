@@ -5,7 +5,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { StateRepository } from './state.repository';
 import {
   CreateStateDto,
@@ -22,7 +22,7 @@ import {
   isStateCompleted,
   isValidStateGroup,
 } from './utils/state.util';
-import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
 
 @Injectable()
 export class StateService {

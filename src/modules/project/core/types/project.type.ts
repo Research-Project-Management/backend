@@ -6,14 +6,14 @@ import {
   ProjectState,
 } from '@prisma/client';
 
-import {
+import type {
   MinimalUser,
   ProjectMemberWithUser,
   ProjectMemberListResponse,
   BulkAddProjectMembersResult,
 } from '../../member/types/member.type';
 
-export {
+export type {
   MinimalUser,
   ProjectMemberWithUser,
   ProjectMemberListResponse,

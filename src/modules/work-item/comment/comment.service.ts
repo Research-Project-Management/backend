@@ -113,7 +113,8 @@ export class CommentService {
       workItemId,
       authorId: userId,
       content: createCommentDto.content,
-      attachments: createCommentDto.attachments,
+      attachments:
+        createCommentDto.attachments as unknown as Prisma.InputJsonValue,
     });
 
     // Emit mention events for each @mentioned user
@@ -149,7 +150,8 @@ export class CommentService {
         content: updateCommentDto.content,
       }),
       ...(updateCommentDto.attachments !== undefined && {
-        attachments: updateCommentDto.attachments,
+        attachments:
+          updateCommentDto.attachments as unknown as Prisma.InputJsonValue,
       }),
       isEdited: true,
     });

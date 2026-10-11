@@ -10,7 +10,7 @@ import * as path from 'path';
 export type BibBackend = 'biber' | 'bibtex';
 
 export interface LatexmkrcOptions {
-  engine: 'pdflatex' | 'xelatex' | 'lualatex' | 'tectonic';
+  engine: 'pdflatex' | 'xelatex' | 'lualatex' | 'tectonic' | 'latex';
   bibBackend: BibBackend;
   shellEscape?: boolean;
 }
@@ -93,6 +93,9 @@ export class BibBackendDetector {
     } else if (options.engine === 'lualatex') {
       lines.push(`$pdf_mode = 4;`);
       lines.push(`$lualatex = 'lualatex %O${shellEscapeFlag} %S';`);
+    } else if (options.engine === 'latex') {
+      lines.push(`$pdf_mode = 3;`);
+      lines.push(`$latex = 'latex %O${shellEscapeFlag} %S';`);
     } else {
       lines.push(`$pdf_mode = 1;`);
       lines.push(`$pdflatex = 'pdflatex %O${shellEscapeFlag} %S';`);
@@ -110,9 +113,13 @@ export class BibBackendDetector {
   public static async writeLatexmkrc(
     scratchDir: string,
     options: LatexmkrcOptions,
+    userCustomContent?: string,
   ): Promise<string> {
     const filePath = path.join(scratchDir, '.latexmkrc');
-    const content = this.generateLatexmkrc(options);
+    let content = this.generateLatexmkrc(options);
+    if (userCustomContent && userCustomContent.trim().length > 0) {
+      content = `${content}\n# --- User-Defined .latexmkrc (Overleaf Parity) ---\n${userCustomContent.trim()}\n`;
+    }
     await fs.writeFile(filePath, content, 'utf8');
     return filePath;
   }

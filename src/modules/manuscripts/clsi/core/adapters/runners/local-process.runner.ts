@@ -88,12 +88,19 @@ export class LocalProcessRunner implements ISandboxRunner {
         LocalProcessRunner.activeChildProcesses.delete(child);
         watchdog.disarm();
         if (watchdog.isAborted()) {
+          const timeoutAdvice =
+            '\n\n[Compilation Timeout — Troubleshooting Suggestions]\n' +
+            'Your compilation timed out. Common causes and solutions:\n' +
+            '  1. Infinite loops or recursion in custom macros, TikZ code, or complex tables.\n' +
+            '  2. Very large, uncompressed high-resolution images (switch to "Draft mode" in Settings).\n' +
+            '  3. Unclosed environments, braces, or math delimiters.\n' +
+            '  4. Corrupted auxiliary files (click "Clear cached files" in Settings).';
           resolve({
             exitCode: 137,
             stdout,
             stderr: stderr
-              ? `${stderr}\nCompilation timed out or was canceled`
-              : 'Compilation timed out or was canceled',
+              ? `${stderr}\nCompilation timed out or was canceled.${timeoutAdvice}`
+              : `Compilation timed out or was canceled.${timeoutAdvice}`,
           });
           return;
         }

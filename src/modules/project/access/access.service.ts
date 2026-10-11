@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { Permission } from './enums/permission.enum';
 import { Role, RoleHierarchy } from './enums/role.enum';
 import {

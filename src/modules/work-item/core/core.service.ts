@@ -5,9 +5,10 @@ import {
   BadRequestException,
   ConflictException,
   Optional,
+  Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { CoreRepository } from './core.repository';
 import { IdHandler } from './handlers/id.handler';
 import { RankHandler } from './handlers/rank.handler';
@@ -18,17 +19,21 @@ import { UpdateWorkItemDto } from './dto/update.dto';
 import { QueryWorkItemDto } from './dto/query.dto';
 import {
   BulkUpdateWorkItemDto,
+  BulkUpdatePayload,
   BulkDeleteWorkItemDto,
   ReorderWorkItemDto,
 } from './dto/bulk.dto';
 import { formatWorkItem, mapPriority } from './utils/work-item.util';
-import { isStateCompleted } from '../state/utils/state.util';
-import { isUuid } from '@/core/utils/uuid.util';
+import { isStateCompleted } from '../common/utils/state-completion.util';
+import { isUuid } from '@/core';
 import { WORK_ITEM_REDIS_KEYS } from './constants/redis-keys.constant';
 import { Prisma } from '@prisma/client';
+import { WorkItemWithRelations } from './types/work-item.types';
 
 @Injectable()
 export class CoreService {
+  private readonly logger = new Logger(CoreService.name);
+
   constructor(
     private readonly workItemRepository: CoreRepository,
     private readonly idHandler: IdHandler,
@@ -44,13 +49,17 @@ export class CoreService {
     workItemId?: string,
   ) {
     if (!this.cache) return;
-    const deletions: Promise<any>[] = [
+    const deletions: Promise<void>[] = [
       this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       this.cache.del(`flux:proj:overview:${projectId}`),
     ];
     if (workItemId)
       deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)));
-    await Promise.all(deletions).catch(() => null);
+    await Promise.all(deletions).catch((err) => {
+      this.logger.warn(
+        `Failed to invalidate work item cache: ${(err as Error).message}`,
+      );
+    });
   }
 
   private async buildLabelLookup(
@@ -302,7 +311,8 @@ export class CoreService {
           )
         : [],
       completed: isCompleted,
-      relations: createWorkItemDto.relations || [],
+      relations:
+        (createWorkItemDto.relations as unknown as Prisma.InputJsonValue) || [],
       startDate: createWorkItemDto.startDate
         ? new Date(createWorkItemDto.startDate)
         : null,
@@ -404,7 +414,15 @@ export class CoreService {
     let targetIsCompleted: boolean | undefined;
     let targetColumnId: string | undefined;
     if (updateWorkItemDto.columnId !== undefined) {
-      let targetState = await this.workItemRepository.findStateById(
+      let targetState:
+        | {
+            id: string;
+            name: string;
+            group: string;
+            projectId?: string;
+          }
+        | null
+        | undefined = await this.workItemRepository.findStateById(
         updateWorkItemDto.columnId,
       );
       if (!targetState || targetState.projectId !== existing.projectId) {
@@ -417,7 +435,7 @@ export class CoreService {
             s.name.toLowerCase() ===
               updateWorkItemDto.columnId?.toLowerCase() ||
             s.group.toLowerCase() === updateWorkItemDto.columnId?.toLowerCase(),
-        ) as any;
+        );
       }
       targetColumnId = targetState
         ? targetState.id
@@ -508,7 +526,7 @@ export class CoreService {
           parent.id !== workItemId
         ) {
           // Guard against circular hierarchy (setting a descendant or cyclical ancestor as parent)
-          let curr: any = parent;
+          let curr: WorkItemWithRelations | null = parent;
           let isCycle = false;
           const visited = new Set<string>([workItemId]);
           while (curr && curr.parentWorkItemId) {
@@ -565,7 +583,8 @@ export class CoreService {
           : [],
       }),
       ...(updateWorkItemDto.relations !== undefined && {
-        relations: updateWorkItemDto.relations,
+        relations:
+          updateWorkItemDto.relations as unknown as Prisma.InputJsonValue,
       }),
       ...(updateWorkItemDto.subscriberIds !== undefined && {
         subscriberIds: updateWorkItemDto.subscriberIds,
@@ -675,8 +694,9 @@ export class CoreService {
     bulkUpdateWorkItemDto: BulkUpdateWorkItemDto,
     userId?: string,
   ) {
-    const payload =
-      bulkUpdateWorkItemDto.data || (bulkUpdateWorkItemDto as any);
+    const payload: BulkUpdatePayload =
+      bulkUpdateWorkItemDto.data ||
+      (bulkUpdateWorkItemDto as unknown as BulkUpdatePayload);
 
     const rawIds =
       bulkUpdateWorkItemDto.workItemIds || bulkUpdateWorkItemDto.ids || [];
@@ -735,7 +755,10 @@ export class CoreService {
       await this.workItemRepository.findProjectWithColumns(projectId);
     const canonicalProjectId = rawProject?.id || projectId;
 
-    const data: any = {};
+    const data: Prisma.WorkItemUpdateManyMutationInput & {
+      assigneeId?: string | null;
+      columnId?: string;
+    } = {};
     if (payload.columnId !== undefined) {
       const targetState = rawProject?.states?.find(
         (s) =>
@@ -795,7 +818,7 @@ export class CoreService {
       data.labels = [];
     } else if (payload.labels !== undefined && Array.isArray(payload.labels)) {
       data.labels = payload.labels.filter(
-        (l: any) => typeof l === 'string' && l.trim().length > 0,
+        (l: unknown) => typeof l === 'string' && (l as string).trim().length > 0,
       );
     }
 

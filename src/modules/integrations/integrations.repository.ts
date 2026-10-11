@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
-import { UserIntegration, ProjectIntegrationLink } from '@prisma/client';
+import { PrismaService } from '@/core';
+import {
+  UserIntegration,
+  ProjectIntegrationLink,
+  IntegrationProvider,
+  Prisma,
+} from '@prisma/client';
 import { IntegrationProviderType } from './providers/integration-provider.interface';
 
 @Injectable()
@@ -15,7 +20,7 @@ export class IntegrationsRepository {
       where: {
         userId_provider: {
           userId,
-          provider: provider as any,
+          provider: provider as IntegrationProvider,
         },
       },
     });
@@ -39,11 +44,14 @@ export class IntegrationsRepository {
     accountEmail?: string | null;
     metadata?: Record<string, unknown> | null;
   }): Promise<UserIntegration> {
+    const metadataValue =
+      (data.metadata as Prisma.InputJsonValue) ?? undefined;
+
     return this.prisma.userIntegration.upsert({
       where: {
         userId_provider: {
           userId: data.userId,
-          provider: data.provider as any,
+          provider: data.provider as IntegrationProvider,
         },
       },
       update: {
@@ -53,14 +61,14 @@ export class IntegrationsRepository {
         providerUserId: data.providerUserId,
         accountName: data.accountName,
         accountEmail: data.accountEmail,
-        metadata: data.metadata as any,
+        metadata: metadataValue,
         status: 'connected',
         authFailedAt: null,
         updatedAt: new Date(),
       },
       create: {
         userId: data.userId,
-        provider: data.provider as any,
+        provider: data.provider as IntegrationProvider,
         status: 'connected',
         accessToken: data.accessToken,
         refreshToken: data.refreshToken,
@@ -68,7 +76,7 @@ export class IntegrationsRepository {
         providerUserId: data.providerUserId,
         accountName: data.accountName,
         accountEmail: data.accountEmail,
-        metadata: data.metadata as any,
+        metadata: metadataValue,
       },
     });
   }
@@ -80,7 +88,7 @@ export class IntegrationsRepository {
     await this.prisma.userIntegration.updateMany({
       where: {
         userId,
-        provider: provider as any,
+        provider: provider as IntegrationProvider,
       },
       data: {
         status: 'error',
@@ -96,7 +104,7 @@ export class IntegrationsRepository {
     await this.prisma.userIntegration.deleteMany({
       where: {
         userId,
-        provider: provider as any,
+        provider: provider as IntegrationProvider,
       },
     });
   }

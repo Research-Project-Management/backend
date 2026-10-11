@@ -4,7 +4,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { IHistoryRepositoryPort } from '../../ports/history-repository.port';
 import { Snapshot } from '../../domain/entities/snapshot.entity';
 import { VersionLabel } from '../../domain/entities/version-label.entity';

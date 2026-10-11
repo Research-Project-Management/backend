@@ -81,20 +81,14 @@ export class OverviewService {
         lead: projectMeta.createdBy
           ? {
               id: projectMeta.createdBy.id,
-              name:
-                projectMeta.createdBy.profile?.name ??
-                (projectMeta.createdBy as any).name ??
-                'Lead',
-              avatar:
-                projectMeta.createdBy.profile?.avatar ??
-                (projectMeta.createdBy as any).avatar ??
-                null,
+              name: projectMeta.createdBy.profile?.name ?? 'Lead',
+              avatar: projectMeta.createdBy.profile?.avatar ?? null,
             }
           : null,
-        members: (projectMeta.members || []).map((m: any) => ({
-          id: m.user?.id || m.id,
-          name: m.user?.profile?.name || m.user?.name || 'Member',
-          avatar: m.user?.profile?.avatar || m.user?.avatar || null,
+        members: (projectMeta.members || []).map((m) => ({
+          id: m.user?.id || m.userId,
+          name: m.user?.profile?.name || 'Member',
+          avatar: m.user?.profile?.avatar || null,
           role: m.role || 'contributor',
         })),
       },
@@ -109,7 +103,7 @@ export class OverviewService {
         overdue: overdueCount,
         completionPercentage,
       },
-      recentActivities: (recentActivities || []).map((act: any) => ({
+      recentActivities: (recentActivities || []).map((act) => ({
         id: act.id,
         verb: act.verb,
         field: act.field,
@@ -119,7 +113,7 @@ export class OverviewService {
         newIdentifier: act.newIdentifier,
         createdAt: act.createdAt,
         actor: {
-          id: act.actor?.id,
+          id: act.actor?.id || '',
           name: act.actor?.profile?.name || null,
           avatar: act.actor?.profile?.avatar || null,
         },

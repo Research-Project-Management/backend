@@ -19,8 +19,8 @@ import {
 } from './utils/ai.util';
 
 import * as crypto from 'node:crypto';
-import { PrismaService } from '@/core/database/prisma.service';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { PrismaService } from '@/core';
+import { RedisCacheService } from '@/core';
 
 @Injectable()
 export class AiService {
@@ -92,15 +92,10 @@ export class AiService {
     }
 
     if (pageId) {
-      const doc =
-        (await (this.prisma as any).manuscriptDoc?.findFirst?.({
-          where: { id: pageId, deleted: false },
-          select: { id: true, projectId: true, authorId: true },
-        })) ||
-        (await (this.prisma as any).page?.findFirst?.({
-          where: { id: pageId },
-          select: { id: true, projectId: true, authorId: true },
-        }));
+      const doc = await this.prisma.manuscriptDoc.findFirst({
+        where: { id: pageId, deleted: false },
+        select: { id: true, projectId: true },
+      });
       if (!doc) {
         throw new NotFoundException('Manuscript doc not found');
       }
@@ -120,10 +115,6 @@ export class AiService {
             'You do not have access to this manuscript document',
           );
         }
-      } else if (doc.authorId && doc.authorId !== userId) {
-        throw new ForbiddenException(
-          'You do not have access to this manuscript document',
-        );
       }
     }
   }
@@ -142,8 +133,8 @@ export class AiService {
       select: { id: true, metaData: true },
     });
     for (const f of files) {
-      const meta = f.metaData as Record<string, any> | null;
-      if (meta?.ragDocId) {
+      const meta = f.metaData as Record<string, unknown> | null;
+      if (typeof meta?.ragDocId === 'string') {
         fileMap.set(f.id, meta.ragDocId);
       }
     }
@@ -151,7 +142,7 @@ export class AiService {
     // 2. Library Items
     const missingForItems = documentIds.filter((id) => !fileMap.has(id));
     if (missingForItems.length > 0) {
-      const items = await (this.prisma as any).item?.findMany({
+      const items = await this.prisma.item.findMany({
         where: { id: { in: missingForItems } },
         include: {
           attachments: {
@@ -163,26 +154,26 @@ export class AiService {
 
       if (items) {
         for (const it of items) {
-          const itMeta = it.metadata as Record<string, any> | null;
-          if (itMeta?.ragDocId) {
+          const itMeta = it.metadata as Record<string, unknown> | null;
+          if (typeof itMeta?.ragDocId === 'string') {
             fileMap.set(it.id, itMeta.ragDocId);
             continue;
           }
           if (it.attachments && it.attachments.length > 0) {
             const att =
               it.attachments.find(
-                (a: any) => a.attachmentType === 'primary_pdf',
+                (a) => a.attachmentType === 'primary_pdf',
               ) || it.attachments[0];
-            const attMeta = att.metadata as Record<string, any> | null;
-            if (attMeta?.ragDocId) {
+            const attMeta = att.metadata as Record<string, unknown> | null;
+            if (typeof attMeta?.ragDocId === 'string') {
               fileMap.set(it.id, attMeta.ragDocId);
             } else if (att.fileId) {
               const file = await this.prisma.file.findUnique({
                 where: { id: att.fileId },
                 select: { metaData: true },
               });
-              const fMeta = file?.metaData as Record<string, any> | null;
-              if (fMeta?.ragDocId) {
+              const fMeta = file?.metaData as Record<string, unknown> | null;
+              if (typeof fMeta?.ragDocId === 'string') {
                 fileMap.set(it.id, fMeta.ragDocId);
               }
             }
@@ -258,11 +249,11 @@ export class AiService {
           {
             role: 'user',
             content: lastUserMsg.content,
-            ...((lastUserMsg as any).attachments || (lastUserMsg as any).sources
+            ...(lastUserMsg.attachments || lastUserMsg.sources
               ? {
                   sources:
-                    (lastUserMsg as any).attachments ||
-                    (lastUserMsg as any).sources,
+                    lastUserMsg.attachments ||
+                    lastUserMsg.sources,
                 }
               : {}),
           },
@@ -374,11 +365,11 @@ export class AiService {
           {
             role: 'user',
             content: lastUserMsg.content,
-            ...((lastUserMsg as any).attachments || (lastUserMsg as any).sources
+            ...(lastUserMsg.attachments || lastUserMsg.sources
               ? {
                   sources:
-                    (lastUserMsg as any).attachments ||
-                    (lastUserMsg as any).sources,
+                    lastUserMsg.attachments ||
+                    lastUserMsg.sources,
                 }
               : {}),
           },
@@ -442,7 +433,7 @@ export class AiService {
     scopeId: string;
   }> {
     // 1. Try finding Library Item
-    const item = await (this.prisma as any).item?.findFirst({
+    const item = await this.prisma.item.findFirst({
       where: { id: paperOrFileId, deletedAt: null },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
@@ -456,7 +447,6 @@ export class AiService {
     if (item) {
       const hasAccess =
         item.userId === userId ||
-        item.uploadedById === userId ||
         (item.projectId
           ? (await this.prisma.projectMember.findFirst({
               where: {
@@ -472,28 +462,27 @@ export class AiService {
 
       // Priority resolution of ragDocId:
       // a) check item.metadata.ragDocId
+      const itemMeta = (item.metadata as Record<string, unknown>) || {};
       let ragDocId: string | null =
-        (item.metadata as Record<string, any>)?.ragDocId ||
-        item.ragDocId ||
-        null;
+        typeof itemMeta.ragDocId === 'string' ? itemMeta.ragDocId : null;
 
       // b) check primary_pdf attachment or any attachment
       if (!ragDocId && item.attachments && item.attachments.length > 0) {
         const primaryAtt =
           item.attachments.find(
-            (a: any) => a.attachmentType === 'primary_pdf',
+            (a) => a.attachmentType === 'primary_pdf',
           ) || item.attachments[0];
 
-        const attMeta = (primaryAtt?.metadata as Record<string, any>) || {};
-        if (attMeta.ragDocId) {
+        const attMeta = (primaryAtt?.metadata as Record<string, unknown>) || {};
+        if (typeof attMeta.ragDocId === 'string') {
           ragDocId = attMeta.ragDocId;
         } else if (primaryAtt?.fileId) {
           const file = await this.prisma.file.findUnique({
             where: { id: primaryAtt.fileId },
             select: { metaData: true },
           });
-          const fileMeta = (file?.metaData as Record<string, any>) || {};
-          if (fileMeta.ragDocId) {
+          const fileMeta = (file?.metaData as Record<string, unknown>) || {};
+          if (typeof fileMeta.ragDocId === 'string') {
             ragDocId = fileMeta.ragDocId;
           }
         }
@@ -501,7 +490,7 @@ export class AiService {
 
       return {
         title: item.title,
-        authors: item.contributors?.map((c: any) => c.fullName) || [],
+        authors: item.contributors?.map((c) => c.fullName) || [],
         year: item.year || undefined,
         doi: item.doi || undefined,
         abstract: item.abstract || undefined,
@@ -553,7 +542,7 @@ export class AiService {
     }
 
     // 3. Try finding by Attachment ID
-    const attachment = await (this.prisma as any).attachment?.findFirst({
+    const attachment = await this.prisma.attachment.findFirst({
       where: { id: paperOrFileId, deletedAt: null },
       select: { itemId: true },
     });

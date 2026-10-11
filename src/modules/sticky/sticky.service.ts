@@ -8,9 +8,9 @@ import {
 } from '@nestjs/common';
 import { StickyRepository } from './sticky.repository';
 import { CreateStickyDto, UpdateStickyDto } from './dto/sticky.dto';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { STICKY_REDIS_KEYS } from './constants/redis-keys.constant';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import {
   getNextStickyColor,
   isStickyContentEmpty,

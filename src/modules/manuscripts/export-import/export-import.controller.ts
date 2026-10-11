@@ -50,7 +50,7 @@ import { TemplateNotFoundException } from './core/domain/exceptions/template-not
 export class ExportImportController {
   constructor(private readonly service: ExportImportService) {}
 
-  private handleError(error: any): never {
+  private handleError(error: unknown): never {
     if (error instanceof InvalidZipArchiveException) {
       throw new BadRequestException(error.message);
     }
@@ -90,7 +90,7 @@ export class ExportImportController {
 
       // In real Fastify runtime (res.raw exists), stream with backpressure directly to socket.
       // In test mocks where res.raw is absent, buffer the stream chunks to satisfy buffer-based assertions.
-      if ((res as any).raw) {
+      if ('raw' in res && Boolean((res as unknown as { raw?: unknown }).raw)) {
         return res.send(result.zipStream);
       } else {
         const chunks: Buffer[] = [];
@@ -265,11 +265,19 @@ export class ExportImportController {
       } else if (
         typeof req.body === 'object' &&
         req.body !== null &&
-        'buffer' in req.body &&
-        Buffer.isBuffer((req.body as any).buffer)
+        'buffer' in req.body
       ) {
-        fileBuffer = (req.body as any).buffer;
-        if ('filename' in req.body) fileName = (req.body as any).filename;
+        const bodyWithBuffer = req.body as { buffer?: unknown; filename?: string };
+        if (Buffer.isBuffer(bodyWithBuffer.buffer)) {
+          fileBuffer = bodyWithBuffer.buffer;
+          if (typeof bodyWithBuffer.filename === 'string') {
+            fileName = bodyWithBuffer.filename;
+          }
+        } else {
+          throw new BadRequestException(
+            'Expected document binary payload or multipart form data.',
+          );
+        }
       } else {
         throw new BadRequestException(
           'Expected document binary payload or multipart form data.',

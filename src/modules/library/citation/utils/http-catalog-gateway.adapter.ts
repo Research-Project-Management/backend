@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
+  CatalogItemRecord,
 } from '../types/citation.types';
 import { ResilienceRegistryService } from '../../shared-kernel/resilience/resilience-registry.service';
 
@@ -31,7 +32,7 @@ export class HttpCatalogGatewayAdapter implements ICatalogGatewayPort {
     userId: string,
     itemId: string,
     projectId?: string,
-  ): Promise<any | null> {
+  ): Promise<CatalogItemRecord | null> {
     const baseUrl = this.getBaseUrl();
     const breaker = this.resilienceRegistry?.getCircuitBreaker(
       'catalog-microservice',
@@ -41,7 +42,7 @@ export class HttpCatalogGatewayAdapter implements ICatalogGatewayPort {
       },
     );
 
-    const executeRequest = async (): Promise<any | null> => {
+    const executeRequest = async (): Promise<CatalogItemRecord | null> => {
       const url = projectId
         ? `${baseUrl}/api/v1/projects/${projectId}/library/items/${itemId}`
         : `${baseUrl}/api/v1/library/items/${itemId}`;
@@ -66,10 +67,11 @@ export class HttpCatalogGatewayAdapter implements ICatalogGatewayPort {
           );
         }
 
-        const json = await response.json();
+        const json = (await response.json()) as { data?: CatalogItemRecord } & CatalogItemRecord;
         return json?.data ?? json;
-      } catch (err: any) {
-        if (err?.name === 'AbortError') {
+      } catch (err: unknown) {
+        const errorName = (err as { name?: string })?.name;
+        if (errorName === 'AbortError') {
           this.logger.warn(`Catalog HTTP request timed out for item ${itemId}`);
         }
         throw err;
@@ -79,9 +81,10 @@ export class HttpCatalogGatewayAdapter implements ICatalogGatewayPort {
     };
 
     if (breaker) {
-      return breaker.execute(executeRequest, async (err: any) => {
+      return breaker.execute(executeRequest, async (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Catalog service circuit open or unavailable: ${err?.message || err}`,
+          `Catalog service circuit open or unavailable: ${message}`,
         );
         return null;
       });
@@ -94,7 +97,7 @@ export class HttpCatalogGatewayAdapter implements ICatalogGatewayPort {
     userId: string,
     itemIds: string[],
     projectId?: string,
-  ): Promise<any[]> {
+  ): Promise<CatalogItemRecord[]> {
     if (!itemIds || itemIds.length === 0) return [];
 
     const baseUrl = this.getBaseUrl();
@@ -106,7 +109,7 @@ export class HttpCatalogGatewayAdapter implements ICatalogGatewayPort {
       },
     );
 
-    const executeRequest = async (): Promise<any[]> => {
+    const executeRequest = async (): Promise<CatalogItemRecord[]> => {
       const url = projectId
         ? `${baseUrl}/api/v1/projects/${projectId}/library/items/batch`
         : `${baseUrl}/api/v1/library/items/batch`;
@@ -126,7 +129,7 @@ export class HttpCatalogGatewayAdapter implements ICatalogGatewayPort {
         });
 
         if (response.ok) {
-          const json = await response.json();
+          const json = (await response.json()) as { data?: CatalogItemRecord[] } & CatalogItemRecord[];
           return json?.data ?? json ?? [];
         }
 
@@ -137,9 +140,10 @@ export class HttpCatalogGatewayAdapter implements ICatalogGatewayPort {
         return results.filter(
           (item): item is NonNullable<typeof item> => item !== null,
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Batch fetch failed, attempting parallel individual fetch: ${err.message}`,
+          `Batch fetch failed, attempting parallel individual fetch: ${message}`,
         );
         const results = await Promise.all(
           itemIds.map((id) => this.getItem(userId, id, projectId)),
@@ -153,9 +157,10 @@ export class HttpCatalogGatewayAdapter implements ICatalogGatewayPort {
     };
 
     if (breaker) {
-      return breaker.execute(executeRequest, async (err: any) => {
+      return breaker.execute(executeRequest, async (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Catalog service unavailable for findByIds: ${err?.message || err}`,
+          `Catalog service unavailable for findByIds: ${message}`,
         );
         return [];
       });

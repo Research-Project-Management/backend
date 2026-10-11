@@ -5,7 +5,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { IUpdaterLockPort } from '../../ports/updater-lock.port';
-import { RedisCacheService } from '@/core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 
 @Injectable()
 export class RedisDistributedUpdaterLockAdapter extends IUpdaterLockPort {

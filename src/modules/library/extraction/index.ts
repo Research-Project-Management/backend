@@ -5,5 +5,6 @@ export * from './dto';
 export * from './services';
 export * from './repositories';
 export * from './types';
+export * from './core/domain/attachment.aggregate';
 export * from './extractors';
 export * from './utils';

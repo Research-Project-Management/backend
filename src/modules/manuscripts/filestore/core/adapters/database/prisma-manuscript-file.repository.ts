@@ -4,7 +4,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { IManuscriptFileRepository } from '../../ports/manuscript-file-repository.port';
 import { ManuscriptFile } from '../../domain/entities/manuscript-file.entity';
 import { ManuscriptFileMapper } from './manuscript-file.mapper';

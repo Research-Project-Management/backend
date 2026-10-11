@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import {
   IYourWorkRepository,
   ProjectMinimal,
@@ -140,7 +140,7 @@ export class YourWorkRepository implements IYourWorkRepository {
     hasAccess: boolean;
     project?: ProjectMinimal;
   }> {
-    const project = await (this.prisma as any).project.findFirst({
+    const project = await this.prisma.project.findFirst({
       where: { id: projectId, deletedAt: null },
       select: {
         id: true,
@@ -151,7 +151,7 @@ export class YourWorkRepository implements IYourWorkRepository {
         createdById: true,
         members: {
           where: { userId },
-          select: { id: true },
+          select: { userId: true },
         },
       },
     });

@@ -1,4 +1,4 @@
-﻿import { WorkItem, ProjectMember, Role } from '@prisma/client';
+import { WorkItem, ProjectMember, Role } from '@prisma/client';
 
 export { Role };
 
@@ -31,6 +31,10 @@ export interface IAssignmentRepository {
     projectId: string,
     userId: string,
   ): Promise<ProjectMember | null>;
+  findProjectMembers(
+    projectId: string,
+    userIds: string[],
+  ): Promise<ProjectMember[]>;
   assignWorkItem(
     workItemId: string,
     assigneeId: string | null,

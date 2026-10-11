@@ -9,6 +9,17 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WorkItemPriority } from '@prisma/client';
 
+export interface BulkUpdatePayload {
+  columnId?: string;
+  assigneeId?: string | null;
+  priority?: WorkItemPriority | (string & {});
+  dueDate?: string | null;
+  startDate?: string | null;
+  addLabel?: string;
+  removeLabel?: string;
+  [key: string]: unknown;
+}
+
 export class BulkUpdateWorkItemDto {
   @ApiPropertyOptional({
     description: 'Array of work item IDs to update',
@@ -30,14 +41,7 @@ export class BulkUpdateWorkItemDto {
     example: { columnId: 'done', priority: 'high' },
   })
   @IsObject()
-  data!: {
-    columnId?: string;
-    assigneeId?: string | null;
-    priority?: WorkItemPriority | (string & {});
-    dueDate?: string | null;
-    startDate?: string | null;
-    [key: string]: any;
-  };
+  data!: BulkUpdatePayload;
 
   @ApiPropertyOptional({ description: 'Project ID' })
   @IsString()
@@ -99,6 +103,11 @@ export class DuplicateWorkItemDto {
   @IsString()
   @IsOptional()
   destinationProjectId?: string;
+
+  @ApiPropertyOptional({ description: 'Alias for destination project ID' })
+  @IsString()
+  @IsOptional()
+  projectId?: string;
 }
 
 export class AssignWorkItemDto {

@@ -5,7 +5,7 @@ import {
   ParsedCreator,
 } from '../types/bibliographic.types';
 
-export { ParsedCreator };
+export type { ParsedCreator };
 
 /**
  * Whole-word keywords that mark a creator string as an organization

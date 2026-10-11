@@ -29,7 +29,7 @@ import {
   sanitizeCollectionDescription,
 } from '../utils/collections.utils';
 import { TreeEngine } from '../utils/tree.engine';
-import { RedisCacheService } from '../../../../core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '../../shared-kernel/core/constants/redis-keys.constants';
 
 @Injectable()

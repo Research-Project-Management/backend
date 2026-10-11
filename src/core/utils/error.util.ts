@@ -1,6 +1,5 @@
 /**
- * Total TypeScript Utility: getErrorMessage
- * Narrow `unknown` errors into clean string messages safely.
+ * Safely extracts a readable error message from an unknown error value.
  */
 export function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -16,9 +15,8 @@ export function getErrorMessage(error: unknown): string {
 }
 
 /**
- * Total TypeScript Utility: assertNever
- * Exhaustive check helper for discriminated unions and enums.
- * Triggers a TypeScript compile-time error if any branch is unhandled.
+ * Exhaustiveness check helper for discriminated unions and enums.
+ * Triggers a TypeScript compile-time error if any branch remains unhandled.
  */
 export function assertNever(
   value: never,
@@ -28,8 +26,7 @@ export function assertNever(
 }
 
 /**
- * Error as Value Pattern (Matt Pocock Pattern)
- * Represents either a success (Ok) with a value, or a failure (Err) with an error.
+ * Result type representing either a successful value or an error.
  */
 export type Result<T, E = Error> =
   | { ok: true; value: T; error?: never }

@@ -10,7 +10,7 @@ import { StructureService } from '@/modules/manuscripts/structure/structure.serv
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { DocumentUpdaterService } from '@/modules/manuscripts/document-updater/document-updater.service';
-import { mapWithConcurrency } from '@/core/utils/concurrency.util';
+import { mapWithConcurrency } from '@/core';
 import type { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
 
 const COLLECT_CONCURRENCY = 6;

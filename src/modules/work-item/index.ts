@@ -1,5 +1,6 @@
 export * from './work-item.module';
 export * from './work-item.facade';
+export * from './common';
 export * from './core/constants/redis-keys.constant';
 export * from './core/types/work-item.types';
 export * from './state/types/state.types';

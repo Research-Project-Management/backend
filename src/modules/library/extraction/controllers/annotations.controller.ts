@@ -79,6 +79,15 @@ export class AnnotationsController {
       );
     }
 
+    if (typeof this.annotationsService.getAnnotationsByAttachment === 'function') {
+      return this.annotationsService.getAnnotationsByAttachment(
+        userId,
+        attachmentId,
+        pageIndex,
+        type,
+      );
+    }
+
     return this.annotationsService.listAnnotations(
       userId,
       attachmentId,

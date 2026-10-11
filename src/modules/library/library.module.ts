@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { CoreModule as AppCoreModule } from '../../core/core.module';
+import { CoreModule as AppCoreModule } from '@/core';
 
 // The 6 Canonical Symmetrical Microservices-Ready Modules
 import { SyncModule } from './sync/sync.module';

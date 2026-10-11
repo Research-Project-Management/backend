@@ -4,7 +4,7 @@
  * personal preferences, cross-resource entity search, and dashboard metrics.
  */
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { AuthProvider, Prisma, ThemePreference, User } from '@prisma/client';
 import {
   IUserRepository,
@@ -16,7 +16,7 @@ import {
 } from './types/user.type';
 import { formatBytes } from './utils/user.util';
 
-import { isUuid } from '@/core/utils/uuid.util';
+import { isUuid } from '@/core';
 
 @Injectable()
 export class UserRepository implements IUserRepository {

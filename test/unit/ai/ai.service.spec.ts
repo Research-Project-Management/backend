@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AiService } from '@/modules/ai/ai.service';
 import { EngineService } from '@/modules/ai/engine/engine.service';
 import { ChatService, ThreadService } from '@/modules/ai/chat/chat.service';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import {
   ForbiddenException,
   NotFoundException,
@@ -59,7 +59,7 @@ describe('AiService (Server-Authoritative Chat & Streaming)', () => {
       project: {
         findFirst: jest.fn(),
       },
-      page: {
+      manuscriptDoc: {
         findFirst: jest.fn(),
       },
       aiChat: {
@@ -152,9 +152,9 @@ describe('AiService (Server-Authoritative Chat & Streaming)', () => {
     });
 
     it('should resolve or create pageChat when pageId is provided', async () => {
-      prisma.page.findFirst.mockResolvedValue({
+      prisma.manuscriptDoc.findFirst.mockResolvedValue({
         id: mockPageId,
-        authorId: mockUserId,
+        projectId: null,
       });
 
       await service.stream(

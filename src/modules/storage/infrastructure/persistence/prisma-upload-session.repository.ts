@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PrismaService } from '@/core';
 import { IUploadSessionRepository } from '../../domain/ports/upload-session.repository.port';
 import { UploadSession } from '../../domain/entities/upload-session.entity';
 import { CompletedPart } from '../../domain/ports/storage-driver.port';

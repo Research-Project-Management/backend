@@ -2,6 +2,7 @@ import { Injectable, Inject, Optional } from '@nestjs/common';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
+  CatalogItemRecord,
 } from '../types/citation.types';
 import { CATALOG_FACADE, ICatalogFacade } from '../../shared-kernel';
 
@@ -17,12 +18,20 @@ export class InProcessCatalogGatewayAdapter implements ICatalogGatewayPort {
     private readonly catalogFacade?: ICatalogFacade,
   ) {}
 
-  getItem(userId: string, itemId: string, projectId?: string) {
+  getItem(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<CatalogItemRecord | null> {
     if (!this.catalogFacade) return Promise.resolve(null);
     return this.catalogFacade.getItem(userId, itemId, projectId);
   }
 
-  findByIds(userId: string, itemIds: string[], projectId?: string) {
+  findByIds(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<CatalogItemRecord[]> {
     if (!this.catalogFacade) return Promise.resolve([]);
     return this.catalogFacade.findByIds(userId, itemIds, projectId);
   }

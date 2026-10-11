@@ -38,7 +38,7 @@ import {
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/user.decorator';
 import { JwtAuthGuard } from './guards/auth.guard';
-import { BypassEnvelope } from '@/core/decorators/bypass.decorator';
+import { BypassEnvelope } from '@/core';
 
 function extractRefreshTokenFromCookie(cookieHeader?: string): string | null {
   if (!cookieHeader) return null;

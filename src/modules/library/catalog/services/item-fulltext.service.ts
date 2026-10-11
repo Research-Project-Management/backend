@@ -5,7 +5,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { QueryRepository } from '../repositories/query.repository';
-import { RedisCacheService } from '../../../../core/cache/redis.service';
+import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '../../shared-kernel/core/constants/redis-keys.constants';
 import { DocumentFulltextResponse } from '../dto/items.dto';
 
