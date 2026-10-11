@@ -82,8 +82,8 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
   async getItem(userId: string, id: string, projectId?: string) {
     const cacheKey = LIBRARY_REDIS_KEYS.item(id);
 
-    if (this.cache && typeof (this.cache as any).wrap === 'function') {
-      const item = await (this.cache as any).wrap(
+    if (this.cache) {
+      const item = await this.cache.wrap(
         cacheKey,
         async () => {
           return this.query.findById(userId, id, projectId);

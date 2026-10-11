@@ -13,6 +13,10 @@ import {
   ExecuteSavedSearchQueryDto,
 } from '../dto/saved-search.dto';
 import { ItemsMapper } from '../utils/items.mapper';
+import {
+  SavedSearchConditionGroup,
+  ExecuteSavedSearchOptions,
+} from '../types/saved-search.types';
 
 @Injectable()
 export class SavedSearchesService {
@@ -37,8 +41,9 @@ export class SavedSearchesService {
         effectiveProjectId,
       );
       initialCount = await this.repo.countMatchingItems(where);
-    } catch (err: any) {
-      this.logger.warn(`Failed to evaluate initial count: ${err?.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to evaluate initial count: ${message}`);
     }
 
     const created = await this.repo.create(userId, dto, effectiveProjectId);
@@ -138,7 +143,8 @@ export class SavedSearchesService {
   ) {
     const effectiveProjectId = projectId || dto.projectId;
     const savedSearch = await this.findById(userId, id, effectiveProjectId);
-    const conditions = savedSearch.conditions as any;
+    const conditions =
+      savedSearch.conditions as unknown as SavedSearchConditionGroup;
 
     const queryProjectId =
       effectiveProjectId || savedSearch.projectId || undefined;
@@ -151,8 +157,10 @@ export class SavedSearchesService {
     let rawSortBy = dto.sortBy || savedSearch.sortBy || 'dateAdded';
     if (rawSortBy === 'createdAt') rawSortBy = 'dateAdded';
     if (rawSortBy === 'authors') rawSortBy = 'creator';
-    const sortBy = rawSortBy as any;
-    const sortOrder = (dto.sortOrder || savedSearch.sortOrder || 'desc') as any;
+    const sortBy = rawSortBy as ExecuteSavedSearchOptions['sortBy'];
+    const sortOrder = (dto.sortOrder ||
+      savedSearch.sortOrder ||
+      'desc') as ExecuteSavedSearchOptions['sortOrder'];
 
     const [count, results] = await Promise.all([
       this.repo.countMatchingItems(where),
@@ -166,8 +174,9 @@ export class SavedSearchesService {
     ]);
 
     // Update cached count asynchronously
-    this.repo.updateCachedCount(id, count).catch((err: any) => {
-      this.logger.warn(`Failed to update cached count: ${err?.message}`);
+    this.repo.updateCachedCount(id, count).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to update cached count: ${message}`);
     });
 
     return {

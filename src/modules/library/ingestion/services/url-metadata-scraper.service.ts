@@ -396,7 +396,7 @@ export class UrlMetadataScraperService {
               const doc =
                 await this.extractionGateway.extractDocumentFromBuffer(buffer, {
                   headerOnly: true,
-                } as any);
+                });
               pdfExtracted = doc?.metadata || {};
             } catch (pdfErr: any) {
               this.logger.warn(

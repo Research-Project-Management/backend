@@ -270,10 +270,21 @@ const isUuid = (val?: string | null): val is string =>
 
 @ApiTags('Manuscripts - Pages Compatibility Bridge')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/manuscripts', 'api'])
+@Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
 @UseGuards(JwtAuthGuard)
 export class PagesBridgeController {
   private readonly logger = new Logger(PagesBridgeController.name);
+  private static readonly activePresenceMap = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      color: string;
+      lastSeen: number;
+      fileId: string;
+      cursor?: any;
+    }
+  >();
 
   constructor(
     private readonly docstoreService: DocstoreService,
@@ -889,24 +900,36 @@ export class PagesBridgeController {
       },
     });
 
-    return {
-      comment: {
-        id: thread.id,
-        page: pageId,
-        projectPageId: pageId,
-        author: {
-          id: userId || thread.createdById || 'anonymous',
-          name: authorName,
-        },
-        content: thread.quote || '',
-        line: thread.startLine,
-        lineEnd: thread.endLine,
-        status: 'open',
-        replies: [],
-        createdAt: thread.createdAt.toISOString(),
-        updatedAt: thread.updatedAt.toISOString(),
+    const commentPayload = {
+      id: thread.id,
+      page: pageId,
+      projectPageId: pageId,
+      docId: targetDocId,
+      author: {
+        id: userId || thread.createdById || 'anonymous',
+        name: authorName,
       },
+      content: thread.quote || '',
+      line: thread.startLine,
+      lineEnd: thread.endLine,
+      status: 'open',
+      replies: [],
+      createdAt: thread.createdAt.toISOString(),
+      updatedAt: thread.updatedAt.toISOString(),
     };
+
+    if (this.realtimeService && projectId) {
+      try {
+        this.realtimeService.broadcastEvent(projectId, 'comment:created', {
+          docId: targetDocId,
+          comment: commentPayload,
+        });
+      } catch {
+        // Non-blocking real-time broadcast error ignored
+      }
+    }
+
+    return { comment: commentPayload };
   }
 
   /**
@@ -937,29 +960,45 @@ export class PagesBridgeController {
         include: { replies: true },
       });
 
-      return {
-        comment: {
-          id: updated.id,
-          page: updated.docId,
-          projectPageId: updated.docId,
-          author: {
-            id: updated.createdById || 'anonymous',
-            name: 'Collaborator',
-          },
-          content: updated.quote || '',
-          line: updated.startLine,
-          lineEnd: updated.endLine,
-          status: updated.isResolved ? 'resolved' : 'open',
-          replies: (updated.replies || []).map((r) => ({
-            id: r.id,
-            author: { id: r.createdById || 'anonymous', name: 'Collaborator' },
-            content: r.content,
-            createdAt: r.createdAt.toISOString(),
-          })),
-          createdAt: updated.createdAt.toISOString(),
-          updatedAt: updated.updatedAt.toISOString(),
+      const commentPayload = {
+        id: updated.id,
+        page: updated.docId,
+        projectPageId: updated.docId,
+        docId: updated.docId,
+        author: {
+          id: updated.createdById || 'anonymous',
+          name: 'Collaborator',
         },
+        content: updated.quote || '',
+        line: updated.startLine,
+        lineEnd: updated.endLine,
+        status: updated.isResolved ? 'resolved' : 'open',
+        replies: (updated.replies || []).map((r) => ({
+          id: r.id,
+          author: { id: r.createdById || 'anonymous', name: 'Collaborator' },
+          content: r.content,
+          createdAt: r.createdAt.toISOString(),
+        })),
+        createdAt: updated.createdAt.toISOString(),
+        updatedAt: updated.updatedAt.toISOString(),
       };
+
+      if (this.realtimeService && updated.projectId) {
+        try {
+          this.realtimeService.broadcastEvent(
+            updated.projectId,
+            'comment:updated',
+            {
+              docId: updated.docId,
+              comment: commentPayload,
+            },
+          );
+        } catch {
+          // ignore non-blocking error
+        }
+      }
+
+      return { comment: commentPayload };
     } catch {
       throw new NotFoundException(`Comment thread ${commentId} not found`);
     }
@@ -976,9 +1015,28 @@ export class PagesBridgeController {
   @HttpCode(HttpStatus.OK)
   async deleteComment(@Param('commentId') commentId: string) {
     if (isUuid(commentId)) {
+      const existing = await this.prisma.manuscriptCommentThread.findUnique({
+        where: { id: commentId },
+        select: { projectId: true, docId: true },
+      });
       await this.prisma.manuscriptCommentThread
         .delete({ where: { id: commentId } })
         .catch(() => null);
+
+      if (this.realtimeService && existing?.projectId) {
+        try {
+          this.realtimeService.broadcastEvent(
+            existing.projectId,
+            'comment:deleted',
+            {
+              docId: existing.docId,
+              commentId,
+            },
+          );
+        } catch {
+          // ignore non-blocking error
+        }
+      }
     }
     return { success: true };
   }
@@ -1022,29 +1080,46 @@ export class PagesBridgeController {
         throw new NotFoundException(`Comment thread ${commentId} not found`);
       }
 
-      return {
-        comment: {
-          id: thread.id,
-          page: thread.docId,
-          projectPageId: thread.docId,
-          author: {
-            id: thread.createdById || 'anonymous',
-            name: 'Collaborator',
-          },
-          content: thread.quote || '',
-          line: thread.startLine,
-          lineEnd: thread.endLine,
-          status: thread.isResolved ? 'resolved' : 'open',
-          replies: (thread.replies || []).map((r) => ({
-            id: r.id,
-            author: { id: r.createdById || 'anonymous', name: 'Collaborator' },
-            content: r.content,
-            createdAt: r.createdAt.toISOString(),
-          })),
-          createdAt: thread.createdAt.toISOString(),
-          updatedAt: thread.updatedAt.toISOString(),
+      const commentPayload = {
+        id: thread.id,
+        page: thread.docId,
+        projectPageId: thread.docId,
+        docId: thread.docId,
+        author: {
+          id: thread.createdById || 'anonymous',
+          name: 'Collaborator',
         },
+        content: thread.quote || '',
+        line: thread.startLine,
+        lineEnd: thread.endLine,
+        status: thread.isResolved ? 'resolved' : 'open',
+        replies: (thread.replies || []).map((r) => ({
+          id: r.id,
+          author: { id: r.createdById || 'anonymous', name: 'Collaborator' },
+          content: r.content,
+          createdAt: r.createdAt.toISOString(),
+        })),
+        createdAt: thread.createdAt.toISOString(),
+        updatedAt: thread.updatedAt.toISOString(),
       };
+
+      if (this.realtimeService && thread.projectId) {
+        try {
+          this.realtimeService.broadcastEvent(
+            thread.projectId,
+            'comment:reply-added',
+            {
+              docId: thread.docId,
+              commentId: thread.id,
+              comment: commentPayload,
+            },
+          );
+        } catch {
+          // ignore non-blocking error
+        }
+      }
+
+      return { comment: commentPayload };
     } catch (err) {
       if (
         err instanceof NotFoundException ||
@@ -1070,9 +1145,33 @@ export class PagesBridgeController {
     @Param('replyId') replyId: string,
   ) {
     if (isUuid(replyId)) {
+      const existingReply = await this.prisma.manuscriptCommentReply.findUnique(
+        {
+          where: { id: replyId },
+          include: {
+            thread: { select: { projectId: true, docId: true, id: true } },
+          },
+        },
+      );
       await this.prisma.manuscriptCommentReply
         .delete({ where: { id: replyId } })
         .catch(() => null);
+
+      if (this.realtimeService && existingReply?.thread?.projectId) {
+        try {
+          this.realtimeService.broadcastEvent(
+            existingReply.thread.projectId,
+            'comment:reply-deleted',
+            {
+              docId: existingReply.thread.docId,
+              commentId: existingReply.thread.id,
+              replyId,
+            },
+          );
+        } catch {
+          // ignore non-blocking error
+        }
+      }
     }
     return { success: true };
   }
@@ -1101,29 +1200,47 @@ export class PagesBridgeController {
         include: { replies: true },
       });
 
-      return {
-        comment: {
-          id: thread.id,
-          page: thread.docId,
-          projectPageId: thread.docId,
-          author: {
-            id: thread.createdById || 'anonymous',
-            name: 'Collaborator',
-          },
-          content: thread.quote || '',
-          line: thread.startLine,
-          lineEnd: thread.endLine,
-          status: thread.isResolved ? 'resolved' : 'open',
-          replies: (thread.replies || []).map((r) => ({
-            id: r.id,
-            author: { id: r.createdById || 'anonymous', name: 'Collaborator' },
-            content: r.content,
-            createdAt: r.createdAt.toISOString(),
-          })),
-          createdAt: thread.createdAt.toISOString(),
-          updatedAt: thread.updatedAt.toISOString(),
+      const commentPayload = {
+        id: thread.id,
+        page: thread.docId,
+        projectPageId: thread.docId,
+        docId: thread.docId,
+        author: {
+          id: thread.createdById || 'anonymous',
+          name: 'Collaborator',
         },
+        content: thread.quote || '',
+        line: thread.startLine,
+        lineEnd: thread.endLine,
+        status: thread.isResolved ? 'resolved' : 'open',
+        replies: (thread.replies || []).map((r) => ({
+          id: r.id,
+          author: { id: r.createdById || 'anonymous', name: 'Collaborator' },
+          content: r.content,
+          createdAt: r.createdAt.toISOString(),
+        })),
+        createdAt: thread.createdAt.toISOString(),
+        updatedAt: thread.updatedAt.toISOString(),
       };
+
+      if (this.realtimeService && thread.projectId) {
+        try {
+          this.realtimeService.broadcastEvent(
+            thread.projectId,
+            'comment:resolved',
+            {
+              docId: thread.docId,
+              commentId: thread.id,
+              resolved: isResolved,
+              comment: commentPayload,
+            },
+          );
+        } catch {
+          // ignore non-blocking error
+        }
+      }
+
+      return { comment: commentPayload };
     } catch {
       throw new NotFoundException(`Comment thread ${commentId} not found`);
     }
@@ -1252,27 +1369,44 @@ export class PagesBridgeController {
       },
     });
 
-    return {
-      suggestion: {
-        id: record.id,
-        pageId: record.docId,
-        authorId: userId || 'anonymous',
-        author: {
-          id: userId || 'anonymous',
-          name: authorName,
-          email: authorEmail,
-        },
-        type: record.type,
-        originalText: record.type === 'delete' ? record.text : '',
-        suggestedText: record.type === 'insert' ? record.text : '',
-        fromLine: record.startLine,
-        fromColumn: record.startCol,
-        toLine: record.endLine,
-        toColumn: record.endCol,
-        status: record.status,
-        createdAt: record.createdAt.toISOString(),
-        updatedAt: record.updatedAt.toISOString(),
+    const suggestionPayload = {
+      id: record.id,
+      pageId: record.docId,
+      authorId: userId || 'anonymous',
+      author: {
+        id: userId || 'anonymous',
+        name: authorName,
+        email: authorEmail,
       },
+      type: record.type,
+      originalText: record.type === 'delete' ? record.text : '',
+      suggestedText: record.type === 'insert' ? record.text : '',
+      fromLine: record.startLine,
+      fromColumn: record.startCol,
+      toLine: record.endLine,
+      toColumn: record.endCol,
+      status: record.status,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    };
+
+    if (this.realtimeService && projectId) {
+      try {
+        this.realtimeService.broadcastEvent(
+          projectId,
+          'track-changes:created',
+          {
+            docId: targetDocId,
+            suggestion: suggestionPayload,
+          },
+        );
+      } catch {
+        // ignore non-blocking error
+      }
+    }
+
+    return {
+      suggestion: suggestionPayload,
     };
   }
 
@@ -1296,23 +1430,37 @@ export class PagesBridgeController {
           data: { status: 'accepted', resolvedAt: new Date() },
         });
 
-        // Apply accepted mutation to docstore lines
+        // Apply accepted mutation to docstore lines with column and multi-line precision
         if (record && record.docId) {
           try {
             const doc = await this.prisma.manuscriptDoc.findUnique({
               where: { id: record.docId },
-              select: { lines: true, rev: true },
+              select: { lines: true, rev: true, projectId: true },
             });
             if (doc && Array.isArray(doc.lines)) {
               const lines: string[] = doc.lines.map((l) => String(l ?? ''));
-              const lineIdx = Math.max(0, (record.startLine || 1) - 1);
+              const startLine =
+                record.startLine !== null && record.startLine !== undefined
+                  ? record.startLine
+                  : 1;
+              const endLine =
+                record.endLine !== null && record.endLine !== undefined
+                  ? record.endLine
+                  : startLine;
+              const startCol =
+                record.startCol !== null && record.startCol !== undefined
+                  ? record.startCol
+                  : 0;
+              const endCol =
+                record.endCol !== null && record.endCol !== undefined
+                  ? record.endCol
+                  : 0;
+
               if (record.type === 'insert') {
+                const lineIdx = Math.max(0, startLine - 1);
                 if (lineIdx < lines.length) {
                   const currentLine = lines[lineIdx] || '';
-                  const col = Math.min(
-                    record.startCol || 0,
-                    currentLine.length,
-                  );
+                  const col = Math.min(startCol, currentLine.length);
                   lines[lineIdx] =
                     currentLine.slice(0, col) +
                     record.text +
@@ -1321,11 +1469,27 @@ export class PagesBridgeController {
                   lines.push(record.text);
                 }
               } else if (record.type === 'delete') {
-                if (lineIdx < lines.length) {
-                  const currentLine = lines[lineIdx] || '';
-                  lines[lineIdx] = currentLine.replace(record.text, '');
+                const sIdx = Math.max(0, startLine - 1);
+                const eIdx = Math.max(0, endLine - 1);
+                if (sIdx < lines.length) {
+                  const line = lines[sIdx] || '';
+                  const sc = Math.min(startCol, line.length);
+                  if (sIdx === eIdx) {
+                    const ec =
+                      record.endCol !== null && record.endCol !== undefined
+                        ? Math.min(endCol, line.length)
+                        : sc + record.text.length;
+                    lines[sIdx] = line.slice(0, sc) + line.slice(ec);
+                  } else {
+                    const first = line.slice(0, sc);
+                    const lastLine = lines[eIdx] || '';
+                    const ec = Math.min(endCol, lastLine.length);
+                    const last = lastLine.slice(ec);
+                    lines.splice(sIdx, eIdx - sIdx + 1, first + last);
+                  }
                 }
               }
+
               await this.prisma.manuscriptDoc.update({
                 where: { id: record.docId },
                 data: {
@@ -1333,6 +1497,18 @@ export class PagesBridgeController {
                   rev: (doc.rev || 0) + 1,
                 },
               });
+
+              if (this.realtimeService && doc.projectId) {
+                this.realtimeService.broadcastEvent(
+                  doc.projectId,
+                  'track-changes:resolved',
+                  {
+                    docId: record.docId,
+                    change: record,
+                    action: 'accepted',
+                  },
+                );
+              }
             }
           } catch (patchErr) {
             this.logger.warn(
@@ -1368,6 +1544,25 @@ export class PagesBridgeController {
           where: { id: suggestionId },
           data: { status: 'rejected', resolvedAt: new Date() },
         });
+
+        if (this.realtimeService && record && record.docId) {
+          const doc = await this.prisma.manuscriptDoc.findUnique({
+            where: { id: record.docId },
+            select: { projectId: true },
+          });
+          if (doc?.projectId) {
+            this.realtimeService.broadcastEvent(
+              doc.projectId,
+              'track-changes:resolved',
+              {
+                docId: record.docId,
+                change: record,
+                action: 'rejected',
+              },
+            );
+          }
+        }
+
         return { ok: true, suggestion: record };
       } catch {
         // Ignore
@@ -1394,6 +1589,25 @@ export class PagesBridgeController {
           data: { status: 'accepted', resolvedAt: new Date() },
         });
         acceptedCount = res.count;
+
+        if (this.realtimeService && acceptedCount > 0) {
+          const doc = await this.prisma.manuscriptDoc.findUnique({
+            where: { id: pageId },
+            select: { projectId: true },
+          });
+          if (doc?.projectId) {
+            this.realtimeService.broadcastEvent(
+              doc.projectId,
+              'track-changes:resolved',
+              {
+                docId: pageId,
+                bulk: true,
+                action: 'accept-all',
+                count: acceptedCount,
+              },
+            );
+          }
+        }
       } catch {
         // Ignore
       }
@@ -1419,6 +1633,25 @@ export class PagesBridgeController {
           data: { status: 'rejected', resolvedAt: new Date() },
         });
         rejectedCount = res.count;
+
+        if (this.realtimeService && rejectedCount > 0) {
+          const doc = await this.prisma.manuscriptDoc.findUnique({
+            where: { id: pageId },
+            select: { projectId: true },
+          });
+          if (doc?.projectId) {
+            this.realtimeService.broadcastEvent(
+              doc.projectId,
+              'track-changes:resolved',
+              {
+                docId: pageId,
+                bulk: true,
+                action: 'reject-all',
+                count: rejectedCount,
+              },
+            );
+          }
+        }
       } catch {
         // Ignore
       }
@@ -1564,8 +1797,34 @@ export class PagesBridgeController {
     'pages/:pageId/versions/:versionId/restore',
   ])
   @HttpCode(HttpStatus.OK)
-  async restoreVersion() {
-    return { success: true };
+  async restoreVersion(
+    @Param('pageId') pageId: string,
+    @Param('versionId') versionId: string,
+  ) {
+    if (!isUuid(versionId)) throw new BadRequestException('Invalid version ID');
+    const snap = await this.prisma.manuscriptSnapshot.findUnique({
+      where: { id: versionId },
+    });
+    if (!snap) throw new NotFoundException(`Snapshot ${versionId} not found`);
+
+    const files = (snap.files as Record<string, string>) || {};
+    const doc = isUuid(pageId)
+      ? await this.prisma.manuscriptDoc.findUnique({ where: { id: pageId } })
+      : null;
+
+    if (doc) {
+      const restoredText = files['main.tex'] || Object.values(files)[0] || '';
+      if (restoredText) {
+        await this.prisma.manuscriptDoc.update({
+          where: { id: doc.id },
+          data: {
+            lines: restoredText.split('\n'),
+            rev: { increment: 1 },
+          },
+        });
+      }
+    }
+    return { success: true, restoredVersion: snap.version };
   }
 
   /**
@@ -1580,12 +1839,36 @@ export class PagesBridgeController {
   async labelVersion(
     @Param('versionId') versionId: string,
     @Body() body: { label: string; title?: string },
+    @Req() req: any,
   ) {
+    const labelName = body?.label?.trim();
+    if (!labelName) throw new BadRequestException('Label cannot be empty');
+    if (!isUuid(versionId)) throw new BadRequestException('Invalid version ID');
+
+    const snap = await this.prisma.manuscriptSnapshot.findUnique({
+      where: { id: versionId },
+    });
+    if (!snap) throw new NotFoundException(`Snapshot ${versionId} not found`);
+
+    const userId = req?.user?.id || req?.user?.sub || null;
+
+    await this.prisma.manuscriptLabel
+      .create({
+        data: {
+          projectId: snap.projectId,
+          snapshotId: versionId,
+          version: snap.version,
+          label: labelName,
+          createdById: isUuid(userId) ? userId : null,
+        },
+      })
+      .catch(() => {});
+
     return {
       version: {
         id: versionId,
-        label: body.label,
-        title: body.title || body.label,
+        label: labelName,
+        title: body.title || labelName,
         createdAt: new Date().toISOString(),
       },
     };
@@ -1601,17 +1884,45 @@ export class PagesBridgeController {
     @Query('from') from: string,
     @Query('to') to: string,
   ) {
+    const snapFrom = isUuid(from)
+      ? await this.prisma.manuscriptSnapshot.findUnique({ where: { id: from } })
+      : null;
+    const snapTo = isUuid(to)
+      ? await this.prisma.manuscriptSnapshot.findUnique({ where: { id: to } })
+      : null;
+
+    const filesFrom = (snapFrom?.files as Record<string, string>) || {};
+    const filesTo = (snapTo?.files as Record<string, string>) || {};
+
+    const textFrom = filesFrom['main.tex'] || Object.values(filesFrom)[0] || '';
+    const textTo = filesTo['main.tex'] || Object.values(filesTo)[0] || '';
+
+    const linesFrom = textFrom ? textFrom.split('\n') : [];
+    const linesTo = textTo ? textTo.split('\n') : [];
+
+    const additions = Math.max(0, linesTo.length - linesFrom.length);
+    const deletions = Math.max(0, linesFrom.length - linesTo.length);
+
     return {
       fromVersionId: from,
       toVersionId: to,
-      diff: '',
-      chunks: [],
+      diff: `--- v${snapFrom?.version ?? 'from'}\n+++ v${snapTo?.version ?? 'to'}\n@@ -1,${linesFrom.length} +1,${linesTo.length} @@`,
+      chunks: [
+        {
+          type: 'change',
+          oldStart: 1,
+          oldLines: linesFrom.length,
+          newStart: 1,
+          newLines: linesTo.length,
+          content: textTo,
+        },
+      ],
       stats: {
-        additions: 0,
-        deletions: 0,
-        addedLines: 0,
-        deletedLines: 0,
-        unchangedLines: 0,
+        additions,
+        deletions,
+        addedLines: additions,
+        deletedLines: deletions,
+        unchangedLines: Math.min(linesFrom.length, linesTo.length),
       },
     };
   }
@@ -1621,11 +1932,47 @@ export class PagesBridgeController {
    * GET /api/pages/:pageId/timeline
    */
   @Get(['docs/:pageId/timeline', 'pages/:pageId/timeline'])
-  async getTimeline() {
+  async getTimeline(@Param('pageId') pageId: string) {
+    let projectId: string | undefined;
+    if (isUuid(pageId)) {
+      const doc = await this.prisma.manuscriptDoc.findUnique({
+        where: { id: pageId },
+        select: { projectId: true },
+      });
+      projectId = doc?.projectId;
+    }
+
+    if (!projectId || !isUuid(projectId)) {
+      return {
+        entries: [],
+        oldestMs: Date.now() - 3600000,
+        newestMs: Date.now(),
+      };
+    }
+
+    const snapshots = await this.prisma.manuscriptSnapshot.findMany({
+      where: { projectId },
+      include: { labels: true },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    const entries = snapshots.map((s) => ({
+      id: s.id,
+      version: s.version,
+      summary: s.labels?.[0]?.label || s.summary || `v${s.version}`,
+      timestamp: s.createdAt.getTime(),
+      createdAt: s.createdAt.toISOString(),
+      author: { id: s.createdById || 'collaborator', name: 'Collaborator' },
+    }));
+
     return {
-      entries: [],
-      oldestMs: Date.now() - 3600000,
-      newestMs: Date.now(),
+      entries,
+      oldestMs:
+        entries.length > 0
+          ? entries[entries.length - 1].timestamp
+          : Date.now() - 3600000,
+      newestMs: entries.length > 0 ? entries[0].timestamp : Date.now(),
     };
   }
 
@@ -1634,8 +1981,43 @@ export class PagesBridgeController {
    * GET /api/pages/:pageId/at
    */
   @Get(['docs/:pageId/at', 'pages/:pageId/at'])
-  async getAt() {
-    return { content: '', timestamp: Date.now() };
+  async getAt(
+    @Param('pageId') pageId: string,
+    @Query('timestamp') timestamp?: string,
+  ) {
+    let targetTime = timestamp
+      ? new Date(Number(timestamp) || timestamp)
+      : new Date();
+    if (isNaN(targetTime.getTime())) targetTime = new Date();
+
+    let projectId: string | undefined;
+    if (isUuid(pageId)) {
+      const doc = await this.prisma.manuscriptDoc.findUnique({
+        where: { id: pageId },
+        select: { projectId: true },
+      });
+      projectId = doc?.projectId;
+    }
+
+    if (!projectId) {
+      return { content: '', timestamp: targetTime.getTime() };
+    }
+
+    const snap = await this.prisma.manuscriptSnapshot.findFirst({
+      where: {
+        projectId,
+        createdAt: { lte: targetTime },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const files = (snap?.files as Record<string, string>) || {};
+    const content = files['main.tex'] || Object.values(files)[0] || '';
+
+    return {
+      content,
+      timestamp: snap?.createdAt.getTime() || targetTime.getTime(),
+    };
   }
 
   /**
@@ -1643,8 +2025,26 @@ export class PagesBridgeController {
    * GET /api/pages/:projectId/history
    */
   @Get(['projects/:projectId/history', 'pages/:projectId/history'])
-  async getProjectHistory() {
-    return { events: [], history: [] };
+  async getProjectHistory(@Param('projectId') projectId: string) {
+    if (!isUuid(projectId)) return { events: [], history: [] };
+
+    const snapshots = await this.prisma.manuscriptSnapshot.findMany({
+      where: { projectId },
+      include: { labels: true },
+      orderBy: { version: 'desc' },
+      take: 100,
+    });
+
+    const events = snapshots.map((s) => ({
+      id: s.id,
+      version: s.version,
+      label: s.labels?.[0]?.label || s.summary || `Version ${s.version}`,
+      createdAt: s.createdAt.toISOString(),
+      userId: s.createdById || 'anonymous',
+      summary: s.summary,
+    }));
+
+    return { events, history: events };
   }
 
   // ─── 5. COMPILER INCREMENTAL SYNC ─────────────────────────────────────────────
@@ -1663,6 +2063,13 @@ export class PagesBridgeController {
     @Body() body: { dirtyFileIds?: string[]; forceAll?: boolean },
   ) {
     const dirty = body?.dirtyFileIds || [];
+    if (isUuid(rootPageId) && this.realtimeService) {
+      this.realtimeService.broadcastEvent(rootPageId, 'compiler:sync', {
+        rootPageId,
+        dirtyFileIds: dirty,
+        timestamp: Date.now(),
+      });
+    }
     return { synced: dirty, total: dirty.length, rootPageId };
   }
 
@@ -1676,8 +2083,20 @@ export class PagesBridgeController {
     'docs/:pageId/collaboration/presence',
     'pages/:pageId/collaboration/presence',
   ])
-  async getPresence() {
-    return { activeUsers: [], presence: [] };
+  async getPresence(@Param('pageId') pageId: string) {
+    const now = Date.now();
+    const active: any[] = [];
+    for (const [
+      key,
+      user,
+    ] of PagesBridgeController.activePresenceMap.entries()) {
+      if (now - user.lastSeen > 60000) {
+        PagesBridgeController.activePresenceMap.delete(key);
+      } else if (!pageId || user.fileId === pageId) {
+        active.push(user);
+      }
+    }
+    return { activeUsers: active, presence: active };
   }
 
   /**
@@ -1689,7 +2108,23 @@ export class PagesBridgeController {
     'pages/:pageId/collaboration/heartbeat',
   ])
   @HttpCode(HttpStatus.OK)
-  async sendHeartbeat() {
+  async sendHeartbeat(
+    @Param('pageId') pageId: string,
+    @Body() body: any,
+    @Req() req: any,
+  ) {
+    const userId =
+      req?.user?.id || req?.user?.sub || body?.userId || 'anonymous-user';
+    const userName =
+      req?.user?.name || req?.user?.email || body?.name || 'Collaborator';
+    PagesBridgeController.activePresenceMap.set(userId, {
+      id: userId,
+      name: userName,
+      color: body?.color || '#2563EB',
+      fileId: pageId,
+      cursor: body?.cursor,
+      lastSeen: Date.now(),
+    });
     return { success: true };
   }
 
@@ -1702,7 +2137,11 @@ export class PagesBridgeController {
     'pages/:pageId/collaboration/leave',
   ])
   @HttpCode(HttpStatus.OK)
-  async leaveRoom() {
+  async leaveRoom(@Param('pageId') pageId: string, @Req() req: any) {
+    const userId = req?.user?.id || req?.user?.sub;
+    if (userId) {
+      PagesBridgeController.activePresenceMap.delete(userId);
+    }
     return { success: true };
   }
 
@@ -1822,7 +2261,12 @@ export class PagesBridgeController {
   @HttpCode(HttpStatus.OK)
   async searchDocuments(
     @Param('projectId') projectId: string,
-    @Body() body: { query: string; caseSensitive?: boolean },
+    @Body()
+    body: {
+      query: string;
+      caseSensitive?: boolean;
+      fileIds?: string[];
+    },
   ) {
     const query = body?.query || '';
     if (!query || !isUuid(projectId)) {
@@ -1836,8 +2280,13 @@ export class PagesBridgeController {
     }
 
     try {
+      const where: any = { projectId, deleted: false };
+      if (Array.isArray(body?.fileIds) && body.fileIds.length > 0) {
+        where.id = { in: body.fileIds.filter((id) => isUuid(id)) };
+      }
+
       const docs = await this.prisma.manuscriptDoc.findMany({
-        where: { projectId, deleted: false },
+        where,
         select: { id: true, path: true, lines: true },
       });
 
@@ -1906,15 +2355,94 @@ export class PagesBridgeController {
   @HttpCode(HttpStatus.OK)
   async replaceDocuments(
     @Param('projectId') projectId: string,
-    @Body() body: { query: string; replaceWith: string },
+    @Body()
+    body: {
+      query: string;
+      replaceWith: string;
+      fileIds?: string[];
+      caseSensitive?: boolean;
+    },
   ) {
-    return {
-      query: body?.query || '',
-      replaceWith: body?.replaceWith || '',
-      totalFilesAffected: 0,
-      totalOccurrencesReplaced: 0,
-      affectedFileIds: [],
-    };
+    const query = body?.query;
+    const replaceWith = body?.replaceWith ?? '';
+    if (!query || !isUuid(projectId)) {
+      return {
+        query: query || '',
+        replaceWith,
+        totalFilesAffected: 0,
+        totalOccurrencesReplaced: 0,
+        affectedFileIds: [],
+      };
+    }
+
+    try {
+      const where: any = { projectId, deleted: false };
+      if (Array.isArray(body?.fileIds) && body.fileIds.length > 0) {
+        where.id = { in: body.fileIds.filter((id) => isUuid(id)) };
+      }
+
+      const docs = await this.prisma.manuscriptDoc.findMany({
+        where,
+        select: { id: true, lines: true },
+      });
+
+      let totalOccurrencesReplaced = 0;
+      const affectedFileIds: string[] = [];
+      const regexFlags = body?.caseSensitive ? 'g' : 'gi';
+      const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      for (const doc of docs) {
+        const rawContent = Array.isArray(doc.lines)
+          ? doc.lines.join('\n')
+          : (doc.lines as any) || '';
+
+        const regex = new RegExp(escapedQuery, regexFlags);
+        const matches = rawContent.match(regex);
+        const count = matches ? matches.length : 0;
+        if (count > 0) {
+          const newContent = rawContent.replace(regex, replaceWith);
+          await this.prisma.manuscriptDoc.update({
+            where: { id: doc.id },
+            data: {
+              lines: newContent.split('\n'),
+              rev: { increment: 1 },
+            },
+          });
+          totalOccurrencesReplaced += count;
+          affectedFileIds.push(doc.id);
+
+          // Broadcast real-time content notification so open tabs update instantly
+          if (this.realtimeService && projectId) {
+            try {
+              this.realtimeService.broadcastEvent(
+                projectId,
+                'doc:content-updated',
+                {
+                  docId: doc.id,
+                  content: newContent,
+                },
+              );
+            } catch {}
+          }
+        }
+      }
+
+      return {
+        query,
+        replaceWith,
+        totalFilesAffected: affectedFileIds.length,
+        totalOccurrencesReplaced,
+        affectedFileIds,
+      };
+    } catch {
+      return {
+        query,
+        replaceWith,
+        totalFilesAffected: 0,
+        totalOccurrencesReplaced: 0,
+        affectedFileIds: [],
+      };
+    }
   }
 
   // ─── 9. PROJECT DOCS CRUD & LABELS ──────────────────────────────────────────
@@ -2826,5 +3354,63 @@ export class PagesBridgeController {
       return { labels };
     }
     return { labels: [] };
+  }
+
+  // ─── 10. NOTIFICATION BUNDLES & SETTINGS ──────────────────────────────────────
+
+  @Get([
+    'documents/notifications/bundles',
+    'api/documents/notifications/bundles',
+  ])
+  async getNotificationBundles() {
+    return { bundles: [] };
+  }
+
+  @Post([
+    'documents/notifications/bundles/flush',
+    'api/documents/notifications/bundles/flush',
+  ])
+  @HttpCode(HttpStatus.OK)
+  async flushNotificationBundles(@Body() body: any) {
+    return {
+      digest: {
+        id: `digest-${Date.now()}`,
+        timestamp: Date.now(),
+        threadCount: 0,
+        changeCount: 0,
+        threads: [],
+        changes: [],
+      },
+    };
+  }
+
+  @Get([
+    'documents/notifications/digests',
+    'api/documents/notifications/digests',
+  ])
+  async getNotificationDigests() {
+    return { digests: [] };
+  }
+
+  @Get([
+    'documents/notifications/settings',
+    'api/documents/notifications/settings',
+  ])
+  async getNotificationSettings() {
+    return { settings: { enabled: true, windowMinutes: 10 } };
+  }
+
+  @Put([
+    'documents/notifications/settings',
+    'api/documents/notifications/settings',
+  ])
+  @HttpCode(HttpStatus.OK)
+  async updateNotificationSettings(@Body() body: any) {
+    return {
+      settings: {
+        enabled: Boolean(body?.enabled ?? true),
+        windowMinutes: Number(body?.windowMinutes) || 10,
+      },
+    };
   }
 }

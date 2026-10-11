@@ -73,7 +73,7 @@ async function main() {
         status: 'active',
         profile: {
           create: {
-            name: 'GS. TS. Ngô Tấn Thành',
+            name: 'Tấn Thành',
             avatar:
               'https://lh3.googleusercontent.com/a/ACg8ocLfL42lSWtqIwZdRz8r9d64G5dfKsAaMJ8SvRMLcWSckzM5KbY=s96-c',
           },
@@ -95,9 +95,16 @@ async function main() {
       await prisma.userProfile.create({
         data: {
           userId: userThanh.id,
-          name: 'GS. TS. Ngô Tấn Thành',
+          name: 'Tấn Thành',
           avatar:
             'https://lh3.googleusercontent.com/a/ACg8ocLfL42lSWtqIwZdRz8r9d64G5dfKsAaMJ8SvRMLcWSckzM5KbY=s96-c',
+        },
+      });
+    } else {
+      await prisma.userProfile.update({
+        where: { userId: userThanh.id },
+        data: {
+          name: 'Tấn Thành',
         },
       });
     }

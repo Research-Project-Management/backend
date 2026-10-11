@@ -25,7 +25,6 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { StructureService } from './structure.service';
 import {
   CreateNodeDto,
@@ -48,13 +47,13 @@ import {
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/structure',
+  'v1/manuscripts/projects/:projectId/structure',
   'api/manuscripts/projects/:projectId/structure',
   'manuscripts/projects/:projectId/structure',
   'projects/:projectId/structure',
   'api/projects/:projectId/structure',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
-@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+@UseGuards(JwtAuthGuard)
 export class StructureController {
   constructor(private readonly structureService: StructureService) {}
 
@@ -121,7 +120,6 @@ export class StructureController {
   }
 
   @Post('nodes')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Create new file, document, or folder with auto-mkdirp',
   })
@@ -139,7 +137,6 @@ export class StructureController {
 
   @Patch('nodes/:nodeId/move')
   @Post('nodes/:nodeId/move')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Move node to destination folder or path (with cycle detection)',
   })
@@ -158,7 +155,6 @@ export class StructureController {
 
   @Patch('nodes/:nodeId/rename')
   @Post('nodes/:nodeId/rename')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Rename node (cascades path updates to all children if folder)',
   })
@@ -180,7 +176,6 @@ export class StructureController {
   }
 
   @Delete('nodes/:nodeId')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete node and all nested descendants' })
   async deleteNode(
     @Param('projectId') projectId: string,
@@ -215,7 +210,6 @@ export class StructureController {
   }
 
   @Post('root-doc/:nodeId')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Explicitly set the master LaTeX entrypoint' })
   async setRootDoc(
     @Param('projectId') projectId: string,
@@ -230,7 +224,6 @@ export class StructureController {
   }
 
   @Post('nodes/:nodeId/reorder')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Update sort order index for display' })
   async reorderNode(

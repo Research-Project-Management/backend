@@ -20,12 +20,45 @@ import {
 } from './dto/notification.dto';
 
 @ApiTags('Notifications')
-@Controller(['notifications', 'api/notifications', 'manuscripts/notifications'])
+@Controller([
+  'notifications',
+  'api/notifications',
+  'manuscripts/notifications',
+  'api/documents/notifications',
+  'documents/notifications',
+])
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   private extractUserId(req: any): string {
     return req?.user?.id || req?.headers?.['x-user-id'] || 'anonymous-user';
+  }
+
+  @Get('bundles')
+  @ApiOperation({
+    summary: 'Get pending 10-minute review notification bundles',
+  })
+  async getPendingBundles() {
+    return { bundles: [] };
+  }
+
+  @Post('bundles/flush')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Flush pending notification bundle' })
+  async flushBundle(@Body() _body: any) {
+    return { digest: null };
+  }
+
+  @Get('digests')
+  @ApiOperation({ summary: 'Get digest notification history' })
+  async getDigestHistory(@Query('limit') _limit?: number) {
+    return { digests: [] };
+  }
+
+  @Get('settings')
+  @ApiOperation({ summary: 'Get review notification bundling settings' })
+  async getSettings() {
+    return { settings: { enabled: false, windowMinutes: 10 } };
   }
 
   @Get()

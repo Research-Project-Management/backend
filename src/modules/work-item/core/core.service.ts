@@ -805,7 +805,7 @@ export class CoreService {
       data,
     );
     await this.invalidateWorkItemCache(projectId);
-    this.eventDispatcher.emitBulkUpdated(projectId, userId);
+    this.eventDispatcher.emitBulkUpdated(projectId, userId, rawIds);
     return {
       message: `${result.count} work items updated successfully`,
       count: result.count,
@@ -836,7 +836,7 @@ export class CoreService {
       rawIds,
     );
     await this.invalidateWorkItemCache(effectiveProjectId);
-    this.eventDispatcher.emitBulkDeleted(effectiveProjectId, userId);
+    this.eventDispatcher.emitBulkDeleted(effectiveProjectId, userId, rawIds);
     return {
       message: `${result.count} work items deleted successfully`,
       count: result.count,

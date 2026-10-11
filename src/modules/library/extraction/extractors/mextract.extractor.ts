@@ -18,8 +18,8 @@ export interface MeXtractResult {
 /**
  * MeXtract: High-speed, local Small Language Model (SLM) for Academic Metadata Extraction.
  *
- * Designed to replace GROBID's bulky 2-4GB JVM / CRF models with a lightweight,
- * specialized SLM (e.g. Qwen2.5-0.5B-Instruct quantized ONNX / CPU).
+ * Lightweight, specialized SLM architecture (e.g. Qwen2.5-0.5B-Instruct quantized ONNX / CPU)
+ * for rapid zero-network academic structure parsing.
  */
 @Injectable()
 export class MeXtractExtractor {

@@ -52,6 +52,10 @@ export class UnifiedIngestionDto {
   idempotencyKey?: string;
 
   @IsOptional()
+  @IsString()
+  projectId?: string;
+
+  @IsOptional()
   @IsBoolean()
   silent?: boolean;
 }

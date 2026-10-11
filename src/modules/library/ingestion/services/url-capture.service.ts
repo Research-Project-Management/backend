@@ -120,7 +120,7 @@ export class UrlCaptureService {
       throw new BadRequestException('Invalid or expired capture preview token');
     }
 
-    if (preview.consumedAt) {
+    if (preview.claimedAt) {
       throw new ConflictException('Capture preview has already been confirmed');
     }
 
@@ -132,8 +132,19 @@ export class UrlCaptureService {
     }
 
     if (this.urlCaptureProvider?.verifyPreviewToken) {
+      const canonicalMeta =
+        preview.canonicalMetadata &&
+        typeof preview.canonicalMetadata === 'object' &&
+        !Array.isArray(preview.canonicalMetadata)
+          ? (preview.canonicalMetadata as {
+              url?: string;
+              title: string;
+              doi?: string;
+              year?: number;
+            })
+          : { title: '' };
       const verifyRes = this.urlCaptureProvider.verifyPreviewToken(
-        preview.canonicalMetadata,
+        canonicalMeta,
         dto.previewToken,
         { scopeId, userId: targetUserId },
       );
@@ -147,7 +158,7 @@ export class UrlCaptureService {
       }
     }
 
-    const canonical = preview.canonicalMetadata || {};
+    const canonical = (preview.canonicalMetadata as Record<string, any>) || {};
     const title = dto.title || canonical.title || 'Untitled';
     const itemType = dto.itemType || canonical.itemType || 'webpage';
 

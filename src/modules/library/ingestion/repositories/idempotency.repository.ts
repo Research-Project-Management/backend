@@ -14,13 +14,16 @@ export type ClaimResult =
  * on the idempotency table's (scopeId, idempotencyKey) compound key.
  */
 export function isIdempotencyUniqueViolation(error: unknown): boolean {
-  if (!error) return false;
-  const anyErr = error as any;
+  if (!error || typeof error !== 'object') return false;
+  const anyErr = error as {
+    code?: string;
+    meta?: { driverAdapterError?: { cause?: unknown }; target?: unknown };
+  };
 
   const isP2002 =
-    anyErr?.code === 'P2002' ||
-    (anyErr instanceof Prisma.PrismaClientKnownRequestError &&
-      anyErr.code === 'P2002');
+    anyErr.code === 'P2002' ||
+    (error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002');
 
   if (!isP2002) return false;
 
@@ -183,7 +186,7 @@ export class IdempotencyRepository {
           requestHash,
           expiresAt,
           statusCode: null,
-          responseBody: null as any,
+          responseBody: Prisma.DbNull,
         },
       });
 

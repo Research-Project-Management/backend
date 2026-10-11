@@ -6,7 +6,7 @@ import {
   Inject,
   Optional,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, RelationType } from '@prisma/client';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { VersionMismatchException } from '../../shared-kernel/core/errors/version-mismatch.exception';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
@@ -67,13 +67,12 @@ export class CommandRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
-    const { createData, resolvedFileId } = await buildCommandCreateInput(
+    const { createData } = await buildCommandCreateInput(
       userId,
       data,
       client,
       projectId,
     );
-    delete (createData as any).type;
 
     const item = await client.item.create({
       data: createData,
@@ -94,15 +93,6 @@ export class CommandRepository {
       },
     });
 
-    if (resolvedFileId && (client as any).file?.updateMany) {
-      await (client as any).file.updateMany({
-        where: { id: resolvedFileId },
-        data: {
-          linkedToType: 'Paper',
-          linkedToId: item.id,
-        },
-      });
-    }
     return item;
   }
 
@@ -125,7 +115,7 @@ export class CommandRepository {
         ...(projectId && projectId !== 'user' && isUUID(projectId)
           ? { projectId }
           : { userId }),
-      } as any,
+      },
       include: {
         notesList: { where: { deletedAt: null } },
       },
@@ -178,13 +168,8 @@ export class CommandRepository {
       userId,
       existing,
       data,
+      { skipVersionIncrement: expectedVersion !== undefined },
     );
-
-    // If expectedVersion was specified, version was already incremented atomically via updateMany
-    if (expectedVersion !== undefined) {
-      delete (updateData as any).version;
-    }
-    delete (updateData as any).type;
 
     const updated = await client.item.update({
       where: { id },
@@ -248,10 +233,12 @@ export class CommandRepository {
       return false;
     }
     const client = this.getClient(tx);
-    const scopeWhere: any = {
+    const scopeWhere: Prisma.ItemWhereInput = {
       id,
       deletedAt: null,
-      ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
+      ...(projectId && projectId !== 'user' && isUUID(projectId)
+        ? { projectId }
+        : { userId }),
     };
 
     if (expectedVersion !== undefined) {
@@ -329,7 +316,12 @@ export class CommandRepository {
     }
 
     // Protection against restoring merged items
-    const metadataObj: any = (existing.metadata as any) ?? {};
+    const metadataObj =
+      existing.metadata &&
+      typeof existing.metadata === 'object' &&
+      !Array.isArray(existing.metadata)
+        ? (existing.metadata as Record<string, unknown>)
+        : {};
 
     if (metadataObj.mergedIntoId) {
       throw new BadRequestException(
@@ -452,9 +444,10 @@ export class CommandRepository {
       if (fileId && this.storagePort?.deleteFile) {
         try {
           await this.storagePort.deleteFile(fileId);
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
           this.logger.warn(
-            `Failed to delete storage file ${fileId} during item purge: ${err?.message}`,
+            `Failed to delete storage file ${fileId} during item purge: ${message}`,
           );
         }
       }
@@ -492,7 +485,7 @@ export class CommandRepository {
     const rawType = String(relation.relationType || '')
       .trim()
       .toLowerCase();
-    const validRelationTypes = new Set([
+    const validRelationTypes = new Set<string>([
       'cites',
       'cited_by',
       'replicates',
@@ -506,9 +499,9 @@ export class CommandRepository {
       'uses_dataset',
       'survey_of',
     ]);
-    const relationType = validRelationTypes.has(rawType)
-      ? (rawType as any)
-      : 'related';
+    const relationType: RelationType = validRelationTypes.has(rawType)
+      ? (rawType as RelationType)
+      : RelationType.related;
 
     await client.itemRelation.upsert({
       where: {
@@ -552,19 +545,26 @@ export class CommandRepository {
     });
     if (item?.metadata) {
       try {
-        const metadataObj: any = (item.metadata as any) ?? {};
+        const metadataObj =
+          typeof item.metadata === 'object' &&
+          item.metadata !== null &&
+          !Array.isArray(item.metadata)
+            ? { ...(item.metadata as Record<string, unknown>) }
+            : {};
         if (Array.isArray(metadataObj.relations)) {
-          metadataObj.relations = metadataObj.relations.filter(
-            (r: any) => (r.targetItemId || r.targetId) !== targetItemId,
-          );
+          metadataObj.relations = metadataObj.relations.filter((r: unknown) => {
+            const rel = r as Record<string, unknown> | null;
+            return (rel?.targetItemId || rel?.targetId) !== targetItemId;
+          });
           await client.item.update({
             where: { id: itemId },
-            data: { metadata: metadataObj },
+            data: { metadata: metadataObj as Prisma.InputJsonValue },
           });
         }
       } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Failed to parse or sanitize relations JSON for item ${itemId}: ${(err as Error)?.message}`,
+          `Failed to parse or sanitize relations JSON for item ${itemId}: ${message}`,
         );
       }
     }
@@ -588,7 +588,12 @@ export class CommandRepository {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
 
-    const metadataObj: any = (existing.metadata as any) ?? {};
+    const metadataObj: Record<string, unknown> =
+      typeof existing.metadata === 'object' &&
+      existing.metadata !== null &&
+      !Array.isArray(existing.metadata)
+        ? { ...(existing.metadata as Record<string, unknown>) }
+        : {};
     metadataObj.isMyPublication = isMyPublication;
     if (isMyPublication) {
       metadataObj.publicationConfirmedAt = new Date().toISOString();
@@ -606,7 +611,7 @@ export class CommandRepository {
     return client.item.update({
       where: { id },
       data: {
-        metadata: metadataObj,
+        metadata: metadataObj as Prisma.InputJsonValue,
         version: { increment: 1 },
       },
       include: {

@@ -35,8 +35,15 @@ export class QualityService {
   /**
    * Calculates completeness score for an item based on its type definition.
    */
-  calculateItemCompleteness(item: Record<string, any>): CompletenessAnalysis {
-    const itemType = item.itemType || item.type || 'journalArticle';
+  calculateItemCompleteness(
+    item: Record<string, unknown>,
+  ): CompletenessAnalysis {
+    const itemType =
+      typeof item.itemType === 'string'
+        ? item.itemType
+        : typeof item.type === 'string'
+          ? item.type
+          : 'journalArticle';
     const fields = this.catalogGateway?.getOrderedFields
       ? this.catalogGateway.getOrderedFields(itemType)
       : [];
@@ -140,13 +147,13 @@ export class QualityService {
       }
     }
 
-    const typeSpecificKeys = fields
-      .filter((f: any) => !['title', 'date', 'url', 'doi'].includes(f.key))
+    const typeSpecificKeys = (fields as Array<{ key: string }>)
+      .filter((f) => !['title', 'date', 'url', 'doi'].includes(f.key))
       .slice(0, 5)
-      .map((f: any) => f.key);
+      .map((f) => f.key);
 
     const hasTypeSpecific = typeSpecificKeys.some(
-      (k: string) => Boolean((item as any)[k]) || Boolean(extraFields[k]),
+      (k: string) => Boolean(item[k]) || Boolean(extraFields[k]),
     );
     if (hasTypeSpecific) {
       totalScore += 5;

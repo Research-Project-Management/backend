@@ -182,18 +182,29 @@ export class IngestionRepository {
       },
     });
     if (!run) return null;
-    const log = (run.executionLog as any) || {};
-    const stages: IngestionStage[] = Array.isArray(log.stages)
-      ? log.stages.map((s: any) => ({
-          id: s.id || randomUUID(),
-          ingestionRunId: run.id,
-          stageName: s.stageName,
-          durationMs: s.durationMs || 0,
-          success: s.success !== false,
-          errorMessage: s.errorMessage || null,
-          executedAt: s.executedAt ? new Date(s.executedAt) : new Date(),
-        }))
-      : [];
+    const log =
+      run.executionLog && typeof run.executionLog === 'object'
+        ? (run.executionLog as Record<string, unknown>)
+        : {};
+    const rawStages = Array.isArray(log.stages) ? log.stages : [];
+    const stages: IngestionStage[] = rawStages.map((stage) => {
+      const s =
+        stage && typeof stage === 'object'
+          ? (stage as Record<string, unknown>)
+          : {};
+      return {
+        id: typeof s.id === 'string' ? s.id : randomUUID(),
+        ingestionRunId: run.id,
+        stageName: typeof s.stageName === 'string' ? s.stageName : '',
+        durationMs: typeof s.durationMs === 'number' ? s.durationMs : 0,
+        success: s.success !== false,
+        errorMessage:
+          typeof s.errorMessage === 'string' ? s.errorMessage : null,
+        executedAt: s.executedAt
+          ? new Date(s.executedAt as string | number | Date)
+          : new Date(),
+      };
+    });
     const reviewCases: IngestionReviewCase[] = run.reviewData
       ? [run.reviewData as unknown as IngestionReviewCase]
       : [];
@@ -239,7 +250,8 @@ export class IngestionRepository {
     // Only increment attempts when retrying: transitioning from FAILED_RETRYABLE back to PENDING
     const isRetry =
       details?.previousStatus === IngestionStatus.FAILED_RETRYABLE &&
-      (status === IngestionStatus.PENDING || (status as any) === 'RECEIVED');
+      (status === IngestionStatus.PENDING ||
+        (status as unknown as string) === 'RECEIVED');
     return client.ingestionRun.update({
       where: {
         id: runId,
@@ -423,23 +435,36 @@ export class IngestionRepository {
         select: { executionLog: true },
       });
       if (run) {
-        const log = (run.executionLog as any) || {};
-        const stages = Array.isArray(log.stages) ? log.stages : [];
+        const log =
+          run.executionLog &&
+          typeof run.executionLog === 'object' &&
+          !Array.isArray(run.executionLog)
+            ? (run.executionLog as Record<string, unknown>)
+            : {};
+        const stages = Array.isArray(log.stages)
+          ? [...(log.stages as unknown[])]
+          : [];
         stages.push({
+          id: stage.id,
           stageName: data.stageName,
-          durationMs: data.durationMs,
-          success: data.success,
+          durationMs: data.durationMs ?? 0,
+          success: data.success ?? true,
           errorMessage: data.errorMessage,
+          executedAt: stage.executedAt,
         });
         await client.ingestionRun.update({
           where: { id: ingestionRunId },
-          data: { executionLog: { ...log, stages } },
+          data: {
+            executionLog: {
+              ...log,
+              stages,
+            } as unknown as Prisma.InputJsonValue,
+          },
         });
       }
-    } catch (err: any) {
-      this.logger.debug(
-        `Could not update executionLog for stage: ${err?.message}`,
-      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.debug(`Could not update executionLog for stage: ${message}`);
     }
 
     return stage;
@@ -454,8 +479,13 @@ export class IngestionRepository {
       where: { id: ingestionRunId },
       select: { executionLog: true },
     });
-    const log = (run?.executionLog as any) || {};
-    return Array.isArray(log.stages) ? log.stages : [];
+    const log =
+      run?.executionLog &&
+      typeof run.executionLog === 'object' &&
+      !Array.isArray(run.executionLog)
+        ? (run.executionLog as Record<string, unknown>)
+        : {};
+    return Array.isArray(log.stages) ? (log.stages as IngestionStage[]) : [];
   }
 
   // ── Candidate Operations ──────────────────────────────────────────────────
@@ -539,7 +569,7 @@ export class IngestionRepository {
     await client.ingestionRun.update({
       where: { id: ingestionRunId },
       data: {
-        reviewData: reviewCase as any,
+        reviewData: reviewCase as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -595,7 +625,9 @@ export class IngestionRepository {
       where: { id },
       select: { reviewData: true },
     });
-    const currentReview = (run?.reviewData as any) || {};
+    const currentReview =
+      (run?.reviewData as unknown as IngestionReviewCase) ||
+      ({} as IngestionReviewCase);
     const updatedReview: IngestionReviewCase = {
       ...currentReview,
       status,
@@ -604,7 +636,7 @@ export class IngestionRepository {
     await client.ingestionRun.update({
       where: { id },
       data: {
-        reviewData: updatedReview as any,
+        reviewData: updatedReview as unknown as Prisma.InputJsonValue,
         status:
           status === 'APPROVED'
             ? IngestionStatus.COMPLETED
@@ -653,7 +685,11 @@ export class IngestionRepository {
     }> = [];
 
     for (const run of runs) {
-      const rd = run.reviewData as any;
+      const rd = run.reviewData as unknown as
+        | (IngestionReviewCase & {
+            evidence?: { confidence?: number; matchReason?: string };
+          })
+        | null;
       if (
         rd &&
         rd.targetItemId &&
@@ -688,7 +724,9 @@ export class IngestionRepository {
     });
 
     for (const run of runs) {
-      const rd = (run.reviewData as any) || {};
+      const rd =
+        (run.reviewData as unknown as IngestionReviewCase) ||
+        ({} as IngestionReviewCase);
       await client.ingestionRun.update({
         where: { id: run.id },
         data: {
@@ -696,16 +734,19 @@ export class IngestionRepository {
             ...rd,
             status: 'RESOLVED',
             resolvedAt: new Date(),
-          },
+          } as unknown as Prisma.InputJsonValue,
         },
       });
     }
   }
 
   // ── Capture Preview Operations (Persistent Database Store) ─────────────────
-  async createCapturePreview(data: any, tx?: Prisma.TransactionClient) {
+  async createCapturePreview(
+    data: Prisma.CapturePreviewCreateInput,
+    tx?: Prisma.TransactionClient,
+  ) {
     const client = this.getClient(tx);
-    return await (client as any).capturePreview.create({ data });
+    return await client.capturePreview.create({ data });
   }
 
   async findCapturePreviewByTokenHash(
@@ -713,7 +754,7 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return await (client as any).capturePreview.findUnique({
+    return await client.capturePreview.findUnique({
       where: { tokenHash },
     });
   }
@@ -723,7 +764,7 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
     const client = this.getClient(tx);
-    const updateRes = await (client as any).capturePreview.updateMany({
+    const updateRes = await client.capturePreview.updateMany({
       where: {
         tokenHash,
         claimedAt: null,
@@ -740,7 +781,7 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
     const client = this.getClient(tx);
-    const res = await (client as any).capturePreview.deleteMany({
+    const res = await client.capturePreview.deleteMany({
       where: {
         expiresAt: { lt: olderThan },
       },

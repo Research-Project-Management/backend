@@ -42,7 +42,7 @@ export class EnrichStage {
       if (
         candidate.sourceName === 'TrustedPaper' ||
         candidate.normalizedMetadata?.extraFields?.isSelfSufficient === true ||
-        (candidate.normalizedMetadata as any)?.isSelfSufficient === true
+        candidate.normalizedMetadata?.isSelfSufficient === true
       ) {
         this.logger.debug(
           `[EnrichStage] Candidate ${candidate.candidateId} (source=${candidate.sourceName}) is self-sufficient. Skipping external API enrichment.`,

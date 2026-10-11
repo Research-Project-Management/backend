@@ -37,8 +37,15 @@ export class SyncTexUseCase {
     providedSynctex?: string,
   ): Promise<string> {
     if (providedSynctex) {
-      const buffer = Buffer.from(providedSynctex, 'base64');
-      return this.processor.decompress(buffer);
+      if (providedSynctex.startsWith('SyncTeX Version:')) {
+        return providedSynctex;
+      }
+      try {
+        const buffer = Buffer.from(providedSynctex, 'base64');
+        const decompressed = await this.processor.decompress(buffer);
+        if (decompressed) return decompressed;
+      } catch {}
+      return providedSynctex;
     }
 
     const gzBuffer = await this.workspace.readArtifact(

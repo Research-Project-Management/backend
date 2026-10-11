@@ -13,17 +13,12 @@ import {
   ReorderLabelsDto,
   CreateLabelDto,
   UpdateLabelDto,
-  ImportLabelsDto,
 } from './dto/label.dto';
 import { WorkItemLabel as Label, Prisma } from '@prisma/client';
 import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
-import {
-  LabelWithChildren,
-  ImportLabelResult,
-  LabelType,
-} from './types/label.types';
+import { LabelWithChildren } from './types/label.types';
 
 export const DEFAULT_LABEL_PALETTE = [
   '#ef4444', // Red
@@ -69,7 +64,7 @@ export class LabelService {
 
   // ── 1. Project-Scoped Methods ───────────────────────────────────────────────
 
-  async getProjectLabels(projectId: string, type?: LabelType) {
+  async getProjectLabels(projectId: string, type?: string) {
     const cacheKey = type
       ? `${WORK_ITEM_REDIS_KEYS.projectLabels(projectId)}:${type}`
       : WORK_ITEM_REDIS_KEYS.projectLabels(projectId);
@@ -258,7 +253,6 @@ export class LabelService {
       }),
       ...(dto.parentId !== undefined && { parentId: dto.parentId }),
       ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
-      ...(dto.type !== undefined && { type: dto.type }),
     });
 
     await this.invalidateLabelCache(existing.createdById, projectId);
@@ -274,7 +268,7 @@ export class LabelService {
       throw new ForbiddenException('Label does not belong to this project');
     }
 
-    // 1. Detach label and all its sub-labels from all work items & pages in project (cascade safe deletion)
+    // 1. Detach label and all its sub-labels from all work items in project (cascade safe deletion)
     const labelIdsToDetach = [labelId];
     const labelNamesToDetach = [label.name];
     if (label.children && label.children.length > 0) {
@@ -283,14 +277,11 @@ export class LabelService {
         if (child.name) labelNamesToDetach.push(child.name);
       }
     }
-    await Promise.all([
-      this.labelRepository.detachMultipleFromWorkItems(
-        projectId,
-        labelIdsToDetach,
-        labelNamesToDetach,
-      ),
-      this.labelRepository.detachMultipleFromPages(projectId, labelIdsToDetach),
-    ]);
+    await this.labelRepository.detachMultipleFromWorkItems(
+      projectId,
+      labelIdsToDetach,
+      labelNamesToDetach,
+    );
 
     // 2. Delete label (Cascade in DB deletes sub-labels)
     await this.labelRepository.delete(labelId);
@@ -309,104 +300,9 @@ export class LabelService {
     return { message: 'Labels reordered successfully' };
   }
 
-  async importProjectLabels(
-    projectId: string,
-    userId: string,
-    dto: ImportLabelsDto,
-  ): Promise<ImportLabelResult> {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true },
-    });
-    if (!project) {
-      throw new NotFoundException(`Project not found: ${projectId}`);
-    }
-
-    if (!dto.labels || !Array.isArray(dto.labels) || !dto.labels.length) {
-      return { created: 0, skipped: 0, failed: 0, labels: [] };
-    }
-
-    // Existing labels in project for case-insensitive duplicate checking
-    const existingLabels =
-      await this.labelRepository.findProjectLabels(projectId);
-    const existingNames = new Set(
-      existingLabels.map((label) => label.name.trim().toLowerCase()),
-    );
-    for (const label of existingLabels) {
-      if (label.children) {
-        for (const childLabel of label.children) {
-          existingNames.add(childLabel.name.trim().toLowerCase());
-        }
-      }
-    }
-
-    const seenInBatch = new Set<string>();
-    let skipped = 0;
-    let failed = 0;
-    const toCreate: Prisma.WorkItemLabelUncheckedCreateInput[] = [];
-
-    const lastLabel = await this.prisma.workItemLabel.findFirst({
-      where: { projectId },
-      orderBy: { sortOrder: 'desc' },
-      select: { sortOrder: true },
-    });
-    let baseSortOrder = lastLabel ? lastLabel.sortOrder + 10000 : 10000;
-
-    for (const row of dto.labels) {
-      if (!row.name || typeof row.name !== 'string' || !row.name.trim()) {
-        failed++;
-        continue;
-      }
-      const normalized = row.name.trim().toLowerCase();
-      if (existingNames.has(normalized) || seenInBatch.has(normalized)) {
-        skipped++;
-        continue;
-      }
-      seenInBatch.add(normalized);
-
-      const color =
-        row.color?.trim() &&
-        /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(row.color.trim())
-          ? row.color.trim()
-          : this.pickDefaultColor();
-
-      toCreate.push({
-        name: row.name.trim(),
-        color,
-        description: row.description?.trim() || null,
-        projectId,
-        createdById: userId,
-        sortOrder: baseSortOrder,
-      });
-      baseSortOrder += 10000;
-    }
-
-    const createdLabels: Label[] = [];
-    if (toCreate.length > 0) {
-      if (typeof this.labelRepository.createBatch === 'function') {
-        const batchCreated = await this.labelRepository.createBatch(toCreate);
-        createdLabels.push(...batchCreated);
-      } else {
-        for (const item of toCreate) {
-          const created = await this.labelRepository.create(item);
-          createdLabels.push(created);
-        }
-      }
-    }
-
-    await this.invalidateLabelCache(userId, projectId);
-
-    return {
-      created: createdLabels.length,
-      skipped,
-      failed,
-      labels: createdLabels,
-    };
-  }
-
   // ── 2. User-Scoped Personal Labels ──────────────────────────────────────────
 
-  async getLabels(userId: string, type?: LabelType, projectId?: string | null) {
+  async getLabels(userId: string, type?: string, projectId?: string | null) {
     const cacheKey = WORK_ITEM_REDIS_KEYS.labels(userId);
 
     if (this.cache && !type && projectId === undefined) {
@@ -500,7 +396,6 @@ export class LabelService {
     const label = await this.labelRepository.update(labelId, {
       ...(dto.name !== undefined && { name: dto.name.trim() }),
       ...(dto.color !== undefined && { color: dto.color }),
-      ...(dto.type !== undefined && { type: dto.type }),
       ...(dto.description !== undefined && { description: dto.description }),
       ...(dto.parentId !== undefined && { parentId: dto.parentId }),
       ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
@@ -527,77 +422,5 @@ export class LabelService {
     await this.labelRepository.delete(labelId);
     await this.invalidateLabelCache(userId, label.projectId || undefined);
     return { message: 'Label deleted successfully' };
-  }
-
-  async importUserLabels(
-    userId: string,
-    dto: ImportLabelsDto,
-  ): Promise<ImportLabelResult> {
-    if (!dto.labels || !Array.isArray(dto.labels) || !dto.labels.length) {
-      return { created: 0, skipped: 0, failed: 0, labels: [] };
-    }
-
-    const existingLabels = await this.labelRepository.findUserLabels(
-      userId,
-      undefined,
-      null,
-    );
-    const existingNames = new Set(
-      existingLabels.map((l) => l.name.trim().toLowerCase()),
-    );
-
-    const seenInBatch = new Set<string>();
-    let skipped = 0;
-    let failed = 0;
-    const toCreate: Prisma.WorkItemLabelUncheckedCreateInput[] = [];
-
-    for (const row of dto.labels) {
-      if (!row.name || typeof row.name !== 'string' || !row.name.trim()) {
-        failed++;
-        continue;
-      }
-      const normalized = row.name.trim().toLowerCase();
-      if (existingNames.has(normalized) || seenInBatch.has(normalized)) {
-        skipped++;
-        continue;
-      }
-      seenInBatch.add(normalized);
-
-      const color =
-        row.color?.trim() &&
-        /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(row.color.trim())
-          ? row.color.trim()
-          : this.pickDefaultColor();
-
-      toCreate.push({
-        name: row.name.trim(),
-        color,
-        description: row.description?.trim() || null,
-        projectId: null,
-        createdById: userId,
-      });
-    }
-
-    const createdLabels: Label[] = [];
-    if (toCreate.length > 0) {
-      if (typeof this.labelRepository.createBatch === 'function') {
-        const batchCreated = await this.labelRepository.createBatch(toCreate);
-        createdLabels.push(...batchCreated);
-      } else {
-        for (const item of toCreate) {
-          const created = await this.labelRepository.create(item);
-          createdLabels.push(created);
-        }
-      }
-    }
-
-    await this.invalidateLabelCache(userId);
-
-    return {
-      created: createdLabels.length,
-      skipped,
-      failed,
-      labels: createdLabels,
-    };
   }
 }

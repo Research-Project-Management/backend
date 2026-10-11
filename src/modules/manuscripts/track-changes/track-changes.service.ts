@@ -3,7 +3,8 @@
  * Main Injectable Service orchestrating Track Changes & Comments use cases.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { PrismaService } from '@/core/database/prisma.service';
 import { RecordChangeUseCase } from './core/use-cases/record-change.use-case';
 import { AcceptChangeUseCase } from './core/use-cases/accept-change.use-case';
 import { RejectChangeUseCase } from './core/use-cases/reject-change.use-case';
@@ -43,7 +44,31 @@ export class TrackChangesService {
     private readonly addCommentReplyUseCase: AddCommentReplyUseCase,
     private readonly resolveCommentThreadUseCase: ResolveCommentThreadUseCase,
     private readonly getDocReviewsUseCase: GetDocReviewsUseCase,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
+
+  public async resolveProjectId(
+    projectId: string,
+    docId: string,
+  ): Promise<string> {
+    const isSpecial =
+      !projectId ||
+      projectId === 'default' ||
+      projectId === 'personal' ||
+      projectId === 'me';
+    if (this.prisma && isSpecial && docId) {
+      try {
+        const doc = await this.prisma.manuscriptDoc.findUnique({
+          where: { id: docId },
+          select: { projectId: true },
+        });
+        if (doc?.projectId) return doc.projectId;
+      } catch {
+        // Fallback
+      }
+    }
+    return projectId || 'default';
+  }
 
   public async recordChange(
     projectId: string,
@@ -51,12 +76,19 @@ export class TrackChangesService {
     dto: RecordChangeDto,
     userId?: string | null,
   ): Promise<TrackChangeResponseDto> {
+    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const range = dto.range || {
+      startLine: dto.startLine ?? 0,
+      startCol: dto.startCol ?? dto.fromIndex ?? 0,
+      endLine: dto.endLine ?? dto.startLine ?? 0,
+      endCol: dto.endCol ?? dto.toIndex ?? 0,
+    };
     const change = await this.recordChangeUseCase.execute({
-      projectId,
+      projectId: resolvedProjId,
       docId,
       type: dto.type,
       text: dto.text,
-      range: dto.range,
+      range,
       userId,
     });
     return this.toChangeDto(change);
@@ -68,8 +100,9 @@ export class TrackChangesService {
     changeId: string,
     userId?: string | null,
   ): Promise<TrackChangeResponseDto> {
+    const resolvedProjId = await this.resolveProjectId(projectId, docId);
     const change = await this.acceptChangeUseCase.execute({
-      projectId,
+      projectId: resolvedProjId,
       docId,
       changeId,
       userId,
@@ -83,8 +116,9 @@ export class TrackChangesService {
     changeId: string,
     userId?: string | null,
   ): Promise<TrackChangeResponseDto> {
+    const resolvedProjId = await this.resolveProjectId(projectId, docId);
     const change = await this.rejectChangeUseCase.execute({
-      projectId,
+      projectId: resolvedProjId,
       docId,
       changeId,
       userId,
@@ -98,8 +132,9 @@ export class TrackChangesService {
     action: BatchAction,
     userId?: string | null,
   ): Promise<{ resolvedCount: number; action: BatchAction }> {
+    const resolvedProjId = await this.resolveProjectId(projectId, docId);
     return await this.batchResolveChangesUseCase.execute({
-      projectId,
+      projectId: resolvedProjId,
       docId,
       action,
       userId,
@@ -112,11 +147,18 @@ export class TrackChangesService {
     dto: CreateCommentThreadDto,
     userId?: string | null,
   ): Promise<CommentThreadResponseDto> {
+    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const range = dto.range || {
+      startLine: dto.startLine ?? 0,
+      startCol: dto.startCol ?? dto.fromIndex ?? 0,
+      endLine: dto.endLine ?? dto.startLine ?? 0,
+      endCol: dto.endCol ?? dto.toIndex ?? 0,
+    };
     const thread = await this.createCommentThreadUseCase.execute({
-      projectId,
+      projectId: resolvedProjId,
       docId,
       quote: dto.quote,
-      range: dto.range,
+      range,
       content: dto.content,
       userId,
     });
@@ -130,8 +172,9 @@ export class TrackChangesService {
     dto: AddCommentReplyDto,
     userId?: string | null,
   ): Promise<CommentReplyResponseDto> {
+    const resolvedProjId = await this.resolveProjectId(projectId, docId);
     const reply = await this.addCommentReplyUseCase.execute({
-      projectId,
+      projectId: resolvedProjId,
       docId,
       threadId,
       content: dto.content,
@@ -147,8 +190,9 @@ export class TrackChangesService {
     resolve: boolean,
     userId?: string | null,
   ): Promise<CommentThreadResponseDto> {
+    const resolvedProjId = await this.resolveProjectId(projectId, docId);
     const thread = await this.resolveCommentThreadUseCase.execute({
-      projectId,
+      projectId: resolvedProjId,
       docId,
       threadId,
       resolve,
@@ -161,7 +205,11 @@ export class TrackChangesService {
     projectId: string,
     docId: string,
   ): Promise<DocReviewsResponseDto> {
-    const result = await this.getDocReviewsUseCase.execute(projectId, docId);
+    const resolvedProjId = await this.resolveProjectId(projectId, docId);
+    const result = await this.getDocReviewsUseCase.execute(
+      resolvedProjId,
+      docId,
+    );
     return {
       changes: result.changes.map((c) => this.toChangeDto(c)),
       threads: result.threads.map((t) => this.toThreadDto(t)),

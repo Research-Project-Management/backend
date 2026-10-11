@@ -61,6 +61,56 @@ export interface LibraryItemDetail extends LibraryItemSummary {
 export type SyncChangeDto = LibraryChange;
 export type SyncTombstoneDto = Tombstone;
 
+interface RawNoteLike {
+  id: string;
+  title?: string | null;
+  content?: string | null;
+  contentMd?: string | null;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+}
+
+interface ItemTagLike {
+  tag?: { id?: string; name?: string; color?: string | null };
+  tagId?: string;
+  name?: string;
+  color?: string | null;
+}
+
+interface CollectionItemLike {
+  collection?: {
+    id?: string;
+    name?: string;
+    color?: string | null;
+    parentId?: string | null;
+  };
+  collectionId?: string;
+  id?: string;
+  name?: string;
+  color?: string | null;
+  parentId?: string | null;
+}
+
+interface CatalogItemWithRelations {
+  id: string;
+  title: string;
+  doi?: string | null;
+  abstract?: string | null;
+  year?: number | null;
+  itemType?: string | null;
+  itemTags?: ItemTagLike[];
+  tags?: Array<
+    string | { id?: string; name?: string; tag?: string; color?: string | null }
+  >;
+  collectionItems?: CollectionItemLike[];
+  collections?: Array<{
+    id?: string;
+    name?: string;
+    color?: string | null;
+    parentId?: string | null;
+  }>;
+}
+
 export interface ILibraryFacade {
   readonly catalog?: CatalogFacade;
   readonly extraction?: ExtractionFacade;
@@ -204,8 +254,8 @@ export class LibraryFacade implements ILibraryFacade {
       }),
     );
 
-    const rawNotes = Array.isArray(notes) ? notes : [];
-    const noteSummaries: NoteSummaryDto[] = rawNotes.map((note: any) => ({
+    const rawNotes = Array.isArray(notes) ? (notes as RawNoteLike[]) : [];
+    const noteSummaries: NoteSummaryDto[] = rawNotes.map((note) => ({
       id: note.id,
       title: note.title || null,
       content: note.content || note.contentMd || null,
@@ -214,8 +264,12 @@ export class LibraryFacade implements ILibraryFacade {
       updatedAt: note.updatedAt,
     }));
 
-    const tags = this.extractTagSummaries(catalogItem);
-    const collections = this.extractCollectionSummaries(catalogItem);
+    const tags = this.extractTagSummaries(
+      catalogItem as CatalogItemWithRelations,
+    );
+    const collections = this.extractCollectionSummaries(
+      catalogItem as CatalogItemWithRelations,
+    );
 
     return {
       id: catalogItem.id,
@@ -232,39 +286,43 @@ export class LibraryFacade implements ILibraryFacade {
     };
   }
 
-  private extractTagSummaries(item: any): TagSummaryDto[] {
+  private extractTagSummaries(
+    item?: CatalogItemWithRelations | null,
+  ): TagSummaryDto[] {
     if (!item) return [];
     if (Array.isArray(item.itemTags)) {
       return item.itemTags
-        .map((it: any) => ({
-          id: it.tag?.id || it.tagId,
+        .map((it): TagSummaryDto => ({
+          id: it.tag?.id || it.tagId || undefined,
           name: it.tag?.name || it.name || '',
           color: it.tag?.color || null,
         }))
-        .filter((t: TagSummaryDto) => Boolean(t.name));
+        .filter((t): t is TagSummaryDto => Boolean(t.name));
     }
     if (Array.isArray(item.tags)) {
       return item.tags
-        .map((t: any) =>
+        .map((t): TagSummaryDto =>
           typeof t === 'string'
             ? { name: t }
             : {
-                id: t.id,
+                id: t.id || undefined,
                 name: t.name || t.tag || '',
                 color: t.color || null,
               },
         )
-        .filter((t: TagSummaryDto) => Boolean(t.name));
+        .filter((t): t is TagSummaryDto => Boolean(t.name));
     }
     return [];
   }
 
-  private extractCollectionSummaries(item: any): CollectionSummaryDto[] {
+  private extractCollectionSummaries(
+    item?: CatalogItemWithRelations | null,
+  ): CollectionSummaryDto[] {
     if (!item) return [];
     if (Array.isArray(item.collectionItems)) {
       return item.collectionItems
-        .filter((ci: any) => Boolean(ci.collection?.id || ci.collectionId))
-        .map((ci: any) => ({
+        .filter((ci) => Boolean(ci.collection?.id || ci.collectionId))
+        .map((ci) => ({
           id: (ci.collection?.id || ci.collectionId) as string,
           name: ci.collection?.name || '',
           color: ci.collection?.color || null,
@@ -273,8 +331,8 @@ export class LibraryFacade implements ILibraryFacade {
     }
     if (Array.isArray(item.collections)) {
       return item.collections
-        .filter((c: any) => Boolean(c.id))
-        .map((c: any) => ({
+        .filter((c) => Boolean(c.id))
+        .map((c) => ({
           id: c.id as string,
           name: c.name || '',
           color: c.color || null,

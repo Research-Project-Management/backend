@@ -8,11 +8,6 @@ enum WorkItemPriority {
   none
 }
 
-enum LabelType {
-  work_item
-  page
-}
-
 enum WorkItemRelationType {
   blocks
   blocked_by

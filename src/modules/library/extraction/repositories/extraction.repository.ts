@@ -80,7 +80,7 @@ export class ExtractionRepository {
   async saveItemMetadata(
     itemId: string,
     sourceProvider: string,
-    rawPayload: any,
+    rawPayload: Prisma.InputJsonValue,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
@@ -96,7 +96,7 @@ export class ExtractionRepository {
   async saveMetadataSourceRecord(
     itemId: string,
     sourceProvider: string,
-    rawPayload: any,
+    rawPayload: Prisma.InputJsonValue,
     tx?: Prisma.TransactionClient,
   ) {
     return this.saveItemMetadata(itemId, sourceProvider, rawPayload, tx);
@@ -104,7 +104,7 @@ export class ExtractionRepository {
 
   async updateAttachmentMetadata(
     attachmentId: string,
-    metadata: any,
+    metadata: Prisma.InputJsonValue,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);

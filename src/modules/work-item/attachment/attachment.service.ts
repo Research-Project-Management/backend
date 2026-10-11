@@ -13,7 +13,7 @@ import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
-  CreateAttachmentDto as BaseAttachmentDto,
+  AddAttachmentDto,
   AttachPageDto,
   AttachPaperDto,
   AttachFileDto,
@@ -422,7 +422,7 @@ export class AttachmentService {
    */
   async addAttachment(
     workItemId: string,
-    createAttachmentDto: BaseAttachmentDto,
+    createAttachmentDto: AddAttachmentDto,
     authorId: string,
   ) {
     const workItem = await this.findWorkItem(workItemId);

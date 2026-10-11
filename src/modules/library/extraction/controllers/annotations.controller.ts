@@ -79,22 +79,11 @@ export class AnnotationsController {
       );
     }
 
-    if (
-      typeof (this.annotationsService as any).listAnnotations === 'function'
-    ) {
-      return (this.annotationsService as any).listAnnotations(
-        userId,
-        attachmentId,
-        { pageIndex, type },
-        projectId,
-      );
-    }
-
-    return this.annotationsService.getAnnotationsByAttachment(
+    return this.annotationsService.listAnnotations(
       userId,
       attachmentId,
-      pageIndex,
-      type,
+      { pageIndex, type },
+      projectId,
     );
   }
 

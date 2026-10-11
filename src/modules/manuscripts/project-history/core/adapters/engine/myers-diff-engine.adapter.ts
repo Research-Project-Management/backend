@@ -225,7 +225,8 @@ export class MyersDiffEngineAdapter extends IDiffEnginePort {
   }
 
   /**
-   * Classic Myers diff algorithm for Longest Common Subsequence of lines.
+   * High-performance Myers diff algorithm for Longest Common Subsequence of lines
+   * featuring O(N) common prefix/suffix trimming and bounded memory guard.
    */
   private computeMyersLCS(
     a: string[],
@@ -233,8 +234,63 @@ export class MyersDiffEngineAdapter extends IDiffEnginePort {
   ): Array<{ type: 'added' | 'deleted' | 'unchanged'; text: string }> {
     const n = a.length;
     const m = b.length;
-    const max = n + m;
+    if (n === 0 && m === 0) return [];
 
+    // 1. Fast path: Common prefix trimming (O(N) before entering O(ND) matrix)
+    let start = 0;
+    while (start < n && start < m && a[start] === b[start]) {
+      start++;
+    }
+
+    // 2. Fast path: Common suffix trimming
+    let aEnd = n - 1;
+    let bEnd = m - 1;
+    while (aEnd >= start && bEnd >= start && a[aEnd] === b[bEnd]) {
+      aEnd--;
+      bEnd--;
+    }
+
+    const prefix = a.slice(0, start).map((text) => ({
+      type: 'unchanged' as const,
+      text,
+    }));
+    const suffix = a.slice(aEnd + 1).map((text) => ({
+      type: 'unchanged' as const,
+      text,
+    }));
+
+    const middleA = a.slice(start, aEnd + 1);
+    const middleB = b.slice(start, bEnd + 1);
+
+    // If middle slices are empty, the entire document was identical
+    if (middleA.length === 0 && middleB.length === 0) {
+      return [...prefix, ...suffix];
+    }
+
+    // Safety threshold: If middle slice exceeds 3,000 lines (pathological diff),
+    // fallback gracefully to block replacement to prevent event loop blocking.
+    if (middleA.length + middleB.length > 3000) {
+      const fallbackOps: Array<{
+        type: 'added' | 'deleted' | 'unchanged';
+        text: string;
+      }> = [
+        ...middleA.map((text) => ({ type: 'deleted' as const, text })),
+        ...middleB.map((text) => ({ type: 'added' as const, text })),
+      ];
+      return [...prefix, ...fallbackOps, ...suffix];
+    }
+
+    const middleOps = this.rawMyers(middleA, middleB);
+    return [...prefix, ...middleOps, ...suffix];
+  }
+
+  private rawMyers(
+    a: string[],
+    b: string[],
+  ): Array<{ type: 'added' | 'deleted' | 'unchanged'; text: string }> {
+    const n = a.length;
+    const m = b.length;
+    const max = n + m;
     if (max === 0) return [];
 
     const v: number[] = new Array(2 * max + 1);
@@ -327,7 +383,7 @@ export class MyersDiffEngineAdapter extends IDiffEnginePort {
   }
 
   /**
-   * Computes word-level diff tokens for adjacent deleted & added lines.
+   * Computes fine-grained word-level diff tokens for adjacent deleted & added lines.
    */
   private enhanceWithWordDiffs(diffLines: DiffLine[]): void {
     for (let i = 0; i < diffLines.length - 1; i++) {
@@ -335,49 +391,162 @@ export class MyersDiffEngineAdapter extends IDiffEnginePort {
       const next = diffLines[i + 1];
 
       if (current.type === 'deleted' && next.type === 'added') {
-        const oldWords = current.text.split(/(\s+|[^\w\s]+)/);
-        const newWords = next.text.split(/(\s+|[^\w\s]+)/);
-
-        current.words = [{ type: 'deleted', text: current.text }];
-        next.words = [{ type: 'added', text: next.text }];
+        const oldTokens = this.tokenizeText(current.text);
+        const newTokens = this.tokenizeText(next.text);
+        const { aTokens, bTokens } = this.computeTokenLCS(oldTokens, newTokens);
+        current.words = aTokens;
+        next.words = bTokens;
       }
     }
   }
 
+  private tokenizeText(text: string): string[] {
+    return text.split(/([^\w\s]+|\s+)/).filter(Boolean);
+  }
+
+  private computeTokenLCS(
+    a: string[],
+    b: string[],
+  ): { aTokens: WordDiffToken[]; bTokens: WordDiffToken[] } {
+    const n = a.length;
+    const m = b.length;
+    if (n === 0 && m === 0) return { aTokens: [], bTokens: [] };
+    if (n === 0) {
+      return {
+        aTokens: [],
+        bTokens: [{ type: 'added', text: b.join('') }],
+      };
+    }
+    if (m === 0) {
+      return {
+        aTokens: [{ type: 'deleted', text: a.join('') }],
+        bTokens: [],
+      };
+    }
+
+    // Safety guard on pathological lines with > 500 tokens
+    if (n + m > 500) {
+      return {
+        aTokens: [{ type: 'deleted', text: a.join('') }],
+        bTokens: [{ type: 'added', text: b.join('') }],
+      };
+    }
+
+    const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < m; j++) {
+        if (a[i] === b[j]) {
+          dp[i + 1][j + 1] = dp[i][j] + 1;
+        } else {
+          dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+    }
+
+    let i = n;
+    let j = m;
+    const aResult: WordDiffToken[] = [];
+    const bResult: WordDiffToken[] = [];
+
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+        aResult.unshift({ type: 'unchanged', text: a[i - 1] });
+        bResult.unshift({ type: 'unchanged', text: b[j - 1] });
+        i--;
+        j--;
+      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        bResult.unshift({ type: 'added', text: b[j - 1] });
+        j--;
+      } else if (i > 0) {
+        aResult.unshift({ type: 'deleted', text: a[i - 1] });
+        i--;
+      }
+    }
+
+    return {
+      aTokens: this.mergeAdjacentTokens(aResult),
+      bTokens: this.mergeAdjacentTokens(bResult),
+    };
+  }
+
+  private mergeAdjacentTokens(tokens: WordDiffToken[]): WordDiffToken[] {
+    const merged: WordDiffToken[] = [];
+    for (const t of tokens) {
+      if (merged.length > 0 && merged[merged.length - 1].type === t.type) {
+        merged[merged.length - 1].text += t.text;
+      } else {
+        merged.push({ type: t.type, text: t.text });
+      }
+    }
+    return merged;
+  }
+
   /**
-   * Groups linear diff lines into unified diff hunks with context.
+   * Groups linear diff lines into standard discrete unified diff hunks with context windows.
    */
   private buildHunks(lines: DiffLine[], contextSize = 3): DiffHunkVo[] {
     if (lines.length === 0) return [];
 
-    const hasChanges = lines.some((l) => l.type !== 'unchanged');
-    if (!hasChanges) return [];
-
-    const hunks: DiffHunkVo[] = [];
-    const currentHunkLines: DiffLine[] = [];
-    const oldStart = 1;
-    const newStart = 1;
-    let oldLinesCount = 0;
-    let newLinesCount = 0;
-
-    for (const line of lines) {
-      currentHunkLines.push(line);
-      if (line.type === 'deleted' || line.type === 'unchanged') {
-        oldLinesCount++;
-      }
-      if (line.type === 'added' || line.type === 'unchanged') {
-        newLinesCount++;
+    const changeIndices: number[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].type !== 'unchanged') {
+        changeIndices.push(i);
       }
     }
 
-    if (currentHunkLines.length > 0) {
+    if (changeIndices.length === 0) return [];
+
+    // Group change indices into clusters where distance <= 2 * contextSize
+    const clusters: Array<{ start: number; end: number }> = [];
+    let currentCluster = { start: changeIndices[0], end: changeIndices[0] };
+
+    for (let i = 1; i < changeIndices.length; i++) {
+      const idx = changeIndices[i];
+      if (idx - currentCluster.end <= 2 * contextSize) {
+        currentCluster.end = idx;
+      } else {
+        clusters.push(currentCluster);
+        currentCluster = { start: idx, end: idx };
+      }
+    }
+    clusters.push(currentCluster);
+
+    const hunks: DiffHunkVo[] = [];
+    for (const cluster of clusters) {
+      const hunkStart = Math.max(0, cluster.start - contextSize);
+      const hunkEnd = Math.min(lines.length - 1, cluster.end + contextSize);
+      const hunkLines = lines.slice(hunkStart, hunkEnd + 1);
+
+      let oldStartLine = 0;
+      let oldLineCount = 0;
+      let newStartLine = 0;
+      let newLineCount = 0;
+
+      for (const line of hunkLines) {
+        if (line.type === 'deleted' || line.type === 'unchanged') {
+          if (oldStartLine === 0 && line.oldLineNumber !== undefined) {
+            oldStartLine = line.oldLineNumber;
+          }
+          oldLineCount++;
+        }
+        if (line.type === 'added' || line.type === 'unchanged') {
+          if (newStartLine === 0 && line.newLineNumber !== undefined) {
+            newStartLine = line.newLineNumber;
+          }
+          newLineCount++;
+        }
+      }
+
+      if (oldStartLine === 0) oldStartLine = 1;
+      if (newStartLine === 0) newStartLine = 1;
+
       hunks.push(
         new DiffHunkVo({
-          oldStartLine: oldStart,
-          oldLineCount: oldLinesCount,
-          newStartLine: newStart,
-          newLineCount: newLinesCount,
-          lines: currentHunkLines,
+          oldStartLine,
+          oldLineCount,
+          newStartLine,
+          newLineCount,
+          lines: hunkLines,
         }),
       );
     }

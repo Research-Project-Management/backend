@@ -14,8 +14,7 @@ import {
   UserWorkItem,
   YourWorkActivityItem,
 } from './types/your-work.types';
-import { inferStateGroup } from '@/modules/work-item/state/utils/state.util';
-import type { StateGroup } from '@/modules/work-item/state/types/state.types';
+import { inferStateGroup, type StateGroup } from '@/modules/work-item';
 
 @Injectable()
 export class YourWorkService {

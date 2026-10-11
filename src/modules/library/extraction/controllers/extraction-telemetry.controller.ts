@@ -17,6 +17,12 @@ export interface BenchmarkPayloadDto {
   filename?: string;
 }
 
+/**
+ * Standard baseline latency (in ms) for unoptimized legacy multi-stage HTTP extractors,
+ * used as reference point for in-process speedup benchmarking.
+ */
+export const BASELINE_LEGACY_EXTRACTION_LATENCY_MS = 1200;
+
 @ApiTags('Library Extraction Telemetry')
 @Controller('api/v1/library/extraction')
 export class ExtractionTelemetryController {
@@ -85,9 +91,17 @@ export class ExtractionTelemetryController {
     }
 
     // 2. Try reading multipart stream if Fastify multipart is available
-    if (!buffer && typeof (req as any).parts === 'function') {
+    interface FastifyMultipartRequest {
+      parts: () => AsyncIterable<{
+        type: string;
+        filename?: string;
+        toBuffer: () => Promise<Buffer>;
+      }>;
+    }
+    const multipartReq = req as unknown as FastifyMultipartRequest;
+    if (!buffer && typeof multipartReq.parts === 'function') {
       try {
-        const parts = (req as any).parts();
+        const parts = multipartReq.parts();
         for await (const part of parts) {
           if (part.type === 'file') {
             buffer = await part.toBuffer();
@@ -113,9 +127,9 @@ export class ExtractionTelemetryController {
       success: true,
       benchmark: {
         executionLatencyMs: Math.round(latencyMs * 100) / 100,
-        baselineLegacyLatencyMs: 1200,
-        estimatedGrobidLatencyMs: 1200,
-        estimatedSpeedupRatio: `${Math.round(1200 / Math.max(latencyMs, 0.1))}x`,
+        baselineLegacyLatencyMs: BASELINE_LEGACY_EXTRACTION_LATENCY_MS,
+        estimatedLegacyLatencyMs: BASELINE_LEGACY_EXTRACTION_LATENCY_MS,
+        estimatedSpeedupRatio: `${Math.round(BASELINE_LEGACY_EXTRACTION_LATENCY_MS / Math.max(latencyMs, 0.1))}x`,
         engineUsed: result.provenance.engineUsed,
         isSelfSufficient: result.isSelfSufficient,
         qualityScore: result.quality.totalScore,

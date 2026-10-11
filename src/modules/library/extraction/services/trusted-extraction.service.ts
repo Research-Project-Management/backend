@@ -95,7 +95,12 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       pageText =
         typeof rawResult === 'string'
           ? rawResult
-          : (rawResult as any)?.text || '';
+          : typeof rawResult === 'object' &&
+              rawResult !== null &&
+              'text' in rawResult &&
+              typeof (rawResult as { text: unknown }).text === 'string'
+            ? (rawResult as { text: string }).text
+            : '';
     } catch {
       // unpdf text extraction failure is non-fatal if XMP succeeded
     }

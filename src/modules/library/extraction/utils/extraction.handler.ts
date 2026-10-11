@@ -26,6 +26,16 @@ export interface IAttachmentSearchIndexer {
   indexAttachmentPages?(attachmentId: string, pages: any[]): Promise<void>;
 }
 
+function isIdempotentConsumer(val: unknown): val is IdempotentConsumerService {
+  return (
+    typeof val === 'object' &&
+    val !== null &&
+    'executeIdempotent' in val &&
+    typeof (val as { executeIdempotent: unknown }).executeIdempotent ===
+      'function'
+  );
+}
+
 @Injectable()
 export class ExtractionHandler implements OutboxDispatchHandler {
   private readonly logger = new Logger(ExtractionHandler.name);
@@ -51,21 +61,15 @@ export class ExtractionHandler implements OutboxDispatchHandler {
 
     if (typeof searchIndexerOrThreshold === 'number') {
       this.staleThresholdMs = searchIndexerOrThreshold;
-      this.idempotentConsumer =
-        typeof (staleThresholdOrIdempotent as any)?.executeIdempotent ===
-        'function'
-          ? (staleThresholdOrIdempotent as IdempotentConsumerService)
-          : idempotentConsumer;
+      this.idempotentConsumer = isIdempotentConsumer(staleThresholdOrIdempotent)
+        ? staleThresholdOrIdempotent
+        : idempotentConsumer;
     } else {
       this.searchIndexer = searchIndexerOrThreshold;
       if (typeof staleThresholdOrIdempotent === 'number') {
         this.staleThresholdMs = staleThresholdOrIdempotent;
         this.idempotentConsumer = idempotentConsumer;
-      } else if (
-        staleThresholdOrIdempotent &&
-        typeof (staleThresholdOrIdempotent as any).executeIdempotent ===
-          'function'
-      ) {
+      } else if (isIdempotentConsumer(staleThresholdOrIdempotent)) {
         this.staleThresholdMs = 5 * 60 * 1000;
         this.idempotentConsumer = staleThresholdOrIdempotent;
       } else {
@@ -210,21 +214,31 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       }
 
       // 2. Storage-first reading via Storage Port
+      interface LegacyStorageReader {
+        readFile?: (id: string) => Promise<{ buffer?: Buffer } | Buffer | null>;
+      }
+      const legacyStorage = this.storagePort as unknown as LegacyStorageReader;
       const storageFile =
         typeof this.storagePort?.readOwnedFile === 'function'
           ? await this.storagePort.readOwnedFile({ fileId })
-          : typeof (this.storagePort as any)?.readFile === 'function'
-            ? await (this.storagePort as any).readFile(fileId)
+          : typeof legacyStorage?.readFile === 'function'
+            ? await legacyStorage.readFile(fileId)
             : null;
-      const buffer =
+      const rawBuffer =
         storageFile?.buffer ||
         (Buffer.isBuffer(storageFile) ? storageFile : null);
 
-      if (!buffer) {
+      if (!rawBuffer) {
         throw new AttachmentStorageException(
           `Could not resolve binary buffer for attachment ${attachmentId}`,
         );
       }
+
+      const buffer: Buffer = Buffer.isBuffer(rawBuffer)
+        ? rawBuffer
+        : typeof rawBuffer === 'string'
+          ? Buffer.from(rawBuffer)
+          : Buffer.from(rawBuffer as ArrayBuffer);
 
       // 3. Extract text and per-page structures
       const doc = await this.pdf.extractDocumentFromBuffer(buffer);
@@ -240,11 +254,13 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           await this.extractionRepo.saveMetadataSourceRecord(
             attachment.itemId,
             'ocr_provenance',
-            doc.ocrProvenance as any,
+            doc.ocrProvenance as unknown as Prisma.InputJsonValue,
           );
 
           const existingMeta =
-            (attachment.metadata as Record<string, any>) || {};
+            attachment.metadata && typeof attachment.metadata === 'object'
+              ? (attachment.metadata as Record<string, unknown>)
+              : {};
           await this.extractionRepo.updateAttachmentMetadata(attachment.id, {
             ...existingMeta,
             ocr: {
@@ -252,7 +268,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
               avgConfidence: doc.ocrProvenance.avgConfidence,
               executionTimeMs: doc.ocrProvenance.executionTimeMs,
             },
-          });
+          } as unknown as Prisma.InputJsonValue);
         } catch (ocrErr: any) {
           this.logger.warn(
             `Failed to save OCR provenance: ${ocrErr?.message || ocrErr}`,
@@ -393,14 +409,14 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           );
           await this.extractionRepo.saveMetadataSourceRecord(
             attachment.itemId,
-            'grobid_fulltext',
+            'mextract_fulltext',
             payloadToSave,
           );
 
-          // Also keep grobid metadata provenance record for backward compatibility
+          // Save native metadata extraction provenance record
           await this.extractionRepo.saveMetadataSourceRecord(
             attachment.itemId,
-            'grobid',
+            'mextract',
             {
               title: doc.metadata.title,
               abstract: doc.metadata.abstract,
@@ -412,7 +428,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
               notes: doc.metadata.notes,
               referenceCount: doc.references?.length ?? 0,
               references: doc.references ?? [],
-            } as any,
+            } as unknown as Prisma.InputJsonValue,
           );
 
           // Synchronize extracted referenceCount & core metadata onto the Item model
@@ -558,7 +574,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           }
         } catch (provenanceErr: any) {
           this.logger.debug(
-            `Could not store GROBID provenance: ${provenanceErr?.message}`,
+            `Could not store extraction provenance: ${provenanceErr?.message}`,
           );
         }
       }

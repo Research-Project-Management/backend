@@ -23,7 +23,9 @@ export class ItemMapper {
    */
   static toDomain<T>(item: T): T {
     if (!item || typeof item !== 'object') return item;
-    const it = { ...(item as any) };
+    const it: Record<string, any> = {
+      ...(item as Record<string, any>),
+    };
 
     if (!it.userStates && Array.isArray(it.states)) {
       it.userStates = it.states;
@@ -1032,7 +1034,7 @@ export class ItemMapper {
           description: rel.description || '',
           linkedAt: rel.createdAt,
           targetItem: rel.targetItem
-            ? ItemsMapper.toDomain(rel.targetItem)
+            ? ItemMapper.toDomain(rel.targetItem)
             : undefined,
         });
       }
@@ -1047,7 +1049,7 @@ export class ItemMapper {
           description: rel.description || '',
           linkedAt: rel.createdAt,
           targetItem: rel.sourceItem
-            ? ItemsMapper.toDomain(rel.sourceItem)
+            ? ItemMapper.toDomain(rel.sourceItem)
             : undefined,
         });
       }
@@ -1112,32 +1114,39 @@ export class ItemMapper {
    */
   static toDomainList<T>(items: T[]): T[] {
     if (!Array.isArray(items)) return items;
-    return items.map((item) => ItemsMapper.toDomain(item));
+    return items.map((item) => ItemMapper.toDomain(item));
   }
 
   /**
    * Projects user state (readStatus, rating, lastReadAt) to top level of domain item.
    * Matches specific userId if provided, falling back to the first available user state record.
    */
-  static mapFlattenedState<T extends Record<string, any>>(
+  static mapFlattenedState<T extends Record<string, unknown>>(
     item: T | null | undefined,
     userId?: string,
   ):
     | (T & { readStatus: string; rating: number; lastReadAt: string | null })
     | null {
     if (!item) return null;
-    const normalized = ItemsMapper.toDomain(item) as any;
-    let userState: any = undefined;
+    interface StateRecordLike {
+      userId?: string;
+      readStatus?: string;
+      rating?: number;
+      lastReadAt?: Date | string | null;
+      [key: string]: unknown;
+    }
+    const normalized = ItemMapper.toDomain(item) as Record<string, unknown>;
+    let userState: StateRecordLike | undefined = undefined;
     const statesArr =
       Array.isArray(normalized.userStates) && normalized.userStates.length > 0
-        ? normalized.userStates
+        ? (normalized.userStates as StateRecordLike[])
         : Array.isArray(normalized.states) && normalized.states.length > 0
-          ? normalized.states
+          ? (normalized.states as StateRecordLike[])
           : null;
 
     if (statesArr) {
       userState = userId
-        ? statesArr.find((stateRecord: any) => stateRecord.userId === userId) ||
+        ? statesArr.find((stateRecord) => stateRecord.userId === userId) ||
           statesArr[0]
         : statesArr[0];
     }
@@ -1156,6 +1165,10 @@ export class ItemMapper {
           ? userState.lastReadAt.toISOString()
           : String(userState.lastReadAt)
         : null,
+    } as unknown as T & {
+      readStatus: string;
+      rating: number;
+      lastReadAt: string | null;
     };
   }
 }

@@ -421,7 +421,7 @@ export class ReconciliationService {
             ),
           ),
         );
-        resolved[field] = values as any;
+        (resolved as Record<string, unknown>)[field] = values;
         assertions.push({
           field,
           value: [...values],

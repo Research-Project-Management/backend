@@ -7,6 +7,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ExportProjectZipUseCase,
   ExportProjectZipOutput,
+  ExportProjectZipStreamOutput,
 } from './core/use-cases/export-project-zip.use-case';
 import { ImportProjectZipUseCase } from './core/use-cases/import-project-zip.use-case';
 import { ListTemplatesUseCase } from './core/use-cases/list-templates.use-case';
@@ -39,6 +40,18 @@ export class ExportImportService {
     query?: ExportZipQueryDto,
   ): Promise<ExportProjectZipOutput> {
     return await this.exportProjectZipUseCase.execute({
+      projectId,
+      projectName: query?.projectName,
+      includePdf: query?.includePdf,
+      cleanArxiv: query?.cleanArxiv,
+    });
+  }
+
+  public async exportProjectZipStream(
+    projectId: string,
+    query?: ExportZipQueryDto,
+  ): Promise<ExportProjectZipStreamOutput> {
+    return await this.exportProjectZipUseCase.executeStream({
       projectId,
       projectName: query?.projectName,
       includePdf: query?.includePdf,

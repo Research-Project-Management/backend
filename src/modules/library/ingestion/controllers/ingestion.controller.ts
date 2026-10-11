@@ -88,7 +88,7 @@ export abstract class BaseIngestionController {
         break;
       default:
         throw new BadRequestException(
-          'Unknown ingestion kind: ' + String((dto as any).kind),
+          'Unknown ingestion kind: ' + String((dto as { kind?: unknown }).kind),
         );
     }
 
@@ -129,7 +129,7 @@ export abstract class BaseIngestionController {
     projectId?: string,
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
-    const effectiveProjectId = projectId || (dto as any).projectId;
+    const effectiveProjectId = projectId || dto.projectId;
     let command: any;
 
     switch (dto.source) {
@@ -294,8 +294,7 @@ export class IngestionController extends BaseIngestionController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const resolvedProjectId =
-      paramProjectId || queryProjectId || (dto as any).projectId;
+    const resolvedProjectId = paramProjectId || queryProjectId || dto.projectId;
     return this.executeIngestUnified(
       userId,
       idempotencyKeyHeader,

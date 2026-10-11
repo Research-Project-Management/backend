@@ -58,7 +58,7 @@ export class TreeEngine {
    * would create a direct or indirect cycle in the collection hierarchy.
    */
   detectCycle(
-    existingCollections: RawCollectionItem[],
+    existingCollections: Array<Pick<RawCollectionItem, 'id' | 'parentId'>>,
     collectionId: string,
     candidateParentId: string,
   ): boolean {
@@ -93,7 +93,7 @@ export class TreeEngine {
    * Throws BadRequestException if a cycle is detected.
    */
   assertNoCycle(
-    existingCollections: RawCollectionItem[],
+    existingCollections: Array<Pick<RawCollectionItem, 'id' | 'parentId'>>,
     collectionId: string,
     candidateParentId: string,
   ): void {
@@ -109,7 +109,10 @@ export class TreeEngine {
   /**
    * Retrieves all descendant collection IDs for a given root collection ID.
    */
-  getDescendantIds(collections: RawCollectionItem[], rootId: string): string[] {
+  getDescendantIds(
+    collections: Array<Pick<RawCollectionItem, 'id' | 'parentId'>>,
+    rootId: string,
+  ): string[] {
     const childrenMap = new Map<string, string[]>();
     for (const c of collections) {
       if (c.parentId) {

@@ -10,6 +10,7 @@ import { IUpdaterLockPort } from '../ports/updater-lock.port';
 import { IDebounceTimerPort } from '../ports/debounce-timer.port';
 import { DocumentLockedException } from '../domain/exceptions/document-locked.exception';
 import { FlushSingleDocUseCase } from './flush-single-doc.use-case';
+import { mapSettledWithConcurrency } from '@/core/utils/concurrency.util';
 
 export interface FlushProjectDocsInput {
   projectId: string;
@@ -75,27 +76,33 @@ export class FlushProjectDocsUseCase {
         `[DocUpdater] Flushing project '${projectId}': Found ${dirtyDocIds.length} dirty document(s).`,
       );
 
-      // 4. Sequentially flush each dirty doc into Docstore
-      for (const docId of dirtyDocIds) {
-        try {
-          const res = await this.flushSingleDocUseCase.execute({
+      // 4. Concurrently flush dirty docs with bounded concurrency (concurrency = 5)
+      const flushResults = await mapSettledWithConcurrency(
+        dirtyDocIds,
+        5,
+        async (docId) => {
+          return await this.flushSingleDocUseCase.execute({
             projectId,
             docId,
             force: input.force,
           });
+        },
+      );
 
-          if (res.flushed) {
+      for (let i = 0; i < dirtyDocIds.length; i++) {
+        const docId = dirtyDocIds[i];
+        const res = flushResults[i];
+        if (res.ok) {
+          if (res.value.flushed) {
             flushedDocIds.push(docId);
           } else {
             skippedDocIds.push(docId);
           }
-        } catch (err) {
-          errors.push({
-            docId,
-            error: (err as Error).message,
-          });
+        } else {
+          const errMsg = (res.error as Error)?.message || String(res.error);
+          errors.push({ docId, error: errMsg });
           this.logger.error(
-            `[DocUpdater] Error flushing doc '${docId}' in project '${projectId}': ${(err as Error).message}`,
+            `[DocUpdater] Error flushing doc '${docId}' in project '${projectId}': ${errMsg}`,
           );
         }
       }

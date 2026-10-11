@@ -5,7 +5,9 @@
 
 export interface ExportableFileEntry {
   path: string;
-  data: Buffer;
+  data?: Buffer;
+  getData?: () => Promise<Buffer>;
+  date?: Date;
 }
 
 export abstract class IManuscriptAggregatorPort {
@@ -14,6 +16,16 @@ export abstract class IManuscriptAggregatorPort {
    * binary blobs from Filestore, and optionally includes the compiled output PDF.
    */
   abstract collectProjectEntries(
+    projectId: string,
+    includePdf?: boolean,
+    cleanArxiv?: boolean,
+  ): Promise<ExportableFileEntry[]>;
+
+  /**
+   * Lazily collects project entries for streaming export without preloading
+   * file buffers upfront into memory.
+   */
+  abstract collectLazyProjectEntries(
     projectId: string,
     includePdf?: boolean,
     cleanArxiv?: boolean,

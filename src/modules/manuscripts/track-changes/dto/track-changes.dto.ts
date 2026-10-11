@@ -50,10 +50,35 @@ export class RecordChangeDto {
   @IsNotEmpty()
   text!: string;
 
-  @ApiProperty({ type: TextRangeDto })
+  @ApiPropertyOptional({ type: TextRangeDto })
+  @IsOptional()
   @ValidateNested()
   @Type(() => TextRangeDto)
-  range!: TextRangeDto;
+  range?: TextRangeDto;
+
+  @ApiPropertyOptional({ description: 'Flat character offset start' })
+  @IsOptional()
+  fromIndex?: number;
+
+  @ApiPropertyOptional({ description: 'Flat character offset end' })
+  @IsOptional()
+  toIndex?: number;
+
+  @ApiPropertyOptional({ description: '0-indexed starting line' })
+  @IsOptional()
+  startLine?: number;
+
+  @ApiPropertyOptional({ description: '0-indexed starting column' })
+  @IsOptional()
+  startCol?: number;
+
+  @ApiPropertyOptional({ description: '0-indexed ending line' })
+  @IsOptional()
+  endLine?: number;
+
+  @ApiPropertyOptional({ description: '0-indexed ending column' })
+  @IsOptional()
+  endCol?: number;
 }
 
 export class BatchResolveDto {
@@ -68,10 +93,35 @@ export class CreateCommentThreadDto {
   @IsOptional()
   quote?: string;
 
-  @ApiProperty({ type: TextRangeDto })
+  @ApiPropertyOptional({ type: TextRangeDto })
+  @IsOptional()
   @ValidateNested()
   @Type(() => TextRangeDto)
-  range!: TextRangeDto;
+  range?: TextRangeDto;
+
+  @ApiPropertyOptional({ description: 'Flat character offset start' })
+  @IsOptional()
+  fromIndex?: number;
+
+  @ApiPropertyOptional({ description: 'Flat character offset end' })
+  @IsOptional()
+  toIndex?: number;
+
+  @ApiPropertyOptional({ description: '0-indexed starting line' })
+  @IsOptional()
+  startLine?: number;
+
+  @ApiPropertyOptional({ description: '0-indexed starting column' })
+  @IsOptional()
+  startCol?: number;
+
+  @ApiPropertyOptional({ description: '0-indexed ending line' })
+  @IsOptional()
+  endLine?: number;
+
+  @ApiPropertyOptional({ description: '0-indexed ending column' })
+  @IsOptional()
+  endCol?: number;
 
   @ApiProperty({ description: 'Initial comment message content' })
   @IsString()

@@ -25,7 +25,22 @@ export const WORK_ITEM_REDIS_KEYS = {
    * Project labels list (JSON array, TTL 1h)
    */
   projectLabels: (projectId: string) => `flux:wi:labels:proj:${projectId}`,
-  WorkItem: (workItemId: string) => `flux:wi:work-item:${workItemId}`,
+
+  /**
+   * Project work-item atomic sequence counter (Integer)
+   */
+  sequence: (projectId: string) => `flux:wi:seq:${projectId}`,
+
+  /**
+   * Project states list
+   */
+  states: (projectId: string) => `flux:wi:states:${projectId}`,
+
+  /**
+   * Aliases for cleaner shorthand
+   */
+  list: (projectId: string) => `flux:wi:work-items:${projectId}`,
+  item: (id: string) => `flux:wi:work-item:${id}`,
 } as const;
 
 /**

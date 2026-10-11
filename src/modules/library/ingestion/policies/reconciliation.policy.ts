@@ -37,7 +37,7 @@ export class ReconciliationPolicy {
     ris: 60,
     UrlCapture: 50, // Web scraping; lowest structural reliability
     unpaywall: 55,
-    StagedPdf: 40, // GROBID/LocalPDFExtraction; noisy for venue/year fields
+    StagedPdf: 40, // LocalPDFExtraction / unpdf; noisy for venue/year fields
   };
 
   private static getProviderPriority(provider: string): number {

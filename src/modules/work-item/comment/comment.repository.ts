@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma } from '@prisma/client';
 import { isUuid } from '@/core/utils/uuid.util';
@@ -109,7 +109,7 @@ export class CommentRepository {
   }) {
     const itemUuid = await this.resolveWorkItemUuid(data.workItemId);
     if (!itemUuid) {
-      throw new Error(`Work item "${data.workItemId}" not found`);
+      throw new NotFoundException(`Work item "${data.workItemId}" not found`);
     }
     const comment = await this.prismaService.workItemComment.create({
       data: {

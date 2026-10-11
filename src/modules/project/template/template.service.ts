@@ -14,7 +14,7 @@ import {
 } from './dto/create-template.dto';
 import { InstantiateProjectTemplateDto } from './dto/instantiate-template.dto';
 import { deriveProjectPrefix } from '../core/utils/identifier.util';
-import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/work-item.facade';
+import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item';
 
 @Injectable()
 export class TemplateService {

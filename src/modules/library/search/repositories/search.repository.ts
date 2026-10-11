@@ -176,7 +176,7 @@ export class SearchRepository implements OnModuleInit {
     params.push(limit + 1);
     const limitParam = paramIdx++;
 
-    const rows: any[] = await this.prisma.$queryRawUnsafe(
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(
       `WITH search_results AS (
          SELECT id, ROW_NUMBER() OVER (ORDER BY ${orderExpr}) AS _row_num
          FROM "items"
@@ -191,7 +191,7 @@ export class SearchRepository implements OnModuleInit {
 
     let hasNextPage = false;
     let nextCursor: string | undefined;
-    const ids = rows.map((r: any) => r.id as string);
+    const ids = rows.map((r) => r.id);
 
     if (ids.length > limit) {
       hasNextPage = true;
@@ -301,21 +301,21 @@ export class SearchRepository implements OnModuleInit {
 
     // 2. High-Performance Database Pushdown Aggregation (PostgreSQL engine groupBy)
     let facetResult: FacetResult;
-    if (typeof (client.item as any)?.groupBy === 'function') {
+    if (typeof client.item?.groupBy === 'function') {
       try {
         const [typeGroups, yearGroups, tagItems] = await Promise.all([
-          (client.item as any).groupBy({
+          client.item.groupBy({
             by: ['itemType'],
             where,
             _count: { _all: true },
           }),
-          (client.item as any).groupBy({
+          client.item.groupBy({
             by: ['year'],
             where,
             _count: { _all: true },
           }),
-          typeof (client as any).itemTag?.findMany === 'function'
-            ? (client as any).itemTag.findMany({
+          typeof client.itemTag?.findMany === 'function'
+            ? client.itemTag.findMany({
                 where: { item: where },
                 take: 1000,
                 select: { tag: { select: { name: true } } },
@@ -326,16 +326,14 @@ export class SearchRepository implements OnModuleInit {
         const itemTypes: Record<string, number> = {};
         for (const g of typeGroups || []) {
           if (g.itemType) {
-            itemTypes[g.itemType] =
-              g._count?._all ?? g._count?.id ?? Number(g._count) ?? 1;
+            itemTypes[g.itemType] = (g._count as { _all?: number })?._all ?? 1;
           }
         }
 
         const years: Record<number, number> = {};
         for (const g of yearGroups || []) {
           if (g.year != null) {
-            years[Number(g.year)] =
-              g._count?._all ?? g._count?.id ?? Number(g._count) ?? 1;
+            years[Number(g.year)] = (g._count as { _all?: number })?._all ?? 1;
           }
         }
 
@@ -348,9 +346,13 @@ export class SearchRepository implements OnModuleInit {
         }
 
         facetResult = { itemTypes, years, tags };
-      } catch (pushdownErr: any) {
+      } catch (pushdownErr: unknown) {
+        const message =
+          pushdownErr instanceof Error
+            ? pushdownErr.message
+            : String(pushdownErr);
         this.logger.debug(
-          `GroupBy pushdown aggregation fallback to scan: ${pushdownErr?.message}`,
+          `GroupBy pushdown aggregation fallback to scan: ${message}`,
         );
         facetResult = await this.computeFacetsFallback(client, where);
       }
@@ -362,8 +364,9 @@ export class SearchRepository implements OnModuleInit {
     if (this.cache) {
       try {
         await this.cache.set(cacheKey, facetResult, 120);
-      } catch (err: any) {
-        this.logger.debug(`Facet cache set error: ${err?.message}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Facet cache set error: ${message}`);
       }
     }
 
@@ -371,7 +374,7 @@ export class SearchRepository implements OnModuleInit {
   }
 
   private async computeFacetsFallback(
-    client: any,
+    client: Prisma.TransactionClient | PrismaService,
     where: Prisma.ItemWhereInput,
   ): Promise<FacetResult> {
     const items = await client.item.findMany({
@@ -438,7 +441,7 @@ export class SearchRepository implements OnModuleInit {
    */
   async checkFtsColumnExists(): Promise<void> {
     try {
-      const res: any[] = await this.prisma.$queryRaw`
+      const res = await this.prisma.$queryRaw<unknown[]>`
         SELECT 1 FROM pg_attribute a
         JOIN pg_class c ON c.oid = a.attrelid
         WHERE c.relname IN ('items', 'papers')

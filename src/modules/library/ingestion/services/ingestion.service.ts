@@ -221,6 +221,17 @@ export class IngestionService implements IngestionPort {
     return this.pipeline.executePipeline(runId, projectId, envelope);
   }
 
+  private parseExecutionLog(executionLog: unknown): Record<string, any> {
+    if (
+      executionLog &&
+      typeof executionLog === 'object' &&
+      !Array.isArray(executionLog)
+    ) {
+      return executionLog as Record<string, any>;
+    }
+    return {};
+  }
+
   async getRunStatus(
     /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
     scopeId: string,
@@ -231,7 +242,7 @@ export class IngestionService implements IngestionPort {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
 
-    const log = (run.executionLog as any) || {};
+    const log = this.parseExecutionLog(run.executionLog);
     const logItem =
       log.item ||
       (Array.isArray(log.items) && log.items.length > 0
@@ -290,11 +301,9 @@ export class IngestionService implements IngestionPort {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
 
-    const log = (run.executionLog as any) || {};
+    const log = this.parseExecutionLog(run.executionLog);
     const total = Number(log.total) || 1;
-    const isCompleted =
-      run.status === IngestionStatus.COMPLETED ||
-      (run.status as any) === 'READY';
+    const isCompleted = run.status === IngestionStatus.COMPLETED;
     const processed = Number(log.processed) || (isCompleted ? total : 0);
     const succeeded =
       Number(log.succeeded) || (isCompleted && !log.duplicates ? 1 : 0);
@@ -336,7 +345,7 @@ export class IngestionService implements IngestionPort {
       runId: run.id,
       projectId: scopeId,
       status: String(run.status),
-      currentStage: (run as any).currentStage || undefined,
+      currentStage: run.currentStage || undefined,
       total,
       processed,
       percentage,
@@ -456,7 +465,7 @@ export class IngestionService implements IngestionPort {
       attachmentIds: [],
       deduplicated: false,
       item,
-      errorMessage: (updatedRun as any)?.errorSummary?.lastError ?? undefined,
+      errorMessage: updatedRun?.lastError ?? undefined,
     };
   }
 
@@ -496,7 +505,7 @@ export class IngestionService implements IngestionPort {
         break;
       default:
         throw new BadRequestException(
-          `Unsupported ingestion source: ${(command as any).source}`,
+          `Unsupported ingestion source: ${String((command as { source?: unknown }).source)}`,
         );
     }
 

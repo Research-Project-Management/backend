@@ -14,7 +14,25 @@ export class PrismaIngestionRunRepositoryAdapter implements IIngestionRunReposit
     PrismaIngestionRunRepositoryAdapter.name,
   );
 
-  constructor(private readonly prisma: PrismaService) {}
+  private extractInputParams(inputParams: unknown): {
+    sourceType?: string;
+    totalItems?: number;
+  } {
+    if (
+      inputParams &&
+      typeof inputParams === 'object' &&
+      !Array.isArray(inputParams)
+    ) {
+      const rec = inputParams as Record<string, unknown>;
+      return {
+        sourceType:
+          typeof rec.sourceType === 'string' ? rec.sourceType : undefined,
+        totalItems:
+          typeof rec.totalItems === 'number' ? rec.totalItems : undefined,
+      };
+    }
+    return {};
+  }
 
   async findById(runId: string): Promise<IngestionRunAggregate | null> {
     const raw = await this.prisma.ingestionRun.findUnique({
@@ -23,13 +41,15 @@ export class PrismaIngestionRunRepositoryAdapter implements IIngestionRunReposit
 
     if (!raw) return null;
 
+    const params = this.extractInputParams(raw.inputParams);
+
     return IngestionRunAggregate.reconstitute({
       id: raw.id,
       userId: raw.userId,
       projectId: raw.projectId,
-      sourceType: (raw.inputParams as any)?.sourceType || 'manual',
+      sourceType: params.sourceType || 'manual',
       status: this.mapPrismaStatusToDomain(raw.status),
-      totalItems: (raw.inputParams as any)?.totalItems || 1,
+      totalItems: params.totalItems || 1,
       processedItems: raw.status === IngestionStatus.COMPLETED ? 1 : 0,
       failedItems: raw.status === IngestionStatus.FAILED_FINAL ? 1 : 0,
       errorReason: raw.lastError,
@@ -48,21 +68,22 @@ export class PrismaIngestionRunRepositoryAdapter implements IIngestionRunReposit
       take: limit,
     });
 
-    return records.map((raw) =>
-      IngestionRunAggregate.reconstitute({
+    return records.map((raw) => {
+      const params = this.extractInputParams(raw.inputParams);
+      return IngestionRunAggregate.reconstitute({
         id: raw.id,
         userId: raw.userId,
         projectId: raw.projectId,
-        sourceType: (raw.inputParams as any)?.sourceType || 'manual',
+        sourceType: params.sourceType || 'manual',
         status: this.mapPrismaStatusToDomain(raw.status),
-        totalItems: (raw.inputParams as any)?.totalItems || 1,
+        totalItems: params.totalItems || 1,
         processedItems: raw.status === IngestionStatus.COMPLETED ? 1 : 0,
         failedItems: raw.status === IngestionStatus.FAILED_FINAL ? 1 : 0,
         errorReason: raw.lastError,
         startedAt: raw.startedAt,
         completedAt: raw.completedAt,
-      }),
-    );
+      });
+    });
   }
 
   async save(aggregate: IngestionRunAggregate): Promise<void> {

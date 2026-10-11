@@ -172,6 +172,82 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     return results;
   }
 
+  public async collectLazyProjectEntries(
+    projectId: string,
+    includePdf = false,
+    cleanArxiv = false,
+  ): Promise<ExportableFileEntry[]> {
+    const nodes = await this.structureService.getAllNodes(projectId);
+    const nonFolderNodes = nodes.filter((n) => n.type !== 'FOLDER');
+    const results: ExportableFileEntry[] = [];
+
+    const candidates = nonFolderNodes
+      .map((node) => ({
+        node,
+        relPath: node.path.replace(/^\/+/, ''),
+      }))
+      .filter(
+        ({ relPath }) => relPath && (!cleanArxiv || isArxivAllowed(relPath)),
+      );
+
+    for (const { node, relPath } of candidates) {
+      if (node.type === 'DOC' && node.docId) {
+        const docId = node.docId;
+        results.push({
+          path: relPath,
+          getData: async () => {
+            const doc = await this.docstoreService.getDoc(projectId, docId);
+            const textContent = (doc.lines || []).join('\n');
+            return Buffer.from(textContent, 'utf8');
+          },
+        });
+      } else if (node.type === 'FILE' && node.fileId) {
+        const fileId = node.fileId;
+        results.push({
+          path: relPath,
+          getData: async () => {
+            const streamResult = await this.filestoreService.openReadStream(
+              projectId,
+              fileId,
+            );
+            return this.streamToBuffer(streamResult.stream);
+          },
+        });
+      }
+    }
+
+    if (cleanArxiv && this.clsiService) {
+      const hasBbl = results.some((r) => r.path.endsWith('.bbl'));
+      if (!hasBbl) {
+        results.push({
+          path: 'output.bbl',
+          getData: async () => {
+            const bblBuffer = await this.clsiService!.readAuxFileBuffer(
+              projectId,
+              'output.bbl',
+            );
+            return bblBuffer || Buffer.alloc(0);
+          },
+        });
+      }
+    }
+
+    if (includePdf && this.clsiService) {
+      results.push({
+        path: 'output.pdf',
+        getData: async () => {
+          const pdfBuffer = await this.clsiService!.readAuxFileBuffer(
+            projectId,
+            'output.pdf',
+          );
+          return pdfBuffer || Buffer.alloc(0);
+        },
+      });
+    }
+
+    return results;
+  }
+
   private async streamToBuffer(stream: Readable): Promise<Buffer> {
     const chunks: Buffer[] = [];
     return new Promise((resolve, reject) => {

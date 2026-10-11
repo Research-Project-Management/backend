@@ -243,6 +243,8 @@ export interface ItemMetadata {
   labels?: string[];
   keywords?: string[];
   notes?: Array<{ content: string; source?: string }>;
+  attachments?: unknown[];
+  isSelfSufficient?: boolean;
   rights?: string;
   license?: string;
   archive?: string;

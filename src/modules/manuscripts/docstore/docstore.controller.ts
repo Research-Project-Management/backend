@@ -31,7 +31,6 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { DocstoreService } from './docstore.service';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 import { CreateDocDto, UpdateDocDto, PatchDocDto } from './dto/doc.dto';
@@ -46,14 +45,14 @@ import {
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/docs',
+  'v1/manuscripts/projects/:projectId/docs',
   'api/manuscripts/projects/:projectId/docs',
   'manuscripts/projects/:projectId/docs',
   'api/projects/:projectId/pages',
   'projects/:projectId/pages',
   'docstore/project/:projectId',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
-@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+@UseGuards(JwtAuthGuard)
 export class DocstoreController {
   constructor(
     private readonly docstoreService: DocstoreService,
@@ -179,7 +178,6 @@ export class DocstoreController {
   }
 
   @Post('doc')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Create new document' })
   async createDoc(
     @Param('projectId') projectId: string,
@@ -193,7 +191,6 @@ export class DocstoreController {
   }
 
   @Post(['doc/:docId', ':docId'])
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update document lines with OCC revision check' })
   async updateDoc(
     @Param('projectId') projectId: string,
@@ -235,7 +232,6 @@ export class DocstoreController {
   }
 
   @Patch(['doc/:docId', ':docId'])
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Patch document metadata or soft-delete' })
   async patchDoc(
     @Param('projectId') projectId: string,
@@ -250,7 +246,6 @@ export class DocstoreController {
   }
 
   @Delete(['doc/:docId', ':docId'])
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary:
       'Delete document (Deprecated in Overleaf - returns error instructing PATCH)',
@@ -262,7 +257,6 @@ export class DocstoreController {
   }
 
   @Post('archive')
-  @ProjectRoles('owner', 'coordinator')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Archive all documents in project to Cold Tier (S3)',
@@ -276,7 +270,6 @@ export class DocstoreController {
   }
 
   @Post('doc/:docId/archive')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Archive single document to Cold Tier (S3)' })
   async archiveDoc(
@@ -291,7 +284,6 @@ export class DocstoreController {
   }
 
   @Post('unarchive')
-  @ProjectRoles('owner', 'coordinator')
   @ApiOperation({
     summary: 'Unarchive all documents in project from Cold Tier (S3)',
   })
@@ -305,7 +297,6 @@ export class DocstoreController {
   }
 
   @Post('destroy')
-  @ProjectRoles('owner')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Permanently destroy all documents in project' })
   async destroyAllDocs(@Param('projectId') projectId: string) {

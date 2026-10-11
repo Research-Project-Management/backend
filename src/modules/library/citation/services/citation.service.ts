@@ -34,11 +34,11 @@ export class CitationService {
 
   constructor(
     @Optional()
-    private readonly doiService: DoiContentNegotiationService = {} as any,
+    private readonly doiService?: DoiContentNegotiationService,
     @Optional()
     private readonly cslEngine: CslEngineService = new CslEngineService(),
     @Optional()
-    private readonly cslRepo: CslRepositoryService = {} as any,
+    private readonly cslRepo?: CslRepositoryService,
     @Optional()
     @Inject(CATALOG_GATEWAY_PORT)
     private readonly catalogGateway?: ICatalogGatewayPort,
@@ -53,6 +53,7 @@ export class CitationService {
    * Search across 10,000+ CSL styles from official repository.
    */
   async searchStyles(query: string = '', limit: number = 30) {
+    if (!this.cslRepo) return [];
     return this.cslRepo.searchStyles(query, limit);
   }
 
@@ -60,12 +61,21 @@ export class CitationService {
    * Registers an uploaded custom CSL XML stylesheet.
    */
   async registerCustomStyle(cslXml: string, title?: string) {
+    if (!this.cslRepo) {
+      throw new BadRequestException('CSL repository service unavailable');
+    }
     const meta = await this.cslRepo.registerCustomStyle(cslXml, title);
     await this.cslEngine.ensureTemplate(meta.id);
+    const validCategory = (
+      meta.category &&
+      ['author-date', 'numeric', 'label', 'raw'].includes(meta.category)
+        ? meta.category
+        : 'author-date'
+    ) as 'author-date' | 'numeric' | 'label' | 'raw';
     this.registry.registerStyle({
       id: meta.id,
       name: meta.title,
-      category: meta.category as any,
+      category: validCategory,
     });
     return meta;
   }
@@ -414,10 +424,12 @@ export class CitationService {
           (resolved.metadata.title || resolved.metadata.doi)
         ) {
           const work = this.mapItemMetadataToReferenceData(resolved.metadata);
+          const firstProv = Object.values(resolved.provenance || {})[0] as
+            { provider?: string } | undefined;
           const primaryProvider =
             resolved.provenance?.title?.provider ||
             resolved.provenance?.doi?.provider ||
-            (Object.values(resolved.provenance || {})[0] as any)?.provider ||
+            firstProv?.provider ||
             'AcademicMetadata';
 
           return {

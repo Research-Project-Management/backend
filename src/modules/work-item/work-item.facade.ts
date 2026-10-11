@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { WorkItemPriority } from '@prisma/client';
+import { WorkItemPriority, EntityType } from '@prisma/client';
 import { WorkItemRepository } from './core/core.repository';
 import {
   WorkItemWithRelations,
@@ -7,6 +7,7 @@ import {
 } from './core/types/work-item.types';
 import { StateService } from './state/state.service';
 import { WorkItemState } from './state/types/state.types';
+import { AttachmentService } from './attachment/attachment.service';
 
 export interface WorkItemSummary {
   id: string;
@@ -24,6 +25,25 @@ export interface WorkItemSummary {
   updatedAt: Date;
 }
 
+export interface LinkedWorkItemSummary {
+  linkId: string;
+  entityType: EntityType;
+  entityId: string;
+  description: string | null;
+  createdAt: Date;
+  workItem: {
+    id: string;
+    identifier: string | null;
+    title: string;
+    columnId: string;
+    state?: any;
+    priority: WorkItemPriority;
+    projectId: string;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+}
+
 export type WorkItemFilter = WorkItemFilterOptions;
 
 export interface IWorkItemFacade {
@@ -38,6 +58,13 @@ export interface IWorkItemFacade {
   ): Promise<WorkItemSummary[]>;
   getProjectStates(projectId: string): Promise<WorkItemState[]>;
   countWorkItemsByProject(projectId: string): Promise<number>;
+  getStateWorkItemCounts(projectId: string): Promise<Record<string, number>>;
+  getStateGroupCounts(projectId: string): Promise<Record<string, number>>;
+  getOverdueCount(projectId: string): Promise<number>;
+  getWorkItemsByLinkedEntity(
+    entityType: EntityType,
+    entityId: string,
+  ): Promise<LinkedWorkItemSummary[]>;
 }
 
 @Injectable()
@@ -45,6 +72,7 @@ export class WorkItemFacade implements IWorkItemFacade {
   constructor(
     private readonly workItemRepository: WorkItemRepository,
     private readonly stateService: StateService,
+    private readonly attachmentService: AttachmentService,
   ) {}
 
   private toSummary(workItem: WorkItemWithRelations): WorkItemSummary {
@@ -101,6 +129,32 @@ export class WorkItemFacade implements IWorkItemFacade {
 
   async countWorkItemsByProject(projectId: string): Promise<number> {
     return this.workItemRepository.countProjectWorkItems(projectId);
+  }
+
+  async getStateWorkItemCounts(
+    projectId: string,
+  ): Promise<Record<string, number>> {
+    return this.stateService.getStateWorkItemCounts(projectId);
+  }
+
+  async getStateGroupCounts(
+    projectId: string,
+  ): Promise<Record<string, number>> {
+    return this.workItemRepository.getStateGroupCounts(projectId);
+  }
+
+  async getOverdueCount(projectId: string): Promise<number> {
+    return this.workItemRepository.getOverdueCount(projectId);
+  }
+
+  async getWorkItemsByLinkedEntity(
+    entityType: EntityType,
+    entityId: string,
+  ): Promise<LinkedWorkItemSummary[]> {
+    return this.attachmentService.getWorkItemsByLinkedEntity(
+      entityType,
+      entityId,
+    );
   }
 }
 

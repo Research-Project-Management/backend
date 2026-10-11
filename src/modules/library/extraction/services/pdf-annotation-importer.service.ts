@@ -165,19 +165,31 @@ export class PdfAnnotationImporterService {
             height: normH,
           };
 
-          const isDuplicate = existingAnnotations.some((ea: any) => {
-            if (ea.pageIndex !== pageIndex || ea.type !== mappedType)
-              return false;
-            const eaRects = Array.isArray(ea.rectCoords)
-              ? (ea.rectCoords as any[])
-              : [];
-            if (eaRects.length === 0) return false;
-            const first = eaRects[0];
-            return (
-              Math.abs((first?.x1 ?? 0) - normX1) < 0.02 &&
-              Math.abs((first?.y1 ?? 0) - normY1) < 0.02
-            );
-          });
+          interface RectCoordLike {
+            x1?: number;
+            y1?: number;
+          }
+          interface ExistingAnnotationLike {
+            pageIndex?: number;
+            type?: string;
+            rectCoords?: unknown;
+          }
+
+          const isDuplicate = existingAnnotations.some(
+            (ea: ExistingAnnotationLike) => {
+              if (ea.pageIndex !== pageIndex || ea.type !== mappedType)
+                return false;
+              const eaRects = Array.isArray(ea.rectCoords)
+                ? (ea.rectCoords as RectCoordLike[])
+                : [];
+              if (eaRects.length === 0) return false;
+              const first = eaRects[0];
+              return (
+                Math.abs((first?.x1 ?? 0) - normX1) < 0.02 &&
+                Math.abs((first?.y1 ?? 0) - normY1) < 0.02
+              );
+            },
+          );
 
           if (isDuplicate) continue;
 

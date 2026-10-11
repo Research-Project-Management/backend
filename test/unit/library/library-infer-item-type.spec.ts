@@ -28,9 +28,9 @@ describe('inferItemTypeFromPdfSignals', () => {
   });
 
   // ──────────────────────────────────────────────────────────────
-  // Tier 2 – GROBID TEI structural signals
+  // Tier 2 – Native structural signals
   // ──────────────────────────────────────────────────────────────
-  describe('Tier 2 – GROBID structural signals', () => {
+  describe('Tier 2 – Native structural signals', () => {
     it('returns conferencePaper when conferenceName is present', () => {
       const result = inferItemTypeFromPdfSignals({
         title: 'Attention Is All You Need',

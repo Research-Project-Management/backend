@@ -6,7 +6,11 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import * as zlib from 'node:zlib';
+import { Readable } from 'node:stream';
+import { promisify } from 'node:util';
 import { IZipEnginePort, RawZipEntryInput } from '../../ports/zip-engine.port';
+
+const deflateRawAsync = promisify(zlib.deflateRaw);
 import { ArchiveEntryVo } from '../../domain/value-objects/archive-entry.vo';
 import { InvalidZipArchiveException } from '../../domain/exceptions/invalid-zip-archive.exception';
 import { ArchiveSizeExceededException } from '../../domain/exceptions/archive-size-exceeded.exception';
@@ -46,7 +50,7 @@ export class PkzipEngineAdapter extends IZipEnginePort {
       const nameBuf = Buffer.from(cleanPath, 'utf8');
       const rawData = Buffer.isBuffer(entry.data)
         ? entry.data
-        : Buffer.from(entry.data, 'utf8');
+        : Buffer.from(entry.data || '', 'utf8');
 
       const isEmpty = rawData.length === 0;
       const compressionMethod = isEmpty ? 0 : 8; // 0 = Store, 8 = Deflate
@@ -115,6 +119,114 @@ export class PkzipEngineAdapter extends IZipEnginePort {
     eocd.writeUInt16LE(0, 20); // Comment length
 
     return Buffer.concat([...localChunks, cdBuf, eocd]);
+  }
+
+  /**
+   * Encodes entries into a streaming PKZIP 2.0 Readable with backpressure.
+   * Lazily awaits getData() if provided, streaming payload chunk-by-chunk to reduce memory.
+   */
+  public createZipStream(entries: RawZipEntryInput[]): Readable {
+    return Readable.from(
+      (async function* () {
+        const cdChunks: Buffer[] = [];
+        let offset = 0;
+
+        for (const entry of entries) {
+          const cleanPath = entry.path.replace(/\\/g, '/').replace(/^\/+/, '');
+          if (!cleanPath) continue;
+
+          const nameBuf = Buffer.from(cleanPath, 'utf8');
+          let rawData: Buffer;
+          if (entry.getData) {
+            const resolved = await entry.getData();
+            rawData = Buffer.isBuffer(resolved)
+              ? resolved
+              : Buffer.from(resolved, 'utf8');
+          } else if (entry.data !== undefined) {
+            rawData = Buffer.isBuffer(entry.data)
+              ? entry.data
+              : Buffer.from(entry.data, 'utf8');
+          } else {
+            rawData = Buffer.alloc(0);
+          }
+
+          const isEmpty = rawData.length === 0;
+          const compressionMethod = isEmpty ? 0 : 8; // 0 = Store, 8 = Deflate
+          const compressedData: Buffer = isEmpty
+            ? Buffer.alloc(0)
+            : ((await deflateRawAsync(rawData, { level: 6 })) as Buffer);
+
+          const crc = zlib.crc32(rawData);
+          const { time: dosTime, date: dosDate } = toDosDateTime(entry.date);
+
+          // Local File Header (30 bytes)
+          const localHeader = Buffer.alloc(30);
+          localHeader.writeUInt32LE(0x04034b50, 0); // Local header signature
+          localHeader.writeUInt16LE(20, 4); // Version needed to extract (2.0)
+          localHeader.writeUInt16LE(0x0800, 6); // General purpose bit flag (UTF-8)
+          localHeader.writeUInt16LE(compressionMethod, 8);
+          localHeader.writeUInt16LE(dosTime, 10);
+          localHeader.writeUInt16LE(dosDate, 12);
+          localHeader.writeUInt32LE(crc, 14);
+          localHeader.writeUInt32LE(compressedData.length, 18);
+          localHeader.writeUInt32LE(rawData.length, 22);
+          localHeader.writeUInt16LE(nameBuf.length, 26);
+          localHeader.writeUInt16LE(0, 28); // Extra field length
+
+          const localRecordLength =
+            localHeader.length + nameBuf.length + compressedData.length;
+
+          // Central Directory Header (46 bytes)
+          const cdHeader = Buffer.alloc(46);
+          cdHeader.writeUInt32LE(0x02014b50, 0); // Central directory signature
+          cdHeader.writeUInt16LE(0x0314, 4); // Version made by (UNIX 2.0)
+          cdHeader.writeUInt16LE(20, 6); // Version needed to extract (2.0)
+          cdHeader.writeUInt16LE(0x0800, 8); // UTF-8
+          cdHeader.writeUInt16LE(compressionMethod, 10);
+          cdHeader.writeUInt16LE(dosTime, 12);
+          cdHeader.writeUInt16LE(dosDate, 14);
+          cdHeader.writeUInt32LE(crc, 16);
+          cdHeader.writeUInt32LE(compressedData.length, 20);
+          cdHeader.writeUInt32LE(rawData.length, 24);
+          cdHeader.writeUInt16LE(nameBuf.length, 28);
+          cdHeader.writeUInt16LE(0, 30);
+          cdHeader.writeUInt16LE(0, 32);
+          cdHeader.writeUInt16LE(0, 34);
+          cdHeader.writeUInt16LE(0, 36);
+          cdHeader.writeUInt32LE((0o100644 << 16) >>> 0, 38);
+          cdHeader.writeUInt32LE(offset, 42);
+
+          cdChunks.push(Buffer.concat([cdHeader, nameBuf]));
+          offset += localRecordLength;
+
+          yield localHeader;
+          yield nameBuf;
+          if (compressedData.length > 0) {
+            yield compressedData;
+          }
+        }
+
+        const cdStart = offset;
+        let cdSize = 0;
+        for (const cd of cdChunks) {
+          cdSize += cd.length;
+          yield cd;
+        }
+
+        // End of Central Directory (22 bytes)
+        const eocd = Buffer.alloc(22);
+        eocd.writeUInt32LE(0x06054b50, 0);
+        eocd.writeUInt16LE(0, 4);
+        eocd.writeUInt16LE(0, 6);
+        eocd.writeUInt16LE(cdChunks.length, 8);
+        eocd.writeUInt16LE(cdChunks.length, 10);
+        eocd.writeUInt32LE(cdSize, 12);
+        eocd.writeUInt32LE(cdStart, 16);
+        eocd.writeUInt16LE(0, 20);
+
+        yield eocd;
+      })(),
+    );
   }
 
   /**

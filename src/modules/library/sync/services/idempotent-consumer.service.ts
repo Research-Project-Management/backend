@@ -17,7 +17,7 @@ interface MemoryInboxEntry {
  * Idempotent Consumer & Deduplication Log Service (Inbox Pattern).
  *
  * Guarantees exactly-once processing semantics for distributed event subscribers
- * and asynchronous background consumers (such as GROBID extraction, OCR, indexing).
+ * and asynchronous background consumers (such as PDF extraction, OCR, indexing).
  *
  * Employs atomic Redis lease locking (`SET ... NX EX`) with automatic in-memory LRU fallback.
  */

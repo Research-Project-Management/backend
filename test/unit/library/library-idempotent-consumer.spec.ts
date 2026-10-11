@@ -326,9 +326,9 @@ describe('IdempotentConsumerService & Inbox Pattern', () => {
           buffer: Buffer.from('%PDF-1.4 mock content'),
         }),
         uploadFile: jest.fn().mockResolvedValue({
-          fileId: 'grobid-storage-id',
-          url: '/api/files/grobid-storage-id',
-          path: 'extractions/item-1/grobid_fulltext.json.gz',
+          fileId: 'mextract-storage-id',
+          url: '/api/files/mextract-storage-id',
+          path: 'extractions/item-1/pdf_fulltext.json.gz',
         }),
       };
 

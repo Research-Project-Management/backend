@@ -3,6 +3,7 @@ import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { isUUID } from 'class-validator';
 import { deriveProjectIdentifierPrefix } from '../utils/work-item.util';
+import { WORK_ITEM_REDIS_KEYS } from '../constants/redis-keys.constant';
 
 export interface NextIdentifierResult {
   identifier: string;
@@ -49,25 +50,15 @@ export class IdHandler {
   private async getNextSequence(projectId: string): Promise<number> {
     if (this.cache) {
       try {
-        const client = (
-          this.cache as unknown as {
-            client?: {
-              exists: (k: string) => Promise<number>;
-              set: (k: string, v: string) => Promise<string>;
-              incr: (k: string) => Promise<number>;
-            };
-          }
-        ).client;
-
-        if (client) {
-          const key = `work-item:seq:${projectId}`;
-          const exists = await client.exists(key);
-          if (!exists) {
-            const maxSeq = await this.getMaxSequenceFromDb(projectId);
-            await client.set(key, maxSeq.toString());
-          }
-          const next = await client.incr(key);
-          return Number(next);
+        const key = WORK_ITEM_REDIS_KEYS.sequence(projectId);
+        const exists = await this.cache.exists(key);
+        if (!exists) {
+          const maxSeq = await this.getMaxSequenceFromDb(projectId);
+          await this.cache.set(key, maxSeq.toString());
+        }
+        const next = await this.cache.incr(key);
+        if (next > 0) {
+          return next;
         }
       } catch (err) {
         this.logger.warn(

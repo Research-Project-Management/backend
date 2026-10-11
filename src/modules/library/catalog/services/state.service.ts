@@ -3,7 +3,6 @@ import {
   NotFoundException,
   BadRequestException,
   Inject,
-  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StateRepository } from '../repositories/state.repository';
@@ -33,8 +32,7 @@ import {
 export class StateService {
   constructor(
     private readonly stateRepository: StateRepository,
-    @Optional()
-    private readonly libraryTx?: TransactionService,
+    private readonly libraryTx: TransactionService,
     @Inject(ITEM_EXISTENCE_PORT)
     private readonly itemExistencePort?: IItemExistencePort,
   ) {}
@@ -127,7 +125,10 @@ export class StateService {
     };
 
     const effectiveProjectId =
-      projectId || (item as any)?.projectId || undefined;
+      projectId ||
+      ('projectId' in item && typeof item.projectId === 'string'
+        ? item.projectId
+        : undefined);
     const eventScope = { userId, projectId: effectiveProjectId };
 
     const execute = async (
@@ -170,17 +171,7 @@ export class StateService {
       return this.toResponse(updated);
     };
 
-    if (this.libraryTx) {
-      return this.libraryTx.executeInTransaction(execute);
-    }
-    const fallbackHelpers = {
-      appendChange: (async () => ({}) as any) as any,
-      publishOutbox: (async () => ({}) as any) as any,
-    } as TransactionHelpers;
-    return execute(
-      (this.stateRepository as any).prisma || (this.stateRepository as any),
-      fallbackHelpers,
-    );
+    return this.libraryTx.executeInTransaction(execute);
   }
 
   async markAsRead(
@@ -197,8 +188,7 @@ export class StateService {
         : ReadingStatus.READING;
 
     const now = new Date();
-    const effectiveProjectId =
-      projectId || (item as any)?.projectId || undefined;
+    const effectiveProjectId = projectId || item.projectId || undefined;
     const eventScope = { userId, projectId: effectiveProjectId };
 
     const execute = async (
@@ -244,17 +234,7 @@ export class StateService {
       return this.toResponse(updated);
     };
 
-    if (this.libraryTx) {
-      return this.libraryTx.executeInTransaction(execute);
-    }
-    const fallbackHelpers = {
-      appendChange: (async () => ({}) as any) as any,
-      publishOutbox: (async () => ({}) as any) as any,
-    } as TransactionHelpers;
-    return execute(
-      (this.stateRepository as any).prisma || (this.stateRepository as any),
-      fallbackHelpers,
-    );
+    return this.libraryTx.executeInTransaction(execute);
   }
 
   private async assertItemExists(
@@ -318,7 +298,7 @@ export class StateService {
 
     for (const [userId, states] of userStateByUser.entries()) {
       const maxRating = Math.max(...states.map((s) => s.rating || 0));
-      const isStarred = states.some((s) => Boolean((s as any).isStarred));
+      const isStarred = states.some((s) => Boolean(s.isStarred));
       const isCompleted = states.some((s) => s.readStatus === 'completed');
       const isReading = states.some((s) => s.readStatus === 'reading');
       const readStatus = isCompleted

@@ -181,8 +181,8 @@ export function packExtraPayload(
 }
 
 /**
- * Resolves the Extra plain text field according to Zotero standard.
- * In Zotero, the Extra field contains user notes and translator variables (e.g. arXiv: ..., PMID: ...).
+ * Resolves the Extra plain text field according to bibliographic standards.
+ * The Extra field contains user notes and bibliographic variables (e.g. arXiv: ..., PMID: ...).
  * It is never an internal bucket for dumping unmapped schema or telemetry fields.
  */
 export function resolveExtraPlainText(
@@ -255,10 +255,10 @@ export function resolveExtraPlainText(
 }
 
 export function extractNonColumnExtraFields(
-  data?: Record<string, any> | null,
-  existingExtraFields?: Record<string, any> | null,
-): Record<string, any> {
-  const result: Record<string, any> = { ...(existingExtraFields || {}) };
+  data?: Record<string, unknown> | null,
+  existingExtraFields?: Record<string, unknown> | null,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...(existingExtraFields || {}) };
   if (!data || typeof data !== 'object') return result;
 
   const ignoredSystemKeys = new Set([
@@ -721,7 +721,8 @@ export async function resolveOrCreateTags(
       if (typeof rt === 'object' && rt !== null) {
         const tagName = (rt.name || rt.tag || '').trim();
         if (tagName) {
-          const typeVal = (rt as any).type;
+          const typeVal =
+            'type' in rt ? (rt as { type?: unknown }).type : undefined;
           if (
             typeVal === 1 ||
             typeVal === 'automatic' ||
@@ -794,7 +795,8 @@ export async function syncTagsForCatalogItem(
       if (typeof rt === 'object' && rt !== null) {
         const tagName = (rt.name || rt.tag || '').trim();
         if (tagName) {
-          const typeVal = (rt as any).type;
+          const typeVal =
+            'type' in rt ? (rt as { type?: unknown }).type : undefined;
           if (
             typeVal === 1 ||
             typeVal === 'automatic' ||
@@ -987,7 +989,10 @@ export async function buildCommandCreateInput(
     data.network ??
     '';
 
-  const effectiveExtraFields = extractNonColumnExtraFields(data as any, null);
+  const effectiveExtraFields = extractNonColumnExtraFields(
+    data as Record<string, unknown>,
+    null,
+  );
 
   const rawDate =
     data.publicationDate ?? data.date ?? (data.year ? String(data.year) : '');
@@ -1069,7 +1074,7 @@ export async function buildCommandCreateInput(
         }
       : {}),
     ...(data.relations ? { relations: data.relations } : {}),
-    ...((data as any).seeAlso ? { seeAlso: (data as any).seeAlso } : {}),
+    ...('seeAlso' in data && data.seeAlso ? { seeAlso: data.seeAlso } : {}),
     tags: normalizeTags(rawTagList),
     keywords: normalizeTags(rawTagList),
     labels: normalizeTags(rawTagList),
@@ -1246,6 +1251,7 @@ export function buildCommandUpdateInput(
   userId: string,
   existing: any,
   data: UpdateItemData,
+  options?: { skipVersionIncrement?: boolean },
 ): {
   updateData: Prisma.ItemUpdateInput;
   cleanIds: {
@@ -1277,7 +1283,7 @@ export function buildCommandUpdateInput(
   const { cleanExtra: existingRawExtra, extraFields: existingParsedFields } =
     unpackExtraFromDb(existing.extra);
   const effectiveExtraFields = extractNonColumnExtraFields(
-    data as any,
+    data as Record<string, unknown>,
     existingParsedFields,
   );
 
@@ -1642,7 +1648,7 @@ export function buildCommandUpdateInput(
           },
         }
       : {}),
-    version: { increment: 1 },
+    ...(options?.skipVersionIncrement ? {} : { version: { increment: 1 } }),
   };
 
   return {

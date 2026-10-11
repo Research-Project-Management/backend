@@ -240,6 +240,32 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async exists(key: string): Promise<boolean> {
+    if (this.memoryCache.has(key)) return true;
+    if (!this.isReady() || !this.redisClient) return false;
+    try {
+      const res = await this.redisClient.exists(key);
+      return res > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  async incr(key: string): Promise<number> {
+    if (!this.isReady() || !this.redisClient) {
+      const current = this.memoryCache.get(key);
+      const next = (Number(current?.value) || 0) + 1;
+      this.memoryCache.set(key, { value: next.toString() });
+      return next;
+    }
+    try {
+      return await this.redisClient.incr(key);
+    } catch (err: unknown) {
+      this.logger.warn(`INCR failed for key "${key}": ${getErrorMessage(err)}`);
+      return 0;
+    }
+  }
+
   async del(key: string): Promise<void> {
     this.memoryCache.delete(key);
     if (!this.isReady() || !this.redisClient) return;

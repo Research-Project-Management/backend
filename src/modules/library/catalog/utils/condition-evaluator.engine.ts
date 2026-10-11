@@ -1,5 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, ReadStatus } from '@prisma/client';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { TreeEngine } from './tree.engine';
 import {
@@ -7,6 +7,7 @@ import {
   SavedSearchConditionGroup,
   isConditionGroup,
   SavedSearchOperator,
+  SavedSearchScopeOptions,
 } from '../types/saved-search.types';
 import { FIELD_ALIASES } from '../types/items.constants';
 
@@ -57,7 +58,11 @@ export class ConditionEvaluatorEngine {
       return baseWhere;
     }
 
-    const scopeOptions = group.scopeOptions || (group as any).options || {};
+    const optionsFallback =
+      'options' in group && group.options && typeof group.options === 'object'
+        ? (group.options as SavedSearchScopeOptions)
+        : {};
+    const scopeOptions = group.scopeOptions || optionsFallback;
     const searchSubcollections = scopeOptions.searchSubcollections !== false;
 
     // If Prisma is available and subcollection search is enabled, resolve descendants asynchronously
@@ -96,7 +101,7 @@ export class ConditionEvaluatorEngine {
 
       for (const colId of referencedCollectionIds) {
         const descendants = this.treeEngine.getDescendantIds(
-          allCollections as any,
+          allCollections,
           colId,
         );
         descendantMap.set(colId, [colId, ...descendants]);
@@ -114,7 +119,11 @@ export class ConditionEvaluatorEngine {
     baseWhere: Prisma.ItemWhereInput,
     descendantMap: Map<string, string[]>,
   ): Prisma.ItemWhereInput {
-    const scopeOptions = group.scopeOptions || (group as any).options || {};
+    const optionsFallback =
+      'options' in group && group.options && typeof group.options === 'object'
+        ? (group.options as SavedSearchScopeOptions)
+        : {};
+    const scopeOptions = group.scopeOptions || optionsFallback;
     const showOnlyTopLevel = Boolean(scopeOptions.showOnlyTopLevel);
 
     const compiledGroup = this.evaluateGroup(group, userId, descendantMap);
@@ -496,7 +505,8 @@ export class ConditionEvaluatorEngine {
         if (!userId) {
           return null;
         }
-        const targetStatus = (strVal || 'unread') as any;
+        const targetStatus: ReadStatus =
+          strVal === 'reading' || strVal === 'completed' ? strVal : 'unread';
         if (operator === 'isNot') {
           if (targetStatus === 'unread') {
             return {

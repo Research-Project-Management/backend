@@ -5,8 +5,8 @@
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $ScriptDir
 
-# If node is installed, run start-env.mjs
-if (Get-Command node -ErrorAction SilentlyContinue) {
+# If node is installed and start-env.mjs exists, run it
+if ((Get-Command node -ErrorAction SilentlyContinue) -and (Test-Path "$ScriptDir\scripts\start-env.mjs")) {
     node "$ScriptDir\scripts\start-env.mjs" $args
     exit $LASTEXITCODE
 }

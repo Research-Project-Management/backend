@@ -52,7 +52,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       findById: jest.fn().mockResolvedValue(mockDbItem),
       findMetadataSourceRecord: jest.fn().mockResolvedValue({
         id: 'meta-1',
-        source: 'grobid_fulltext',
+        source: 'pdf_fulltext',
         rawPayload: {
           title: 'Attention Is All You Need',
           abstract: 'We propose the Transformer...',
@@ -230,6 +230,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
 
     it('should return cached fulltext instantly on cache hit without re-reading metadata', async () => {
       const cachedFulltext = {
+        userId: mockUserId,
         title: 'Attention Is All You Need',
         abstract: 'Cached abstract...',
         sections: [{ title: 'Intro', text: '...' }],

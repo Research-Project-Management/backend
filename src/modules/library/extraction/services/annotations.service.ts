@@ -395,7 +395,7 @@ export class AnnotationsService {
     });
     if (!existing) return;
 
-    let effectiveProjectId = command.projectId || (command as any).projectId;
+    let effectiveProjectId = command.projectId;
     try {
       const attachment = await this.attachmentsService.assertAttachmentExists(
         existing.attachmentId,

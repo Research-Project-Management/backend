@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, Item } from '@prisma/client';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { isUUID } from 'class-validator';
 import {
@@ -12,6 +12,22 @@ const isValidId = (val?: unknown): val is string =>
   typeof val === 'string' &&
   Boolean(val) &&
   (process.env.NODE_ENV === 'test' || isUUID(val));
+
+interface ItemRetractionMetadata {
+  pmid?: string | null;
+  isRetracted?: boolean;
+  retractionNature?: RetractionNature | null;
+  retractionDetails?: RetractionDetails | null;
+  retractionCheckedAt?: string | null;
+  [key: string]: unknown;
+}
+
+function parseItemMetadata(metadata: unknown): ItemRetractionMetadata {
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return metadata as ItemRetractionMetadata;
+  }
+  return {};
+}
 
 /**
  * Filter matching Zotero's retraction checking constraint:
@@ -80,7 +96,7 @@ export class RetractionRepository {
 
     return items
       .map((item) => {
-        const meta = (item.metadata as any) ?? {};
+        const meta = parseItemMetadata(item.metadata);
         return {
           id: item.id,
           title: item.title,
@@ -119,7 +135,7 @@ export class RetractionRepository {
 
     return items
       .map((item) => {
-        const meta = (item.metadata as any) ?? {};
+        const meta = parseItemMetadata(item.metadata);
         return {
           id: item.id,
           title: item.title,
@@ -145,21 +161,23 @@ export class RetractionRepository {
     nature?: RetractionNature | null,
     details?: RetractionDetails | null,
     checkedAt: Date = new Date(),
-  ) {
-    if (!isValidId(itemId)) return null as any;
+  ): Promise<Item | null> {
+    if (!isValidId(itemId)) return null;
     const existing = await this.prisma.item.findUnique({
       where: { id: itemId },
       select: { metadata: true },
     });
-    const metadataObj: any = (existing?.metadata as any) ?? {};
-    metadataObj.isRetracted = isRetracted;
-    metadataObj.retractionNature = nature || null;
-    metadataObj.retractionDetails = details || null;
-    metadataObj.retractionCheckedAt = checkedAt.toISOString();
+    const metadataObj: ItemRetractionMetadata = {
+      ...parseItemMetadata(existing?.metadata),
+      isRetracted,
+      retractionNature: nature || null,
+      retractionDetails: details || null,
+      retractionCheckedAt: checkedAt.toISOString(),
+    };
 
     return this.prisma.item.update({
       where: { id: itemId },
-      data: { metadata: metadataObj },
+      data: { metadata: metadataObj as unknown as Prisma.InputJsonValue },
     });
   }
 
@@ -181,8 +199,8 @@ export class RetractionRepository {
       },
     });
     return items.filter((item) => {
-      const meta = (item.metadata as any) ?? {};
-      return meta.isRetracted === true || (item as any).isRetracted === true;
+      const meta = parseItemMetadata(item.metadata);
+      return meta.isRetracted === true;
     });
   }
 
@@ -207,7 +225,7 @@ export class RetractionRepository {
     let manual = 0;
 
     for (const item of retractedItems) {
-      const meta = (item.metadata as any) ?? {};
+      const meta = parseItemMetadata(item.metadata);
       if (meta.isRetracted) {
         retracted++;
         if (meta.retractionNature === 'expression_of_concern')
@@ -245,7 +263,7 @@ export class RetractionRepository {
 
     return items
       .map((item) => {
-        const meta = (item.metadata as any) ?? {};
+        const meta = parseItemMetadata(item.metadata);
         return {
           id: item.id,
           userId: item.userId,

@@ -43,9 +43,13 @@ export class OutboxWorker
     private readonly bullQueue?: Queue,
   ) {
     this.workerId = `outbox-worker-${process.pid}-${randomUUID().slice(0, 8)}`;
-    if (this.bullQueue && typeof (this.bullQueue as any).on === 'function') {
-      (this.bullQueue as any).on('error', (err: any) => {
-        this.logger.warn(`Outbox BullMQ queue notice: ${err?.message || err}`);
+    const queueEmitter = this.bullQueue as unknown as {
+      on?: (event: string, cb: (err: unknown) => void) => void;
+    };
+    if (typeof queueEmitter?.on === 'function') {
+      queueEmitter.on('error', (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Outbox BullMQ queue notice: ${message}`);
       });
     }
   }
@@ -395,9 +399,31 @@ export class OutboxWorker
     const newLeaseExpiresAt = new Date(Date.now() + leaseMs);
 
     // 1. Production PostgreSQL path: Atomic batch claim with SKIP LOCKED
-    if (typeof (this.prisma as any).$queryRaw === 'function') {
+    if (typeof this.prisma.$queryRaw === 'function') {
       try {
-        const rows: any[] = await (this.prisma as any).$queryRaw`
+        const rows = await this.prisma.$queryRaw<
+          Array<{
+            id: string;
+            userId: string;
+            projectId: string | null;
+            aggregateId: string;
+            eventType: string;
+            payload: any;
+            status: OutboxStatus;
+            retryCount: number;
+            error: string | null;
+            scheduledAt: Date | string | null;
+            claimedAt: Date | string | null;
+            leaseExpiresAt: Date | string | null;
+            claimedBy: string | null;
+            dedupeKey: string | null;
+            createdAt: Date | string;
+            updatedAt: Date | string;
+            processedAt: Date | string | null;
+            previousStatus: OutboxStatus;
+            previousLeaseExpiresAt: Date | string | null;
+          }>
+        >`
           WITH candidates AS (
             SELECT id, status, lease_expires_at
             FROM outbox_events
@@ -469,9 +495,10 @@ export class OutboxWorker
           }));
         }
         return [];
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.debug(
-          `Atomic raw claim skipped or unavailable (${err?.message}); falling back to ORM optimistic claim`,
+          `Atomic raw claim skipped or unavailable (${message}); falling back to ORM optimistic claim`,
         );
       }
     }

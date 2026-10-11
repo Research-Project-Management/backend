@@ -6,7 +6,7 @@ export { BaseAttachmentMetadataDto };
 export * from './presign-attachment.dto';
 export * from './query-attachment.dto';
 
-export class CreateAttachmentDto extends BaseAttachmentMetadataDto {
+export class AddAttachmentDto extends BaseAttachmentMetadataDto {
   @ApiPropertyOptional({ description: 'Filename', example: 'specs.pdf' })
   @IsOptional()
   @IsString()
@@ -30,8 +30,10 @@ export class CreateAttachmentDto extends BaseAttachmentMetadataDto {
 }
 
 // Backward compatibility alias
-export const CreateWorkItemAttachmentDto = CreateAttachmentDto;
-export type CreateWorkItemAttachmentDto = CreateAttachmentDto;
+export const CreateAttachmentDto = AddAttachmentDto;
+export type CreateAttachmentDto = AddAttachmentDto;
+export const CreateWorkItemAttachmentDto = AddAttachmentDto;
+export type CreateWorkItemAttachmentDto = AddAttachmentDto;
 
 export class AttachPageDto {
   @ApiProperty({

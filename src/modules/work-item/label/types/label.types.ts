@@ -19,27 +19,14 @@ export interface ReorderLabelItem {
   sortOrder: number;
 }
 
-export interface ImportLabelRow {
-  name: string;
-  color?: string;
-  description?: string;
-}
-
-export interface ImportLabelResult {
-  created: number;
-  skipped: number;
-  failed: number;
-  labels: Label[];
-}
-
 export interface ILabelRepository {
   findProjectLabels(
     projectId: string,
-    type?: LabelType,
+    type?: string,
   ): Promise<LabelWithChildren[]>;
   findUserLabels(
     userId: string,
-    type?: LabelType,
+    type?: string,
     projectId?: string | null,
   ): Promise<Label[]>;
   findById(labelId: string): Promise<LabelWithChildren | null>;
@@ -70,10 +57,5 @@ export interface ILabelRepository {
     projectId: string,
     labelIds: string[],
     labelNames?: string[],
-  ): Promise<number>;
-  detachFromPages(projectId: string, labelId: string): Promise<number>;
-  detachMultipleFromPages(
-    projectId: string,
-    labelIds: string[],
   ): Promise<number>;
 }

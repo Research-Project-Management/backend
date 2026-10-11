@@ -124,7 +124,10 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
         for (const doc of mockDbDocs.values()) {
           if (doc.id === where.id && doc.projectId === where.projectId) {
             if (where.rev !== undefined && doc.rev !== where.rev) continue;
-            Object.assign(doc, data);
+            const updatedRev = data.rev?.increment
+              ? doc.rev + 1
+              : (data.rev ?? doc.rev);
+            Object.assign(doc, data, { rev: updatedRev });
             count++;
           }
         }

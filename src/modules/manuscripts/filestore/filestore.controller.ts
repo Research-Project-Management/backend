@@ -22,7 +22,6 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -40,11 +39,11 @@ import { FilestoreService } from './filestore.service';
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/files',
+  'v1/manuscripts/projects/:projectId/files',
   'manuscripts/projects/:projectId/files',
   'project/:projectId/file',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
-@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+@UseGuards(JwtAuthGuard)
 export class FilestoreController {
   constructor(
     private readonly uploadUseCase: UploadManuscriptFileUseCase,
@@ -56,7 +55,6 @@ export class FilestoreController {
   ) {}
 
   @Post()
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   public async uploadFile(
     @Param('projectId') projectId: string,
@@ -259,7 +257,6 @@ export class FilestoreController {
   }
 
   @Delete(':fileId')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   public async deleteFile(
     @Param('projectId') projectId: string,

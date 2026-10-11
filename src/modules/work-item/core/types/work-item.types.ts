@@ -219,9 +219,6 @@ export interface IWorkItemRepository {
     projectId: string,
     identifier: string,
   ): Promise<WorkItemWithRelations | null>;
-  nextProjectWorkItemIdentifier(
-    projectId: string,
-  ): Promise<{ identifier: string; sequenceNumber: number }>;
   createWorkItem(
     data: Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput,
   ): Promise<WorkItemWithRelations>;

@@ -3,7 +3,7 @@
  */
 
 import { WorkItem } from '@prisma/client';
-import type { StateGroup } from '@/modules/work-item/state/types/state.types';
+import type { StateGroup } from '@/modules/work-item';
 
 export interface ProjectWorkloadBreakdown {
   projectId: string;

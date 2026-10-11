@@ -302,8 +302,19 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     const rawVector = this.normalizeToUint8Array(stateVector);
 
     try {
+      let stateVectorToUse = rawVector;
+      try {
+        const dec = decoding.createDecoder(rawVector);
+        const msgType = decoding.readVarUint(dec);
+        if (msgType === syncProtocol.messageYjsSyncStep1) {
+          stateVectorToUse = decoding.readVarUint8Array(dec);
+        }
+      } catch {
+        // Direct raw state vector
+      }
+
       const encoder = encoding.createEncoder();
-      syncProtocol.writeSyncStep2(encoder, session.doc, rawVector);
+      syncProtocol.writeSyncStep2(encoder, session.doc, stateVectorToUse);
       syncProtocol.writeSyncStep1(encoder, session.doc);
       return Buffer.from(encoding.toUint8Array(encoder));
     } catch (err: any) {
@@ -326,24 +337,25 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     const rawUpdate = this.normalizeToUint8Array(update);
     if (!rawUpdate || rawUpdate.length === 0) return;
 
-    // 1. Try applying directly as raw Y.Doc binary update
+    // 1. Try decoding as y-protocols sync step 2 or update message
     try {
-      Y.applyUpdate(session.doc, rawUpdate, origin);
-      return;
-    } catch {
-      // Not raw update bytes, fall through
-    }
-
-    // 2. Try decoding as y-protocols sync step 2 message
-    try {
-      const decoder = decoding.createDecoder(rawUpdate);
-      const firstByte = decoding.readVarUint(decoder);
-      if (firstByte === syncProtocol.messageYjsSyncStep2) {
-        syncProtocol.readSyncStep2(decoder, session.doc, origin);
+      const dec = decoding.createDecoder(rawUpdate);
+      const msgType = decoding.readVarUint(dec);
+      if (
+        msgType === syncProtocol.messageYjsSyncStep2 ||
+        msgType === syncProtocol.messageYjsUpdate
+      ) {
+        const innerUpdate = decoding.readVarUint8Array(dec);
+        Y.applyUpdate(session.doc, innerUpdate, origin);
         return;
       }
-      const retryDecoder = decoding.createDecoder(rawUpdate);
-      syncProtocol.readSyncStep2(retryDecoder, session.doc, origin);
+    } catch {
+      // Fall through to direct apply
+    }
+
+    // 2. Direct apply as raw Y.Doc binary update
+    try {
+      Y.applyUpdate(session.doc, rawUpdate, origin);
     } catch (err: any) {
       this.logger.warn(`handleSyncStep2 error: ${err?.message}`);
     }
@@ -364,12 +376,39 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     if (!rawBytes || rawBytes.length === 0) return Buffer.alloc(0);
 
     try {
-      // Apply incremental update
-      Y.applyUpdate(session.doc, rawBytes, origin);
+      // 1. Extract raw update if client packaged it inside y-protocols sync message
+      let updateToApply: Uint8Array = rawBytes;
+      try {
+        const dec = decoding.createDecoder(rawBytes);
+        const msgType = decoding.readVarUint(dec);
+        if (
+          msgType === syncProtocol.messageYjsUpdate ||
+          msgType === syncProtocol.messageYjsSyncStep2
+        ) {
+          const candidate = decoding.readVarUint8Array(dec);
+          if (dec.pos === rawBytes.length) {
+            updateToApply = candidate;
+          }
+        }
+      } catch {
+        // Direct update bytes
+      }
 
-      // Re-package as standard sync update frame for room broadcast
+      // 2. Apply incremental update to server Y.Doc (with rawBytes fallback)
+      try {
+        Y.applyUpdate(session.doc, updateToApply, origin);
+      } catch (applyErr) {
+        if (updateToApply !== rawBytes) {
+          Y.applyUpdate(session.doc, rawBytes, origin);
+          updateToApply = rawBytes;
+        } else {
+          throw applyErr;
+        }
+      }
+
+      // 3. Package as standard y-protocols sync update frame for room broadcast
       const encoder = encoding.createEncoder();
-      syncProtocol.writeUpdate(encoder, rawBytes);
+      syncProtocol.writeUpdate(encoder, updateToApply);
       return Buffer.from(encoding.toUint8Array(encoder));
     } catch (err: any) {
       this.logger.warn(`handleSyncUpdate error: ${err?.message}`);

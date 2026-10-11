@@ -36,10 +36,20 @@ export class ForwardSyncDto {
   @IsOptional()
   projectId?: string;
 
+  @ApiPropertyOptional({ description: 'Project ID context (snake_case)' })
+  @IsString()
+  @IsOptional()
+  project_id?: string;
+
   @ApiPropertyOptional({ description: 'Document page ID context' })
   @IsString()
   @IsOptional()
   pageId?: string;
+
+  @ApiPropertyOptional({ description: 'Document page ID context (snake_case)' })
+  @IsString()
+  @IsOptional()
+  page_id?: string;
 
   @ApiPropertyOptional({
     description: 'Raw plaintext SyncTeX data from compilation',
@@ -68,10 +78,20 @@ export class ReverseSyncDto {
   @IsOptional()
   projectId?: string;
 
+  @ApiPropertyOptional({ description: 'Project ID context (snake_case)' })
+  @IsString()
+  @IsOptional()
+  project_id?: string;
+
   @ApiPropertyOptional({ description: 'Document page ID context' })
   @IsString()
   @IsOptional()
   pageId?: string;
+
+  @ApiPropertyOptional({ description: 'Document page ID context (snake_case)' })
+  @IsString()
+  @IsOptional()
+  page_id?: string;
 
   @ApiPropertyOptional({
     description: 'Raw plaintext SyncTeX data from compilation',

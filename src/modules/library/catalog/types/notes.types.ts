@@ -29,6 +29,7 @@ export interface UpdateNoteData {
   contentJson?: Record<string, unknown> | null;
   contentMd?: string;
   tags?: string[];
+  expectedVersion?: number;
 }
 
 export interface ExtractLiteratureNoteResult {

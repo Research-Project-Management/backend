@@ -24,7 +24,6 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { SpellingService } from './spelling.service';
 import {
   CheckSpellingDto,
@@ -40,11 +39,11 @@ import { InvalidWordException } from './core/domain/exceptions/invalid-word.exce
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/spelling',
+  'v1/manuscripts/projects/:projectId/spelling',
   'manuscripts/projects/:projectId/spelling',
   'projects/:projectId/spelling',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
-@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+@UseGuards(JwtAuthGuard)
 export class SpellingController {
   constructor(private readonly spellingService: SpellingService) {}
 
@@ -72,7 +71,11 @@ export class SpellingController {
   ): Promise<SpellingReportDto> {
     try {
       const userId =
-        req?.user?.id || req?.headers?.['x-user-id'] || 'user-default';
+        req?.user?.id ||
+        req?.user?.sub ||
+        req?.user?.userId ||
+        req?.headers?.['x-user-id'] ||
+        'user-default';
       return await this.spellingService.checkDocumentSpelling(
         projectId,
         userId,
@@ -93,7 +96,6 @@ export class SpellingController {
   }
 
   @Post('dictionary/learn')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Add a custom word to the project dictionary' })
   @ApiResponse({ status: 200, description: 'Word added to project dictionary' })
@@ -110,7 +112,6 @@ export class SpellingController {
   }
 
   @Delete('dictionary/:word')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Remove a custom word from the project dictionary' })
   async unlearnProjectWord(
@@ -127,7 +128,12 @@ export class SpellingController {
 
 @ApiTags('Manuscripts - Spelling & Dictionaries')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/manuscripts/spelling', 'manuscripts/spelling', 'spelling'])
+@Controller([
+  'api/v1/manuscripts/spelling',
+  'v1/manuscripts/spelling',
+  'manuscripts/spelling',
+  'spelling',
+])
 @UseGuards(JwtAuthGuard)
 export class SpellingUtilityController {
   constructor(private readonly spellingService: SpellingService) {}
@@ -164,7 +170,10 @@ export class SpellingUtilityController {
     @Req() req: any,
   ): Promise<CustomDictionaryResponseDto> {
     const userId =
-      req?.user?.id || req?.headers?.['x-user-id'] || 'user-default';
+      req?.user?.id ||
+      req?.user?.sub ||
+      req?.headers?.['x-user-id'] ||
+      'user-default';
     return this.spellingService.listUserWords(userId);
   }
 
@@ -176,7 +185,10 @@ export class SpellingUtilityController {
   async learnUserWord(@Body() dto: LearnWordDto, @Req() req: any) {
     try {
       const userId =
-        req?.user?.id || req?.headers?.['x-user-id'] || 'user-default';
+        req?.user?.id ||
+        req?.user?.sub ||
+        req?.headers?.['x-user-id'] ||
+        'user-default';
       await this.spellingService.learnUserWord(userId, dto.word);
       return { success: true, word: dto.word };
     } catch (err) {
@@ -191,7 +203,10 @@ export class SpellingUtilityController {
   })
   async unlearnUserWord(@Param('word') word: string, @Req() req: any) {
     const userId =
-      req?.user?.id || req?.headers?.['x-user-id'] || 'user-default';
+      req?.user?.id ||
+      req?.user?.sub ||
+      req?.headers?.['x-user-id'] ||
+      'user-default';
     const removed = await this.spellingService.unlearnUserWord(userId, word);
     return { success: true, removed, word };
   }

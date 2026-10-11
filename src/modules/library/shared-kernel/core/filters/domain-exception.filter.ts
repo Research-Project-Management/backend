@@ -54,8 +54,12 @@ export class DomainExceptionFilter implements ExceptionFilter {
       status = HttpStatus.UNPROCESSABLE_ENTITY;
     } else if (exceptionName.includes('Storage')) {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
-    } else if ('category' in (exception as any)) {
-      const category = (exception as any).category;
+    } else if (
+      exception &&
+      typeof exception === 'object' &&
+      'category' in exception
+    ) {
+      const category = (exception as { category: unknown }).category;
       switch (category) {
         case 'metadata_not_found':
           status = HttpStatus.NOT_FOUND;

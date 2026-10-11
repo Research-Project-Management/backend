@@ -22,7 +22,6 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { DiagnosticsService } from './diagnostics.service';
 import {
   ParseLogDto,
@@ -39,7 +38,11 @@ import { ExplanationNotFoundException } from './core/domain/exceptions/explanati
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/diagnostics',
+  'v1/manuscripts/diagnostics',
+  'manuscripts/diagnostics',
   'api/v1/manuscripts/projects',
+  'v1/manuscripts/projects',
+  'manuscripts/projects',
   'projects',
 ])
 @UseGuards(JwtAuthGuard)
@@ -75,8 +78,6 @@ export class DiagnosticsController {
   }
 
   @Post([':projectId/lint', 'project/:projectId/lint'])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

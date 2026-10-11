@@ -141,7 +141,10 @@ export class ExtractionFacade implements IExtractionFacade {
     data: CreateAttachmentInput,
     projectId?: string,
   ): Promise<AttachmentEntity> {
-    return this.attachmentsService.createAttachment(data, projectId);
+    return (await this.attachmentsService.createAttachment(
+      data,
+      projectId,
+    )) as unknown as AttachmentEntity;
   }
 
   async extractDocumentFromBuffer(

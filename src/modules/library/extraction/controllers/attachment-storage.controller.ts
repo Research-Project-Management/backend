@@ -57,7 +57,15 @@ export abstract class BaseAttachmentStorageController {
     let filename = 'document.pdf';
     let mimeType = 'application/pdf';
 
-    const parts = (req as any).parts();
+    const multipartReq = req as FastifyRequest & {
+      parts: () => AsyncIterable<{
+        type: string;
+        filename?: string;
+        mimetype?: string;
+        toBuffer: () => Promise<Buffer>;
+      }>;
+    };
+    const parts = multipartReq.parts();
     for await (const part of parts) {
       if (part.type === 'file') {
         buffer = await part.toBuffer();
@@ -256,14 +264,13 @@ export abstract class BaseAttachmentStorageController {
     attachmentId: string,
     projectId?: string,
   ) {
-    const result = await this.attachmentsService.getItemAttachment(
+    const { attachment } = await this.attachmentsService.getItemAttachment(
       userId,
       undefined,
       attachmentId,
       projectId,
     );
 
-    const attachment = (result as any)?.attachment || result;
     if (!attachment) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
@@ -302,14 +309,12 @@ export abstract class BaseAttachmentStorageController {
     res: FastifyReply,
     projectId?: string,
   ) {
-    const result = await this.attachmentsService.getItemAttachment(
+    const { attachment } = await this.attachmentsService.getItemAttachment(
       userId,
       undefined,
       attachmentId,
       projectId,
     );
-
-    const attachment = (result as any)?.attachment || result;
 
     if (!attachment) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
@@ -319,7 +324,7 @@ export abstract class BaseAttachmentStorageController {
       const defaultFilename = attachment.filename || 'attachment.pdf';
       const defaultMimeType = attachment.mimeType;
 
-      const rangeHeader = (req as any)?.headers?.range;
+      const rangeHeader = req.headers.range;
       let range: { start: number; end: number } | undefined;
       if (
         rangeHeader &&

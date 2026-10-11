@@ -29,6 +29,7 @@ import {
 @ApiTags('Manuscripts - Templates')
 @Controller([
   'api/v1/manuscripts/templates',
+  'v1/manuscripts/templates',
   'manuscripts/templates',
   'templates',
 ])
@@ -36,7 +37,13 @@ export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
 
   private extractUserId(req: any): string {
-    return req?.user?.id || req?.headers?.['x-user-id'] || 'anonymous-user';
+    return (
+      req?.user?.id ||
+      req?.user?.sub ||
+      req?.user?.userId ||
+      req?.headers?.['x-user-id'] ||
+      'anonymous-user'
+    );
   }
 
   @Get()
@@ -92,13 +99,26 @@ export class TemplatesController {
 
 @ApiTags('Manuscripts - Overleaf Parity')
 @ApiBearerAuth('JWT-auth')
-@Controller('project')
+@Controller([
+  'project',
+  'projects',
+  'api/project',
+  'api/projects',
+  'api/v1/manuscripts/project',
+  'v1/manuscripts/project',
+])
 @UseGuards(JwtAuthGuard)
 export class OverleafTemplatesParityController {
   constructor(private readonly templatesService: TemplatesService) {}
 
   private extractUserId(req: any): string {
-    return req?.user?.id || req?.headers?.['x-user-id'] || 'anonymous-user';
+    return (
+      req?.user?.id ||
+      req?.user?.sub ||
+      req?.user?.userId ||
+      req?.headers?.['x-user-id'] ||
+      'anonymous-user'
+    );
   }
 
   @Post('new/template')

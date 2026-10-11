@@ -33,7 +33,6 @@ import { CreateWorkItemDto } from './dto/create.dto';
 import { UpdateWorkItemDto } from './dto/update.dto';
 import { QueryWorkItemDto } from './dto/query.dto';
 import {
-  AssignWorkItemDto,
   ReorderWorkItemDto,
   BulkUpdateWorkItemDto,
   BulkDeleteWorkItemDto,
@@ -174,25 +173,6 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     @CurrentUser('id') userId: string,
   ) {
     return this.workItemService.deleteWorkItem(workItemId, userId);
-  }
-
-  @Put([
-    'work-items/:workItemId/assign',
-    'projects/:projectId/work-items/:workItemId/assign',
-  ])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Assign a work item to a user (or unassign)' })
-  async assignWorkItem(
-    @Param('workItemId') workItemId: string,
-    @CurrentUser('id') userId: string,
-    @Body() assignWorkItemDto: AssignWorkItemDto,
-  ) {
-    return this.workItemService.updateWorkItem(
-      workItemId,
-      { assigneeId: assignWorkItemDto.assigneeId ?? null },
-      userId,
-    );
   }
 
   @Post(['work-items/:workItemId/children', 'work-items/:workItemId/sub-items'])

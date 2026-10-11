@@ -364,6 +364,29 @@ export class CompilePipeline {
                 engineToUse === this.latexmkEngine
                   ? this.tectonicEngine
                   : this.latexmkEngine;
+            } else {
+              const errorMsg =
+                'No supported TeX engine (latexmk or tectonic) was found in PATH or sandbox runner. Please install TeX Live (latexmk) or Tectonic, or configure CLSI_URL / Docker runner.';
+              return {
+                success: false,
+                status: 'failure',
+                compile: {
+                  status: 'failure',
+                  outputFiles: [],
+                },
+                error: errorMsg,
+                logs: errorMsg,
+                diagnostics: [
+                  {
+                    file: mainFile,
+                    line: 1,
+                    message: errorMsg,
+                    severity: 'error',
+                    context: 'System Environment',
+                  },
+                ],
+                durationMs: Date.now() - startTime,
+              };
             }
           }
 

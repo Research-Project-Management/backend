@@ -12,7 +12,7 @@ import type {
  */
 export const CurrentUser = createParamDecorator(
   (
-    data: keyof JwtPayload | keyof AuthenticatedUser | undefined,
+    data: keyof JwtPayload | keyof AuthenticatedUser | 'role' | undefined,
     ctx: ExecutionContext,
   ) => {
     const request = ctx.switchToHttp().getRequest<{

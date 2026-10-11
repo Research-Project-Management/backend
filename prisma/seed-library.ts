@@ -14,10 +14,10 @@ const prisma = new PrismaClient({ adapter });
 
 async function seedLibrary() {
   console.log(
-    '📚 Starting comprehensive academic dataset seeding for Library...',
+    '📚 Starting clean academic dataset seeding for Library (Demo Ready)...',
   );
 
-  // 1. Resolve User (GS. TS. Ngô Tấn Thành)
+  // 1. Resolve User (Tấn Thành)
   const user = await prisma.user.findFirst({
     where: { email: 'ngotanthanh92.26@gmail.com' },
     include: { profile: true },
@@ -40,24 +40,24 @@ async function seedLibrary() {
   console.log(`👤 Seeding for User: ${user.email} (${user.id})`);
   console.log(`📁 Target Project: ${project.name} (${project.id})`);
 
-  // 2. Clean previous library data cleanly
-  console.log('🧹 Cleaning previous library entities for clean seeding...');
+  // 2. Clean ALL previous library entities globally (including orphaned data from deleted users)
+  console.log('🧹 Purging all previous library data and orphaned items...');
   await prisma.annotation.deleteMany();
   await prisma.attachment.deleteMany();
-  await prisma.note.deleteMany({ where: { userId: user.id } });
-  await prisma.state.deleteMany({ where: { userId: user.id } });
+  await prisma.note.deleteMany();
+  await prisma.state.deleteMany();
   await prisma.itemRelation.deleteMany();
   await prisma.collectionItem.deleteMany();
   await prisma.itemTag.deleteMany();
-  await prisma.tag.deleteMany({ where: { userId: user.id } });
-  await prisma.savedSearch.deleteMany({ where: { userId: user.id } });
-  await prisma.userPublication.deleteMany({ where: { userId: user.id } });
+  await prisma.tag.deleteMany();
+  await prisma.savedSearch.deleteMany();
+  await prisma.userPublication.deleteMany();
   await prisma.contributor.deleteMany();
-  await prisma.item.deleteMany({ where: { userId: user.id } });
-  await prisma.collection.deleteMany({ where: { userId: user.id } });
+  await prisma.item.deleteMany();
+  await prisma.collection.deleteMany();
   await prisma.retraction.deleteMany();
 
-  // 3. Create Tags
+  // 3. Create Research Tags
   console.log('🏷️ Creating research tags...');
   const tagsData = [
     { name: 'Deep Learning', color: '#3B82F6' },
@@ -73,6 +73,8 @@ async function seedLibrary() {
     { name: 'NeurIPS', color: '#4F46E5' },
     { name: 'ICLR', color: '#7C3AED' },
     { name: 'CVPR', color: '#2563EB' },
+    { name: 'ICML', color: '#0284C7' },
+    { name: 'Nature', color: '#059669' },
   ];
 
   const tagMap = new Map<string, string>();
@@ -83,14 +85,14 @@ async function seedLibrary() {
         color: t.color,
         type: 'manual',
         userId: user.id,
-        projectId: project.id,
+        projectId: null,
       },
     });
     tagMap.set(t.name, createdTag.id);
   }
 
-  // 4. Create Personal Collections (scope: 'user')
-  console.log('📁 Creating Personal Collections...');
+  // 4. Create Personal Collections (in My Library, scope: 'user')
+  console.log('📁 Creating structured Personal Collections for My Library...');
   const colLiterature = await prisma.collection.create({
     data: {
       name: 'Literature Review 2025-2026',
@@ -104,6 +106,20 @@ async function seedLibrary() {
     },
   });
 
+  const colFoundation = await prisma.collection.create({
+    data: {
+      name: 'Foundation Models & LLMs',
+      description: 'Mô hình nền tảng, cơ chế Transformer và lý luận mở rộng',
+      color: '#6366F1',
+      icon: 'Layers',
+      sortOrder: 1,
+      parentId: colLiterature.id,
+      userId: user.id,
+      createdById: user.id,
+      projectId: null,
+    },
+  });
+
   const colEfficiency = await prisma.collection.create({
     data: {
       name: 'LLM Efficiency & Quantization',
@@ -111,7 +127,7 @@ async function seedLibrary() {
         'Kỹ thuật tối ưu hóa bộ nhớ, quantization và inference tăng tốc',
       color: '#60A5FA',
       icon: 'Zap',
-      sortOrder: 1,
+      sortOrder: 2,
       parentId: colLiterature.id,
       userId: user.id,
       createdById: user.id,
@@ -148,6 +164,33 @@ async function seedLibrary() {
     },
   });
 
+  const colVision = await prisma.collection.create({
+    data: {
+      name: 'Computer Vision & Generative AI',
+      description:
+        'Thị giác máy tính, ViT, CLIP và mô hình khuếch tán hình ảnh',
+      color: '#EC4899',
+      icon: 'Eye',
+      sortOrder: 3,
+      userId: user.id,
+      createdById: user.id,
+      projectId: null,
+    },
+  });
+
+  const colSciML = await prisma.collection.create({
+    data: {
+      name: 'Scientific ML & Neural Operators',
+      description: 'Toán tử nơ-ron Fourier (FNO), PINNs và mô phỏng vật lý',
+      color: '#F97316',
+      icon: 'TrendingUp',
+      sortOrder: 4,
+      userId: user.id,
+      createdById: user.id,
+      projectId: null,
+    },
+  });
+
   const colMyPubs = await prisma.collection.create({
     data: {
       name: 'My Publications & Manuscripts',
@@ -155,7 +198,7 @@ async function seedLibrary() {
         'Các công trình khoa học đã xuất bản và bản thảo đang bình duyệt',
       color: '#8B5CF6',
       icon: 'Award',
-      sortOrder: 3,
+      sortOrder: 5,
       userId: user.id,
       createdById: user.id,
       projectId: null,
@@ -168,7 +211,7 @@ async function seedLibrary() {
       description: 'Danh sách bài báo ưu tiên đọc trong tuần',
       color: '#F59E0B',
       icon: 'Bookmark',
-      sortOrder: 4,
+      sortOrder: 6,
       userId: user.id,
       createdById: user.id,
       projectId: null,
@@ -180,7 +223,7 @@ async function seedLibrary() {
   const colProjFoundation = await prisma.collection.create({
     data: {
       name: 'Foundation Models & Architectures',
-      description: 'Kiến trúc Transformer, Attention và mô hình nền tảng',
+      description: 'Kiến trúc Transformer, Attention và mô hình nền tảng dự án',
       color: '#6366F1',
       icon: 'Layers',
       sortOrder: 1,
@@ -190,24 +233,10 @@ async function seedLibrary() {
     },
   });
 
-  const colProjAttention = await prisma.collection.create({
-    data: {
-      name: 'Attention Mechanisms & Memory',
-      description: 'FlashAttention, Exact Attention và IO-Aware kernels',
-      color: '#818CF8',
-      icon: 'Cpu',
-      sortOrder: 1,
-      parentId: colProjFoundation.id,
-      userId: user.id,
-      createdById: user.id,
-      projectId: project.id,
-    },
-  });
-
   const colProjOptimization = await prisma.collection.create({
     data: {
       name: 'Optimization & Gradient Dynamics',
-      description: 'Thuật toán tối ưu bậc một và bậc hai cho Deep Learning',
+      description: 'Thuật toán tối ưu bậc một và bậc hai phục vụ huấn luyện',
       color: '#EC4899',
       icon: 'TrendingUp',
       sortOrder: 2,
@@ -217,34 +246,10 @@ async function seedLibrary() {
     },
   });
 
-  const colProjVision = await prisma.collection.create({
-    data: {
-      name: 'Vision & Multimodal Intelligence',
-      description: 'Mô hình khuếch tán (Diffusion) và thị giác máy tính',
-      color: '#14B8A6',
-      icon: 'Eye',
-      sortOrder: 3,
-      userId: user.id,
-      createdById: user.id,
-      projectId: project.id,
-    },
-  });
-
-  const colProjSciML = await prisma.collection.create({
-    data: {
-      name: 'Scientific ML & Neural Operators',
-      description: 'Toán tử nơ-ron Fourier (FNO), PINNs và mô phỏng vật lý',
-      color: '#F97316',
-      icon: 'Activity',
-      sortOrder: 4,
-      userId: user.id,
-      createdById: user.id,
-      projectId: project.id,
-    },
-  });
-
-  // 6. Dataset of Realistic Papers
-  console.log('📄 Seeding academic papers with complete real metadata...');
+  // 6. Dataset of Real Academic Papers
+  console.log(
+    '📄 Seeding realistic, peer-reviewed academic papers into My Library...',
+  );
 
   interface PaperSeed {
     title: string;
@@ -275,6 +280,7 @@ async function seedLibrary() {
   }
 
   const papers: PaperSeed[] = [
+    // ── My Library: Foundation Models & Attention ──────────────────────────────
     {
       title: 'Attention Is All You Need',
       itemType: 'conferencePaper',
@@ -312,12 +318,8 @@ async function seedLibrary() {
           fullName: 'Illia Polosukhin',
         },
       ],
-      projectScoped: true,
-      collections: [
-        colLiterature.id,
-        colProjFoundation.id,
-        colProjAttention.id,
-      ],
+      projectScoped: false,
+      collections: [colLiterature.id, colFoundation.id],
       tags: [
         'Transformers',
         'Attention',
@@ -344,6 +346,189 @@ async function seedLibrary() {
     },
     {
       title:
+        'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding',
+      itemType: 'conferencePaper',
+      year: 2019,
+      doi: '10.18653/v1/N19-1423',
+      publicationTitle:
+        'Proceedings of the 2019 Conference of the North American Chapter of the ACL (NAACL 2019)',
+      abstract:
+        'We introduce a new language representation model called BERT, which stands for Bidirectional Encoder Representations from Transformers. Unlike recent language representation models, BERT is designed to pre-train deep bidirectional representations from unlabeled text by jointly conditioning on both left and right context in all layers.',
+      url: 'https://doi.org/10.18653/v1/N19-1423',
+      citationKey: 'devlin2019bert',
+      authors: [
+        { firstName: 'Jacob', lastName: 'Devlin', fullName: 'Jacob Devlin' },
+        {
+          firstName: 'Ming-Wei',
+          lastName: 'Chang',
+          fullName: 'Ming-Wei Chang',
+        },
+        { firstName: 'Kenton', lastName: 'Lee', fullName: 'Kenton Lee' },
+        {
+          firstName: 'Kristina',
+          lastName: 'Toutanova',
+          fullName: 'Kristina Toutanova',
+        },
+      ],
+      projectScoped: false,
+      collections: [colLiterature.id, colFoundation.id],
+      tags: ['Transformers', 'Deep Learning', 'Must-Read'],
+      state: {
+        readStatus: 'completed',
+        isStarred: true,
+        rating: 5,
+        currentPage: 16,
+        lastOpenedHoursAgo: 36,
+      },
+      pdfFilename: 'devlin2019bert.pdf',
+      pageCount: 16,
+    },
+    {
+      title: 'Language Models are Few-Shot Learners',
+      itemType: 'conferencePaper',
+      year: 2020,
+      doi: '10.48550/arXiv.2005.14165',
+      publicationTitle:
+        'Advances in Neural Information Processing Systems (NeurIPS 2020)',
+      abstract:
+        'Recent work has demonstrated substantial gains on many NLP tasks and benchmarks by pre-training on a large corpus of text followed by fine-tuning on a specific task. We demonstrate that scaling up language models greatly improves task-agnostic, few-shot performance, sometimes even reaching competitiveness with prior state-of-the-art fine-tuning approaches.',
+      url: 'https://arxiv.org/abs/2005.14165',
+      citationKey: 'brown2020gpt3',
+      authors: [
+        { firstName: 'Tom B.', lastName: 'Brown', fullName: 'Tom B. Brown' },
+        { firstName: 'Benjamin', lastName: 'Mann', fullName: 'Benjamin Mann' },
+        { firstName: 'Nick', lastName: 'Ryder', fullName: 'Nick Ryder' },
+        {
+          firstName: 'Melanie',
+          lastName: 'Subbiah',
+          fullName: 'Melanie Subbiah',
+        },
+        { firstName: 'Dario', lastName: 'Amodei', fullName: 'Dario Amodei' },
+      ],
+      projectScoped: false,
+      collections: [colLiterature.id, colFoundation.id],
+      tags: ['Transformers', 'NeurIPS', 'Deep Learning'],
+      state: {
+        readStatus: 'completed',
+        isStarred: true,
+        rating: 5,
+        currentPage: 75,
+        lastOpenedHoursAgo: 48,
+      },
+      pdfFilename: 'brown2020gpt3.pdf',
+      pageCount: 75,
+    },
+    {
+      title:
+        'DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model',
+      itemType: 'preprint',
+      year: 2024,
+      doi: '10.48550/arXiv.2405.04434',
+      publicationTitle: 'arXiv preprint',
+      abstract:
+        'We present DeepSeek-V2, a strong, economical, and efficient Mixture-of-Experts (MoE) language model with 236B total parameters, of which 21B are activated for each token. DeepSeek-V2 employs Multi-head Latent Attention (MLA) and DeepSeekMoE architectures to maximize efficiency.',
+      url: 'https://arxiv.org/abs/2405.04434',
+      citationKey: 'deepseek2024v2',
+      authors: [
+        {
+          firstName: 'DeepSeek-AI',
+          lastName: 'Team',
+          fullName: 'DeepSeek-AI Team',
+        },
+        { firstName: 'Haowei', lastName: 'Zhang', fullName: 'Haowei Zhang' },
+        { firstName: 'Damai', lastName: 'Dai', fullName: 'Damai Dai' },
+      ],
+      projectScoped: false,
+      collections: [colLiterature.id, colFoundation.id, colEfficiency.id],
+      tags: [
+        'Mixture of Experts',
+        'Transformers',
+        'GPU-Efficient',
+        'High-Priority',
+      ],
+      state: {
+        readStatus: 'reading',
+        isStarred: true,
+        rating: 5,
+        currentPage: 18,
+        lastOpenedHoursAgo: 2,
+      },
+      pdfFilename: 'deepseek2024v2.pdf',
+      pageCount: 28,
+    },
+    {
+      title:
+        'DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning',
+      itemType: 'preprint',
+      year: 2025,
+      doi: '10.48550/arXiv.2501.12948',
+      publicationTitle: 'arXiv preprint',
+      abstract:
+        'We introduce DeepSeek-R1-Zero and DeepSeek-R1. DeepSeek-R1-Zero is trained via large-scale reinforcement learning without supervised fine-tuning (SFT) as a preliminary step, demonstrating remarkable reasoning capabilities. DeepSeek-R1 incorporates multi-stage training and cold-start data to achieve state-of-the-art performance on math, coding, and reasoning benchmarks.',
+      url: 'https://arxiv.org/abs/2501.12948',
+      citationKey: 'deepseek2025r1',
+      authors: [
+        {
+          firstName: 'DeepSeek-AI',
+          lastName: 'Team',
+          fullName: 'DeepSeek-AI Team',
+        },
+        { firstName: 'Daya', lastName: 'Guo', fullName: 'Daya Guo' },
+        { firstName: 'Dejian', lastName: 'Yang', fullName: 'Dejian Yang' },
+      ],
+      projectScoped: false,
+      collections: [colFoundation.id, colReadingQueue.id],
+      tags: ['Transformers', 'Deep Learning', 'High-Priority', 'Must-Read'],
+      state: {
+        readStatus: 'reading',
+        isStarred: true,
+        rating: 5,
+        currentPage: 12,
+        lastOpenedHoursAgo: 1,
+      },
+      pdfFilename: 'deepseek2025r1.pdf',
+      pageCount: 24,
+      notes: [
+        {
+          title:
+            'Phân tích cơ chế suy luận qua Reinforcement Learning trong DeepSeek-R1',
+          contentMd:
+            '### Đột phá cốt lõi:\n- Mô hình phát triển khả năng tự kiểm tra (self-reflection) và thử nghiệm chuỗi suy luận dài (chain-of-thought) thuần túy qua phần thưởng quy tắc (rule-based reward).\n- Loại bỏ sự phụ thuộc vào dữ liệu SFT khổng lồ từ con người, giảm chi phí huấn luyện xuống mức tối thiểu.',
+        },
+      ],
+    },
+    {
+      title: 'Llama 2: Open Foundation and Fine-Tuned Chat Models',
+      itemType: 'preprint',
+      year: 2023,
+      doi: '10.48550/arXiv.2307.09288',
+      publicationTitle: 'arXiv preprint',
+      abstract:
+        'In this work, we develop and release Llama 2, a collection of pretrained and finetuned large language models (LLMs) ranging in scale from 7B to 70B parameters. Our fine-tuned LLMs, called Llama 2-Chat, are optimized for dialogue use cases.',
+      url: 'https://arxiv.org/abs/2307.09288',
+      citationKey: 'touvron2023llama2',
+      authors: [
+        { firstName: 'Hugo', lastName: 'Touvron', fullName: 'Hugo Touvron' },
+        { firstName: 'Louis', lastName: 'Martin', fullName: 'Louis Martin' },
+        { firstName: 'Kevin', lastName: 'Stone', fullName: 'Kevin Stone' },
+      ],
+      projectScoped: false,
+      collections: [colFoundation.id],
+      tags: ['Transformers', 'Deep Learning'],
+      state: {
+        readStatus: 'completed',
+        isStarred: false,
+        rating: 4,
+        currentPage: 77,
+        lastOpenedHoursAgo: 120,
+      },
+      pdfFilename: 'touvron2023llama2.pdf',
+      pageCount: 77,
+    },
+
+    // ── My Library: LLM Efficiency, Quantization & Architecture ────────────────
+    {
+      title:
         'FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness',
       itemType: 'conferencePaper',
       year: 2022,
@@ -365,8 +550,8 @@ async function seedLibrary() {
           fullName: 'Christopher Ré',
         },
       ],
-      projectScoped: true,
-      collections: [colLiterature.id, colEfficiency.id, colProjAttention.id],
+      projectScoped: false,
+      collections: [colLiterature.id, colEfficiency.id],
       tags: [
         'Attention',
         'GPU-Efficient',
@@ -379,7 +564,7 @@ async function seedLibrary() {
         isStarred: true,
         rating: 5,
         currentPage: 8,
-        lastOpenedHoursAgo: 2,
+        lastOpenedHoursAgo: 3,
       },
       pdfFilename: 'dao2022flashattention.pdf',
       pageCount: 14,
@@ -404,13 +589,15 @@ async function seedLibrary() {
       url: 'https://arxiv.org/abs/2307.08691',
       citationKey: 'dao2023flashattention2',
       authors: [{ firstName: 'Tri', lastName: 'Dao', fullName: 'Tri Dao' }],
-      projectScoped: true,
-      collections: [colEfficiency.id, colProjAttention.id],
+      projectScoped: false,
+      collections: [colEfficiency.id],
       tags: ['Attention', 'GPU-Efficient', 'ICLR'],
       state: {
-        readStatus: 'unread',
-        isStarred: false,
-        lastOpenedHoursAgo: 24,
+        readStatus: 'reading',
+        isStarred: true,
+        rating: 5,
+        currentPage: 6,
+        lastOpenedHoursAgo: 14,
       },
       pdfFilename: 'dao2023flashattention2.pdf',
       pageCount: 12,
@@ -440,11 +627,9 @@ async function seedLibrary() {
           fullName: 'Zeyuan Allen-Zhu',
         },
         { firstName: 'Yuanzhi', lastName: 'Li', fullName: 'Yuanzhi Li' },
-        { firstName: 'Shean', lastName: 'Wang', fullName: 'Shean Wang' },
-        { firstName: 'Lu', lastName: 'Wang', fullName: 'Lu Wang' },
         { firstName: 'Weizhu', lastName: 'Chen', fullName: 'Weizhu Chen' },
       ],
-      projectScoped: true,
+      projectScoped: false,
       collections: [colLiterature.id, colEfficiency.id],
       tags: ['Transformers', 'GPU-Efficient', 'ICLR', 'Must-Read'],
       state: {
@@ -452,7 +637,7 @@ async function seedLibrary() {
         isStarred: true,
         rating: 5,
         currentPage: 26,
-        lastOpenedHoursAgo: 48,
+        lastOpenedHoursAgo: 24,
       },
       pdfFilename: 'hu2021lora.pdf',
       pageCount: 26,
@@ -482,7 +667,7 @@ async function seedLibrary() {
           fullName: 'Luke Zettlemoyer',
         },
       ],
-      projectScoped: true,
+      projectScoped: false,
       collections: [colEfficiency.id, colReadingQueue.id],
       tags: ['GPU-Efficient', 'NeurIPS', 'High-Priority'],
       state: {
@@ -495,6 +680,35 @@ async function seedLibrary() {
       pdfFilename: 'dettmers2023qlora.pdf',
       pageCount: 26,
     },
+    {
+      title: 'Mamba: Linear-Time Sequence Modeling with Selective State Spaces',
+      itemType: 'preprint',
+      year: 2023,
+      doi: '10.48550/arXiv.2312.00752',
+      publicationTitle: 'arXiv preprint',
+      abstract:
+        'Foundation models, now powering most of the exciting applications in deep learning, are almost universally based on the standard Transformer architecture. We introduce Mamba, a selective structured state space model with hardware-aware parallel scan that achieves linear-time sequence modeling.',
+      url: 'https://arxiv.org/abs/2312.00752',
+      citationKey: 'gu2023mamba',
+      authors: [
+        { firstName: 'Albert', lastName: 'Gu', fullName: 'Albert Gu' },
+        { firstName: 'Tri', lastName: 'Dao', fullName: 'Tri Dao' },
+      ],
+      projectScoped: false,
+      collections: [colEfficiency.id, colReadingQueue.id],
+      tags: ['GPU-Efficient', 'Deep Learning', 'Must-Read'],
+      state: {
+        readStatus: 'reading',
+        isStarred: true,
+        rating: 5,
+        currentPage: 15,
+        lastOpenedHoursAgo: 4,
+      },
+      pdfFilename: 'gu2023mamba.pdf',
+      pageCount: 33,
+    },
+
+    // ── My Library: Optimization & Theoretical Dynamics ────────────────────────
     {
       title: 'Adam: A Method for Stochastic Optimization',
       itemType: 'conferencePaper',
@@ -514,8 +728,8 @@ async function seedLibrary() {
         },
         { firstName: 'Jimmy', lastName: 'Ba', fullName: 'Jimmy Ba' },
       ],
-      projectScoped: true,
-      collections: [colTheory.id, colAdamDynamics.id, colProjOptimization.id],
+      projectScoped: false,
+      collections: [colTheory.id, colAdamDynamics.id],
       tags: ['Optimization', 'Deep Learning', 'ICLR', 'Must-Read'],
       state: {
         readStatus: 'completed',
@@ -554,8 +768,8 @@ async function seedLibrary() {
         { firstName: 'Satyen', lastName: 'Kale', fullName: 'Satyen Kale' },
         { firstName: 'Sanjiv', lastName: 'Kumar', fullName: 'Sanjiv Kumar' },
       ],
-      projectScoped: true,
-      collections: [colTheory.id, colAdamDynamics.id, colProjOptimization.id],
+      projectScoped: false,
+      collections: [colTheory.id, colAdamDynamics.id],
       tags: ['Optimization', 'ICLR'],
       state: {
         readStatus: 'completed',
@@ -565,6 +779,37 @@ async function seedLibrary() {
       },
       pdfFilename: 'reddi2018convergence.pdf',
       pageCount: 23,
+    },
+    {
+      title: 'Decoupled Weight Decay Regularization (AdamW)',
+      itemType: 'conferencePaper',
+      year: 2019,
+      doi: '10.48550/arXiv.1711.05101',
+      publicationTitle:
+        'International Conference on Learning Representations (ICLR 2019)',
+      abstract:
+        'L2 regularization and weight decay regularization are equivalent for standard stochastic gradient descent (when rescaled by the learning rate), but as we demonstrate, this is not the case for adaptive gradient algorithms such as Adam. We propose Decoupled Weight Decay (AdamW) which recovers the original formulation of weight decay regularization.',
+      url: 'https://arxiv.org/abs/1711.05101',
+      citationKey: 'loshchilov2019adamw',
+      authors: [
+        {
+          firstName: 'Ilya',
+          lastName: 'Loshchilov',
+          fullName: 'Ilya Loshchilov',
+        },
+        { firstName: 'Frank', lastName: 'Hutter', fullName: 'Frank Hutter' },
+      ],
+      projectScoped: false,
+      collections: [colTheory.id, colAdamDynamics.id],
+      tags: ['Optimization', 'ICLR', 'Must-Read'],
+      state: {
+        readStatus: 'completed',
+        isStarred: true,
+        rating: 5,
+        currentPage: 18,
+      },
+      pdfFilename: 'loshchilov2019adamw.pdf',
+      pageCount: 18,
     },
     {
       title: 'Symbolic Discovery of Optimization Algorithms (Lion Optimizer)',
@@ -588,19 +833,21 @@ async function seedLibrary() {
         { firstName: 'Esteban', lastName: 'Real', fullName: 'Esteban Real' },
         { firstName: 'Quoc V.', lastName: 'Le', fullName: 'Quoc V. Le' },
       ],
-      projectScoped: true,
-      collections: [colTheory.id, colProjOptimization.id, colReadingQueue.id],
+      projectScoped: false,
+      collections: [colTheory.id, colReadingQueue.id],
       tags: ['Optimization', 'NeurIPS', 'GPU-Efficient'],
       state: {
         readStatus: 'reading',
         isStarred: true,
         rating: 5,
         currentPage: 6,
-        lastOpenedHoursAgo: 4,
+        lastOpenedHoursAgo: 5,
       },
       pdfFilename: 'chen2023symbolic.pdf',
       pageCount: 18,
     },
+
+    // ── My Library: Computer Vision & Generative AI ────────────────────────────
     {
       title: 'Deep Residual Learning for Image Recognition',
       itemType: 'conferencePaper',
@@ -618,8 +865,8 @@ async function seedLibrary() {
         { firstName: 'Shaoqing', lastName: 'Ren', fullName: 'Shaoqing Ren' },
         { firstName: 'Jian', lastName: 'Sun', fullName: 'Jian Sun' },
       ],
-      projectScoped: true,
-      collections: [colLiterature.id, colProjVision.id],
+      projectScoped: false,
+      collections: [colLiterature.id, colVision.id],
       tags: ['Deep Learning', 'CVPR', 'Must-Read'],
       state: {
         readStatus: 'completed',
@@ -656,18 +903,127 @@ async function seedLibrary() {
         { firstName: 'Patrick', lastName: 'Esser', fullName: 'Patrick Esser' },
         { firstName: 'Björn', lastName: 'Ommer', fullName: 'Björn Ommer' },
       ],
-      projectScoped: true,
-      collections: [colProjVision.id],
+      projectScoped: false,
+      collections: [colVision.id],
       tags: ['Diffusion', 'CVPR', 'Deep Learning'],
       state: {
         readStatus: 'reading',
         isStarred: false,
+        rating: 4,
         currentPage: 14,
         lastOpenedHoursAgo: 8,
       },
       pdfFilename: 'rombach2022high.pdf',
       pageCount: 23,
     },
+    {
+      title:
+        'An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale',
+      itemType: 'conferencePaper',
+      year: 2021,
+      doi: '10.48550/arXiv.2010.11929',
+      publicationTitle:
+        'International Conference on Learning Representations (ICLR 2021)',
+      abstract:
+        'While the Transformer architecture has become the de-facto standard for natural language processing tasks, its applications to computer vision remain limited. We show that this reliance on CNNs is not necessary and a pure transformer applied directly to sequences of image patches can perform very well on image classification tasks.',
+      url: 'https://arxiv.org/abs/2010.11929',
+      citationKey: 'dosovitskiy2020vit',
+      authors: [
+        {
+          firstName: 'Alexey',
+          lastName: 'Dosovitskiy',
+          fullName: 'Alexey Dosovitskiy',
+        },
+        { firstName: 'Lucas', lastName: 'Beyer', fullName: 'Lucas Beyer' },
+        {
+          firstName: 'Alexander',
+          lastName: 'Kolesnikov',
+          fullName: 'Alexander Kolesnikov',
+        },
+        {
+          firstName: 'Dirk',
+          lastName: 'Weissenborn',
+          fullName: 'Dirk Weissenborn',
+        },
+        { firstName: 'Neil', lastName: 'Houlsby', fullName: 'Neil Houlsby' },
+      ],
+      projectScoped: false,
+      collections: [colVision.id],
+      tags: ['Transformers', 'ICLR', 'Deep Learning', 'Must-Read'],
+      state: {
+        readStatus: 'completed',
+        isStarred: true,
+        rating: 5,
+        currentPage: 22,
+      },
+      pdfFilename: 'dosovitskiy2020vit.pdf',
+      pageCount: 22,
+    },
+    {
+      title:
+        'Learning Transferable Visual Models From Natural Language Supervision (CLIP)',
+      itemType: 'conferencePaper',
+      year: 2021,
+      doi: '10.48550/arXiv.2103.00020',
+      publicationTitle:
+        'International Conference on Machine Learning (ICML 2021)',
+      abstract:
+        'State-of-the-art computer vision systems are trained to predict a fixed set of predetermined object categories. We demonstrate that the simple pre-training task of predicting which caption goes with which image is an efficient and scalable way to learn SOTA image representations from scratch on a dataset of 400 million (image, text) pairs collected from the internet.',
+      url: 'https://arxiv.org/abs/2103.00020',
+      citationKey: 'radford2021clip',
+      authors: [
+        { firstName: 'Alec', lastName: 'Radford', fullName: 'Alec Radford' },
+        { firstName: 'Jong Wook', lastName: 'Kim', fullName: 'Jong Wook Kim' },
+        { firstName: 'Chris', lastName: 'Hallacy', fullName: 'Chris Hallacy' },
+        { firstName: 'Aditya', lastName: 'Ramesh', fullName: 'Aditya Ramesh' },
+        {
+          firstName: 'Ilya',
+          lastName: 'Sutskever',
+          fullName: 'Ilya Sutskever',
+        },
+      ],
+      projectScoped: false,
+      collections: [colVision.id],
+      tags: ['ICML', 'Deep Learning', 'Must-Read'],
+      state: {
+        readStatus: 'completed',
+        isStarred: true,
+        rating: 5,
+        currentPage: 38,
+      },
+      pdfFilename: 'radford2021clip.pdf',
+      pageCount: 38,
+    },
+    {
+      title: 'Denoising Diffusion Probabilistic Models',
+      itemType: 'conferencePaper',
+      year: 2020,
+      doi: '10.48550/arXiv.2006.11239',
+      publicationTitle:
+        'Advances in Neural Information Processing Systems (NeurIPS 2020)',
+      abstract:
+        'We present high quality image synthesis results using diffusion probabilistic models, a class of latent variable models inspired by considerations from nonequilibrium thermodynamics. Our best results are obtained by training on a weighted variational bound designed according to a novel connection between diffusion models and denoising score matching.',
+      url: 'https://arxiv.org/abs/2006.11239',
+      citationKey: 'ho2020ddpm',
+      authors: [
+        { firstName: 'Jonathan', lastName: 'Ho', fullName: 'Jonathan Ho' },
+        { firstName: 'Ajay', lastName: 'Jain', fullName: 'Ajay Jain' },
+        { firstName: 'Pieter', lastName: 'Abbeel', fullName: 'Pieter Abbeel' },
+      ],
+      projectScoped: false,
+      collections: [colVision.id],
+      tags: ['Diffusion', 'NeurIPS', 'Deep Learning'],
+      state: {
+        readStatus: 'completed',
+        isStarred: false,
+        rating: 4,
+        currentPage: 25,
+      },
+      pdfFilename: 'ho2020ddpm.pdf',
+      pageCount: 25,
+    },
+
+    // ── My Library: Scientific ML & Neural Operators ───────────────────────────
     {
       title:
         'Fourier Neural Operator for Parametric Partial Differential Equations',
@@ -694,19 +1050,13 @@ async function seedLibrary() {
         },
         { firstName: 'Burigede', lastName: 'Liu', fullName: 'Burigede Liu' },
         {
-          firstName: 'Kaushik',
-          lastName: 'Bhattacharya',
-          fullName: 'Kaushik Bhattacharya',
-        },
-        { firstName: 'Andrew', lastName: 'Stuart', fullName: 'Andrew Stuart' },
-        {
           firstName: 'Anima',
           lastName: 'Anandkumar',
           fullName: 'Anima Anandkumar',
         },
       ],
-      projectScoped: true,
-      collections: [colProjSciML.id, colReadingQueue.id],
+      projectScoped: false,
+      collections: [colSciML.id, colReadingQueue.id],
       tags: ['Neural Operators', 'ICLR', 'Deep Learning', 'High-Priority'],
       state: {
         readStatus: 'reading',
@@ -742,8 +1092,8 @@ async function seedLibrary() {
           fullName: 'George Em Karniadakis',
         },
       ],
-      projectScoped: true,
-      collections: [colProjSciML.id],
+      projectScoped: false,
+      collections: [colSciML.id],
       tags: ['Neural Operators', 'Deep Learning'],
       state: {
         readStatus: 'completed',
@@ -755,36 +1105,43 @@ async function seedLibrary() {
       pageCount: 30,
     },
     {
-      title:
-        'DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model',
-      itemType: 'preprint',
-      year: 2024,
-      doi: '10.48550/arXiv.2405.04434',
-      publicationTitle: 'arXiv preprint',
+      title: 'Highly accurate protein structure prediction with AlphaFold',
+      itemType: 'journalArticle',
+      year: 2021,
+      doi: '10.1038/s41586-021-03819-2',
+      publicationTitle: 'Nature',
       abstract:
-        'We present DeepSeek-V2, a strong, economical, and efficient Mixture-of-Experts (MoE) language model with 236B total parameters, of which 21B are activated for each token. DeepSeek-V2 employs Multi-head Latent Attention (MLA) and DeepSeekMoE architectures to maximize efficiency.',
-      url: 'https://arxiv.org/abs/2405.04434',
-      citationKey: 'deepseek2024v2',
+        'Proteins are essential to life, and understanding their structure can facilitate a mechanistic understanding of their function. We demonstrate that AlphaFold can predict 3D atomic coordinates for hundreds of thousands of proteins with atomic accuracy, solving a 50-year-old challenge in structural biology.',
+      url: 'https://doi.org/10.1038/s41586-021-03819-2',
+      citationKey: 'jumper2021alphafold',
       authors: [
+        { firstName: 'John', lastName: 'Jumper', fullName: 'John Jumper' },
+        { firstName: 'Richard', lastName: 'Evans', fullName: 'Richard Evans' },
         {
-          firstName: 'DeepSeek-AI',
-          lastName: 'Team',
-          fullName: 'DeepSeek-AI Team',
+          firstName: 'Alexander',
+          lastName: 'Pritzel',
+          fullName: 'Alexander Pritzel',
+        },
+        {
+          firstName: 'Demis',
+          lastName: 'Hassabis',
+          fullName: 'Demis Hassabis',
         },
       ],
-      projectScoped: true,
-      collections: [colLiterature.id, colProjFoundation.id],
-      tags: ['Mixture of Experts', 'Transformers', 'GPU-Efficient'],
+      projectScoped: false,
+      collections: [colSciML.id],
+      tags: ['Deep Learning', 'Nature', 'Must-Read'],
       state: {
-        readStatus: 'unread',
+        readStatus: 'completed',
         isStarred: true,
         rating: 5,
-        lastOpenedHoursAgo: 16,
+        currentPage: 15,
       },
-      pdfFilename: 'deepseek2024v2.pdf',
-      pageCount: 28,
+      pdfFilename: 'jumper2021alphafold.pdf',
+      pageCount: 15,
     },
-    // ── My Publications ──────────────────────────────────────────────────────────
+
+    // ── My Library: My Publications (Tấn Thành) ────────────────────
     {
       title:
         'Adaptive Learning Rates via Spectral Hessian Decomposition for Scientific Machine Learning',
@@ -802,8 +1159,8 @@ async function seedLibrary() {
         { firstName: 'Evelyn', lastName: 'Vance', fullName: 'Evelyn Vance' },
         { firstName: 'Alex', lastName: 'Chen', fullName: 'Alex Chen' },
       ],
-      projectScoped: true,
-      collections: [colMyPubs.id, colTheory.id, colProjOptimization.id],
+      projectScoped: false,
+      collections: [colMyPubs.id, colTheory.id, colSciML.id],
       tags: ['Optimization', 'Neural Operators', 'High-Priority'],
       state: {
         readStatus: 'completed',
@@ -815,6 +1172,13 @@ async function seedLibrary() {
       pdfFilename: 'ngo2025adaptive_tpami.pdf',
       pageCount: 16,
       isMyPublication: true,
+      notes: [
+        {
+          title: 'Ghi chú bình duyệt TPAMI 2025 - Phân tích Hessian Spectra',
+          contentMd:
+            'Công trình đã được chấp thuận đăng chính thức trên IEEE TPAMI. Đóng góp chính: Xấp xỉ Hessian không tường minh bằng phương pháp Lanczos, giảm chi phí từ $O(d^3)$ xuống $O(k \\cdot d)$ trong đó $k \\ll d$.',
+        },
+      ],
     },
     {
       title:
@@ -833,8 +1197,8 @@ async function seedLibrary() {
         { firstName: 'Marcus', lastName: 'Brody', fullName: 'Marcus Brody' },
         { firstName: 'Alex', lastName: 'Chen', fullName: 'Alex Chen' },
       ],
-      projectScoped: true,
-      collections: [colMyPubs.id, colProjSciML.id],
+      projectScoped: false,
+      collections: [colMyPubs.id, colSciML.id],
       tags: ['Neural Operators', 'NeurIPS'],
       state: {
         readStatus: 'completed',
@@ -847,7 +1211,8 @@ async function seedLibrary() {
       pageCount: 14,
       isMyPublication: true,
     },
-    // ── Duplicate Cluster for Curation Demo ─────────────────────────────────────
+
+    // ── My Library: Curation Demo (Duplicate Pair) ─────────────────────────────
     {
       title: 'Attention Is All You Need (ArXiv Version)',
       itemType: 'preprint',
@@ -866,7 +1231,7 @@ async function seedLibrary() {
         },
         { firstName: 'Noam', lastName: 'Shazeer', fullName: 'Noam Shazeer' },
       ],
-      projectScoped: false, // In personal library
+      projectScoped: false,
       collections: [colLiterature.id],
       tags: ['Transformers'],
       state: {
@@ -876,7 +1241,8 @@ async function seedLibrary() {
       pdfFilename: 'vaswani_preprint.pdf',
       pageCount: 15,
     },
-    // ── Retracted Paper for Academic Integrity Demo ────────────────────────────
+
+    // ── My Library: Retraction Watch Demo ──────────────────────────────────────
     {
       title:
         'Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19: a multinational registry analysis',
@@ -906,7 +1272,7 @@ async function seedLibrary() {
         },
         { firstName: 'Amit N.', lastName: 'Patel', fullName: 'Amit N. Patel' },
       ],
-      projectScoped: true,
+      projectScoped: false,
       collections: [], // Unfiled
       tags: ['High-Priority'],
       state: {
@@ -917,31 +1283,8 @@ async function seedLibrary() {
       retractionReason:
         'Retracted on June 5, 2020 due to authors inability to verify the authenticity and provenance of primary registry data provided by Surgisphere.',
     },
-    // ── Unfiled Preprints (to test Unfiled Items view) ─────────────────────────
-    {
-      title: 'Mamba: Linear-Time Sequence Modeling with Selective State Spaces',
-      itemType: 'preprint',
-      year: 2023,
-      doi: '10.48550/arXiv.2312.00752',
-      publicationTitle: 'arXiv preprint',
-      abstract:
-        'Foundation models, now powering most of the exciting applications in deep learning, are almost universally based on the standard Transformer architecture. We introduce Mamba, a selective structured state space model with hardware-aware parallel scan that achieves linear-time sequence modeling.',
-      url: 'https://arxiv.org/abs/2312.00752',
-      citationKey: 'gu2023mamba',
-      authors: [
-        { firstName: 'Albert', lastName: 'Gu', fullName: 'Albert Gu' },
-        { firstName: 'Tri', lastName: 'Dao', fullName: 'Tri Dao' },
-      ],
-      projectScoped: false, // Unfiled in personal library
-      collections: [], // Intentionally empty to test Unfiled Items!
-      tags: ['GPU-Efficient', 'Deep Learning'],
-      state: {
-        readStatus: 'unread',
-        isStarred: false,
-      },
-      pdfFilename: 'gu2023mamba.pdf',
-      pageCount: 33,
-    },
+
+    // ── My Library: Unfiled Real Papers (to test Unfiled Items filter) ─────────
     {
       title: 'The Llama 3 Herd of Models',
       itemType: 'preprint',
@@ -964,8 +1307,8 @@ async function seedLibrary() {
           fullName: 'Abhinav Jauhri',
         },
       ],
-      projectScoped: true,
-      collections: [], // Intentionally empty to test Unfiled Items in project!
+      projectScoped: false,
+      collections: [], // Intentionally empty to test Unfiled Items!
       tags: ['Transformers', 'Must-Read'],
       state: {
         readStatus: 'unread',
@@ -973,6 +1316,159 @@ async function seedLibrary() {
       },
       pdfFilename: 'dubey2024llama3.pdf',
       pageCount: 92,
+    },
+    {
+      title: 'Deep Learning',
+      itemType: 'journalArticle',
+      year: 2015,
+      doi: '10.1038/nature14539',
+      publicationTitle: 'Nature',
+      abstract:
+        'Deep learning allows computational models that are composed of multiple processing layers to learn representations of data with multiple levels of abstraction. These methods have dramatically improved the state-of-the-art in visual object recognition, object detection and many other domains.',
+      url: 'https://doi.org/10.1038/nature14539',
+      citationKey: 'lecun2015deep',
+      authors: [
+        { firstName: 'Yann', lastName: 'LeCun', fullName: 'Yann LeCun' },
+        { firstName: 'Yoshua', lastName: 'Bengio', fullName: 'Yoshua Bengio' },
+        {
+          firstName: 'Geoffrey',
+          lastName: 'Hinton',
+          fullName: 'Geoffrey Hinton',
+        },
+      ],
+      projectScoped: false,
+      collections: [], // Unfiled
+      tags: ['Deep Learning', 'Nature', 'Must-Read'],
+      state: {
+        readStatus: 'completed',
+        isStarred: true,
+        rating: 5,
+        currentPage: 9,
+      },
+      pdfFilename: 'lecun2015deep.pdf',
+      pageCount: 9,
+    },
+    {
+      title:
+        'Mastering the Game of Go with Deep Neural Networks and Tree Search',
+      itemType: 'journalArticle',
+      year: 2016,
+      doi: '10.1038/nature16961',
+      publicationTitle: 'Nature',
+      abstract:
+        'The game of Go has long been viewed as the most challenging of classic games for artificial intelligence owing to its enormous search space and the difficulty of evaluating board positions and moves. We introduce AlphaGo, which combines Monte-Carlo tree search with deep neural networks.',
+      url: 'https://doi.org/10.1038/nature16961',
+      citationKey: 'silver2016alphago',
+      authors: [
+        { firstName: 'David', lastName: 'Silver', fullName: 'David Silver' },
+        { firstName: 'Aja', lastName: 'Huang', fullName: 'Aja Huang' },
+        {
+          firstName: 'Demis',
+          lastName: 'Hassabis',
+          fullName: 'Demis Hassabis',
+        },
+      ],
+      projectScoped: false,
+      collections: [], // Unfiled
+      tags: ['Deep Learning', 'Nature'],
+      state: {
+        readStatus: 'completed',
+        isStarred: true,
+        rating: 5,
+        currentPage: 11,
+      },
+      pdfFilename: 'silver2016alphago.pdf',
+      pageCount: 11,
+    },
+
+    // ── Project Library (Flux Collaborative Scope) ─────────────────────────────
+    {
+      title:
+        'FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness (Project Reference)',
+      itemType: 'conferencePaper',
+      year: 2022,
+      doi: '10.48550/arXiv.2205.14135',
+      publicationTitle:
+        'Advances in Neural Information Processing Systems (NeurIPS 2022)',
+      abstract:
+        'Project reference copy of FlashAttention for long-context memory caching and token throughput benchmarks.',
+      url: 'https://arxiv.org/abs/2205.14135',
+      citationKey: 'proj_dao2022flashattention',
+      authors: [
+        { firstName: 'Tri', lastName: 'Dao', fullName: 'Tri Dao' },
+        {
+          firstName: 'Christopher',
+          lastName: 'Ré',
+          fullName: 'Christopher Ré',
+        },
+      ],
+      projectScoped: true,
+      collections: [colProjFoundation.id],
+      tags: ['Attention', 'GPU-Efficient'],
+      state: {
+        readStatus: 'reading',
+        isStarred: true,
+        rating: 5,
+      },
+      pdfFilename: 'dao2022flashattention.pdf',
+      pageCount: 14,
+    },
+    {
+      title:
+        'Symbolic Discovery of Optimization Algorithms (Lion Optimizer) (Project Reference)',
+      itemType: 'conferencePaper',
+      year: 2023,
+      doi: '10.48550/arXiv.2302.06675',
+      publicationTitle:
+        'Advances in Neural Information Processing Systems (NeurIPS 2023)',
+      abstract:
+        'Project reference copy of Lion optimizer for training stability experiments in collaborative pipeline.',
+      url: 'https://arxiv.org/abs/2302.06675',
+      citationKey: 'proj_chen2023symbolic',
+      authors: [
+        {
+          firstName: 'Xiangning',
+          lastName: 'Chen',
+          fullName: 'Xiangning Chen',
+        },
+        { firstName: 'Quoc V.', lastName: 'Le', fullName: 'Quoc V. Le' },
+      ],
+      projectScoped: true,
+      collections: [colProjOptimization.id],
+      tags: ['Optimization', 'NeurIPS'],
+      state: {
+        readStatus: 'completed',
+        isStarred: true,
+        rating: 5,
+      },
+      pdfFilename: 'chen2023symbolic.pdf',
+      pageCount: 18,
+    },
+    {
+      title:
+        'Adaptive Learning Rates via Spectral Hessian Decomposition (Project Copy)',
+      itemType: 'journalArticle',
+      year: 2025,
+      doi: '10.1109/TPAMI.2025.1049281',
+      publicationTitle:
+        'IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI)',
+      abstract: 'Team master copy for experimental verification.',
+      url: 'https://doi.org/10.1109/TPAMI.2025.1049281',
+      citationKey: 'proj_ngo2025adaptive',
+      authors: [
+        { firstName: 'Tan-Thanh', lastName: 'Ngo', fullName: 'Tan-Thanh Ngo' },
+      ],
+      projectScoped: true,
+      collections: [colProjOptimization.id],
+      tags: ['Optimization', 'Neural Operators'],
+      state: {
+        readStatus: 'completed',
+        isStarred: true,
+        rating: 5,
+      },
+      isMyPublication: true,
+      pdfFilename: 'ngo2025adaptive_tpami.pdf',
+      pageCount: 16,
     },
   ];
 
@@ -1005,6 +1501,8 @@ async function seedLibrary() {
           publisher: p.publicationTitle,
           pages: p.pageCount ? `1-${p.pageCount}` : undefined,
           bibtexKey: p.citationKey,
+          isMyPublication: Boolean(p.isMyPublication),
+          isRetracted: Boolean(p.isRetracted),
         },
       },
     });
@@ -1101,7 +1599,7 @@ async function seedLibrary() {
         },
       });
 
-      // For FlashAttention and Attention, create rich PDF highlights & annotations
+      // For FlashAttention, create rich PDF highlights & annotations
       if (p.citationKey === 'dao2022flashattention') {
         await prisma.annotation.create({
           data: {
@@ -1207,11 +1705,32 @@ async function seedLibrary() {
         'AMSGrad proves a counterexample to Adam convergence and provides a non-increasing learning rate step.',
     },
     {
+      sourceKey: 'loshchilov2019adamw',
+      targetKey: 'kingma2014adam',
+      relationType: 'extends',
+      description:
+        'AdamW decouples weight decay from gradient updates to restore true L2 regularization behavior.',
+    },
+    {
       sourceKey: 'chen2023symbolic',
       targetKey: 'kingma2014adam',
       relationType: 'related',
       description:
         'Lion discovered via program synthesis matches or outperforms AdamW with 50% lower optimizer state memory.',
+    },
+    {
+      sourceKey: 'deepseek2025r1',
+      targetKey: 'deepseek2024v2',
+      relationType: 'extends',
+      description:
+        'DeepSeek-R1 leverages DeepSeek-V2 MoE architecture as foundation for reinforcement learning reasoning.',
+    },
+    {
+      sourceKey: 'dosovitskiy2020vit',
+      targetKey: 'vaswani2017attention',
+      relationType: 'extends',
+      description:
+        'ViT adopts the pure Transformer encoder architecture for direct patch-based image recognition.',
     },
     {
       sourceKey: 'ngo2025adaptive',
@@ -1244,68 +1763,8 @@ async function seedLibrary() {
     }
   }
 
-  // 8. Create Saved Searches (Smart Views)
-  console.log('🔍 Creating Smart Saved Searches for research workflow...');
-  const savedSearchesData = [
-    {
-      name: '⭐ 5-Star Reading Essentials',
-      description: 'Các bài báo cốt lõi được đánh giá 5 sao và đánh dấu sao',
-      query: '',
-      conditions: { rating: 5, isStarred: true },
-      conjunction: 'AND',
-      sortBy: 'rating',
-      sortOrder: 'desc',
-      isPinned: true,
-      color: '#F59E0B',
-      cachedCount: 7,
-      projectId: null,
-    },
-    {
-      name: '⚡ High-Impact Recent (2023–2025)',
-      description: 'Các công trình mới xuất bản trong 2 năm gần nhất',
-      query: '',
-      conditions: { fromYear: 2023 },
-      conjunction: 'AND',
-      sortBy: 'year',
-      sortOrder: 'desc',
-      isPinned: true,
-      color: '#3B82F6',
-      cachedCount: 8,
-      projectId: null,
-    },
-    {
-      name: '📖 Currently Reading Queue',
-      description: 'Các tài liệu đang đọc dở cần xử lý ghi chú',
-      query: '',
-      conditions: { readStatus: 'reading' },
-      conjunction: 'AND',
-      sortBy: 'dateAdded',
-      sortOrder: 'desc',
-      isPinned: false,
-      color: '#10B981',
-      cachedCount: 6,
-      projectId: project.id,
-    },
-  ];
-
-  for (const s of savedSearchesData) {
-    await prisma.savedSearch.create({
-      data: {
-        name: s.name,
-        description: s.description,
-        query: s.query,
-        conditions: s.conditions,
-        conjunction: s.conjunction,
-        sortBy: s.sortBy,
-        sortOrder: s.sortOrder,
-        isPinned: s.isPinned,
-        color: s.color,
-        cachedCount: s.cachedCount,
-        userId: user.id,
-        projectId: s.projectId,
-      },
-    });
-  }
+  // 8. Saved Searches: Purposely OMITTED per user instruction (can skip saved search cleanup)
+  console.log('🔍 Saved searches skipped (cleaned per user request).');
 
   // 9. Invalidate Redis Caches
   try {
@@ -1323,17 +1782,21 @@ async function seedLibrary() {
   console.log('🎉 Academic Library Seeding Completed Successfully!');
   console.log(`📊 Summary of Seeded Data for ${user.email}:`);
   console.log(
-    `   - Total Items: ${papers.length} peer-reviewed & preprint papers`,
+    `   - Total Real Papers: ${papers.length} peer-reviewed & preprint papers`,
   );
   console.log(
-    `   - Personal Collections: 6 structured categories (with sub-collections)`,
+    `   - My Library Papers: ${papers.filter((p) => !p.projectScoped).length} papers in Personal Library`,
   );
-  console.log(`   - Project Collections: 5 research domain categories`);
+  console.log(
+    `   - Project Library Papers: ${papers.filter((p) => p.projectScoped).length} papers in Flux Project`,
+  );
+  console.log(
+    `   - Personal Collections: 8 structured categories (with sub-collections)`,
+  );
   console.log(`   - Research Tags: ${tagsData.length} technical tags`);
-  console.log(`   - Starred Papers: 7 key papers`);
-  console.log(`   - Reading Statuses: 6 Completed, 7 Reading, 6 Unread`);
+  console.log(`   - Starred Papers: 18 key papers`);
   console.log(
-    `   - Research Notes: Detailed mathematical & implementation Markdown notes`,
+    `   - Reading Notes: Detailed mathematical & implementation Markdown notes`,
   );
   console.log(
     `   - PDF Attachments & Annotations: Real highlights and sticky notes`,
@@ -1343,22 +1806,17 @@ async function seedLibrary() {
     `   - Duplicate Cluster: 1 duplicate pair for Curation/Merge testing`,
   );
   console.log(`   - Retraction Watch: 1 retracted paper with warning notice`);
-  console.log(
-    `   - My Publications: 2 peer-reviewed articles by GS. TS. Ngô Tấn Thành`,
-  );
-  console.log(`   - Saved Searches: 3 customized smart filter views`);
+  console.log(`   - My Publications: 2 peer-reviewed articles by Tấn Thành`);
 }
 
 export { seedLibrary };
 
-if (require.main === module) {
-  seedLibrary()
-    .catch((e) => {
-      console.error('❌ Error during library seeding:', e);
-      process.exit(1);
-    })
-    .finally(async () => {
-      await prisma.$disconnect();
-      await pool.end();
-    });
-}
+seedLibrary()
+  .catch((e) => {
+    console.error('❌ Error during library seeding:', e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+    await pool.end();
+  });

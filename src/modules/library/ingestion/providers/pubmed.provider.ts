@@ -104,10 +104,7 @@ export class PubMedProvider implements MetadataProvider {
     if (response.status === 404) return null;
     if (!response.ok) return null;
 
-    const contentType =
-      (typeof response.headers?.get === 'function'
-        ? response.headers.get('content-type')
-        : (response.headers as any)?.['content-type']) || '';
+    const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('text/html')) return null;
 
     let data: any;
@@ -140,10 +137,7 @@ export class PubMedProvider implements MetadataProvider {
 
     if (response.status === 404) return null;
 
-    const contentType =
-      (typeof response.headers?.get === 'function'
-        ? response.headers.get('content-type')
-        : (response.headers as any)?.['content-type']) || '';
+    const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('text/html')) {
       throw new ProviderFetchError(
         `NCBI E-utilities blocked or returned HTML diagnostic for PMID: ${cleanPmid}`,
@@ -473,8 +467,8 @@ export class PubMedProvider implements MetadataProvider {
     const rawAbstract =
       typeof item.abstract === 'string'
         ? item.abstract
-        : typeof (item as any).abstractText === 'string'
-          ? (item as any).abstractText
+        : typeof item.abstractText === 'string'
+          ? item.abstractText
           : undefined;
     const abstract = cleanAbstractText(rawAbstract);
 

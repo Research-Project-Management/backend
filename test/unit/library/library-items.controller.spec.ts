@@ -193,13 +193,19 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
   });
 
   it('should return metadata sources by delegating to ItemService', async () => {
-    const result = await controller.getMetadataSources(validUuid, 'user-1');
+    const result = (await controller.getMetadataSources(
+      validUuid,
+      'user-1',
+    )) as {
+      count: number;
+      sources: { sourceProvider: string }[];
+    };
     expect(mockItemService.getMetadataSources).toHaveBeenCalledWith(
       'user-1',
       validUuid,
       undefined,
     );
     expect(result.count).toBe(1);
-    expect(result.sources[0].sourceProvider).toBe('arxiv');
+    expect(result.sources[0]?.sourceProvider).toBe('arxiv');
   });
 });

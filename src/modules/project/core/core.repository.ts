@@ -14,7 +14,7 @@ import {
   MinimalUser,
 } from './types/project.type';
 import { isUuid } from '@/core/utils/uuid.util';
-import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/work-item.facade';
+import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item';
 import { DEFAULT_PROJECT_STATES } from '../state/state.constants';
 import { deriveProjectPrefix } from './utils/identifier.util';
 import { ProjectQueryDto } from './dto/query.dto';

@@ -21,7 +21,7 @@ export class SavedSearchesRepository {
         description: dto.description?.trim() || '',
         icon: dto.icon || '',
         color: dto.color || '#3b82f6',
-        conditions: dto.conditions as any,
+        conditions: dto.conditions as unknown as Prisma.InputJsonValue,
         conjunction: dto.conjunction || 'AND',
         sortBy: dto.sortBy || 'dateAdded',
         sortOrder: dto.sortOrder || 'desc',
@@ -85,7 +85,9 @@ export class SavedSearchesRepository {
         ...(dto.icon !== undefined ? { icon: dto.icon } : {}),
         ...(dto.color !== undefined ? { color: dto.color } : {}),
         ...(dto.conditions !== undefined
-          ? { conditions: dto.conditions as any }
+          ? {
+              conditions: dto.conditions as unknown as Prisma.InputJsonValue,
+            }
           : {}),
         ...(dto.conjunction !== undefined
           ? { conjunction: dto.conjunction }
@@ -143,12 +145,9 @@ export class SavedSearchesRepository {
       orderBy = { year: sortDir };
     } else if (options.sortBy === 'title') {
       orderBy = { title: options.sortOrder || 'asc' };
-    } else if (
-      options.sortBy === 'creator' ||
-      (options.sortBy as any) === 'authors'
-    ) {
+    } else if (options.sortBy === 'creator' || options.sortBy === 'authors') {
       orderBy = { firstAuthor: options.sortOrder || 'asc' };
-    } else if ((options.sortBy as any) === 'updatedAt') {
+    } else if (options.sortBy === 'updatedAt') {
       orderBy = { updatedAt: sortDir };
     } else {
       orderBy = { createdAt: sortDir };

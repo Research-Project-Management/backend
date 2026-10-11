@@ -49,7 +49,7 @@ export class CslEngineService implements OnModuleInit {
 
   private getCacheKey(cslItem: CslItemData, style: string): string {
     const rawId =
-      (cslItem as any)._itemId ||
+      (typeof cslItem._itemId === 'string' ? cslItem._itemId : '') ||
       cslItem.id ||
       cslItem.DOI ||
       cslItem.title ||
@@ -58,8 +58,15 @@ export class CslEngineService implements OnModuleInit {
     // Include BOTH version and updatedAt: `version` can be overwritten by the
     // item's own edition/software version (CslJsonMapper), which would otherwise
     // hide updatedAt and serve stale renders after the item is edited.
-    const ver = cslItem.version || (cslItem as any)._version || '';
-    const updated = (cslItem as any)._updatedAt || '';
+    const ver =
+      cslItem.version ||
+      (typeof cslItem._version === 'string' ? cslItem._version : '') ||
+      '';
+    const updated =
+      (typeof cslItem._updatedAt === 'string' ||
+      typeof cslItem._updatedAt === 'number'
+        ? String(cslItem._updatedAt)
+        : '') || '';
     return `${rawId}::${style}::${date}::${ver}::${updated}`;
   }
 

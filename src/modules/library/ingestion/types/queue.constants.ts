@@ -18,9 +18,7 @@ export const LIBRARY_INGESTION_QUEUE_CAPTURE =
   process.env.LIBRARY_INGESTION_QUEUE_CAPTURE ||
   'flux_library_ingestion_capture';
 
-/** @deprecated Use LIBRARY_INGESTION_QUEUE_STANDARD for default routing */
-export const LIBRARY_INGESTION_QUEUE =
-  process.env.LIBRARY_INGESTION_QUEUE || LIBRARY_INGESTION_QUEUE_STANDARD;
+export const LIBRARY_INGESTION_QUEUE = LIBRARY_INGESTION_QUEUE_STANDARD;
 
 export const LIBRARY_INGESTION_JOB = 'process_ingestion_run';
 export const LIBRARY_CAPTURE_JOB = 'process_url_capture';

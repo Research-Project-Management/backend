@@ -588,6 +588,41 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
       expect(empty!.data.length).toBe(0);
     });
 
+    it('should create streamable PKZIP 2.0 archive from lazy entries with backpressure', async () => {
+      let loadedDoc = false;
+      const entries = [
+        {
+          path: 'lazy.tex',
+          getData: async () => {
+            loadedDoc = true;
+            return Buffer.from('\\documentclass{article}\nLazy loaded content');
+          },
+        },
+        {
+          path: 'images/icon.png',
+          data: Buffer.from([1, 2, 3, 4, 5]),
+        },
+      ];
+
+      expect(loadedDoc).toBe(false);
+      const stream = zipEngine.createZipStream(entries);
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      expect(loadedDoc).toBe(true);
+
+      const fullZip = Buffer.concat(chunks);
+      expect(fullZip.readUInt32LE(0)).toBe(0x04034b50);
+
+      const extracted = zipEngine.extractZip(fullZip);
+      expect(extracted.length).toBe(2);
+      expect(
+        extracted.find((e) => e.path === 'lazy.tex')?.data.toString(),
+      ).toContain('Lazy loaded content');
+    });
+
     it('should throw InvalidZipArchiveException on corrupted or truncated zip buffers', () => {
       expect(() => zipEngine.extractZip(Buffer.alloc(10))).toThrow(
         InvalidZipArchiveException,
@@ -629,7 +664,9 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
 
       const main = entries.find((e) => e.path === 'main.tex');
       expect(main).toBeDefined();
-      expect(main!.data.toString('utf8')).toContain('\\documentclass{article}');
+      expect(main!.data!.toString('utf8')).toContain(
+        '\\documentclass{article}',
+      );
 
       const bib = entries.find((e) => e.path === 'references.bib');
       expect(bib).toBeDefined();
@@ -645,7 +682,7 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
       );
       const pdf = entries.find((e) => e.path === 'output.pdf');
       expect(pdf).toBeDefined();
-      expect(pdf!.data.toString('utf8')).toContain('%PDF-1.5');
+      expect(pdf!.data!.toString('utf8')).toContain('%PDF-1.5');
     });
 
     it('should hydrate archive entries into structure, docstore, and filestore', async () => {
@@ -766,6 +803,26 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
         expect(result.manifest.fileCount).toBe(1);
         const extracted = zipEngine.extractZip(result.zipBuffer);
         expect(extracted[0].path).toBe('main.tex');
+      });
+
+      it('should export project zip as a stream using lazy entries', async () => {
+        const result = await exportUseCase.executeStream({
+          projectId,
+          projectName: 'StreamProject',
+        });
+
+        expect(result.projectName).toBe('StreamProject');
+        expect(result.fileCount).toBe(3);
+
+        const chunks: Buffer[] = [];
+        for await (const chunk of result.zipStream) {
+          chunks.push(Buffer.from(chunk));
+        }
+        const fullZip = Buffer.concat(chunks);
+        expect(fullZip.readUInt32LE(0)).toBe(0x04034b50);
+
+        const extracted = zipEngine.extractZip(fullZip);
+        expect(extracted.length).toBe(3);
       });
     });
 

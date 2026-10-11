@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { isStateCompleted } from '../../state/utils/state.util';
 
 export interface RankUpdateItem {
@@ -31,7 +31,7 @@ export class RankHandler {
     }
 
     if (!currentWorkItem) {
-      throw new Error(`WorkItem with ID ${workItemId} not found`);
+      throw new NotFoundException(`WorkItem with ID ${workItemId} not found`);
     }
 
     const otherWorkItems = columnWorkItems.filter(

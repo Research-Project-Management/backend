@@ -120,11 +120,11 @@ export class NotesService {
       data = expectedVersionOrData as UpdateNoteData;
       effectiveProjectId =
         typeof dataOrProjectId === 'string' ? dataOrProjectId : projectId;
-      expectedVersion = (data as any)?.expectedVersion;
+      expectedVersion = data?.expectedVersion;
     }
 
     return this.libraryTx.executeInTransaction(
-      async (tx: any, helpers: any) => {
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const sanitizedData: UpdateNoteData = {
           ...data,
           ...(data.title !== undefined
@@ -143,9 +143,12 @@ export class NotesService {
           projectId,
         );
 
-        const effectiveProjectId =
-          projectId || (updated as any).projectId || undefined;
-        const eventScope = { userId, projectId: effectiveProjectId };
+        const noteProjectId =
+          projectId ||
+          ('projectId' in updated && typeof updated.projectId === 'string'
+            ? updated.projectId
+            : undefined);
+        const eventScope = { userId, projectId: noteProjectId };
 
         await helpers.appendChange(eventScope, {
           entityType: 'Note',
@@ -210,7 +213,7 @@ export class NotesService {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
-    const targetUserId = command.userId || (command as any).projectId || '';
+    const targetUserId = command.userId || command.projectId || '';
     if (command.existingId) {
       const existing = await tx.note.findUnique({
         where: { id: command.existingId },
@@ -255,8 +258,7 @@ export class NotesService {
 
       return { id: updated.id, isNew: false, version: updated.version };
     } else {
-      const noteProjectId =
-        command.projectId || (command as any).projectId || undefined;
+      const noteProjectId = command.projectId || undefined;
       const syncScope = { userId: targetUserId, projectId: noteProjectId };
 
       const created = await tx.note.create({
@@ -295,7 +297,7 @@ export class NotesService {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const targetUserId = command.userId || (command as any).projectId || '';
+    const targetUserId = command.userId || command.projectId || '';
     const { entityId } = command;
     const existing = await tx.note.findFirst({
       where: {
@@ -306,11 +308,7 @@ export class NotesService {
     });
     if (!existing) return;
 
-    const noteProjectId =
-      existing.projectId ||
-      command.projectId ||
-      (command as any).projectId ||
-      undefined;
+    const noteProjectId = existing.projectId || command.projectId || undefined;
     const syncScope = { userId: targetUserId, projectId: noteProjectId };
 
     await tx.note.updateMany({
@@ -376,7 +374,10 @@ export class NotesService {
 
     const note = await this.createNote(userId, {
       itemId,
-      projectId: (item as any).projectId || undefined,
+      projectId:
+        'projectId' in item && typeof item.projectId === 'string'
+          ? item.projectId
+          : undefined,
       title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
       contentMd: markdown,
       contentJson: buildTipTapDocFromText(markdown),

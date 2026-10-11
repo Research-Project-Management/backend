@@ -79,14 +79,14 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     private readonly transformer: ItemTransformer,
     private readonly queryService: ItemQueryService,
     @Optional()
-    private readonly fulltextService: ItemFulltextService = {} as any,
+    private readonly fulltextService?: ItemFulltextService,
     @Optional()
-    private readonly typeConversionService: ItemTypeConversionService = {} as any,
+    private readonly typeConversionService?: ItemTypeConversionService,
     @Optional()
-    private readonly curationService: ItemCurationService = {} as any,
+    private readonly curationService?: ItemCurationService,
     @Optional()
-    private readonly validator: ZoteroSchemaValidatorService = {} as any,
-    @Optional() private readonly syncDelegate: ItemSyncDelegate = {} as any,
+    private readonly validator?: ZoteroSchemaValidatorService,
+    @Optional() private readonly syncDelegate?: ItemSyncDelegate,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
@@ -240,6 +240,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     id: string,
     projectId?: string,
   ): Promise<DocumentFulltextResponse> {
+    if (!this.fulltextService) {
+      throw new BadRequestException('Fulltext service unavailable');
+    }
     return this.fulltextService.getFulltext(userId, id, projectId);
   }
 
@@ -250,6 +253,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     targetType: string,
     options: { retainUnmappedInExtra?: boolean } = {},
   ): TypeConversionPreview {
+    if (!this.typeConversionService) {
+      throw new BadRequestException('Type conversion service unavailable');
+    }
     return this.typeConversionService.previewTypeConversion(
       rawItem,
       targetType,
@@ -264,6 +270,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     options: ConvertTypeOptions = {},
     tx?: Prisma.TransactionClient,
   ) {
+    if (!this.typeConversionService) {
+      throw new BadRequestException('Type conversion service unavailable');
+    }
     return this.typeConversionService.convertItemType(
       userId,
       itemId,
@@ -278,6 +287,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
   async parseCitations(
     rawCitations: string,
   ): Promise<BibliographicReference[]> {
+    if (!this.curationService) return [];
     return this.curationService.parseCitations(rawCitations);
   }
 
@@ -286,6 +296,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     projectId: string,
     itemIds: string[],
   ): Promise<{ success: boolean; importedCount: number }> {
+    if (!this.curationService) {
+      throw new BadRequestException('Curation service unavailable');
+    }
     return this.curationService.importItemsToProject(
       userId,
       projectId,
@@ -294,6 +307,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
   }
 
   async getMetadataSources(userId: string, itemId: string, projectId?: string) {
+    if (!this.curationService) return { sources: [] };
     return this.curationService.getMetadataSources(userId, itemId, projectId);
   }
 
@@ -316,7 +330,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     }
     data.title = cleanTitle;
 
-    const valRes = this.validator.validateAndSanitizeItem(data.itemType, data);
+    const valRes = this.validator?.validateAndSanitizeItem
+      ? this.validator.validateAndSanitizeItem(data.itemType, data)
+      : { sanitizedItem: data, warnings: [] };
     const itemPayload = valRes.sanitizedItem as CreateItemData;
 
     const effectiveProjectId =
@@ -414,10 +430,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
 
     let updatePayload = data;
     if (targetItemType) {
-      const valRes = this.validator.validateAndSanitizeItem(
-        targetItemType,
-        data,
-      );
+      const valRes = this.validator?.validateAndSanitizeItem
+        ? this.validator.validateAndSanitizeItem(targetItemType, data)
+        : { sanitizedItem: data, warnings: [] };
       updatePayload = valRes.sanitizedItem as UpdateItemData;
     }
 
@@ -431,8 +446,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
         projectId,
       );
 
-      const effectiveProjectId =
-        projectId || (updated as any).projectId || undefined;
+      const effectiveProjectId = projectId || updated.projectId || undefined;
       const eventScope = { userId, projectId: effectiveProjectId };
 
       await context.helpers.appendChange(eventScope, {
@@ -487,7 +501,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
         tx,
       );
 
-      const effectiveProjectId = (updated as any).projectId || undefined;
+      const effectiveProjectId = updated.projectId || undefined;
       const eventScope = { userId, projectId: effectiveProjectId };
 
       await helpers.appendChange(eventScope, {
@@ -611,8 +625,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
           projectId,
         );
 
-        const effectiveProjectId =
-          (restored as any).projectId || projectId || undefined;
+        const effectiveProjectId = restored.projectId || projectId || undefined;
         const eventScope = { userId, projectId: effectiveProjectId };
 
         await helpers.appendChange(eventScope, {
@@ -870,6 +883,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
+    if (!this.syncDelegate) {
+      throw new BadRequestException('Sync delegate unavailable');
+    }
     return this.syncDelegate.upsertFromSync(command, tx, helpers);
   }
 
@@ -881,6 +897,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
+    if (!this.syncDelegate) {
+      throw new BadRequestException('Sync delegate unavailable');
+    }
     return this.syncDelegate.deleteFromSync(command, tx, helpers);
   }
 }

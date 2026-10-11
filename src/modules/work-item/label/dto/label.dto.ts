@@ -1,6 +1,5 @@
 import {
   IsArray,
-  IsEnum,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -11,7 +10,6 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { LabelType } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // ── Project-Scoped DTOs ───────────────────────────────────────────────────────
@@ -59,11 +57,6 @@ export class CreateProjectLabelDto {
   @IsNumber()
   @IsOptional()
   sortOrder?: number;
-
-  @ApiPropertyOptional({ enum: LabelType, default: LabelType.work_item })
-  @IsEnum(LabelType)
-  @IsOptional()
-  type?: LabelType;
 }
 
 export class UpdateProjectLabelDto {
@@ -75,11 +68,6 @@ export class UpdateProjectLabelDto {
   @IsOptional()
   @MaxLength(255)
   name?: string;
-
-  @ApiPropertyOptional({ enum: LabelType })
-  @IsEnum(LabelType)
-  @IsOptional()
-  type?: LabelType;
 
   @ApiPropertyOptional({
     description: 'Updated hex color code',
@@ -131,43 +119,13 @@ export class ReorderLabelsDto {
   labels!: ReorderLabelItemDto[];
 }
 
-export class ImportLabelItemDto {
-  @ApiProperty({ description: 'Label name', example: 'Frontend' })
-  @IsString()
-  @IsNotEmpty({ message: 'Label name is required' })
-  @MaxLength(255)
-  name!: string;
-
-  @ApiPropertyOptional({ description: 'Hex color code', example: '#3b82f6' })
-  @IsString()
-  @IsOptional()
-  color?: string;
-
-  @ApiPropertyOptional({ description: 'Label description' })
-  @IsString()
-  @IsOptional()
-  @MaxLength(1000)
-  description?: string;
-}
-
-export class ImportLabelsDto {
-  @ApiProperty({
-    type: [ImportLabelItemDto],
-    description: 'Array of labels to import into project',
-  })
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ImportLabelItemDto)
-  labels!: ImportLabelItemDto[];
-}
-
-// ── Legacy DTOs (Preserved for 100% Backward Compatibility) ───────────────────
+// ── Generic / Legacy DTOs ────────────────────────────────────────────────────
 
 export class QueryLabelDto {
-  @ApiPropertyOptional({ enum: LabelType })
-  @IsEnum(LabelType)
+  @ApiPropertyOptional()
+  @IsString()
   @IsOptional()
-  type?: LabelType;
+  type?: string;
 
   @ApiPropertyOptional()
   @IsString()
@@ -186,10 +144,10 @@ export class CreateLabelDto {
   @IsOptional()
   color?: string;
 
-  @ApiPropertyOptional({ enum: LabelType })
-  @IsEnum(LabelType)
+  @ApiPropertyOptional()
+  @IsString()
   @IsOptional()
-  type?: LabelType;
+  type?: string;
 
   @ApiPropertyOptional()
   @IsString()
@@ -218,10 +176,10 @@ export class UpdateLabelDto {
   @IsOptional()
   color?: string;
 
-  @ApiPropertyOptional({ enum: LabelType })
-  @IsEnum(LabelType)
+  @ApiPropertyOptional()
+  @IsString()
   @IsOptional()
-  type?: LabelType;
+  type?: string;
 
   @ApiPropertyOptional()
   @IsString()

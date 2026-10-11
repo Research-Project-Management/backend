@@ -5,7 +5,6 @@ import {
   ILabelRepository,
   LabelWithChildren,
   ReorderLabelItem,
-  LabelType,
 } from './types/label.types';
 
 @Injectable()
@@ -14,7 +13,7 @@ export class LabelRepository implements ILabelRepository {
 
   async findProjectLabels(
     projectId: string,
-    type?: LabelType,
+    type?: string,
   ): Promise<LabelWithChildren[]> {
     return this.prisma.workItemLabel.findMany({
       where: {
@@ -31,7 +30,7 @@ export class LabelRepository implements ILabelRepository {
 
   async findUserLabels(
     userId: string,
-    type?: LabelType,
+    type?: string,
     projectId?: string | null,
   ): Promise<Label[]> {
     return this.prisma.workItemLabel.findMany({
@@ -163,57 +162,6 @@ export class LabelRepository implements ILabelRepository {
       );
 
       return workItems.length;
-    } catch {
-      return 0;
-    }
-  }
-
-  async detachFromPages(projectId: string, labelId: string): Promise<number> {
-    return this.detachMultipleFromPages(projectId, [labelId]);
-  }
-
-  async detachMultipleFromPages(
-    projectId: string,
-    labelIds: string[],
-  ): Promise<number> {
-    const targets = Array.from(new Set(labelIds.filter(Boolean)));
-    if (!targets.length) return 0;
-
-    try {
-      const pageClient = (this.prisma as any).page;
-      if (!pageClient) return 0;
-
-      const pages = await pageClient.findMany({
-        where: {
-          projectId,
-          deletedAt: null,
-        },
-      });
-
-      if (!pages || !pages.length) return 0;
-
-      const targetSet = new Set(targets);
-      const updates = pages
-        .filter(
-          (item: any) =>
-            Array.isArray(item.labels) &&
-            item.labels.some((l: string) => targetSet.has(l)),
-        )
-        .map((item: any) => {
-          const cleaned = item.labels.filter(
-            (label: string) => !targetSet.has(label),
-          );
-          return pageClient.update({
-            where: { id: item.id },
-            data: { labels: cleaned },
-          });
-        });
-
-      if (updates.length > 0) {
-        await this.prisma.$transaction(updates);
-      }
-
-      return updates.length;
     } catch {
       return 0;
     }

@@ -128,6 +128,13 @@ export function toItemResultDto(aggregate: ItemAggregate): ItemResultDto {
   };
 }
 
+interface CreatorSummaryItem {
+  creatorType?: string;
+  lastName?: string;
+  fullName?: string;
+  name?: string;
+}
+
 function buildMetaEnvelope(
   aggregate: ItemAggregate,
   fields: Record<string, any>,
@@ -140,7 +147,10 @@ function buildMetaEnvelope(
       : (fields.creators ?? []);
 
   let creatorSummary: string | undefined;
-  const primaryCreators = (creators as any[]).filter(
+  const rawCreators = Array.isArray(creators)
+    ? (creators as CreatorSummaryItem[])
+    : [];
+  const primaryCreators = rawCreators.filter(
     (c) => !c.creatorType || c.creatorType === 'author',
   );
   if (primaryCreators.length > 0) {

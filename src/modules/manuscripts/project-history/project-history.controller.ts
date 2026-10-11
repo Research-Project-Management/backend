@@ -18,6 +18,7 @@ import {
   BadRequestException,
   ParseIntPipe,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -26,7 +27,6 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { ProjectHistoryService } from './project-history.service';
 import {
   CreateSnapshotDto,
@@ -46,11 +46,11 @@ import { EmptyProjectException } from './core/domain/exceptions/empty-project.ex
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/history',
+  'v1/manuscripts/projects/:projectId/history',
   'manuscripts/projects/:projectId/history',
   'projects/:projectId/history',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
-@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+@UseGuards(JwtAuthGuard)
 export class ProjectHistoryController {
   constructor(private readonly historyService: ProjectHistoryService) {}
 
@@ -83,7 +83,6 @@ export class ProjectHistoryController {
   }
 
   @Post('snapshots')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Manually capture an immutable snapshot of current project files',
   })
@@ -91,9 +90,12 @@ export class ProjectHistoryController {
   async createSnapshot(
     @Param('projectId') projectId: string,
     @Body() dto: CreateSnapshotDto,
+    @Req() req?: any,
   ): Promise<SnapshotDetailDto> {
     try {
-      return await this.historyService.createSnapshot(projectId, dto);
+      const userId =
+        req?.user?.sub || req?.user?.id || req?.user?.userId || null;
+      return await this.historyService.createSnapshot(projectId, dto, userId);
     } catch (err) {
       this.handleError(err);
     }
@@ -138,7 +140,6 @@ export class ProjectHistoryController {
   }
 
   @Post('versions/:version/labels')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary:
       'Attach or update a named label/milestone tag on a specific version',
@@ -148,12 +149,16 @@ export class ProjectHistoryController {
     @Param('projectId') projectId: string,
     @Param('version', ParseIntPipe) version: number,
     @Body() dto: LabelVersionDto,
+    @Req() req?: any,
   ): Promise<VersionLabelDto> {
     try {
+      const userId =
+        req?.user?.sub || req?.user?.id || req?.user?.userId || null;
       return await this.historyService.labelVersion(
         projectId,
         version,
         dto.label,
+        userId,
       );
     } catch (err) {
       this.handleError(err);
@@ -161,7 +166,6 @@ export class ProjectHistoryController {
   }
 
   @Delete('labels/:labelId')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove a named label from project history' })
   @ApiResponse({ status: 204 })
@@ -177,7 +181,6 @@ export class ProjectHistoryController {
   }
 
   @Post('restore')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary:
       'Rollback project to a historical version (creates version N+1 non-destructively)',
@@ -186,11 +189,15 @@ export class ProjectHistoryController {
   async restoreVersion(
     @Param('projectId') projectId: string,
     @Body() dto: RestoreVersionDto,
+    @Req() req?: any,
   ) {
     try {
+      const userId =
+        req?.user?.sub || req?.user?.id || req?.user?.userId || null;
       return await this.historyService.restoreVersion(
         projectId,
         dto.targetVersion,
+        userId,
       );
     } catch (err) {
       this.handleError(err);

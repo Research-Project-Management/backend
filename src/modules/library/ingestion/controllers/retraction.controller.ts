@@ -35,7 +35,7 @@ export class RetractionController {
   @ProjectRoles('owner')
   async seedDatabase(
     @CurrentUser('id') userId: string,
-    @CurrentUser('role' as any) role?: string,
+    @CurrentUser('role') role?: string,
     @Body('force') force?: boolean,
   ) {
     if (role !== 'admin' && role !== 'superadmin' && role !== 'system') {

@@ -1,0 +1,16 @@
+export * from './work-item.module';
+export * from './work-item.facade';
+export * from './core/constants/redis-keys.constant';
+export * from './core/types/work-item.types';
+export * from './state/types/state.types';
+export * from './state/utils/state.util';
+export { CoreService as WorkItemCoreService } from './core/core.service';
+export { StateService as WorkItemStateService } from './state/state.service';
+export { AttachmentService as WorkItemAttachmentService } from './attachment/attachment.service';
+export { AssignmentService as WorkItemAssignmentService } from './assignment/assignment.service';
+export { CommentService as WorkItemCommentService } from './comment/comment.service';
+export { RelationService as WorkItemRelationService } from './relation/relation.service';
+export { LabelService as WorkItemLabelService } from './label/label.service';
+export { HistoryService as WorkItemHistoryService } from './history/history.service';
+export { ArchiveService as WorkItemArchiveService } from './archive/archive.service';
+export { DraftService as WorkItemDraftService } from './draft/draft.service';

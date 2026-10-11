@@ -10,6 +10,7 @@ import {
   Patch,
   Param,
   Body,
+  Req,
   NotFoundException,
   BadRequestException,
   UseGuards,
@@ -21,7 +22,6 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { TrackChangesService } from './track-changes.service';
 import {
   RecordChangeDto,
@@ -42,11 +42,11 @@ import { ResolvedThreadException } from './core/domain/exceptions/resolved-threa
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/docs/:docId/review',
+  'v1/manuscripts/projects/:projectId/docs/:docId/review',
   'manuscripts/projects/:projectId/docs/:docId/review',
   'projects/:projectId/docs/:docId/review',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
-@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+@UseGuards(JwtAuthGuard)
 export class TrackChangesController {
   constructor(private readonly trackChangesService: TrackChangesService) {}
 
@@ -88,16 +88,22 @@ export class TrackChangesController {
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
     @Body() dto: RecordChangeDto,
+    @Req() req?: any,
   ): Promise<TrackChangeResponseDto> {
     try {
-      return await this.trackChangesService.recordChange(projectId, docId, dto);
+      const userId = req?.user?.id || req?.user?.sub || null;
+      return await this.trackChangesService.recordChange(
+        projectId,
+        docId,
+        dto,
+        userId,
+      );
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Post('changes/:changeId/accept')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Accept a proposed change (merges text permanently into Docstore)',
   })
@@ -106,12 +112,15 @@ export class TrackChangesController {
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
     @Param('changeId') changeId: string,
+    @Req() req?: any,
   ): Promise<TrackChangeResponseDto> {
     try {
+      const userId = req?.user?.id || req?.user?.sub || null;
       return await this.trackChangesService.acceptChange(
         projectId,
         docId,
         changeId,
+        userId,
       );
     } catch (err) {
       this.handleError(err);
@@ -119,7 +128,6 @@ export class TrackChangesController {
   }
 
   @Post('changes/:changeId/reject')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Reject a proposed change (reverts text in Docstore)',
   })
@@ -128,12 +136,15 @@ export class TrackChangesController {
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
     @Param('changeId') changeId: string,
+    @Req() req?: any,
   ): Promise<TrackChangeResponseDto> {
     try {
+      const userId = req?.user?.id || req?.user?.sub || null;
       return await this.trackChangesService.rejectChange(
         projectId,
         docId,
         changeId,
+        userId,
       );
     } catch (err) {
       this.handleError(err);
@@ -141,7 +152,6 @@ export class TrackChangesController {
   }
 
   @Post('changes/batch')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Bulk accept or reject all pending changes in a document',
   })
@@ -150,19 +160,22 @@ export class TrackChangesController {
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
     @Body() dto: BatchResolveDto,
+    @Req() req?: any,
   ) {
     try {
+      const userId = req?.user?.id || req?.user?.sub || null;
       return await this.trackChangesService.batchResolveChanges(
         projectId,
         docId,
         dto.action,
+        userId,
       );
     } catch (err) {
       this.handleError(err);
     }
   }
 
-  @Post('threads')
+  @Post(['threads', 'comments'])
   @ApiOperation({
     summary: 'Create an inline comment thread pinned to text coordinates',
   })
@@ -171,19 +184,22 @@ export class TrackChangesController {
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
     @Body() dto: CreateCommentThreadDto,
+    @Req() req?: any,
   ): Promise<CommentThreadResponseDto> {
     try {
+      const userId = req?.user?.id || req?.user?.sub || null;
       return await this.trackChangesService.createCommentThread(
         projectId,
         docId,
         dto,
+        userId,
       );
     } catch (err) {
       this.handleError(err);
     }
   }
 
-  @Post('threads/:threadId/replies')
+  @Post(['threads/:threadId/replies', 'comments/:threadId/replies'])
   @ApiOperation({ summary: 'Reply to an active comment thread' })
   @ApiResponse({ status: 201, type: CommentReplyResponseDto })
   async addCommentReply(
@@ -191,20 +207,23 @@ export class TrackChangesController {
     @Param('docId') docId: string,
     @Param('threadId') threadId: string,
     @Body() dto: AddCommentReplyDto,
+    @Req() req?: any,
   ): Promise<CommentReplyResponseDto> {
     try {
+      const userId = req?.user?.id || req?.user?.sub || null;
       return await this.trackChangesService.addCommentReply(
         projectId,
         docId,
         threadId,
         dto,
+        userId,
       );
     } catch (err) {
       this.handleError(err);
     }
   }
 
-  @Patch('threads/:threadId/resolve')
+  @Patch(['threads/:threadId/resolve', 'comments/:threadId/resolve'])
   @ApiOperation({ summary: 'Resolve or reopen a comment thread' })
   @ApiResponse({ status: 200, type: CommentThreadResponseDto })
   async resolveCommentThread(
@@ -212,13 +231,16 @@ export class TrackChangesController {
     @Param('docId') docId: string,
     @Param('threadId') threadId: string,
     @Body() dto: ResolveThreadDto,
+    @Req() req?: any,
   ): Promise<CommentThreadResponseDto> {
     try {
+      const userId = req?.user?.id || req?.user?.sub || null;
       return await this.trackChangesService.resolveCommentThread(
         projectId,
         docId,
         threadId,
         dto.resolve,
+        userId,
       );
     } catch (err) {
       this.handleError(err);

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { RedisCacheService } from './redis.service';
+import { WORK_ITEM_REDIS_KEYS } from '@/modules/work-item/core/constants/redis-keys.constant';
 
 export interface EntityChangeEvent {
   entityType?: string;
@@ -45,12 +46,14 @@ export class CacheInvalidationListener {
   @OnEvent('work-item.*', { async: true })
   async handleWorkItemChanged(event: EntityChangeEvent) {
     if (event.projectId) {
-      await this.redisCache.del(`flux:wi:work-items:${event.projectId}`);
-      await this.redisCache.delPattern(
-        `flux:wi:work-items:${event.projectId}*`,
+      await this.redisCache.del(
+        WORK_ITEM_REDIS_KEYS.projectWorkItems(event.projectId),
       );
       await this.redisCache.delPattern(
-        `flux:wi:labels:proj:${event.projectId}*`,
+        `${WORK_ITEM_REDIS_KEYS.projectWorkItems(event.projectId)}*`,
+      );
+      await this.redisCache.delPattern(
+        `${WORK_ITEM_REDIS_KEYS.projectLabels(event.projectId)}*`,
       );
       await this.redisCache.del(`flux:proj:overview:${event.projectId}`);
       await this.redisCache.delPattern(`work-items:${event.projectId}:*`);
@@ -59,12 +62,14 @@ export class CacheInvalidationListener {
       );
     }
     if (event.entityId) {
-      await this.redisCache.del(`flux:wi:work-item:${event.entityId}`);
+      await this.redisCache.del(WORK_ITEM_REDIS_KEYS.workItem(event.entityId));
       await this.redisCache.del(`work_item:${event.entityId}`);
       await this.redisCache.del(`WorkItem:${event.entityId}`);
     }
     if (event.scopeId) {
-      await this.redisCache.delPattern(`flux:wi:labels:${event.scopeId}*`);
+      await this.redisCache.delPattern(
+        `${WORK_ITEM_REDIS_KEYS.labels(event.scopeId)}*`,
+      );
     }
   }
 

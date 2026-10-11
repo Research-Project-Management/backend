@@ -14,6 +14,7 @@ import {
   BadRequestException,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import { CreateItemData } from '../types/items.types';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -60,7 +61,7 @@ export abstract class BaseItemController {
     },
     projectId?: string,
   ) {
-    const rawFields = (query as any)?.fields;
+    const rawFields = query?.fields;
     const fieldsList =
       typeof rawFields === 'string'
         ? rawFields
@@ -142,7 +143,7 @@ export abstract class BaseItemController {
 
     return this.itemService.createItem(
       userId,
-      cleanBody as any,
+      cleanBody as CreateItemData,
       {
         projectId: effectiveProjectId,
         source: 'manual',

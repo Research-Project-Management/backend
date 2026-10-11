@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { IngestionRunAggregate } from '../types/ingestion-run.aggregate';
 import { IngestionStageName } from '../types/ingestion-domain.event';
 import { IngestionRepository } from '../repositories/ingestion.repository';
-import { IngestionStatus, Prisma } from '@prisma/client';
+import { IngestionStage, IngestionStatus, Prisma } from '@prisma/client';
 
 export interface ExecuteStepOptions<T> {
   compensate?: (result: T) => Promise<void>;
@@ -45,9 +45,10 @@ export class IngestionSagaSession {
     this.aggregate.startStep(stageName);
 
     try {
-      const dbStage = (
-        stageName === 'ENRICH_EXISTING' ? 'ENRICH' : stageName
-      ) as any;
+      const dbStage: IngestionStage =
+        stageName === 'ENRICH_EXISTING'
+          ? IngestionStage.ENRICH
+          : IngestionStage[stageName];
       await this.repo
         .updateRunStage(this.scopeId, this.runId, dbStage)
         .catch(() => {});

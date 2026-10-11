@@ -22,7 +22,6 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { LinkedFilesService } from './linked-files.service';
 import {
   CreateLinkedFileDto,
@@ -38,11 +37,12 @@ export class LinkedFilesController {
 
   @Post([
     'api/v1/manuscripts/projects/:projectId/linked-files',
+    'v1/manuscripts/projects/:projectId/linked-files',
+    'manuscripts/projects/:projectId/linked-files',
+    'projects/:projectId/linked-files',
     'project/:projectId/linked_file',
     'projects/:projectId/linked_file',
   ])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
@@ -59,11 +59,12 @@ export class LinkedFilesController {
 
   @Get([
     'api/v1/manuscripts/projects/:projectId/linked-files',
+    'v1/manuscripts/projects/:projectId/linked-files',
+    'manuscripts/projects/:projectId/linked-files',
+    'projects/:projectId/linked-files',
     'project/:projectId/linked_file',
     'projects/:projectId/linked_file',
   ])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List all linked files for a manuscript project' })
   @ApiResponse({ status: 200, type: [LinkedFileResponseDto] })
   public async listLinkedFiles(
@@ -74,11 +75,12 @@ export class LinkedFilesController {
 
   @Post([
     'api/v1/manuscripts/projects/:projectId/linked-files/:id/refresh',
+    'v1/manuscripts/projects/:projectId/linked-files/:id/refresh',
+    'manuscripts/projects/:projectId/linked-files/:id/refresh',
+    'projects/:projectId/linked-files/:id/refresh',
     'project/:projectId/linked_file/:id/refresh',
     'projects/:projectId/linked_file/:id/refresh',
   ])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Refresh and re-synchronize a linked file immediately',
@@ -94,11 +96,12 @@ export class LinkedFilesController {
 
   @Delete([
     'api/v1/manuscripts/projects/:projectId/linked-files/:id',
+    'v1/manuscripts/projects/:projectId/linked-files/:id',
+    'manuscripts/projects/:projectId/linked-files/:id',
+    'projects/:projectId/linked-files/:id',
     'project/:projectId/linked_file/:id',
     'projects/:projectId/linked_file/:id',
   ])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'coordinator')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Unlink a linked file from the manuscript project' })
   public async deleteLinkedFile(
@@ -109,7 +112,11 @@ export class LinkedFilesController {
     await this.linkedFilesService.delete(projectId, id, deleteNode === 'true');
   }
 
-  @Post('api/v1/manuscripts/linked-files/refresh-all')
+  @Post([
+    'api/v1/manuscripts/linked-files/refresh-all',
+    'v1/manuscripts/linked-files/refresh-all',
+    'manuscripts/linked-files/refresh-all',
+  ])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Trigger background refresh for all auto-refresh linked files',

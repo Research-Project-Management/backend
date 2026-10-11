@@ -46,7 +46,9 @@ export class SearchEventsSubscriber implements OnModuleInit {
         INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_CREATED,
         {
           handle: async (event: OutboxEvent) => {
-            await this.handleIntegrationItemCreated(event.payload as any);
+            await this.handleIntegrationItemCreated(
+              event.payload as unknown as BaseIntegrationEvent<ItemCreatedIntegrationPayload>,
+            );
           },
         },
       );
@@ -55,7 +57,9 @@ export class SearchEventsSubscriber implements OnModuleInit {
         INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_DELETED,
         {
           handle: async (event: OutboxEvent) => {
-            await this.handleIntegrationItemDeleted(event.payload as any);
+            await this.handleIntegrationItemDeleted(
+              event.payload as unknown as BaseIntegrationEvent<ItemDeletedIntegrationPayload>,
+            );
           },
         },
       );

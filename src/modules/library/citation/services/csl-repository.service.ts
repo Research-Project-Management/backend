@@ -24,6 +24,19 @@ export interface CslStyleMetadata {
   isCustom?: boolean;
 }
 
+function parseCslCategory(val?: unknown): CslStyleMetadata['category'] {
+  if (
+    val === 'author-date' ||
+    val === 'numeric' ||
+    val === 'label' ||
+    val === 'note' ||
+    val === 'raw'
+  ) {
+    return val;
+  }
+  return 'author-date';
+}
+
 /**
  * Authoritative built-in offline catalog of the most widely used international
  * academic journals and publisher styles (Nature, Science, Cell, IEEE, ACM, Lancet, etc.).
@@ -348,7 +361,7 @@ export class CslRepositoryService implements OnModuleInit {
       return null;
     }
 
-    // 1. Built-in hardcoded high-performance styles
+    // 1. Built-in bundled high-performance styles
     if (normalized === 'ieee') return IEEE_CSL;
     if (normalized === 'nature') return NATURE_CSL;
     if (normalized === 'chicago' || normalized === 'chicago-author-date')
@@ -453,7 +466,7 @@ export class CslRepositoryService implements OnModuleInit {
       .toLowerCase();
 
     const formatMatch = cslXml.match(/citation-format="([^"]+)"/i);
-    const category = (formatMatch?.[1] as any) || 'author-date';
+    const category = parseCslCategory(formatMatch?.[1]);
 
     const meta: CslStyleMetadata = {
       id: slug,
@@ -564,14 +577,7 @@ export class CslRepositoryService implements OnModuleInit {
       }
 
       const parsed: CslStyleMetadata[] = rawList.map((item) => {
-        const cat = item.categories?.format as any;
-        const validCategory =
-          cat === 'author-date' ||
-          cat === 'numeric' ||
-          cat === 'label' ||
-          cat === 'note'
-            ? cat
-            : 'author-date';
+        const validCategory = parseCslCategory(item.categories?.format);
 
         return {
           id: item.name,

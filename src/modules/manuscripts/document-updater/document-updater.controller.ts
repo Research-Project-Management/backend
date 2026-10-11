@@ -23,7 +23,6 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { DocumentUpdaterService } from './document-updater.service';
 import { QueueUpdateDto } from './dto/queue-update.dto';
 import { FlushProjectDto } from './dto/flush-project.dto';
@@ -37,11 +36,11 @@ import { DocumentLockedException } from './core/domain/exceptions/document-locke
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/updater',
+  'v1/manuscripts/projects/:projectId/updater',
   'manuscripts/projects/:projectId/updater',
   'project/:projectId',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
-@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+@UseGuards(JwtAuthGuard)
 export class DocumentUpdaterController {
   constructor(private readonly service: DocumentUpdaterService) {}
 
@@ -49,7 +48,6 @@ export class DocumentUpdaterController {
    * Queue real-time updates for a document (keystrokes / lines / splice).
    */
   @Post('doc/:docId/update')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.ACCEPTED)
   public async queueUpdate(
     @Param('projectId') projectId: string,
@@ -73,7 +71,6 @@ export class DocumentUpdaterController {
    * Flush-Before-Compile endpoint: flushes all dirty docs in a project into Docstore.
    */
   @Post('flush')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   public async flushProject(
     @Param('projectId') projectId: string,
@@ -93,7 +90,6 @@ export class DocumentUpdaterController {
    * Flush a single document into Docstore.
    */
   @Post('doc/:docId/flush')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   public async flushDoc(
     @Param('projectId') projectId: string,
@@ -134,7 +130,6 @@ export class DocumentUpdaterController {
    * Evict document buffer when users disconnect.
    */
   @Delete('doc/:docId/buffer')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   public async evictDoc(
     @Param('projectId') projectId: string,

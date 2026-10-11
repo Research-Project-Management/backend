@@ -26,7 +26,6 @@ import {
   CreateLabelDto,
   UpdateLabelDto,
   QueryLabelDto,
-  ImportLabelsDto,
 } from './dto/label.dto';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
@@ -146,28 +145,6 @@ export class LabelController {
     return this.labelService.reorderProjectLabels(projectId, dto);
   }
 
-  @Post([
-    'projects/:projectId/labels/import',
-    'project/:projectId/labels/import',
-  ])
-  @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner')
-  @ApiOperation({
-    summary: 'Bulk import labels into project from CSV data',
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'Labels imported with summary stats',
-  })
-  async importProjectLabels(
-    @Param('projectId') projectId: string,
-    @CurrentUser('id') userId: string,
-    @Body() dto: ImportLabelsDto,
-  ) {
-    return this.labelService.importProjectLabels(projectId, userId, dto);
-  }
-
   // ── 2. Generic Labels Endpoints (Scoped to Project or User) ─────────────────
 
   @Get('labels')
@@ -213,17 +190,5 @@ export class LabelController {
     @CurrentUser('id') userId: string,
   ) {
     return this.labelService.deleteLabel(labelId, userId);
-  }
-
-  @Post('labels/import')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({
-    summary: 'Bulk import labels from CSV data',
-  })
-  async importLabels(
-    @CurrentUser('id') userId: string,
-    @Body() dto: ImportLabelsDto,
-  ) {
-    return this.labelService.importUserLabels(userId, dto);
   }
 }

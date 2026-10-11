@@ -55,7 +55,9 @@ import { ClsiHealthCheck } from './core/adapters/engines/health-check';
 import { ClsiMetrics } from './core/adapters/telemetry/clsi.metrics';
 import {
   buildZipArchive,
+  createZipStreamFromDisk,
   ZipFileEntry,
+  ZipDiskEntry,
 } from './core/adapters/artifacts/zip.util';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 
@@ -611,7 +613,12 @@ export class ClsiService {
     }
 
     return this.synctexUseCase.forwardSync({
-      projectId: dto.projectId || dto.pageId || 'default',
+      projectId:
+        dto.projectId ||
+        dto.project_id ||
+        dto.pageId ||
+        dto.page_id ||
+        'default',
       file: dto.file,
       line: dto.line,
       column: dto.column,
@@ -645,7 +652,12 @@ export class ClsiService {
     }
 
     return this.synctexUseCase.reverseSync({
-      projectId: dto.projectId || dto.pageId || 'default',
+      projectId:
+        dto.projectId ||
+        dto.project_id ||
+        dto.pageId ||
+        dto.page_id ||
+        'default',
       page: dto.page,
       x: dto.x,
       y: dto.y,
@@ -672,12 +684,33 @@ export class ClsiService {
       throw new NotFoundException(`Artifact file ${filename} not found`);
     }
 
+    const ext = path.extname(filename).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.log': 'text/plain; charset=utf-8',
+      '.aux': 'text/plain; charset=utf-8',
+      '.bbl': 'text/plain; charset=utf-8',
+      '.blg': 'text/plain; charset=utf-8',
+      '.toc': 'text/plain; charset=utf-8',
+      '.lof': 'text/plain; charset=utf-8',
+      '.lot': 'text/plain; charset=utf-8',
+      '.fls': 'text/plain; charset=utf-8',
+      '.fdb_latexmk': 'text/plain; charset=utf-8',
+      '.synctex.gz': 'application/gzip',
+      '.synctex': 'text/plain; charset=utf-8',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.svg': 'image/svg+xml',
+    };
+    const contentType = mimeTypes[ext] || 'application/octet-stream';
+
     res.header(
       'Content-Disposition',
       `attachment; filename="${encodeURIComponent(filename)}"`,
     );
-    res.header('Content-Type', 'text/plain');
-    res.send(buffer);
+    res.header('Content-Type', contentType);
+    return res.send(buffer);
   }
 
   public async readAuxFileBuffer(
@@ -719,7 +752,7 @@ export class ClsiService {
     res: FastifyReply,
   ): Promise<void> {
     const scratchDir = this.workspace.getScratchDir(projectId);
-    const entries: ZipFileEntry[] = [];
+    const diskEntries: ZipDiskEntry[] = [];
 
     const walk = async (currentDir: string, relDir: string) => {
       try {
@@ -739,9 +772,8 @@ export class ClsiService {
           if (entry.isDirectory()) {
             await walk(fullPath, relPath);
           } else if (entry.isFile()) {
-            const data = await fs.readFile(fullPath);
             const stat = await fs.stat(fullPath);
-            entries.push({ path: relPath, data, date: stat.mtime });
+            diskEntries.push({ fullPath, relPath, date: stat.mtime });
           }
         }
       } catch {
@@ -751,18 +783,18 @@ export class ClsiService {
 
     await walk(scratchDir, '');
 
-    if (entries.length === 0) {
+    if (diskEntries.length === 0) {
       throw new NotFoundException(
         `No output artifacts found for project ${projectId}`,
       );
     }
 
-    const zipBuffer = buildZipArchive(entries);
+    const zipStream = createZipStreamFromDisk(diskEntries);
     res.header(
       'Content-Disposition',
       `attachment; filename="project-${encodeURIComponent(projectId)}-artifacts.zip"`,
     );
     res.header('Content-Type', 'application/zip');
-    res.send(zipBuffer);
+    return res.send(zipStream);
   }
 }

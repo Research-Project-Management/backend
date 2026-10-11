@@ -8,7 +8,7 @@ describe('ScientificChunkingService Unit Suite', () => {
     service = new ScientificChunkingService();
   });
 
-  it('should chunk document using GROBID structured sections when available', () => {
+  it('should chunk document using extracted structured sections when available', () => {
     const mockDoc: ExtractedPdfDocument = {
       metadata: {
         title: 'Attention Is All You Need',

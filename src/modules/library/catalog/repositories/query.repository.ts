@@ -4,7 +4,7 @@ import {
   Inject,
   Optional,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, ReadStatus } from '@prisma/client';
 import zlib from 'zlib';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { isUUID } from 'class-validator';
@@ -75,7 +75,16 @@ export class QueryRepository {
           where: { id },
           select: { metadata: true, deletedAt: true },
         });
-        const targetId = (tombstone?.metadata as any)?.mergedIntoId;
+        const tombstoneMeta =
+          tombstone?.metadata &&
+          typeof tombstone.metadata === 'object' &&
+          !Array.isArray(tombstone.metadata)
+            ? (tombstone.metadata as Record<string, unknown>)
+            : undefined;
+        const targetId =
+          typeof tombstoneMeta?.mergedIntoId === 'string'
+            ? tombstoneMeta.mergedIntoId
+            : undefined;
         if (targetId && isUuid(targetId) && targetId !== id) {
           return this.findById(
             userId,
@@ -184,13 +193,13 @@ export class QueryRepository {
       },
     });
 
-    if (!item || ((item as any).userId && (item as any).userId !== userId)) {
+    if (!item || item.userId !== userId) {
       return null;
     }
 
-    const relationTags = item.itemTags.map((it: any) => it.tag.name);
+    const relationTags = item.itemTags.map((it) => it.tag.name);
     const tags = normalizeTags(relationTags);
-    const meta: any = (item.metadata as any) ?? {};
+    const meta = (item.metadata as Record<string, any>) ?? {};
 
     return {
       id: item.id,
@@ -271,7 +280,7 @@ export class QueryRepository {
   }
 
   /**
-   * Retrieves the latest itemMetadata for an item and provider (e.g. grobid, grobid_fulltext).
+   * Retrieves the latest itemMetadata for an item and provider (e.g. mextract, pdf_fulltext).
    */
   async findItemMetadata(
     itemId: string,
@@ -389,7 +398,7 @@ export class QueryRepository {
     });
 
     const descendantIds = this.treeEngine.getDescendantIds(
-      allCollections as any,
+      allCollections,
       options.collectionId,
     );
 
@@ -549,7 +558,7 @@ export class QueryRepository {
                   },
                 }
               : {}),
-          } as any,
+          } as Prisma.ItemWhereInput,
         },
         include: {
           item: {
@@ -759,18 +768,18 @@ export class QueryRepository {
     }
 
     if (options.readStatus && options.readStatus !== 'all') {
+      const validStatuses: ReadStatus[] = ['unread', 'reading', 'completed'];
       const statuses = options.readStatus
         .split(',')
         .map((s) => s.trim())
-        .filter(Boolean);
+        .filter((s): s is ReadStatus =>
+          validStatuses.includes(s as ReadStatus),
+        );
       if (statuses.length > 0) {
         where.states = {
           some: {
             userId,
-            readStatus:
-              statuses.length > 1
-                ? { in: statuses as any }
-                : (statuses[0] as any),
+            readStatus: statuses.length > 1 ? { in: statuses } : statuses[0],
           },
         };
       }
@@ -896,7 +905,7 @@ export class QueryRepository {
                   },
                 }
               : {}),
-          } as any,
+          } as Prisma.ItemWhereInput,
         },
       });
     }
@@ -1187,7 +1196,7 @@ export class QueryRepository {
           authors: authorNames,
           year: peerItem.year,
           doi: peerItem.doi,
-          itemType: (peerItem as any).type || (peerItem as any).itemType,
+          itemType: peerItem.type,
           citationKey: peerItem.citationKey,
           relationType: effectiveRelationType,
           direction: isOutgoing ? 'outgoing' : 'incoming',
@@ -1208,7 +1217,12 @@ export class QueryRepository {
     });
     if (!item || !item.metadata) return [];
     try {
-      const meta = (item.metadata as any) ?? {};
+      const meta =
+        item.metadata &&
+        typeof item.metadata === 'object' &&
+        !Array.isArray(item.metadata)
+          ? (item.metadata as Record<string, unknown>)
+          : {};
       return Array.isArray(meta.relations) ? meta.relations : [];
     } catch {
       return [];
@@ -1330,7 +1344,9 @@ export class QueryRepository {
     const sourceRecord = await client.itemMetadata.findFirst({
       where: {
         itemId: itemId,
-        sourceProvider: 'grobid_fulltext',
+        sourceProvider: {
+          in: ['pdf_fulltext', 'mextract_fulltext', 'trusted_extraction'],
+        },
       },
       orderBy: { fetchedAt: 'desc' },
     });

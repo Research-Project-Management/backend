@@ -446,11 +446,18 @@ export class IntegrationsService {
     }
 
     // 2. Commit and push tree to GitHub
+    const filesToPush = await Promise.all(
+      entries.map(async (e) => ({
+        path: e.path,
+        data: e.data ?? (e.getData ? await e.getData() : Buffer.alloc(0)),
+      })),
+    );
+
     const pushResult = await this.githubProvider.pushProjectTree({
       decryptedToken: token,
       repoFullName,
       branch,
-      files: entries,
+      files: filesToPush,
       commitMessage: dto.commitMessage,
     });
 

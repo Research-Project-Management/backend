@@ -31,9 +31,7 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 async function seedAllFeatures() {
-  console.log(
-    '🚀 Starting end-to-end multi-feature seeding for GS. TS. Ngô Tấn Thành...',
-  );
+  console.log('🚀 Starting end-to-end multi-feature seeding for Tấn Thành...');
 
   const now = new Date();
   const dayMs = 24 * 60 * 60 * 1000;
@@ -79,13 +77,13 @@ async function seedAllFeatures() {
     where: { userId: userThanh.id },
     create: {
       userId: userThanh.id,
-      name: 'GS. TS. Ngô Tấn Thành',
+      name: 'Tấn Thành',
       avatar:
         'https://lh3.googleusercontent.com/a/ACg8ocLfL42lSWtqIwZdRz8r9d64G5dfKsAaMJ8SvRMLcWSckzM5KbY=s96-c',
       institution: 'Viện Công nghệ Thông tin & Trí tuệ Nhân tạo - ĐHQG Hà Nội',
     },
     update: {
-      name: 'GS. TS. Ngô Tấn Thành',
+      name: 'Tấn Thành',
       avatar:
         'https://lh3.googleusercontent.com/a/ACg8ocLfL42lSWtqIwZdRz8r9d64G5dfKsAaMJ8SvRMLcWSckzM5KbY=s96-c',
       institution: 'Viện Công nghệ Thông tin & Trí tuệ Nhân tạo - ĐHQG Hà Nội',
@@ -139,7 +137,7 @@ async function seedAllFeatures() {
         providerSubjectId: 'google-oauth2|114820194820194',
         email: userThanh.email,
         profileData: {
-          name: 'GS. TS. Ngô Tấn Thành',
+          name: 'Tấn Thành',
           email: userThanh.email,
           picture:
             'https://lh3.googleusercontent.com/a/ACg8ocLfL42lSWtqIwZdRz8r9d64G5dfKsAaMJ8SvRMLcWSckzM5KbY=s96-c',
@@ -879,7 +877,7 @@ async function seedAllFeatures() {
         chatId: chat1.id,
         role: MessageRole.assistant,
         content:
-          'Hoàn toàn khả thi, GS. Thành. Dưới giả định kỳ vọng hữu hạn điều kiện:\n\n$$\\mathbb{E}[\\|g_t\\|^2 \\mid \\mathcal{F}_t] \\le \\sigma^2 + c \\|\\nabla f(x_t)\\|^2$$\n\nTa áp dụng bất đẳng thức sai phân Martingale kết hợp bổ đề Robbins-Monro. Khi đó, đại lượng $\\hat{v}_t$ vẫn bị chặn dưới theo xác suất, và kỳ vọng regret $\\mathbb{E}[R(T)]$ vẫn giữ được trật tự $\\mathcal{O}(\\sqrt{T \\log T})$ mà không cần đòi hỏi $\\|g_t\\|_\\infty \\le G_\\infty$ đối với mọi mẫu ngẫu nhiên.',
+          'Hoàn toàn khả thi, anh Thành. Dưới giả định kỳ vọng hữu hạn điều kiện:\n\n$$\\mathbb{E}[\\|g_t\\|^2 \\mid \\mathcal{F}_t] \\le \\sigma^2 + c \\|\\nabla f(x_t)\\|^2$$\n\nTa áp dụng bất đẳng thức sai phân Martingale kết hợp bổ đề Robbins-Monro. Khi đó, đại lượng $\\hat{v}_t$ vẫn bị chặn dưới theo xác suất, và kỳ vọng regret $\\mathbb{E}[R(T)]$ vẫn giữ được trật tự $\\mathcal{O}(\\sqrt{T \\log T})$ mà không cần đòi hỏi $\\|g_t\\|_\\infty \\le G_\\infty$ đối với mọi mẫu ngẫu nhiên.',
         createdAt: new Date(now.getTime() - 1 * dayMs + 3 * minMs),
       },
     ],
@@ -1409,7 +1407,7 @@ async function seedAllFeatures() {
       status: IntegrationStatus.connected,
       accessToken: 'enc:v1:aes-256-gcm:github-pat-token-sample',
       providerUserId: 'ngotanthanh-research',
-      accountName: 'GS. TS. Ngô Tấn Thành (Lab Leader)',
+      accountName: 'Tấn Thành (Lab Leader)',
       accountEmail: userThanh.email,
       metadata: {
         repositories: [

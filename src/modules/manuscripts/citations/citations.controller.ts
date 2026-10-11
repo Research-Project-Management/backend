@@ -45,11 +45,11 @@ import { InvalidBibtexException } from './core/domain/exceptions/invalid-bibtex.
 @ApiBearerAuth('JWT-auth')
 @Controller([
   'api/v1/manuscripts/projects/:projectId/citations',
+  'v1/manuscripts/projects/:projectId/citations',
   'manuscripts/projects/:projectId/citations',
   'projects/:projectId/citations',
 ])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
-@ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
 export class CitationsController {
   constructor(private readonly citationsService: CitationsService) {}
 

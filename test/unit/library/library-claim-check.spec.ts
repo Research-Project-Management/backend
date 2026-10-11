@@ -72,7 +72,7 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
         uploadFile: jest.fn().mockResolvedValue({
           fileId: storageFileId,
           url: `/api/files/${storageFileId}`,
-          path: `extractions/${itemId}/grobid_fulltext.json.gz`,
+          path: `extractions/${itemId}/pdf_fulltext.json.gz`,
         }),
       };
 
@@ -95,9 +95,9 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
       expect(mockStoragePort.uploadFile).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-1',
-          filename: expect.stringMatching(/(pdf|grobid)_fulltext_.*\.json\.gz/),
+          filename: expect.stringMatching(/pdf_fulltext_.*\.json\.gz/),
           mimeType: 'application/gzip',
-          source: expect.stringMatching(/reader\.(pdf|grobid)_fulltext/),
+          source: expect.stringMatching(/reader\.pdf_fulltext/),
         }),
       );
 
@@ -113,11 +113,11 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
       // Verify that extractionRepo saved the lightweight Claim Check payload in Postgres
       expect(mockExtractionRepo.saveMetadataSourceRecord).toHaveBeenCalledWith(
         itemId,
-        'grobid_fulltext',
+        'pdf_fulltext',
         expect.objectContaining({
           isOffloaded: true,
           fileId: storageFileId,
-          storageKey: `extractions/${itemId}/grobid_fulltext.json.gz`,
+          storageKey: `extractions/${itemId}/pdf_fulltext.json.gz`,
           sectionCount: 2,
           figureCount: 1,
           tableCount: 1,
@@ -143,7 +143,7 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
       // Should still succeed without crashing, saving inline payload
       expect(mockExtractionRepo.saveMetadataSourceRecord).toHaveBeenCalledWith(
         itemId,
-        'grobid_fulltext',
+        'pdf_fulltext',
         expect.objectContaining({
           title: 'Attention Is All You Need',
           sections: expect.any(Array),
@@ -195,7 +195,7 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
       mockPrisma.itemMetadata.findFirst.mockResolvedValue({
         id: 'meta-1',
         itemId,
-        sourceProvider: 'grobid_fulltext',
+        sourceProvider: 'pdf_fulltext',
         rawPayload: {
           isOffloaded: true,
           fileId: storageFileId,
@@ -210,7 +210,7 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
         buffer: compressedPayload,
       });
 
-      const result = await repo.findItemMetadata(itemId, 'grobid_fulltext');
+      const result = await repo.findItemMetadata(itemId, 'pdf_fulltext');
 
       expect(result).toBeDefined();
       expect(mockStoragePort.readOwnedFile).toHaveBeenCalledWith({
@@ -228,14 +228,14 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
       mockPrisma.itemMetadata.findFirst.mockResolvedValue({
         id: 'meta-legacy',
         itemId,
-        sourceProvider: 'grobid_fulltext',
+        sourceProvider: 'pdf_fulltext',
         rawPayload: {
           title: 'Legacy Paper',
           sections: [{ heading: 'Legacy' }],
         },
       });
 
-      const result = await repo.findItemMetadata(itemId, 'grobid_fulltext');
+      const result = await repo.findItemMetadata(itemId, 'pdf_fulltext');
 
       expect(mockStoragePort.readOwnedFile).not.toHaveBeenCalled();
       const payload = result?.rawPayload as Record<string, any>;

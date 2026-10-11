@@ -61,12 +61,19 @@ export class MatchStage {
     scope: { userId?: string; projectId?: string | null } | string,
     proposed: ItemMetadata,
   ): Promise<DuplicateMatchResult> {
+    const nestedMeta =
+      'metadata' in proposed &&
+      proposed.metadata &&
+      typeof proposed.metadata === 'object'
+        ? (proposed.metadata as Record<string, unknown>)
+        : undefined;
+
     const proposedDoi = proposed.doi?.toLowerCase().trim();
-    const rawArxiv = proposed.arxivId || (proposed as any).metadata?.arxivId;
+    const rawArxiv = proposed.arxivId || nestedMeta?.arxivId;
     const cleanArxiv = rawArxiv ? String(rawArxiv).trim() : undefined;
-    const rawPmid = proposed.pmid || (proposed as any).metadata?.pmid;
+    const rawPmid = proposed.pmid || nestedMeta?.pmid;
     const cleanPmid = rawPmid ? String(rawPmid).trim() : undefined;
-    const rawIsbn = proposed.isbn || (proposed as any).metadata?.isbn;
+    const rawIsbn = proposed.isbn || nestedMeta?.isbn;
     const cleanIsbn = rawIsbn
       ? String(rawIsbn).replace(/[-\s]/g, '').trim()
       : undefined;

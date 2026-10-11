@@ -659,16 +659,6 @@ export interface ItemDetail extends ItemMetadata {
   deletedAt?: Date | null;
 }
 
-export interface LegacyItemAggregate {
-  id?: string;
-  authors?: string[];
-  creators?: any[];
-  year?: number | null;
-  noteCount?: number;
-  attachmentCount?: number;
-  [key: string]: any;
-}
-
 export interface QualityAuditCandidateItem {
   id: string;
   title: string;

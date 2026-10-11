@@ -9,6 +9,15 @@ import {
   PageScanDetection,
 } from '../types/ocr.types';
 
+export interface PdfPageProxyLike {
+  getViewport(params: { scale: number }): { width: number; height: number };
+  render(params: {
+    canvas?: unknown;
+    canvasContext?: unknown;
+    viewport: unknown;
+  }): { promise: Promise<unknown> };
+}
+
 /**
  * Production-grade OCR Provider for Flux Library.
  * Features:
@@ -112,7 +121,7 @@ export class OcrProvider {
    * Performs full OCR recognition on a single PDF page with image preprocessing and worker pool.
    */
   async recognizePdfPage(
-    page: any,
+    page: PdfPageProxyLike,
     pageIndex = 0,
     options?: OcrPreprocessOptions,
   ): Promise<OcrPageResult> {
@@ -136,8 +145,8 @@ export class OcrProvider {
       const canvas = createCanvas(canvasWidth, canvasHeight);
       const canvasContext = canvas.getContext('2d');
       await page.render({
-        canvas: canvas as any,
-        canvasContext: canvasContext as any,
+        canvas,
+        canvasContext,
         viewport,
       }).promise;
 

@@ -45,13 +45,25 @@ function extractAuthorString(input: unknown): string {
   if (!input) return '';
   if (typeof input === 'string') return input;
   if (typeof input === 'object' && input !== null) {
-    const obj = input as any;
-    return (
-      obj.fullName ||
-      obj.name ||
-      [obj.firstName, obj.lastName].filter(Boolean).join(' ') ||
-      ''
+    const obj = input as {
+      fullName?: unknown;
+      name?: unknown;
+      firstName?: unknown;
+      lastName?: unknown;
+    };
+    if (typeof obj.fullName === 'string' && obj.fullName.trim()) {
+      return obj.fullName.trim();
+    }
+    if (typeof obj.name === 'string' && obj.name.trim()) {
+      return obj.name.trim();
+    }
+    const parts = [obj.firstName, obj.lastName].filter(
+      (p): p is string => typeof p === 'string' && Boolean(p.trim()),
     );
+    if (parts.length > 0) {
+      return parts.join(' ');
+    }
+    return '';
   }
   if (typeof input === 'number' || typeof input === 'boolean') {
     return String(input);
@@ -349,7 +361,7 @@ export function toItemData(
       metadata.openAccessPdfUrl ||
       undefined,
     openAccessPdfUrl: metadata.openAccessPdfUrl || undefined,
-    attachments: (metadata as any).attachments || undefined,
+    attachments: metadata.attachments || undefined,
     language: metadata.language,
     rights: metadata.rights,
     license: metadata.license,

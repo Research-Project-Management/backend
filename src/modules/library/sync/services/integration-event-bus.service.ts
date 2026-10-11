@@ -6,6 +6,7 @@ import {
   IIntegrationEventBus,
   INTEGRATION_EVENT_BUS,
 } from '../../shared-kernel/events/integration-events';
+import { TransactionHelpers } from '../../shared-kernel';
 
 export { INTEGRATION_EVENT_BUS, IIntegrationEventBus };
 
@@ -24,24 +25,31 @@ export class IntegrationEventBusService implements IIntegrationEventBus {
   ) {}
 
   async publish<T>(event: BaseIntegrationEvent<T>): Promise<void> {
+    const payloadObj =
+      typeof event.payload === 'object' && event.payload !== null
+        ? (event.payload as { itemId?: string; runId?: string })
+        : null;
+    const aggregateId =
+      payloadObj?.itemId || payloadObj?.runId || event.eventId;
+
     this.logger.debug(
-      `[EventBus] Publishing integration event "${event.topic}" from [${event.sourceContext}] (aggregate: ${(event.payload as any)?.itemId || (event.payload as any)?.runId || event.eventId})`,
+      `[EventBus] Publishing integration event "${event.topic}" from [${event.sourceContext}] (aggregate: ${aggregateId})`,
     );
 
     // 1. Transactionally persist to Outbox for durable relay
-    await this.libraryTx.executeInTransaction(async (tx: any, helpers: any) => {
-      await helpers.publishOutbox(
-        {
-          userId: event.scope.userId,
-          projectId: event.scope.projectId ?? null,
-        },
-        (event.payload as any)?.itemId ||
-          (event.payload as any)?.runId ||
-          event.eventId,
-        event.topic,
-        event,
-      );
-    });
+    await this.libraryTx.executeInTransaction(
+      async (_tx, helpers: TransactionHelpers) => {
+        await helpers.publishOutbox(
+          {
+            userId: event.scope.userId,
+            projectId: event.scope.projectId ?? null,
+          },
+          aggregateId,
+          event.topic,
+          event,
+        );
+      },
+    );
 
     // 2. Emit in-memory for instant reactive handlers
     if (this.eventEmitter) {

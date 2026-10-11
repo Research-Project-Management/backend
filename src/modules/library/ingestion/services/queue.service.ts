@@ -43,11 +43,13 @@ export class QueueService implements OnModuleInit {
     @InjectQueue(LIBRARY_INGESTION_QUEUE)
     private readonly bullQueue?: Queue,
   ) {
-    if (this.bullQueue && typeof (this.bullQueue as any).on === 'function') {
-      (this.bullQueue as any).on('error', (err: any) => {
-        this.logger.warn(
-          `Ingestion BullMQ queue error notice: ${err?.message || err}`,
-        );
+    const queueEmitter = this.bullQueue as unknown as {
+      on?: (event: string, cb: (err: unknown) => void) => void;
+    };
+    if (typeof queueEmitter?.on === 'function') {
+      queueEmitter.on('error', (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Ingestion BullMQ queue error notice: ${message}`);
       });
     }
 
@@ -55,7 +57,7 @@ export class QueueService implements OnModuleInit {
       this.configService?.get('INGESTION_CONCURRENCY') ||
         process.env.INGESTION_CONCURRENCY,
     );
-    // GROBID container default has 2 worker threads; 3 concurrent pipelines prevents saturation
+    // Default pipeline concurrency: 3 concurrent pipelines prevents saturation
     this.maxConcurrency =
       Number.isInteger(configuredConcurrency) && configuredConcurrency > 0
         ? configuredConcurrency
@@ -154,7 +156,7 @@ export class QueueService implements OnModuleInit {
 
     this.queuedRunIds.add(runId);
     if (isFastPath) {
-      // Prioritize fast path jobs ahead of heavy file OCR/GROBID jobs to prevent head-of-line blocking
+      // Prioritize fast path jobs ahead of heavy file OCR/parsing jobs to prevent head-of-line blocking
       const insertIdx = this.queue.findIndex(
         (j) => j.envelope?.payload?.kind === 'FILE',
       );

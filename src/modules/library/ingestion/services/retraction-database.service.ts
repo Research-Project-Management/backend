@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { RetractionRepository } from '../repositories/retraction.repository';
 import {
   RetractionDetails,
@@ -126,7 +127,7 @@ export class RetractionDatabaseService implements OnModuleInit {
               ? new Date(item.retractionDate)
               : null,
             source: item.source || 'retraction_watch',
-            rawMetadata: item as any,
+            rawMetadata: item as unknown as Prisma.InputJsonValue,
           },
           update: {
             pmid: cleanPmid,
@@ -140,7 +141,7 @@ export class RetractionDatabaseService implements OnModuleInit {
               ? new Date(item.retractionDate)
               : null,
             source: item.source || 'retraction_watch',
-            rawMetadata: item as any,
+            rawMetadata: item as unknown as Prisma.InputJsonValue,
           },
         });
         seeded++;
@@ -168,7 +169,7 @@ export class RetractionDatabaseService implements OnModuleInit {
       for (const r of records) {
         const details: RetractionDetails = {
           nature:
-            ((r as any).nature as RetractionNature) ||
+            (r.nature as RetractionNature) ||
             (r.noticeType as RetractionNature) ||
             'retraction',
           reason: r.reason || '',
@@ -363,7 +364,7 @@ export class RetractionDatabaseService implements OnModuleInit {
                 ? new Date(r.retractionDate)
                 : null,
               source: r.source || 'retraction_watch',
-              rawMetadata: r as any,
+              rawMetadata: r as unknown as Prisma.InputJsonValue,
             },
             update: {
               title: r.title || null,

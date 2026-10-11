@@ -4,6 +4,20 @@ import { ActivityService } from './activity.service';
 import { DomainActivityEvent } from './events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis.service';
 
+export interface WorkItemEventPayload {
+  entityId?: string;
+  workItemId?: string;
+  verb?: string;
+  actorId?: string;
+  authorId?: string;
+  projectId?: string;
+  field?: string;
+  oldValue?: any;
+  newValue?: any;
+  columnId?: string;
+  [key: string]: any;
+}
+
 @Injectable()
 export class ActivityListener {
   private readonly logger = new Logger(ActivityListener.name);
@@ -24,7 +38,9 @@ export class ActivityListener {
   }
 
   @OnEvent('work-item.*', { async: true })
-  async handleWorkItemEvents(event: any) {
+  async handleWorkItemEvents(
+    event: WorkItemEventPayload | DomainActivityEvent,
+  ) {
     if (event instanceof DomainActivityEvent) {
       return this.handleGenericActivity(event);
     }

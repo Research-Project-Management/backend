@@ -232,7 +232,7 @@ export class ItemCurationService {
   }
 
   /**
-   * Retrieves raw provenance metadata records for an item across all providers (arXiv, Grobid, CrossRef).
+   * Retrieves raw provenance metadata records for an item across all providers (arXiv, MeXtract, CrossRef).
    */
   async getMetadataSources(userId: string, itemId: string, projectId?: string) {
     const item = await this.query.findById(userId, itemId, projectId);

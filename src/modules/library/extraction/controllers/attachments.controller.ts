@@ -96,7 +96,7 @@ export abstract class BaseAttachmentController {
     dto: CreateAttachmentDto,
     projectId?: string,
   ) {
-    const itemId = paramItemId || (dto as any).itemId;
+    const itemId = paramItemId || dto.itemId;
     if (!itemId) {
       throw new NotFoundException(
         'Target itemId is required for attachment creation',
@@ -118,24 +118,11 @@ export abstract class BaseAttachmentController {
     attachmentId: string,
     projectId?: string,
   ) {
-    if (typeof this.attachmentsService?.reExtractAttachment === 'function') {
-      return this.attachmentsService.reExtractAttachment(
-        userId,
-        attachmentId,
-        projectId,
-      );
-    }
-    if (
-      typeof (this.attachmentsService as any)?.reextractAttachment ===
-      'function'
-    ) {
-      return (this.attachmentsService as any).reextractAttachment(
-        userId,
-        attachmentId,
-        projectId,
-      );
-    }
-    return { success: true };
+    return this.attachmentsService.reExtractAttachment(
+      userId,
+      attachmentId,
+      projectId,
+    );
   }
 
   protected async executeDeleteAttachment(

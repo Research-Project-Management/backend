@@ -1,7 +1,10 @@
 export const EXTRACTION_GATEWAY_PORT = Symbol('EXTRACTION_GATEWAY_PORT');
 
 export interface IExtractionGatewayPort {
-  extractDocumentFromBuffer?(buffer: Buffer, options?: any): Promise<any>;
+  extractDocumentFromBuffer?(
+    buffer: Buffer,
+    options?: Record<string, unknown>,
+  ): Promise<any>;
   extractMetadataFromBuffer?(buffer: Buffer): Promise<any>;
   captureWebSnapshot?(
     url: string,

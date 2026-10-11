@@ -1604,16 +1604,16 @@ export interface InferredItemType {
 }
 
 /**
- * Infers the probable Zotero itemType for a PDF that has no DOI, arXiv ID,
+ * Infers the probable itemType for a PDF that has no DOI, arXiv ID,
  * or other authoritative identifier, by applying deterministic text heuristics
- * on metadata signals extracted by GROBID (title, notes, conference name, etc.).
+ * on metadata signals extracted from PDF (title, notes, conference name, etc.).
  *
  * Returns undefined when no signal is strong enough — the caller should fall
  * back to the pipeline default (`journalArticle`).
  *
  * Heuristic tiers (highest confidence first):
  *  1. ISBN present → book or bookSection
- *  2. conferenceName / bookTitle from GROBID TEI → conferencePaper / bookSection
+ *  2. conferenceName / bookTitle from structural signals → conferencePaper / bookSection
  *  3. Title/notes keyword patterns for thesis, report, preprint, patent, dataset
  *  4. Filename-level patterns as a last resort
  */
@@ -1643,12 +1643,12 @@ export function inferItemTypeFromPdfSignals(
     return { itemType: 'book', confidence: 0.85, reason: 'isbn' };
   }
 
-  // ── Tier 2: GROBID TEI structural signals ─────────────────────────────────
+  // ── Tier 2: Structural venue signals ──────────────────────────────────────
   if (signals.conferenceName) {
     return {
       itemType: 'conferencePaper',
       confidence: 0.87,
-      reason: 'grobid:conferenceName',
+      reason: 'structural:conferenceName',
     };
   }
 
@@ -1656,7 +1656,7 @@ export function inferItemTypeFromPdfSignals(
     return {
       itemType: 'bookSection',
       confidence: 0.85,
-      reason: 'grobid:bookTitle',
+      reason: 'structural:bookTitle',
     };
   }
 

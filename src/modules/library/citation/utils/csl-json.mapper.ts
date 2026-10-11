@@ -276,8 +276,11 @@ export class CslJsonMapper {
           if (!csl.author) csl.author = [];
           csl.author.push(cslName);
         } else if (cslMappedRole) {
-          if (!(csl as any)[cslMappedRole]) (csl as any)[cslMappedRole] = [];
-          (csl as any)[cslMappedRole].push(cslName);
+          const roleRecord = csl as Record<string, unknown>;
+          if (!Array.isArray(roleRecord[cslMappedRole])) {
+            roleRecord[cslMappedRole] = [];
+          }
+          (roleRecord[cslMappedRole] as unknown[]).push(cslName);
         } else {
           // Secondary unknown roles belong in contributor list
           if (!csl.contributor) csl.contributor = [];

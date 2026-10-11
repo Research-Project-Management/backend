@@ -185,8 +185,13 @@ export class PrismaDocRepository implements IDocRepository {
         );
       }
 
-      const updated = await this.prisma.manuscriptDoc.update({
-        where: { id: docId },
+      // Atomic compare-and-swap (CAS) via updateMany to guarantee zero TOCTOU race condition
+      const updateResult = await this.prisma.manuscriptDoc.updateMany({
+        where: {
+          id: docId,
+          projectId,
+          rev: data.expectedRev,
+        },
         data: {
           lines: data.lines,
           version: data.version,
@@ -200,8 +205,27 @@ export class PrismaDocRepository implements IDocRepository {
         },
       });
 
+      if (updateResult.count === 0) {
+        const recheck = await this.prisma.manuscriptDoc.findFirst({
+          where: { id: docId, projectId },
+        });
+        DocstoreMetrics.recordOccConflict();
+        throw new DocModifiedError(
+          `Optimistic concurrency conflict on doc ${docId}: expected rev ${data.expectedRev} but current is ${recheck?.rev ?? 'unknown'}`,
+          {
+            docId,
+            rev: data.expectedRev,
+            currentRev: recheck?.rev ?? data.expectedRev + 1,
+          },
+        );
+      }
+
+      const updated = await this.prisma.manuscriptDoc.findFirst({
+        where: { id: docId, projectId },
+      });
+
       DocstoreMetrics.recordWrite(sizeBytes);
-      return { doc: this.mapToEntity(updated), modified: true };
+      return { doc: this.mapToEntity(updated || current), modified: true };
     }
 
     // 2. Direct atomic update in 1 single roundtrip when OCC revision check is not requested

@@ -24,7 +24,7 @@ export class ItemFulltextService {
   ) {}
 
   /**
-   * Retrieves the structured academic full-text document tree extracted by GROBID / PDF pipelines.
+   * Retrieves the structured academic full-text document tree extracted by native PDF extraction pipelines.
    */
   async getFulltext(
     userId: string,
@@ -47,9 +47,6 @@ export class ItemFulltextService {
             this.logger.warn(
               `Unauthorized fulltext cache access attempt for item ${id} by user ${userId}`,
             );
-          } else {
-            // Backward compatibility for mocks/legacy entries without userId
-            return cached;
           }
         }
       } catch (err: any) {
@@ -69,7 +66,7 @@ export class ItemFulltextService {
       (await this.query.findMetadataSourceRecord(id, 'pdf_fulltext')) ||
       (await this.query.findMetadataSourceRecord(id, 'trusted_extraction')) ||
       (await this.query.findMetadataSourceRecord(id, 'ocr')) ||
-      (await this.query.findMetadataSourceRecord(id, 'grobid_fulltext'));
+      (await this.query.findMetadataSourceRecord(id, 'mextract_fulltext'));
 
     let result: DocumentFulltextResponse;
     if (
@@ -90,7 +87,7 @@ export class ItemFulltextService {
       // 2. Fallback to header/metadata extraction record if available
       const headerRecord =
         (await this.query.findMetadataSourceRecord(id, 'trusted_extraction')) ||
-        (await this.query.findMetadataSourceRecord(id, 'grobid'));
+        (await this.query.findMetadataSourceRecord(id, 'mextract'));
 
       if (
         headerRecord?.rawPayload &&

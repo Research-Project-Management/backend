@@ -13,11 +13,6 @@ export const INTEGRATION_EVENT_TOPICS = {
   EXTRACTION_ATTACHMENT_EXTRACTED:
     'library.integration.extraction.attachment_extracted',
   INGESTION_COMPLETED: 'library.integration.ingestion.completed',
-  /** @deprecated Use EXTRACTION_ATTACHMENT_EXTRACTED instead */
-  CONTENT_ATTACHMENT_EXTRACTED:
-    'library.integration.extraction.attachment_extracted',
-  /** @deprecated Use INGESTION_COMPLETED instead */
-  PROCESSING_INGESTION_COMPLETED: 'library.integration.ingestion.completed',
 } as const;
 
 export type LibraryBoundedContext =

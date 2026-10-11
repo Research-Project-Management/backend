@@ -21,7 +21,7 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { AttachmentService } from './attachment.service';
 import {
-  CreateAttachmentDto,
+  AddAttachmentDto,
   AttachPageDto,
   AttachPaperDto,
   AttachFileDto,
@@ -55,7 +55,7 @@ export class AttachmentController {
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   async addAttachment(
     @Param('workItemId') workItemId: string,
-    @Body() dto: CreateAttachmentDto,
+    @Body() dto: AddAttachmentDto,
     @Req() req: FastifyRequest,
     @CurrentUser('id') userId: string,
   ) {

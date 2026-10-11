@@ -435,7 +435,7 @@ export class CollectionsService {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    await (this.repo as any).removeItems(collectionId, itemIds);
+    await this.repo.removeItems(collectionId, itemIds);
     await this.invalidateCollectionsCache(userId, projectId);
     return { success: true, count: itemIds.length };
   }
@@ -469,7 +469,7 @@ export class CollectionsService {
       });
 
       const effectiveProjectId =
-        (updated as any).projectId || targetProjectId || undefined;
+        updated.projectId || targetProjectId || undefined;
       const syncScope = { userId: targetUserId, projectId: effectiveProjectId };
 
       await helpers.appendChange(syncScope, {
@@ -536,7 +536,7 @@ export class CollectionsService {
     });
 
     const effectiveProjectId =
-      existing.projectId || (command as any).projectId || undefined;
+      existing.projectId || command.projectId || undefined;
     const syncScope = { userId: targetUserId, projectId: effectiveProjectId };
 
     await helpers.appendChange(syncScope, {

@@ -28,11 +28,18 @@ export class CslCitationEngineAdapter implements ICitationEnginePort {
 
     if (!res) return null;
 
+    const resObj = res as {
+      bibliography?: string;
+      citation?: string;
+      formatted?: string;
+    };
+    const formattedText =
+      typeof res === 'string'
+        ? res
+        : resObj.bibliography || resObj.citation || resObj.formatted || '';
+
     return {
-      formattedText:
-        typeof res === 'string'
-          ? res
-          : (res as any).citation || (res as any).formatted || '',
+      formattedText,
       style: style.value,
       itemId,
     };
@@ -51,10 +58,25 @@ export class CslCitationEngineAdapter implements ICitationEnginePort {
 
     if (!res || !Array.isArray(res)) return [];
 
-    return res.map((r: any, idx: number) => ({
-      formattedText: typeof r === 'string' ? r : r?.citation || '',
-      style: style.value,
-      itemId: itemIds[idx] || '',
-    }));
+    return res.map((r: unknown, idx: number) => {
+      const itemRes = r as {
+        bibliography?: string;
+        citation?: string;
+        formatted?: string;
+      };
+      const formattedText =
+        typeof r === 'string'
+          ? r
+          : itemRes?.bibliography ||
+            itemRes?.citation ||
+            itemRes?.formatted ||
+            '';
+
+      return {
+        formattedText,
+        style: style.value,
+        itemId: itemIds[idx] || '',
+      };
+    });
   }
 }

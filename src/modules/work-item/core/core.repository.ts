@@ -40,63 +40,13 @@ export const BASE_WORK_ITEM_INCLUDE = {
 export class CoreRepository implements IWorkItemRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  private async executeTx<T>(fn: (tx: any) => Promise<T>): Promise<T> {
+  private async executeTx<T>(
+    fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
     if (typeof this.prismaService.$transaction === 'function') {
       return this.prismaService.$transaction(fn);
     }
     return fn(this.prismaService);
-  }
-
-  async nextProjectWorkItemIdentifier(
-    projectId: string,
-  ): Promise<{ identifier: string; sequenceNumber: number }> {
-    let canonicalProjectId = projectId;
-    if (!isUuid(canonicalProjectId)) {
-      const p = await this.prismaService.project.findFirst({
-        where: {
-          identifier: { equals: canonicalProjectId, mode: 'insensitive' },
-          deletedAt: null,
-        },
-        select: { id: true },
-      });
-      if (p) canonicalProjectId = p.id;
-    }
-
-    try {
-      const project = await this.prismaService.project.update({
-        where: { id: canonicalProjectId },
-        data: { workItemSequence: { increment: 1 } },
-        select: { name: true, identifier: true, workItemSequence: true },
-      });
-
-      const prefix = deriveProjectIdentifierPrefix(
-        project.identifier,
-        project.name,
-      );
-
-      return {
-        identifier: `${prefix}-${project.workItemSequence}`,
-        sequenceNumber: project.workItemSequence,
-      };
-    } catch {
-      const project = await this.prismaService.project.findUnique({
-        where: { id: canonicalProjectId },
-        select: { identifier: true, name: true },
-      });
-      const prefix = deriveProjectIdentifierPrefix(
-        project?.identifier,
-        project?.name,
-      );
-
-      const lastWorkItem = await this.prismaService.workItem.findFirst({
-        where: { projectId: canonicalProjectId },
-        orderBy: { sequenceNumber: 'desc' },
-        select: { sequenceNumber: true },
-      });
-
-      const sequenceNumber = (lastWorkItem?.sequenceNumber ?? 0) + 1;
-      return { identifier: `${prefix}-${sequenceNumber}`, sequenceNumber };
-    }
   }
 
   async findProjectWorkItems(
@@ -1231,6 +1181,53 @@ export class CoreRepository implements IWorkItemRepository {
         sequence: true,
         isDefault: true,
         projectId: true,
+      },
+    });
+  }
+
+  async getStateGroupCounts(
+    projectId: string,
+  ): Promise<Record<string, number>> {
+    const workItems = await this.prismaService.workItem.findMany({
+      where: {
+        projectId,
+        deletedAt: null,
+      },
+      select: {
+        state: {
+          select: { group: true },
+        },
+      },
+    });
+
+    const counts: Record<string, number> = {
+      backlog: 0,
+      unstarted: 0,
+      started: 0,
+      completed: 0,
+      cancelled: 0,
+    };
+
+    for (const item of workItems) {
+      const group = item.state?.group || 'backlog';
+      counts[group] = (counts[group] || 0) + 1;
+    }
+
+    return counts;
+  }
+
+  async getOverdueCount(projectId: string): Promise<number> {
+    const now = new Date();
+    return this.prismaService.workItem.count({
+      where: {
+        projectId,
+        deletedAt: null,
+        dueDate: { lt: now },
+        state: {
+          group: {
+            notIn: ['completed', 'cancelled'],
+          },
+        },
       },
     });
   }

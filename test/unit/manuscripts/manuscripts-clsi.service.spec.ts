@@ -18,7 +18,11 @@ import { BibBackendDetector } from '@/modules/manuscripts/clsi/core/adapters/eng
 import { DraftModeManager } from '@/modules/manuscripts/clsi/core/adapters/engines/draft-mode.manager';
 import { DiskUsageCleaner } from '@/modules/manuscripts/clsi/core/adapters/workspace/disk-usage.cleaner';
 import { ClsiMetrics } from '@/modules/manuscripts/clsi/core/adapters/telemetry/clsi.metrics';
-import { buildZipArchive } from '@/modules/manuscripts/clsi/core/adapters/artifacts/zip.util';
+import {
+  buildZipArchive,
+  createZipStream,
+  createZipStreamFromDisk,
+} from '@/modules/manuscripts/clsi/core/adapters/artifacts/zip.util';
 
 describe('Manuscripts - ClsiService', () => {
   let service: ClsiService;
@@ -477,6 +481,51 @@ describe('Manuscripts - ClsiService', () => {
       expect(zipBuffer.length).toBeGreaterThan(50);
       // Valid ZIP starts with PK\x03\x04
       expect(zipBuffer.readUInt32LE(0)).toBe(0x04034b50);
+    });
+
+    it('should create streamable PKZIP archive from in-memory entries', async () => {
+      const stream = createZipStream([
+        { path: 'doc.tex', data: '\\documentclass{article}' },
+        { path: 'figures/plot.svg', data: '<svg></svg>' },
+      ]);
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const fullZip = Buffer.concat(chunks);
+
+      expect(fullZip.length).toBeGreaterThan(50);
+      expect(fullZip.readUInt32LE(0)).toBe(0x04034b50);
+    });
+
+    it('should stream PKZIP archive directly from disk files with backpressure', async () => {
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'clsi-zip-test-'));
+      try {
+        const file1 = path.join(tmpDir, 'main.tex');
+        const file2 = path.join(tmpDir, 'paper.pdf');
+        await fs.writeFile(file1, 'Sample LaTeX content');
+        await fs.writeFile(
+          file2,
+          Buffer.from('%PDF-1.4 mock binary pdf stream'),
+        );
+
+        const stream = createZipStreamFromDisk([
+          { fullPath: file1, relPath: 'main.tex' },
+          { fullPath: file2, relPath: 'output/paper.pdf' },
+        ]);
+
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+          chunks.push(Buffer.from(chunk));
+        }
+        const diskZip = Buffer.concat(chunks);
+
+        expect(diskZip.length).toBeGreaterThan(50);
+        expect(diskZip.readUInt32LE(0)).toBe(0x04034b50);
+      } finally {
+        await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+      }
     });
   });
 

@@ -1,9 +1,11 @@
 /**
  * export-import/core/use-cases/export-project-zip.use-case.ts
  * Inbound Use Case packaging a project's virtual file tree, docs, and assets into a PKZIP archive.
+ * Supports both buffer generation (backward compatibility) and streaming backpressure generation.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import { Readable } from 'node:stream';
 import { IManuscriptAggregatorPort } from '../ports/manuscript-aggregator.port';
 import { IZipEnginePort } from '../ports/zip-engine.port';
 import { ArchiveManifest } from '../domain/entities/archive-manifest.entity';
@@ -18,6 +20,13 @@ export interface ExportProjectZipInput {
 export interface ExportProjectZipOutput {
   zipBuffer: Buffer;
   manifest: ArchiveManifest;
+}
+
+export interface ExportProjectZipStreamOutput {
+  zipStream: Readable;
+  projectName: string;
+  fileCount: number;
+  hasCompiledPdf: boolean;
 }
 
 @Injectable()
@@ -76,6 +85,48 @@ export class ExportProjectZipUseCase {
     return {
       zipBuffer,
       manifest,
+    };
+  }
+
+  public async executeStream(
+    input: ExportProjectZipInput,
+  ): Promise<ExportProjectZipStreamOutput> {
+    const {
+      projectId,
+      projectName,
+      includePdf = false,
+      cleanArxiv = false,
+    } = input;
+
+    const files = await this.aggregator.collectLazyProjectEntries(
+      projectId,
+      includePdf,
+      cleanArxiv,
+    );
+
+    if (files.length === 0) {
+      files.push({
+        path: 'main.tex',
+        data: Buffer.from(
+          '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}',
+          'utf8',
+        ),
+      });
+    }
+
+    const zipStream = this.zipEngine.createZipStream(files);
+    const hasPdf = files.some((f) => f.path.toLowerCase().endsWith('.pdf'));
+    const resolvedName = cleanArxiv
+      ? projectName?.startsWith('arxiv-')
+        ? projectName
+        : `arxiv-${projectName || 'manuscript'}`
+      : projectName || 'manuscript';
+
+    return {
+      zipStream,
+      projectName: resolvedName,
+      fileCount: files.length,
+      hasCompiledPdf: hasPdf,
     };
   }
 }

@@ -8,6 +8,7 @@ import {
   ItemTypeDefinition,
   ItemFieldDefinition,
   CreatorTypeDefinition,
+  CanonicalItemType,
 } from './schema.types';
 import rawZoteroSchema from '../data/zotero-schema.json';
 
@@ -198,8 +199,39 @@ export const BASE_SEMANTICS = [
   'authority',
 ] as const;
 
+interface ZoteroRawSchema {
+  version?: number;
+  locales?: Record<
+    string,
+    {
+      fields?: Record<string, string>;
+      itemTypes?: Record<string, string>;
+      creatorTypes?: Record<string, string>;
+    }
+  >;
+  itemTypes?: Array<{
+    itemType: string;
+    fields?: Array<{
+      field: string;
+      baseField?: string;
+    }>;
+    creatorTypes?: Array<{
+      creatorType: string;
+      primary?: boolean;
+    }>;
+  }>;
+  meta?: {
+    fields?: Record<string, { type?: string }>;
+  };
+  csl?: {
+    types?: Record<string, string[]>;
+    names?: Record<string, string>;
+    fields?: Record<string, Record<string, string[]>>;
+  };
+}
+
 function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
-  const schema = rawZoteroSchema as any;
+  const schema = rawZoteroSchema as unknown as ZoteroRawSchema;
   const en = schema.locales?.['en-US'] || {
     fields: {},
     itemTypes: {},
@@ -216,7 +248,7 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
     reverseBaseFieldMappings[typeKey] = {};
 
     const fields: ItemFieldDefinition[] = (t.fields || []).map(
-      (f: any, idx: number) => {
+      (f, idx: number) => {
         distinctKeys.add(f.field);
         if (f.baseField) {
           baseFieldMappings[typeKey][f.baseField] = f.field;
@@ -225,7 +257,7 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
         return {
           key: f.field,
           field: f.field,
-          label: en.fields[f.field] || f.field,
+          label: en.fields?.[f.field] || f.field,
           order: idx + 1,
           baseField: f.baseField,
           category: FIELD_CATEGORY_MAP[f.field] || 'publication',
@@ -243,9 +275,9 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
     );
 
     const creatorTypes: CreatorTypeDefinition[] = (t.creatorTypes || []).map(
-      (c: any) => ({
+      (c) => ({
         creatorType: c.creatorType,
-        label: en.creatorTypes[c.creatorType] || c.creatorType,
+        label: en.creatorTypes?.[c.creatorType] || c.creatorType,
         primary: Boolean(c.primary),
       }),
     );
@@ -257,8 +289,8 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
     const isSpecial = ['attachment', 'note', 'annotation'].includes(typeKey);
 
     itemTypes[typeKey] = {
-      itemType: typeKey,
-      label: en.itemTypes[typeKey] || typeKey,
+      itemType: typeKey as CanonicalItemType,
+      label: en.itemTypes?.[typeKey] || typeKey,
       category: CATEGORY_MAP[typeKey] || 'documents',
       fields,
       creatorTypes,

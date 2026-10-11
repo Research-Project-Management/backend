@@ -351,6 +351,7 @@ export class OpenAlexProvider implements MetadataProvider {
           };
           pdf_url?: string;
           landing_page_url?: string;
+          license?: string;
         }
       | undefined;
     const hostVenue = item.host_venue as { display_name?: string } | undefined;
@@ -478,12 +479,11 @@ export class OpenAlexProvider implements MetadataProvider {
         }
       }
     } else {
-      const primaryTopic = (item as any).primary_topic;
-      if (
-        primaryTopic &&
-        typeof primaryTopic === 'object' &&
-        typeof primaryTopic.display_name === 'string'
-      ) {
+      const primaryTopic =
+        item.primary_topic && typeof item.primary_topic === 'object'
+          ? (item.primary_topic as { display_name?: unknown })
+          : undefined;
+      if (primaryTopic && typeof primaryTopic.display_name === 'string') {
         rawKeywords.push(primaryTopic.display_name);
       }
     }
@@ -502,12 +502,9 @@ export class OpenAlexProvider implements MetadataProvider {
         : undefined;
 
     const license =
-      typeof (primLoc as any)?.license === 'string' &&
-      (primLoc as any).license.trim()
-        ? (primLoc as any).license.trim()
-        : typeof (item.primary_location as any)?.license === 'string'
-          ? (item.primary_location as any).license.trim()
-          : undefined;
+      typeof primLoc?.license === 'string' && primLoc.license.trim()
+        ? primLoc.license.trim()
+        : undefined;
 
     const ids = (item.ids || {}) as Record<string, string>;
     const rawArxiv = ids.arxiv

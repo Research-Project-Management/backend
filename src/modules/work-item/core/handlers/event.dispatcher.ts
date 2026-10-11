@@ -158,21 +158,37 @@ export class EventDispatcher {
     });
   }
 
-  emitBulkUpdated(projectId: string, userId?: string) {
-    this.eventEmitter?.emit('work-item.updated', {
-      entityType: 'work_item',
+  emitBulkUpdated(projectId: string, userId?: string, itemIds?: string[]) {
+    this.eventEmitter?.emit('work-item.bulk-updated', {
+      entityType: 'project',
       entityId: projectId,
+      itemIds: itemIds || [],
       verb: 'updated',
+      actorId: userId || '',
+      projectId,
+    });
+    this.eventEmitter?.emit('work-item.updated', {
+      entityType: 'project',
+      entityId: projectId,
+      verb: 'bulk_updated',
       actorId: userId || '',
       projectId,
     });
   }
 
-  emitBulkDeleted(projectId: string, userId?: string) {
-    this.eventEmitter?.emit('work-item.deleted', {
-      entityType: 'work_item',
+  emitBulkDeleted(projectId: string, userId?: string, itemIds?: string[]) {
+    this.eventEmitter?.emit('work-item.bulk-deleted', {
+      entityType: 'project',
       entityId: projectId,
+      itemIds: itemIds || [],
       verb: 'deleted',
+      actorId: userId || '',
+      projectId,
+    });
+    this.eventEmitter?.emit('work-item.deleted', {
+      entityType: 'project',
+      entityId: projectId,
+      verb: 'bulk_deleted',
       actorId: userId || '',
       projectId,
     });

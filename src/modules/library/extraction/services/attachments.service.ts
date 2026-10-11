@@ -7,7 +7,7 @@ import {
   Inject,
   Optional,
 } from '@nestjs/common';
-import { Prisma, AttachmentType } from '@prisma/client';
+import { Prisma, AttachmentType, LinkMode } from '@prisma/client';
 import { TransactionService, TransactionHelpers } from '../../shared-kernel';
 import {
   CreateAttachmentInput,
@@ -44,6 +44,7 @@ import {
   resolveFileExtension,
   sanitizeFilenameStem,
   DEFAULT_RENAME_PATTERN,
+  RenamerItemMetadata,
 } from '../utils/renamer.utils';
 import type {
   RenameAttachmentDto,
@@ -156,12 +157,12 @@ export class AttachmentsService {
           : AttachmentType.primary_pdf);
 
     return this.libraryTx.executeInTransaction(
-      async (tx: any, helpers: any) => {
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const attachment = await tx.attachment.create({
           data: {
             itemId: targetItemId,
-            linkMode: resolvedLinkMode as any,
-            attachmentType: resolvedAttachmentType as any,
+            linkMode: resolvedLinkMode as LinkMode,
+            attachmentType: resolvedAttachmentType as AttachmentType,
             filename: input.filename,
             url: input.url,
             mimeType:
@@ -369,7 +370,7 @@ export class AttachmentsService {
         );
       }
 
-      const item = existing.item as any;
+      const item = existing.item;
       if (projectId && item?.projectId && item.projectId !== projectId) {
         throw new ForbiddenException(
           `Attachment ${command.existingId} does not belong to project ${projectId}`,
@@ -414,7 +415,7 @@ export class AttachmentsService {
       });
 
       const effectiveProjectId =
-        projectId || (existing.item as any)?.projectId || undefined;
+        projectId || existing.item?.projectId || undefined;
       const syncScope = { userId: actorId, projectId: effectiveProjectId };
 
       await helpers.appendChange(syncScope, {
@@ -441,28 +442,28 @@ export class AttachmentsService {
         throw new NotFoundException(`Item ${parentItemId} not found`);
       }
 
-      const itemAny = item as any;
-      if (projectId && itemAny.projectId && itemAny.projectId !== projectId) {
+      if (projectId && item.projectId && item.projectId !== projectId) {
         throw new ForbiddenException(
           `Item ${parentItemId} does not belong to project ${projectId}`,
         );
       } else if (
         !projectId &&
         userId &&
-        itemAny.userId &&
-        !itemAny.projectId &&
-        itemAny.userId !== userId
+        item.userId &&
+        !item.projectId &&
+        item.userId !== userId
       ) {
         throw new ForbiddenException(
           `Item ${parentItemId} does not belong to user ${userId}`,
         );
       }
 
-      let resolvedLinkMode = command.linkMode as any;
+      let resolvedLinkMode: LinkMode | undefined = command.linkMode as
+        LinkMode | undefined;
       if (!resolvedLinkMode) {
         if (
           command.mimeType === 'text/html' ||
-          command.attachmentType === ('snapshot' as any)
+          command.attachmentType === AttachmentType.snapshot
         ) {
           resolvedLinkMode = 'imported_url';
         } else if (
@@ -503,7 +504,7 @@ export class AttachmentsService {
         },
       });
 
-      const effectiveProjectId = projectId || itemAny.projectId || undefined;
+      const effectiveProjectId = projectId || item.projectId || undefined;
       const syncScope = { userId: actorId, projectId: effectiveProjectId };
 
       await helpers.appendChange(syncScope, {
@@ -867,7 +868,14 @@ export class AttachmentsService {
       );
     }
 
-    const attachments = await this.repo.findMany(whereClause, {
+    interface RenameAttachmentRecord {
+      id: string;
+      itemId: string;
+      filename?: string | null;
+      fileId?: string | null;
+      item?: Parameters<typeof formatAttachmentFilename>[1];
+    }
+    const attachments = (await this.repo.findMany(whereClause, {
       item: {
         include: {
           contributors: {
@@ -875,7 +883,7 @@ export class AttachmentsService {
           },
         },
       },
-    });
+    })) as RenameAttachmentRecord[];
 
     const results: Array<{
       attachmentId: string;
@@ -890,7 +898,7 @@ export class AttachmentsService {
         const oldFilename = att.filename || 'document.pdf';
         const newFilename = formatAttachmentFilename(
           pattern,
-          (att as any).item,
+          (att.item || {}) as RenamerItemMetadata,
           oldFilename,
         );
 

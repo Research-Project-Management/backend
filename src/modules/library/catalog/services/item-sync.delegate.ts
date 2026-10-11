@@ -54,7 +54,7 @@ export class ItemSyncDelegate {
       if (
         !existing.userId &&
         existing.projectId &&
-        existing.projectId !== (command as any).projectId
+        existing.projectId !== command.projectId
       ) {
         throw new ForbiddenException(
           `Item ${command.existingId} does not belong to the specified project`,
@@ -69,8 +69,7 @@ export class ItemSyncDelegate {
         ...(command.tags || []),
       ]);
 
-      const itemProjectId =
-        command.projectId || (command as any).projectId || undefined;
+      const itemProjectId = command.projectId || undefined;
       const syncScope = { userId, projectId: itemProjectId };
 
       const updated = await this.command.update(
@@ -96,8 +95,7 @@ export class ItemSyncDelegate {
 
       return { id: updated.id, isNew: false, version: updated.version };
     } else {
-      const itemProjectId =
-        command.projectId || (command as any).projectId || undefined;
+      const itemProjectId = command.projectId || undefined;
       const syncScope = { userId, projectId: itemProjectId };
 
       const created = await this.command.create(
@@ -146,7 +144,7 @@ export class ItemSyncDelegate {
     const existing = await this.query.findById(
       targetUserId,
       entityId,
-      (command as any).projectId,
+      command.projectId,
       tx,
       false,
       true,
@@ -159,8 +157,7 @@ export class ItemSyncDelegate {
       );
     }
 
-    const itemProjectId =
-      existing.projectId || (command as any).projectId || undefined;
+    const itemProjectId = existing.projectId || command.projectId || undefined;
     const syncScope = { userId: targetUserId, projectId: itemProjectId };
 
     await this.command.delete(
