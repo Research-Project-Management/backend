@@ -74,6 +74,7 @@ export class CoreService {
     );
     for (const l of labels) {
       lookup.set(l.id, { name: l.name, color: l.color });
+      lookup.set(l.name, { name: l.name, color: l.color });
     }
     return lookup;
   }
@@ -818,7 +819,7 @@ export class CoreService {
       data.labels = [];
     } else if (payload.labels !== undefined && Array.isArray(payload.labels)) {
       data.labels = payload.labels.filter(
-        (l: unknown) => typeof l === 'string' && (l as string).trim().length > 0,
+        (l: unknown) => typeof l === 'string' && l.trim().length > 0,
       );
     }
 

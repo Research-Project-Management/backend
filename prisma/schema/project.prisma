@@ -75,6 +75,7 @@ model Project {
   workItems      WorkItem[]
   workItemLabels WorkItemLabel[]       @relation("ProjectWorkItemLabels")
   drafts         WorkItemDraft[]
+  views          WorkItemView[]
   activityEvents   ActivityEvent[]
   aiChats          AiChat[]                 @relation("ProjectAiChats")
   updates          ProjectUpdate[]

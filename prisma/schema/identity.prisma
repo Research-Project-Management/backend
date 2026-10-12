@@ -79,6 +79,8 @@ model User {
   userAttachments       EntityAttachment[]    @relation("UserAttachments")
   createdWorkItemLabels WorkItemLabel[]       @relation("UserCreatedWorkItemLabels")
   workItemCoAssignments WorkItemAssignee[]    @relation("WorkItemCoAssignees")
+  createdViews          WorkItemView[]        @relation("ViewAuthor")
+  viewFavorites         ViewFavorite[]
 
   // AI & Intelligence Relations (Unified Copilot & Chat History)
   aiChats AiChat[] @relation("UserAiChats")

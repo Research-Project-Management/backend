@@ -23,6 +23,9 @@ describe('WorkItem Creation & State Connect Type Safety', () => {
         findMany: jest.fn(),
         count: jest.fn(),
       },
+      workItemLabel: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
 
     repository = new CoreRepository(mockPrisma);
@@ -91,6 +94,62 @@ describe('WorkItem Creation & State Connect Type Safety', () => {
       expect(callArgs.data.state).toEqual({
         connect: { id: 'be2e87e3-0b7b-4009-adab-e4470c9554a9' },
       });
+    });
+  });
+
+  describe('CoreRepository.findLabelsByIds', () => {
+    const projectId = '01a1078c-3162-723a-b454-814b8af5f5ec';
+
+    it('should query by name when given non-UUID strings to prevent Postgres 22P02 uuid syntax error', async () => {
+      await repository.findLabelsByIds(projectId, [
+        'Deep Learning',
+        'Optimization',
+      ]);
+
+      expect(mockPrisma.workItemLabel.findMany).toHaveBeenCalledTimes(1);
+      const callArgs = mockPrisma.workItemLabel.findMany.mock.calls[0][0];
+
+      expect(callArgs.where.AND[0]).toEqual({ projectId });
+      expect(callArgs.where.AND[1]).toEqual({
+        name: { in: ['Deep Learning', 'Optimization'] },
+      });
+    });
+
+    it('should query by id when given valid UUIDs', async () => {
+      const uuid1 = '01a1078c-3162-723a-b454-814b8af5f5ec';
+      const uuid2 = '88e686b9-1226-4b65-abbf-5cd319ba61b2';
+      await repository.findLabelsByIds(projectId, [uuid1, uuid2]);
+
+      expect(mockPrisma.workItemLabel.findMany).toHaveBeenCalledTimes(1);
+      const callArgs = mockPrisma.workItemLabel.findMany.mock.calls[0][0];
+
+      expect(callArgs.where.AND[0]).toEqual({ projectId });
+      expect(callArgs.where.AND[1]).toEqual({ id: { in: [uuid1, uuid2] } });
+    });
+
+    it('should combine OR queries when given a mix of UUIDs and label names', async () => {
+      const validUuid = '88e686b9-1226-4b65-abbf-5cd319ba61b2';
+      await repository.findLabelsByIds(projectId, [
+        validUuid,
+        'GPU Cluster & HPC',
+      ]);
+
+      expect(mockPrisma.workItemLabel.findMany).toHaveBeenCalledTimes(1);
+      const callArgs = mockPrisma.workItemLabel.findMany.mock.calls[0][0];
+
+      expect(callArgs.where.AND[0]).toEqual({ projectId });
+      expect(callArgs.where.AND[1]).toEqual({
+        OR: [
+          { id: { in: [validUuid] } },
+          { name: { in: ['GPU Cluster & HPC'] } },
+        ],
+      });
+    });
+
+    it('should return empty array without database call when labelIds is empty', async () => {
+      const result = await repository.findLabelsByIds(projectId, []);
+      expect(result).toEqual([]);
+      expect(mockPrisma.workItemLabel.findMany).not.toHaveBeenCalled();
     });
   });
 });

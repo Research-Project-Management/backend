@@ -15,6 +15,11 @@ enum WorkItemRelationType {
   duplicate_of
 }
 
+enum ViewAccess {
+  public
+  private
+}
+
 model WorkItemState {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id") @db.Uuid
@@ -234,4 +239,44 @@ model WorkItemEntityLink {
   @@unique([workItemId, entityType, entityId])
   @@index([entityType, entityId])
   @@map("work_item_entity_links")
+}
+
+model WorkItemView {
+  id                String         @id @default(uuid()) @db.Uuid
+  name              String
+  description       String?        @default("")
+  query             Json           @default("{}")
+  filters           Json?          @default("{}")
+  displayFilters    Json?          @default("{}") @map("display_filters")
+  displayProperties Json?          @default("{}") @map("display_properties")
+  richFilters       Json?          @default("{}") @map("rich_filters")
+  access            ViewAccess     @default(public)
+  sortOrder         Float          @default(65535) @map("sort_order")
+  logoProps         Json?          @default("{}") @map("logo_props")
+  isLocked          Boolean        @default(false) @map("is_locked")
+  archivedAt        DateTime?      @map("archived_at") @db.Timestamptz(6)
+  projectId         String         @map("project_id") @db.Uuid
+  project           Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdById       String         @map("created_by_id") @db.Uuid
+  createdBy         User           @relation("ViewAuthor", fields: [createdById], references: [id], onDelete: Cascade)
+  favorites         ViewFavorite[]
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([projectId, access])
+  @@index([projectId, createdById])
+  @@map("work_item_views")
+}
+
+model ViewFavorite {
+  id        String       @id @default(uuid()) @db.Uuid
+  viewId    String       @map("view_id") @db.Uuid
+  view      WorkItemView @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  userId    String       @map("user_id") @db.Uuid
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([viewId, userId])
+  @@index([userId])
+  @@map("view_favorites")
 }

@@ -364,8 +364,9 @@ export class CoreRepository implements IWorkItemRepository {
         for (const r of records) {
           const itemAtts = attachmentMap.get(r.id);
           if (itemAtts && itemAtts.length > 0) {
-            (r as WorkItemWithRelations & { attachments?: WorkItemAttachments }).attachments =
-              this.formatEntityAttachments(itemAtts);
+            (
+              r as WorkItemWithRelations & { attachments?: WorkItemAttachments }
+            ).attachments = this.formatEntityAttachments(itemAtts);
           }
         }
       } catch {
@@ -387,7 +388,9 @@ export class CoreRepository implements IWorkItemRepository {
     const safeRecords = Array.isArray(records) ? records : [];
     for (const r of safeRecords) {
       const meta =
-        r.metadata && typeof r.metadata === 'object' && !Array.isArray(r.metadata)
+        r.metadata &&
+        typeof r.metadata === 'object' &&
+        !Array.isArray(r.metadata)
           ? (r.metadata as Record<string, unknown>)
           : {};
       const category =
@@ -403,7 +406,10 @@ export class CoreRepository implements IWorkItemRepository {
       if (category === 'page') {
         pages.push({
           id: r.id,
-          title: typeof meta.title === 'string' ? meta.title : (r.filename || 'Untitled Page'),
+          title:
+            typeof meta.title === 'string'
+              ? meta.title
+              : r.filename || 'Untitled Page',
           slug: typeof meta.slug === 'string' ? meta.slug : null,
           addedAt: r.createdAt
             ? new Date(r.createdAt).toISOString()
@@ -412,16 +418,21 @@ export class CoreRepository implements IWorkItemRepository {
       } else if (category === 'paper') {
         papers.push({
           id: r.id,
-          title: typeof meta.title === 'string' ? meta.title : (r.filename || 'Untitled Paper'),
+          title:
+            typeof meta.title === 'string'
+              ? meta.title
+              : r.filename || 'Untitled Paper',
           doi: typeof meta.doi === 'string' ? meta.doi : null,
-          citationKey: typeof meta.citationKey === 'string' ? meta.citationKey : null,
+          citationKey:
+            typeof meta.citationKey === 'string' ? meta.citationKey : null,
           addedAt: r.createdAt
             ? new Date(r.createdAt).toISOString()
             : new Date().toISOString(),
         });
       } else if (category === 'link') {
         links.push({
-          title: typeof meta.title === 'string' ? meta.title : (r.filename || 'Link'),
+          title:
+            typeof meta.title === 'string' ? meta.title : r.filename || 'Link',
           url: r.url || '',
           addedAt: r.createdAt
             ? new Date(r.createdAt).toISOString()
@@ -517,8 +528,11 @@ export class CoreRepository implements IWorkItemRepository {
           orderBy: { createdAt: 'asc' },
         });
         if (records && records.length > 0) {
-          (item as WorkItemWithRelations & { attachments?: WorkItemAttachments }).attachments =
-            this.formatEntityAttachments(records);
+          (
+            item as WorkItemWithRelations & {
+              attachments?: WorkItemAttachments;
+            }
+          ).attachments = this.formatEntityAttachments(records);
         }
       } catch {
         // Graceful fallback
@@ -557,8 +571,7 @@ export class CoreRepository implements IWorkItemRepository {
     data: Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput,
   ): Promise<WorkItemWithRelations> {
     const { columnId, ...restData } = data as (
-      | Prisma.WorkItemCreateInput
-      | Prisma.WorkItemUncheckedCreateInput
+      Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput
     ) & { columnId?: string };
     const createData = { ...restData };
     const hasRelationConnect = Boolean(
@@ -654,7 +667,7 @@ export class CoreRepository implements IWorkItemRepository {
         }
       }
 
-      return created as unknown as WorkItemWithRelations;
+      return created;
     });
   }
 
@@ -663,8 +676,7 @@ export class CoreRepository implements IWorkItemRepository {
     data: Prisma.WorkItemUpdateInput | Prisma.WorkItemUncheckedUpdateInput,
   ): Promise<WorkItemWithRelations> {
     const { columnId, ...restData } = data as (
-      | Prisma.WorkItemUpdateInput
-      | Prisma.WorkItemUncheckedUpdateInput
+      Prisma.WorkItemUpdateInput | Prisma.WorkItemUncheckedUpdateInput
     ) & { columnId?: string; assigneeId?: string };
     const updateData = { ...restData };
     const hasRelationConnect = Boolean(
@@ -688,7 +700,7 @@ export class CoreRepository implements IWorkItemRepository {
     return this.executeTx<WorkItemWithRelations>(async (tx) => {
       const updated = await tx.workItem.update({
         where: { id: workItemId },
-        data: updateData as Prisma.WorkItemUpdateInput,
+        data: updateData as any,
         include: BASE_WORK_ITEM_INCLUDE,
       });
 
@@ -742,7 +754,7 @@ export class CoreRepository implements IWorkItemRepository {
         });
 
         const rawLabels: unknown[] = Array.isArray(updated.labels)
-          ? (updated.labels as unknown[])
+          ? updated.labels
           : [];
         const uniqueLabelNames: string[] = Array.from(
           new Set(
@@ -1168,13 +1180,33 @@ export class CoreRepository implements IWorkItemRepository {
     labelIds: string[],
   ): Promise<Array<{ id: string; name: string; color: string }>> {
     if (!labelIds.length) return [];
-    const uniqueIds = Array.from(new Set(labelIds.filter(Boolean)));
-    if (!uniqueIds.length) return [];
+    const uniqueInputs = Array.from(new Set(labelIds.filter(Boolean)));
+    if (!uniqueInputs.length) return [];
+
+    const uuids = uniqueInputs.filter((id) => isUuid(id));
+    const names = uniqueInputs.filter((id) => !isUuid(id));
+
+    const orConditions: Prisma.WorkItemLabelWhereInput[] = [];
+    if (uuids.length > 0) {
+      orConditions.push({ id: { in: uuids } });
+    }
+    if (names.length > 0) {
+      orConditions.push({ name: { in: names } });
+    }
+
+    if (orConditions.length === 0) return [];
+
     const projectFilter = Array.isArray(projectId)
       ? { in: projectId }
       : projectId;
+
     return this.prismaService.workItemLabel.findMany({
-      where: { id: { in: uniqueIds }, projectId: projectFilter },
+      where: {
+        AND: [
+          { projectId: projectFilter },
+          orConditions.length === 1 ? orConditions[0] : { OR: orConditions },
+        ],
+      },
       select: { id: true, name: true, color: true },
     });
   }

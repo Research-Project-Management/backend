@@ -952,14 +952,16 @@ async function main() {
     const parentId = def.parentSeq
       ? createdWorkItemsMap.get(def.parentSeq)
       : undefined;
-    const startDate =
-      def.startDelta !== undefined
-        ? new Date(now.getTime() + def.startDelta * dayMs)
-        : undefined;
-    const dueDate =
-      def.daysDelta !== undefined
-        ? new Date(now.getTime() + def.daysDelta * dayMs)
-        : undefined;
+    let startDate: Date | undefined;
+    if (def.startDelta !== undefined) {
+      startDate = new Date(now.getTime() + def.startDelta * dayMs);
+      startDate.setUTCHours(0, 0, 0, 0);
+    }
+    let dueDate: Date | undefined;
+    if (def.daysDelta !== undefined) {
+      dueDate = new Date(now.getTime() + def.daysDelta * dayMs);
+      dueDate.setUTCHours(0, 0, 0, 0);
+    }
 
     const wi = await prisma.workItem.create({
       data: {
