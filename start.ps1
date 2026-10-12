@@ -5,13 +5,7 @@
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $ScriptDir
 
-# If node is installed and start-env.mjs exists, run it
-if ((Get-Command node -ErrorAction SilentlyContinue) -and (Test-Path "$ScriptDir\scripts\start-env.mjs")) {
-    node "$ScriptDir\scripts\start-env.mjs" $args
-    exit $LASTEXITCODE
-}
 
-# Fallback PowerShell execution
 Write-Host "`n==============================================================" -ForegroundColor Cyan
 Write-Host "💻 Starting Flux Backend in Local Dev Mode (Docker Infra Only)" -ForegroundColor Cyan
 Write-Host "==============================================================`n" -ForegroundColor Cyan

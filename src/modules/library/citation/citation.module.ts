@@ -27,10 +27,8 @@ import { InProcessCatalogGatewayAdapter } from './utils/in-process-catalog-gatew
 import { HttpCatalogGatewayAdapter } from './utils/http-catalog-gateway.adapter';
 
 // Ports/Types
-import {
-  CITATION_ENGINE_PORT,
-  CATALOG_GATEWAY_PORT,
-} from './types/citation.types';
+import { CITATION_ENGINE_PORT } from './core/ports/citation-engine.port';
+import { CATALOG_GATEWAY_PORT } from './types/citation.types';
 
 /**
  * Citation Bounded Context Unified Module (Supporting Domain).

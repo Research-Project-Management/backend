@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { BullModule } from '@nestjs/bullmq';
-import { CoreModule, HealthModule, getBullMqConfig } from './core';
+import { CoreModule, getBullMqConfig } from './core';
 import { IdentityModule } from './modules/identity/identity.module';
 import { ProjectModule } from './modules/project/project.module';
 import { ActivityModule } from './modules/activity/activity.module';
@@ -17,7 +17,6 @@ import { RealtimeModule } from './modules/realtime/realtime.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { AppController } from './app.controller';
-import { AppService } from './app.service';
 
 @Module({
   imports: [
@@ -35,7 +34,6 @@ import { AppService } from './app.service';
       useFactory: getBullMqConfig,
     }),
     CoreModule,
-    HealthModule,
     IdentityModule,
     ProjectModule,
     ActivityModule,
@@ -51,6 +49,5 @@ import { AppService } from './app.service';
     IntegrationsModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

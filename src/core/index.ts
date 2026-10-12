@@ -38,6 +38,11 @@ export * from './http/interceptors/transform.interceptor';
 export * from './http/interceptors/logger.interceptor';
 export * from './http/interceptors/idempotency.interceptor';
 
+// HTTP - Setup & Middlewares
+export * from './http/setup/cors.setup';
+export * from './http/setup/swagger.setup';
+export * from './http/setup/plugins.setup';
+
 // Logger
 export * from './logger/logger.module';
 export * from './logger/logger.service';
@@ -45,6 +50,5 @@ export * from './logger/logger.service';
 // Utils
 export * from './utils/concurrency.util';
 export * from './utils/error.util';
-export * from './utils/rate-limit.util';
 export * from './utils/uuid.util';
 export * from './utils/worker-mode.util';

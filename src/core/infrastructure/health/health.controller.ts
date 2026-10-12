@@ -32,14 +32,14 @@ export class HealthController {
   }
 
   @Get('liveness')
-  @ApiOperation({ summary: 'Kubernetes / Container liveness probe' })
+  @ApiOperation({ summary: 'Container liveness probe' })
   liveness() {
     return { status: 'ok', timestamp: new Date().toISOString() };
   }
 
   @Get('readiness')
   @HealthCheck()
-  @ApiOperation({ summary: 'Kubernetes / Container readiness probe' })
+  @ApiOperation({ summary: 'Container readiness probe' })
   readiness() {
     return this.health.check([() => this.prismaHealth.isHealthy('database')]);
   }

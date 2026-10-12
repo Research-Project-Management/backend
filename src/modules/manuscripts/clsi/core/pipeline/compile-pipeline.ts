@@ -28,6 +28,7 @@ export interface CompilePipelineRequest {
   projectId?: string;
   mainFile?: string;
   engine?: string;
+  texLiveVersion?: string;
   draft?: boolean;
   syntaxOnly?: boolean;
   force?: boolean;

@@ -248,6 +248,26 @@ The result is valid.
         expect(tokenizer.tokenize('')).toEqual([]);
         expect(tokenizer.tokenize('   \n\t  ')).toEqual([]);
       });
+
+      it('should accurately extract Unicode and Vietnamese words with tone marks', () => {
+        const text =
+          'Nghiên cứu về trí tuệ nhân tạo và xử lý ngôn ngữ tự nhiên.';
+        const tokens = tokenizer.tokenize(text);
+        const words = tokens.map((t) => t.word);
+
+        expect(words).toContain('Nghiên');
+        expect(words).toContain('cứu');
+        expect(words).toContain('trí');
+        expect(words).toContain('tuệ');
+        expect(words).toContain('nhân');
+        expect(words).toContain('tạo');
+        expect(words).toContain('xử');
+        expect(words).toContain('lý');
+        expect(words).toContain('ngôn');
+        expect(words).toContain('ngữ');
+        expect(words).toContain('tự');
+        expect(words).toContain('nhiên');
+      });
     });
 
     describe('AcademicSpellEngineAdapter', () => {
@@ -291,6 +311,17 @@ The result is valid.
 
       it('should return empty suggestions for correctly spelled words', () => {
         expect(engine.getSuggestions('algorithm', langEn)).toEqual([]);
+      });
+
+      it('should recognize Vietnamese academic and standard vocabulary', () => {
+        const langVi = LanguageCodeVo.create('vi-VN');
+        expect(engine.isCorrect('nghiên', langVi)).toBe(true);
+        expect(engine.isCorrect('cứu', langVi)).toBe(true);
+        expect(engine.isCorrect('thuật', langVi)).toBe(true);
+        expect(engine.isCorrect('toán', langVi)).toBe(true);
+        expect(engine.isCorrect('luận', langVi)).toBe(true);
+        expect(engine.isCorrect('văn', langVi)).toBe(true);
+        expect(engine.isCorrect('nghiênn', langVi)).toBe(false);
       });
     });
 

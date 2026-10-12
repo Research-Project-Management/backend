@@ -69,14 +69,14 @@ export class RegexLatexTokenizerAdapter implements ILatexTokenizerPort {
       // Mask line while preserving column indices
       const maskedLine = this.maskLatexLine(originalLine);
 
-      // Extract words: matches alphabetic tokens with optional internal apostrophe or hyphen
-      const wordRegex = /\b[a-zA-ZÀ-ÿ]+(?:['’][a-zA-ZÀ-ÿ]+)*\b/g;
+      // Extract words: matches Unicode letter tokens with optional internal apostrophe or hyphen
+      const wordRegex = /[\p{L}]+(?:['’][\p{L}]+)*/gu;
       let match: RegExpExecArray | null;
 
       while ((match = wordRegex.exec(maskedLine)) !== null) {
         const rawWord = match[0];
-        // Skip single-letter words other than 'a', 'i', 'A', 'I' in English
-        if (rawWord.length === 1 && !/^[aiAI]$/.test(rawWord)) {
+        // Skip single-letter words other than 'a', 'i', 'A', 'I', 'y', 'Y', 'ở', 'Ở', 'ý', 'Ý', 'e', 'E', 'ô', 'Ô'
+        if (rawWord.length === 1 && !/^[aiAIyYởỞýÝeEôÔ]$/u.test(rawWord)) {
           continue;
         }
 

@@ -9,12 +9,7 @@ set -e
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
-# 1. If node and start-env.mjs are available, execute the Node.js orchestrator
-if command -v node >/dev/null 2>&1 && [ -f "$DIR/scripts/start-env.mjs" ]; then
-    exec node "$DIR/scripts/start-env.mjs" "$@"
-fi
-
-# 2. Native Bash execution (VPS without host node, or Linux dev environments)
+# Native execution (VPS Docker vs Local Dev)
 IS_VPS=false
 
 # Detect VPS / Production

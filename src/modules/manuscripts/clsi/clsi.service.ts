@@ -266,7 +266,8 @@ export class ClsiService {
         dto.main_file = dto.compile.rootResourcePath;
       }
       if (dto.compile.options?.compiler && !dto.engine) {
-        const rawCompiler = dto.compile.options.compiler.toLowerCase() as ClsiCompilerEngine;
+        const rawCompiler =
+          dto.compile.options.compiler.toLowerCase() as ClsiCompilerEngine;
         if (Object.values(ClsiCompilerEngine).includes(rawCompiler)) {
           dto.engine = rawCompiler;
         }
@@ -288,6 +289,7 @@ export class ClsiService {
     }
 
     const engine = dto.engine || 'pdflatex';
+    const texLiveVersion = dto.tex_live_version || dto.texLiveVersion || '2024';
     const projectId = await this.resolveProjectId(dto);
 
     // Phase A — metadata only: plan the file set + content-independent fingerprint.
@@ -298,6 +300,7 @@ export class ClsiService {
         plan.fingerprint,
         plan.mainFile,
         engine,
+        texLiveVersion,
         dto.draft ?? false,
         dto.syntax_only ?? dto.syntaxOnly ?? false,
         dto.stop_on_first_error ?? false,
@@ -357,6 +360,7 @@ export class ClsiService {
     cacheKey: string,
     _userId?: string,
   ): Promise<ClsiCompileResult> {
+    const texLiveVersion = dto.tex_live_version || dto.texLiveVersion || '2024';
     // Phase B — cache miss: now (and only now) read the document bodies.
     const mainFile = plan.mainFile;
     const mergedFiles = await this.hydrateFiles(plan);
@@ -549,6 +553,7 @@ export class ClsiService {
             projectId,
             mainFile,
             engine,
+            texLiveVersion,
             draft: dto.draft,
             syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
             stopOnFirstError: dto.stop_on_first_error,

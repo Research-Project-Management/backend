@@ -29,6 +29,8 @@ export class StorageRedisCacheService {
     await this.redis.set(key, data, ttlSeconds);
   }
 
+  private readonly inFlight = new Map<string, Promise<any>>();
+
   async wrapFolderListing<T>(
     scopeKey: string,
     parentId: string | null | undefined,
@@ -37,9 +39,25 @@ export class StorageRedisCacheService {
   ): Promise<T> {
     const cached = await this.getFolderListing<T>(scopeKey, parentId);
     if (cached !== null && cached !== undefined) return cached;
-    const fresh = await factory();
-    await this.setFolderListing(scopeKey, parentId, fresh, ttlSeconds);
-    return fresh;
+
+    const key = this.getTreeKey(scopeKey, parentId);
+    const existing = this.inFlight.get(key);
+    if (existing) {
+      return existing as Promise<T>;
+    }
+
+    const promise = (async () => {
+      try {
+        const fresh = await factory();
+        await this.setFolderListing(scopeKey, parentId, fresh, ttlSeconds);
+        return fresh;
+      } finally {
+        this.inFlight.delete(key);
+      }
+    })();
+
+    this.inFlight.set(key, promise);
+    return promise;
   }
 
   async invalidateFolder(

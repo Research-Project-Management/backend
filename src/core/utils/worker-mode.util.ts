@@ -3,7 +3,7 @@
  *
  * Rules:
  * 1. WORKER_MODE === 'true': Dedicated worker process -> Always true.
- * 2. ENABLE_IN_PROCESS_WORKERS === 'false': Explicitly disabled for Web API pods -> False.
+ * 2. ENABLE_IN_PROCESS_WORKERS === 'false': Explicitly disabled for Web API containers -> False.
  * 3. ENABLE_IN_PROCESS_WORKERS === 'true': Explicitly enabled -> True.
  * 4. Default in development (process.env.NODE_ENV !== 'production'): True (for hybrid single-process DX).
  * 5. Default in production (process.env.NODE_ENV === 'production'): False (Web API and Workers MUST be separated).

@@ -161,9 +161,8 @@ export class AiService {
           }
           if (it.attachments && it.attachments.length > 0) {
             const att =
-              it.attachments.find(
-                (a) => a.attachmentType === 'primary_pdf',
-              ) || it.attachments[0];
+              it.attachments.find((a) => a.attachmentType === 'primary_pdf') ||
+              it.attachments[0];
             const attMeta = att.metadata as Record<string, unknown> | null;
             if (typeof attMeta?.ragDocId === 'string') {
               fileMap.set(it.id, attMeta.ragDocId);
@@ -251,9 +250,7 @@ export class AiService {
             content: lastUserMsg.content,
             ...(lastUserMsg.attachments || lastUserMsg.sources
               ? {
-                  sources:
-                    lastUserMsg.attachments ||
-                    lastUserMsg.sources,
+                  sources: lastUserMsg.attachments || lastUserMsg.sources,
                 }
               : {}),
           },
@@ -367,9 +364,7 @@ export class AiService {
             content: lastUserMsg.content,
             ...(lastUserMsg.attachments || lastUserMsg.sources
               ? {
-                  sources:
-                    lastUserMsg.attachments ||
-                    lastUserMsg.sources,
+                  sources: lastUserMsg.attachments || lastUserMsg.sources,
                 }
               : {}),
           },
@@ -461,17 +456,21 @@ export class AiService {
       }
 
       // Priority resolution of ragDocId:
-      // a) check item.metadata.ragDocId
+      // a) check item.metadata.ragDocId or direct item.ragDocId
       const itemMeta = (item.metadata as Record<string, unknown>) || {};
+      const rawItem = item as unknown as Record<string, unknown>;
       let ragDocId: string | null =
-        typeof itemMeta.ragDocId === 'string' ? itemMeta.ragDocId : null;
+        typeof itemMeta.ragDocId === 'string'
+          ? itemMeta.ragDocId
+          : typeof rawItem.ragDocId === 'string'
+            ? rawItem.ragDocId
+            : null;
 
       // b) check primary_pdf attachment or any attachment
       if (!ragDocId && item.attachments && item.attachments.length > 0) {
         const primaryAtt =
-          item.attachments.find(
-            (a) => a.attachmentType === 'primary_pdf',
-          ) || item.attachments[0];
+          item.attachments.find((a) => a.attachmentType === 'primary_pdf') ||
+          item.attachments[0];
 
         const attMeta = (primaryAtt?.metadata as Record<string, unknown>) || {};
         if (typeof attMeta.ragDocId === 'string') {

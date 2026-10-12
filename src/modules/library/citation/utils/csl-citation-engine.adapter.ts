@@ -2,8 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   ICitationEnginePort,
   FormattedCitationResult,
-  CitationStyleVo,
-} from '../types/citation.types';
+} from '../core/ports/citation-engine.port';
+import { CitationStyleVo } from '../core/domain/citation-style.vo';
 import { CitationService } from '../services/citation.service';
 
 /**

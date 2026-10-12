@@ -102,20 +102,10 @@ export interface ReferenceData {
   [key: string]: unknown;
 }
 
-export const CITATION_ENGINE_PORT = Symbol('CITATION_ENGINE_PORT');
-
-export interface ICitationEnginePort {
-  formatItem(
-    userId: string,
-    itemId: string,
-    style: CitationStyleVo,
-  ): Promise<FormattedCitationResult | null>;
-  formatBatch(
-    userId: string,
-    itemIds: string[],
-    style: CitationStyleVo,
-  ): Promise<FormattedCitationResult[]>;
-}
+export {
+  CITATION_ENGINE_PORT,
+  type ICitationEnginePort,
+} from '../core/ports/citation-engine.port';
 
 export interface CatalogItemCreator {
   creatorType?: string | null;

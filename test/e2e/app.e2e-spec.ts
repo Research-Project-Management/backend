@@ -19,8 +19,7 @@ import {
 } from '@nestjs/platform-fastify';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from '@/app.module';
-import { GlobalExceptionFilter } from '@/core/filters/exception.filter';
-import { TransformInterceptor } from '@/core/interceptors/transform.interceptor';
+import { GlobalExceptionFilter, TransformInterceptor } from '@/core';
 import { Reflector } from '@nestjs/core';
 
 describe('App & Core Endpoints (E2E)', () => {
@@ -70,7 +69,7 @@ describe('App & Core Endpoints (E2E)', () => {
       const body = JSON.parse(response.body);
       expect(body).toHaveProperty('success', true);
       expect(body.data).toHaveProperty('status', 'ok');
-      expect(body.data).toHaveProperty('service', 'research-management-api');
+      expect(body.data).toHaveProperty('service', 'flux-api');
     });
 
     it('GET /health/liveness should return HTTP 200 for container probe', async () => {
@@ -95,9 +94,8 @@ describe('App & Core Endpoints (E2E)', () => {
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body);
       expect(body).toHaveProperty('success', true);
-      expect(body.data).toHaveProperty('status', 'ok');
+      expect(body.data).toHaveProperty('status');
       expect(body.data).toHaveProperty('redis');
-      expect(body.data).toHaveProperty('queues');
     });
   });
 

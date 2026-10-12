@@ -9,6 +9,7 @@ import { Injectable } from '@nestjs/common';
 import { ISpellEnginePort } from '../../ports/spell-engine.port';
 import { LanguageCodeVo } from '../../domain/value-objects/language-code.vo';
 import { ENGLISH_COMMON_WORDS } from './dictionaries/english-common.dictionary';
+import { VIETNAMESE_COMMON_WORDS } from './dictionaries/vietnamese-common.dictionary';
 
 @Injectable()
 export class AcademicSpellEngineAdapter implements ISpellEnginePort {
@@ -22,7 +23,7 @@ export class AcademicSpellEngineAdapter implements ISpellEnginePort {
   }
 
   public isCorrect(word: string, language: LanguageCodeVo): boolean {
-    const clean = word.toLowerCase().trim();
+    const clean = word.toLowerCase().trim().normalize('NFC');
     if (!clean) return true;
 
     // Numbers, hex, formulas, single letters (variables like a, i, x, y, k, n)
@@ -63,7 +64,7 @@ export class AcademicSpellEngineAdapter implements ISpellEnginePort {
     language: LanguageCodeVo,
     maxSuggestions = 5,
   ): string[] {
-    const clean = word.toLowerCase().trim();
+    const clean = word.toLowerCase().trim().normalize('NFC');
     if (!clean) return [];
 
     if (this.isCorrect(word, language)) {
@@ -1051,89 +1052,16 @@ export class AcademicSpellEngineAdapter implements ISpellEnginePort {
 
     for (const w of academicWords) {
       this.englishDictionary.add(w.toLowerCase());
+      // Many academic CS/LaTeX terms are also used in Vietnamese scientific papers
+      this.vietnameseDictionary.add(w.toLowerCase());
     }
 
     for (const w of ENGLISH_COMMON_WORDS) {
       this.englishDictionary.add(w.toLowerCase());
     }
 
-    const vietnameseWords = [
-      'thuật',
-      'toán',
-      'mô',
-      'hình',
-      'học',
-      'máy',
-      'sâu',
-      'trí',
-      'tuệ',
-      'nhân',
-      'tạo',
-      'bài',
-      'báo',
-      'nghiên',
-      'cứu',
-      'khoa',
-      'học',
-      'kết',
-      'quả',
-      'thực',
-      'nghiệm',
-      'phân',
-      'tích',
-      'đánh',
-      'giá',
-      'phương',
-      'pháp',
-      'hệ',
-      'thống',
-      'dữ',
-      'liệu',
-      'độ',
-      'chính',
-      'xác',
-      'mạng',
-      'nơ-ron',
-      'tối',
-      'ưu',
-      'hóa',
-      'công',
-      'thức',
-      'luận',
-      'văn',
-      'tóm',
-      'tắt',
-      'mở',
-      'đầu',
-      'kết',
-      'luận',
-      'tài',
-      'liệu',
-      'tham',
-      'khảo',
-      'trích',
-      'dẫn',
-      'hình',
-      'ảnh',
-      'bảng',
-      'biểu',
-      'đồ',
-      'chương',
-      'mục',
-      'giả',
-      'thuyết',
-      'thông',
-      'tin',
-      'công',
-      'nghệ',
-      'phần',
-      'mềm',
-      'chương',
-      'trình',
-    ];
-
-    for (const w of vietnameseWords) {
-      this.vietnameseDictionary.add(w.toLowerCase());
+    for (const w of VIETNAMESE_COMMON_WORDS) {
+      this.vietnameseDictionary.add(w.toLowerCase().normalize('NFC'));
     }
   }
 }

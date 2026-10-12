@@ -64,6 +64,24 @@ export class CompileManuscriptDto {
   engine?: ClsiCompilerEngine;
 
   @ApiPropertyOptional({
+    description: 'Target TeX Live release year',
+    example: '2024',
+    default: '2024',
+  })
+  @IsString()
+  @IsOptional()
+  tex_live_version?: string;
+
+  @ApiPropertyOptional({
+    description: 'Target TeX Live release year (camelCase)',
+    example: '2024',
+    default: '2024',
+  })
+  @IsString()
+  @IsOptional()
+  texLiveVersion?: string;
+
+  @ApiPropertyOptional({
     description: 'Draft compilation (skips images/PDF embed for speed)',
   })
   @IsBoolean()
@@ -121,7 +139,9 @@ export class CompileManuscriptDto {
   @IsOptional()
   forceClean?: boolean;
 
-  @ApiPropertyOptional({ description: 'Halt on first LaTeX error (snake_case)' })
+  @ApiPropertyOptional({
+    description: 'Halt on first LaTeX error (snake_case)',
+  })
   @IsBoolean()
   @IsOptional()
   stop_on_first_error?: boolean;

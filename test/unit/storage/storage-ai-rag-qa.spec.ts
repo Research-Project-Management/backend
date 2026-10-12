@@ -53,6 +53,9 @@ describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
       aiChat: {
         findFirst: jest.fn(),
       },
+      attachment: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
     };
 
     mockReply = {
@@ -177,10 +180,12 @@ describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
     mockPrisma.item.findFirst.mockResolvedValue({
       id: 'library-item-999',
       title: 'Attention Is All You Need',
+      userId: 'user-researcher-1',
       uploadedById: 'user-researcher-1',
       projectId: null,
       contributors: [{ fullName: 'Vaswani et al.' }],
       year: 2017,
+      metadata: { ragDocId: 'vec-doc-vaswani' },
       ragDocId: 'vec-doc-vaswani',
     });
 

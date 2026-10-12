@@ -1,6 +1,6 @@
 import { CitationStyleVo } from '../domain/citation-style.vo';
 
-export const CITATION_ENGINE_PORT = Symbol('CITATION_ENGINE_PORT');
+export const CITATION_ENGINE_PORT = Symbol.for('CITATION_ENGINE_PORT');
 
 export interface FormattedCitationResult {
   formattedText: string;
