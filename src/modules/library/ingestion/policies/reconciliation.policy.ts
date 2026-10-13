@@ -185,11 +185,31 @@ export class ReconciliationPolicy {
       }
 
       if (field === 'creators' || field === 'authors') {
-        const bestWithContent =
+        // If an authoritative publisher registry (CrossRef/PubMed/arXiv/EnrichedProvider) provides
+        // a richer/more complete creator list than local PDF text extraction, prefer it.
+        const authoritative = sorted.find(
+          (e) =>
+            ['crossref', 'pubmed', 'arxiv', 'enrichedprovider'].includes(
+              (e.sourceProvider || '').toLowerCase(),
+            ) &&
+            Array.isArray(e.normalizedValue) &&
+            e.normalizedValue.length > 0,
+        );
+
+        const currentBest =
           sorted.find(
             (e) =>
               Array.isArray(e.normalizedValue) && e.normalizedValue.length > 0,
           ) || best;
+
+        const bestWithContent =
+          authoritative &&
+          Array.isArray(authoritative.normalizedValue) &&
+          Array.isArray(currentBest.normalizedValue) &&
+          authoritative.normalizedValue.length > currentBest.normalizedValue.length
+            ? authoritative
+            : currentBest;
+
         selectedFields[field] = bestWithContent;
         proposedItem[field] = bestWithContent.normalizedValue;
         rejectedFields[field] = sorted.filter((e) => e !== bestWithContent);

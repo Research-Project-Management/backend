@@ -106,9 +106,11 @@ export class LayoutHeuristicExtractor {
 
       const candidateLines = lines.filter((l) => {
         const isNoiseHeader =
-          /^(arxiv:\s*\d|proceedings of|ieee|volume|vol\.|accepted|submitted)/i.test(
+          /^(arxiv\s*:\s*[a-z0-9\-./]+|proceedings of|ieee|volume|vol\.|accepted|submitted|published|journal of|springer|elsevier|nature|biorxiv)/i.test(
             l.text,
-          ) || l.text.length < 3;
+          ) ||
+          /^(\d{1,2}\s+[a-z]{3,9}\s+\d{4}|\d{4}\s*[-/]\s*\d{1,2})/i.test(l.text) ||
+          l.text.length < 3;
         return !isNoiseHeader;
       });
 

@@ -401,33 +401,13 @@ export class CoreService {
   }
 
   /**
-   * Soft-delete a project.
+   * Delete a project permanently (Direct hard delete, no soft-delete/trash).
    */
   async softDelete(
     projectId: string,
     actorId?: string,
   ): Promise<{ message: string }> {
-    const existing = await this.projectRepo.findProjectById(projectId);
-    if (!existing) {
-      throw new NotFoundException('Project not found');
-    }
-
-    await this.projectRepo.softDeleteProject(projectId);
-    const memberIds = existing.members?.map((m) => m.userId) || [];
-    await this.invalidateProjectCache(projectId, memberIds);
-
-    this.eventEmitter?.emit(
-      'project.deleted',
-      new DomainActivityEvent({
-        entityType: 'project' as unknown as EntityType,
-        entityId: projectId,
-        verb: 'deleted',
-        actorId: actorId || '',
-        projectId,
-      }),
-    );
-
-    return { message: 'Project soft-deleted successfully' };
+    return this.permanentDeleteProject(projectId, actorId || '');
   }
 
   /**
@@ -686,14 +666,29 @@ export class CoreService {
   ): Promise<{ message: string }> {
     const project = await this.projectRepo.findProjectById(projectId);
     if (!project) throw new NotFoundException(`Project ${projectId} not found`);
-    if (project.createdById !== userId)
-      throw new ForbiddenException('Only project owner can permanently delete');
-    if (!project.deletedAt)
-      throw new BadRequestException(
-        'Project must be soft-deleted before permanent deletion',
-      );
+
+    const isOwner =
+      project.createdById === userId ||
+      project.members?.some((m) => m.userId === userId && m.role === Role.owner);
+    if (!isOwner) {
+      throw new ForbiddenException('Only project owner can delete project');
+    }
+
     await this.projectRepo.permanentDeleteProject(projectId);
-    await this.invalidateProjectCache(projectId, [userId]);
+    const memberIds = project.members?.map((m) => m.userId) || [userId];
+    await this.invalidateProjectCache(projectId, memberIds);
+
+    this.eventEmitter?.emit(
+      'project.deleted',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'deleted',
+        actorId: userId,
+        projectId,
+      }),
+    );
+
     return { message: 'Project permanently deleted' };
   }
 }

@@ -470,6 +470,59 @@ export class PipelineService {
       },
     );
 
+    // If upstream site was blocked by WAF/Cloudflare and cannot be processed:
+    if (decision.proposedItem?.extraFields?.ingestionStatus === 'BLOCKED') {
+      const wafKind =
+        (decision.proposedItem.extraFields.wafKind as string) ||
+        'WAF_CLOUDFLARE_TURNSTILE';
+      const blockedSourceLabel =
+        getSubmissionPayloadLabel(envelope.payload) ||
+        decision.proposedItem?.url ||
+        'Document';
+
+      await this.repo.createDecision(runId, {
+        decisionType: 'BLOCKED',
+        decisionReason: `Blocked by upstream anti-bot WAF (${wafKind}). Please upload the PDF directly.`,
+        proposedItem: decision.proposedItem as unknown as Prisma.InputJsonValue,
+      });
+
+      await this.repo.updateRunStatus(
+        scopeId,
+        runId,
+        IngestionStatus.COMPLETED,
+        {
+          completedAt: new Date(),
+          executionLog: {
+            total: 1,
+            processed: 1,
+            succeeded: 0,
+            duplicates: 0,
+            failed: 0,
+            percentage: 100,
+            status: 'BLOCKED',
+            ingestionStatus: 'BLOCKED',
+            wafKind,
+            promptUploadPdf: true,
+            currentTitle: blockedSourceLabel,
+            message:
+              'Website is protected by WAF / Cloudflare Turnstile. Please upload the PDF file directly.',
+            items: [
+              {
+                title: blockedSourceLabel,
+                status: 'BLOCKED',
+                error:
+                  'Website is protected by WAF / Cloudflare Turnstile. Please upload the PDF file directly.',
+              },
+            ],
+          } as unknown as Prisma.InputJsonValue,
+        },
+      );
+
+      aggregate.recordProgress(0, 1);
+      aggregate.complete();
+      return;
+    }
+
     // Stage 5: MATCH (Duplicate Detection)
     const matchResult = await session.executeStep(
       'MATCH',

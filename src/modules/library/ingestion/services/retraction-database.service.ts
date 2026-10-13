@@ -78,14 +78,9 @@ export class RetractionDatabaseService implements OnModuleInit {
 
       const candidatePaths = [
         path.resolve(__dirname, '../repositories/retraction-watch-seed.json'),
-        path.resolve(__dirname, '../core/adapters/retraction-watch-seed.json'),
         path.resolve(
           process.cwd(),
           'src/modules/library/ingestion/repositories/retraction-watch-seed.json',
-        ),
-        path.resolve(
-          process.cwd(),
-          'src/modules/library/ingestion/core/adapters/retraction-watch-seed.json',
         ),
         path.resolve(
           process.cwd(),

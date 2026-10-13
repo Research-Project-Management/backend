@@ -126,7 +126,6 @@ export class MetadataQualityGate {
       venueScore * this.WEIGHT_VENUE;
 
     const totalScore = Math.round(totalRaw * 100) / 100;
-    const isSelfSufficient = totalScore >= this.SELF_SUFFICIENCY_THRESHOLD;
 
     const missingFields: string[] = [];
     if (titleScore < 0.7) missingFields.push('title');
@@ -134,6 +133,8 @@ export class MetadataQualityGate {
     if (identifierScore === 0) missingFields.push('doi/arxivId');
     if (yearScore === 0) missingFields.push('year');
     if (venueScore === 0) missingFields.push('journal/publisher');
+
+    const isSelfSufficient = totalScore >= this.SELF_SUFFICIENCY_THRESHOLD;
 
     const breakdown: QualityScoreBreakdown = {
       titleScore,

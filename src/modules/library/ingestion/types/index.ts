@@ -18,3 +18,5 @@ export * from './extraction-gateway.types';
 export * from './ingestion-run-repository.types';
 export * from './ingestion.errors';
 export * from './curation.types';
+export * from './web-fetch.types';
+export * from './external-search.types';

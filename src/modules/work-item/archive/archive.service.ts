@@ -150,7 +150,10 @@ export class ArchiveService {
   }
 
   async bulkArchiveWorkItems(bulkArchiveDto: BulkArchiveDto, userId: string) {
-    const ids = bulkArchiveDto.workItemIds;
+    const ids = bulkArchiveDto.workItemIds || bulkArchiveDto.ids || [];
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new BadRequestException('No work item IDs provided to archive');
+    }
     const workItems = await this.archiveRepository.findWorkItemsByIds(ids);
     if (workItems.length === 0) {
       throw new BadRequestException('No valid work items found to archive');
@@ -189,7 +192,10 @@ export class ArchiveService {
   }
 
   async bulkRestoreWorkItems(bulkArchiveDto: BulkArchiveDto, userId: string) {
-    const ids = bulkArchiveDto.workItemIds;
+    const ids = bulkArchiveDto.workItemIds || bulkArchiveDto.ids || [];
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new BadRequestException('No work item IDs provided to restore');
+    }
     const workItems = await this.archiveRepository.findWorkItemsByIds(ids);
     if (workItems.length === 0) {
       throw new BadRequestException('No valid work items found to restore');

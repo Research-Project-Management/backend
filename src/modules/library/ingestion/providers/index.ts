@@ -6,3 +6,5 @@ export * from './openlibrary.provider';
 export * from './unpaywall.provider';
 export * from './url-capture.provider';
 export * from './retraction-scanner.provider';
+export * from './searxng.provider';
+export * from './europe-pmc-search.provider';

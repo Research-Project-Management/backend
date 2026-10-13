@@ -104,6 +104,8 @@ export class CoreRepository implements IWorkItemRepository {
       where.archivedAt = null;
     }
 
+    const andConditions: Prisma.WorkItemWhereInput[] = [];
+
     let take: number | undefined;
     let skip: number | undefined;
 
@@ -187,10 +189,12 @@ export class CoreRepository implements IWorkItemRepository {
             id !== '__unassigned__',
         );
         if (hasUnassigned && specificAssigneeIds.length > 0) {
-          where.OR = [
-            { assigneeId: { in: specificAssigneeIds } },
-            { assigneeId: null },
-          ];
+          andConditions.push({
+            OR: [
+              { assigneeId: { in: specificAssigneeIds } },
+              { assigneeId: null },
+            ],
+          });
         } else if (hasUnassigned) {
           where.assigneeId = null;
         } else if (specificAssigneeIds.length === 1) {
@@ -287,13 +291,19 @@ export class CoreRepository implements IWorkItemRepository {
       }
       if (filter.search?.trim()) {
         const query = filter.search.trim();
-        where.OR = [
-          { title: { contains: query, mode: 'insensitive' } },
-          { identifier: { contains: query, mode: 'insensitive' } },
-        ];
+        andConditions.push({
+          OR: [
+            { title: { contains: query, mode: 'insensitive' } },
+            { identifier: { contains: query, mode: 'insensitive' } },
+          ],
+        });
       }
       if (filter.limit) take = filter.limit;
       if (filter.offset) skip = filter.offset;
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
     }
 
     // Dynamic Ordering

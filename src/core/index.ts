@@ -38,10 +38,6 @@ export * from './http/interceptors/transform.interceptor';
 export * from './http/interceptors/logger.interceptor';
 export * from './http/interceptors/idempotency.interceptor';
 
-// HTTP - Setup & Middlewares
-export * from './http/setup/cors.setup';
-export * from './http/setup/swagger.setup';
-export * from './http/setup/plugins.setup';
 
 // Logger
 export * from './logger/logger.module';

@@ -14,3 +14,6 @@ export * from './queue.service';
 export * from './watchdog.service';
 export * from './ingestion-queue.consumer';
 export * from './ingestion.service';
+export * from './ingestion-verifier.service';
+export * from './web-fetch-ladder.service';
+export * from './external-search-comparator.service';

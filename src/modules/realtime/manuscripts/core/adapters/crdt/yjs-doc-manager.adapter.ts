@@ -545,6 +545,26 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
   }
 
   /**
+   * Pre-Compile Flush Barrier:
+   * Flushes all active Y.Doc sessions for a project to Docstore before CLSI compile.
+   */
+  public async flushProject(projectId: string): Promise<number> {
+    const promises: Promise<void>[] = [];
+    for (const session of this.activeDocs.values()) {
+      if (session.projectId === projectId) {
+        promises.push(this.flushDoc(session.projectId, session.docId));
+      }
+    }
+    if (promises.length > 0) {
+      await Promise.all(promises);
+      this.logger.log(
+        `Pre-compile flush barrier completed for ${promises.length} active doc(s) in project ${projectId}`,
+      );
+    }
+    return promises.length;
+  }
+
+  /**
    * Flushes and evicts in-memory session when room is empty.
    */
   public async evictDoc(projectId: string, docId: string): Promise<void> {

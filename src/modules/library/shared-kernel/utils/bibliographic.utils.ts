@@ -265,11 +265,17 @@ export function cleanAuthorName(raw?: string | null): string {
   }
 
   // Strip trailing footnote markers, superscripts, and affiliation numbers:
-  // e.g. "1,2*", "*", "1", "†", "‡", "§", "1*", "*1"
+  // e.g. "1,2*", "*", "1", "†", "‡", "§", "1*", "*1", "∗", "⋆"
   cleaned = cleaned.replace(
-    /(?:[\s,]*[*†‡§^#~]+[\s,]*\d*|[\s,]*\d+[*†‡§^#~]*)+$/,
+    /(?:[\s,]*[*∗⋆†‡§¶^#~]+[\s,]*\d*|[\s,]*\d+[*∗⋆†‡§¶^#~]*)+$/u,
     '',
   );
+
+  // Strip leading footnote markers if present
+  cleaned = cleaned.replace(/^[*∗⋆†‡§¶^#~]+\s*/u, '');
+
+  // Strip leftover footnote characters if any remain attached to words
+  cleaned = cleaned.replace(/[*∗⋆†‡§¶^#~]+/gu, ' ');
 
   // Normalize excessive internal whitespace
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
@@ -390,6 +396,22 @@ export function splitAuthorString(input: string): string[] {
         }
       }
       continue;
+    }
+
+    // 4. Footnote-delimited author lists: e.g. "Author 1 ∗ Author 2 ∗ Author 3"
+    // Many preprints and conferences (NeurIPS, ICML, etc.) place all authors on a line
+    // separated by footnote symbols (*, ∗, †, ‡) without commas or semicolons.
+    if (/[*∗⋆†‡§¶]/.test(line)) {
+      const parts = line
+        .split(/(?:[\s,]*[*∗⋆†‡§¶]+\s*)+/u)
+        .map((s) => s.trim())
+        .filter((s) => s.length >= 2 && !/^\d+$/.test(s));
+      if (parts.length > 1) {
+        for (const p of parts) {
+          result.push(...splitAuthorString(p));
+        }
+        continue;
+      }
     }
 
     result.push(line.trim());
@@ -2249,4 +2271,203 @@ export function deriveDoiFromPublisherUrl(rawUrl?: string | null): string {
   if (qid && /^10\.\d{4,9}\//.test(qid)) return normalizeDoi(qid) || '';
 
   return '';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PDF first-page accuracy helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Lower-case name particles that may legitimately appear inside a surname. */
+const AUTHOR_NAME_PARTICLES = new Set([
+  'van',
+  'von',
+  'der',
+  'den',
+  'de',
+  'del',
+  'della',
+  'di',
+  'da',
+  'dos',
+  'du',
+  'la',
+  'le',
+  'bin',
+  'ibn',
+  'al',
+  'el',
+  'ten',
+  'ter',
+]);
+
+/**
+ * Rejects author candidates that are clearly prose (e.g. an abstract sentence
+ * that bled into the author block: "We introduce Adam"). A person name is made
+ * of capitalised tokens; the only lowercase tokens allowed are name particles.
+ */
+export function isPlausibleAuthorName(name?: string | null): boolean {
+  if (!name) return false;
+  const tokens = name.trim().split(/\s+/);
+  if (tokens.length === 0 || tokens.length > 8) return false;
+  return tokens.every(
+    (t) =>
+      /^\p{Lu}/u.test(t) ||
+      AUTHOR_NAME_PARTICLES.has(t.toLowerCase()) ||
+      !/\p{L}/u.test(t),
+  );
+}
+
+/**
+ * Splits a run of names that the PDF text layer joined without any delimiter,
+ * e.g. "Kaiming He Xiangyu Zhang Shaoqing Ren Jian Sun".
+ *
+ * Heuristic: each name is `Given [Initial.]* [particle]* Surname`. The split is
+ * only applied when the whole string parses cleanly into >= 2 names; otherwise
+ * the input is returned untouched. Known limitation: a person with a given name
+ * of two words and no initial (e.g. "Maria Del Carmen Lopez") is ambiguous, so
+ * strings shorter than `minTokens` are left alone unless the caller opts in.
+ */
+export function splitConcatenatedAuthors(
+  raw: string,
+  minTokens = 6,
+): string[] {
+  const input = (raw || '').trim();
+  if (!input) return [];
+  if (/[,;@&]|\band\b/i.test(input)) return [input];
+
+  const tokens = input.split(/\s+/);
+  if (tokens.length < minTokens) return [input];
+  if (isInstitutionName(input)) return [input];
+
+  const isCap = (t: string) => /^\p{Lu}/u.test(t);
+  const isInitial = (t: string) => /^\p{Lu}\.?$/u.test(t);
+  const isParticle = (t: string) => AUTHOR_NAME_PARTICLES.has(t);
+
+  if (!tokens.every((t) => isCap(t) || isParticle(t))) return [input];
+
+  const names: string[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const start = i;
+    if (!isCap(tokens[i])) return [input];
+    i++; // given name
+    while (i < tokens.length && isInitial(tokens[i])) i++;
+    while (i < tokens.length && isParticle(tokens[i])) i++;
+    if (i >= tokens.length || !isCap(tokens[i])) return [input];
+    i++; // surname
+    names.push(tokens.slice(start, i).join(' '));
+  }
+  return names.length >= 2 ? names : [input];
+}
+
+/**
+ * Derives the first-submission year from an arXiv identifier.
+ * New style `YYMM.NNNNN` => 20YY. Old style `cat/YYMMNNN` => 19YY if YY >= 91.
+ * Returns undefined for impossible months or future years.
+ */
+export function yearFromArxivId(id?: string | null): number | undefined {
+  if (!id) return undefined;
+  const now = new Date().getFullYear();
+
+  let m = id.match(/^(\d{2})(\d{2})\.\d{4,5}/);
+  if (m) {
+    const month = parseInt(m[2], 10);
+    const year = 2000 + parseInt(m[1], 10);
+    return month >= 1 && month <= 12 && year <= now ? year : undefined;
+  }
+
+  m = id.match(/\/(\d{2})(\d{2})\d{3}/);
+  if (m) {
+    const month = parseInt(m[2], 10);
+    const yy = parseInt(m[1], 10);
+    const year = yy >= 91 ? 1900 + yy : 2000 + yy;
+    return month >= 1 && month <= 12 && year <= now ? year : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Repairs a title whose small-caps / drop-cap glyphs were split into separate
+ * text runs ("A Dam : A M Ethod for S Tochastic O Ptimization"). The repair is
+ * accepted only if a line of the real text layer has exactly the same letters,
+ * so a legitimate title such as "A Survey of X" can never be altered.
+ */
+export function repairFragmentedTitle(
+  title: string,
+  pageText: string,
+): string | undefined {
+  if (!title || !pageText) return undefined;
+  const fragments = title
+    .split(/\s+/)
+    .filter((t) => /^\p{Lu}$/u.test(t)).length;
+  // "A" alone is a real word; require several isolated capitals to suspect damage.
+  if (fragments < 3) return undefined;
+
+  const key = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const target = key(title);
+  if (target.length < 8) return undefined;
+
+  const lines = pageText
+    .slice(0, 4000)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 40);
+
+  for (let i = 0; i < lines.length; i++) {
+    for (const span of [1, 2]) {
+      const candidate = lines.slice(i, i + span).join(' ');
+      if (candidate !== title && key(candidate) === target) {
+        return candidate;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Resolves known academic and open repository URLs directly to their PDF stream URL using regex.
+ * Zero API calls, 0ms latency.
+ */
+export function deriveDirectPdfUrl(rawUrl: string): string | undefined {
+  if (!rawUrl || typeof rawUrl !== 'string') return undefined;
+  const url = rawUrl.trim();
+
+  // 1. Direct PDF URL
+  if (/\.pdf(?:\?.*)?$/i.test(url)) {
+    return url;
+  }
+
+  // 2. arXiv: https://arxiv.org/abs/1706.03762 or https://arxiv.org/html/1706.03762
+  const arxivMatch = url.match(/(?:arxiv\.org\/(?:abs|html)\/|arxiv:)([\d.]+v?\d*)/i);
+  if (arxivMatch) {
+    const cleanArxivId = normalizeArxivId(arxivMatch[1]);
+    return `https://arxiv.org/pdf/${cleanArxivId}.pdf`;
+  }
+
+  // 3. BioRxiv / MedRxiv: https://www.biorxiv.org/content/10.1101/2023.01.01.522432v1
+  const bioRxivMatch = url.match(
+    /(?:biorxiv|medrxiv)\.org\/content\/(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+?)(?:\.full|\.abstract)?$/i,
+  );
+  if (bioRxivMatch) {
+    const isMedrxiv = url.includes('medrxiv');
+    const domain = isMedrxiv ? 'www.medrxiv.org' : 'www.biorxiv.org';
+    return `https://${domain}/content/${bioRxivMatch[1]}.full.pdf`;
+  }
+
+  // 4. OpenReview: https://openreview.net/forum?id=XXXX -> https://openreview.net/pdf?id=XXXX
+  const openReviewMatch = url.match(
+    /openreview\.net\/(?:forum|document)\?id=([a-zA-Z0-9_-]+)/i,
+  );
+  if (openReviewMatch) {
+    return `https://openreview.net/pdf?id=${openReviewMatch[1]}`;
+  }
+
+  // 5. ACL Anthology: https://aclanthology.org/2020.acl-main.1/ -> https://aclanthology.org/2020.acl-main.1.pdf
+  const aclMatch = url.match(/aclanthology\.org\/([a-zA-Z0-9.-]+)\/?$/i);
+  if (aclMatch && !aclMatch[1].endsWith('.pdf')) {
+    return `https://aclanthology.org/${aclMatch[1].replace(/\/+$/, '')}.pdf`;
+  }
+
+  return undefined;
 }

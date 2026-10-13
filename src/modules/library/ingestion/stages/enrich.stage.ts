@@ -38,14 +38,26 @@ export class EnrichStage {
 
     const enrichedCandidates = [...candidates];
 
+    const isLegacyMode =
+      process.env.INGESTION_PIPELINE_MODE === 'legacy' ||
+      process.env.DISABLE_ZERO_API_SHORT_CIRCUIT === 'true';
+
     for (const candidate of candidates) {
+      const hasCoreVerifiedMetadata =
+        Boolean(candidate.normalizedMetadata?.title) &&
+        Boolean(candidate.normalizedMetadata?.doi || candidate.normalizedMetadata?.arxivId) &&
+        (candidate.confidenceScore ?? 0) >= 0.75;
+
       if (
-        candidate.sourceName === 'TrustedPaper' ||
-        candidate.normalizedMetadata?.extraFields?.isSelfSufficient === true ||
-        candidate.normalizedMetadata?.isSelfSufficient === true
+        !isLegacyMode &&
+        (candidate.sourceName === 'TrustedPaper' ||
+          candidate.normalizedMetadata?.extraFields?.isSelfSufficient === true ||
+          candidate.normalizedMetadata?.isSelfSufficient === true ||
+          (candidate.confidenceScore != null && candidate.confidenceScore >= 0.85) ||
+          hasCoreVerifiedMetadata)
       ) {
         this.logger.debug(
-          `[EnrichStage] Candidate ${candidate.candidateId} (source=${candidate.sourceName}) is self-sufficient. Skipping external API enrichment.`,
+          `[EnrichStage] Candidate ${candidate.candidateId} (source=${candidate.sourceName}, score=${candidate.confidenceScore}) has sufficient local/verified metadata. Skipping external API enrichment.`,
         );
         continue;
       }

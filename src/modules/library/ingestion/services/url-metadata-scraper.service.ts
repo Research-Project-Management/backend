@@ -4,6 +4,10 @@ import {
   EXTRACTION_GATEWAY_PORT,
   IExtractionGatewayPort,
 } from '../types/extraction-gateway.types';
+import {
+  WEB_FETCH_PORT,
+  IWebFetchPort,
+} from '../types/web-fetch.types';
 import { SsrfGuardService } from '../../shared-kernel/core/services/ssrf-guard.service';
 import { MetadataRoutingPolicy } from '../policies/metadata.policy';
 import {
@@ -77,6 +81,10 @@ export interface ScrapedUrlResult {
    */
   itemType?: string;
   confidence: number;
+  isBlocked?: boolean;
+  wafKind?: string;
+  promptUploadPdf?: boolean;
+  ladderStepReached?: number;
 }
 
 /** Thrown when a redirect hop targets an unsafe destination. */
@@ -152,6 +160,9 @@ export class UrlMetadataScraperService {
     @Inject(EXTRACTION_GATEWAY_PORT)
     private readonly extractionGateway?: IExtractionGatewayPort,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
+    @Optional()
+    @Inject(WEB_FETCH_PORT)
+    private readonly webFetch?: IWebFetchPort,
   ) {}
 
   /**
@@ -305,6 +316,72 @@ export class UrlMetadataScraperService {
       confidence: 0.5,
     });
 
+    if (this.webFetch) {
+      const ladderRes = await this.webFetch.fetch(canonicalUrl, {
+        scopeId: options?.scopeId,
+        userId: options?.userId,
+        preferredFilename: options?.preferredFilename,
+      });
+
+      if (ladderRes.isBlocked) {
+        return {
+          url: canonicalUrl,
+          isPdf: false,
+          filename: slugHint.filename,
+          title: urlDoi ? undefined : slugHint.title,
+          doi: urlDoi || ladderRes.derivedIdentifier?.doi || undefined,
+          arxivId: ladderRes.derivedIdentifier?.arxivId,
+          pmid: ladderRes.derivedIdentifier?.pmid,
+          confidence: urlDoi ? 0.9 : 0.3,
+          isBlocked: true,
+          wafKind: ladderRes.wafKind,
+          promptUploadPdf: true,
+          ladderStepReached: ladderRes.ladderStepReached,
+        };
+      }
+
+      if (ladderRes.mirrorMetadata) {
+        const m = ladderRes.mirrorMetadata;
+        return {
+          url: canonicalUrl,
+          isPdf: false,
+          filename: slugHint.filename,
+          title: m.title || slugHint.title,
+          authors: m.authors,
+          doi: m.doi || urlDoi || undefined,
+          pmid: m.pmid,
+          year: m.year,
+          publicationTitle: m.journal,
+          journal: m.journal,
+          abstract: m.abstract,
+          pdfUrl: m.pdfUrl,
+          confidence: 0.95,
+          isBlocked: false,
+          ladderStepReached: 2,
+        };
+      }
+
+      if (ladderRes.isPdf && ladderRes.bodyBuffer) {
+        const pdfProcessed = await this.processPdfBuffer(
+          ladderRes.bodyBuffer,
+          canonicalUrl,
+          slugHint,
+          options,
+        );
+        if (pdfProcessed) return pdfProcessed;
+      }
+
+      if (ladderRes.bodyText) {
+        return this.processHtmlText(
+          ladderRes.bodyText,
+          ladderRes.finalUrl || canonicalUrl,
+          canonicalUrl,
+          slugHint,
+          urlDoi,
+        );
+      }
+    }
+
     try {
       await this.assertSafeUrl(canonicalUrl);
     } catch (ssrfErr: any) {
@@ -353,109 +430,13 @@ export class UrlMetadataScraperService {
       try {
         const arrayBuf = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuf);
-
-        const isPdfMagic =
-          buffer.length >= 4 &&
-          buffer[0] === 0x25 &&
-          buffer[1] === 0x50 &&
-          buffer[2] === 0x44 &&
-          buffer[3] === 0x46;
-
-        if (isPdfMagic) {
-          const effectiveFilename =
-            options?.preferredFilename || slugHint.filename;
-          let fileId: string | undefined;
-
-          if (this.storagePort) {
-            try {
-              const uploadRes = await this.storagePort.uploadFile({
-                userId: options?.userId || SYSTEM_INGESTION_USER_ID,
-                filename: effectiveFilename,
-                buffer,
-                mimeType: 'application/pdf',
-                projectId:
-                  options?.scopeId && options.scopeId !== 'user'
-                    ? options.scopeId
-                    : undefined,
-                source: 'url_pdf_download',
-              });
-              fileId = uploadRes?.fileId;
-              this.logger.log(
-                `Stored downloaded PDF for "${canonicalUrl}" with fileId: ${fileId}`,
-              );
-            } catch (storageErr: any) {
-              this.logger.warn(
-                `Failed to persist downloaded PDF to storage: ${storageErr?.message}`,
-              );
-            }
-          }
-
-          let pdfExtracted: any = {};
-          if (this.extractionGateway?.extractDocumentFromBuffer) {
-            try {
-              const doc =
-                await this.extractionGateway.extractDocumentFromBuffer(buffer, {
-                  headerOnly: true,
-                });
-              pdfExtracted = doc?.metadata || {};
-            } catch (pdfErr: any) {
-              this.logger.warn(
-                `ExtractionGateway pdf extraction failed: ${pdfErr?.message}`,
-              );
-            }
-          }
-
-          let binaryDoi: string | undefined;
-          const scanBuffer = buffer
-            .slice(0, Math.min(buffer.length, 65536))
-            .toString('utf-8');
-          const doiMatch = scanBuffer.match(
-            /\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+)\b/i,
-          );
-          if (doiMatch) {
-            binaryDoi = normalizeDoi(doiMatch[1]);
-          }
-
-          let binaryArxiv: string | undefined;
-          const arxivMatch = scanBuffer.match(
-            /\barXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)\b/i,
-          );
-          if (arxivMatch) {
-            binaryArxiv = normalizeArxivId(arxivMatch[1]);
-          }
-
-          const resolvedDoi = pdfExtracted.doi || binaryDoi;
-          const resolvedArxiv = pdfExtracted.arxivId || binaryArxiv;
-          const resolvedTitle =
-            pdfExtracted.title &&
-            pdfExtracted.title !== 'Untitled Document' &&
-            pdfExtracted.title.length > 5
-              ? pdfExtracted.title
-              : slugHint.title;
-
-          return {
-            url: canonicalUrl,
-            isPdf: true,
-            fileBuffer: buffer,
-            filename: effectiveFilename,
-            fileId,
-            title: resolvedTitle,
-            authors: pdfExtracted.authors,
-            creators: pdfExtracted.creators,
-            doi: resolvedDoi,
-            arxivId: resolvedArxiv,
-            year: pdfExtracted.year,
-            publicationDate: pdfExtracted.publicationDate,
-            publicationTitle:
-              pdfExtracted.journal || pdfExtracted.conferenceName,
-            journal: pdfExtracted.journal,
-            publisher: pdfExtracted.publisher,
-            abstract: pdfExtracted.abstract,
-            keywords: pdfExtracted.keywords,
-            confidence:
-              resolvedDoi || resolvedArxiv ? 0.95 : resolvedTitle ? 0.85 : 0.7,
-          };
-        }
+        const pdfProcessed = await this.processPdfBuffer(
+          buffer,
+          canonicalUrl,
+          slugHint,
+          options,
+        );
+        if (pdfProcessed) return pdfProcessed;
       } catch (pdfProcessErr: any) {
         this.logger.warn(
           `Error downloading/processing PDF from "${canonicalUrl}": ${pdfProcessErr?.message}`,
@@ -465,75 +446,200 @@ export class UrlMetadataScraperService {
 
     try {
       const htmlText = await response.text();
-
-      if (isBotChallengePage(htmlText)) {
-        this.logger.warn(
-          `Bot-challenge page detected for "${canonicalUrl}" — ignoring page metadata${urlDoi ? `, using URL-derived DOI ${urlDoi}` : ''}`,
-        );
-        return {
-          url: canonicalUrl,
-          isPdf: false,
-          filename: slugHint.filename,
-          title: urlDoi ? undefined : slugHint.title,
-          doi: urlDoi || undefined,
-          confidence: urlDoi ? 0.9 : 0.3,
-        };
-      }
-
-      const parsedHtml = this.extractHtmlMetadata(htmlText, finalUrl);
-      const resolvedDoi = parsedHtml.doi || urlDoi || undefined;
-
-      const resolvedTitle = parsedHtml.title || slugHint.title;
-      return {
-        url: canonicalUrl,
-        isPdf: false,
-        filename: slugHint.filename,
-        title: resolvedTitle,
-        authors: parsedHtml.authors,
-        creators: parsedHtml.creators,
-        doi: resolvedDoi,
-        arxivId: parsedHtml.arxivId,
-        pmid: parsedHtml.pmid,
-        isbn: parsedHtml.isbn,
-        issn: parsedHtml.issn,
-        year: parsedHtml.year,
-        publicationDate: parsedHtml.publicationDate,
-        publicationTitle: parsedHtml.publicationTitle,
-        journal: parsedHtml.journal,
-        publisher: parsedHtml.publisher,
-        abstract: parsedHtml.abstract,
-        keywords: parsedHtml.keywords,
-        pdfUrl: parsedHtml.pdfUrl,
-        volume: parsedHtml.volume,
-        issue: parsedHtml.issue,
-        pages: parsedHtml.pages,
-        language: parsedHtml.language,
-        publisherPlace: parsedHtml.publisherPlace,
-        conferenceName: parsedHtml.conferenceName,
-        bookTitle: parsedHtml.bookTitle,
-        institution: parsedHtml.institution,
-        reportNumber: parsedHtml.reportNumber,
-        itemType: parsedHtml.itemType,
-        confidence:
-          resolvedDoi || parsedHtml.arxivId || parsedHtml.pmid
-            ? 0.95
-            : resolvedTitle
-              ? 0.85
-              : 0.6,
-      };
+      return this.processHtmlText(
+        htmlText,
+        finalUrl,
+        canonicalUrl,
+        slugHint,
+        urlDoi,
+      );
     } catch (htmlErr: any) {
       this.logger.warn(
         `Error parsing HTML from "${canonicalUrl}": ${htmlErr?.message}`,
+      );
+      return fallbackResult();
+    }
+  }
+
+  private async processPdfBuffer(
+    buffer: Buffer,
+    canonicalUrl: string,
+    slugHint: { title?: string; filename: string },
+    options?: {
+      scopeId?: string;
+      userId?: string;
+      preferredFilename?: string;
+    },
+  ): Promise<ScrapedUrlResult | null> {
+    const isPdfMagic =
+      buffer.length >= 4 &&
+      buffer[0] === 0x25 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x44 &&
+      buffer[3] === 0x46;
+
+    if (!isPdfMagic) return null;
+
+    const effectiveFilename =
+      options?.preferredFilename || slugHint.filename;
+    let fileId: string | undefined;
+
+    if (this.storagePort) {
+      try {
+        const uploadRes = await this.storagePort.uploadFile({
+          userId: options?.userId || SYSTEM_INGESTION_USER_ID,
+          filename: effectiveFilename,
+          buffer,
+          mimeType: 'application/pdf',
+          projectId:
+            options?.scopeId && options.scopeId !== 'user'
+              ? options.scopeId
+              : undefined,
+          source: 'url_pdf_download',
+        });
+        fileId = uploadRes?.fileId;
+        this.logger.log(
+          `Stored downloaded PDF for "${canonicalUrl}" with fileId: ${fileId}`,
+        );
+      } catch (storageErr: any) {
+        this.logger.warn(
+          `Failed to persist downloaded PDF to storage: ${storageErr?.message}`,
+        );
+      }
+    }
+
+    let pdfExtracted: any = {};
+    if (this.extractionGateway?.extractDocumentFromBuffer) {
+      try {
+        const doc =
+          await this.extractionGateway.extractDocumentFromBuffer(buffer, {
+            headerOnly: true,
+          });
+        pdfExtracted = doc?.metadata || {};
+      } catch (pdfErr: any) {
+        this.logger.warn(
+          `ExtractionGateway pdf extraction failed: ${pdfErr?.message}`,
+        );
+      }
+    }
+
+    let binaryDoi: string | undefined;
+    const scanBuffer = buffer
+      .slice(0, Math.min(buffer.length, 65536))
+      .toString('utf-8');
+    const doiMatch = scanBuffer.match(
+      /\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+)\b/i,
+    );
+    if (doiMatch) {
+      binaryDoi = normalizeDoi(doiMatch[1]);
+    }
+
+    let binaryArxiv: string | undefined;
+    const arxivMatch = scanBuffer.match(
+      /\barXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)\b/i,
+    );
+    if (arxivMatch) {
+      binaryArxiv = normalizeArxivId(arxivMatch[1]);
+    }
+
+    const resolvedDoi = pdfExtracted.doi || binaryDoi;
+    const resolvedArxiv = pdfExtracted.arxivId || binaryArxiv;
+    const resolvedTitle =
+      pdfExtracted.title &&
+      pdfExtracted.title !== 'Untitled Document' &&
+      pdfExtracted.title.length > 5
+        ? pdfExtracted.title
+        : slugHint.title;
+
+    return {
+      url: canonicalUrl,
+      isPdf: true,
+      fileBuffer: buffer,
+      filename: effectiveFilename,
+      fileId,
+      title: resolvedTitle,
+      authors: pdfExtracted.authors,
+      creators: pdfExtracted.creators,
+      doi: resolvedDoi,
+      arxivId: resolvedArxiv,
+      year: pdfExtracted.year,
+      publicationDate: pdfExtracted.publicationDate,
+      publicationTitle:
+        pdfExtracted.journal || pdfExtracted.conferenceName,
+      journal: pdfExtracted.journal,
+      publisher: pdfExtracted.publisher,
+      abstract: pdfExtracted.abstract,
+      keywords: pdfExtracted.keywords,
+      confidence:
+        resolvedDoi || resolvedArxiv ? 0.95 : resolvedTitle ? 0.85 : 0.7,
+    };
+  }
+
+  private processHtmlText(
+    htmlText: string,
+    finalUrl: string,
+    canonicalUrl: string,
+    slugHint: { title?: string; filename: string },
+    urlDoi?: string,
+  ): ScrapedUrlResult {
+    if (isBotChallengePage(htmlText)) {
+      this.logger.warn(
+        `Bot-challenge page detected for "${canonicalUrl}" — ignoring page metadata${urlDoi ? `, using URL-derived DOI ${urlDoi}` : ''}`,
       );
       return {
         url: canonicalUrl,
         isPdf: false,
         filename: slugHint.filename,
-        title: slugHint.title,
+        title: urlDoi ? undefined : slugHint.title,
         doi: urlDoi || undefined,
-        confidence: 0.5,
+        confidence: urlDoi ? 0.9 : 0.3,
+        isBlocked: true,
+        wafKind: 'BOT_CHALLENGE',
+        promptUploadPdf: true,
       };
     }
+
+    const parsedHtml = this.extractHtmlMetadata(htmlText, finalUrl);
+    const resolvedDoi = parsedHtml.doi || urlDoi || undefined;
+    const resolvedTitle = parsedHtml.title || slugHint.title;
+
+    return {
+      url: canonicalUrl,
+      isPdf: false,
+      filename: slugHint.filename,
+      title: resolvedTitle,
+      authors: parsedHtml.authors,
+      creators: parsedHtml.creators,
+      doi: resolvedDoi,
+      arxivId: parsedHtml.arxivId,
+      pmid: parsedHtml.pmid,
+      isbn: parsedHtml.isbn,
+      issn: parsedHtml.issn,
+      year: parsedHtml.year,
+      publicationDate: parsedHtml.publicationDate,
+      publicationTitle: parsedHtml.publicationTitle,
+      journal: parsedHtml.journal,
+      publisher: parsedHtml.publisher,
+      abstract: parsedHtml.abstract,
+      keywords: parsedHtml.keywords,
+      pdfUrl: parsedHtml.pdfUrl,
+      volume: parsedHtml.volume,
+      issue: parsedHtml.issue,
+      pages: parsedHtml.pages,
+      language: parsedHtml.language,
+      publisherPlace: parsedHtml.publisherPlace,
+      conferenceName: parsedHtml.conferenceName,
+      bookTitle: parsedHtml.bookTitle,
+      institution: parsedHtml.institution,
+      reportNumber: parsedHtml.reportNumber,
+      itemType: parsedHtml.itemType,
+      confidence:
+        resolvedDoi || parsedHtml.arxivId || parsedHtml.pmid
+          ? 0.95
+          : resolvedTitle
+            ? 0.85
+            : 0.6,
+    };
   }
 
   extractHtmlMetadata(

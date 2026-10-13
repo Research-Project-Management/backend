@@ -699,8 +699,17 @@ export class CoreService {
       bulkUpdateWorkItemDto.data ||
       (bulkUpdateWorkItemDto as unknown as BulkUpdatePayload);
 
+    let effectiveProjectId = projectId;
     const rawIds =
       bulkUpdateWorkItemDto.workItemIds || bulkUpdateWorkItemDto.ids || [];
+    if (!effectiveProjectId && rawIds.length > 0) {
+      const firstItem = await this.workItemRepository.findWorkItemById(
+        rawIds[0],
+      );
+      if (firstItem) {
+        effectiveProjectId = firstItem.projectId;
+      }
+    }
 
     // Support bulk add single label to all selected items
     if (
@@ -711,7 +720,9 @@ export class CoreService {
       const validIds = rawIds.filter(isUuid);
       const allItems =
         await this.workItemRepository.findWorkItemsByIds(validIds);
-      const items = allItems.filter((t) => t.projectId === projectId);
+      const items = effectiveProjectId
+        ? allItems.filter((t) => t.projectId === effectiveProjectId)
+        : allItems;
       await Promise.all(
         items.map((t) => {
           const current = Array.isArray(t.labels) ? t.labels : [];
@@ -720,7 +731,7 @@ export class CoreService {
           return this.workItemRepository.updateWorkItem(t.id, { labels: next });
         }),
       );
-      await this.invalidateWorkItemCache(projectId);
+      if (effectiveProjectId) await this.invalidateWorkItemCache(effectiveProjectId);
       return {
         message: `Label added to ${items.length} work items`,
         count: items.length,
@@ -736,7 +747,9 @@ export class CoreService {
       const validIds = rawIds.filter(isUuid);
       const allItems =
         await this.workItemRepository.findWorkItemsByIds(validIds);
-      const items = allItems.filter((t) => t.projectId === projectId);
+      const items = effectiveProjectId
+        ? allItems.filter((t) => t.projectId === effectiveProjectId)
+        : allItems;
       await Promise.all(
         items.map((t) => {
           const current = Array.isArray(t.labels) ? t.labels : [];
@@ -745,16 +758,17 @@ export class CoreService {
           return this.workItemRepository.updateWorkItem(t.id, { labels: next });
         }),
       );
-      await this.invalidateWorkItemCache(projectId);
+      if (effectiveProjectId) await this.invalidateWorkItemCache(effectiveProjectId);
       return {
         message: `Label removed from ${items.length} work items`,
         count: items.length,
       };
     }
 
-    const rawProject =
-      await this.workItemRepository.findProjectWithColumns(projectId);
-    const canonicalProjectId = rawProject?.id || projectId;
+    const rawProject = effectiveProjectId
+      ? await this.workItemRepository.findProjectWithColumns(effectiveProjectId)
+      : null;
+    const canonicalProjectId = rawProject?.id || effectiveProjectId;
 
     const data: Prisma.WorkItemUpdateManyMutationInput & {
       assigneeId?: string | null;
@@ -823,13 +837,14 @@ export class CoreService {
       );
     }
 
+    const targetProjId = canonicalProjectId || effectiveProjectId || projectId;
     const result = await this.workItemRepository.bulkUpdateWorkItems(
-      projectId,
+      targetProjId,
       rawIds,
       data,
     );
-    await this.invalidateWorkItemCache(projectId);
-    this.eventDispatcher.emitBulkUpdated(projectId, userId, rawIds);
+    if (targetProjId) await this.invalidateWorkItemCache(targetProjId);
+    this.eventDispatcher.emitBulkUpdated(targetProjId, userId, rawIds);
     return {
       message: `${result.count} work items updated successfully`,
       count: result.count,

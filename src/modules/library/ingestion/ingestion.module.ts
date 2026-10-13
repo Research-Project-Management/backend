@@ -48,6 +48,9 @@ import { QualityService } from './services/quality.service';
 import { RetractionService } from './services/retraction.service';
 import { RetractionDatabaseService } from './services/retraction-database.service';
 import { RetractionSyncService } from './services/retraction-sync.service';
+import { IngestionVerifierService } from './services/ingestion-verifier.service';
+import { WebFetchLadderService } from './services/web-fetch-ladder.service';
+import { WEB_FETCH_PORT } from './types/web-fetch.types';
 
 // Repositories
 import { IngestionRepository } from './repositories/ingestion.repository';
@@ -89,7 +92,14 @@ import {
   OpenAlexProvider,
   UnpaywallProvider,
   RetractionScannerProvider,
+  SearxngSearchProvider,
+  EuropePmcSearchProvider,
 } from './providers';
+import { ExternalSearchComparatorService } from './services/external-search-comparator.service';
+import {
+  EXTERNAL_SEARCH_PORT,
+  EXTERNAL_SEARCH_PROVIDERS,
+} from './types/external-search.types';
 import { RetractionItemEventsSubscriber } from './utils/retraction-item-events.subscriber';
 
 const ingestionWorkerProviders = shouldRunWorkerConsumers()
@@ -172,6 +182,12 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     WatchdogService,
     UrlCaptureService,
     UrlMetadataScraperService,
+    IngestionVerifierService,
+    WebFetchLadderService,
+    {
+      provide: WEB_FETCH_PORT,
+      useClass: WebFetchLadderService,
+    },
     ...ingestionWorkerProviders,
 
     // Parsers & Policies & Stages
@@ -240,6 +256,15 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     RetractionScannerProvider,
     RetractionSyncService,
     RetractionItemEventsSubscriber,
+
+    // External Search Providers & Benchmark Comparator
+    SearxngSearchProvider,
+    EuropePmcSearchProvider,
+    ExternalSearchComparatorService,
+    {
+      provide: EXTERNAL_SEARCH_PORT,
+      useExisting: ExternalSearchComparatorService,
+    },
   ],
   exports: [
     IngestionFacade,
@@ -248,6 +273,13 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     INGESTION_PORT,
     METADATA_PORT,
     IngestionSagaOrchestrator,
+    IngestionVerifierService,
+    WebFetchLadderService,
+    WEB_FETCH_PORT,
+    EXTERNAL_SEARCH_PORT,
+    ExternalSearchComparatorService,
+    SearxngSearchProvider,
+    EuropePmcSearchProvider,
   ],
 })
 export class IngestionModule {}

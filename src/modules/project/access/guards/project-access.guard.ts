@@ -266,13 +266,28 @@ export class ProjectAccessGuard implements CanActivate {
       }
     }
 
-    // 2. Sub-resource lookup from URL parameters
+    // 2. Sub-resource lookup from URL parameters or request body
     if (!resolvedProjectId) {
-      if (request.params?.workItemId) {
-        const workItemId = request.params.workItemId;
-        const where = isUUID(workItemId)
-          ? { id: workItemId }
-          : { identifier: { equals: workItemId, mode: 'insensitive' as const } };
+      const singleWorkItemId =
+        request.params?.workItemId ||
+        (request.params?.id &&
+        (request.url?.includes('/work-item') ||
+          request.url?.includes('/work_item'))
+          ? request.params.id
+          : undefined) ||
+        (typeof request.body?.workItemId === 'string'
+          ? (request.body.workItemId as string)
+          : undefined) ||
+        (typeof request.body?.id === 'string' &&
+        (request.url?.includes('/work-item') ||
+          request.url?.includes('/work_item'))
+          ? (request.body.id as string)
+          : undefined);
+
+      if (singleWorkItemId) {
+        const where = isUUID(singleWorkItemId)
+          ? { id: singleWorkItemId }
+          : { identifier: { equals: singleWorkItemId, mode: 'insensitive' as const } };
         const workItem = await this.prisma.workItem
           .findFirst({
             where,
@@ -280,6 +295,27 @@ export class ProjectAccessGuard implements CanActivate {
           })
           .catch(() => null);
         if (workItem?.projectId) resolvedProjectId = workItem.projectId;
+      }
+
+      if (!resolvedProjectId) {
+        const idsList = Array.isArray(request.body?.workItemIds)
+          ? (request.body.workItemIds as unknown[])
+          : Array.isArray(request.body?.ids)
+            ? (request.body.ids as unknown[])
+            : [];
+        const firstId = idsList.length > 0 ? String(idsList[0] || '') : '';
+        if (firstId) {
+          const where = isUUID(firstId)
+            ? { id: firstId }
+            : { identifier: { equals: firstId, mode: 'insensitive' as const } };
+          const workItem = await this.prisma.workItem
+            .findFirst({
+              where,
+              select: { projectId: true },
+            })
+            .catch(() => null);
+          if (workItem?.projectId) resolvedProjectId = workItem.projectId;
+        }
       } else if (
         request.params?.commentId &&
         isUUID(request.params.commentId)

@@ -24,12 +24,15 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('work-items')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/work-items', 'api/work-items'])
+@Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class ArchiveController {
   constructor(private readonly archiveService: ArchiveService) {}
 
-  @Post(':workItemId/archive')
+  @Post([
+    'work-items/:workItemId/archive',
+    'projects/:projectId/work-items/:workItemId/archive',
+  ])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -46,7 +49,10 @@ export class ArchiveController {
     return this.archiveService.archiveWorkItem(workItemId, userId);
   }
 
-  @Post(':workItemId/restore')
+  @Post([
+    'work-items/:workItemId/restore',
+    'projects/:projectId/work-items/:workItemId/restore',
+  ])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Restore an archived work item to active boards' })
@@ -61,29 +67,47 @@ export class ArchiveController {
     return this.archiveService.restoreWorkItem(workItemId, userId);
   }
 
-  @Post('bulk-archive')
+  @Post([
+    'work-items/bulk-archive',
+    'projects/:projectId/work-items/bulk-archive',
+  ])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk archive multiple work items' })
   async bulkArchive(
     @Body() bulkArchiveDto: BulkArchiveDto,
     @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
   ) {
+    if (projectId && !bulkArchiveDto.projectId) {
+      bulkArchiveDto.projectId = projectId;
+    }
     return this.archiveService.bulkArchiveWorkItems(bulkArchiveDto, userId);
   }
 
-  @Post('bulk-restore')
+  @Post([
+    'work-items/bulk-restore',
+    'projects/:projectId/work-items/bulk-restore',
+  ])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk restore multiple archived work items' })
   async bulkRestore(
     @Body() bulkArchiveDto: BulkArchiveDto,
     @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
   ) {
+    if (projectId && !bulkArchiveDto.projectId) {
+      bulkArchiveDto.projectId = projectId;
+    }
     return this.archiveService.bulkRestoreWorkItems(bulkArchiveDto, userId);
   }
 
-  @Get('projects/:projectId/archived')
+  @Get([
+    'work-items/projects/:projectId/archived',
+    'projects/:projectId/work-items/archived',
+    'projects/:projectId/archived',
+  ])
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List archived work items of a project' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })

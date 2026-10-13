@@ -292,6 +292,18 @@ export class ClsiService {
     const texLiveVersion = dto.tex_live_version || dto.texLiveVersion || '2024';
     const projectId = await this.resolveProjectId(dto);
 
+    // Pre-Compile Flush Barrier: Ensure any active in-memory Yjs documents are flushed to Docstore
+    if (this.realtimeService && projectId) {
+      try {
+        await this.realtimeService.flushProjectBeforeCompile(projectId);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Pre-compile flush barrier encountered an error for project ${projectId}: ${msg}`,
+        );
+      }
+    }
+
     // Phase A — metadata only: plan the file set + content-independent fingerprint.
     const plan = await this.planFiles(projectId, dto);
     const cacheKey = `flux:clsi:compile:${this.hashSource(

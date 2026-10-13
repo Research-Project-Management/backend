@@ -16,6 +16,10 @@ import { extractText } from 'unpdf';
 import {
   cleanAuthorName,
   normalizeAcademicTitleCase,
+  isPlausibleAuthorName,
+  splitConcatenatedAuthors,
+  yearFromArxivId,
+  repairFragmentedTitle,
 } from '../../shared-kernel/utils/bibliographic.utils';
 
 /**
@@ -35,6 +39,21 @@ import {
 @Injectable()
 export class TrustedExtractionService implements ITrustedExtractorPort {
   private readonly logger = new Logger(TrustedExtractionService.name);
+
+  public static isBogusTitle(t?: string): boolean {
+    if (!t) return true;
+    const lower = t.toLowerCase().trim();
+    return (
+      lower.startsWith('microsoft word') ||
+      lower.startsWith('untitled') ||
+      lower.startsWith('document') ||
+      lower.startsWith('arxiv:') ||
+      /^arxiv\s*:\s*[a-z0-9\-./]+/i.test(lower) ||
+      /\.(docx?|pdf|tex|txt|ps|eps)$/i.test(lower) ||
+      /^[a-z]+\.\d+\s+\d+\.\.\d+$/i.test(lower) ||
+      lower.length < 5
+    );
+  }
 
   /**
    * Executes the autonomous multi-tier extraction pipeline.
@@ -57,8 +76,9 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
         merged.doi = xmp.doi;
         rawMatches.detectedDoi = xmp.doi;
       }
-      if (xmp.title) {
-        merged.title = normalizeAcademicTitleCase(xmp.title);
+      if (xmp.title && !TrustedExtractionService.isBogusTitle(xmp.title)) {
+        const cleanTitle = xmp.title.replace(/^lncs\s+\d+\s*[-–—:]\s*/i, '');
+        merged.title = normalizeAcademicTitleCase(cleanTitle);
       }
       if (xmp.authors && xmp.authors.length > 0) {
         merged.authors = xmp.authors
@@ -180,11 +200,17 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
     // If still missing essential Title or Authors, activate typographic LayoutHeuristic
     if (
       !gateEvaluation.isSelfSufficient &&
-      (!merged.title || !merged.authors || merged.authors.length === 0)
+      (!merged.title ||
+        TrustedExtractionService.isBogusTitle(merged.title) ||
+        !merged.authors ||
+        merged.authors.length === 0)
     ) {
       const layoutResults = await LayoutHeuristicExtractor.extract(buffer);
 
-      if (layoutResults.title && !merged.title) {
+      if (
+        layoutResults.title &&
+        (!merged.title || TrustedExtractionService.isBogusTitle(merged.title))
+      ) {
         merged.title = layoutResults.title;
       }
       if (
@@ -281,6 +307,10 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       }
     }
 
+    // ── Accuracy refinement (year, author list, fragmented title, arXiv DOI) ──
+    this.refineMetadata(merged, xmp?.year, pageText, rawMatches);
+    gateEvaluation = MetadataQualityGate.evaluate(merged);
+
     // Filename fallback if title is still missing
     if (!merged.title && preferredFilename) {
       const cleanSlug = preferredFilename
@@ -315,5 +345,66 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
         rawMatches,
       },
     };
+  }
+
+  /**
+   * Post-processing that corrects systematic first-page extraction errors.
+   * Mutates `merged` in place and records what it changed in `rawMatches`
+   * so the correction is auditable.
+   */
+  private refineMetadata(
+    merged: ItemMetadata,
+    xmpYear: number | undefined,
+    pageText: string,
+    rawMatches: Record<string, any>,
+  ): void {
+    const refinements: string[] = [];
+
+    // The arXiv ID encodes the submission year; it beats "last year in the
+    // header text" (which picked up e.g. "WMT 2014" for a 2017 paper).
+    // A year embedded in the PDF's own XMP is authoritative and kept.
+    const arxivYear = yearFromArxivId(merged.arxivId);
+    if (arxivYear && !xmpYear && merged.year !== arxivYear) {
+      rawMatches.yearBeforeRefinement = merged.year;
+      merged.year = arxivYear;
+      refinements.push('year-from-arxiv-id');
+    } else if (
+      merged.year &&
+      (merged.year < 1900 || merged.year > new Date().getFullYear() + 1)
+    ) {
+      delete merged.year;
+      refinements.push('year-out-of-range-dropped');
+    }
+
+    // Authors: split undelimited runs, then drop anything that is not a name.
+    if (merged.authors && merged.authors.length > 0) {
+      const lone = merged.authors.length === 1;
+      const expanded = merged.authors.flatMap((a) =>
+        splitConcatenatedAuthors(a, lone ? 4 : 6),
+      );
+      const cleaned = expanded
+        .map((a) => cleanAuthorName(a))
+        .filter((a) => a && isPlausibleAuthorName(a));
+      if (
+        cleaned.length !== merged.authors.length ||
+        cleaned.some((a, i) => a !== merged.authors![i])
+      ) {
+        rawMatches.authorsBeforeRefinement = merged.authors.length;
+        merged.authors = cleaned;
+        refinements.push('authors-normalized');
+      }
+    }
+
+    // Title: repair only when the text layer proves what the title really is.
+    if (merged.title) {
+      const repaired = repairFragmentedTitle(merged.title, pageText);
+      if (repaired) {
+        rawMatches.titleBeforeRefinement = merged.title;
+        merged.title = normalizeAcademicTitleCase(repaired);
+        refinements.push('title-repaired');
+      }
+    }
+
+    if (refinements.length > 0) rawMatches.refinements = refinements;
   }
 }

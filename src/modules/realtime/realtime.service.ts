@@ -9,6 +9,7 @@ import {
   BroadcastProjectEventUseCase,
   IRoomManagerPort,
   UserPresenceVo,
+  YjsDocManagerAdapter,
 } from './manuscripts';
 import { NotificationGateway } from './notifications/notifications.gateway';
 
@@ -20,7 +21,19 @@ export class RealtimeService {
     private readonly broadcastProjectEventUseCase: BroadcastProjectEventUseCase,
     private readonly roomManager: IRoomManagerPort,
     @Optional() private readonly notificationGateway?: NotificationGateway,
+    @Optional() private readonly yjsDocManager?: YjsDocManagerAdapter,
   ) {}
+
+  /**
+   * Pre-Compile Flush Barrier:
+   * Synchronously flushes all in-memory Y.Doc sessions for a project to Docstore/Redis before CLSI compile begins.
+   */
+  public async flushProjectBeforeCompile(projectId: string): Promise<number> {
+    if (!this.yjsDocManager) {
+      return 0;
+    }
+    return await this.yjsDocManager.flushProject(projectId);
+  }
 
   /**
    * Structure Subsystem Integration:

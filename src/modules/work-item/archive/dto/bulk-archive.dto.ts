@@ -2,7 +2,7 @@ import { IsArray, IsString, ArrayNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class BulkArchiveDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Array of WorkItem IDs to archive or restore',
     type: [String],
     example: [
@@ -11,9 +11,25 @@ export class BulkArchiveDto {
     ],
   })
   @IsArray()
-  @ArrayNotEmpty()
+  @IsOptional()
   @IsString({ each: true })
-  workItemIds!: string[];
+  workItemIds?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Array of WorkItem IDs (alias for workItemIds)',
+    type: [String],
+  })
+  @IsArray()
+  @IsOptional()
+  @IsString({ each: true })
+  ids?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Project ID',
+  })
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 
   @ApiPropertyOptional({
     description: 'Optional note or reason for archiving/restoring',

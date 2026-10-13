@@ -76,10 +76,10 @@ export class CoreController {
 
   @Get('trash')
   @ApiOperation({
-    summary: 'List soft-deleted (trashed) projects for current user',
+    summary: 'List trashed projects (always empty as projects are deleted permanently)',
   })
-  async getTrashedProjects(@CurrentUser('id') userId: string) {
-    return this.projectService.getTrashedProjects(userId);
+  async getTrashedProjects(@CurrentUser('id') _userId: string) {
+    return { projects: [] };
   }
 
   @Get(':projectId')
@@ -118,16 +118,16 @@ export class CoreController {
   @Delete(':projectId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
-  @ApiOperation({ summary: 'Soft-delete a project (Owner only)' })
+  @ApiOperation({ summary: 'Permanently delete a project (Owner only)' })
   @ApiResponse({
     status: 200,
-    description: 'Project soft-deleted successfully',
+    description: 'Project permanently deleted successfully',
   })
   async deleteProject(
     @Param('projectId') projectId: string,
     @CurrentUser('id') actorId: string,
   ) {
-    return this.projectService.softDelete(projectId, actorId);
+    return this.projectService.permanentDeleteProject(projectId, actorId);
   }
 
   @Post(':projectId/restore')

@@ -31,10 +31,10 @@ import {
   TransformInterceptor,
   IdempotencyInterceptor,
   IdempotencyService,
-  setupFastifyPlugins,
-  setupCors,
-  setupSwagger,
 } from './core';
+import { setupFastifyPlugins } from './core/http/setup/plugins.setup';
+import { setupCors } from './core/http/setup/cors.setup';
+import { setupSwagger } from './core/http/setup/swagger.setup';
 import { AppModule } from './app.module';
 
 // Standard process-level diagnostics for unhandled rejections and fatal errors

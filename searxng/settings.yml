@@ -1,0 +1,82 @@
+# ==============================================================================
+# SearXNG Configuration for Flux Academic Retrieval & Research
+# Optimized for high concurrency, zero tracking, science categories, ultra-low RAM
+# ==============================================================================
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "Flux Academic Search"
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "flux-academic-searxng-internal-secret-key-replace-in-production"
+  base_url: false
+  image_proxy: false
+  method: "GET"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  formats:
+    - html
+    - json
+
+# ------------------------------------------------------------------------------
+# Academic & Scholarly Engines Selection
+# ------------------------------------------------------------------------------
+engines:
+  - name: arxiv
+    engine: arxiv
+    shortcut: ax
+    categories: science
+    timeout: 3.0
+    disabled: false
+
+  - name: pubmed
+    engine: pubmed
+    shortcut: pm
+    categories: science
+    timeout: 3.0
+    disabled: false
+
+  - name: google scholar
+    engine: google_scholar
+    shortcut: gs
+    categories: science
+    timeout: 4.0
+    disabled: false
+
+  - name: crossref
+    engine: crossref
+    shortcut: cr
+    categories: science
+    timeout: 3.0
+    disabled: false
+
+  - name: semantic scholar
+    engine: semantic_scholar
+    shortcut: ss
+    categories: science
+    timeout: 3.0
+    disabled: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    categories: general
+    timeout: 2.5
+    disabled: false
+
+  # Disable heavy non-text engines to save memory and CPU
+  - name: bing images
+    disabled: true
+  - name: google images
+    disabled: true
+  - name: youtube
+    disabled: true
+  - name: vimeo
+    disabled: true

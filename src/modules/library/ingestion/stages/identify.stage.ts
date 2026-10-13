@@ -483,6 +483,10 @@ export class IdentifyStage {
               filename: scraped.filename || payload.filename,
               fileUrl:
                 scraped.pdfUrl || (scraped.isPdf ? payload.url : undefined),
+              isBlocked: scraped.isBlocked,
+              wafKind: scraped.wafKind,
+              promptUploadPdf: scraped.promptUploadPdf,
+              ladderStepReached: scraped.ladderStepReached,
             };
           } catch (scrapeErr: any) {
             this.logger.warn(
@@ -496,12 +500,32 @@ export class IdentifyStage {
         if (extractedRaw.filename) normalized.filename = extractedRaw.filename;
         if (extractedRaw.fileUrl) normalized.fileUrl = extractedRaw.fileUrl;
 
+        if (extractedRaw.isBlocked) {
+          normalized.extraFields = {
+            ...(normalized.extraFields || {}),
+            isBlocked: true,
+            wafKind: extractedRaw.wafKind,
+            promptUploadPdf: true,
+            ladderStepReached: extractedRaw.ladderStepReached,
+          };
+        }
+
         const hasIdentifier = Boolean(
           normalized.doi || normalized.arxivId || normalized.pmid,
         );
         const hasTitle = Boolean(
           normalized.title && normalized.title !== 'Untitled Document',
         );
+
+        const confidenceScore = extractedRaw.isBlocked
+          ? hasIdentifier
+            ? 0.6
+            : 0.2
+          : hasIdentifier
+            ? 0.95
+            : hasTitle
+              ? 0.88
+              : 0.7;
 
         candidates.push({
           candidateId: randomUUID(),
@@ -516,7 +540,7 @@ export class IdentifyStage {
             'UrlCapture',
           ),
           normalizedMetadata: normalized,
-          confidenceScore: hasIdentifier ? 0.95 : hasTitle ? 0.88 : 0.7,
+          confidenceScore,
         });
         break;
       }
