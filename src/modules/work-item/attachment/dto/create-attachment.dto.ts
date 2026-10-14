@@ -33,7 +33,7 @@ export class BaseAttachmentMetadataDto {
   @ApiPropertyOptional({ description: 'Additional custom metadata' })
   @IsOptional()
   @IsObject()
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export class CreateAttachmentDto extends BaseAttachmentMetadataDto {

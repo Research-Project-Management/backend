@@ -12,7 +12,11 @@ export function isStateCompleted(
     return stateOrGroup.toLowerCase() === 'completed';
   }
 
-  if (typeof stateOrGroup === 'object' && stateOrGroup !== null && 'group' in stateOrGroup) {
+  if (
+    typeof stateOrGroup === 'object' &&
+    stateOrGroup !== null &&
+    'group' in stateOrGroup
+  ) {
     return stateOrGroup.group === 'completed';
   }
 

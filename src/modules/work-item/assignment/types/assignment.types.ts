@@ -1,4 +1,4 @@
-import { WorkItem, ProjectMember, Role } from '@prisma/client';
+import { WorkItem, Role } from '@prisma/client';
 
 export { Role };
 
@@ -24,27 +24,3 @@ export const ELIGIBLE_ASSIGNEE_ROLES: readonly Role[] = [
   Role.coordinator,
   Role.contributor,
 ] as const;
-
-export interface IAssignmentRepository {
-  findWorkItem(workItemId: string): Promise<WorkItem | null>;
-  findProjectMember(
-    projectId: string,
-    userId: string,
-  ): Promise<ProjectMember | null>;
-  findProjectMembers(
-    projectId: string,
-    userIds: string[],
-  ): Promise<ProjectMember[]>;
-  assignWorkItem(
-    workItemId: string,
-    assigneeId: string | null,
-  ): Promise<WorkItem>;
-  bulkAssignWorkItems(
-    projectId: string,
-    workItemIds: string[],
-    assigneeId: string | null,
-  ): Promise<number>;
-  getProjectSettings(
-    projectId: string,
-  ): Promise<ProjectSettingsWithAssignee | null>;
-}

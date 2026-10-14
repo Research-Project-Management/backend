@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { WorkItemPriority, EntityType } from '@prisma/client';
-import { WorkItemRepository } from './core/core.repository';
+import { CoreRepository as WorkItemRepository } from './core/core.repository';
 import {
   WorkItemWithRelations,
   WorkItemFilterOptions,
@@ -8,6 +8,9 @@ import {
 import { StateService } from './state/state.service';
 import { WorkItemState } from './state/types/state.types';
 import { AttachmentService } from './attachment/attachment.service';
+import { AssignmentService } from './assignment/assignment.service';
+import { RelationService } from './relation/relation.service';
+import { HistoryService } from './history/history.service';
 
 export interface WorkItemSummary {
   id: string;
@@ -46,33 +49,15 @@ export interface LinkedWorkItemSummary {
 
 export type WorkItemFilter = WorkItemFilterOptions;
 
-export interface IWorkItemFacade {
-  getWorkItemById(idOrIdentifier: string): Promise<WorkItemSummary | null>;
-  getProjectWorkItems(
-    projectId: string,
-    filter?: WorkItemFilter,
-  ): Promise<WorkItemSummary[]>;
-  getUserAssignedWorkItems(
-    userId: string,
-    projectId?: string,
-  ): Promise<WorkItemSummary[]>;
-  getProjectStates(projectId: string): Promise<WorkItemState[]>;
-  countWorkItemsByProject(projectId: string): Promise<number>;
-  getStateWorkItemCounts(projectId: string): Promise<Record<string, number>>;
-  getStateGroupCounts(projectId: string): Promise<Record<string, number>>;
-  getOverdueCount(projectId: string): Promise<number>;
-  getWorkItemsByLinkedEntity(
-    entityType: EntityType,
-    entityId: string,
-  ): Promise<LinkedWorkItemSummary[]>;
-}
-
 @Injectable()
-export class WorkItemFacade implements IWorkItemFacade {
+export class WorkItemFacade {
   constructor(
     private readonly workItemRepository: WorkItemRepository,
     private readonly stateService: StateService,
     private readonly attachmentService: AttachmentService,
+    @Optional() private readonly assignmentService?: AssignmentService,
+    @Optional() private readonly relationService?: RelationService,
+    @Optional() private readonly historyService?: HistoryService,
   ) {}
 
   private toSummary(workItem: WorkItemWithRelations): WorkItemSummary {
@@ -92,6 +77,8 @@ export class WorkItemFacade implements IWorkItemFacade {
       updatedAt: workItem.updatedAt,
     };
   }
+
+  // ── Core Work Item Queries & Stats ──────────────────────────────────────────
 
   async getWorkItemById(
     idOrIdentifier: string,
@@ -122,11 +109,6 @@ export class WorkItemFacade implements IWorkItemFacade {
     return items.map((workItem) => this.toSummary(workItem));
   }
 
-  async getProjectStates(projectId: string): Promise<WorkItemState[]> {
-    const { states } = await this.stateService.getStates(projectId);
-    return states;
-  }
-
   async countWorkItemsByProject(projectId: string): Promise<number> {
     return this.workItemRepository.countProjectWorkItems(projectId);
   }
@@ -146,6 +128,67 @@ export class WorkItemFacade implements IWorkItemFacade {
   async getOverdueCount(projectId: string): Promise<number> {
     return this.workItemRepository.getOverdueCount(projectId);
   }
+
+  // ── State & Workflow ────────────────────────────────────────────────────────
+
+  async getProjectStates(projectId: string): Promise<WorkItemState[]> {
+    const { states } = await this.stateService.getStates(projectId);
+    return states;
+  }
+
+  // ── Assignments ─────────────────────────────────────────────────────────────
+
+  async getWorkItemAssignees(workItemId: string, projectId?: string) {
+    const item = await this.workItemRepository.findWorkItemById(workItemId);
+    const resolvedProjectId = projectId || item?.projectId;
+    if (this.assignmentService && resolvedProjectId) {
+      const res = await this.assignmentService.getAssignees(
+        resolvedProjectId,
+        workItemId,
+      );
+      return res.assignees;
+    }
+    return item?.assignee ? [item.assignee] : [];
+  }
+
+  async assignWorkItem(
+    projectId: string,
+    workItemId: string,
+    assigneeId: string | null | undefined,
+    actorId?: string,
+  ) {
+    if (this.assignmentService) {
+      return this.assignmentService.assignWorkItem(
+        projectId,
+        workItemId,
+        assigneeId,
+        actorId,
+      );
+    }
+    return this.workItemRepository.updateWorkItem(workItemId, {
+      assigneeId: assigneeId || null,
+    });
+  }
+
+  // ── Relations (Dependencies) ────────────────────────────────────────────────
+
+  async getWorkItemRelations(workItemId: string) {
+    if (this.relationService) {
+      return this.relationService.getWorkItemRelations(workItemId);
+    }
+    return { relations: [] };
+  }
+
+  // ── History & Audit ─────────────────────────────────────────────────────────
+
+  async getWorkItemActivity(workItemId: string, sort: 'asc' | 'desc' = 'desc') {
+    if (this.historyService) {
+      return this.historyService.getActivity(workItemId, sort);
+    }
+    return { workItemId, total: 0, activities: [] };
+  }
+
+  // ── Attachments & Entity Links ──────────────────────────────────────────────
 
   async getWorkItemsByLinkedEntity(
     entityType: EntityType,

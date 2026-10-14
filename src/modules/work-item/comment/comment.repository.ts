@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
-import { isUuid } from '@/core';
 
 const AUTHOR_SELECT = {
   id: true,

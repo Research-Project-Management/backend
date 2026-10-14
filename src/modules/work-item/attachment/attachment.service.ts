@@ -11,7 +11,7 @@ import type { FastifyRequest } from 'fastify';
 import { AttachmentRepository } from './attachment.repository';
 import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import {
   AddAttachmentDto,
   AttachPageDto,
@@ -24,10 +24,7 @@ import { PresignAttachmentDto } from './dto/presign-attachment.dto';
 import { QueryAttachmentDto } from './dto/query-attachment.dto';
 import { PresignedAttachmentResponse } from './types/attachment.types';
 import { EntityType } from '@prisma/client';
-import { isUuid } from '@/core';
 import { formatWorkItem } from '../core/utils/work-item.util';
-
-
 
 interface AttachmentMetadata {
   pageId?: string;
@@ -226,11 +223,8 @@ export class AttachmentService {
     }
 
     const rawEntityType = fields.entityType || 'work_item';
-    const params = req.params as
-      | Record<string, string | undefined>
-      | undefined;
-    const entityId =
-      fields.entityId || params?.workItemId || params?.id;
+    const params = req.params as Record<string, string | undefined> | undefined;
+    const entityId = fields.entityId || params?.workItemId || params?.id;
     if (!entityId) {
       throw new BadRequestException(
         'entityId is required in multipart form data or URL parameter',
@@ -434,7 +428,9 @@ export class AttachmentService {
               },
             },
           },
-          parentWorkItem: { select: { id: true, title: true, identifier: true } },
+          parentWorkItem: {
+            select: { id: true, title: true, identifier: true },
+          },
           childWorkItems: {
             select: {
               id: true,
@@ -561,6 +557,71 @@ export class AttachmentService {
     return this.deleteAttachment(attachmentId, authorId);
   }
 
+  private async linkEntity(
+    workItemId: string,
+    entityType: EntityType,
+    entityId: string,
+    description?: string,
+  ): Promise<void> {
+    if (this.repository.upsertEntityLink) {
+      await this.repository
+        .upsertEntityLink(workItemId, entityType, entityId, description)
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to link ${entityType} to work item ${workItemId}: ${(err as Error).message}`,
+          );
+        });
+      return;
+    }
+    if (this.prismaService?.workItemEntityLink) {
+      await this.prismaService.workItemEntityLink
+        .upsert({
+          where: {
+            workItemId_entityType_entityId: {
+              workItemId,
+              entityType,
+              entityId,
+            },
+          },
+          create: { workItemId, entityType, entityId, description },
+          update: { description },
+        })
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to link ${entityType} to work item ${workItemId}: ${(err as Error).message}`,
+          );
+        });
+    }
+  }
+
+  private async unlinkEntity(
+    workItemId: string,
+    entityType: EntityType,
+    entityId: string,
+  ): Promise<void> {
+    if (this.repository.deleteEntityLink) {
+      await this.repository
+        .deleteEntityLink(workItemId, entityType, entityId)
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to unlink ${entityType} from work item ${workItemId}: ${(err as Error).message}`,
+          );
+        });
+      return;
+    }
+    if (this.prismaService?.workItemEntityLink) {
+      await this.prismaService.workItemEntityLink
+        .deleteMany({
+          where: { workItemId, entityType, entityId },
+        })
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to unlink ${entityType} from work item ${workItemId}: ${(err as Error).message}`,
+          );
+        });
+    }
+  }
+
   async attachPage(workItemId: string, dto: AttachPageDto, authorId: string) {
     const workItem = await this.findWorkItem(workItemId);
     if (!workItem) {
@@ -588,40 +649,7 @@ export class AttachmentService {
       authorId,
     );
 
-    if (this.repository.upsertEntityLink) {
-      await this.repository
-        .upsertEntityLink(workItem.id, EntityType.page, pageId, title)
-        .catch((err) => {
-          this.logger.warn(
-            `Failed to link page to work item ${workItem.id}: ${(err as Error).message}`,
-          );
-        });
-    } else if (this.prismaService?.workItemEntityLink) {
-      await this.prismaService.workItemEntityLink
-        .upsert({
-          where: {
-            workItemId_entityType_entityId: {
-              workItemId: workItem.id,
-              entityType: EntityType.page,
-              entityId: pageId,
-            },
-          },
-          create: {
-            workItemId: workItem.id,
-            entityType: EntityType.page,
-            entityId: pageId,
-            description: title,
-          },
-          update: {
-            description: title,
-          },
-        })
-        .catch((err) => {
-          this.logger.warn(
-            `Failed to link page to work item ${workItem.id}: ${(err as Error).message}`,
-          );
-        });
-    }
+    await this.linkEntity(workItem.id, EntityType.page, pageId, title);
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
@@ -655,29 +683,7 @@ export class AttachmentService {
     }
 
     const resolvedEntityId = getAttachmentMeta(target).pageId || pageId;
-    if (this.repository.deleteEntityLink) {
-      await this.repository
-        .deleteEntityLink(workItem.id, EntityType.page, resolvedEntityId)
-        .catch((err) => {
-          this.logger.warn(
-            `Failed to unlink page from work item ${workItem.id}: ${(err as Error).message}`,
-          );
-        });
-    } else if (this.prismaService?.workItemEntityLink) {
-      await this.prismaService.workItemEntityLink
-        .deleteMany({
-          where: {
-            workItemId: workItem.id,
-            entityType: EntityType.page,
-            entityId: resolvedEntityId,
-          },
-        })
-        .catch((err) => {
-          this.logger.warn(
-            `Failed to unlink page from work item ${workItem.id}: ${(err as Error).message}`,
-          );
-        });
-    }
+    await this.unlinkEntity(workItem.id, EntityType.page, resolvedEntityId);
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
@@ -717,40 +723,7 @@ export class AttachmentService {
       authorId,
     );
 
-    if (this.repository.upsertEntityLink) {
-      await this.repository
-        .upsertEntityLink(workItem.id, EntityType.paper, paperId, title)
-        .catch((err) => {
-          this.logger.warn(
-            `Failed to link paper to work item ${workItem.id}: ${(err as Error).message}`,
-          );
-        });
-    } else if (this.prismaService?.workItemEntityLink) {
-      await this.prismaService.workItemEntityLink
-        .upsert({
-          where: {
-            workItemId_entityType_entityId: {
-              workItemId: workItem.id,
-              entityType: EntityType.paper,
-              entityId: paperId,
-            },
-          },
-          create: {
-            workItemId: workItem.id,
-            entityType: EntityType.paper,
-            entityId: paperId,
-            description: title,
-          },
-          update: {
-            description: title,
-          },
-        })
-        .catch((err) => {
-          this.logger.warn(
-            `Failed to link paper to work item ${workItem.id}: ${(err as Error).message}`,
-          );
-        });
-    }
+    await this.linkEntity(workItem.id, EntityType.paper, paperId, title);
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
@@ -786,29 +759,7 @@ export class AttachmentService {
     }
 
     const resolvedEntityId = getAttachmentMeta(target).paperId || paperId;
-    if (this.repository.deleteEntityLink) {
-      await this.repository
-        .deleteEntityLink(workItem.id, EntityType.paper, resolvedEntityId)
-        .catch((err) => {
-          this.logger.warn(
-            `Failed to unlink paper from work item ${workItem.id}: ${(err as Error).message}`,
-          );
-        });
-    } else if (this.prismaService?.workItemEntityLink) {
-      await this.prismaService.workItemEntityLink
-        .deleteMany({
-          where: {
-            workItemId: workItem.id,
-            entityType: EntityType.paper,
-            entityId: resolvedEntityId,
-          },
-        })
-        .catch((err) => {
-          this.logger.warn(
-            `Failed to unlink paper from work item ${workItem.id}: ${(err as Error).message}`,
-          );
-        });
-    }
+    await this.unlinkEntity(workItem.id, EntityType.paper, resolvedEntityId);
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
@@ -1059,44 +1010,29 @@ export class AttachmentService {
    * Retrieves all work items linked to a specific entity (e.g. page or paper).
    */
   async getWorkItemsByLinkedEntity(entityType: EntityType, entityId: string) {
-    if (this.repository.findLinkedWorkItems) {
-      const links = await this.repository.findLinkedWorkItems(entityType, entityId);
-      return links.map((link) => ({
-        linkId: link.id,
-        entityType: link.entityType,
-        entityId: link.entityId,
-        description: link.description,
-        createdAt: link.createdAt,
-        workItem: link.workItem,
-      }));
-    }
-
-    if (!this.prismaService?.workItemEntityLink) {
-      return [];
-    }
-
-    const links = await this.prismaService.workItemEntityLink.findMany({
-      where: {
-        entityType,
-        entityId,
-      },
-      include: {
-        workItem: {
-          select: {
-            id: true,
-            identifier: true,
-            title: true,
-            columnId: true,
-            state: true,
-            priority: true,
-            projectId: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const links = this.repository.findLinkedWorkItems
+      ? await this.repository.findLinkedWorkItems(entityType, entityId)
+      : this.prismaService?.workItemEntityLink
+        ? await this.prismaService.workItemEntityLink.findMany({
+            where: { entityType, entityId },
+            include: {
+              workItem: {
+                select: {
+                  id: true,
+                  identifier: true,
+                  title: true,
+                  columnId: true,
+                  state: true,
+                  priority: true,
+                  projectId: true,
+                  createdAt: true,
+                  updatedAt: true,
+                },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+          })
+        : [];
 
     return links.map((link) => ({
       linkId: link.id,

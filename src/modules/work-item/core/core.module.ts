@@ -6,6 +6,9 @@ import { IdHandler } from './handlers/id.handler';
 import { RankHandler } from './handlers/rank.handler';
 import { CloneHandler } from './handlers/clone.handler';
 import { EventDispatcher } from './handlers/event.dispatcher';
+import { AttachmentSyncHandler } from './handlers/attachment-sync.handler';
+import { SyncHandler } from './handlers/sync.handler';
+import { BulkHandler } from './handlers/bulk.handler';
 
 @Module({
   controllers: [CoreController],
@@ -16,6 +19,9 @@ import { EventDispatcher } from './handlers/event.dispatcher';
     RankHandler,
     CloneHandler,
     EventDispatcher,
+    AttachmentSyncHandler,
+    SyncHandler,
+    BulkHandler,
   ],
   exports: [
     CoreService,
@@ -24,6 +30,9 @@ import { EventDispatcher } from './handlers/event.dispatcher';
     RankHandler,
     CloneHandler,
     EventDispatcher,
+    AttachmentSyncHandler,
+    SyncHandler,
+    BulkHandler,
   ],
 })
 export class CoreModule {}

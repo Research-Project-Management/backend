@@ -1,13 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { WorkItem, ProjectMember, Prisma } from '@prisma/client';
 import {
-  IAssignmentRepository,
   ProjectSettingsWithAssignee,
   ELIGIBLE_ASSIGNEE_ROLES,
-  Role,
 } from './types/assignment.types';
-import { isUuid } from '@/core';
 
 export type WorkItemWithProject = WorkItem & {
   /** JSON array of all assignee user IDs (multi-assignee). Prisma v6 field. */
@@ -25,7 +22,7 @@ export type WorkItemWithProject = WorkItem & {
 };
 
 @Injectable()
-export class AssignmentRepository implements IAssignmentRepository {
+export class AssignmentRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
   async findWorkItem(workItemId: string): Promise<WorkItem | null> {
@@ -35,16 +32,22 @@ export class AssignmentRepository implements IAssignmentRepository {
       });
     }
     return this.prismaService.workItem.findFirst({
-      where: { identifier: workItemId, deletedAt: null },
+      where: {
+        identifier: { equals: workItemId, mode: 'insensitive' },
+        deletedAt: null,
+      },
     });
   }
 
   async findWorkItemWithProject(
     workItemId: string,
   ): Promise<WorkItemWithProject | null> {
-    const whereClause = isUuid(workItemId)
+    const whereClause: Prisma.WorkItemWhereInput = isUuid(workItemId)
       ? { id: workItemId, deletedAt: null }
-      : { identifier: workItemId, deletedAt: null };
+      : {
+          identifier: { equals: workItemId, mode: 'insensitive' },
+          deletedAt: null,
+        };
 
     const item = await this.prismaService.workItem.findFirst({
       where: whereClause,
@@ -315,7 +318,7 @@ export class AssignmentRepository implements IAssignmentRepository {
     await this.prismaService.workItem.update({
       where: { id: workItemId },
       data: {
-        subscriberIds: subscriberIds as Prisma.InputJsonValue,
+        subscriberIds: subscriberIds,
       },
     });
   }

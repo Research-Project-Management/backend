@@ -40,7 +40,7 @@ export class LabelController {
 
   // ── 1. Project-Scoped Endpoints (Canonical) ──────────────────────────────
 
-  @Get(['projects/:projectId/labels', 'project/:projectId/labels'])
+  @Get('projects/:projectId/labels')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
@@ -54,7 +54,7 @@ export class LabelController {
     return this.labelService.getProjectLabels(projectId, query?.type);
   }
 
-  @Post(['projects/:projectId/labels', 'project/:projectId/labels'])
+  @Post('projects/:projectId/labels')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
@@ -68,10 +68,7 @@ export class LabelController {
     return this.labelService.createProjectLabel(projectId, userId, dto);
   }
 
-  @Get([
-    'projects/:projectId/labels/:labelId',
-    'project/:projectId/labels/:labelId',
-  ])
+  @Get('projects/:projectId/labels/:labelId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get details of a specific project label' })
@@ -82,10 +79,7 @@ export class LabelController {
     return this.labelService.getProjectLabelById(projectId, labelId);
   }
 
-  @Patch([
-    'projects/:projectId/labels/:labelId',
-    'project/:projectId/labels/:labelId',
-  ])
+  @Patch('projects/:projectId/labels/:labelId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
@@ -99,10 +93,7 @@ export class LabelController {
     return this.labelService.updateProjectLabel(projectId, labelId, dto);
   }
 
-  @Put([
-    'projects/:projectId/labels/:labelId',
-    'project/:projectId/labels/:labelId',
-  ])
+  @Put('projects/:projectId/labels/:labelId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update project label (PUT alias)' })
@@ -114,10 +105,7 @@ export class LabelController {
     return this.labelService.updateProjectLabel(projectId, labelId, dto);
   }
 
-  @Delete([
-    'projects/:projectId/labels/:labelId',
-    'project/:projectId/labels/:labelId',
-  ])
+  @Delete('projects/:projectId/labels/:labelId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({
@@ -130,10 +118,7 @@ export class LabelController {
     return this.labelService.deleteProjectLabel(projectId, labelId);
   }
 
-  @Post([
-    'projects/:projectId/labels/reorder',
-    'project/:projectId/labels/reorder',
-  ])
+  @Post('projects/:projectId/labels/reorder')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')

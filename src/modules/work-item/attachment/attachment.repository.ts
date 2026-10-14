@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { EntityType, Prisma } from '@prisma/client';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
-import { isUuid } from '@/core';
 
 const AUTHOR_SELECT = {
   id: true,

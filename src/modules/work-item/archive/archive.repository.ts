@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
-
-import { isUuid } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
 import { USER_MINIMAL_SELECT } from '../common/types/shared.types';
 
@@ -28,7 +26,10 @@ export class ArchiveRepository {
   async findWorkItemWithProject(workItemId: string) {
     const where: Prisma.WorkItemWhereInput = isUuid(workItemId)
       ? { id: workItemId, deletedAt: null }
-      : { identifier: workItemId, deletedAt: null };
+      : {
+          identifier: { equals: workItemId, mode: 'insensitive' },
+          deletedAt: null,
+        };
 
     return this.prisma.workItem.findFirst({
       where,

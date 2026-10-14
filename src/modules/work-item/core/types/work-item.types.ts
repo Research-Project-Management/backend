@@ -5,11 +5,14 @@
  * Integrated with Attach Center (Pages, Papers, Files, Links).
  */
 
-import { WorkItem, WorkItemPriority, Prisma } from '@prisma/client';
+import { WorkItemPriority, Prisma } from '@prisma/client';
 
 export { WorkItemPriority };
-export { USER_MINIMAL_SELECT, type UserMinimal } from '../../common/types/shared.types';
-import { USER_MINIMAL_SELECT, type UserMinimal } from '../../common/types/shared.types';
+import {
+  USER_MINIMAL_SELECT,
+  type UserMinimal,
+} from '../../common/types/shared.types';
+export { USER_MINIMAL_SELECT, type UserMinimal };
 
 export const STATE_MINIMAL_SELECT = {
   id: true,
@@ -193,66 +196,4 @@ export interface WorkItemFilterOptions {
   search?: string;
   limit?: number;
   offset?: number;
-}
-
-export interface IWorkItemRepository {
-  findProjectWorkItems(
-    projectId: string,
-    filter?: string | WorkItemFilterOptions,
-  ): Promise<WorkItemWithRelations[]>;
-  findWorkItemById(workItemId: string): Promise<WorkItemWithRelations | null>;
-  findWorkItemByIdentifier(
-    projectId: string,
-    identifier: string,
-  ): Promise<WorkItemWithRelations | null>;
-  createWorkItem(
-    data: Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput,
-  ): Promise<WorkItemWithRelations>;
-  updateWorkItem(
-    workItemId: string,
-    data: Prisma.WorkItemUpdateInput | Prisma.WorkItemUncheckedUpdateInput,
-  ): Promise<WorkItemWithRelations>;
-  softDeleteWorkItem(workItemId: string): Promise<WorkItem>;
-  restoreWorkItem(workItemId: string): Promise<WorkItem>;
-  deleteWorkItem(workItemId: string): Promise<WorkItem>;
-  findWorkItemsByIds(workItemIds: string[]): Promise<WorkItem[]>;
-  bulkUpdateWorkItems(
-    projectId: string,
-    workItemIds: string[],
-    data: Prisma.WorkItemUpdateManyMutationInput & {
-      assigneeId?: string | null;
-    },
-  ): Promise<{ count: number }>;
-  updateWorkItemsRank(
-    updates: Array<{
-      id: string;
-      rank: number;
-      columnId?: string;
-      completed?: boolean;
-    }>,
-  ): Promise<WorkItem[]>;
-  findProjectMemberRole(
-    projectId: string,
-    userId: string,
-  ): Promise<string | null>;
-  saveInitialAttachments(
-    workItemId: string,
-    projectId: string,
-    authorId: string,
-    attachments: WorkItemAttachments | Record<string, unknown>,
-  ): Promise<void>;
-  syncAttachments(
-    workItemId: string,
-    projectId: string,
-    authorId?: string,
-    attachments?: WorkItemAttachments | Record<string, unknown>,
-  ): Promise<void>;
-  countProjectWorkItems(projectId: string): Promise<number>;
-  disconnectParentWorkItem(workItemId: string): Promise<WorkItemWithRelations>;
-  findWorkItemsByAssignee(
-    userId: string,
-    projectId?: string,
-    take?: number,
-    skip?: number,
-  ): Promise<WorkItemWithRelations[]>;
 }

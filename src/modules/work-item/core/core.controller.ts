@@ -13,18 +13,12 @@ import {
   Sse,
   MessageEvent,
   Optional,
-  BadRequestException,
   Req,
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import {
-  ApiTags,
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-} from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Observable, Subject, fromEvent } from 'rxjs';
 import { map, filter, takeUntil } from 'rxjs/operators';

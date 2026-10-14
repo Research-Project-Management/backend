@@ -3,7 +3,6 @@ import {
   IsOptional,
   IsString,
   IsArray,
-  IsNumber,
   IsObject,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -77,5 +76,5 @@ export class CreateDraftDto {
   @ApiPropertyOptional({ description: 'Custom metadata object' })
   @IsOptional()
   @IsObject()
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }

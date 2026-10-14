@@ -1,14 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { WorkItem, Prisma } from '@prisma/client';
-import {
-  IRelationRepository,
-  WorkItemRelationItem,
-} from './types/relation.types';
-import { isUuid } from '@/core';
+import { WorkItemRelationItem } from './types/relation.types';
 
 @Injectable()
-export class RelationRepository implements IRelationRepository {
+export class RelationRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
   get prisma(): PrismaService {
@@ -22,7 +18,10 @@ export class RelationRepository implements IRelationRepository {
       });
     }
     return this.prismaService.workItem.findFirst({
-      where: { identifier: workItemId, deletedAt: null },
+      where: {
+        identifier: { equals: workItemId, mode: 'insensitive' },
+        deletedAt: null,
+      },
     });
   }
 

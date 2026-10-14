@@ -11,7 +11,6 @@ import { HistoryModule } from './history/history.module';
 import { AttachmentModule } from './attachment/attachment.module';
 import { DraftModule } from './draft/draft.module';
 import { ArchiveModule } from './archive/archive.module';
-import { ViewModule } from './view/view.module';
 
 @Module({
   imports: [
@@ -25,7 +24,6 @@ import { ViewModule } from './view/view.module';
     AttachmentModule,
     DraftModule,
     ArchiveModule,
-    ViewModule,
   ],
   providers: [WorkItemFacade],
   exports: [
@@ -40,7 +38,6 @@ import { ViewModule } from './view/view.module';
     AttachmentModule,
     DraftModule,
     ArchiveModule,
-    ViewModule,
   ],
 })
 export class WorkItemModule {}

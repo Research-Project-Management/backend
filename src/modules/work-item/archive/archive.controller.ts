@@ -104,9 +104,8 @@ export class ArchiveController {
   }
 
   @Get([
-    'work-items/projects/:projectId/archived',
     'projects/:projectId/work-items/archived',
-    'projects/:projectId/archived',
+    'work-items/projects/:projectId/archived',
   ])
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List archived work items of a project' })

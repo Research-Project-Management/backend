@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RedisCacheService } from '@/core';
-import { Prisma, WorkItemRelationType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { RelationRepository } from './relation.repository';
 import { AddRelationDto } from './dto/relation.dto';
 import {
@@ -107,8 +107,6 @@ export class RelationService {
     return { relations: enriched };
   }
 
-  /**
-   * Check if a directed path exists between startId and goalId for a given relation type semantics.
   /**
    * Check if a directed path exists between startId and goalId for a given relation type semantics.
    * Uses an in-memory BFS over the project graph to eliminate O(V) database roundtrips.
@@ -390,13 +388,13 @@ export class RelationService {
           sourceId_targetId_type: {
             sourceId: sourceItem.id,
             targetId: targetItem.id,
-            type: addRelationDto.type as WorkItemRelationType,
+            type: addRelationDto.type,
           },
         },
         create: {
           sourceId: sourceItem.id,
           targetId: targetItem.id,
-          type: addRelationDto.type as WorkItemRelationType,
+          type: addRelationDto.type,
         },
         update: {},
       });

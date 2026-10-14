@@ -40,7 +40,6 @@ export interface RawWorkItemRecord {
   assigneeIds?: unknown;
   dueDate?: Date | string | null;
   startDate?: Date | string | null;
-  estimateHours?: number | null;
   timeSpent?: number | null;
   rank?: number;
   completed?: boolean;
@@ -83,9 +82,7 @@ export interface RawWorkItemRecord {
     labelId?: string;
     label?: { id: string; name: string; color: string };
   }>;
-  resolvedLabels?: Array<
-    { id: string; name: string; color: string } | string
-  >;
+  resolvedLabels?: Array<{ id: string; name: string; color: string } | string>;
   labels?: unknown;
   labelLookup?: Map<string, { name: string; color: string }>;
   childWorkItems?: Array<RawWorkItemRecord & { stateGroup?: string }>;
@@ -255,9 +252,7 @@ export const formatWorkItem = (
             ? {
                 id: child.assignee.id,
                 name:
-                  child.assignee.profile?.name ??
-                  child.assignee.name ??
-                  'User',
+                  child.assignee.profile?.name ?? child.assignee.name ?? 'User',
                 email: child.assignee.email ?? null,
                 avatar:
                   child.assignee.profile?.avatar ??
@@ -389,7 +384,7 @@ export const formatWorkItem = (
   const priority: WorkItemPriority =
     typeof record.priority === 'string'
       ? mapPriority(record.priority)
-      : record.priority ?? WorkItemPriority.none;
+      : (record.priority ?? WorkItemPriority.none);
 
   return {
     ...record,

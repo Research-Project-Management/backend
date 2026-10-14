@@ -17,11 +17,7 @@ import {
   WorkItemState,
   getStateDefaultIcon,
 } from './types/state.types';
-import {
-  generateStateSlug,
-  isStateCompleted,
-  isValidStateGroup,
-} from './utils/state.util';
+import { generateStateSlug, isValidStateGroup } from './utils/state.util';
 import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
 
 @Injectable()

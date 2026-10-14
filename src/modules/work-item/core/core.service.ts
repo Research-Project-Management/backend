@@ -2,33 +2,31 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-  BadRequestException,
   ConflictException,
   Optional,
   Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { RedisCacheService } from '@/core';
+import { RedisCacheService, isUuid } from '@/core';
 import { CoreRepository } from './core.repository';
 import { IdHandler } from './handlers/id.handler';
 import { RankHandler } from './handlers/rank.handler';
 import { CloneHandler } from './handlers/clone.handler';
 import { EventDispatcher } from './handlers/event.dispatcher';
+import { BulkHandler } from './handlers/bulk.handler';
 import { CreateWorkItemDto } from './dto/create.dto';
 import { UpdateWorkItemDto } from './dto/update.dto';
 import { QueryWorkItemDto } from './dto/query.dto';
 import {
   BulkUpdateWorkItemDto,
-  BulkUpdatePayload,
   BulkDeleteWorkItemDto,
   ReorderWorkItemDto,
 } from './dto/bulk.dto';
 import { formatWorkItem, mapPriority } from './utils/work-item.util';
 import { isStateCompleted } from '../common/utils/state-completion.util';
-import { isUuid } from '@/core';
+import { validateHierarchyCycle } from './utils/hierarchy.util';
 import { WORK_ITEM_REDIS_KEYS } from './constants/redis-keys.constant';
 import { Prisma } from '@prisma/client';
-import { WorkItemWithRelations } from './types/work-item.types';
 
 @Injectable()
 export class CoreService {
@@ -40,6 +38,11 @@ export class CoreService {
     private readonly rankHandler: RankHandler,
     private readonly cloneHandler: CloneHandler,
     private readonly eventDispatcher: EventDispatcher,
+    @Optional()
+    private readonly bulkHandler = new BulkHandler(
+      workItemRepository,
+      eventDispatcher,
+    ),
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
@@ -53,8 +56,9 @@ export class CoreService {
       this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       this.cache.del(`flux:proj:overview:${projectId}`),
     ];
-    if (workItemId)
+    if (workItemId) {
       deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)));
+    }
     await Promise.all(deletions).catch((err) => {
       this.logger.warn(
         `Failed to invalidate work item cache: ${(err as Error).message}`,
@@ -116,94 +120,99 @@ export class CoreService {
         projectId,
         filterOptions,
       );
-      // Fast-path: Only fetch label lookup from DB if there are legacy raw labels without relational assignments
       const needsLookup = records.some(
         (r) =>
-          (!r.labelAssignments || r.labelAssignments.length === 0) &&
           Array.isArray(r.labels) &&
-          r.labels.length > 0,
+          r.labels.length > 0 &&
+          (!r.labelAssignments || r.labelAssignments.length === 0),
       );
-      const allLabelIds = needsLookup
-        ? records.flatMap((r) => r.labels || [])
-        : [];
-      const labelLookup =
-        allLabelIds.length > 0
-          ? await this.buildLabelLookup(projectId, allLabelIds)
-          : new Map<string, { name: string; color: string }>();
-      return records.map((r) => formatWorkItem(r, labelLookup)).filter(Boolean);
+
+      let labelLookup = new Map<string, { name: string; color: string }>();
+      if (needsLookup) {
+        const allLabelNamesOrIds = Array.from(
+          new Set(
+            records.flatMap((r) => (Array.isArray(r.labels) ? r.labels : [])),
+          ),
+        );
+        labelLookup = await this.buildLabelLookup(
+          projectId,
+          allLabelNamesOrIds,
+        );
+      }
+
+      return records.map((record) => formatWorkItem(record, labelLookup));
     };
 
     if (this.cache && isUnfiltered) {
-      const workItems = await this.cache.wrap(cacheKey, fetchWorkItems, 300);
-      return { workItems };
+      const cached = await this.cache.get<Record<string, unknown>[]>(cacheKey);
+      if (cached) return cached;
+      const result = await fetchWorkItems();
+      await this.cache.set(cacheKey, result, 120);
+      return result;
     }
-    const workItems = await fetchWorkItems();
-    return { workItems };
+
+    return fetchWorkItems();
   }
 
   async getUserWorkItems(userId: string, query?: QueryWorkItemDto) {
-    const limit = query?.limit ? Number(query.limit) : 50;
-    const offset =
-      query?.page && query?.limit ? (query.page - 1) * query.limit : 0;
+    const take = query?.limit ? Number(query.limit) : 50;
+    const skip =
+      query?.page && query?.limit
+        ? (Number(query.page) - 1) * Number(query.limit)
+        : 0;
+
     const records = await this.workItemRepository.findWorkItemsByAssignee(
       userId,
       query?.projectId,
-      limit,
-      offset,
+      take,
+      skip,
     );
-    const needsLookup = records.some(
-      (r) =>
-        (!r.labelAssignments || r.labelAssignments.length === 0) &&
-        Array.isArray(r.labels) &&
-        r.labels.length > 0,
+
+    const projectIds = Array.from(new Set(records.map((r) => r.projectId)));
+    const allLabelNamesOrIds = Array.from(
+      new Set(
+        records.flatMap((r) => (Array.isArray(r.labels) ? r.labels : [])),
+      ),
     );
-    const allLabelIds = needsLookup
-      ? records.flatMap((r) => r.labels || [])
-      : [];
-    const projectIds = query?.projectId
-      ? query.projectId
-      : Array.from(new Set(records.map((r) => r.projectId).filter(Boolean)));
-    const hasProjectContext = Array.isArray(projectIds)
-      ? projectIds.length > 0
-      : Boolean(projectIds);
-    const labelLookup =
-      hasProjectContext && allLabelIds.length > 0
-        ? await this.buildLabelLookup(projectIds, allLabelIds)
-        : new Map<string, { id: string; name: string; color: string }>();
-    const workItems = records
-      .map((r) => formatWorkItem(r, labelLookup))
-      .filter(Boolean);
-    return { workItems, data: workItems, total: workItems.length };
+    const labelLookup = await this.buildLabelLookup(
+      projectIds,
+      allLabelNamesOrIds,
+    );
+
+    return records.map((record) => formatWorkItem(record, labelLookup));
   }
 
   async getWorkItemById(workItemId: string) {
     if (this.cache) {
-      const cached = await this.cache.get<any>(
+      const cached = await this.cache.get<Record<string, unknown>>(
         WORK_ITEM_REDIS_KEYS.workItem(workItemId),
       );
       if (cached) {
-        const labelLookup = await this.buildLabelLookup(
-          cached.projectId,
-          cached.labels || [],
-        );
-        const formatted = formatWorkItem(cached, labelLookup);
-        return { workItem: formatted, item: formatted };
+        return {
+          ...cached,
+          workItem: cached,
+          WorkItem: cached,
+          item: cached,
+        };
       }
     }
+
     const item = await this.workItemRepository.findWorkItemById(workItemId);
     if (!item) throw new NotFoundException('WorkItem not found');
-    if (this.cache)
-      await this.cache.set(
-        WORK_ITEM_REDIS_KEYS.workItem(workItemId),
-        item,
-        600,
-      );
+    if (this.cache) {
+      await this.cache.set(WORK_ITEM_REDIS_KEYS.workItem(item.id), item, 60);
+    }
     const labelLookup = await this.buildLabelLookup(
       item.projectId,
       item.labels || [],
     );
     const formatted = formatWorkItem(item, labelLookup);
-    return { workItem: formatted, item: formatted };
+    return {
+      ...formatted,
+      workItem: formatted,
+      WorkItem: formatted,
+      item: formatted,
+    };
   }
 
   // ── Mutations ───────────────────────────────────────────────────────────────
@@ -285,18 +294,24 @@ export class CoreService {
       : createWorkItemDto.assigneeId
         ? [createWorkItemDto.assigneeId]
         : [];
-    const validAssigneeIds = (
-      await Promise.all(
-        rawAssigneeIds.map(async (uid) => {
-          if (!isUuid(uid)) return null;
-          const isMember = await this.workItemRepository.isProjectMember(
+    const validAssigneeIds =
+      typeof this.workItemRepository.filterProjectMembers === 'function'
+        ? await this.workItemRepository.filterProjectMembers(
             rawProject.id,
-            uid,
-          );
-          return isMember ? uid : null;
-        }),
-      )
-    ).filter(Boolean) as string[];
+            rawAssigneeIds,
+          )
+        : ((
+            await Promise.all(
+              rawAssigneeIds.map(async (uid) => {
+                if (!isUuid(uid)) return null;
+                const isMember = await this.workItemRepository.isProjectMember(
+                  rawProject.id,
+                  uid,
+                );
+                return isMember ? uid : null;
+              }),
+            )
+          ).filter(Boolean) as string[]);
     const validAssigneeId = validAssigneeIds[0] || null;
 
     const workItem = await this.workItemRepository.createWorkItem({
@@ -379,7 +394,7 @@ export class CoreService {
 
     return this.createWorkItem(parent.projectId, authorId, {
       ...createWorkItemDto,
-      parentWorkItemId,
+      parentWorkItemId: parent.id,
     });
   }
 
@@ -416,12 +431,7 @@ export class CoreService {
     let targetColumnId: string | undefined;
     if (updateWorkItemDto.columnId !== undefined) {
       let targetState:
-        | {
-            id: string;
-            name: string;
-            group: string;
-            projectId?: string;
-          }
+        | { id: string; name: string; group: string; projectId?: string }
         | null
         | undefined = await this.workItemRepository.findStateById(
         updateWorkItemDto.columnId,
@@ -497,18 +507,25 @@ export class CoreService {
     let validAssigneeIds: string[] | undefined;
     if (updateWorkItemDto.assigneeIds !== undefined) {
       if (Array.isArray(updateWorkItemDto.assigneeIds)) {
-        const filtered = (
-          await Promise.all(
-            updateWorkItemDto.assigneeIds.map(async (uid) => {
-              if (!isUuid(uid)) return null;
-              const isMember = await this.workItemRepository.isProjectMember(
+        const filtered =
+          typeof this.workItemRepository.filterProjectMembers === 'function'
+            ? await this.workItemRepository.filterProjectMembers(
                 existing.projectId,
-                uid,
-              );
-              return isMember ? uid : null;
-            }),
-          )
-        ).filter(Boolean) as string[];
+                updateWorkItemDto.assigneeIds,
+              )
+            : ((
+                await Promise.all(
+                  updateWorkItemDto.assigneeIds.map(async (uid) => {
+                    if (!isUuid(uid)) return null;
+                    const isMember =
+                      await this.workItemRepository.isProjectMember(
+                        existing.projectId,
+                        uid,
+                      );
+                    return isMember ? uid : null;
+                  }),
+                )
+              ).filter(Boolean) as string[]);
         validAssigneeIds = filtered;
       } else {
         validAssigneeIds = [];
@@ -526,25 +543,9 @@ export class CoreService {
           parent.projectId === existing.projectId &&
           parent.id !== workItemId
         ) {
-          // Guard against circular hierarchy (setting a descendant or cyclical ancestor as parent)
-          let curr: WorkItemWithRelations | null = parent;
-          let isCycle = false;
-          const visited = new Set<string>([workItemId]);
-          while (curr && curr.parentWorkItemId) {
-            if (visited.has(curr.parentWorkItemId)) {
-              isCycle = true;
-              break;
-            }
-            visited.add(curr.parentWorkItemId);
-            curr = await this.workItemRepository.findWorkItemById(
-              curr.parentWorkItemId,
-            );
-          }
-          if (isCycle) {
-            throw new BadRequestException(
-              'Cannot set a descendant or cyclical ancestor as the parent work item',
-            );
-          }
+          await validateHierarchyCycle(workItemId, parent, (id) =>
+            this.workItemRepository.findWorkItemById(id),
+          );
           parentUpdate = { connect: { id: parent.id } };
         } else {
           parentUpdate = { disconnect: true };
@@ -652,41 +653,43 @@ export class CoreService {
 
   async reorderWorkItem(
     workItemId: string,
-    reorderWorkItemDto: ReorderWorkItemDto,
+    reorderDto: ReorderWorkItemDto,
+    userId?: string,
   ) {
     const item = await this.workItemRepository.findWorkItemById(workItemId);
     if (!item) throw new NotFoundException('WorkItem not found');
 
-    const targetColumn = reorderWorkItemDto.columnId || item.columnId;
-    const targetRank = reorderWorkItemDto.rank ?? 0;
+    const targetColumn = reorderDto.columnId || item.columnId;
+    const targetRank =
+      typeof reorderDto.rank === 'number' ? reorderDto.rank : 0;
+
     const columnItems = await this.workItemRepository.findColumnWorkItems(
       item.projectId,
       targetColumn,
     );
-
-    const targetState =
-      await this.workItemRepository.findStateById(targetColumn);
-    const isTargetDone = targetState
-      ? targetState.group === 'completed'
-      : isStateCompleted(targetColumn);
 
     const updates = this.rankHandler.calculateReorder(
       columnItems,
       item.id,
       targetColumn,
       targetRank,
-      () => isTargetDone,
+      isStateCompleted,
       item,
     );
 
-    await this.workItemRepository.updateWorkItemsRank(updates);
-    await this.invalidateWorkItemCache(item.projectId, item.id);
+    if (updates.length > 0) {
+      await this.workItemRepository.updateWorkItemsRank(updates);
+      await this.invalidateWorkItemCache(item.projectId);
+    }
+
     this.eventDispatcher.emitWorkItemReordered({
       workItemId: item.id,
       projectId: item.projectId,
       columnId: targetColumn,
       rank: targetRank,
+      actorId: userId,
     });
+
     return { message: 'WorkItem reordered successfully' };
   }
 
@@ -695,160 +698,12 @@ export class CoreService {
     bulkUpdateWorkItemDto: BulkUpdateWorkItemDto,
     userId?: string,
   ) {
-    const payload: BulkUpdatePayload =
-      bulkUpdateWorkItemDto.data ||
-      (bulkUpdateWorkItemDto as unknown as BulkUpdatePayload);
-
-    let effectiveProjectId = projectId;
-    const rawIds =
-      bulkUpdateWorkItemDto.workItemIds || bulkUpdateWorkItemDto.ids || [];
-    if (!effectiveProjectId && rawIds.length > 0) {
-      const firstItem = await this.workItemRepository.findWorkItemById(
-        rawIds[0],
-      );
-      if (firstItem) {
-        effectiveProjectId = firstItem.projectId;
-      }
-    }
-
-    // Support bulk add single label to all selected items
-    if (
-      payload.addLabel !== undefined &&
-      typeof payload.addLabel === 'string'
-    ) {
-      const labelId = payload.addLabel;
-      const validIds = rawIds.filter(isUuid);
-      const allItems =
-        await this.workItemRepository.findWorkItemsByIds(validIds);
-      const items = effectiveProjectId
-        ? allItems.filter((t) => t.projectId === effectiveProjectId)
-        : allItems;
-      await Promise.all(
-        items.map((t) => {
-          const current = Array.isArray(t.labels) ? t.labels : [];
-          if (current.includes(labelId)) return Promise.resolve();
-          const next = [...current, labelId];
-          return this.workItemRepository.updateWorkItem(t.id, { labels: next });
-        }),
-      );
-      if (effectiveProjectId) await this.invalidateWorkItemCache(effectiveProjectId);
-      return {
-        message: `Label added to ${items.length} work items`,
-        count: items.length,
-      };
-    }
-
-    // Support bulk remove single label from all selected items
-    if (
-      payload.removeLabel !== undefined &&
-      typeof payload.removeLabel === 'string'
-    ) {
-      const labelId = payload.removeLabel;
-      const validIds = rawIds.filter(isUuid);
-      const allItems =
-        await this.workItemRepository.findWorkItemsByIds(validIds);
-      const items = effectiveProjectId
-        ? allItems.filter((t) => t.projectId === effectiveProjectId)
-        : allItems;
-      await Promise.all(
-        items.map((t) => {
-          const current = Array.isArray(t.labels) ? t.labels : [];
-          if (!current.includes(labelId)) return Promise.resolve();
-          const next = current.filter((l) => l !== labelId);
-          return this.workItemRepository.updateWorkItem(t.id, { labels: next });
-        }),
-      );
-      if (effectiveProjectId) await this.invalidateWorkItemCache(effectiveProjectId);
-      return {
-        message: `Label removed from ${items.length} work items`,
-        count: items.length,
-      };
-    }
-
-    const rawProject = effectiveProjectId
-      ? await this.workItemRepository.findProjectWithColumns(effectiveProjectId)
-      : null;
-    const canonicalProjectId = rawProject?.id || effectiveProjectId;
-
-    const data: Prisma.WorkItemUpdateManyMutationInput & {
-      assigneeId?: string | null;
-      columnId?: string;
-    } = {};
-    if (payload.columnId !== undefined) {
-      const targetState = rawProject?.states?.find(
-        (s) =>
-          s.id === payload.columnId ||
-          s.name.toLowerCase() === payload.columnId?.toLowerCase() ||
-          s.group.toLowerCase() === payload.columnId?.toLowerCase(),
-      );
-      data.columnId = targetState ? targetState.id : payload.columnId;
-      data.completed = targetState
-        ? targetState.group === 'completed'
-        : isStateCompleted(data.columnId);
-    } else if (payload.completed !== undefined) {
-      if (payload.completed) {
-        const completedState = rawProject?.states?.find(
-          (s) => s.group === 'completed',
-        );
-        if (completedState) {
-          data.columnId = completedState.id;
-        }
-        data.completed = true;
-      } else {
-        const defaultState =
-          rawProject?.states?.find((s) => s.isDefault) ||
-          rawProject?.states?.find((s) => s.group === 'unstarted') ||
-          rawProject?.states?.[0];
-        if (defaultState) {
-          data.columnId = defaultState.id;
-        }
-        data.completed = false;
-      }
-    }
-
-    if (payload.assigneeId !== undefined) {
-      if (!payload.assigneeId) {
-        data.assigneeId = null;
-      } else if (isUuid(payload.assigneeId)) {
-        const isMember = await this.workItemRepository.isProjectMember(
-          canonicalProjectId,
-          payload.assigneeId,
-        );
-        if (isMember) {
-          data.assigneeId = payload.assigneeId;
-        }
-      }
-    }
-
-    if (payload.priority !== undefined)
-      data.priority = mapPriority(payload.priority);
-
-    if (payload.dueDate !== undefined)
-      data.dueDate = payload.dueDate ? new Date(payload.dueDate) : null;
-
-    if (payload.startDate !== undefined)
-      data.startDate = payload.startDate ? new Date(payload.startDate) : null;
-
-    if (payload.clearLabels === true) {
-      data.labels = [];
-    } else if (payload.labels !== undefined && Array.isArray(payload.labels)) {
-      data.labels = payload.labels.filter(
-        (l: unknown) => typeof l === 'string' && l.trim().length > 0,
-      );
-    }
-
-    const targetProjId = canonicalProjectId || effectiveProjectId || projectId;
-    const result = await this.workItemRepository.bulkUpdateWorkItems(
-      targetProjId,
-      rawIds,
-      data,
+    return this.bulkHandler.bulkUpdate(
+      projectId,
+      bulkUpdateWorkItemDto,
+      userId,
+      (projId) => this.invalidateWorkItemCache(projId),
     );
-    if (targetProjId) await this.invalidateWorkItemCache(targetProjId);
-    this.eventDispatcher.emitBulkUpdated(targetProjId, userId, rawIds);
-    return {
-      message: `${result.count} work items updated successfully`,
-      count: result.count,
-    };
   }
 
   async bulkDelete(
@@ -856,30 +711,12 @@ export class CoreService {
     bulkDeleteWorkItemDto: BulkDeleteWorkItemDto,
     userId?: string,
   ) {
-    let effectiveProjectId = projectId;
-    const rawIds =
-      bulkDeleteWorkItemDto.workItemIds || bulkDeleteWorkItemDto.ids || [];
-    if (!effectiveProjectId && rawIds.length > 0) {
-      const firstItem = await this.workItemRepository.findWorkItemById(
-        rawIds[0],
-      );
-      if (firstItem) {
-        effectiveProjectId = firstItem.projectId;
-      }
-    }
-    if (!effectiveProjectId) {
-      throw new BadRequestException('Project ID is required for bulk deletion');
-    }
-    const result = await this.workItemRepository.bulkDeleteWorkItems(
-      effectiveProjectId,
-      rawIds,
+    return this.bulkHandler.bulkDelete(
+      projectId,
+      bulkDeleteWorkItemDto,
+      userId,
+      (projId) => this.invalidateWorkItemCache(projId),
     );
-    await this.invalidateWorkItemCache(effectiveProjectId);
-    this.eventDispatcher.emitBulkDeleted(effectiveProjectId, userId, rawIds);
-    return {
-      message: `${result.count} work items deleted successfully`,
-      count: result.count,
-    };
   }
 
   async duplicateWorkItem(
@@ -895,10 +732,11 @@ export class CoreService {
         source.projectId,
         userId,
       );
-    if (!sourceMemberRole)
+    if (!sourceMemberRole) {
       throw new ForbiddenException(
         'Insufficient permissions to access source work item',
       );
+    }
 
     const { cloneData, targetProjectId } =
       await this.cloneHandler.buildCloneData(

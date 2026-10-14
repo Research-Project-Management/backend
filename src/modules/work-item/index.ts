@@ -15,3 +15,4 @@ export { LabelService as WorkItemLabelService } from './label/label.service';
 export { HistoryService as WorkItemHistoryService } from './history/history.service';
 export { ArchiveService as WorkItemArchiveService } from './archive/archive.service';
 export { DraftService as WorkItemDraftService } from './draft/draft.service';
+export * from './draft/types/draft.types';

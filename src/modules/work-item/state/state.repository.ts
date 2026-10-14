@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import {
-  IStateRepository,
   StateGroup,
   WorkItemState,
   DEFAULT_WORK_ITEM_STATES,
@@ -9,7 +8,7 @@ import {
 } from './types/state.types';
 
 @Injectable()
-export class StateRepository implements IStateRepository {
+export class StateRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
   async findProjectById(projectId: string) {

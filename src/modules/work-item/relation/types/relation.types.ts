@@ -1,5 +1,3 @@
-import { WorkItem, Prisma } from '@prisma/client';
-
 export type RelationType =
   | 'blocks'
   | 'blocked_by'
@@ -52,20 +50,4 @@ export interface EnrichedRelationItem extends WorkItemRelationItem {
     priority?: string;
     completed?: boolean;
   } | null;
-}
-
-export interface IRelationRepository {
-  findWorkItem(workItemId: string): Promise<WorkItem | null>;
-  findWorkItemsByIds(workItemIds: string[]): Promise<WorkItem[]>;
-  updateWorkItemRelations(
-    workItemId: string,
-    relations: Prisma.InputJsonValue,
-  ): Promise<WorkItem>;
-  executeTransaction<T = unknown>(
-    operations: Prisma.PrismaPromise<T>[],
-  ): Promise<T[]>;
-  findProjectGraphEdges(
-    projectId: string,
-    relationCategory: 'blocks' | 'duplicate_of',
-  ): Promise<Array<{ sourceId: string; targetId: string }>>;
 }

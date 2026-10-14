@@ -1,5 +1,5 @@
-import { IsArray, IsString, ArrayNotEmpty, IsOptional } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsArray, IsString, IsOptional } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class BulkArchiveDto {
   @ApiPropertyOptional({

@@ -2,12 +2,9 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
-  IsInt,
   IsNumber,
   IsOptional,
   IsString,
-  Min,
-  Max,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { WorkItemPriority } from '@prisma/client';

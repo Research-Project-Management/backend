@@ -114,26 +114,3 @@ export interface StateWorkItemCount {
   stateId: string;
   count: number;
 }
-
-export interface IStateRepository {
-  findProjectStates(projectId: string): Promise<WorkItemState[]>;
-  saveProjectStates(
-    projectId: string,
-    states: WorkItemState[],
-  ): Promise<WorkItemState[]>;
-  countWorkItemsByState(projectId: string): Promise<Record<string, number>>;
-  countWorkItemsInState(projectId: string, stateId: string): Promise<number>;
-  migrateWorkItemsToState(
-    projectId: string,
-    fromStateId: string,
-    toStateId: string,
-    isToCompleted: boolean,
-  ): Promise<number>;
-  deleteStateWithWorkItemMigration(
-    projectId: string,
-    deletedStateId: string,
-    fallbackStateId: string,
-    updatedStates: WorkItemState[],
-    isFallbackCompleted: boolean,
-  ): Promise<void>;
-}

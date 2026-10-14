@@ -35,12 +35,7 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 export class StateController {
   constructor(private readonly stateService: StateService) {}
 
-  @Get([
-    'projects/:projectId/states',
-    'project/:projectId/states',
-    'projects/:projectId/columns',
-    'project/:projectId/columns',
-  ])
+  @Get(['projects/:projectId/states', 'projects/:projectId/columns'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
@@ -54,10 +49,7 @@ export class StateController {
     return this.stateService.getStates(projectId);
   }
 
-  @Get([
-    'projects/:projectId/states/counts',
-    'project/:projectId/states/counts',
-  ])
+  @Get('projects/:projectId/states/counts')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
@@ -71,10 +63,7 @@ export class StateController {
     return this.stateService.getStateWorkItemCounts(projectId);
   }
 
-  @Get([
-    'projects/:projectId/states/:stateId',
-    'project/:projectId/states/:stateId',
-  ])
+  @Get('projects/:projectId/states/:stateId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get details of a specific state' })
@@ -86,12 +75,7 @@ export class StateController {
     return this.stateService.getStateById(projectId, stateId);
   }
 
-  @Post([
-    'projects/:projectId/states',
-    'project/:projectId/states',
-    'projects/:projectId/columns',
-    'project/:projectId/columns',
-  ])
+  @Post(['projects/:projectId/states', 'projects/:projectId/columns'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
@@ -110,9 +94,7 @@ export class StateController {
 
   @Put([
     'projects/:projectId/states/reorder',
-    'project/:projectId/states/reorder',
     'projects/:projectId/columns/reorder',
-    'project/:projectId/columns/reorder',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
@@ -131,9 +113,7 @@ export class StateController {
 
   @Post([
     'projects/:projectId/states/reset',
-    'project/:projectId/states/reset',
     'projects/:projectId/columns/reset',
-    'project/:projectId/columns/reset',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
@@ -150,9 +130,7 @@ export class StateController {
 
   @Put([
     'projects/:projectId/states/:stateId',
-    'project/:projectId/states/:stateId',
     'projects/:projectId/columns/:stateId',
-    'project/:projectId/columns/:stateId',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
@@ -176,9 +154,7 @@ export class StateController {
 
   @Delete([
     'projects/:projectId/states/:stateId',
-    'project/:projectId/states/:stateId',
     'projects/:projectId/columns/:stateId',
-    'project/:projectId/columns/:stateId',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')

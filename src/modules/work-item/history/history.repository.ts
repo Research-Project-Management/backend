@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { EntityType } from '@prisma/client';
-import { isUuid } from '@/core';
 
 const USER_SELECT = {
   id: true,
@@ -53,49 +52,6 @@ export class HistoryRepository {
     return item?.id || null;
   }
 
-  async findWorkItemWithProject(workItemId: string) {
-    const itemUuid = await this.resolveWorkItemUuid(workItemId);
-    if (!itemUuid) return null;
-    return this.prismaService.workItem.findUnique({
-      where: { id: itemUuid },
-      select: {
-        id: true,
-        columnId: true,
-        completed: true,
-        createdAt: true,
-        projectId: true,
-        project: {
-          select: {
-            id: true,
-            identifier: true,
-            states: true,
-          },
-        },
-      },
-    });
-  }
-
-  async findWorkItemComments(
-    workItemId: string,
-    sort: 'asc' | 'desc' = 'desc',
-  ) {
-    const itemUuid = await this.resolveWorkItemUuid(workItemId);
-    if (!itemUuid) return [];
-    const comments = await this.prismaService.workItemComment.findMany({
-      where: { workItemId: itemUuid },
-      orderBy: { createdAt: sort },
-      include: {
-        author: {
-          select: USER_SELECT,
-        },
-      },
-    });
-    return comments.map((c) => ({
-      ...c,
-      author: mapUser(c.author),
-    }));
-  }
-
   async findWorkItemActivityEvents(
     workItemId: string,
     sort: 'asc' | 'desc' = 'desc',
@@ -106,54 +62,6 @@ export class HistoryRepository {
       where: {
         entityType: EntityType.work_item,
         entityId: itemUuid,
-      },
-      orderBy: { createdAt: sort },
-      include: {
-        actor: {
-          select: USER_SELECT,
-        },
-      },
-    });
-    return events.map((e) => ({
-      ...e,
-      actor: mapUser(e.actor),
-    }));
-  }
-
-  async findStateTransitions(workItemId: string) {
-    const itemUuid = await this.resolveWorkItemUuid(workItemId);
-    if (!itemUuid) return [];
-    const events = await this.prismaService.activityEvent.findMany({
-      where: {
-        entityType: EntityType.work_item,
-        entityId: itemUuid,
-        OR: [
-          { verb: 'transitioned' },
-          { field: 'state' },
-          { field: 'columnId' },
-        ],
-      },
-      orderBy: { createdAt: 'asc' },
-      include: {
-        actor: {
-          select: USER_SELECT,
-        },
-      },
-    });
-    return events.map((e) => ({
-      ...e,
-      actor: mapUser(e.actor),
-    }));
-  }
-
-  async findHistoryEvents(workItemId: string, sort: 'asc' | 'desc' = 'desc') {
-    const itemUuid = await this.resolveWorkItemUuid(workItemId);
-    if (!itemUuid) return [];
-    const events = await this.prismaService.activityEvent.findMany({
-      where: {
-        entityType: EntityType.work_item,
-        entityId: itemUuid,
-        field: { not: null },
       },
       orderBy: { createdAt: sort },
       include: {

@@ -5,7 +5,7 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
-import { CslItemData } from '../types/csl-json.types';
+import { CslItemData, CslName } from '../types/csl-json.types';
 import {
   IEEE_CSL,
   NATURE_CSL,
@@ -13,9 +13,13 @@ import {
   MLA_CSL,
   TCVN_CSL,
   TCVN_NUMERIC_CSL,
-} from '../utils/official-styles.data';
-import { VI_VN_LOCALE } from '../utils/official-locales.data';
+} from '../data/official-styles.data';
+import { VI_VN_LOCALE } from '../data/official-locales.data';
 import { CslRepositoryService } from './csl-repository.service';
+import {
+  VIETNAMESE_SURNAMES_PREFIX_REGEX,
+  hasVietnameseDiacritics,
+} from '../../shared-kernel';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Cite, plugins } = require('@citation-js/core');
@@ -47,7 +51,11 @@ export class CslEngineService implements OnModuleInit {
     private readonly cslRepo?: CslRepositoryService,
   ) {}
 
-  private getCacheKey(cslItem: CslItemData, style: string): string {
+  private getCacheKey(
+    cslItem: CslItemData,
+    style: string,
+    index?: number,
+  ): string {
     const rawId =
       (typeof cslItem._itemId === 'string' ? cslItem._itemId : '') ||
       cslItem.id ||
@@ -67,7 +75,7 @@ export class CslEngineService implements OnModuleInit {
       typeof cslItem._updatedAt === 'number'
         ? String(cslItem._updatedAt)
         : '') || '';
-    return `${rawId}::${style}::${date}::${ver}::${updated}`;
+    return `${rawId}::${style}::${date}::${ver}::${updated}${index !== undefined ? `::${index}` : ''}`;
   }
 
   private setCache(
@@ -84,6 +92,31 @@ export class CslEngineService implements OnModuleInit {
 
   onModuleInit() {
     this.initTemplates();
+  }
+
+  /**
+   * Synchronously checks if a style is already loaded or natively supported in the CSL engine.
+   */
+  public isStyleSupported(styleId: string): boolean {
+    if (!styleId) return false;
+    this.initTemplates();
+    const normalized = this.normalizeStyle(styleId);
+    if (
+      normalized === 'auto' ||
+      normalized === 'auto-numeric' ||
+      normalized === 'bibtex' ||
+      normalized === 'ris' ||
+      normalized === 'tcvn' ||
+      normalized === 'tcvn-numeric'
+    ) {
+      return true;
+    }
+    try {
+      const csl = plugins.config.get('@csl');
+      return Boolean(csl?.templates?.has(normalized));
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -118,9 +151,10 @@ export class CslEngineService implements OnModuleInit {
           return true;
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `Could not dynamically load CSL template for "${normalized}": ${err?.message || err}`,
+        `Could not dynamically load CSL template for "${normalized}": ${errMsg}`,
       );
     }
 
@@ -173,10 +207,9 @@ export class CslEngineService implements OnModuleInit {
         }
       }
       this.templatesInitialized = true;
-    } catch (err: any) {
-      this.logger.error(
-        `Failed to register CSL templates: ${err?.message || err}`,
-      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to register CSL templates: ${errMsg}`);
     }
   }
 
@@ -237,7 +270,7 @@ export class CslEngineService implements OnModuleInit {
     const normalizedStyle = this.normalizeStyle(styleId);
 
     // O(1) LRU In-Memory Cache Lookup
-    const cacheKey = this.getCacheKey(cslItem, normalizedStyle);
+    const cacheKey = this.getCacheKey(cslItem, normalizedStyle, index);
     const cached = this.citationCache.get(cacheKey);
     if (cached) {
       this.citationCache.delete(cacheKey);
@@ -341,9 +374,10 @@ export class CslEngineService implements OnModuleInit {
         bibliographyHtml,
         source: 'csl-engine',
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `Failed to render CSL template ${normalizedStyle}: ${err?.message || err}. Falling back to smart formatter.`,
+        `Failed to render CSL template ${normalizedStyle}: ${errMsg}. Falling back to smart formatter.`,
       );
 
       const authors = cslItem.author || [];
@@ -352,7 +386,7 @@ export class CslEngineService implements OnModuleInit {
       const authorListStr =
         authors.length > 0
           ? authors
-              .map((a: any) =>
+              .map((a: CslName) =>
                 `${a.family || a.literal || ''} ${a.given ? a.given[0] + '.' : ''}`.trim(),
               )
               .filter(Boolean)
@@ -747,28 +781,21 @@ export class CslEngineService implements OnModuleInit {
 
   // ── TCVN / BỘ GIÁO DỤC & ĐÀO TẠO CITATION ENGINE ──────────────────────────
 
-  private static readonly VN_SURNAMES_REGEX =
-    /^(nguy[eễ]n|tr[aầ]n|l[eê]|ph[aạ]m|ho[aà]ng|hu[yỳ]nh|phan|v[uũ]|v[oõ]|đ[aặ]ng|b[uù]i|đ[oỗ]|h[oồ]|ng[oô]|d[uư][oơ]ng|l[yý]|đinh|đo[aà]n|l[aâ]m|tr[iị]nh|mai|đ[aà]o|cao|h[aà]|l[uư]u|l[uư][oơ]ng|th[aá]i|t[aạ]|ph[uù]ng|t[oô]|v[uư][oơ]ng|chu|ch[aâ]u|t[oố]ng|qu[aá]ch|tri[eệ]u|nghi[eê]m|h[uứ]a|kh[oổ]ng|di[eệ]p|nhan|t[aă]ng|th[aạ]ch|ti[eê]u|l[uụ]c|m[aã]|ch[uử]|ki[eề]u|do[aã]n|c[uù]|b[aạ]ch|[aâ]n|b[aà]ng|tr[uư][oơ]ng|t[oô]n|qu[aả]n|đ[aậ]u|n[oô]ng|l[aạ]i|ph[ií]|la)(\s|$)/i;
+  private static readonly VN_SURNAMES_REGEX = VIETNAMESE_SURNAMES_PREFIX_REGEX;
 
-  public static isVietnameseAuthor(author: any): boolean {
+  public static isVietnameseAuthor(author?: CslName | null): boolean {
     if (!author) return false;
     if (author.literal) {
-      return /[àáảãạăắằẳẵặâấầẩẫậđèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]/i.test(
-        author.literal,
-      );
+      return hasVietnameseDiacritics(author.literal);
     }
     const full = `${author.family || ''} ${author.given || ''}`.trim();
-    if (
-      /[àáảãạăắằẳẵặâấầẩẫậđèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]/i.test(
-        full,
-      )
-    ) {
+    if (hasVietnameseDiacritics(full)) {
       return true;
     }
     return CslEngineService.VN_SURNAMES_REGEX.test(author.family || '');
   }
 
-  public static getVietnameseSortKey(author: any): {
+  public static getVietnameseSortKey(author?: CslName | null): {
     primary: string;
     secondary: string;
   } {
@@ -791,27 +818,25 @@ export class CslEngineService implements OnModuleInit {
     if (firstAuthor && CslEngineService.isVietnameseAuthor(firstAuthor)) {
       return true;
     }
-    if (
-      item.title &&
-      /[àáảãạăắằẳẵặâấầẩẫậđèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]/i.test(
-        item.title,
-      )
-    ) {
+    if (item.title && hasVietnameseDiacritics(item.title)) {
       return true;
     }
     return false;
   }
 
-  public static compareTcvnEntries(a: CslItemData, b: CslItemData): number {
-    const isVnA = CslEngineService.isVietnameseItem(a);
-    const isVnB = CslEngineService.isVietnameseItem(b);
+  public static compareTcvnEntries(
+    itemA: CslItemData,
+    itemB: CslItemData,
+  ): number {
+    const isVnA = CslEngineService.isVietnameseItem(itemA);
+    const isVnB = CslEngineService.isVietnameseItem(itemB);
 
     if (isVnA && !isVnB) return -1;
     if (!isVnA && isVnB) return 1;
 
     if (isVnA && isVnB) {
-      const authorA = a.author?.[0];
-      const authorB = b.author?.[0];
+      const authorA = itemA.author?.[0];
+      const authorB = itemB.author?.[0];
       const keyA = CslEngineService.getVietnameseSortKey(authorA);
       const keyB = CslEngineService.getVietnameseSortKey(authorB);
       const cmp = keyA.primary.localeCompare(keyB.primary, 'vi', {
@@ -824,13 +849,19 @@ export class CslEngineService implements OnModuleInit {
     }
 
     const famA =
-      a.author?.[0]?.family || a.author?.[0]?.literal || a.title || '';
+      itemA.author?.[0]?.family ||
+      itemA.author?.[0]?.literal ||
+      itemA.title ||
+      '';
     const famB =
-      b.author?.[0]?.family || b.author?.[0]?.literal || b.title || '';
+      itemB.author?.[0]?.family ||
+      itemB.author?.[0]?.literal ||
+      itemB.title ||
+      '';
     return famA.localeCompare(famB, 'en', { sensitivity: 'base' });
   }
 
-  public static formatTcvnAuthorName(author: any): string {
+  public static formatTcvnAuthorName(author?: CslName | null): string {
     if (!author) return 'Khuyết danh';
     if (author.literal) return author.literal.trim();
 
@@ -852,7 +883,7 @@ export class CslEngineService implements OnModuleInit {
     return family || 'Anonymous';
   }
 
-  public static formatTcvnInTextAuthor(author: any): string {
+  public static formatTcvnInTextAuthor(author?: CslName | null): string {
     if (!author) return 'Khuyết danh';
     if (author.literal) return author.literal.trim();
 
@@ -871,7 +902,7 @@ export class CslEngineService implements OnModuleInit {
     index: number = 1,
   ): EngineCitationResult {
     const authors = cslItem.author || [];
-    const formattedAuthors = authors.map((a: any) =>
+    const formattedAuthors = authors.map((a: CslName) =>
       CslEngineService.formatTcvnAuthorName(a),
     );
 
@@ -902,7 +933,7 @@ export class CslEngineService implements OnModuleInit {
     if (isNumeric) {
       inText = `[${index}]`;
     } else {
-      const inTextAuthors = authors.map((a: any) =>
+      const inTextAuthors = authors.map((a: CslName) =>
         CslEngineService.formatTcvnInTextAuthor(a),
       );
       if (inTextAuthors.length === 0) {

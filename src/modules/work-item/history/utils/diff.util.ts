@@ -37,9 +37,6 @@ export function summarizeDiff(
     case 'labels':
       return `Updated labels: from ${oldVal} to ${newVal}`;
 
-    case 'module':
-      return `Updated module: "${newVal}" (was "${oldVal}")`;
-
     case 'due_date':
     case 'duedate':
       return `Changed due date to ${newVal} (was ${oldVal})`;

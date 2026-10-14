@@ -43,7 +43,7 @@ export interface WorkItemVotedPayload {
   type: 'up' | 'down';
 }
 
-export class WorkItemDomainEvent<T = any> {
+export class WorkItemDomainEvent<T = unknown> {
   constructor(
     public readonly eventName: string,
     public readonly payload: T,

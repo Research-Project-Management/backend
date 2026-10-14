@@ -1,14 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, WorkItemLabel as Label } from '@prisma/client';
-import {
-  ILabelRepository,
-  LabelWithChildren,
-  ReorderLabelItem,
-} from './types/label.types';
+import { LabelWithChildren, ReorderLabelItem } from './types/label.types';
 
 @Injectable()
-export class LabelRepository implements ILabelRepository {
+export class LabelRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findProjectLabels(

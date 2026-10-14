@@ -10,7 +10,7 @@ export interface AttachmentItem {
   storageKey?: string | null;
   size: number;
   mimeType: string;
-  metadata?: Record<string, any> | null;
+  metadata?: Record<string, unknown> | null;
   authorId?: string | null;
   author?: {
     id: string;

@@ -1,9 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { CoreRepository } from '../core.repository';
-import { PrismaService } from '@/core';
 import { RedisCacheService } from '@/core';
-import { isUUID } from 'class-validator';
-import { deriveProjectIdentifierPrefix } from '../utils/work-item.util';
 import { WORK_ITEM_REDIS_KEYS } from '../../common/constants/redis-keys.constant';
 
 export interface NextIdentifierResult {
@@ -18,7 +15,6 @@ export class IdHandler {
   constructor(
     private readonly repository: CoreRepository,
     @Optional() private readonly cache?: RedisCacheService,
-    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   async nextIdentifier(projectId: string): Promise<NextIdentifierResult> {
@@ -32,25 +28,7 @@ export class IdHandler {
   }
 
   private async getProjectPrefix(projectId: string): Promise<string> {
-    if (this.repository?.findProjectPrefix) {
-      return this.repository.findProjectPrefix(projectId);
-    }
-
-    const where = isUUID(projectId)
-      ? { id: projectId, deletedAt: null }
-      : {
-          identifier: { equals: projectId, mode: 'insensitive' as const },
-          deletedAt: null,
-        };
-
-    const project = await this.prisma?.project
-      .findFirst({
-        where,
-        select: { identifier: true, name: true },
-      })
-      .catch(() => null);
-
-    return deriveProjectIdentifierPrefix(project?.identifier, project?.name);
+    return this.repository.findProjectPrefix(projectId);
   }
 
   private async getNextSequence(projectId: string): Promise<number> {
@@ -59,7 +37,7 @@ export class IdHandler {
         const key = WORK_ITEM_REDIS_KEYS.sequence(projectId);
         const exists = await this.cache.exists(key);
         if (!exists) {
-          const maxSeq = await this.getMaxSequenceFromDb(projectId);
+          const maxSeq = await this.repository.getMaxSequence(projectId);
           await this.cache.set(key, maxSeq.toString());
         }
         const next = await this.cache.incr(key);
@@ -73,33 +51,8 @@ export class IdHandler {
       }
     }
 
-    const maxSeq = await this.getMaxSequenceFromDb(projectId);
+    const maxSeq = await this.repository.getMaxSequence(projectId);
     return maxSeq + 1;
-  }
-
-  private async getMaxSequenceFromDb(projectId: string): Promise<number> {
-    if (this.repository?.getMaxSequence) {
-      return this.repository.getMaxSequence(projectId);
-    }
-
-    const lastWorkItem = await this.prisma?.workItem.findFirst({
-      where: { projectId },
-      orderBy: { sequenceNumber: 'desc' },
-      select: { sequenceNumber: true },
-    });
-
-    if (lastWorkItem?.sequenceNumber) {
-      return lastWorkItem.sequenceNumber;
-    }
-
-    const project = await this.prisma?.project
-      .findUnique({
-        where: { id: projectId },
-        select: { workItemSequence: true },
-      })
-      .catch(() => null);
-
-    return project?.workItemSequence ?? 0;
   }
 }
 

@@ -14,7 +14,7 @@ import {
   CreateLabelDto,
   UpdateLabelDto,
 } from './dto/label.dto';
-import { WorkItemLabel as Label, Prisma } from '@prisma/client';
+import { WorkItemLabel as Label } from '@prisma/client';
 import { RedisCacheService } from '@/core';
 import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
 import { LabelWithChildren } from './types/label.types';

@@ -1,11 +1,11 @@
 /**
- * Label Domain Types & Repository Port (Hexagonal / DDD-Lite)
+ * Label Domain Types
  *
  * Scoped to Project or User,
  * parent-child nesting hierarchy, and safe work item detachment.
  */
 
-import { WorkItemLabel as Label, Prisma } from '@prisma/client';
+import { WorkItemLabel as Label } from '@prisma/client';
 
 export type LabelType = string;
 
@@ -17,57 +17,4 @@ export interface LabelWithChildren extends Label {
 export interface ReorderLabelItem {
   id: string;
   sortOrder: number;
-}
-
-export interface ILabelRepository {
-  findProjectLabels(
-    projectId: string,
-    type?: string,
-  ): Promise<LabelWithChildren[]>;
-  findUserLabels(
-    userId: string,
-    type?: string,
-    projectId?: string | null,
-  ): Promise<Label[]>;
-  findById(labelId: string): Promise<LabelWithChildren | null>;
-  findByNameInProject(
-    projectId: string,
-    name: string,
-    excludeId?: string,
-  ): Promise<Label | null>;
-  findProject?(projectId: string): Promise<{ id: string } | null>;
-  getLastSortOrder?(
-    projectId: string,
-    parentId?: string | null,
-  ): Promise<number | null>;
-  findDuplicate?(params: {
-    projectId: string | null;
-    name: string;
-    parentId?: string | null;
-    excludeId?: string;
-    createdById?: string;
-  }): Promise<Label | null>;
-  create(data: Prisma.WorkItemLabelUncheckedCreateInput): Promise<Label>;
-  createMany?(
-    data: Prisma.WorkItemLabelUncheckedCreateInput[],
-  ): Promise<{ count: number }>;
-  createBatch?(
-    data: Prisma.WorkItemLabelUncheckedCreateInput[],
-  ): Promise<Label[]>;
-  update(
-    labelId: string,
-    data: Prisma.WorkItemLabelUncheckedUpdateInput,
-  ): Promise<Label>;
-  delete(labelId: string): Promise<Label>;
-  reorder(projectId: string, updates: ReorderLabelItem[]): Promise<void>;
-  detachFromWorkItems(
-    projectId: string,
-    labelId: string,
-    labelName?: string,
-  ): Promise<number>;
-  detachMultipleFromWorkItems(
-    projectId: string,
-    labelIds: string[],
-    labelNames?: string[],
-  ): Promise<number>;
 }
