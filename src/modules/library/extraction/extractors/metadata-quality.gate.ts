@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { ItemMetadata } from '../../shared-kernel';
-import { QualityScoreBreakdown } from '../types/trusted-extraction.types';
-import { isInstitutionName } from '../../shared-kernel/utils/bibliographic.utils';
+import { ItemMetadata } from '@/modules/library/shared-kernel';
+import { QualityScoreBreakdown } from '@/modules/library/extraction/types/trusted-extraction.types';
+import { isInstitutionName } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 export interface EvaluationResult {
   breakdown: QualityScoreBreakdown;
@@ -36,14 +36,30 @@ export class MetadataQualityGate {
     return 0.7;
   }
 
-  private static evaluateAuthors(authors?: string[], creators?: any[]): number {
+  private static evaluateAuthors(
+    authors?: string[],
+    creators?: Array<
+      | { fullName?: string | null; name?: string | null }
+      | string
+      | Record<string, unknown>
+    >,
+  ): number {
     const list =
       authors && authors.length > 0
         ? authors
         : creators && creators.length > 0
-          ? creators.map((c) =>
-              typeof c === 'string' ? c : c.fullName || c.name,
-            )
+          ? creators.map((c) => {
+              if (typeof c === 'string') return c;
+              if (c && typeof c === 'object') {
+                const rec = c as Record<string, unknown>;
+                return (
+                  (typeof rec.fullName === 'string' ? rec.fullName : null) ||
+                  (typeof rec.name === 'string' ? rec.name : null) ||
+                  undefined
+                );
+              }
+              return undefined;
+            })
           : [];
 
     if (list.length === 0) return 0.0;

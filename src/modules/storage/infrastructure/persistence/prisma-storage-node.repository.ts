@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
+import { File as PrismaFile, Prisma } from '@prisma/client';
 import {
   IStorageNodeRepository,
   ListDriveFilter,
@@ -61,7 +62,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     filter: ListDriveFilter,
   ): Promise<{ nodes: StorageNode[]; total: number }> {
     const targetUserId = filter.userId ?? filter.authorId;
-    const where: any = {};
+    const where: Prisma.FileWhereInput = {};
     if (targetUserId) {
       where.authorId = targetUserId;
     }
@@ -96,7 +97,10 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
       ];
     }
 
-    let orderBy: any[] = [{ isFolder: 'desc' }, { filename: 'asc' }];
+    let orderBy: Prisma.FileOrderByWithRelationInput[] = [
+      { isFolder: 'desc' },
+      { filename: 'asc' },
+    ];
     if (filter.sortBy) {
       const orderDir = filter.sortOrder === 'desc' ? 'desc' : 'asc';
       if (filter.sortBy === 'updatedAt' || filter.sortBy === 'updated_at') {
@@ -165,7 +169,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
   }
 
   async findSubtreeNodes(rootNodeId: string): Promise<StorageNode[]> {
-    const records = await this.prisma.$queryRaw<any[]>`
+    const records = await this.prisma.$queryRaw<PrismaFile[]>`
       WITH RECURSIVE subtree AS (
         SELECT * FROM files WHERE id = ${rootNodeId}::uuid
         UNION ALL

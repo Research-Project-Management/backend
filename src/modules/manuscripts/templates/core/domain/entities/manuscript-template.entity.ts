@@ -1,11 +1,11 @@
 import {
   TemplateCategoryString,
   TemplateCategoryVo,
-} from '../value-objects/template-category.vo';
+} from '@/modules/manuscripts/templates/core/domain/value-objects/template-category.vo';
 import {
   CompilerType,
   CompilerTypeVo,
-} from '../value-objects/compiler-type.vo';
+} from '@/modules/manuscripts/templates/core/domain/value-objects/compiler-type.vo';
 
 export interface TemplateFileBlueprint {
   path: string;
@@ -221,11 +221,14 @@ export class ManuscriptTemplateEntity {
       id: this._id,
       versionId: this._versionId,
       name: this._name,
+      title: this._name,
       category: this._category,
       description: this._description,
       compiler: this._compiler,
       imageName: this._imageName,
       mainFile: this._mainFile,
+      defaultRootDoc: this._mainFile,
+      fileCount: Object.keys(this._files).length,
       thumbnailUrl: this._thumbnailUrl,
       author: this._author,
       tags: this._tags,

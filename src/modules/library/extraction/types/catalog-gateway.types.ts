@@ -17,5 +17,5 @@ export interface ICatalogGatewayPort {
     userId: string,
     itemId: string,
     projectId?: string,
-  ): Promise<any | null>;
+  ): Promise<Record<string, unknown> | null>;
 }

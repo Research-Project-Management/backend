@@ -8,8 +8,8 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { QueryRepository } from '../repositories/query.repository';
-import { CommandRepository } from '../repositories/command.repository';
+import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
+import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import {
   CreateItemData,
   UpdateItemData,
@@ -19,34 +19,35 @@ import {
   IItemExistencePort,
   QualityAuditCandidateItem,
   DuplicateCandidateItem,
-} from '../types/items.types';
-import { sanitizeItemTitle } from '../../shared-kernel/utils/bibliographic.utils';
+  ItemDetail,
+} from '@/modules/library/catalog/types/items.types';
+import { sanitizeItemTitle } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 import {
   TransactionService,
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
   LibraryItemSource,
-} from '../../shared-kernel';
+} from '@/modules/library/shared-kernel';
 import {
   CursorPaginatedResult,
   DocumentFulltextResponse,
-} from '../dto/items.dto';
+} from '@/modules/library/catalog/dto/items.dto';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '../../shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
 import { TagsService } from './tags.service';
 import { TypesService } from './types.service';
 import { ItemSyncDelegate } from './item-sync.delegate';
 import { ZoteroSchemaValidatorService } from './zotero-schema-validator.service';
-import { ItemsMapper } from '../utils/items.mapper';
-import { ItemTransformer } from '../utils/item.transformer';
-import { BibliographicReference } from '../../shared-kernel/types/bibliographic.types';
+import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { BibliographicReference } from '@/modules/library/shared-kernel/types/bibliographic.types';
 
 import type {
   UpsertSyncItemCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../../shared-kernel/core/types/entity-commands.types';
+} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
 
 // Specialized Sub-Services (Divide & Conquer)
 import { ItemQueryService } from './item-query.service';
@@ -97,41 +98,84 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     id: string,
     userId?: string,
     projectId?: string,
+    options?: { skipScopeInvalidation?: boolean },
   ): Promise<void> {
     if (!this.cache) return;
     try {
-      const tasks: Promise<any>[] = [
+      const tasks: Promise<unknown>[] = [
         this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
         this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
         this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(id)),
         this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
       ];
-      if (userId) {
-        tasks.push(
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-          this.cache.del(`library:counts:user:${userId}`),
-        );
-      }
-      if (projectId && projectId !== 'user') {
-        tasks.push(
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`),
-          ),
-          this.cache.del(`library:counts:proj:${projectId}`),
-        );
+      if (!options?.skipScopeInvalidation) {
+        this.appendScopeCacheInvalidationTasks(tasks, userId, projectId);
       }
       await Promise.all(tasks);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to invalidate item cache for ${id}: ${message}`);
+    }
+  }
+
+  private appendScopeCacheInvalidationTasks(
+    tasks: Promise<unknown>[],
+    userId?: string,
+    projectId?: string,
+  ): void {
+    if (!this.cache) return;
+    if (userId) {
+      tasks.push(
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+        this.cache.del(`library:counts:user:${userId}`),
+      );
+    }
+    if (projectId && projectId !== 'user') {
+      tasks.push(
+        this.cache.delPattern(
+          LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`),
+        ),
+        this.cache.del(`library:counts:proj:${projectId}`),
+      );
+    }
+  }
+
+  private async invalidateScopeCachesOnce(
+    userId: string,
+    projectId?: string,
+  ): Promise<void> {
+    await this.tagsService.invalidateTagsCache(userId, projectId);
+    if (!this.cache) return;
+    try {
+      const tasks: Promise<unknown>[] = [];
+      this.appendScopeCacheInvalidationTasks(tasks, userId, projectId);
+      if (tasks.length > 0) {
+        await Promise.all(tasks);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `Failed to invalidate item cache for ${id}: ${err?.message || err}`,
+        `Failed to invalidate scope cache for user ${userId}: ${message}`,
       );
     }
   }
 
   // ── Delegated Query Operations (ItemQueryService) ──────────────────────────
 
-  async getCounts(userId: string, projectId?: string) {
-    return this.queryService.getCounts(userId, projectId);
+  async getCounts(
+    userId: string,
+    projectId?: string,
+    accessHint?: Parameters<ItemQueryService['getCounts']>[2],
+  ) {
+    return this.queryService.getCounts(userId, projectId, accessHint);
+  }
+
+  async getPermissions(
+    userId: string,
+    projectId?: string,
+    accessHint?: Parameters<ItemQueryService['getPermissions']>[2],
+  ) {
+    return this.queryService.getPermissions(userId, projectId, accessHint);
   }
 
   async getItem(userId: string, id: string, projectId?: string) {
@@ -140,8 +184,8 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
 
   async listItems(
     userId: string,
-    options: any,
-  ): Promise<CursorPaginatedResult<any>> {
+    options: Parameters<ItemQueryService['listItems']>[1],
+  ): Promise<CursorPaginatedResult<ItemDetail | Record<string, unknown>>> {
     return this.queryService.listItems(userId, options);
   }
 
@@ -249,7 +293,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
   // ── Delegated Type Conversion (ItemTypeConversionService) ─────────────────
 
   previewTypeConversion(
-    rawItem: Record<string, any>,
+    rawItem: Record<string, unknown>,
     targetType: string,
     options: { retainUnmappedInExtra?: boolean } = {},
   ): TypeConversionPreview {
@@ -268,6 +312,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     itemId: string,
     targetType: string,
     options: ConvertTypeOptions = {},
+    projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
     if (!this.typeConversionService) {
@@ -278,6 +323,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       itemId,
       targetType,
       options,
+      projectIdOrTx,
       tx,
     );
   }
@@ -323,8 +369,21 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       correlationId?: string;
     },
     projectId?: string,
-  ): Promise<any> {
-    const cleanTitle = sanitizeItemTitle(data.title);
+  ): Promise<ItemDetail> {
+    const dataRec = data as Record<string, unknown>;
+    const dataEf =
+      data.extraFields && typeof data.extraFields === 'object'
+        ? data.extraFields
+        : {};
+    const fallbackTitle =
+      data.title ??
+      (dataRec.caseName as string | undefined) ??
+      (dataRec.nameOfAct as string | undefined) ??
+      (dataRec.subject as string | undefined) ??
+      (dataEf.caseName as string | undefined) ??
+      (dataEf.nameOfAct as string | undefined) ??
+      (dataEf.subject as string | undefined);
+    const cleanTitle = sanitizeItemTitle(fallbackTitle);
     if (!cleanTitle) {
       throw new UnprocessableEntityException('Item title cannot be empty');
     }
@@ -378,7 +437,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       return ItemsMapper.toDomain(item);
     };
 
-    let result: any;
+    let result: ItemDetail;
     if (context?.tx && context?.helpers) {
       result = await execute(context.tx, context.helpers);
     } else {
@@ -403,7 +462,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     data: UpdateItemData,
     context?: ItemTransactionContext,
     projectId?: string,
-  ): Promise<any> {
+  ): Promise<ItemDetail> {
     if (data.title !== undefined) {
       const cleanTitle = sanitizeItemTitle(data.title);
       if (!cleanTitle) {
@@ -433,75 +492,33 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       const valRes = this.validator?.validateAndSanitizeItem
         ? this.validator.validateAndSanitizeItem(targetItemType, data)
         : { sanitizedItem: data, warnings: [] };
-      updatePayload = valRes.sanitizedItem as UpdateItemData;
+      updatePayload = valRes.sanitizedItem;
     }
 
-    if (context) {
+    let resolvedProjectId = projectId;
+
+    const effectiveExpectedVersion =
+      expectedVersion ??
+      (typeof (data as { expectedVersion?: unknown }).expectedVersion ===
+      'number'
+        ? (data as { expectedVersion: number }).expectedVersion
+        : undefined);
+
+    const executeUpdate = async (
+      tx: Prisma.TransactionClient,
+      helpers: TransactionHelpers,
+    ): Promise<ItemDetail> => {
       const updated = await this.command.update(
         userId,
         id,
-        expectedVersion,
+        effectiveExpectedVersion,
         updatePayload,
-        context.tx,
+        tx,
         projectId,
       );
 
       const effectiveProjectId = projectId || updated.projectId || undefined;
-      const eventScope = { userId, projectId: effectiveProjectId };
-
-      await context.helpers.appendChange(eventScope, {
-        entityType: 'Item',
-        entityId: id,
-        action: 'update',
-        version: updated.version,
-        data: updated,
-      });
-
-      await context.helpers.publishOutbox(
-        eventScope,
-        id,
-        LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-        updated,
-      );
-
-      await this.invalidateItemCache(id, userId, effectiveProjectId);
-
-      return ItemsMapper.toDomain(updated);
-    }
-
-    const result = await this.libraryTx.executeInTransaction(
-      async (tx, helpers) => {
-        return this.updateItem(
-          userId,
-          id,
-          expectedVersion,
-          data,
-          {
-            tx,
-            helpers,
-          },
-          projectId,
-        );
-      },
-    );
-    await this.invalidateItemCache(id, userId, projectId);
-    return result;
-  }
-
-  async setMyPublication(
-    userId: string,
-    id: string,
-    isMyPublication: boolean,
-  ): Promise<any> {
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const updated = await this.command.setMyPublication(
-        userId,
-        id,
-        isMyPublication,
-        tx,
-      );
-
-      const effectiveProjectId = updated.projectId || undefined;
+      resolvedProjectId = effectiveProjectId;
       const eventScope = { userId, projectId: effectiveProjectId };
 
       await helpers.appendChange(eventScope, {
@@ -519,10 +536,76 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
         updated,
       );
 
-      await this.invalidateItemCache(id, userId, effectiveProjectId);
-
       return ItemsMapper.toDomain(updated);
-    });
+    };
+
+    if (context) {
+      const res = await executeUpdate(context.tx, context.helpers);
+      await this.invalidateItemCache(id, userId, resolvedProjectId);
+      return res;
+    }
+
+    const res = await this.libraryTx.executeInTransaction(executeUpdate);
+    await this.invalidateItemCache(id, userId, resolvedProjectId);
+    return res;
+  }
+
+  async setMyPublication(
+    userId: string,
+    id: string,
+    isMyPublication: boolean,
+    options?: {
+      contributorId?: string | null;
+      isPublic?: boolean;
+      openAccessLicense?: string | null;
+      includeAttachments?: boolean;
+      includeNotes?: boolean;
+      authorshipConfirmed?: boolean;
+    },
+  ): Promise<ItemDetail> {
+    let resolvedProjectId: string | undefined;
+    const res = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        const updated = options
+          ? await this.command.setMyPublication(
+              userId,
+              id,
+              isMyPublication,
+              options,
+              tx,
+            )
+          : await this.command.setMyPublication(
+              userId,
+              id,
+              isMyPublication,
+              tx,
+            );
+
+        const effectiveProjectId = updated.projectId || undefined;
+        resolvedProjectId = effectiveProjectId;
+        const eventScope = { userId, projectId: effectiveProjectId };
+
+        await helpers.appendChange(eventScope, {
+          entityType: 'Item',
+          entityId: id,
+          action: 'update',
+          version: updated.version,
+          data: updated,
+        });
+
+        await helpers.publishOutbox(
+          eventScope,
+          id,
+          LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+          updated,
+        );
+
+        return ItemsMapper.toDomain(updated);
+      },
+    );
+
+    await this.invalidateItemCache(id, userId, resolvedProjectId);
+    return res;
   }
 
   async reindexItem(userId: string, id: string, projectId?: string) {
@@ -555,57 +638,57 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     expectedVersion?: number,
     context?: ItemTransactionContext,
     projectId?: string,
+    skipScopeInvalidation?: boolean,
   ): Promise<boolean> {
-    if (context) {
+    const executeDelete = async (
+      tx: Prisma.TransactionClient,
+      helpers: TransactionHelpers,
+    ): Promise<boolean> => {
       const deleted = await this.command.softDelete(
         userId,
         id,
         expectedVersion,
-        context.tx,
+        tx,
         projectId,
       );
 
       if (deleted) {
         const eventScope = { userId, projectId: projectId || undefined };
-        await context.helpers.recordTombstone(eventScope, {
+        await helpers.recordTombstone(eventScope, {
           entityType: 'Item',
           entityId: id,
           deletedById: userId,
         });
 
-        await context.helpers.publishOutbox(
-          eventScope,
+        await helpers.publishOutbox(eventScope, id, 'library.item.deleted', {
           id,
-          'library.item.deleted',
-          {
-            id,
-            deletedAt: new Date(),
-            projectId,
-          },
-        );
-
-        await this.invalidateItemCache(id, userId, projectId);
+          deletedAt: new Date(),
+          projectId,
+        });
       }
 
       return deleted;
+    };
+
+    if (context) {
+      const deleted = await executeDelete(context.tx, context.helpers);
+      if (deleted) {
+        await this.invalidateItemCache(id, userId, projectId, {
+          skipScopeInvalidation,
+        });
+      }
+      return deleted;
     }
 
-    const result = await this.libraryTx.executeInTransaction(
-      async (tx, helpers) => {
-        return this.deleteItem(
-          userId,
-          id,
-          expectedVersion,
-          {
-            tx,
-            helpers,
-          },
-          projectId,
-        );
-      },
-    );
-    await this.tagsService.invalidateTagsCache(userId, projectId);
-    await this.invalidateItemCache(id, userId, projectId);
+    const result = await this.libraryTx.executeInTransaction(executeDelete);
+    if (result) {
+      await this.invalidateItemCache(id, userId, projectId, {
+        skipScopeInvalidation,
+      });
+    }
+    if (!skipScopeInvalidation) {
+      await this.tagsService.invalidateTagsCache(userId, projectId);
+    }
     return result;
   }
 
@@ -614,6 +697,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     id: string,
     expectedVersion?: number,
     projectId?: string,
+    skipScopeInvalidation?: boolean,
   ) {
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
@@ -646,8 +730,12 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       },
     );
 
-    await this.tagsService.invalidateTagsCache(userId, projectId);
-    await this.invalidateItemCache(id, userId, projectId);
+    if (!skipScopeInvalidation) {
+      await this.tagsService.invalidateTagsCache(userId, projectId);
+    }
+    await this.invalidateItemCache(id, userId, projectId, {
+      skipScopeInvalidation,
+    });
     return result;
   }
 
@@ -655,6 +743,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     userId: string,
     id: string,
     projectId?: string,
+    skipScopeInvalidation?: boolean,
   ): Promise<boolean> {
     const eventScope = { userId, projectId };
     const result = await this.libraryTx.executeInTransaction(
@@ -675,8 +764,12 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       },
     );
 
-    await this.tagsService.invalidateTagsCache(userId, projectId);
-    await this.invalidateItemCache(id, userId, projectId);
+    if (!skipScopeInvalidation) {
+      await this.tagsService.invalidateTagsCache(userId, projectId);
+    }
+    await this.invalidateItemCache(id, userId, projectId, {
+      skipScopeInvalidation,
+    });
     return result;
   }
 
@@ -697,6 +790,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
           undefined,
           undefined,
           projectId,
+          true,
         );
         if (deleted) trashedIds.push(itemId);
       } catch (err: unknown) {
@@ -704,6 +798,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
           `Failed to move item ${itemId} to trash: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+    }
+    if (trashedIds.length > 0) {
+      await this.invalidateScopeCachesOnce(userId, projectId);
     }
     return { success: true, count: trashedIds.length, trashedIds };
   }
@@ -719,13 +816,16 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     const restoredIds: string[] = [];
     for (const itemId of itemIds) {
       try {
-        await this.restoreItem(userId, itemId, undefined, projectId);
+        await this.restoreItem(userId, itemId, undefined, projectId, true);
         restoredIds.push(itemId);
       } catch (err: unknown) {
         this.logger.warn(
           `Failed to restore item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+    }
+    if (restoredIds.length > 0) {
+      await this.invalidateScopeCachesOnce(userId, projectId);
     }
     return { success: true, count: restoredIds.length, restoredIds };
   }
@@ -741,13 +841,16 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     const purgedIds: string[] = [];
     for (const itemId of itemIds) {
       try {
-        const purged = await this.purgeItem(userId, itemId, projectId);
+        const purged = await this.purgeItem(userId, itemId, projectId, true);
         if (purged) purgedIds.push(itemId);
       } catch (err: unknown) {
         this.logger.warn(
           `Failed to purge item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+    }
+    if (purgedIds.length > 0) {
+      await this.invalidateScopeCachesOnce(userId, projectId);
     }
     return { success: true, count: purgedIds.length, purgedIds };
   }
@@ -804,7 +907,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     const linkedRelations = [];
 
     // Batch fetch target items to eliminate N+1 queries
-    let targetItemMap = new Map<string, any>();
+    let targetItemMap = new Map<string, ItemDetail>();
     if (this.query.findByIds && targetIds.length > 0) {
       const targetItems = await this.query.findByIds(
         userId,

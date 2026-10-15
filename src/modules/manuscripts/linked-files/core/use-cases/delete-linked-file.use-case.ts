@@ -4,7 +4,7 @@
  */
 
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ILinkedFilesRepositoryPort } from '../ports/linked-files-repository.port';
+import { ILinkedFilesRepositoryPort } from '@/modules/manuscripts/linked-files/core/ports/linked-files-repository.port';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 
 @Injectable()

@@ -4,16 +4,16 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ITrackChangesRepositoryPort } from '../ports/track-changes-repository.port';
-import { IRealtimeNotifierPort } from '../ports/realtime-notifier.port';
+import { ITrackChangesRepositoryPort } from '@/modules/manuscripts/track-changes/core/ports/track-changes-repository.port';
+import { IRealtimeNotifierPort } from '@/modules/manuscripts/track-changes/core/ports/realtime-notifier.port';
 import {
   TrackChange,
   ChangeType,
-} from '../domain/entities/track-change.entity';
+} from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
 import {
   TextRangeVo,
   TextRangeProps,
-} from '../domain/value-objects/text-range.vo';
+} from '@/modules/manuscripts/track-changes/core/domain/value-objects/text-range.vo';
 
 export interface RecordChangeInput {
   projectId: string;

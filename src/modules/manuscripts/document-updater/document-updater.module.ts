@@ -1,28 +1,19 @@
 /**
  * document-updater/document-updater.module.ts
- * NestJS Module for Manuscripts Document Updater subsystem (Hexagonal Architecture).
+ * NestJS Module for Manuscripts Document Updater subsystem.
  */
 
 import { Module } from '@nestjs/common';
-import { DocstoreModule } from '../docstore/docstore.module';
+import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { DocumentUpdaterController } from './document-updater.controller';
 import { DocumentUpdaterService } from './document-updater.service';
+import { DocumentUpdaterRepository } from './document-updater.repository';
 
-// Use Cases
-import { QueueDocUpdateUseCase } from './core/use-cases/queue-doc-update.use-case';
-import { FlushProjectDocsUseCase } from './core/use-cases/flush-project-docs.use-case';
-import { FlushSingleDocUseCase } from './core/use-cases/flush-single-doc.use-case';
-import { GetInFlightDocUseCase } from './core/use-cases/get-in-flight-doc.use-case';
-import { EvictDocBufferUseCase } from './core/use-cases/evict-doc-buffer.use-case';
-
-// Ports
+// Ports & Adapters
 import { IInFlightStorePort } from './core/ports/in-flight-store.port';
 import { IDocstoreWriterPort } from './core/ports/docstore-writer.port';
 import { IUpdaterLockPort } from './core/ports/updater-lock.port';
 import { IDebounceTimerPort } from './core/ports/debounce-timer.port';
-
-// Adapters
-import { RedisInFlightStoreAdapter } from './core/adapters/storage/redis-in-flight-store.adapter';
 import { InMemoryInFlightStoreAdapter } from './core/adapters/storage/in-memory-in-flight-store.adapter';
 import { RedisDistributedUpdaterLockAdapter } from './core/adapters/lock/redis-distributed-updater-lock.adapter';
 import { LocalMutexUpdaterLockAdapter } from './core/adapters/lock/local-mutex-updater-lock.adapter';
@@ -33,27 +24,18 @@ import { DocstoreBridgeAdapter } from './core/adapters/external/docstore-bridge.
   imports: [DocstoreModule],
   controllers: [DocumentUpdaterController],
   providers: [
+    DocumentUpdaterRepository,
     DocumentUpdaterService,
 
-    // Use cases
-    QueueDocUpdateUseCase,
-    FlushProjectDocsUseCase,
-    FlushSingleDocUseCase,
-    GetInFlightDocUseCase,
-    EvictDocBufferUseCase,
-
-    // Adapter implementations
-    RedisInFlightStoreAdapter,
+    // Adapters & Ports
     InMemoryInFlightStoreAdapter,
     RedisDistributedUpdaterLockAdapter,
     LocalMutexUpdaterLockAdapter,
     NodeTimeoutDebounceAdapter,
     DocstoreBridgeAdapter,
-
-    // Port token bindings
     {
       provide: IInFlightStorePort,
-      useClass: RedisInFlightStoreAdapter,
+      useExisting: DocumentUpdaterRepository,
     },
     {
       provide: IDocstoreWriterPort,
@@ -70,10 +52,7 @@ import { DocstoreBridgeAdapter } from './core/adapters/external/docstore-bridge.
   ],
   exports: [
     DocumentUpdaterService,
-    QueueDocUpdateUseCase,
-    FlushProjectDocsUseCase,
-    FlushSingleDocUseCase,
-    GetInFlightDocUseCase,
+    DocumentUpdaterRepository,
     IInFlightStorePort,
     IUpdaterLockPort,
   ],

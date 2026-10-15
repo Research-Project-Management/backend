@@ -3,11 +3,8 @@
  * Contract for managing project scratch workspaces with Overleaf's incremental hashing
  */
 
-export interface WorkspaceFile {
-  path: string;
-  content: string | Buffer;
-  hash?: string;
-}
+import type { WorkspaceFile } from '../../domain/workspace-file.interface';
+export type { WorkspaceFile };
 
 export interface WorkspaceSyncStats {
   written: number;

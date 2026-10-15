@@ -3,7 +3,7 @@
  * Outbound SPI Port for parsing and serializing BibTeX bibliography files.
  */
 
-import { BibEntry } from '../domain/entities/bib-entry.entity';
+import { BibEntry } from '@/modules/manuscripts/citations/core/domain/entities/bib-entry.entity';
 
 export const BIBTEX_PARSER_PORT = Symbol('BIBTEX_PARSER_PORT');
 

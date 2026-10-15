@@ -7,6 +7,10 @@ export const EXPORT_MAX_ITEMS = 1000;
 /** Cursor-page size used when fetching from the DB. */
 export const EXPORT_CHUNK_SIZE = 200;
 
+export type ExportItemRecord = Prisma.ItemGetPayload<{
+  include: { contributors: { orderBy: { orderIndex: 'asc' } } };
+}>;
+
 /**
  * ExportsRepository — CQRS Read-Side Optimized Data Store for Bulk Citation Export.
  * Serves read-only projection streaming to prevent N+1 queries across thousands of items.
@@ -19,8 +23,8 @@ export class ExportsRepository {
     where: Prisma.ItemWhereInput,
     maxItems: number = EXPORT_MAX_ITEMS,
     chunkSize: number = EXPORT_CHUNK_SIZE,
-  ): Promise<{ items: any[]; truncated: boolean }> {
-    const collected: any[] = [];
+  ): Promise<{ items: ExportItemRecord[]; truncated: boolean }> {
+    const collected: ExportItemRecord[] = [];
     let cursor: string | undefined;
     let truncated = false;
 
@@ -62,12 +66,23 @@ export class ExportsRepository {
   }
 
   async findProjectMember(projectId: string, userId: string) {
-    return this.prisma.projectMember.findUnique({
+    const member = await this.prisma.projectMember.findUnique({
       where: {
         projectId_userId: { projectId, userId },
       },
       select: { role: true },
     });
+    if (member) return member;
+    if (typeof this.prisma.project?.findFirst === 'function') {
+      const ownedProject = await this.prisma.project.findFirst({
+        where: { id: projectId, createdById: userId, deletedAt: null },
+        select: { id: true },
+      });
+      if (ownedProject) {
+        return { role: 'OWNER' as const };
+      }
+    }
+    return null;
   }
 
   async findCollection(collectionId: string) {

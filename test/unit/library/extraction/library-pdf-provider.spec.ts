@@ -1,5 +1,5 @@
 import { getDocumentProxy, getMeta } from 'unpdf';
-import { PdfProvider } from '@/modules/library/extraction/utils/pdf.provider';
+import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
 
 jest.mock('unpdf', () => ({
   extractText: jest.fn(),

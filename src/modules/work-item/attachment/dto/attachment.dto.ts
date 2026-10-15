@@ -29,12 +29,6 @@ export class AddAttachmentDto extends BaseAttachmentMetadataDto {
   url!: string;
 }
 
-// Backward compatibility alias
-export const CreateAttachmentDto = AddAttachmentDto;
-export type CreateAttachmentDto = AddAttachmentDto;
-export const CreateWorkItemAttachmentDto = AddAttachmentDto;
-export type CreateWorkItemAttachmentDto = AddAttachmentDto;
-
 export class AttachPageDto {
   @ApiProperty({
     description: 'Page ID',

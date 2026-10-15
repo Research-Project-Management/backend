@@ -19,13 +19,23 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { IngestionSubmissionDto } from '../dto/submission.dto';
-import { UnifiedIngestionDto } from '../dto/ingestion.dto';
-import { CaptureUrlDto, ConfirmCapturedUrlDto } from '../dto/capture-url.dto';
+import { IngestionSubmissionDto } from '@/modules/library/ingestion/dto/submission.dto';
+import { UnifiedIngestionDto } from '@/modules/library/ingestion/dto/ingestion.dto';
+import {
+  CaptureUrlDto,
+  ConfirmCapturedUrlDto,
+} from '@/modules/library/ingestion/dto/capture-url.dto';
+import { ReResolveMetadataDto } from '@/modules/library/ingestion/dto/curation.dto';
 import { isUUID } from 'class-validator';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
-import { IngestionService } from '../services/ingestion.service';
-import { UrlCaptureService } from '../services/url-capture.service';
+import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
+import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
+import {
+  SubmissionPayload,
+  IdentifierType,
+  RecordFormat,
+} from '@/modules/library/ingestion/types/submission.types';
+import { IngestionCommand } from '@/modules/library/ingestion/types/ingestion.types';
 
 /**
  * Shared Base Adapter for Library Ingestion Operations.
@@ -45,12 +55,14 @@ export abstract class BaseIngestionController {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
     const effectiveProjectId = projectId || dto.projectId;
 
-    let payload: any;
+    let payload: SubmissionPayload;
     switch (dto.kind) {
       case 'IDENTIFIER':
         payload = {
           kind: 'IDENTIFIER',
-          identifierType: (dto.identifierType || 'DOI').toUpperCase(),
+          identifierType: (
+            dto.identifierType || 'DOI'
+          ).toUpperCase() as IdentifierType,
           value: (dto.value || dto.identifierValue || '').trim(),
         };
         break;
@@ -58,8 +70,10 @@ export abstract class BaseIngestionController {
         payload = {
           kind: 'RECORD',
           format: (
-            (dto.format || dto.recordFormat || 'BIBTEX') as string
-          ).toUpperCase(),
+            dto.format ||
+            dto.recordFormat ||
+            'BIBTEX'
+          ).toUpperCase() as RecordFormat,
           content: dto.content || dto.rawRecord || '',
         };
         break;
@@ -92,12 +106,15 @@ export abstract class BaseIngestionController {
         );
     }
 
+    const effectiveCollectionIds =
+      dto.collectionIds ?? (dto.collectionId ? [dto.collectionId] : undefined);
+
     return this.ingestionService.submit({
       projectId: effectiveProjectId,
       userId,
       idempotencyKey: effectiveIdempotencyKey,
       payload,
-      collectionIds: dto.collectionIds,
+      collectionIds: effectiveCollectionIds,
       tagIds: dto.tagIds,
       overrides: dto.overrides,
       contractVersion: dto.contractVersion,
@@ -130,7 +147,7 @@ export abstract class BaseIngestionController {
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
     const effectiveProjectId = projectId || dto.projectId;
-    let command: any;
+    let command: IngestionCommand;
 
     switch (dto.source) {
       case 'doi':
@@ -140,6 +157,43 @@ export abstract class BaseIngestionController {
           userId,
           doi: dto.doi || '',
           collectionId: dto.collectionId,
+          overrides: dto.overrides,
+          idempotencyKey: effectiveIdempotencyKey,
+        };
+        break;
+
+      case 'arxiv':
+        command = {
+          source: 'arxiv',
+          projectId: effectiveProjectId,
+          userId,
+          arxivId: dto.arxivId || '',
+          collectionId: dto.collectionId,
+          overrides: dto.overrides,
+          idempotencyKey: effectiveIdempotencyKey,
+        };
+        break;
+
+      case 'pmid':
+        command = {
+          source: 'pmid',
+          projectId: effectiveProjectId,
+          userId,
+          pmid: dto.pmid || '',
+          collectionId: dto.collectionId,
+          overrides: dto.overrides,
+          idempotencyKey: effectiveIdempotencyKey,
+        };
+        break;
+
+      case 'isbn':
+        command = {
+          source: 'isbn',
+          projectId: effectiveProjectId,
+          userId,
+          isbn: dto.isbn || '',
+          collectionId: dto.collectionId,
+          overrides: dto.overrides,
           idempotencyKey: effectiveIdempotencyKey,
         };
         break;
@@ -168,6 +222,17 @@ export abstract class BaseIngestionController {
         };
         break;
 
+      case 'ris':
+        command = {
+          source: 'ris',
+          projectId: effectiveProjectId,
+          userId,
+          content: dto.content || dto.ris || '',
+          collectionId: dto.collectionId,
+          idempotencyKey: effectiveIdempotencyKey,
+        };
+        break;
+
       case 'pdf':
         command = {
           source: 'pdf',
@@ -177,6 +242,18 @@ export abstract class BaseIngestionController {
           filename: dto.filename,
           collectionId: dto.collectionId,
           overrides: dto.overrides,
+          idempotencyKey: effectiveIdempotencyKey,
+        };
+        break;
+
+      case 'zotero':
+        command = {
+          source: 'zotero',
+          projectId: effectiveProjectId,
+          userId,
+          connectionId: dto.connectionId,
+          externalItemKey: dto.externalItemKey,
+          collectionId: dto.collectionId,
           idempotencyKey: effectiveIdempotencyKey,
         };
         break;
@@ -217,6 +294,20 @@ export abstract class BaseIngestionController {
       dto,
     );
   }
+
+  protected async executeReResolveMetadata(
+    userId: string,
+    itemId: string,
+    dto: ReResolveMetadataDto,
+    projectId?: string,
+  ) {
+    return this.ingestionService.reResolveMetadata(
+      userId,
+      itemId,
+      dto,
+      projectId,
+    );
+  }
 }
 
 /**
@@ -233,6 +324,22 @@ export class IngestionController extends BaseIngestionController {
     urlCaptureService: UrlCaptureService,
   ) {
     super(ingestionService, urlCaptureService);
+  }
+
+  @Post(['items/:id/re-resolve', ':id/re-resolve'])
+  @ApiOperation({
+    summary: 'Re-resolve bibliographic metadata on demand from open mirrors',
+  })
+  async reResolveMetadata(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() dto: ReResolveMetadataDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId =
+      paramProjectId || queryProjectId || dto?.projectId;
+    return this.executeReResolveMetadata(userId, id, dto, effectiveProjectId);
   }
 
   @Post('submit')
@@ -352,6 +459,22 @@ export class ProjectIngestionController extends BaseIngestionController {
     super(ingestionService, urlCaptureService);
   }
 
+  @Post(['items/:id/re-resolve', ':id/re-resolve'])
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary:
+      'Re-resolve bibliographic metadata on demand from open mirrors for project item',
+  })
+  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
+  async reResolveMetadata(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
+    @Body() dto: ReResolveMetadataDto,
+  ) {
+    return this.executeReResolveMetadata(userId, id, dto, projectId);
+  }
+
   @Post('submit')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.ACCEPTED)
@@ -371,10 +494,10 @@ export class ProjectIngestionController extends BaseIngestionController {
   @ApiOperation({ summary: 'Get project ingestion run status' })
   @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
   async getStatus(
-    @CurrentUser('id') userId: string,
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
     @Param('runId') runId: string,
   ) {
-    return this.executeGetStatus(userId, runId);
+    return this.executeGetStatus(projectId, runId);
   }
 
   @Get('status/:runId/progress')
@@ -382,10 +505,10 @@ export class ProjectIngestionController extends BaseIngestionController {
   @ApiOperation({ summary: 'Get project ingestion run real-time progress' })
   @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
   async getProgress(
-    @CurrentUser('id') userId: string,
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
     @Param('runId') runId: string,
   ) {
-    return this.executeGetProgress(userId, runId);
+    return this.executeGetProgress(projectId, runId);
   }
 
   @Post('retry/:runId')
@@ -394,10 +517,10 @@ export class ProjectIngestionController extends BaseIngestionController {
   @ApiOperation({ summary: 'Retry failed project ingestion run' })
   @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
   async retry(
-    @CurrentUser('id') userId: string,
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
     @Param('runId') runId: string,
   ) {
-    return this.executeRetry(userId, runId);
+    return this.executeRetry(projectId, runId);
   }
 
   @Post()

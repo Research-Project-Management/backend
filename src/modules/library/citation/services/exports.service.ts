@@ -6,19 +6,175 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   ExportsRepository,
   EXPORT_MAX_ITEMS,
-} from '../repositories/exports.repository';
+  ExportItemRecord,
+} from '@/modules/library/citation/repositories/exports.repository';
 import { CitationService } from './citation.service';
-import { CslJsonMapper } from '../utils/csl-json.mapper';
-import { ExportLibraryDto } from '../dto/exports.dto';
+import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
+import { ExportLibraryDto } from '@/modules/library/citation/dto/exports.dto';
 import { PdfBakerService } from './pdf-baker.service';
-import { ExportResult, BurnableAnnotation } from '../types/exports.types';
-import { formatCsvExport } from '../utils/exports.utils';
+import {
+  ExportResult,
+  BurnableAnnotation,
+} from '@/modules/library/citation/types/exports.types';
+import { formatCsvExport } from '@/modules/library/citation/domain/exports.domain';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 
 export type { BurnableAnnotation, ExportResult };
+
+function extractExportMetadata(it: {
+  metadata?: Prisma.JsonValue | null;
+  itemTags?: Array<{ tag?: { name?: string | null } | null }> | null;
+}): {
+  publisher?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  doi?: string;
+  isbn?: string;
+  issn?: string;
+  pmid?: string;
+  pmcid?: string;
+  arxivId?: string;
+  citationKey?: string;
+  edition?: string;
+  place?: string;
+  series?: string;
+  accessedAt?: string;
+  accessDate?: string;
+  extra?: string;
+  extraFields?: Record<string, unknown>;
+} {
+  const meta =
+    it.metadata &&
+    typeof it.metadata === 'object' &&
+    !Array.isArray(it.metadata)
+      ? (it.metadata as Record<string, unknown>)
+      : {};
+  const extraStr = typeof meta.extra === 'string' ? meta.extra : undefined;
+  const extraMap: Record<string, string> = {};
+  if (extraStr) {
+    for (const match of extraStr.matchAll(
+      /\{:\s*([a-zA-Z_][a-zA-Z0-9_.\s-]*?)\s*:\s*([^}]+?)\s*\}/g,
+    )) {
+      const k = match[1]
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_]+/g, '-');
+      extraMap[k] = match[2].trim();
+    }
+    for (const line of extraStr.split(/\r?\n/)) {
+      const m = line
+        .trim()
+        .match(/^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/);
+      if (m) {
+        const k = m[1]
+          .trim()
+          .toLowerCase()
+          .replace(/[\s_]+/g, '-');
+        if (!extraMap[k]) extraMap[k] = m[2].trim();
+      }
+    }
+  }
+
+  const tagNames = Array.isArray(it.itemTags)
+    ? it.itemTags
+        .map((t) => t?.tag?.name?.trim())
+        .filter((n): n is string => Boolean(n))
+    : [];
+  const metaKeywords = Array.isArray(meta.keywords)
+    ? meta.keywords.filter((k): k is string => typeof k === 'string')
+    : [];
+  const combinedKeywords = Array.from(new Set([...metaKeywords, ...tagNames]));
+
+  return {
+    publisher:
+      (typeof meta.publisher === 'string' && meta.publisher) ||
+      (typeof meta.university === 'string' && meta.university) ||
+      (typeof meta.institution === 'string' && meta.institution) ||
+      (typeof meta.company === 'string' && meta.company) ||
+      (typeof meta.organization === 'string' && meta.organization) ||
+      extraMap['publisher'] ||
+      undefined,
+    volume:
+      (typeof meta.volume === 'string' && meta.volume) ||
+      (typeof meta.reporterVolume === 'string' && meta.reporterVolume) ||
+      (typeof meta.codeNumber === 'string' && meta.codeNumber) ||
+      extraMap['volume'] ||
+      undefined,
+    issue:
+      (typeof meta.issue === 'string' && meta.issue) ||
+      extraMap['issue'] ||
+      extraMap['number'] ||
+      undefined,
+    pages:
+      (typeof meta.pages === 'string' && meta.pages) ||
+      (typeof meta.firstPage === 'string' && meta.firstPage) ||
+      extraMap['pages'] ||
+      extraMap['page'] ||
+      undefined,
+    doi:
+      (typeof meta.doi === 'string' && meta.doi) ||
+      extraMap['doi']?.replace(
+        /^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)/i,
+        '',
+      ) ||
+      undefined,
+    isbn:
+      (typeof meta.isbn === 'string' && meta.isbn) ||
+      extraMap['isbn'] ||
+      undefined,
+    issn:
+      (typeof meta.issn === 'string' && meta.issn) ||
+      extraMap['issn'] ||
+      undefined,
+    pmid:
+      (typeof meta.pmid === 'string' && meta.pmid) ||
+      extraMap['pmid'] ||
+      undefined,
+    pmcid:
+      (typeof meta.pmcid === 'string' && meta.pmcid) ||
+      extraMap['pmcid'] ||
+      undefined,
+    arxivId:
+      (typeof meta.arxivId === 'string' && meta.arxivId) ||
+      extraMap['arxiv'] ||
+      extraMap['arxivid'] ||
+      undefined,
+    citationKey:
+      extraMap['citation-key'] ||
+      extraMap['citationkey'] ||
+      extraMap['bibtex'] ||
+      extraMap['tex.ids']?.split(/[,\s]+/)[0] ||
+      undefined,
+    edition: typeof meta.edition === 'string' ? meta.edition : undefined,
+    place:
+      (typeof meta.place === 'string' && meta.place) ||
+      (typeof meta.eventPlace === 'string' && meta.eventPlace) ||
+      (typeof meta.country === 'string' && meta.country) ||
+      extraMap['event-place'] ||
+      extraMap['publisher-place'] ||
+      extraMap['place'] ||
+      undefined,
+    series:
+      (typeof meta.series === 'string' && meta.series) ||
+      (typeof meta.seriesTitle === 'string' && meta.seriesTitle) ||
+      extraMap['collection-title'] ||
+      undefined,
+    accessedAt:
+      typeof meta.accessedAt === 'string' ? meta.accessedAt : undefined,
+    accessDate:
+      typeof meta.accessDate === 'string' ? meta.accessDate : undefined,
+    extra: extraStr,
+    extraFields: {
+      ...meta,
+      ...(combinedKeywords.length > 0 ? { keywords: combinedKeywords } : {}),
+    },
+  };
+}
 
 @Injectable()
 export class ExportsService {
@@ -37,9 +193,18 @@ export class ExportsService {
     userId: string,
     dto: ExportLibraryDto,
   ): Promise<ExportResult> {
-    let scopeWhere: any = { userId, deletedAt: null };
+    let scopeWhere: Prisma.ItemWhereInput = {
+      userId,
+      projectId: null,
+      deletedAt: null,
+    };
 
-    if (dto.projectId && dto.projectId !== 'user') {
+    if (
+      dto.projectId &&
+      dto.projectId !== 'user' &&
+      dto.projectId !== 'me' &&
+      dto.projectId !== 'personal'
+    ) {
       const member = await this.exportsRepo.findProjectMember(
         dto.projectId,
         userId,
@@ -65,6 +230,15 @@ export class ExportsService {
           );
         }
         scopeWhere = { projectId: collection.projectId, deletedAt: null };
+      } else if (
+        collection &&
+        'userId' in collection &&
+        collection.userId &&
+        collection.userId !== userId
+      ) {
+        throw new NotFoundException(
+          `Collection ${dto.collectionId} not found or access denied`,
+        );
       }
     }
 
@@ -81,7 +255,7 @@ export class ExportsService {
 
     // When the caller specifies explicit itemIds, fetch them directly (already scoped).
     // Otherwise use cursor-based chunking to avoid OOM on large libraries.
-    let items: any[];
+    let items: ExportItemRecord[];
     let truncated: boolean;
 
     if (dto.itemIds && dto.itemIds.length > 0) {
@@ -100,36 +274,11 @@ export class ExportsService {
 
     switch (dto.format) {
       case 'bibtex': {
-        const entries = items.map((it) => {
-          const authors = CslJsonMapper.getAuthorNames(it);
-          const res = this.citationService.formatItem(
-            {
-              ...it,
-              id: it.id,
-              itemType: it.itemType ?? 'journalArticle',
-              title: it.title,
-              authors,
-              publicationTitle: it.publicationTitle ?? undefined,
-              publisher: it.publisher ?? undefined,
-              year: it.year ?? undefined,
-              volume: it.volume ?? undefined,
-              issue: it.issue ?? undefined,
-              pages: it.pages ?? undefined,
-              doi: it.doi ?? undefined,
-              url: it.url ?? undefined,
-              citationKey: it.citationKey ?? undefined,
-              contributors: it.contributors,
-            },
-            'bibtex',
-          );
-          return res.bibliography;
-        });
-
         return {
           format: 'bibtex',
           filename: `library-export-${timestamp}.bib`,
           mimeType: 'application/x-bibtex',
-          content: entries.join('\n\n'),
+          content: this.formatItemsAsBibtex(items),
           itemCount: items.length,
           truncated,
         };
@@ -138,22 +287,36 @@ export class ExportsService {
       case 'ris': {
         const entries = items.map((it) => {
           const authors = CslJsonMapper.getAuthorNames(it);
+          const meta = extractExportMetadata(it);
           const res = this.citationService.formatItem(
             {
-              ...it,
-              id: it.id,
+              id: meta.citationKey || it.citationKey || it.id,
               itemType: it.itemType ?? 'journalArticle',
               title: it.title,
               authors,
               publicationTitle: it.publicationTitle ?? undefined,
-              publisher: it.publisher ?? undefined,
+              publisher: meta.publisher,
               year: it.year ?? undefined,
-              volume: it.volume ?? undefined,
-              issue: it.issue ?? undefined,
-              pages: it.pages ?? undefined,
-              doi: it.doi ?? undefined,
+              volume: meta.volume,
+              issue: meta.issue,
+              pages: meta.pages,
+              doi: it.doi || meta.doi || undefined,
+              isbn: meta.isbn,
+              issn: meta.issn,
+              pmid: meta.pmid,
+              pmcid: meta.pmcid,
+              arxivId: meta.arxivId,
+              edition: meta.edition,
+              place: meta.place,
+              series: meta.series,
+              accessedAt: meta.accessedAt || meta.accessDate,
               url: it.url ?? undefined,
+              abstract: it.abstract ?? undefined,
+              citationKey: meta.citationKey || it.citationKey || undefined,
+              extra: meta.extra,
+              extraFields: meta.extraFields,
               contributors: it.contributors,
+              metadata: it.metadata,
             },
             'ris',
           );
@@ -184,18 +347,21 @@ export class ExportsService {
       }
 
       case 'csv': {
-        const csvItems = items.map((it) => ({
-          id: it.id,
-          title: it.title,
-          authors: CslJsonMapper.getAuthorNames(it),
-          year: it.year,
-          publicationTitle: it.publicationTitle,
-          publisher: it.publisher,
-          doi: it.doi,
-          itemType: it.itemType,
-          citationKey: it.citationKey,
-          url: it.url,
-        }));
+        const csvItems = items.map((it) => {
+          const meta = extractExportMetadata(it);
+          return {
+            id: it.id,
+            title: it.title,
+            authors: CslJsonMapper.getAuthorNames(it),
+            year: it.year,
+            publicationTitle: it.publicationTitle,
+            publisher: meta.publisher,
+            doi: it.doi || meta.doi || null,
+            itemType: it.itemType,
+            citationKey: it.citationKey || meta.citationKey || null,
+            url: it.url,
+          };
+        });
 
         return {
           format: 'csv',
@@ -238,6 +404,47 @@ export class ExportsService {
     }
   }
 
+  private formatItemsAsBibtex(items: ExportItemRecord[]): string {
+    const entries = items.map((it) => {
+      const authors = CslJsonMapper.getAuthorNames(it);
+      const meta = extractExportMetadata(it);
+      const res = this.citationService.formatItem(
+        {
+          id: meta.citationKey || it.citationKey || it.id,
+          itemType: it.itemType ?? 'journalArticle',
+          title: it.title,
+          authors,
+          publicationTitle: it.publicationTitle ?? undefined,
+          publisher: meta.publisher,
+          year: it.year ?? undefined,
+          volume: meta.volume,
+          issue: meta.issue,
+          pages: meta.pages,
+          doi: it.doi || meta.doi || undefined,
+          isbn: meta.isbn,
+          issn: meta.issn,
+          pmid: meta.pmid,
+          pmcid: meta.pmcid,
+          arxivId: meta.arxivId,
+          edition: meta.edition,
+          place: meta.place,
+          series: meta.series,
+          accessedAt: meta.accessedAt || meta.accessDate,
+          url: it.url ?? undefined,
+          abstract: it.abstract ?? undefined,
+          citationKey: meta.citationKey || it.citationKey || undefined,
+          extra: meta.extra,
+          extraFields: meta.extraFields,
+          contributors: it.contributors,
+          metadata: it.metadata,
+        },
+        'bibtex',
+      );
+      return res.bibliography;
+    });
+    return entries.join('\n\n');
+  }
+
   async exportBundle(userId: string, collectionId: string) {
     const collection = await this.exportsRepo.findCollection(collectionId);
 
@@ -245,7 +452,11 @@ export class ExportsService {
       throw new BadRequestException(`Collection ${collectionId} not found`);
     }
 
-    let scopeWhere: any = { userId, deletedAt: null };
+    let scopeWhere: Prisma.ItemWhereInput = {
+      userId,
+      projectId: null,
+      deletedAt: null,
+    };
     if (collection.projectId) {
       const member = await this.exportsRepo.findProjectMember(
         collection.projectId,
@@ -269,11 +480,7 @@ export class ExportsService {
       2000,
     );
 
-    const bibtexRes = await this.exportLibrary(userId, {
-      format: 'bibtex',
-      collectionId,
-      projectId: collection.projectId ?? undefined,
-    });
+    const bibtexContent = this.formatItemsAsBibtex(items);
 
     const files: Array<{
       itemId: string;
@@ -297,7 +504,7 @@ export class ExportsService {
       collection: { id: collection.id, name: collection.name },
       totalItems: items.length,
       totalFiles: files.length,
-      bibtex: bibtexRes.content,
+      bibtex: bibtexContent,
       files,
     };
   }
@@ -320,23 +527,22 @@ export class ExportsService {
     itemId: string,
     rawPdfBuffer?: Buffer,
     projectId?: string,
-  ): Promise<{ filename: string; buffer: Uint8Array }> {
-    const item: any = await this.exportsRepo.findItemById(
-      userId,
-      itemId,
-      projectId,
-    );
+  ): Promise<{
+    filename: string;
+    mimeType: string;
+    base64: string;
+    buffer: Uint8Array;
+  }> {
+    const item = await this.exportsRepo.findItemById(userId, itemId, projectId);
 
     if (!item) {
       throw new NotFoundException('Item not found');
     }
 
-    const attachments: any[] = Array.isArray(item.attachments)
-      ? item.attachments
-      : [];
+    const attachments = item.attachments ?? [];
 
     const pdfAttachment =
-      attachments.find((a: any) => a.mimeType === 'application/pdf') ||
+      attachments.find((a) => a.mimeType === 'application/pdf') ||
       attachments[0];
 
     if (!pdfAttachment && !rawPdfBuffer) {
@@ -346,7 +552,7 @@ export class ExportsService {
     const annotations: BurnableAnnotation[] = Array.isArray(
       pdfAttachment?.annotations,
     )
-      ? pdfAttachment.annotations
+      ? (pdfAttachment.annotations as unknown as BurnableAnnotation[])
       : [];
 
     // Resolve raw PDF binary from parameter or storage layer
@@ -361,9 +567,10 @@ export class ExportsService {
         if (fileOutput?.buffer) {
           bufferToUse = fileOutput.buffer;
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Could not read PDF attachment ${pdfAttachment.fileId} from storage: ${err?.message || err}`,
+          `Could not read PDF attachment ${pdfAttachment.fileId} from storage: ${message}`,
         );
       }
     }
@@ -380,6 +587,8 @@ export class ExportsService {
 
     return {
       filename: safeFilename,
+      mimeType: 'application/pdf',
+      base64: Buffer.from(burned).toString('base64'),
       buffer: burned,
     };
   }
@@ -393,8 +602,58 @@ export class ExportsService {
   }
 
   /**
+   * Extracts merged citation keys (from DuplicateService.mergeDuplicates) and
+   * BetterBibTeX tex.ids / Citation Key aliases from item metadata.
+   */
+  private extractItemCitationAliases(it: ExportItemRecord): string[] {
+    const aliases = new Set<string>();
+    const metaObj =
+      it.metadata &&
+      typeof it.metadata === 'object' &&
+      !Array.isArray(it.metadata)
+        ? (it.metadata as Record<string, unknown>)
+        : {};
+
+    const addKey = (val: unknown) => {
+      if (typeof val === 'string' && val.trim()) {
+        for (const token of val.split(/[,;\s]+/)) {
+          const trimmed = token.trim();
+          if (trimmed) aliases.add(trimmed);
+        }
+      }
+    };
+
+    if (Array.isArray(metaObj.mergedCitationKeys)) {
+      for (const k of metaObj.mergedCitationKeys) addKey(k);
+    }
+
+    if (
+      metaObj.extra &&
+      typeof metaObj.extra === 'object' &&
+      !Array.isArray(metaObj.extra)
+    ) {
+      const extraObj = metaObj.extra as Record<string, unknown>;
+      if (Array.isArray(extraObj.mergedCitationKeys)) {
+        for (const k of extraObj.mergedCitationKeys) addKey(k);
+      }
+      addKey(extraObj['tex.ids']);
+      addKey(extraObj['citation-key']);
+      addKey(extraObj['citationKey']);
+      addKey(extraObj['bibtex']);
+    }
+
+    const parsedMeta = extractExportMetadata(it);
+    if (parsedMeta.citationKey) {
+      addKey(parsedMeta.citationKey);
+    }
+
+    return Array.from(aliases);
+  }
+
+  /**
    * Export BibTeX bibliography strictly for a specific list of citation keys.
    * Used for on-demand BibTeX sync and automatic \bibliography injection during LaTeX compilation.
+   * Supports primary citationKey, item UUID, and merged/alias citation keys (mergedCitationKeys / tex.ids).
    */
   async exportByCitationKeys(
     userId: string,
@@ -410,37 +669,32 @@ export class ExportsService {
       return { content: '', count: 0, foundKeys: [], missingKeys: [] };
     }
 
-    const normalizedKeys = keys
-      .map((k) => k.trim().toLowerCase())
-      .filter(Boolean);
+    const trimmedKeys = keys.map((k) => k.trim()).filter(Boolean);
+    const normalizedKeys = trimmedKeys.map((k) => k.toLowerCase());
 
-    if (projectId && userId) {
+    const effectiveProjectId =
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
+        ? projectId
+        : undefined;
+
+    if (effectiveProjectId && userId) {
       const member = await this.exportsRepo.findProjectMember(
-        projectId,
+        effectiveProjectId,
         userId,
       );
       if (!member) {
         throw new NotFoundException(
-          `Project ${projectId} not found or access denied`,
+          `Project ${effectiveProjectId} not found or access denied`,
         );
       }
     }
 
-    const scopeWhere: any = projectId
-      ? { projectId, deletedAt: null }
-      : {
-          deletedAt: null,
-          OR: [
-            { userId },
-            {
-              project: {
-                members: {
-                  some: { userId },
-                },
-              },
-            },
-          ],
-        };
+    const scopeWhere: Prisma.ItemWhereInput = effectiveProjectId
+      ? { projectId: effectiveProjectId, deletedAt: null }
+      : { userId, deletedAt: null };
 
     const isUuid = (val: string) =>
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-7][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -449,7 +703,7 @@ export class ExportsService {
     const idKeys = normalizedKeys.filter((k) => isUuid(k));
     const citeKeys = normalizedKeys;
 
-    const targetedScopeWhere: any = {
+    const targetedScopeWhere: Prisma.ItemWhereInput = {
       AND: [
         scopeWhere,
         {
@@ -461,50 +715,148 @@ export class ExportsService {
       ],
     };
 
-    const items = await this.exportsRepo.findItemsByScope(targetedScopeWhere);
+    const initialItems =
+      await this.exportsRepo.findItemsByScope(targetedScopeWhere);
+    const itemById = new Map<string, ExportItemRecord>();
+    for (const it of initialItems) {
+      if (it?.id) itemById.set(it.id, it);
+    }
 
+    // Check if all requested keys were satisfied by initialItems (including aliases on those items)
     const keySet = new Set(normalizedKeys);
-    const matchedItems = items.filter((it: any) => {
-      const citeKey = (it.citationKey || '').toLowerCase();
-      const itemId = (it.id || '').toLowerCase();
-      return (citeKey && keySet.has(citeKey)) || (itemId && keySet.has(itemId));
-    });
+    const satisfiedLowerKeys = new Set<string>();
 
-    const foundKeys: string[] = [];
-    for (const it of matchedItems) {
-      const citeKey = it.citationKey;
-      const itemId = it.id;
-      if (citeKey && keySet.has(citeKey.toLowerCase())) {
-        foundKeys.push(citeKey);
-      } else if (itemId && keySet.has(itemId.toLowerCase())) {
-        foundKeys.push(itemId);
+    const recordSatisfiedKeys = (itemsList: ExportItemRecord[]) => {
+      for (const it of itemsList) {
+        const cKey = (it.citationKey || '').toLowerCase();
+        const iId = (it.id || '').toLowerCase();
+        if (cKey && keySet.has(cKey)) satisfiedLowerKeys.add(cKey);
+        if (iId && keySet.has(iId)) satisfiedLowerKeys.add(iId);
+        for (const alias of this.extractItemCitationAliases(it)) {
+          const lowerAlias = alias.toLowerCase();
+          if (keySet.has(lowerAlias)) satisfiedLowerKeys.add(lowerAlias);
+        }
+      }
+    };
+
+    recordSatisfiedKeys(initialItems);
+
+    // If any requested key is still unresolved, scan scope items for mergedCitationKeys / tex.ids aliases
+    if (satisfiedLowerKeys.size < keySet.size) {
+      const scopeItems = await this.exportsRepo.findItemsByScope(scopeWhere);
+      for (const it of scopeItems) {
+        if (it?.id && !itemById.has(it.id)) {
+          itemById.set(it.id, it);
+        }
       }
     }
+
+    const allCandidateItems = Array.from(itemById.values());
+
+    // Preserve original casing from requested keys when emitting alias entries
+    const originalKeyByLower = new Map<string, string>();
+    for (const rawKey of trimmedKeys) {
+      const lower = rawKey.toLowerCase();
+      if (!originalKeyByLower.has(lower)) {
+        originalKeyByLower.set(lower, rawKey);
+      }
+    }
+
+    const foundKeys: string[] = [];
+    const emittedEntries: Array<{
+      item: ExportItemRecord;
+      emitCiteKey: string;
+    }> = [];
+    const emittedCiteKeySet = new Set<string>();
+
+    for (const it of allCandidateItems) {
+      const primaryCiteKey = it.citationKey || '';
+      const itemId = it.id || '';
+      const aliases = this.extractItemCitationAliases(it);
+
+      let itemMatchedPrimary = false;
+      if (primaryCiteKey && keySet.has(primaryCiteKey.toLowerCase())) {
+        foundKeys.push(primaryCiteKey);
+        itemMatchedPrimary = true;
+        const lowerPrimary = primaryCiteKey.toLowerCase();
+        if (!emittedCiteKeySet.has(lowerPrimary)) {
+          emittedCiteKeySet.add(lowerPrimary);
+          emittedEntries.push({ item: it, emitCiteKey: primaryCiteKey });
+        }
+      } else if (itemId && keySet.has(itemId.toLowerCase())) {
+        foundKeys.push(itemId);
+        itemMatchedPrimary = true;
+        const emitKey = primaryCiteKey || itemId;
+        const lowerEmit = emitKey.toLowerCase();
+        if (!emittedCiteKeySet.has(lowerEmit)) {
+          emittedCiteKeySet.add(lowerEmit);
+          emittedEntries.push({ item: it, emitCiteKey: emitKey });
+        }
+      }
+
+      for (const alias of aliases) {
+        const lowerAlias = alias.toLowerCase();
+        if (
+          keySet.has(lowerAlias) &&
+          lowerAlias !== primaryCiteKey.toLowerCase() &&
+          lowerAlias !== itemId.toLowerCase()
+        ) {
+          const requestedKey = originalKeyByLower.get(lowerAlias) || alias;
+          foundKeys.push(requestedKey);
+          if (!emittedCiteKeySet.has(lowerAlias)) {
+            emittedCiteKeySet.add(lowerAlias);
+            emittedEntries.push({ item: it, emitCiteKey: requestedKey });
+          }
+        } else if (
+          !itemMatchedPrimary &&
+          keySet.has(lowerAlias) &&
+          !emittedCiteKeySet.has(lowerAlias)
+        ) {
+          const requestedKey = originalKeyByLower.get(lowerAlias) || alias;
+          foundKeys.push(requestedKey);
+          emittedCiteKeySet.add(lowerAlias);
+          emittedEntries.push({ item: it, emitCiteKey: requestedKey });
+        }
+      }
+    }
+
     const foundKeySet = new Set(foundKeys.map((k: string) => k.toLowerCase()));
     const missingKeys = keys.filter(
       (k) => !foundKeySet.has(k.trim().toLowerCase()),
     );
 
-    const entries = matchedItems.map((it: any) => {
+    const entries = emittedEntries.map(({ item: it, emitCiteKey }) => {
       const authors = CslJsonMapper.getAuthorNames(it);
-      const citeKey = it.citationKey || it.id;
+      const meta = extractExportMetadata(it);
       const res = this.citationService.formatItem(
         {
-          id: citeKey,
+          id: emitCiteKey,
           itemType: it.itemType ?? 'journalArticle',
           title: it.title,
           authors,
           publicationTitle: it.publicationTitle ?? undefined,
-          publisher: it.publisher ?? undefined,
+          publisher: meta.publisher,
           year: it.year ?? undefined,
-          volume: it.volume ?? undefined,
-          issue: it.issue ?? undefined,
-          pages: it.pages ?? undefined,
-          doi: it.doi ?? undefined,
+          volume: meta.volume,
+          issue: meta.issue,
+          pages: meta.pages,
+          doi: it.doi || meta.doi || undefined,
+          isbn: meta.isbn,
+          issn: meta.issn,
+          pmid: meta.pmid,
+          pmcid: meta.pmcid,
+          arxivId: meta.arxivId,
+          edition: meta.edition,
+          place: meta.place,
+          series: meta.series,
+          accessedAt: meta.accessedAt || meta.accessDate,
           url: it.url ?? undefined,
-          citationKey: citeKey,
+          citationKey: emitCiteKey,
+          extra: meta.extra,
+          contributors: it.contributors,
           creators: it.contributors,
           abstract: it.abstract ?? undefined,
+          metadata: it.metadata,
           // Cache-busting: CslEngineService keys its LRU cache on id + version/updatedAt.
           updatedAt: it.updatedAt ?? undefined,
           version: it.version ?? undefined,
@@ -516,7 +868,7 @@ export class ExportsService {
 
     return {
       content: entries.join('\n\n'),
-      count: matchedItems.length,
+      count: emittedEntries.length,
       foundKeys,
       missingKeys,
     };

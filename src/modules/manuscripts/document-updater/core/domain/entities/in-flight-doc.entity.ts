@@ -4,12 +4,12 @@
  * Holds current hot text lines, uncommitted operation counters, and flush lifecycle state.
  */
 
-import { DocumentVersionVo } from '../value-objects/document-version.vo';
+import { DocumentVersionVo } from '@/modules/manuscripts/document-updater/core/domain/value-objects/document-version.vo';
 import {
   FlushStatusVo,
   FlushStatusEnum,
-} from '../value-objects/flush-status.vo';
-import { UpdateOpVo } from '../value-objects/update-op.vo';
+} from '@/modules/manuscripts/document-updater/core/domain/value-objects/flush-status.vo';
+import { UpdateOpVo } from '@/modules/manuscripts/document-updater/core/domain/value-objects/update-op.vo';
 
 export interface InFlightDocProps {
   docId: string;

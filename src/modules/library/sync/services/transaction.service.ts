@@ -1,20 +1,14 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import {
-  Prisma,
-  LibraryChange,
-  Tombstone,
-  OutboxEvent,
-  OutboxStatus,
-} from '@prisma/client';
-import { ChangeLogRepository } from '../repositories/changelog.repository';
+import { Prisma, LibraryChange, Tombstone, OutboxStatus } from '@prisma/client';
+import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
 import {
   IUnitOfWork,
   TransactionService as SharedTransactionService,
   TransactionHelpers,
   AppendChangeEntry,
   RecordTombstoneEntry,
-} from '../../shared-kernel/ports/unit-of-work.port';
+} from '@/modules/library/shared-kernel/ports/unit-of-work.port';
 import { OutboxWorker } from './outbox.worker';
 
 export type { AppendChangeEntry, RecordTombstoneEntry, TransactionHelpers };
@@ -62,7 +56,7 @@ export class TransactionService
             scope: { userId: string; projectId?: string | null } | string,
             aggregateId: string,
             eventType: string,
-            payload: any,
+            payload: unknown,
           ) => {
             const userId = typeof scope === 'object' ? scope.userId : scope;
             const projectId =

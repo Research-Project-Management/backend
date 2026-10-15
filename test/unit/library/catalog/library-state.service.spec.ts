@@ -13,7 +13,7 @@ import {
   isValidScrollPosition,
   shouldAutoAdvanceToReading,
   toStateResponse,
-} from '@/modules/library/catalog/utils/state.utils';
+} from '@/modules/library/catalog/domain/state.domain';
 import {
   TransactionService,
   TransactionHelpers,

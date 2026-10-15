@@ -9,7 +9,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   LiveCollaborationPort,
   LivePresenceUser,
-} from '@/modules/manuscripts/docstore/core/ports/live-collaboration.port';
+} from '@/modules/manuscripts/docstore/domain';
 import { YjsDocManagerAdapter } from '../crdt/yjs-doc-manager.adapter';
 import { IRoomManagerPort } from '../../ports/room-manager.port';
 import { SocketIoBroadcasterAdapter } from '../broadcast/socket-io-broadcaster.adapter';
@@ -64,7 +64,9 @@ export class LiveCollaborationAdapter extends LiveCollaborationPort {
       color: p.color,
       avatar: p.avatar,
       fileId: p.activeDocId,
-      cursor: p.cursor ? p.cursor.toJSON() : null,
+      cursor: p.cursor
+        ? (p.cursor.toJSON() as unknown as Record<string, unknown>)
+        : null,
       lastSeen: p.lastSeenAt.getTime(),
     }));
   }

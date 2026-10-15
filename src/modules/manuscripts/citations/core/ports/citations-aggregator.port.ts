@@ -3,8 +3,8 @@
  * Outbound SPI Port for discovering .bib files and writing entries via Structure & Docstore.
  */
 
-import { BibliographyFile } from '../domain/entities/bibliography-file.entity';
-import { BibEntry } from '../domain/entities/bib-entry.entity';
+import { BibliographyFile } from '@/modules/manuscripts/citations/core/domain/entities/bibliography-file.entity';
+import { BibEntry } from '@/modules/manuscripts/citations/core/domain/entities/bib-entry.entity';
 
 export const CITATIONS_AGGREGATOR_PORT = Symbol('CITATIONS_AGGREGATOR_PORT');
 

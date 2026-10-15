@@ -2,8 +2,13 @@ import { IsString, IsOptional, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class SearchItemsQueryDto {
+  @IsOptional()
   @IsString()
-  query!: string;
+  query?: string;
+
+  @IsOptional()
+  @IsString()
+  q?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -27,6 +32,28 @@ export class SearchItemsQueryDto {
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @IsString()
+  itemType?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  yearFrom?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  yearTo?: number;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: 'relevance' | 'dateAdded' | 'createdAt' | 'year' | 'title';
+
+  @IsOptional()
+  @IsString()
+  sortOrder?: 'asc' | 'desc';
 }
 
 export const SearchQueryDto = SearchItemsQueryDto;

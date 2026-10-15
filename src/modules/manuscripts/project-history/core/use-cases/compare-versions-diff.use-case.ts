@@ -4,10 +4,10 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IHistoryRepositoryPort } from '../ports/history-repository.port';
-import { IDiffEnginePort } from '../ports/diff-engine.port';
-import { FileDiffVo } from '../domain/value-objects/file-diff.vo';
-import { VersionNotFoundException } from '../domain/exceptions/version-not-found.exception';
+import { IHistoryRepositoryPort } from '@/modules/manuscripts/project-history/core/ports/history-repository.port';
+import { IDiffEnginePort } from '@/modules/manuscripts/project-history/core/ports/diff-engine.port';
+import { FileDiffVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/file-diff.vo';
+import { VersionNotFoundException } from '@/modules/manuscripts/project-history/core/domain/exceptions/version-not-found.exception';
 
 export interface DiffComparisonResult {
   baseVersion: number;

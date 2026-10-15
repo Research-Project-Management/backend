@@ -64,9 +64,7 @@ export class CacheInvalidationListener {
       await this.redisCache.del(`WorkItem:${event.entityId}`);
     }
     if (event.scopeId) {
-      await this.redisCache.delPattern(
-        `flux:wi:labels:${event.scopeId}*`,
-      );
+      await this.redisCache.delPattern(`flux:wi:labels:${event.scopeId}*`);
     }
   }
 

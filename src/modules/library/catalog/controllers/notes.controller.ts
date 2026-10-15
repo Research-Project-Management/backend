@@ -14,9 +14,12 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { CreateNoteDto, UpdateNoteDto } from '../dto/notes.dto';
+import {
+  CreateNoteDto,
+  UpdateNoteDto,
+} from '@/modules/library/catalog/dto/notes.dto';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
-import { NotesService } from '../services/notes.service';
+import { NotesService } from '@/modules/library/catalog/services/notes.service';
 
 @ApiTags('Library Notes')
 @ApiBearerAuth('JWT-auth')
@@ -124,7 +127,17 @@ export class NoteController {
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
     }
-    return this.notesService.updateNote(currentUserId, id, dto);
+    const rawProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId =
+      rawProjectId &&
+      rawProjectId !== 'me' &&
+      rawProjectId !== 'user' &&
+      rawProjectId !== 'undefined'
+        ? rawProjectId
+        : undefined;
+    return effectiveProjectId
+      ? this.notesService.updateNote(currentUserId, id, dto, effectiveProjectId)
+      : this.notesService.updateNote(currentUserId, id, dto);
   }
 
   @Delete(':id')
@@ -139,7 +152,22 @@ export class NoteController {
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
     }
-    return this.notesService.deleteNote(currentUserId, id);
+    const rawProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId =
+      rawProjectId &&
+      rawProjectId !== 'me' &&
+      rawProjectId !== 'user' &&
+      rawProjectId !== 'undefined'
+        ? rawProjectId
+        : undefined;
+    return effectiveProjectId
+      ? this.notesService.deleteNote(
+          currentUserId,
+          id,
+          undefined,
+          effectiveProjectId,
+        )
+      : this.notesService.deleteNote(currentUserId, id);
   }
 
   @Post(['items/:itemId/extract-annotations', 'items/:itemId/from-annotations'])
@@ -152,11 +180,18 @@ export class NoteController {
     @Param('itemId') itemId: string,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
+    @Body()
+    body?: {
+      noteId?: string;
+      tagColor?: boolean;
+      includeComments?: boolean;
+      projectId?: string;
+    },
   ) {
     if (!isUUID(itemId)) {
       throw new BadRequestException(`Invalid item UUID: ${itemId}`);
     }
-    const rawProjectId = paramProjectId || queryProjectId;
+    const rawProjectId = paramProjectId || queryProjectId || body?.projectId;
     const effectiveProjectId =
       rawProjectId &&
       rawProjectId !== 'me' &&
@@ -165,10 +200,18 @@ export class NoteController {
         ? rawProjectId
         : undefined;
 
+    const options =
+      body &&
+      (body.noteId !== undefined ||
+        body.tagColor !== undefined ||
+        body.includeComments !== undefined)
+        ? { ...body, projectId: effectiveProjectId }
+        : effectiveProjectId;
+
     return this.notesService.extractNotesFromAnnotations(
       currentUserId,
       itemId,
-      effectiveProjectId,
+      options,
     );
   }
 

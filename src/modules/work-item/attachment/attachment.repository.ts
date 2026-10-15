@@ -2,39 +2,20 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { EntityType, Prisma } from '@prisma/client';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
+import {
+  USER_MINIMAL_SELECT,
+  mapUserMinimal,
+  UserProfileSource,
+} from '@/modules/work-item/common/types/shared.types';
 
-const AUTHOR_SELECT = {
-  id: true,
-  email: true,
-  profile: {
-    select: {
-      name: true,
-      avatar: true,
-    },
-  },
-} as const;
-
-function mapAttachment<
-  T extends {
-    author?: {
-      id: string;
-      email: string | null;
-      profile?: { name: string; avatar: string | null } | null;
-    } | null;
-  },
->(attachment: T) {
+function mapAttachment<T extends { author?: UserProfileSource | null }>(
+  attachment: T,
+) {
   if (!attachment) return attachment;
   const { author, ...rest } = attachment;
   return {
     ...rest,
-    author: author
-      ? {
-          id: author.id,
-          email: author.email,
-          name: author.profile?.name ?? 'User',
-          avatar: author.profile?.avatar ?? null,
-        }
-      : null,
+    author: mapUserMinimal(author),
   };
 }
 
@@ -58,7 +39,7 @@ export class AttachmentRepository {
       },
       include: {
         author: {
-          select: AUTHOR_SELECT,
+          select: USER_MINIMAL_SELECT,
         },
       },
     });
@@ -70,7 +51,7 @@ export class AttachmentRepository {
       where: { id },
       include: {
         author: {
-          select: AUTHOR_SELECT,
+          select: USER_MINIMAL_SELECT,
         },
       },
     });
@@ -101,7 +82,7 @@ export class AttachmentRepository {
         orderBy: { createdAt: 'desc' },
         include: {
           author: {
-            select: AUTHOR_SELECT,
+            select: USER_MINIMAL_SELECT,
           },
         },
       }),
@@ -119,7 +100,7 @@ export class AttachmentRepository {
       orderBy: { createdAt: 'desc' },
       include: {
         author: {
-          select: AUTHOR_SELECT,
+          select: USER_MINIMAL_SELECT,
         },
       },
     });
@@ -162,11 +143,7 @@ export class AttachmentRepository {
       where: { id },
       include: {
         assignee: {
-          select: {
-            id: true,
-            email: true,
-            profile: { select: { name: true, avatar: true } },
-          },
+          select: USER_MINIMAL_SELECT,
         },
         state: {
           select: {

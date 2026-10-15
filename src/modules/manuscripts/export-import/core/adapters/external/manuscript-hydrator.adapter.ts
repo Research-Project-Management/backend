@@ -6,9 +6,9 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'node:path';
-import { IManuscriptHydratorPort } from '../../ports/manuscript-hydrator.port';
-import { ArchiveEntryVo } from '../../domain/value-objects/archive-entry.vo';
-import { ImportSummaryVo } from '../../domain/value-objects/import-summary.vo';
+import { IManuscriptHydratorPort } from '@/modules/manuscripts/export-import/core/ports/manuscript-hydrator.port';
+import { ArchiveEntryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/archive-entry.vo';
+import { ImportSummaryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/import-summary.vo';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
@@ -57,8 +57,21 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     let totalFolders = 0;
     const docContentsMap = new Map<string, string[]>();
 
+    // Overleaf Parity: Detect and unwrap a single top-level wrapper directory
+    // (e.g., GitHub/macOS archives where all files sit under "attention-paper/ms.tex", "attention-paper/Sections/...")
+    const wrapperPrefix = this.detectSingleWrapperFolder(entries);
+
     for (const entry of entries) {
-      const normalizedPath = '/' + entry.path.replace(/^\/+/, '');
+      let cleanRelPath = entry.path.replace(/^\/+/, '');
+      if (wrapperPrefix) {
+        if (cleanRelPath === wrapperPrefix) {
+          continue; // Skip the wrapper folder entry itself
+        }
+        if (cleanRelPath.startsWith(wrapperPrefix + '/')) {
+          cleanRelPath = cleanRelPath.slice(wrapperPrefix.length + 1);
+        }
+      }
+      const normalizedPath = '/' + cleanRelPath;
       const parentDir = path.posix.dirname(normalizedPath);
       const baseName = path.posix.basename(normalizedPath);
 
@@ -76,10 +89,34 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
       }
 
       const storageType = entry.getStorageType();
+      const existingNode = await this.structureService.getNodeByPath(
+        projectId,
+        normalizedPath,
+      );
 
       if (storageType === 'doc') {
-        const text = entry.data.toString('utf8');
-        const lines = text.split(/\r?\n/);
+        const text = entry.data.toString('utf8').replace(/^\uFEFF/, '');
+        const lines = text
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '\n')
+          .split('\n');
+
+        if (existingNode && existingNode.type === 'DOC' && existingNode.docId) {
+          const current = await this.docstoreService
+            .getDoc(projectId, existingNode.docId)
+            .catch(() => null);
+          await this.docstoreService.updateDoc(projectId, existingNode.docId, {
+            lines,
+            version: (current?.version ?? 0) + 1,
+          });
+          docContentsMap.set(existingNode.docId, lines);
+          totalDocs++;
+          continue;
+        }
+
+        if (existingNode) {
+          await this.structureService.deleteNode(projectId, existingNode.id);
+        }
 
         const doc = await this.docstoreService.createDoc(projectId, {
           path: normalizedPath,
@@ -97,6 +134,15 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
         totalDocs++;
       } else {
         const mimeType = inferMimeType(entry.path);
+
+        if (existingNode) {
+          if (existingNode.fileId) {
+            await this.filestoreService
+              .deleteFile(projectId, existingNode.fileId, false)
+              .catch(() => undefined);
+          }
+          await this.structureService.deleteNode(projectId, existingNode.id);
+        }
 
         const file = await this.filestoreService.uploadFileFromBuffer(
           projectId,
@@ -121,7 +167,11 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     let rootDocPath: string | null = null;
 
     if (preferredRootDoc) {
-      const preferredNorm = '/' + preferredRootDoc.replace(/^\/+/, '');
+      let cleanPreferred = preferredRootDoc.replace(/^\/+/, '');
+      if (wrapperPrefix && cleanPreferred.startsWith(wrapperPrefix + '/')) {
+        cleanPreferred = cleanPreferred.slice(wrapperPrefix.length + 1);
+      }
+      const preferredNorm = '/' + cleanPreferred;
       const match = await this.structureService.getNodeByPath(
         projectId,
         preferredNorm,
@@ -157,5 +207,46 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
       rootDocId,
       rootDocPath,
     });
+  }
+
+  /**
+   * Detects when all archive entries are nested inside a single top-level wrapper folder
+   * that directly contains at least one TeX document (e.g., "attention-paper/ms.tex").
+   */
+  private detectSingleWrapperFolder(entries: ArchiveEntryVo[]): string | null {
+    const fileEntries = entries.filter((e) => !e.isDirectory);
+    if (fileEntries.length === 0) return null;
+
+    let commonTopFolder: string | null = null;
+    let hasRootTexInsideWrapper = false;
+
+    for (const entry of entries) {
+      const clean = entry.path.replace(/^\/+/, '').replace(/\/+$/, '');
+      if (!clean) continue;
+      const segments = clean.split('/');
+      const firstSegment = segments[0];
+
+      if (commonTopFolder === null) {
+        commonTopFolder = firstSegment;
+      } else if (commonTopFolder !== firstSegment) {
+        return null;
+      }
+
+      if (!entry.isDirectory) {
+        // A file directly at root (depth 1) means there is no wrapper folder
+        if (segments.length < 2) {
+          return null;
+        }
+        // Check if there is a .tex/.ltx/.rtex file directly inside the wrapper folder (depth 2)
+        if (
+          segments.length === 2 &&
+          /\.(tex|ltx|rtex|latex)$/i.test(segments[1])
+        ) {
+          hasRootTexInsideWrapper = true;
+        }
+      }
+    }
+
+    return hasRootTexInsideWrapper ? commonTopFolder : null;
   }
 }

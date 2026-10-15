@@ -1,0 +1,99 @@
+export type QueryCriteria = Record<string, unknown>;
+
+/**
+ * Specification Pattern Interface.
+ *
+ * Encapsulates domain query and filtering criteria into reusable, composable objects.
+ * Supports:
+ * - In-memory evaluation via `isSatisfiedBy(candidate)` (great for unit tests and local filters)
+ * - Database query compilation via `toPrismaWhere()` / `toQueryCriteria()`
+ * - Logical composition via `.and()`, `.or()`, and `.not()`
+ */
+export interface ISpecification<T = unknown> {
+  isSatisfiedBy(candidate: T): boolean;
+  toPrismaWhere(): QueryCriteria;
+  and(other: ISpecification<T>): ISpecification<T>;
+  or(other: ISpecification<T>): ISpecification<T>;
+  not(): ISpecification<T>;
+}
+
+export abstract class CompositeSpecification<
+  T = unknown,
+> implements ISpecification<T> {
+  abstract isSatisfiedBy(candidate: T): boolean;
+  abstract toPrismaWhere(): QueryCriteria;
+
+  and(other: ISpecification<T>): ISpecification<T> {
+    return new AndSpecification(this, other);
+  }
+
+  or(other: ISpecification<T>): ISpecification<T> {
+    return new OrSpecification(this, other);
+  }
+
+  not(): ISpecification<T> {
+    return new NotSpecification(this);
+  }
+}
+
+export class AndSpecification<T = unknown> extends CompositeSpecification<T> {
+  constructor(
+    private readonly left: ISpecification<T>,
+    private readonly right: ISpecification<T>,
+  ) {
+    super();
+  }
+
+  isSatisfiedBy(candidate: T): boolean {
+    return (
+      this.left.isSatisfiedBy(candidate) && this.right.isSatisfiedBy(candidate)
+    );
+  }
+
+  toPrismaWhere(): QueryCriteria {
+    const leftWhere = this.left.toPrismaWhere();
+    const rightWhere = this.right.toPrismaWhere();
+    return {
+      AND: [leftWhere, rightWhere],
+    };
+  }
+}
+
+export class OrSpecification<T = unknown> extends CompositeSpecification<T> {
+  constructor(
+    private readonly left: ISpecification<T>,
+    private readonly right: ISpecification<T>,
+  ) {
+    super();
+  }
+
+  isSatisfiedBy(candidate: T): boolean {
+    return (
+      this.left.isSatisfiedBy(candidate) || this.right.isSatisfiedBy(candidate)
+    );
+  }
+
+  toPrismaWhere(): QueryCriteria {
+    const leftWhere = this.left.toPrismaWhere();
+    const rightWhere = this.right.toPrismaWhere();
+    return {
+      OR: [leftWhere, rightWhere],
+    };
+  }
+}
+
+export class NotSpecification<T = unknown> extends CompositeSpecification<T> {
+  constructor(private readonly spec: ISpecification<T>) {
+    super();
+  }
+
+  isSatisfiedBy(candidate: T): boolean {
+    return !this.spec.isSatisfiedBy(candidate);
+  }
+
+  toPrismaWhere(): QueryCriteria {
+    return {
+      NOT: this.spec.toPrismaWhere(),
+    };
+  }
+}

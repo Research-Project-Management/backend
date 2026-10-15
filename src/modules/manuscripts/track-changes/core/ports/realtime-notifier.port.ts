@@ -3,9 +3,9 @@
  * Outbound Port (SPI) for broadcasting review notifications (track changes, comments, replies) over WebSocket.
  */
 
-import { TrackChange } from '../domain/entities/track-change.entity';
-import { CommentThread } from '../domain/entities/comment-thread.entity';
-import { CommentReply } from '../domain/entities/comment-reply.entity';
+import { TrackChange } from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
+import { CommentThread } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-thread.entity';
+import { CommentReply } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-reply.entity';
 
 export abstract class IRealtimeNotifierPort {
   abstract notifyChangeRecorded(

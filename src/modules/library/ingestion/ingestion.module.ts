@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
-import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
-import { StorageModule } from '../../storage/storage.module';
-import { CatalogModule } from '../catalog/catalog.module';
-import { ExtractionModule } from '../extraction/extraction.module';
+import { SharedKernelModule } from '@/modules/library/shared-kernel/shared-kernel.module';
+import { StorageModule } from '@/modules/storage/storage.module';
+import { CatalogModule } from '@/modules/library/catalog/catalog.module';
+import { ExtractionModule } from '@/modules/library/extraction/extraction.module';
 import { BullModule } from '@nestjs/bullmq';
 import {
   LIBRARY_INGESTION_QUEUE_PRIORITY,
@@ -14,11 +14,11 @@ import { shouldRunWorkerConsumers } from '@/core';
 
 // Gateway Ports & Adapters
 import { CATALOG_GATEWAY_PORT } from './types/catalog-gateway.types';
-import { InProcessCatalogGatewayAdapter } from './utils/in-process-catalog-gateway.adapter';
-import { HttpCatalogGatewayAdapter } from './utils/http-catalog-gateway.adapter';
+import { InProcessCatalogGatewayAdapter } from './gateways/in-process-catalog-gateway.adapter';
+import { HttpCatalogGatewayAdapter } from './gateways/http-catalog-gateway.adapter';
 import { EXTRACTION_GATEWAY_PORT } from './types/extraction-gateway.types';
-import { InProcessExtractionGatewayAdapter } from './utils/in-process-extraction-gateway.adapter';
-import { HttpExtractionGatewayAdapter } from './utils/http-extraction-gateway.adapter';
+import { InProcessExtractionGatewayAdapter } from './gateways/in-process-extraction-gateway.adapter';
+import { HttpExtractionGatewayAdapter } from './gateways/http-extraction-gateway.adapter';
 
 // Facade
 import { IngestionFacade, INGESTION_FACADE } from './ingestion.facade';
@@ -50,6 +50,7 @@ import { RetractionDatabaseService } from './services/retraction-database.servic
 import { RetractionSyncService } from './services/retraction-sync.service';
 import { IngestionVerifierService } from './services/ingestion-verifier.service';
 import { WebFetchLadderService } from './services/web-fetch-ladder.service';
+import { DomainRateLimiterService } from './services/domain-rate-limiter.service';
 import { WEB_FETCH_PORT } from './types/web-fetch.types';
 
 // Repositories
@@ -57,11 +58,8 @@ import { IngestionRepository } from './repositories/ingestion.repository';
 import { IdempotencyRepository } from './repositories/idempotency.repository';
 import { MetadataCache } from './repositories/metadata.cache';
 import { RetractionRepository } from './repositories/retraction.repository';
-import { PrismaIngestionRunRepositoryAdapter } from './repositories/prisma-ingestion-run-repository.adapter';
 
 // Types & Ports
-import { INGESTION_PORT } from './types/ingestion.types';
-import { INGESTION_RUN_REPOSITORY_PORT } from './types/ingestion-run-repository.types';
 import {
   METADATA_PROVIDERS,
   METADATA_PORT,
@@ -69,7 +67,7 @@ import {
 } from './types/metadata.types';
 
 // Parsers & Policies & Stages & Providers
-import { DoiParser, BibtexParser, RisParser } from './parsers';
+import { DoiParser, BibtexParser, RisParser, CslParser } from './parsers';
 import {
   NormalizationPolicy,
   ReconciliationPolicy,
@@ -94,13 +92,12 @@ import {
   RetractionScannerProvider,
   SearxngSearchProvider,
   EuropePmcSearchProvider,
+  DblpProvider,
+  SemanticScholarProvider,
 } from './providers';
 import { ExternalSearchComparatorService } from './services/external-search-comparator.service';
-import {
-  EXTERNAL_SEARCH_PORT,
-  EXTERNAL_SEARCH_PROVIDERS,
-} from './types/external-search.types';
-import { RetractionItemEventsSubscriber } from './utils/retraction-item-events.subscriber';
+import { EXTERNAL_SEARCH_PORT } from './types/external-search.types';
+import { RetractionItemEventsSubscriber } from './subscribers/retraction-item-events.subscriber';
 
 const ingestionWorkerProviders = shouldRunWorkerConsumers()
   ? [IngestionQueueConsumer]
@@ -164,18 +161,9 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     IdempotencyRepository,
     MetadataCache,
     RetractionRepository,
-    PrismaIngestionRunRepositoryAdapter,
-    {
-      provide: INGESTION_RUN_REPOSITORY_PORT,
-      useClass: PrismaIngestionRunRepositoryAdapter,
-    },
 
     // Services
     IngestionService,
-    {
-      provide: INGESTION_PORT,
-      useExisting: IngestionService,
-    },
     PipelineService,
     IngestionSagaOrchestrator,
     QueueService,
@@ -194,6 +182,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     DoiParser,
     BibtexParser,
     RisParser,
+    CslParser,
     { provide: NormalizationPolicy, useClass: NormalizationPolicy },
     { provide: ReconciliationPolicy, useClass: ReconciliationPolicy },
     { provide: DuplicatePolicy, useClass: DuplicatePolicy },
@@ -206,6 +195,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     UrlCaptureProvider,
 
     // Metadata Providers & Enrichment
+    DomainRateLimiterService,
     ReconciliationService,
     ExecutorService,
     CrossRefProvider,
@@ -214,6 +204,8 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     OpenLibraryProvider,
     OpenAlexProvider,
     UnpaywallProvider,
+    DblpProvider,
+    SemanticScholarProvider,
     {
       provide: METADATA_PROVIDERS,
       useFactory: (
@@ -223,6 +215,8 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
         openlibrary: OpenLibraryProvider,
         openalex: OpenAlexProvider,
         unpaywall: UnpaywallProvider,
+        dblp: DblpProvider,
+        semanticscholar: SemanticScholarProvider,
       ): MetadataProvider[] => [
         crossref,
         arxiv,
@@ -230,6 +224,8 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
         openlibrary,
         openalex,
         unpaywall,
+        dblp,
+        semanticscholar,
       ],
       inject: [
         CrossRefProvider,
@@ -238,6 +234,8 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
         OpenLibraryProvider,
         OpenAlexProvider,
         UnpaywallProvider,
+        DblpProvider,
+        SemanticScholarProvider,
       ],
     },
     MetadataService,
@@ -269,8 +267,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
   exports: [
     IngestionFacade,
     INGESTION_FACADE,
-    INGESTION_RUN_REPOSITORY_PORT,
-    INGESTION_PORT,
     METADATA_PORT,
     IngestionSagaOrchestrator,
     IngestionVerifierService,
@@ -280,6 +276,9 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     ExternalSearchComparatorService,
     SearxngSearchProvider,
     EuropePmcSearchProvider,
+    DomainRateLimiterService,
+    DblpProvider,
+    SemanticScholarProvider,
   ],
 })
 export class IngestionModule {}

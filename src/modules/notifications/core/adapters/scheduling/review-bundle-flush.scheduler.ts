@@ -36,7 +36,10 @@ export class ReviewBundleFlushScheduler
   ) {}
 
   onApplicationBootstrap(): void {
-    if (process.env.NODE_ENV === 'test' || process.env.REVIEW_BUNDLE_SCHEDULER === 'off') {
+    if (
+      process.env.NODE_ENV === 'test' ||
+      process.env.REVIEW_BUNDLE_SCHEDULER === 'off'
+    ) {
       return;
     }
     this.timer = setInterval(() => void this.sweep(), SWEEP_INTERVAL_MS);
@@ -63,7 +66,11 @@ export class ReviewBundleFlushScheduler
           const users = await this.prisma.manuscriptNotification.findMany({
             where: {
               isRead: false,
-              type: { in: [...REVIEW_NOTIFICATION_TYPES] as ManuscriptNotificationType[] },
+              type: {
+                in: [
+                  ...REVIEW_NOTIFICATION_TYPES,
+                ] as ManuscriptNotificationType[],
+              },
               createdAt: { lte: new Date(now.getTime() - 60_000) },
             },
             distinct: ['userId'],
@@ -89,8 +96,9 @@ export class ReviewBundleFlushScheduler
         },
         { timeout: SWEEP_INTERVAL_MS - 5_000 },
       );
-    } catch (err: any) {
-      this.logger.warn(`Review bundle sweep skipped: ${err?.message}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Review bundle sweep skipped: ${errMsg}`);
       return 0;
     } finally {
       this.running = false;

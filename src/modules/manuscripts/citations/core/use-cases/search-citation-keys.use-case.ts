@@ -3,8 +3,8 @@
  * Inbound Use Case: Searches all .bib files in the project to power editor \cite{...} autocompletion.
  */
 
-import { ICitationsAggregatorPort } from '../ports/citations-aggregator.port';
-import { BibEntry } from '../domain/entities/bib-entry.entity';
+import { ICitationsAggregatorPort } from '@/modules/manuscripts/citations/core/ports/citations-aggregator.port';
+import { BibEntry } from '@/modules/manuscripts/citations/core/domain/entities/bib-entry.entity';
 
 export interface SearchCitationKeysCommand {
   projectId: string;

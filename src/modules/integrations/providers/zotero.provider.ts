@@ -166,11 +166,10 @@ export class ZoteroProvider implements IIntegrationProvider {
         state,
         requestTokenSecret: requestTokenSecret || '',
       };
-    } catch (err: any) {
-      this.logger.error(
-        `Error initiating Zotero OAuth: ${err.message}`,
-        err.stack,
-      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error(`Error initiating Zotero OAuth: ${errMsg}`, stack);
       throw err;
     }
   }
@@ -289,11 +288,10 @@ export class ZoteroProvider implements IIntegrationProvider {
         },
         userId: resolvedUserId,
       };
-    } catch (err: any) {
-      this.logger.error(
-        `Error exchanging Zotero token: ${err.message}`,
-        err.stack,
-      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error(`Error exchanging Zotero token: ${errMsg}`, stack);
       throw err;
     }
   }
@@ -335,10 +333,10 @@ export class ZoteroProvider implements IIntegrationProvider {
           name: 'My Library (Entire Library)',
           itemCount: totalItems,
         });
-      } catch (probeErr: any) {
-        this.logger.warn(
-          `Could not probe Zotero root library: ${probeErr.message}`,
-        );
+      } catch (probeErr: unknown) {
+        const errMsg =
+          probeErr instanceof Error ? probeErr.message : String(probeErr);
+        this.logger.warn(`Could not probe Zotero root library: ${errMsg}`);
         results.push({
           id: 'all',
           name: 'My Library (Entire Library)',
@@ -446,11 +444,10 @@ export class ZoteroProvider implements IIntegrationProvider {
       }
 
       return results;
-    } catch (err: any) {
-      this.logger.error(
-        `Error fetching Zotero collections: ${err.message}`,
-        err.stack,
-      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error(`Error fetching Zotero collections: ${errMsg}`, stack);
       throw err;
     }
   }
@@ -540,11 +537,10 @@ export class ZoteroProvider implements IIntegrationProvider {
       } while (start < totalResults && start < 2000); // 2000 items maximum safety limit
 
       return bibtexChunks.join('\n\n');
-    } catch (err: any) {
-      this.logger.error(
-        `Error fetching Zotero BibTeX: ${err.message}`,
-        err.stack,
-      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error(`Error fetching Zotero BibTeX: ${errMsg}`, stack);
       throw err;
     }
   }

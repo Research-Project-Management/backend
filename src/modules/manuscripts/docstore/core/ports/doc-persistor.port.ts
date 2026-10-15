@@ -5,10 +5,11 @@
  */
 
 import { Readable } from 'stream';
+import { DocRanges } from '@/modules/manuscripts/docstore/core/domain/doc-range.vo';
 
 export interface PersistArchivePayload {
   lines: string[];
-  ranges?: any;
+  ranges?: DocRanges | Record<string, unknown>;
   schema_v: number;
 }
 

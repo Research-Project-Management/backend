@@ -1,4 +1,5 @@
 export * from './transaction.service';
+export * from './changelog.service';
 export * from './outbox.worker';
 export * from './outbox.dispatcher';
 export * from './outbox.metrics';

@@ -18,7 +18,7 @@ export const INTEGRATION_EVENT_TOPICS = {
 export type LibraryBoundedContext =
   'catalog' | 'sync' | 'extraction' | 'ingestion' | 'citation' | 'search';
 
-export interface BaseIntegrationEvent<T = any> {
+export interface BaseIntegrationEvent<T = unknown> {
   readonly eventId: string;
   readonly topic: string;
   readonly occurredAt: string;

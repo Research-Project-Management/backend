@@ -1,4 +1,4 @@
-import { CslJsonMapper } from '@/modules/library/citation/utils/csl-json.mapper';
+import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
 import { CslItemData } from '@/modules/library/citation/types/csl-json.types';
 

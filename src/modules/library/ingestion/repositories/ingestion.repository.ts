@@ -12,7 +12,7 @@ import {
   IngestionCandidate,
   IngestionDecision,
   IngestionReviewCase,
-} from '../types/ingestion.types';
+} from '@/modules/library/ingestion/types/ingestion.types';
 import { randomUUID } from 'crypto';
 import { isUUID } from 'class-validator';
 
@@ -38,22 +38,6 @@ export interface CreateIngestionStageData {
   outputSnapshot?: Prisma.InputJsonValue;
   leaseToken?: string;
   leaseExpiresAt?: Date;
-}
-
-export interface CreateIngestionCandidateData {
-  sourceProvider: string;
-  sourceRecordId?: string;
-  confidenceScore?: number;
-  metadataPayload: Prisma.InputJsonValue;
-  rawEvidenceRef?: string;
-}
-
-export interface CreateIngestionDecisionData {
-  decisionType: string; // CREATE, UPDATE, MERGE, REVIEW, REJECT
-  decisionReason: string;
-  proposedItem: Prisma.InputJsonValue;
-  fieldDecisions?: Prisma.InputJsonValue;
-  duplicateMatch?: Prisma.InputJsonValue;
 }
 
 export interface CreateIngestionReviewCaseData {
@@ -158,8 +142,38 @@ export class IngestionRepository {
     });
   }
 
+  private buildRunIdWhere(
+    scope: IngestionScope | undefined,
+    runId: string,
+  ): Prisma.IngestionRunWhereInput {
+    if (!scope) return { id: runId };
+    if (typeof scope === 'object') {
+      if (scope.projectId && isUUID(scope.projectId)) {
+        return { id: runId, projectId: scope.projectId };
+      }
+      if (scope.userId && scope.userId !== 'system' && isUUID(scope.userId)) {
+        return { id: runId, userId: scope.userId };
+      }
+      return { id: runId };
+    }
+    const trimmed = scope.trim();
+    if (
+      !trimmed ||
+      trimmed === 'system' ||
+      trimmed === 'user' ||
+      trimmed === 'me' ||
+      !isUUID(trimmed)
+    ) {
+      return { id: runId };
+    }
+    return {
+      id: runId,
+      OR: [{ userId: trimmed }, { projectId: trimmed }],
+    };
+  }
+
   async findRunById(
-    _scope: { userId?: string; projectId?: string } | string,
+    scope: { userId?: string; projectId?: string } | string,
     runId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<
@@ -174,9 +188,7 @@ export class IngestionRepository {
   > {
     const client = this.getClient(tx);
     const run = await client.ingestionRun.findFirst({
-      where: {
-        id: runId,
-      },
+      where: this.buildRunIdWhere(scope, runId),
       include: {
         item: true,
       },
@@ -488,58 +500,6 @@ export class IngestionRepository {
     return Array.isArray(log.stages) ? (log.stages as IngestionStage[]) : [];
   }
 
-  // ── Candidate Operations ──────────────────────────────────────────────────
-
-  createCandidate(
-    ingestionRunId: string,
-    data: CreateIngestionCandidateData,
-    _tx?: Prisma.TransactionClient,
-  ): Promise<IngestionCandidate> {
-    return Promise.resolve({
-      id: randomUUID(),
-      ingestionRunId,
-      sourceProvider: data.sourceProvider,
-      sourceRecordId: data.sourceRecordId ?? null,
-      confidenceScore: data.confidenceScore ?? 1.0,
-      metadataPayload: data.metadataPayload,
-      rawEvidenceRef: data.rawEvidenceRef ?? null,
-      fetchedAt: new Date(),
-    });
-  }
-
-  findCandidates(
-    _ingestionRunId: string,
-    _tx?: Prisma.TransactionClient,
-  ): Promise<IngestionCandidate[]> {
-    return Promise.resolve([]);
-  }
-
-  // ── Decision Operations ───────────────────────────────────────────────────
-
-  createDecision(
-    ingestionRunId: string,
-    data: CreateIngestionDecisionData,
-    _tx?: Prisma.TransactionClient,
-  ): Promise<IngestionDecision> {
-    return Promise.resolve({
-      id: randomUUID(),
-      ingestionRunId,
-      decisionType: data.decisionType,
-      decisionReason: data.decisionReason,
-      proposedItem: data.proposedItem,
-      fieldDecisions: data.fieldDecisions,
-      duplicateMatch: data.duplicateMatch,
-      decidedAt: new Date(),
-    });
-  }
-
-  findDecisions(
-    _ingestionRunId: string,
-    _tx?: Prisma.TransactionClient,
-  ): Promise<IngestionDecision[]> {
-    return Promise.resolve([]);
-  }
-
   // ── Review Case Operations ────────────────────────────────────────────────
 
   async createReviewCase(
@@ -602,27 +562,27 @@ export class IngestionRepository {
   }
 
   async findReviewCaseById(
-    _scope: { userId?: string; projectId?: string } | string,
+    scope: { userId?: string; projectId?: string } | string,
     id: string,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase | null> {
     const client = this.getClient(tx);
     const run = await client.ingestionRun.findFirst({
-      where: { id },
+      where: this.buildRunIdWhere(scope, id),
       select: { reviewData: true },
     });
     return (run?.reviewData as unknown as IngestionReviewCase) ?? null;
   }
 
   async updateReviewCaseStatus(
-    _scope: { userId?: string; projectId?: string } | string,
+    scope: { userId?: string; projectId?: string } | string,
     id: string,
     status: 'APPROVED' | 'REJECTED' | 'DISMISSED',
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase> {
     const client = this.getClient(tx);
     const run = await client.ingestionRun.findFirst({
-      where: { id },
+      where: this.buildRunIdWhere(scope, id),
       select: { reviewData: true },
     });
     const currentReview =
@@ -666,7 +626,7 @@ export class IngestionRepository {
         ...(projectId
           ? { projectId }
           : userId && userId !== 'system'
-            ? { userId }
+            ? { userId, projectId: null }
             : {}),
         itemId: { not: null },
         reviewData: { not: Prisma.JsonNull },
@@ -803,21 +763,31 @@ export class IngestionRepository {
   ) {
     if (!scope?.userId) return null;
     const client = this.getClient(tx);
-    let whereClause: any = null;
+    let whereClause: Prisma.ItemWhereInput | null = null;
     if (type === 'DOI') {
       whereClause = {
         doi: { equals: cleanQuery, mode: 'insensitive' },
         deletedAt: null,
       };
     } else if (type === 'ARXIV') {
-      whereClause = { arxivId: cleanQuery, deletedAt: null };
+      whereClause = {
+        metadata: { path: ['arxivId'], equals: cleanQuery },
+        deletedAt: null,
+      };
     } else if (type === 'PMID') {
-      whereClause = { pmid: cleanQuery, deletedAt: null };
+      whereClause = {
+        metadata: { path: ['pmid'], equals: cleanQuery },
+        deletedAt: null,
+      };
     }
     if (!whereClause) return null;
 
-    whereClause.userId = scope.userId;
-    if (scope.projectId) whereClause.projectId = scope.projectId;
+    if (scope.projectId) {
+      whereClause.projectId = scope.projectId;
+    } else {
+      whereClause.userId = scope.userId;
+      whereClause.projectId = null;
+    }
 
     return client.item.findFirst({
       where: whereClause,

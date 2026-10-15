@@ -18,7 +18,7 @@ import {
   getStateDefaultIcon,
 } from './types/state.types';
 import { generateStateSlug, isValidStateGroup } from './utils/state.util';
-import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
+import { invalidateWorkItemCache } from '@/modules/work-item/common/constants/redis-keys.constant';
 
 @Injectable()
 export class StateService {
@@ -28,6 +28,14 @@ export class StateService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
+  private async ensureProjectExists(projectId: string) {
+    const project = await this.stateRepository.findProjectById(projectId);
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+    return project;
+  }
+
   /**
    * Retrieves all states configured for a project, sorted by sequence ascending.
    * Returns both `states` and `columns` for full backwards compatibility.
@@ -36,11 +44,7 @@ export class StateService {
     states: WorkItemState[];
     columns: WorkItemState[];
   }> {
-    const project = await this.stateRepository.findProjectById(projectId);
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
-
+    await this.ensureProjectExists(projectId);
     const states = await this.stateRepository.findProjectStates(projectId);
     return { states, columns: states };
   }
@@ -66,10 +70,7 @@ export class StateService {
   async getStateWorkItemCounts(
     projectId: string,
   ): Promise<Record<string, number>> {
-    const project = await this.stateRepository.findProjectById(projectId);
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
+    await this.ensureProjectExists(projectId);
     return this.stateRepository.countWorkItemsByState(projectId);
   }
 
@@ -89,10 +90,7 @@ export class StateService {
     states: WorkItemState[];
     columns: WorkItemState[];
   }> {
-    const project = await this.stateRepository.findProjectById(projectId);
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
+    await this.ensureProjectExists(projectId);
 
     const existingStates =
       await this.stateRepository.findProjectStates(projectId);
@@ -106,7 +104,6 @@ export class StateService {
       throw new BadRequestException('State name cannot be empty');
     }
 
-    // Check name uniqueness (case-insensitive)
     const nameExists = existingStates.some(
       (state) => state.name.toLowerCase() === targetName.toLowerCase(),
     );
@@ -116,14 +113,12 @@ export class StateService {
       );
     }
 
-    // Generate unique slug id
     let stateId = (createStateDto.id || generateStateSlug(targetName)).trim();
     if (!stateId) stateId = `state-${Date.now()}`;
     if (existingStates.some((state) => state.id === stateId)) {
       stateId = `${stateId}-${Date.now().toString().slice(-4)}`;
     }
 
-    // Determine sequence
     const maxSeq = existingStates.reduce(
       (maxSequence, state) => Math.max(maxSequence, state.sequence || 0),
       0,
@@ -141,7 +136,6 @@ export class StateService {
       '#6366F1'
     ).trim();
 
-    // If new state is marked as default, unset previous default
     const updatedStates = existingStates.map((state) => {
       if (isDefault && state.isDefault) {
         return { ...state, isDefault: false };
@@ -203,10 +197,7 @@ export class StateService {
     states: WorkItemState[];
     columns: WorkItemState[];
   }> {
-    const project = await this.stateRepository.findProjectById(projectId);
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
+    await this.ensureProjectExists(projectId);
 
     const existingStates =
       await this.stateRepository.findProjectStates(projectId);
@@ -224,7 +215,6 @@ export class StateService {
       current.name
     ).trim();
 
-    // Check name uniqueness if changed
     if (newName.toLowerCase() !== current.name.toLowerCase()) {
       const duplicate = existingStates.some(
         (state) =>
@@ -238,7 +228,6 @@ export class StateService {
       }
     }
 
-    // Default state protection
     if (updateStateDto.isDefault === false && current.isDefault) {
       throw new BadRequestException(
         'Cannot unset the default state directly. Please set another state as default instead.',
@@ -295,7 +284,6 @@ export class StateService {
       (firstState, secondState) => firstState.sequence - secondState.sequence,
     );
 
-    // If group changed to or from completed, synchronize completion on existing work items in this state
     const previousWasCompleted = current.group === 'completed';
     const nowIsCompleted = newGroup === 'completed';
     if (previousWasCompleted !== nowIsCompleted) {
@@ -344,10 +332,7 @@ export class StateService {
     columns: WorkItemState[];
     migratedTo?: string;
   }> {
-    const project = await this.stateRepository.findProjectById(projectId);
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
+    await this.ensureProjectExists(projectId);
 
     const currentStates =
       await this.stateRepository.findProjectStates(projectId);
@@ -437,10 +422,7 @@ export class StateService {
     states: WorkItemState[];
     columns: WorkItemState[];
   }> {
-    const project = await this.stateRepository.findProjectById(projectId);
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
+    await this.ensureProjectExists(projectId);
 
     const items = reorderStatesDto.states || reorderStatesDto.columns;
     if (!Array.isArray(items) || items.length === 0) {
@@ -476,7 +458,6 @@ export class StateService {
       stateMap.delete(item.id);
     }
 
-    // Append any states that were not mentioned in reorder list
     let nextSeq = (reordered.length + 1) * 1000;
     for (const remaining of stateMap.values()) {
       reordered.push({ ...remaining, sequence: nextSeq });
@@ -512,15 +493,10 @@ export class StateService {
     states: WorkItemState[];
     columns: WorkItemState[];
   }> {
-    const project = await this.stateRepository.findProjectById(projectId);
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
+    await this.ensureProjectExists(projectId);
 
     const defaultStates = [...DEFAULT_WORK_ITEM_STATES];
-    const defaultIds = new Set(defaultStates.map((state) => state.id));
 
-    // Migrate any orphan work items whose columnId does not match any default state to 'backlog'
     await this.stateRepository.deleteStateWithWorkItemMigration(
       projectId,
       '__orphan_migration__',
@@ -544,8 +520,8 @@ export class StateService {
 
   private async invalidateProjectStateCache(projectId: string): Promise<void> {
     if (!this.cache) return;
+    await invalidateWorkItemCache(this.cache, { projectId });
     await Promise.allSettled([
-      this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       this.cache.del(`flux:project:${projectId}`),
       this.cache.del(`flux:project:overview:${projectId}`),
     ]);

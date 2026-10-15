@@ -14,9 +14,12 @@ import { RedisCacheService } from '@/core';
 @Injectable()
 export class RedisRoomManagerAdapter extends IRoomManagerPort {
   private readonly logger = new Logger(RedisRoomManagerAdapter.name);
-  private readonly fallbackMemory = new InMemoryRoomManagerAdapter();
 
-  constructor(@Optional() private readonly redis?: RedisCacheService) {
+  constructor(
+    @Optional() private readonly redis?: RedisCacheService,
+    @Optional()
+    private readonly fallbackMemory: InMemoryRoomManagerAdapter = new InMemoryRoomManagerAdapter(),
+  ) {
     super();
   }
 

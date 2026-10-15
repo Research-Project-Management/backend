@@ -1,9 +1,22 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 
+interface MiddlewareRequest {
+  headers?: Record<string, string | string[] | undefined>;
+}
+
+interface MiddlewareResponse {
+  setHeader?(name: string, value: string): void;
+  header?(name: string, value: string): void;
+}
+
 @Injectable()
 export class CorrelationIdMiddleware implements NestMiddleware {
-  use(req: any, res: any, next: (error?: any) => void) {
+  use(
+    req: MiddlewareRequest,
+    res: MiddlewareResponse,
+    next: (error?: unknown) => void,
+  ) {
     const correlationId =
       (req.headers?.['x-correlation-id'] as string) ||
       (req.headers?.['x-request-id'] as string) ||

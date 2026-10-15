@@ -1,13 +1,13 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { CoreRepository } from '../core.repository';
+import { CoreRepository } from '@/modules/work-item/core/core.repository';
 import { EventDispatcher } from './event.dispatcher';
 import {
   BulkUpdateWorkItemDto,
   BulkUpdatePayload,
   BulkDeleteWorkItemDto,
-} from '../dto/bulk.dto';
-import { mapPriority } from '../utils/work-item.util';
-import { isStateCompleted } from '../../common/utils/state-completion.util';
+} from '@/modules/work-item/core/dto/bulk.dto';
+import { mapPriority } from '@/modules/work-item/core/utils/work-item.util';
+import { isStateCompleted } from '@/modules/work-item/common/utils/state-completion.util';
 import { isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
 
@@ -17,6 +17,73 @@ export class BulkHandler {
     private readonly workItemRepository: CoreRepository,
     private readonly eventDispatcher: EventDispatcher,
   ) {}
+
+  private normalizeIds(rawIds: string[]): string[] {
+    return Array.from(
+      new Set(
+        (Array.isArray(rawIds) ? rawIds : [])
+          .filter((id): id is string => typeof id === 'string')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ).sort();
+  }
+
+  private async resolveEffectiveProjectId(
+    projectId: string | undefined,
+    rawIds: string[],
+  ): Promise<string> {
+    if (projectId) return projectId;
+    if (rawIds.length > 0) {
+      const firstItem = await this.workItemRepository.findWorkItemById(
+        rawIds[0],
+      );
+      if (firstItem) return firstItem.projectId;
+    }
+    return '';
+  }
+
+  private async bulkModifyLabel(
+    effectiveProjectId: string,
+    rawIds: string[],
+    labelId: string,
+    mode: 'add' | 'remove',
+    onInvalidateCache?: (projectId: string) => Promise<void>,
+  ) {
+    const validIds = this.normalizeIds(rawIds).filter(isUuid);
+    const allItems = await this.workItemRepository.findWorkItemsByIds(validIds);
+    const items = effectiveProjectId
+      ? allItems.filter((t) => t.projectId === effectiveProjectId)
+      : allItems;
+
+    await Promise.all(
+      items.map((t) => {
+        const current = Array.isArray(t.labels) ? t.labels : [];
+        if (mode === 'add') {
+          if (current.includes(labelId)) return Promise.resolve();
+          return this.workItemRepository.updateWorkItem(t.id, {
+            labels: [...current, labelId],
+          });
+        }
+        if (!current.includes(labelId)) return Promise.resolve();
+        return this.workItemRepository.updateWorkItem(t.id, {
+          labels: current.filter((l) => l !== labelId),
+        });
+      }),
+    );
+
+    if (effectiveProjectId && onInvalidateCache) {
+      await onInvalidateCache(effectiveProjectId);
+    }
+
+    return {
+      message:
+        mode === 'add'
+          ? `Label added to ${items.length} work items`
+          : `Label removed from ${items.length} work items`,
+      count: items.length,
+    };
+  }
 
   async bulkUpdate(
     projectId: string,
@@ -28,74 +95,32 @@ export class BulkHandler {
       bulkUpdateWorkItemDto.data ||
       (bulkUpdateWorkItemDto as unknown as BulkUpdatePayload);
 
-    let effectiveProjectId = projectId;
-    const rawIds =
-      bulkUpdateWorkItemDto.workItemIds || bulkUpdateWorkItemDto.ids || [];
-    if (!effectiveProjectId && rawIds.length > 0) {
-      const firstItem = await this.workItemRepository.findWorkItemById(
-        rawIds[0],
+    const rawIds = this.normalizeIds(
+      bulkUpdateWorkItemDto.workItemIds || bulkUpdateWorkItemDto.ids || [],
+    );
+    const effectiveProjectId = await this.resolveEffectiveProjectId(
+      projectId,
+      rawIds,
+    );
+
+    if (typeof payload.addLabel === 'string') {
+      return this.bulkModifyLabel(
+        effectiveProjectId,
+        rawIds,
+        payload.addLabel,
+        'add',
+        onInvalidateCache,
       );
-      if (firstItem) {
-        effectiveProjectId = firstItem.projectId;
-      }
     }
 
-    // Support bulk add single label to all selected items
-    if (
-      payload.addLabel !== undefined &&
-      typeof payload.addLabel === 'string'
-    ) {
-      const labelId = payload.addLabel;
-      const validIds = rawIds.filter(isUuid);
-      const allItems =
-        await this.workItemRepository.findWorkItemsByIds(validIds);
-      const items = effectiveProjectId
-        ? allItems.filter((t) => t.projectId === effectiveProjectId)
-        : allItems;
-      await Promise.all(
-        items.map((t) => {
-          const current = Array.isArray(t.labels) ? t.labels : [];
-          if (current.includes(labelId)) return Promise.resolve();
-          const next = [...current, labelId];
-          return this.workItemRepository.updateWorkItem(t.id, { labels: next });
-        }),
+    if (typeof payload.removeLabel === 'string') {
+      return this.bulkModifyLabel(
+        effectiveProjectId,
+        rawIds,
+        payload.removeLabel,
+        'remove',
+        onInvalidateCache,
       );
-      if (effectiveProjectId && onInvalidateCache) {
-        await onInvalidateCache(effectiveProjectId);
-      }
-      return {
-        message: `Label added to ${items.length} work items`,
-        count: items.length,
-      };
-    }
-
-    // Support bulk remove single label from all selected items
-    if (
-      payload.removeLabel !== undefined &&
-      typeof payload.removeLabel === 'string'
-    ) {
-      const labelId = payload.removeLabel;
-      const validIds = rawIds.filter(isUuid);
-      const allItems =
-        await this.workItemRepository.findWorkItemsByIds(validIds);
-      const items = effectiveProjectId
-        ? allItems.filter((t) => t.projectId === effectiveProjectId)
-        : allItems;
-      await Promise.all(
-        items.map((t) => {
-          const current = Array.isArray(t.labels) ? t.labels : [];
-          if (!current.includes(labelId)) return Promise.resolve();
-          const next = current.filter((l) => l !== labelId);
-          return this.workItemRepository.updateWorkItem(t.id, { labels: next });
-        }),
-      );
-      if (effectiveProjectId && onInvalidateCache) {
-        await onInvalidateCache(effectiveProjectId);
-      }
-      return {
-        message: `Label removed from ${items.length} work items`,
-        count: items.length,
-      };
     }
 
     const rawProject = effectiveProjectId
@@ -192,17 +217,13 @@ export class BulkHandler {
     userId?: string,
     onInvalidateCache?: (projectId: string) => Promise<void>,
   ) {
-    let effectiveProjectId = projectId;
-    const rawIds =
-      bulkDeleteWorkItemDto.workItemIds || bulkDeleteWorkItemDto.ids || [];
-    if (!effectiveProjectId && rawIds.length > 0) {
-      const firstItem = await this.workItemRepository.findWorkItemById(
-        rawIds[0],
-      );
-      if (firstItem) {
-        effectiveProjectId = firstItem.projectId;
-      }
-    }
+    const rawIds = this.normalizeIds(
+      bulkDeleteWorkItemDto.workItemIds || bulkDeleteWorkItemDto.ids || [],
+    );
+    const effectiveProjectId = await this.resolveEffectiveProjectId(
+      projectId,
+      rawIds,
+    );
     if (!effectiveProjectId) {
       throw new BadRequestException('Project context required for bulk delete');
     }

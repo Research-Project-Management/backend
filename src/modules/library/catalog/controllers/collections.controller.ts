@@ -20,7 +20,7 @@ import {
   ApiOperation,
   ApiParam,
 } from '@nestjs/swagger';
-import { CollectionsService } from '../services/collections.service';
+import { CollectionsService } from '@/modules/library/catalog/services/collections.service';
 import {
   CreateCollectionDto,
   UpdateCollectionDto,
@@ -28,8 +28,8 @@ import {
   ReorderCollectionsDto,
   AssignItemsToCollectionDto,
   BulkDetachItemsDto,
-} from '../dto/collections.dto';
-import { CollectionDeleteStrategy } from '../types/collections.types';
+} from '@/modules/library/catalog/dto/collections.dto';
+import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { isUUID } from 'class-validator';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';

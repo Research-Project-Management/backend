@@ -5,7 +5,10 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
-import { CslItemData, CslName } from '../types/csl-json.types';
+import {
+  CslItemData,
+  CslName,
+} from '@/modules/library/citation/types/csl-json.types';
 import {
   IEEE_CSL,
   NATURE_CSL,
@@ -13,13 +16,13 @@ import {
   MLA_CSL,
   TCVN_CSL,
   TCVN_NUMERIC_CSL,
-} from '../data/official-styles.data';
-import { VI_VN_LOCALE } from '../data/official-locales.data';
+} from '@/modules/library/citation/data/official-styles.data';
+import { VI_VN_LOCALE } from '@/modules/library/citation/data/official-locales.data';
 import { CslRepositoryService } from './csl-repository.service';
 import {
   VIETNAMESE_SURNAMES_PREFIX_REGEX,
   hasVietnameseDiacritics,
-} from '../../shared-kernel';
+} from '@/modules/library/shared-kernel';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Cite, plugins } = require('@citation-js/core');
@@ -37,6 +40,130 @@ export interface EngineCitationResult {
   bibliographyHtml?: string;
   source: 'csl-engine';
 }
+
+const BUILTIN_SPECIAL_STYLES = new Set([
+  'auto',
+  'auto-numeric',
+  'bibtex',
+  'ris',
+  'tcvn',
+  'tcvn-numeric',
+]);
+
+const NUMERIC_STYLE_TOKENS = [
+  'vancouver',
+  'nature',
+  'science',
+  'ieee',
+  'the-lancet',
+  'pnas',
+  'plos',
+];
+
+const BIBTEX_ITEM_TYPE_MAP: Record<string, string> = {
+  journalArticle: 'article',
+  magazineArticle: 'article',
+  newspaperArticle: 'article',
+  book: 'book',
+  bookSection: 'incollection',
+  dictionaryEntry: 'incollection',
+  encyclopediaArticle: 'incollection',
+  conferencePaper: 'inproceedings',
+  report: 'techreport',
+  patent: 'patent',
+  dataset: 'dataset',
+  computerProgram: 'software',
+  standard: 'standard',
+  webpage: 'online',
+  blogPost: 'online',
+  forumPost: 'online',
+  preprint: 'unpublished',
+  manuscript: 'unpublished',
+  case: 'jurisdiction',
+  statute: 'legislation',
+  bill: 'legislation',
+};
+
+const BIBTEX_CSL_TYPE_MAP: Record<string, string> = {
+  'article-journal': 'article',
+  'article-magazine': 'article',
+  'article-newspaper': 'article',
+  'paper-conference': 'inproceedings',
+  book: 'book',
+  chapter: 'incollection',
+  'entry-dictionary': 'incollection',
+  'entry-encyclopedia': 'incollection',
+  report: 'techreport',
+  thesis: 'phdthesis',
+  patent: 'patent',
+  dataset: 'dataset',
+  software: 'software',
+  standard: 'standard',
+  webpage: 'online',
+  'post-weblog': 'online',
+  post: 'online',
+  manuscript: 'unpublished',
+  article: 'unpublished',
+  legal_case: 'jurisdiction',
+  legislation: 'legislation',
+  bill: 'legislation',
+};
+
+const RIS_ITEM_TYPE_MAP: Record<string, string> = {
+  journalArticle: 'JOUR',
+  magazineArticle: 'MGZN',
+  newspaperArticle: 'NEWS',
+  book: 'BOOK',
+  bookSection: 'CHAP',
+  dictionaryEntry: 'DICT',
+  encyclopediaArticle: 'ENCYC',
+  conferencePaper: 'CONF',
+  thesis: 'THES',
+  report: 'RPRT',
+  patent: 'PAT',
+  dataset: 'DATA',
+  computerProgram: 'COMP',
+  standard: 'STAND',
+  webpage: 'ELEC',
+  blogPost: 'BLOG',
+  forumPost: 'ELEC',
+  preprint: 'UNPB',
+  manuscript: 'UNPB',
+  case: 'CASE',
+  statute: 'STAT',
+  bill: 'BILL',
+  hearing: 'HEAR',
+  letter: 'PCOMM',
+  interview: 'INTV',
+  film: 'MPCT',
+  videoRecording: 'VIDEO',
+  audioRecording: 'SOUND',
+  artwork: 'ART',
+  map: 'MAP',
+  presentation: 'SLIDE',
+};
+
+const RIS_CSL_TYPE_MAP: Record<string, string> = {
+  'article-journal': 'JOUR',
+  'article-magazine': 'MGZN',
+  'article-newspaper': 'NEWS',
+  'paper-conference': 'CONF',
+  book: 'BOOK',
+  chapter: 'CHAP',
+  report: 'RPRT',
+  thesis: 'THES',
+  patent: 'PAT',
+  dataset: 'DATA',
+  software: 'COMP',
+  standard: 'STAND',
+  webpage: 'ELEC',
+  'post-weblog': 'BLOG',
+  post: 'ELEC',
+  manuscript: 'UNPB',
+  legal_case: 'CASE',
+  legislation: 'STAT',
+  bill: 'BILL',
+};
 
 @Injectable()
 export class CslEngineService implements OnModuleInit {
@@ -63,18 +190,15 @@ export class CslEngineService implements OnModuleInit {
       cslItem.title ||
       '';
     const date = cslItem.issued?.['date-parts']?.[0]?.[0] || '';
-    // Include BOTH version and updatedAt: `version` can be overwritten by the
-    // item's own edition/software version (CslJsonMapper), which would otherwise
-    // hide updatedAt and serve stale renders after the item is edited.
     const ver =
       cslItem.version ||
       (typeof cslItem._version === 'string' ? cslItem._version : '') ||
       '';
     const updated =
-      (typeof cslItem._updatedAt === 'string' ||
+      typeof cslItem._updatedAt === 'string' ||
       typeof cslItem._updatedAt === 'number'
         ? String(cslItem._updatedAt)
-        : '') || '';
+        : '';
     return `${rawId}::${style}::${date}::${ver}::${updated}${index !== undefined ? `::${index}` : ''}`;
   }
 
@@ -94,23 +218,11 @@ export class CslEngineService implements OnModuleInit {
     this.initTemplates();
   }
 
-  /**
-   * Synchronously checks if a style is already loaded or natively supported in the CSL engine.
-   */
   public isStyleSupported(styleId: string): boolean {
     if (!styleId) return false;
     this.initTemplates();
     const normalized = this.normalizeStyle(styleId);
-    if (
-      normalized === 'auto' ||
-      normalized === 'auto-numeric' ||
-      normalized === 'bibtex' ||
-      normalized === 'ris' ||
-      normalized === 'tcvn' ||
-      normalized === 'tcvn-numeric'
-    ) {
-      return true;
-    }
+    if (BUILTIN_SPECIAL_STYLES.has(normalized)) return true;
     try {
       const csl = plugins.config.get('@csl');
       return Boolean(csl?.templates?.has(normalized));
@@ -119,31 +231,18 @@ export class CslEngineService implements OnModuleInit {
     }
   }
 
-  /**
-   * Dynamically loads and registers a CSL stylesheet template into Citation.js engine.
-   */
   public async ensureTemplate(styleId: string): Promise<boolean> {
     this.initTemplates();
     const normalized = this.normalizeStyle(styleId);
-    if (
-      normalized === 'auto' ||
-      normalized === 'auto-numeric' ||
-      normalized === 'bibtex' ||
-      normalized === 'ris' ||
-      normalized === 'tcvn' ||
-      normalized === 'tcvn-numeric'
-    )
-      return true;
+    if (BUILTIN_SPECIAL_STYLES.has(normalized)) return true;
 
     try {
       const csl = plugins.config.get('@csl');
-      if (csl && csl.templates && csl.templates.has(normalized)) {
-        return true;
-      }
+      if (csl?.templates?.has(normalized)) return true;
 
       if (this.cslRepo) {
         const xml = await this.cslRepo.fetchCslXml(normalized);
-        if (xml && csl && csl.templates) {
+        if (xml && csl?.templates) {
           csl.templates.add(normalized, xml);
           this.logger.log(
             `Dynamically registered on-demand CSL template: "${normalized}"`,
@@ -157,53 +256,38 @@ export class CslEngineService implements OnModuleInit {
         `Could not dynamically load CSL template for "${normalized}": ${errMsg}`,
       );
     }
-
     return false;
   }
 
-  /**
-   * Registers authoritative CSL XML stylesheets into Citation.js CSL plugin.
-   */
   public initTemplates() {
     if (this.templatesInitialized) return;
 
     try {
-      // Configure BibTeX plugin to preserve custom citationKey/ID
       const bibtexConfig = plugins.config.get('@bibtex');
-      if (bibtexConfig && bibtexConfig.format) {
+      if (bibtexConfig?.format) {
         bibtexConfig.format.useIdAsLabel = true;
       }
 
       const csl = plugins.config.get('@csl');
-      if (csl && csl.templates) {
-        if (!csl.templates.has('ieee')) {
-          csl.templates.add('ieee', IEEE_CSL);
-        }
-        if (!csl.templates.has('nature')) {
-          csl.templates.add('nature', NATURE_CSL);
-        }
-        if (!csl.templates.has('chicago')) {
-          csl.templates.add('chicago', CHICAGO_CSL);
-          csl.templates.add('chicago-author-date', CHICAGO_CSL);
-        }
-        if (!csl.templates.has('mla')) {
-          csl.templates.add('mla', MLA_CSL);
-          csl.templates.add('mla-9th', MLA_CSL);
-        }
-        if (!csl.templates.has('tcvn')) {
-          csl.templates.add('tcvn', TCVN_CSL);
-          csl.templates.add('tcvn-author-date', TCVN_CSL);
-        }
-        if (!csl.templates.has('tcvn-numeric')) {
-          csl.templates.add('tcvn-numeric', TCVN_NUMERIC_CSL);
+      if (csl?.templates) {
+        const templateBindings: ReadonlyArray<[string, string]> = [
+          ['ieee', IEEE_CSL],
+          ['nature', NATURE_CSL],
+          ['chicago', CHICAGO_CSL],
+          ['chicago-author-date', CHICAGO_CSL],
+          ['mla', MLA_CSL],
+          ['mla-9th', MLA_CSL],
+          ['tcvn', TCVN_CSL],
+          ['tcvn-author-date', TCVN_CSL],
+          ['tcvn-numeric', TCVN_NUMERIC_CSL],
+        ];
+        for (const [id, xml] of templateBindings) {
+          if (!csl.templates.has(id)) csl.templates.add(id, xml);
         }
       }
-      if (csl && csl.locales) {
-        if (!csl.locales.has('vi-VN')) {
-          csl.locales.add('vi-VN', VI_VN_LOCALE);
-        }
-        if (!csl.locales.has('vi')) {
-          csl.locales.add('vi', VI_VN_LOCALE);
+      if (csl?.locales) {
+        for (const loc of ['vi-VN', 'vi']) {
+          if (!csl.locales.has(loc)) csl.locales.add(loc, VI_VN_LOCALE);
         }
       }
       this.templatesInitialized = true;
@@ -213,9 +297,6 @@ export class CslEngineService implements OnModuleInit {
     }
   }
 
-  /**
-   * Normalizes style aliases to valid CSL template names.
-   */
   public normalizeStyle(styleId: string): string {
     const s = (styleId || 'auto').toLowerCase().trim();
     if (s === 'auto' || s === 'default' || !s) return 'auto';
@@ -229,15 +310,13 @@ export class CslEngineService implements OnModuleInit {
       s === 'tcvn-author-date' ||
       s === 'bo-giao-duc' ||
       s === 'vietnam'
-    )
+    ) {
       return 'tcvn';
+    }
     if (s === 'tcvn-numeric') return 'tcvn-numeric';
     return s;
   }
 
-  /**
-   * Asynchronously ensures the CSL stylesheet is loaded before formatting.
-   */
   public async formatAsync(
     cslItem: CslItemData,
     styleId: string = 'apa',
@@ -247,9 +326,6 @@ export class CslEngineService implements OnModuleInit {
     return this.format(cslItem, styleId, index);
   }
 
-  /**
-   * Asynchronously ensures the CSL stylesheet is loaded before batch formatting.
-   */
   public async formatBatchAsync(
     cslItems: CslItemData[],
     styleId: string = 'apa',
@@ -258,9 +334,6 @@ export class CslEngineService implements OnModuleInit {
     return this.formatBatch(cslItems, styleId);
   }
 
-  /**
-   * Formats a single CSL-JSON item in the requested international style.
-   */
   public format(
     cslItem: CslItemData,
     styleId: string = 'apa',
@@ -269,7 +342,6 @@ export class CslEngineService implements OnModuleInit {
     this.initTemplates();
     const normalizedStyle = this.normalizeStyle(styleId);
 
-    // O(1) LRU In-Memory Cache Lookup
     const cacheKey = this.getCacheKey(cslItem, normalizedStyle, index);
     const cached = this.citationCache.get(cacheKey);
     if (cached) {
@@ -278,70 +350,46 @@ export class CslEngineService implements OnModuleInit {
       return cached;
     }
 
-    // 0. Auto style detection (Cultural & Document aware)
-    if (normalizedStyle === 'auto') {
+    if (normalizedStyle === 'auto' || normalizedStyle === 'auto-numeric') {
       const isVn = CslEngineService.isVietnameseItem(cslItem);
-      const targetStyle = isVn ? 'tcvn' : 'apa';
+      const targetStyle =
+        normalizedStyle === 'auto-numeric'
+          ? isVn
+            ? 'tcvn-numeric'
+            : 'ieee'
+          : isVn
+            ? 'tcvn'
+            : 'apa';
       const result = this.format(cslItem, targetStyle, index);
-      return this.setCache(cacheKey, {
-        ...result,
-        styleId: 'auto',
-      });
+      return this.setCache(cacheKey, { ...result, styleId: normalizedStyle });
     }
 
-    if (normalizedStyle === 'auto-numeric') {
-      const isVn = CslEngineService.isVietnameseItem(cslItem);
-      const targetStyle = isVn ? 'tcvn-numeric' : 'ieee';
-      const result = this.format(cslItem, targetStyle, index);
+    if (normalizedStyle === 'bibtex' || normalizedStyle === 'ris') {
+      const isBib = normalizedStyle === 'bibtex';
+      const rawText = isBib
+        ? this.formatBibtex(cslItem)
+        : this.formatRis(cslItem);
       return this.setCache(cacheKey, {
-        ...result,
-        styleId: 'auto-numeric',
-      });
-    }
-
-    // 1. BibTeX
-    if (normalizedStyle === 'bibtex') {
-      const bibtex = this.formatBibtex(cslItem);
-      return this.setCache(cacheKey, {
-        styleId: 'bibtex',
-        inText: `\\cite{${cslItem.id}}`,
-        bibliography: bibtex,
-        bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(bibtex)}</pre>`,
+        styleId: normalizedStyle,
+        inText: isBib ? `\\cite{${cslItem.id}}` : cslItem.title,
+        bibliography: rawText,
+        bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(rawText)}</pre>`,
         source: 'csl-engine',
       });
     }
 
-    // 2. RIS
-    if (normalizedStyle === 'ris') {
-      const ris = this.formatRis(cslItem);
-      return this.setCache(cacheKey, {
-        styleId: 'ris',
-        inText: cslItem.title,
-        bibliography: ris,
-        bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(ris)}</pre>`,
-        source: 'csl-engine',
-      });
-    }
-
-    // 3. TCVN (Tiêu chuẩn Việt Nam - Bộ Giáo dục & Đào tạo)
     if (normalizedStyle === 'tcvn' || normalizedStyle === 'tcvn-numeric') {
-      const isNumeric = normalizedStyle === 'tcvn-numeric';
-      const result = this.formatTcvn(cslItem, isNumeric, index);
-      return this.setCache(cacheKey, result);
+      return this.setCache(
+        cacheKey,
+        this.formatTcvn(cslItem, normalizedStyle === 'tcvn-numeric', index),
+      );
     }
 
-    // 4. CSL Styles (APA, IEEE, Nature, Chicago, MLA, Harvard, Vancouver)
     try {
       const cite = new Cite(cslItem);
-
       let bibliography = cite
-        .format('bibliography', {
-          template: normalizedStyle,
-          lang: 'en-US',
-        })
+        .format('bibliography', { template: normalizedStyle, lang: 'en-US' })
         .trim();
-
-      // Normalize unicode quotation marks in plain text for broader system/regex compatibility
       if (normalizedStyle === 'ieee') {
         bibliography = bibliography.replace(/[\u201C\u201D]/g, '"');
       }
@@ -399,43 +447,26 @@ export class CslEngineService implements OnModuleInit {
       const issue = cslItem.issue ? `(${cslItem.issue})` : '';
       const page = cslItem.page ? `: ${cslItem.page}` : '';
 
-      const isNumeric = [
-        'vancouver',
-        'nature',
-        'science',
-        'ieee',
-        'the-lancet',
-        'pnas',
-        'plos',
-      ].some((s) => normalizedStyle.includes(s));
-
-      if (isNumeric) {
-        const inText = `[${index}]`;
-        const bibliography = `[${index}] ${authorListStr}. ${title}.${journal ? ` ${journal}.` : ''} ${year}${volume}${issue}${page}.`;
-        const bibliographyHtml = `[${index}] ${authorListStr}. ${title}.${journal ? ` <i>${journal}</i>.` : ''} ${year}${volume}${issue}${page}.`;
+      if (NUMERIC_STYLE_TOKENS.some((s) => normalizedStyle.includes(s))) {
         return this.setCache(cacheKey, {
           styleId: normalizedStyle,
-          inText,
-          bibliography,
-          bibliographyHtml,
+          inText: `[${index}]`,
+          bibliography: `[${index}] ${authorListStr}. ${title}.${journal ? ` ${journal}.` : ''} ${year}${volume}${issue}${page}.`,
+          bibliographyHtml: `[${index}] ${authorListStr}. ${title}.${journal ? ` <i>${journal}</i>.` : ''} ${year}${volume}${issue}${page}.`,
           source: 'csl-engine',
         });
       }
 
       if (normalizedStyle.includes('harvard')) {
-        const inText = `(${firstAuthorFamily}, ${year})`;
-        const bibliography = `${authorListStr} (${year}) '${title}', ${journal}${volume}${issue}${cslItem.page ? `, pp. ${cslItem.page}` : ''}.`;
-        const bibliographyHtml = `${authorListStr} (${year}) &lsquo;${title}&rsquo;, <i>${journal}</i>${volume}${issue}${cslItem.page ? `, pp. ${cslItem.page}` : ''}.`;
         return this.setCache(cacheKey, {
           styleId: normalizedStyle,
-          inText,
-          bibliography,
-          bibliographyHtml,
+          inText: `(${firstAuthorFamily}, ${year})`,
+          bibliography: `${authorListStr} (${year}) '${title}', ${journal}${volume}${issue}${cslItem.page ? `, pp. ${cslItem.page}` : ''}.`,
+          bibliographyHtml: `${authorListStr} (${year}) &lsquo;${title}&rsquo;, <i>${journal}</i>${volume}${issue}${cslItem.page ? `, pp. ${cslItem.page}` : ''}.`,
           source: 'csl-engine',
         });
       }
 
-      // Resilient fallback to APA with requested styleId preserved
       const cite = new Cite(cslItem);
       return this.setCache(cacheKey, {
         styleId: normalizedStyle,
@@ -461,9 +492,6 @@ export class CslEngineService implements OnModuleInit {
     }
   }
 
-  /**
-   * Formats a batch of CSL-JSON items.
-   */
   public formatBatch(
     cslItems: CslItemData[],
     styleId: string = 'apa',
@@ -492,79 +520,78 @@ export class CslEngineService implements OnModuleInit {
       };
     }
 
-    if (normalizedStyle === 'bibtex') {
-      const bibs = cslItems.map((item) => this.formatBibtex(item));
-      const bibliographyText = bibs.join('\n\n');
+    if (normalizedStyle === 'bibtex' || normalizedStyle === 'ris') {
+      const isBib = normalizedStyle === 'bibtex';
+      const renderedList = cslItems.map((item) =>
+        isBib ? this.formatBibtex(item) : this.formatRis(item),
+      );
+      const bibliographyText = renderedList.join('\n\n');
       return {
-        styleId: 'bibtex',
-        combinedInText: `\\cite{${cslItems.map((item) => item.id).join(', ')}}`,
+        styleId: normalizedStyle,
+        combinedInText: isBib
+          ? `\\cite{${cslItems.map((item) => item.id).join(', ')}}`
+          : cslItems.map((item) => item.title).join('; '),
         citations: cslItems.map((item, idx) => ({
           id: item.id,
-          inText: `\\cite{${item.id}}`,
-          bibliography: bibs[idx],
-          bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(bibs[idx])}</pre>`,
+          inText: isBib ? `\\cite{${item.id}}` : item.title,
+          bibliography: renderedList[idx],
+          bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(renderedList[idx])}</pre>`,
         })),
         bibliographyText,
         bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(bibliographyText)}</pre>`,
       };
     }
 
-    if (normalizedStyle === 'ris') {
-      const riss = cslItems.map((item) => this.formatRis(item));
-      const bibliographyText = riss.join('\n\n');
-      return {
-        styleId: 'ris',
-        combinedInText: cslItems.map((item) => item.title).join('; '),
-        citations: cslItems.map((item, idx) => ({
-          id: item.id,
-          inText: item.title,
-          bibliography: riss[idx],
-          bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(riss[idx])}</pre>`,
-        })),
-        bibliographyText,
-        bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(bibliographyText)}</pre>`,
-      };
-    }
-
-    if (normalizedStyle === 'auto') {
+    if (normalizedStyle === 'auto' || normalizedStyle === 'auto-numeric') {
       const hasVn = cslItems.some((item) =>
         CslEngineService.isVietnameseItem(item),
       );
-      const targetStyle = hasVn ? 'tcvn' : 'apa';
-      const res = this.formatBatch(cslItems, targetStyle);
+      const targetStyle =
+        normalizedStyle === 'auto-numeric'
+          ? hasVn
+            ? 'tcvn-numeric'
+            : 'ieee'
+          : hasVn
+            ? 'tcvn'
+            : 'apa';
       return {
-        ...res,
-        styleId: 'auto',
-      };
-    }
-
-    if (normalizedStyle === 'auto-numeric') {
-      const hasVn = cslItems.some((item) =>
-        CslEngineService.isVietnameseItem(item),
-      );
-      const targetStyle = hasVn ? 'tcvn-numeric' : 'ieee';
-      const res = this.formatBatch(cslItems, targetStyle);
-      return {
-        ...res,
-        styleId: 'auto-numeric',
+        ...this.formatBatch(cslItems, targetStyle),
+        styleId: normalizedStyle,
       };
     }
 
     if (normalizedStyle === 'tcvn' || normalizedStyle === 'tcvn-numeric') {
-      const isNumeric = normalizedStyle === 'tcvn-numeric';
-      return this.formatTcvnBatch(cslItems, isNumeric);
+      return this.formatTcvnBatch(cslItems, normalizedStyle === 'tcvn-numeric');
     }
+
+    const citations = cslItems.map((item, idx) => {
+      const single = this.format(item, normalizedStyle, idx + 1);
+      return {
+        id: item.id,
+        inText: single.inText,
+        bibliography: single.bibliography,
+        bibliographyHtml: single.bibliographyHtml,
+      };
+    });
+
+    const buildFallbackCombinedInText = () => {
+      const isNumeric = NUMERIC_STYLE_TOKENS.some((s) =>
+        normalizedStyle.includes(s),
+      );
+      if (isNumeric) {
+        return `[${cslItems.map((_, i) => i + 1).join(', ')}]`;
+      }
+      const inTexts = citations
+        .map((c) => c.inText.replace(/^\(|\)$/g, ''))
+        .filter(Boolean);
+      return `(${inTexts.join('; ')})`;
+    };
 
     try {
       const cite = new Cite(cslItems);
-
       const bibliographyText = cite
-        .format('bibliography', {
-          template: normalizedStyle,
-          lang: 'en-US',
-        })
+        .format('bibliography', { template: normalizedStyle, lang: 'en-US' })
         .trim();
-
       const bibliographyHtml = cite
         .format('bibliography', {
           template: normalizedStyle,
@@ -573,42 +600,13 @@ export class CslEngineService implements OnModuleInit {
         })
         .trim();
 
-      const citations = cslItems.map((item, idx) => {
-        const single = this.format(item, normalizedStyle, idx + 1);
-        return {
-          id: item.id,
-          inText: single.inText,
-          bibliography: single.bibliography,
-          bibliographyHtml: single.bibliographyHtml,
-        };
-      });
-
       let combinedInText = '';
       try {
         combinedInText = cite
-          .format('citation', {
-            template: normalizedStyle,
-            lang: 'en-US',
-          })
+          .format('citation', { template: normalizedStyle, lang: 'en-US' })
           .trim();
       } catch {
-        const isNumeric = [
-          'vancouver',
-          'nature',
-          'science',
-          'ieee',
-          'the-lancet',
-          'pnas',
-          'plos',
-        ].some((s) => normalizedStyle.includes(s));
-        if (isNumeric) {
-          combinedInText = `[${cslItems.map((_, i) => i + 1).join(', ')}]`;
-        } else {
-          const inTexts = citations
-            .map((c) => c.inText.replace(/^\(|\)$/g, ''))
-            .filter(Boolean);
-          combinedInText = `(${inTexts.join('; ')})`;
-        }
+        combinedInText = buildFallbackCombinedInText();
       }
 
       return {
@@ -619,35 +617,9 @@ export class CslEngineService implements OnModuleInit {
         bibliographyHtml,
       };
     } catch {
-      const citations = cslItems.map((item, idx) => {
-        const single = this.format(item, normalizedStyle, idx + 1);
-        return {
-          id: item.id,
-          inText: single.inText,
-          bibliography: single.bibliography,
-          bibliographyHtml: single.bibliographyHtml,
-        };
-      });
-
-      const isNumeric = [
-        'vancouver',
-        'nature',
-        'science',
-        'ieee',
-        'the-lancet',
-        'pnas',
-        'plos',
-      ].some((s) => normalizedStyle.includes(s));
-      const inTexts = citations
-        .map((c) => c.inText.replace(/^\(|\)$/g, ''))
-        .filter(Boolean);
-      const combinedInText = isNumeric
-        ? `[${cslItems.map((_, i) => i + 1).join(', ')}]`
-        : `(${inTexts.join('; ')})`;
-
       return {
         styleId: normalizedStyle,
-        combinedInText,
+        combinedInText: buildFallbackCombinedInText(),
         citations,
         bibliographyText: citations.map((c) => c.bibliography).join('\n\n'),
         bibliographyHtml: '',
@@ -655,43 +627,290 @@ export class CslEngineService implements OnModuleInit {
     }
   }
 
+  private resolveBibtexEntryType(cslItem: CslItemData): string {
+    const rawItemType =
+      typeof cslItem._itemType === 'string' ? cslItem._itemType : '';
+    const genre = typeof cslItem.genre === 'string' ? cslItem.genre : '';
+
+    if (rawItemType === 'thesis' || cslItem.type === 'thesis') {
+      return /\b(?:master|m\.?s\.?|m\.?a\.?|m\.?eng|m\.?sc|thạc\s*sĩ)\b/i.test(
+        genre,
+      )
+        ? 'mastersthesis'
+        : 'phdthesis';
+    }
+    if (rawItemType && BIBTEX_ITEM_TYPE_MAP[rawItemType]) {
+      return BIBTEX_ITEM_TYPE_MAP[rawItemType];
+    }
+    return BIBTEX_CSL_TYPE_MAP[cslItem.type] || 'misc';
+  }
+
+  private resolveRisType(cslItem: CslItemData): string {
+    const rawItemType =
+      typeof cslItem._itemType === 'string' ? cslItem._itemType : '';
+    if (rawItemType && RIS_ITEM_TYPE_MAP[rawItemType]) {
+      return RIS_ITEM_TYPE_MAP[rawItemType];
+    }
+    return RIS_CSL_TYPE_MAP[cslItem.type] || 'GEN';
+  }
+
+  private formatBibtexCreatorList(list?: CslName[]): string {
+    if (!Array.isArray(list) || list.length === 0) return '';
+    return list
+      .map((c) => {
+        if (c.literal && !c.family && !c.given) {
+          return `{${c.literal.trim()}}`;
+        }
+        return `${c.family || c.literal || ''}, ${c.given || ''}`
+          .replace(/,\s*$/, '')
+          .trim();
+      })
+      .filter(Boolean)
+      .join(' and ');
+  }
+
+  private formatIsoDateFromCsl(dateObj?: {
+    'date-parts'?: Array<Array<number | string>>;
+  }): string | undefined {
+    const parts = dateObj?.['date-parts']?.[0];
+    if (!Array.isArray(parts) || !parts[0]) return undefined;
+    const y = String(parts[0]).padStart(4, '0');
+    if (parts[1]) {
+      const m = String(parts[1]).padStart(2, '0');
+      if (parts[2]) {
+        const d = String(parts[2]).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+      return `${y}-${m}`;
+    }
+    return y;
+  }
+
   /**
-   * Formats CSL-JSON into strict BibLaTeX/BibTeX with LaTeX character escaping.
+   * Declarative BibTeX field emitter used by both `formatBibtex` (to inject missing fields)
+   * and `fallbackBibtex`.
    */
+  private collectBibtexSupplementPairs(
+    cslItem: CslItemData,
+    targetType: string,
+  ): Array<[string, string | number]> {
+    const pairs: Array<[string, string | number]> = [];
+    const pushIf = (key: string, val: unknown) => {
+      if (val !== undefined && val !== null && String(val).trim() !== '') {
+        pairs.push([key, typeof val === 'number' ? val : String(val)]);
+      }
+    };
+
+    if (cslItem.page) {
+      pushIf(
+        'pages',
+        String(cslItem.page).replace(/^(\d+)\s*[-–—]+\s*(\d+)$/, '$1--$2'),
+      );
+    }
+    if (cslItem.publisher) {
+      if (targetType === 'phdthesis' || targetType === 'mastersthesis') {
+        pushIf('school', cslItem.publisher);
+      } else if (targetType === 'techreport' || targetType === 'standard') {
+        pushIf('institution', cslItem.publisher);
+      } else {
+        pushIf('publisher', cslItem.publisher);
+      }
+    }
+    if (
+      (targetType === 'incollection' || targetType === 'inproceedings') &&
+      cslItem['container-title']
+    ) {
+      pushIf('booktitle', cslItem['container-title']);
+    }
+    if (Array.isArray(cslItem.editor) && cslItem.editor.length > 0) {
+      pushIf('editor', this.formatBibtexCreatorList(cslItem.editor));
+    }
+    pushIf('series', cslItem['collection-title']);
+    pushIf('edition', cslItem.edition);
+    pushIf('address', cslItem['publisher-place']);
+    pushIf('number', cslItem.number ?? cslItem.issue);
+    pushIf('type', cslItem.genre);
+    pushIf('version', cslItem.version);
+    pushIf('isbn', cslItem.ISBN);
+    pushIf('issn', cslItem.ISSN);
+    pushIf('doi', cslItem.DOI);
+    pushIf('pmid', cslItem.PMID);
+    pushIf('pmcid', cslItem.PMCID);
+    pushIf('url', cslItem.URL);
+    pushIf('urldate', this.formatIsoDateFromCsl(cslItem.accessed));
+
+    const arxivId =
+      typeof cslItem._arxivId === 'string' && cslItem._arxivId
+        ? cslItem._arxivId
+        : typeof cslItem.note === 'string'
+          ? cslItem.note.match(/arxiv:\s*(\S+)/i)?.[1]
+          : undefined;
+    if (arxivId) {
+      pushIf('eprint', arxivId);
+      pushIf('archiveprefix', 'arXiv');
+    }
+
+    return pairs;
+  }
+
   public formatBibtex(cslItem: CslItemData): string {
+    const targetType = this.resolveBibtexEntryType(cslItem);
     try {
       const cite = new Cite(cslItem);
       let raw = cite.format('bibtex');
       if (raw && raw.trim().startsWith('@')) {
-        const typeMap: Record<string, string> = {
-          'article-journal': 'article',
-          'paper-conference': 'inproceedings',
-          book: 'book',
-          chapter: 'incollection',
-          report: 'techreport',
-          thesis: 'phdthesis',
-        };
-        const targetType = typeMap[cslItem.type];
-        if (targetType && /^@misc\{/i.test(raw.trim())) {
-          raw = raw.replace(/^@misc\{/i, `@${targetType}{`);
+        raw = raw.replace(/^@[a-zA-Z]+\{/i, `@${targetType}{`);
+        if (cslItem.id) {
+          raw = raw.replace(/^(@[a-zA-Z]+\{)[^,]+,/, `$1${cslItem.id},`);
+        }
+
+        if (
+          Array.isArray(cslItem.author) &&
+          cslItem.author.some((a) =>
+            Boolean(a.literal && !a.family && !a.given),
+          )
+        ) {
+          const formattedAuthors = this.formatBibtexCreatorList(cslItem.author);
+          if (formattedAuthors) {
+            raw = /\bauthor\s*=\s*\{[^}]*\}/i.test(raw)
+              ? raw.replace(
+                  /\bauthor\s*=\s*\{[^}]*\}/i,
+                  `author = {${formattedAuthors}}`,
+                )
+              : raw.replace(
+                  /^(@[a-zA-Z]+\{[^,]+,)/,
+                  `$1\n  author = {${formattedAuthors}},`,
+                );
+          }
+        }
+
+        raw = raw.replace(
+          /(\bpages\s*=\s*\{)(\d+)\s*[-–—]+\s*(\d+)(\})/i,
+          '$1$2--$3$4',
+        );
+
+        const extraBibFields: string[] = [];
+        for (const [fieldKey, val] of this.collectBibtexSupplementPairs(
+          cslItem,
+          targetType,
+        )) {
+          if (!new RegExp(`\\b${fieldKey}\\s*=`, 'i').test(raw)) {
+            extraBibFields.push(`  ${fieldKey} = {${val}},`);
+          }
+        }
+
+        if (extraBibFields.length > 0) {
+          raw = raw.trim().replace(/\}\s*$/, `${extraBibFields.join('\n')}\n}`);
         }
         return raw.trim();
       }
     } catch {
-      // Fallback manual serializer with strict escaping
+      // Fallback manual serializer
     }
 
     return this.fallbackBibtex(cslItem);
   }
 
   /**
-   * Formats CSL-JSON into standard RIS format.
+   * Declarative RIS tag emitter used by both `formatRis` and `fallbackRis`.
    */
+  private collectRisSupplementTags(
+    cslItem: CslItemData,
+  ): Array<{ tag: string; checkRegex: RegExp; value: string }> {
+    const entries: Array<{ tag: string; checkRegex: RegExp; value: string }> =
+      [];
+    const pushTag = (tag: string, val: unknown, customCheck?: RegExp) => {
+      if (val !== undefined && val !== null && String(val).trim() !== '') {
+        entries.push({
+          tag,
+          checkRegex: customCheck || new RegExp(`^${tag}\\s+-`, 'm'),
+          value: String(val),
+        });
+      }
+    };
+
+    if (Array.isArray(cslItem.editor)) {
+      for (const ed of cslItem.editor) {
+        const edStr =
+          ed.literal && !ed.family && !ed.given
+            ? ed.literal.trim()
+            : `${ed.family || ed.literal || ''}, ${ed.given || ''}`
+                .replace(/,\s*$/, '')
+                .trim();
+        if (edStr) pushTag('ED', edStr);
+      }
+    }
+
+    pushTag('T2', cslItem['container-title'], /^(?:T2|JO|JF|BT)\s+-/m);
+    pushTag('T3', cslItem['collection-title']);
+    pushTag('J2', cslItem['container-title-short']);
+    pushTag('ST', cslItem['title-short']);
+    pushTag('ET', cslItem.edition);
+    pushTag('VL', cslItem.volume);
+    pushTag('IS', cslItem.issue ?? cslItem.number);
+
+    if (cslItem.page) {
+      const pageMatch = String(cslItem.page)
+        .trim()
+        .match(/^(\S+?)\s*[-–—]\s*(\S+)$/);
+      if (pageMatch) {
+        pushTag('SP', pageMatch[1]);
+        pushTag('EP', pageMatch[2]);
+      } else {
+        pushTag('SP', cslItem.page);
+      }
+    }
+
+    pushTag('DO', cslItem.DOI);
+    pushTag('AN', cslItem.PMID, /(?:PMID:|^AN\s+-)/im);
+    pushTag('C2', cslItem.PMCID);
+    pushTag('PB', cslItem.publisher);
+    pushTag('CY', cslItem['publisher-place']);
+    pushTag('SN', cslItem.ISBN || cslItem.ISSN);
+    pushTag('M3', cslItem.genre);
+    pushTag('UR', cslItem.URL);
+    pushTag('Y2', this.formatIsoDateFromCsl(cslItem.accessed));
+
+    if (Array.isArray(cslItem._keywords)) {
+      for (const kw of cslItem._keywords) {
+        if (typeof kw === 'string' && kw.trim()) {
+          pushTag('KW', kw.trim());
+        }
+      }
+    }
+    pushTag('AB', cslItem.abstract);
+
+    return entries;
+  }
+
   public formatRis(cslItem: CslItemData): string {
+    const targetRisType = this.resolveRisType(cslItem);
     try {
       const cite = new Cite(cslItem);
-      const raw = cite.format('ris');
+      let raw = cite.format('ris');
       if (raw && raw.trim().startsWith('TY  -')) {
+        raw = raw
+          .replace(/^TY\s+-\s+\S+/m, `TY  - ${targetRisType}`)
+          .replace(/^KW\s+-\s+/gm, 'KW  - ')
+          .replace(
+            /^SP\s+-\s+(\S+?)\s*[-–—]\s*(\S+)\s*$/m,
+            'SP  - $1\nEP  - $2',
+          );
+
+        const extraRisLines: string[] = [];
+        for (const { tag, checkRegex, value } of this.collectRisSupplementTags(
+          cslItem,
+        )) {
+          if (!checkRegex.test(raw)) {
+            extraRisLines.push(`${tag}  - ${value}`);
+          }
+        }
+
+        if (extraRisLines.length > 0) {
+          raw = raw
+            .trim()
+            .replace(/ER\s*-\s*$/, `${extraRisLines.join('\n')}\nER  - `);
+        }
         return raw.trim();
       }
     } catch {
@@ -710,89 +929,72 @@ export class CslEngineService implements OnModuleInit {
 
   private fallbackBibtex(item: CslItemData): string {
     const key = item.id || `ref_${Date.now()}`;
-    const authors = (item.author || [])
-      .map((a) => `${a.family || ''}, ${a.given || ''}`.trim())
-      .join(' and ');
-
-    const typeMap: Record<string, string> = {
-      'article-journal': 'article',
-      'paper-conference': 'inproceedings',
-      book: 'book',
-      chapter: 'incollection',
-      report: 'techreport',
-      thesis: 'phdthesis',
-    };
-    const entryType = typeMap[item.type] || 'misc';
-
-    // Strict LaTeX escaping for title
+    const authors = this.formatBibtexCreatorList(item.author);
+    const entryType = this.resolveBibtexEntryType(item);
     const escapedTitle = (item.title || '')
       .replace(/&/g, '\\&')
       .replace(/%/g, '\\%')
       .replace(/_/g, '\\_')
       .replace(/#/g, '\\#');
 
-    const lines = [`@${entryType}{${key},`];
-    lines.push(`  title = {${escapedTitle}},`);
+    const lines = [`@${entryType}{${key},`, `  title = {${escapedTitle}},`];
     if (authors) lines.push(`  author = {${authors}},`);
-    if (item['container-title']) {
-      const journalField = entryType === 'article' ? 'journal' : 'booktitle';
-      lines.push(`  ${journalField} = {${item['container-title']}},`);
+    if (entryType === 'article' && item['container-title']) {
+      lines.push(`  journal = {${item['container-title']}},`);
     }
     const year = item.issued?.['date-parts']?.[0]?.[0];
     if (year) lines.push(`  year = {${year}},`);
     if (item.volume) lines.push(`  volume = {${item.volume}},`);
-    if (item.issue) lines.push(`  number = {${item.issue}},`);
-    if (item.page) lines.push(`  pages = {${item.page}},`);
-    if (item.DOI) lines.push(`  doi = {${item.DOI}},`);
-    if (item.URL) lines.push(`  url = {${item.URL}},`);
-    lines.push('}');
 
+    for (const [fieldKey, val] of this.collectBibtexSupplementPairs(
+      item,
+      entryType,
+    )) {
+      lines.push(`  ${fieldKey} = {${val}},`);
+    }
+    lines.push('}');
     return lines.join('\n');
   }
 
   private fallbackRis(item: CslItemData): string {
-    const typeMap: Record<string, string> = {
-      'article-journal': 'JOUR',
-      'paper-conference': 'CONF',
-      book: 'BOOK',
-      chapter: 'CHAP',
-      report: 'RPRT',
-      thesis: 'THES',
-    };
-    const risType = typeMap[item.type] || 'GEN';
-
-    const lines = [`TY  - ${risType}`];
-    lines.push(`TI  - ${item.title}`);
-    (item.author || []).forEach((a) => {
-      lines.push(`AU  - ${a.family || ''}, ${a.given || ''}`.trim());
-    });
-    if (item['container-title']) lines.push(`T2  - ${item['container-title']}`);
+    const risType = this.resolveRisType(item);
+    const lines = [`TY  - ${risType}`, `TI  - ${item.title}`];
+    for (const a of item.author || []) {
+      lines.push(
+        `AU  - ${a.family || a.literal || ''}, ${a.given || ''}`
+          .replace(/,\s*$/, '')
+          .trim(),
+      );
+    }
     const year = item.issued?.['date-parts']?.[0]?.[0];
     if (year) lines.push(`PY  - ${year}`);
-    if (item.volume) lines.push(`VL  - ${item.volume}`);
-    if (item.issue) lines.push(`IS  - ${item.issue}`);
-    if (item.page) lines.push(`SP  - ${item.page}`);
-    if (item.DOI) lines.push(`DO  - ${item.DOI}`);
-    if (item.URL) lines.push(`UR  - ${item.URL}`);
-    lines.push('ER  - ');
 
+    for (const { tag, value } of this.collectRisSupplementTags(item)) {
+      lines.push(`${tag}  - ${value}`);
+    }
+    lines.push('ER  - ');
     return lines.join('\n');
   }
 
   // ── TCVN / BỘ GIÁO DỤC & ĐÀO TẠO CITATION ENGINE ──────────────────────────
 
   private static readonly VN_SURNAMES_REGEX = VIETNAMESE_SURNAMES_PREFIX_REGEX;
+  private static readonly ACADEMIC_DEGREES_REGEX =
+    /^(?:(?:p?gs|ts(?:kh)?|ths|cn|ks|bs|dr|prof|ph\.?d)\.?\s*)+/gi;
+
+  private static stripAcademicDegrees(text: string): string {
+    return (text || '').trim().replace(this.ACADEMIC_DEGREES_REGEX, '').trim();
+  }
 
   public static isVietnameseAuthor(author?: CslName | null): boolean {
     if (!author) return false;
-    if (author.literal) {
-      return hasVietnameseDiacritics(author.literal);
-    }
-    const full = `${author.family || ''} ${author.given || ''}`.trim();
-    if (hasVietnameseDiacritics(full)) {
+    if (author.literal) return hasVietnameseDiacritics(author.literal);
+    const cleanFamily = this.stripAcademicDegrees(author.family || '');
+    const cleanGiven = this.stripAcademicDegrees(author.given || '');
+    if (hasVietnameseDiacritics(`${cleanFamily} ${cleanGiven}`.trim())) {
       return true;
     }
-    return CslEngineService.VN_SURNAMES_REGEX.test(author.family || '');
+    return CslEngineService.VN_SURNAMES_REGEX.test(cleanFamily);
   }
 
   public static getVietnameseSortKey(author?: CslName | null): {
@@ -801,16 +1003,27 @@ export class CslEngineService implements OnModuleInit {
   } {
     if (!author) return { primary: '', secondary: '' };
     if (author.literal) {
-      return { primary: author.literal.trim(), secondary: '' };
+      return {
+        primary: this.stripAcademicDegrees(author.literal),
+        secondary: '',
+      };
     }
-    if (author.given) {
-      const givenParts = author.given.trim().split(/\s+/);
-      const primary = givenParts[givenParts.length - 1]; // Given name (Tên chính)
+    const cleanFamily = this.stripAcademicDegrees(author.family || '');
+    const cleanGiven = this.stripAcademicDegrees(author.given || '');
+    if (cleanGiven) {
+      const givenParts = cleanGiven.split(/\s+/);
+      const primary = givenParts[givenParts.length - 1];
       const middle = givenParts.slice(0, -1).join(' ');
-      const secondary = `${author.family || ''} ${middle}`.trim();
-      return { primary, secondary };
+      return { primary, secondary: `${cleanFamily} ${middle}`.trim() };
     }
-    return { primary: author.family || '', secondary: '' };
+    const familyParts = cleanFamily.split(/\s+/).filter(Boolean);
+    if (familyParts.length > 1) {
+      return {
+        primary: familyParts[familyParts.length - 1],
+        secondary: familyParts.slice(0, -1).join(' '),
+      };
+    }
+    return { primary: cleanFamily, secondary: '' };
   }
 
   public static isVietnameseItem(item: CslItemData): boolean {
@@ -818,10 +1031,7 @@ export class CslEngineService implements OnModuleInit {
     if (firstAuthor && CslEngineService.isVietnameseAuthor(firstAuthor)) {
       return true;
     }
-    if (item.title && hasVietnameseDiacritics(item.title)) {
-      return true;
-    }
-    return false;
+    return Boolean(item.title && hasVietnameseDiacritics(item.title));
   }
 
   public static compareTcvnEntries(
@@ -830,22 +1040,20 @@ export class CslEngineService implements OnModuleInit {
   ): number {
     const isVnA = CslEngineService.isVietnameseItem(itemA);
     const isVnB = CslEngineService.isVietnameseItem(itemB);
-
     if (isVnA && !isVnB) return -1;
     if (!isVnA && isVnB) return 1;
 
     if (isVnA && isVnB) {
-      const authorA = itemA.author?.[0];
-      const authorB = itemB.author?.[0];
-      const keyA = CslEngineService.getVietnameseSortKey(authorA);
-      const keyB = CslEngineService.getVietnameseSortKey(authorB);
+      const keyA = CslEngineService.getVietnameseSortKey(itemA.author?.[0]);
+      const keyB = CslEngineService.getVietnameseSortKey(itemB.author?.[0]);
       const cmp = keyA.primary.localeCompare(keyB.primary, 'vi', {
         sensitivity: 'base',
       });
-      if (cmp !== 0) return cmp;
-      return keyA.secondary.localeCompare(keyB.secondary, 'vi', {
-        sensitivity: 'base',
-      });
+      return cmp !== 0
+        ? cmp
+        : keyA.secondary.localeCompare(keyB.secondary, 'vi', {
+            sensitivity: 'base',
+          });
     }
 
     const famA =
@@ -863,37 +1071,36 @@ export class CslEngineService implements OnModuleInit {
 
   public static formatTcvnAuthorName(author?: CslName | null): string {
     if (!author) return 'Khuyết danh';
-    if (author.literal) return author.literal.trim();
+    if (author.literal) return this.stripAcademicDegrees(author.literal);
+
+    const cleanFamily = this.stripAcademicDegrees(author.family || '');
+    const cleanGiven = this.stripAcademicDegrees(author.given || '');
 
     if (CslEngineService.isVietnameseAuthor(author)) {
-      return (
-        `${author.family || ''} ${author.given || ''}`.trim() || 'Khuyết danh'
-      );
+      return `${cleanFamily} ${cleanGiven}`.trim() || 'Khuyết danh';
     }
-
-    const family = author.family || '';
-    if (author.given) {
-      const initials = author.given
-        .trim()
+    if (cleanGiven) {
+      const initials = cleanGiven
         .split(/\s+/)
+        .filter(Boolean)
         .map((p: string) => p[0] + '.')
         .join(' ');
-      return `${family}, ${initials}`.trim();
+      return `${cleanFamily}, ${initials}`.trim();
     }
-    return family || 'Anonymous';
+    return cleanFamily || 'Anonymous';
   }
 
   public static formatTcvnInTextAuthor(author?: CslName | null): string {
     if (!author) return 'Khuyết danh';
-    if (author.literal) return author.literal.trim();
+    if (author.literal) return this.stripAcademicDegrees(author.literal);
+
+    const cleanFamily = this.stripAcademicDegrees(author.family || '');
+    const cleanGiven = this.stripAcademicDegrees(author.given || '');
 
     if (CslEngineService.isVietnameseAuthor(author)) {
-      return (
-        `${author.family || ''} ${author.given || ''}`.trim() || 'Khuyết danh'
-      );
+      return `${cleanFamily} ${cleanGiven}`.trim() || 'Khuyết danh';
     }
-
-    return author.family || 'Anonymous';
+    return cleanFamily || 'Anonymous';
   }
 
   public formatTcvn(
@@ -906,18 +1113,16 @@ export class CslEngineService implements OnModuleInit {
       CslEngineService.formatTcvnAuthorName(a),
     );
 
-    let authorStr = '';
-    if (formattedAuthors.length === 0) {
-      authorStr = 'Khuyết danh';
-    } else if (formattedAuthors.length === 1) {
-      authorStr = formattedAuthors[0];
-    } else if (formattedAuthors.length === 2) {
-      authorStr = `${formattedAuthors[0]} và ${formattedAuthors[1]}`;
-    } else if (formattedAuthors.length === 3) {
-      authorStr = `${formattedAuthors[0]}, ${formattedAuthors[1]} và ${formattedAuthors[2]}`;
-    } else {
-      authorStr = `${formattedAuthors.slice(0, 3).join(', ')} và c.s.`;
-    }
+    const authorStr =
+      formattedAuthors.length === 0
+        ? 'Khuyết danh'
+        : formattedAuthors.length === 1
+          ? formattedAuthors[0]
+          : formattedAuthors.length === 2
+            ? `${formattedAuthors[0]} và ${formattedAuthors[1]}`
+            : formattedAuthors.length === 3
+              ? `${formattedAuthors[0]}, ${formattedAuthors[1]} và ${formattedAuthors[2]}`
+              : `${formattedAuthors.slice(0, 3).join(', ')} và c.s.`;
 
     const year = cslItem.issued?.['date-parts']?.[0]?.[0] || 'không ngày';
     const title = cslItem.title || 'Không có tiêu đề';
@@ -928,6 +1133,25 @@ export class CslEngineService implements OnModuleInit {
     const publisher = cslItem.publisher || '';
     const place = cslItem['publisher-place'] || '';
     const url = cslItem.URL || '';
+    const doi = cslItem.DOI ? `DOI: ${cslItem.DOI}` : '';
+
+    let accessedDateStr = '';
+    const accessedParts = cslItem.accessed?.['date-parts']?.[0];
+    if (accessedParts && accessedParts.length >= 1) {
+      const accYear = accessedParts[0];
+      const accMonth = accessedParts[1]
+        ? String(accessedParts[1]).padStart(2, '0')
+        : '01';
+      const accDay = accessedParts[2]
+        ? String(accessedParts[2]).padStart(2, '0')
+        : '01';
+      accessedDateStr =
+        accessedParts.length >= 3
+          ? `${accDay}/${accMonth}/${accYear}`
+          : accessedParts.length === 2
+            ? `${accMonth}/${accYear}`
+            : `${accYear}`;
+    }
 
     let inText = '';
     if (isNumeric) {
@@ -936,15 +1160,14 @@ export class CslEngineService implements OnModuleInit {
       const inTextAuthors = authors.map((a: CslName) =>
         CslEngineService.formatTcvnInTextAuthor(a),
       );
-      if (inTextAuthors.length === 0) {
-        inText = `(Khuyết danh, ${year})`;
-      } else if (inTextAuthors.length === 1) {
-        inText = `(${inTextAuthors[0]}, ${year})`;
-      } else if (inTextAuthors.length === 2) {
-        inText = `(${inTextAuthors[0]} và ${inTextAuthors[1]}, ${year})`;
-      } else {
-        inText = `(${inTextAuthors[0]} và c.s., ${year})`;
-      }
+      inText =
+        inTextAuthors.length === 0
+          ? `(Khuyết danh, ${year})`
+          : inTextAuthors.length === 1
+            ? `(${inTextAuthors[0]}, ${year})`
+            : inTextAuthors.length === 2
+              ? `(${inTextAuthors[0]} và ${inTextAuthors[1]}, ${year})`
+              : `(${inTextAuthors[0]} và c.s., ${year})`;
     }
 
     let details = '';
@@ -956,38 +1179,62 @@ export class CslEngineService implements OnModuleInit {
       type === 'article-magazine' ||
       type === 'article'
     ) {
-      const volIssueParts = [volume ? `${volume}${issue}` : issue, page]
+      const volIssueParts = [volume ? `${volume}${issue}` : issue, page, doi]
         .filter(Boolean)
         .join(', ');
       const journalPart = [journal, volIssueParts].filter(Boolean).join(', ');
       details = `"${title}"${journalPart ? `, ${journalPart}` : ''}.`;
       detailsHtml = `"${this.escapeHtml(title)}"${journal ? `, <i>${this.escapeHtml(journal)}</i>` : ''}${volIssueParts ? `, ${this.escapeHtml(volIssueParts)}` : ''}.`;
-    } else if (type === 'book' || type === 'bookSection') {
-      const pubParts = [publisher, place].filter(Boolean).join(', ');
+    } else if (type === 'chapter' || type === 'bookSection') {
+      const tailParts = [publisher, place, page, doi]
+        .filter(Boolean)
+        .join(', ');
+      const inContainer = journal
+        ? `Trong: ${journal}`
+        : 'Trong: Sách chuyên khảo';
+      const inContainerHtml = journal
+        ? `Trong: <i>${this.escapeHtml(journal)}</i>`
+        : 'Trong: <i>Sách chuyên khảo</i>';
+      details = `"${title}", ${inContainer}${tailParts ? `, ${tailParts}` : ''}.`;
+      detailsHtml = `"${this.escapeHtml(title)}", ${inContainerHtml}${tailParts ? `, ${this.escapeHtml(tailParts)}` : ''}.`;
+    } else if (type === 'book') {
+      const pubParts = [publisher, place, page, doi].filter(Boolean).join(', ');
       details = `${title}${pubParts ? `, ${pubParts}` : ''}.`;
       detailsHtml = `<i>${this.escapeHtml(title)}</i>${pubParts ? `, ${this.escapeHtml(pubParts)}` : ''}.`;
     } else if (type === 'paper-conference') {
-      details = `"${title}", Kỷ yếu ${journal || 'Hội nghị Khoa học'}${page ? `, ${page}` : ''}.`;
-      detailsHtml = `"${this.escapeHtml(title)}", <i>Kỷ yếu ${this.escapeHtml(journal || 'Hội nghị Khoa học')}</i>${page ? `, ${this.escapeHtml(page)}` : ''}.`;
+      const confTail = [place, publisher, page, doi].filter(Boolean).join(', ');
+      details = `"${title}", Kỷ yếu ${journal || 'Hội nghị Khoa học'}${confTail ? `, ${confTail}` : ''}.`;
+      detailsHtml = `"${this.escapeHtml(title)}", <i>Kỷ yếu ${this.escapeHtml(journal || 'Hội nghị Khoa học')}</i>${confTail ? `, ${this.escapeHtml(confTail)}` : ''}.`;
     } else if (type === 'thesis') {
       const genre = cslItem.genre || 'Luận án tiến sĩ';
-      details = `${title}, ${genre}${publisher ? `, ${publisher}` : ''}.`;
-      detailsHtml = `<i>${this.escapeHtml(title)}</i>, ${this.escapeHtml(genre)}${publisher ? `, ${this.escapeHtml(publisher)}` : ''}.`;
+      const thesisTail = [publisher, place].filter(Boolean).join(', ');
+      details = `${title}, ${genre}${thesisTail ? `, ${thesisTail}` : ''}.`;
+      detailsHtml = `<i>${this.escapeHtml(title)}</i>, ${this.escapeHtml(genre)}${thesisTail ? `, ${this.escapeHtml(thesisTail)}` : ''}.`;
     } else {
-      details = `"${title}"${journal ? `, ${journal}` : ''}${url ? `, <${url}>` : ''}.`;
-      detailsHtml = `"${this.escapeHtml(title)}"${journal ? `, <i>${this.escapeHtml(journal)}</i>` : ''}${url ? `, &lt;${this.escapeHtml(url)}&gt;` : ''}.`;
+      const accessClause = accessedDateStr
+        ? `, truy cập ngày ${accessedDateStr}`
+        : '';
+      const urlClause = url
+        ? accessedDateStr
+          ? `, tại <${url}>`
+          : `, <${url}>`
+        : '';
+      const urlClauseHtml = url
+        ? accessedDateStr
+          ? `, tại &lt;${this.escapeHtml(url)}&gt;`
+          : `, &lt;${this.escapeHtml(url)}&gt;`
+        : '';
+      details = `"${title}"${journal ? `, ${journal}` : ''}${publisher ? `, ${publisher}` : ''}${accessClause}${urlClause}.`;
+      detailsHtml = `"${this.escapeHtml(title)}"${journal ? `, <i>${this.escapeHtml(journal)}</i>` : ''}${publisher ? `, ${this.escapeHtml(publisher)}` : ''}${this.escapeHtml(accessClause)}${urlClauseHtml}.`;
     }
 
     const prefix = isNumeric ? `[${index}] ` : '';
-    const bibliography = `${prefix}${authorStr} (${year}), ${details}`.trim();
-    const bibliographyHtml =
-      `${prefix}${this.escapeHtml(authorStr)} (${year}), ${detailsHtml}`.trim();
-
     return {
       styleId: isNumeric ? 'tcvn-numeric' : 'tcvn',
       inText,
-      bibliography,
-      bibliographyHtml,
+      bibliography: `${prefix}${authorStr} (${year}), ${details}`.trim(),
+      bibliographyHtml:
+        `${prefix}${this.escapeHtml(authorStr)} (${year}), ${detailsHtml}`.trim(),
       source: 'csl-engine',
     };
   }
@@ -1004,7 +1251,6 @@ export class CslEngineService implements OnModuleInit {
     }
 
     const sorted = [...cslItems].sort(CslEngineService.compareTcvnEntries);
-
     const citations = sorted.map((item, idx) => {
       const single = this.formatTcvn(item, isNumeric, idx + 1);
       return {
@@ -1015,27 +1261,21 @@ export class CslEngineService implements OnModuleInit {
       };
     });
 
-    const bibliographyText = citations.map((c) => c.bibliography).join('\n\n');
-    const bibliographyHtml = citations
-      .map((c) => `<div class="csl-entry">${c.bibliographyHtml}</div>`)
-      .join('\n');
-
-    let combinedInText = '';
-    if (isNumeric) {
-      combinedInText = `[${citations.map((_, i) => i + 1).join(', ')}]`;
-    } else {
-      const inTexts = citations
-        .map((c) => c.inText.replace(/^\(|\)$/g, ''))
-        .filter(Boolean);
-      combinedInText = `(${inTexts.join('; ')})`;
-    }
+    const combinedInText = isNumeric
+      ? `[${citations.map((_, i) => i + 1).join(', ')}]`
+      : `(${citations
+          .map((c) => c.inText.replace(/^\(|\)$/g, ''))
+          .filter(Boolean)
+          .join('; ')})`;
 
     return {
       styleId: isNumeric ? 'tcvn-numeric' : 'tcvn',
       combinedInText,
       citations,
-      bibliographyText,
-      bibliographyHtml,
+      bibliographyText: citations.map((c) => c.bibliography).join('\n\n'),
+      bibliographyHtml: citations
+        .map((c) => `<div class="csl-entry">${c.bibliographyHtml}</div>`)
+        .join('\n'),
     };
   }
 }

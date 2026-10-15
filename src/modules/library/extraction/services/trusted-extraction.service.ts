@@ -3,16 +3,16 @@ import {
   ITrustedExtractorPort,
   TrustedExtractionResult,
   ExtractionEngineKind,
-} from '../types/trusted-extraction.types';
-import { ItemMetadata } from '../../shared-kernel';
+} from '@/modules/library/extraction/types/trusted-extraction.types';
+import { ItemMetadata } from '@/modules/library/shared-kernel';
 import {
   XmpParser,
   AcademicRegexCatalog,
   LayoutHeuristicExtractor,
   MeXtractExtractor,
   MetadataQualityGate,
-} from '../extractors';
-import { extractText } from 'unpdf';
+} from '@/modules/library/extraction/extractors';
+import { extractText, getDocumentProxy } from 'unpdf';
 import {
   cleanAuthorName,
   normalizeAcademicTitleCase,
@@ -20,7 +20,7 @@ import {
   splitConcatenatedAuthors,
   yearFromArxivId,
   repairFragmentedTitle,
-} from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 /**
  * Master Service orchestrating local-first trusted academic metadata extraction.
@@ -44,13 +44,14 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
     if (!t) return true;
     const lower = t.toLowerCase().trim();
     return (
-      lower.startsWith('microsoft word') ||
+      lower.startsWith('microsoft') ||
       lower.startsWith('untitled') ||
       lower.startsWith('document') ||
       lower.startsWith('arxiv:') ||
+      lower === 'technical report' ||
       /^arxiv\s*:\s*[a-z0-9\-./]+/i.test(lower) ||
-      /\.(docx?|pdf|tex|txt|ps|eps)$/i.test(lower) ||
-      /^[a-z]+\.\d+\s+\d+\.\.\d+$/i.test(lower) ||
+      /\.(docx?|pdf|tex|txt|ps|eps|dvi|ppt|pptx|rtf|html?)$/i.test(lower) ||
+      /^[a-z0-9_.-]+\s+\d+\.\.\d+$/i.test(lower) ||
       lower.length < 5
     );
   }
@@ -61,12 +62,13 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
   async extract(
     buffer: Buffer,
     preferredFilename?: string,
+    pdfDocument?: Awaited<ReturnType<typeof getDocumentProxy>>,
   ): Promise<TrustedExtractionResult> {
     const startedAt = Date.now();
     let engineUsed: ExtractionEngineKind = 'ACADEMIC_REGEX';
 
     const merged: ItemMetadata = {};
-    const rawMatches: Record<string, any> = {};
+    const rawMatches: Record<string, unknown> = {};
 
     // ── TIER 1: Fast-Path XMP Binary Packet Scan (< 0.5ms) ──────────────────
     const xmp = XmpParser.parse(buffer);
@@ -107,20 +109,60 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
     }
 
     // ── TIER 2: Fast Text Stream & Academic Regex Catalog (< 5ms) ───────────
+    // Fast-path: Front-matter and header extraction strictly bounded to first 3 pages
     let pageText = '';
+    let sharedDoc: Awaited<ReturnType<typeof getDocumentProxy>> | undefined =
+      pdfDocument;
     try {
       const cloned = new Uint8Array(buffer.byteLength);
       cloned.set(buffer);
-      const rawResult = await extractText(cloned, { mergePages: true });
-      pageText =
-        typeof rawResult === 'string'
-          ? rawResult
-          : typeof rawResult === 'object' &&
-              rawResult !== null &&
-              'text' in rawResult &&
-              typeof (rawResult as { text: unknown }).text === 'string'
-            ? (rawResult as { text: string }).text
-            : '';
+
+      let docText = '';
+      try {
+        const doc = sharedDoc ?? (await getDocumentProxy(cloned));
+        sharedDoc = doc;
+        if (doc && doc.numPages > 0) {
+          const pagesToRead = Math.min(doc.numPages, 3);
+          const pageChunks: string[] = [];
+          for (let i = 1; i <= pagesToRead; i++) {
+            const page = await doc.getPage(i);
+            const content = await page.getTextContent();
+            if (content?.items && content.items.length > 0) {
+              const items = content.items as Array<{
+                str?: string;
+                hasEOL?: boolean;
+              }>;
+              const pText = items
+                .filter((it) => it && it.str != null)
+                .map((it) => (it.str || '') + (it.hasEOL ? '\n' : ' '))
+                .join('');
+              if (pText.trim().length > 0) {
+                pageChunks.push(pText);
+              }
+            }
+          }
+          if (pageChunks.length > 0) {
+            docText = pageChunks.join('\n\n');
+          }
+        }
+      } catch {
+        // Fall back to extractText below
+      }
+
+      if (docText && docText.trim().length > 0) {
+        pageText = docText;
+      } else {
+        const rawResult = await extractText(cloned, { mergePages: true });
+        pageText =
+          typeof rawResult === 'string'
+            ? rawResult
+            : typeof rawResult === 'object' &&
+                rawResult !== null &&
+                'text' in rawResult &&
+                typeof (rawResult as { text: unknown }).text === 'string'
+              ? (rawResult as { text: string }).text
+              : '';
+      }
     } catch {
       // unpdf text extraction failure is non-fatal if XMP succeeded
     }
@@ -198,39 +240,54 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
     let gateEvaluation = MetadataQualityGate.evaluate(merged);
 
     // If still missing essential Title or Authors, activate typographic LayoutHeuristic
-    if (
-      !gateEvaluation.isSelfSufficient &&
-      (!merged.title ||
-        TrustedExtractionService.isBogusTitle(merged.title) ||
-        !merged.authors ||
-        merged.authors.length === 0)
-    ) {
-      const layoutResults = await LayoutHeuristicExtractor.extract(buffer);
-
+    try {
       if (
-        layoutResults.title &&
-        (!merged.title || TrustedExtractionService.isBogusTitle(merged.title))
+        !gateEvaluation.isSelfSufficient &&
+        (!merged.title ||
+          TrustedExtractionService.isBogusTitle(merged.title) ||
+          !merged.authors ||
+          merged.authors.length === 0)
       ) {
-        merged.title = layoutResults.title;
-      }
-      if (
-        layoutResults.authors &&
-        layoutResults.authors.length > 0 &&
-        (!merged.authors || merged.authors.length === 0)
-      ) {
-        merged.authors = layoutResults.authors;
-      }
-      if (layoutResults.abstract && !merged.abstract) {
-        merged.abstract = layoutResults.abstract;
-      }
-      if (layoutResults.maxFontSize) {
-        rawMatches.maxFontSize = layoutResults.maxFontSize;
-      }
+        const layoutResults = await LayoutHeuristicExtractor.extract(
+          buffer,
+          sharedDoc,
+        );
 
-      if (layoutResults.title || layoutResults.authors?.length) {
-        engineUsed = xmp ? 'HYBRID' : 'LAYOUT_HEURISTIC';
+        if (
+          layoutResults.title &&
+          (!merged.title || TrustedExtractionService.isBogusTitle(merged.title))
+        ) {
+          merged.title = layoutResults.title;
+        }
+        if (
+          layoutResults.authors &&
+          layoutResults.authors.length > 0 &&
+          (!merged.authors || merged.authors.length === 0)
+        ) {
+          merged.authors = layoutResults.authors;
+        }
+        if (layoutResults.abstract && !merged.abstract) {
+          merged.abstract = layoutResults.abstract;
+        }
+        if (layoutResults.maxFontSize) {
+          rawMatches.maxFontSize = layoutResults.maxFontSize;
+        }
+
+        if (layoutResults.title || layoutResults.authors?.length) {
+          engineUsed = xmp ? 'HYBRID' : 'LAYOUT_HEURISTIC';
+        }
+        gateEvaluation = MetadataQualityGate.evaluate(merged);
       }
-      gateEvaluation = MetadataQualityGate.evaluate(merged);
+    } finally {
+      if (sharedDoc && sharedDoc !== pdfDocument) {
+        try {
+          await (
+            sharedDoc as { destroy?: () => Promise<void> | void }
+          ).destroy?.();
+        } catch {
+          // Ignore PDF.js cleanup errors
+        }
+      }
     }
 
     // ── TIER 4: MeXtract Intelligent SLM Tier (Qwen2.5-0.5B-Instruct ONNX / Heuristic) ──
@@ -300,9 +357,10 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
             gateEvaluation = MetadataQualityGate.evaluate(merged);
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `MeXtract SLM extraction failed non-fatally: ${err?.message}`,
+          `MeXtract SLM extraction failed non-fatally: ${message}`,
         );
       }
     }
@@ -356,7 +414,7 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
     merged: ItemMetadata,
     xmpYear: number | undefined,
     pageText: string,
-    rawMatches: Record<string, any>,
+    rawMatches: Record<string, unknown>,
   ): void {
     const refinements: string[] = [];
 

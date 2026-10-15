@@ -7,19 +7,24 @@ import {
   ProviderName,
   ProviderResult,
   QueryType,
-} from '../types/metadata.types';
+} from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
+  normalizePmcid,
+  normalizeIsbn,
   normalizeTags,
   cleanAbstractText,
   cleanBibliographicText,
   titleSimilarity,
   TITLE_MATCH_THRESHOLD,
-} from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/metadata-executor.service';
-import { normalizePageRange } from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/ingestion/domain/metadata.domain';
+import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
+import {
+  normalizePageRange,
+  parseCreatorString,
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 @Injectable()
 export class OpenAlexProvider implements MetadataProvider {
@@ -160,9 +165,11 @@ export class OpenAlexProvider implements MetadataProvider {
       );
     }
 
-    let json: any;
+    let json: { results?: Array<Record<string, unknown>> } | null = null;
     try {
-      json = await response.json();
+      json = (await response.json()) as {
+        results?: Array<Record<string, unknown>>;
+      };
     } catch {
       throw new ProviderFetchError(
         `Failed to parse OpenAlex arXiv JSON for ${cleanArxiv}`,
@@ -179,7 +186,8 @@ export class OpenAlexProvider implements MetadataProvider {
     }
 
     const sorted = [...results].sort(
-      (a, b) => (b.cited_by_count || 0) - (a.cited_by_count || 0),
+      (a, b) =>
+        (Number(b.cited_by_count) || 0) - (Number(a.cited_by_count) || 0),
     );
     const item = sorted[0];
     const itemDoi = typeof item.doi === 'string' ? item.doi : '';
@@ -324,12 +332,25 @@ export class OpenAlexProvider implements MetadataProvider {
     const title = cleanBibliographicText(rawTitle) || 'Untitled Paper';
 
     const authors: string[] = [];
+    let firstAuthorInstitution: string | undefined;
     if (Array.isArray(item.authorships)) {
       for (const auth of item.authorships) {
         if (auth && typeof auth === 'object') {
-          const authObj = auth as { author?: { display_name?: string } };
+          const authObj = auth as {
+            author?: { display_name?: string };
+            institutions?: Array<{ display_name?: string }>;
+          };
           if (typeof authObj.author?.display_name === 'string') {
             authors.push(authObj.author.display_name.trim());
+          }
+          if (
+            !firstAuthorInstitution &&
+            Array.isArray(authObj.institutions) &&
+            typeof authObj.institutions[0]?.display_name === 'string' &&
+            authObj.institutions[0].display_name.trim()
+          ) {
+            firstAuthorInstitution =
+              authObj.institutions[0].display_name.trim();
           }
         }
       }
@@ -409,7 +430,12 @@ export class OpenAlexProvider implements MetadataProvider {
     } else {
       itemType = 'journalArticle';
     }
-    const journal = isPreprint ? undefined : sourceName;
+    const journal =
+      isPreprint || itemType === 'bookSection' ? undefined : sourceName;
+    const publicationTitle = isPreprint ? undefined : sourceName;
+    const proceedingsTitle =
+      itemType === 'conferencePaper' ? sourceName : undefined;
+    const bookTitle = itemType === 'bookSection' ? sourceName : undefined;
 
     let abstract: string | undefined;
     if (
@@ -449,6 +475,14 @@ export class OpenAlexProvider implements MetadataProvider {
         : undefined,
     );
     const publisher = primLoc?.source?.host_organization_name || undefined;
+    const university =
+      itemType === 'thesis'
+        ? publisher || sourceName || firstAuthorInstitution
+        : undefined;
+    const institution =
+      itemType === 'report'
+        ? publisher || sourceName || firstAuthorInstitution
+        : undefined;
     const issn =
       primLoc?.source?.issn_l || primLoc?.source?.issn?.[0] || undefined;
 
@@ -490,11 +524,9 @@ export class OpenAlexProvider implements MetadataProvider {
 
     const keywords = normalizeTags(rawKeywords).slice(0, 4);
 
-    const creators = authors.map((name, idx) => ({
-      orderIndex: idx,
-      creatorType: 'author',
-      fullName: name,
-    }));
+    const creators = authors.map((name, idx) =>
+      parseCreatorString(name, idx, 'author'),
+    );
 
     const language =
       typeof item.language === 'string' && item.language.trim()
@@ -506,13 +538,43 @@ export class OpenAlexProvider implements MetadataProvider {
         ? primLoc.license.trim()
         : undefined;
 
-    const ids = (item.ids || {}) as Record<string, string>;
-    const rawArxiv = ids.arxiv
-      ? ids.arxiv.replace(/^https?:\/\/arxiv\.org\/abs\//i, '')
+    const ids = (item.ids || {}) as Record<string, string | string[]>;
+    const rawArxivStr = typeof ids.arxiv === 'string' ? ids.arxiv : undefined;
+    let rawArxiv = rawArxivStr
+      ? normalizeArxivId(rawArxivStr) ||
+        rawArxivStr.replace(/^https?:\/\/arxiv\.org\/abs\//i, '')
       : undefined;
-    const rawPmid = ids.pmid
-      ? ids.pmid.replace(/^https?:\/\/pubmed\.ncbi\.nlm\.nih\.gov\//i, '')
+    if (!rawArxiv) {
+      const locations = Array.isArray(item.locations)
+        ? (item.locations as Array<Record<string, unknown>>)
+        : [];
+      const candidateUrls = [
+        primLoc?.landing_page_url,
+        primLoc?.pdf_url,
+        ...locations.flatMap((loc) => [loc.landing_page_url, loc.pdf_url]),
+      ];
+      for (const u of candidateUrls) {
+        if (typeof u === 'string' && /arxiv\.org|10\.48550\/arxiv\./i.test(u)) {
+          const parsedArxiv = normalizeArxivId(u);
+          if (parsedArxiv) {
+            rawArxiv = parsedArxiv;
+            break;
+          }
+        }
+      }
+    }
+    const rawPmidStr = typeof ids.pmid === 'string' ? ids.pmid : undefined;
+    const rawPmid = rawPmidStr
+      ? rawPmidStr
+          .replace(/^https?:\/\/pubmed\.ncbi\.nlm\.nih\.gov\//i, '')
+          .replace(/\/+$/, '')
       : undefined;
+    const rawPmcidStr = typeof ids.pmcid === 'string' ? ids.pmcid : undefined;
+    const rawPmcid = rawPmcidStr ? normalizePmcid(rawPmcidStr) : undefined;
+    const rawIsbnVal = Array.isArray(ids.isbn) ? ids.isbn[0] : ids.isbn;
+    const rawIsbn =
+      typeof rawIsbnVal === 'string' ? normalizeIsbn(rawIsbnVal) : undefined;
+
     const publicationDate =
       typeof item.publication_date === 'string'
         ? item.publication_date
@@ -535,15 +597,23 @@ export class OpenAlexProvider implements MetadataProvider {
         doi: doi || undefined,
         arxivId: rawArxiv,
         pmid: rawPmid,
+        ...(rawPmcid ? { pmcid: rawPmcid } : {}),
+        ...(rawIsbn ? { isbn: rawIsbn } : {}),
         journal,
-        publicationTitle: journal,
+        publicationTitle,
+        ...(proceedingsTitle ? { proceedingsTitle } : {}),
+        ...(bookTitle ? { bookTitle } : {}),
+        ...(university ? { university } : {}),
+        ...(institution ? { institution } : {}),
         volume: biblio.volume || undefined,
         issue: biblio.issue || undefined,
         pages,
-        publisher: isPreprint ? undefined : publisher,
+        publisher: isPreprint
+          ? undefined
+          : publisher || university || institution,
         repository: preprintRepo,
         archiveId: rawArxiv
-          ? `arXiv:${rawArxiv.replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '')}`
+          ? `arXiv:${rawArxiv.replace(/^arxiv:\s*/i, '')}`
           : undefined,
         issn,
         abstract,
@@ -594,7 +664,6 @@ export class OpenAlexProvider implements MetadataProvider {
 
     joined = joined.replace(/\s+([.,;:!?%)\]}’'”])/g, '$1');
     joined = joined.replace(/([([{‘'“])\s+/g, '$1');
-    joined = joined.replace(/\s*([/-])\s*/g, '$1');
 
     return cleanAbstractText(joined) || joined;
   }

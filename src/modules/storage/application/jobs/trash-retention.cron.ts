@@ -75,10 +75,10 @@ export class TrashRetentionJob {
             reclaimedBytes += BigInt(node.size);
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         errors++;
         this.logger.error(
-          `Failed to purge expired trash node ${node.id}: ${err.message}`,
+          `Failed to purge expired trash node ${node.id}: ${(err as Error)?.message}`,
         );
       }
     }

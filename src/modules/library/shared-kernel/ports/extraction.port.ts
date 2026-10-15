@@ -1,41 +1,58 @@
 export const EXTRACTION_FACADE = 'EXTRACTION_FACADE';
 
 export interface IExtractionFacade {
-  getItemAttachments?(userId: string, itemId: string): Promise<any[]>;
-  getItemAttachment?(
+  getItemAttachments?<T = unknown>(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<T[]>;
+  getItemAttachment?<T = unknown>(
     userId: string,
     attachmentId: string,
     itemId?: string,
     projectId?: string,
-  ): Promise<any | null>;
-  createAttachment?(data: any, projectId?: string): Promise<any>;
-  extractDocumentFromBuffer?(
+  ): Promise<T | null>;
+  createAttachment?<T = unknown, D = Record<string, unknown>>(
+    data: D,
+    projectId?: string,
+  ): Promise<T>;
+  extractDocumentFromBuffer?<T = unknown>(
     buffer: Buffer,
-    options?: Record<string, any>,
-  ): Promise<any>;
-  extractMetadataFromBuffer?(buffer: Buffer): Record<string, any>;
-  extractTrustedMetadata?(
+    options?: Record<string, unknown>,
+  ): Promise<T>;
+  extractMetadataFromBuffer?(buffer: Buffer): Record<string, unknown>;
+  extractTrustedMetadata?<T = unknown>(
     buffer: Buffer,
     preferredFilename?: string,
-  ): Promise<any>;
-  captureWebSnapshot?(
+  ): Promise<T>;
+  captureWebSnapshot?<T = unknown>(
     url: string,
     itemId: string,
     userId: string,
-  ): Promise<any>;
+  ): Promise<T>;
   reassignContentToItem?(
     duplicateItemIds: string[],
     primaryItemId: string,
-    tx?: any,
+    tx?: unknown,
   ): Promise<void>;
-  getAnnotationsByAttachment?(
+  getAnnotationsByAttachment?<T = unknown>(
     userId: string,
     attachmentId: string,
-    options?: any,
-  ): Promise<any[]>;
-  createAnnotation?(userId: string, data: any): Promise<any>;
-  updateAnnotation?(userId: string, id: string, data: any): Promise<any>;
+    options?: Record<string, unknown>,
+  ): Promise<T[]>;
+  createAnnotation?<T = unknown, D = Record<string, unknown>>(
+    userId: string,
+    data: D,
+  ): Promise<T>;
+  updateAnnotation?<T = unknown, D = Record<string, unknown>>(
+    userId: string,
+    id: string,
+    data: D,
+  ): Promise<T>;
   deleteAnnotation?(userId: string, id: string): Promise<void>;
-  batchAnnotations?(userId: string, data: any): Promise<any>;
-  [key: string]: any;
+  batchAnnotations?<T = unknown, D = Record<string, unknown>>(
+    userId: string,
+    data: D,
+  ): Promise<T>;
+  [key: string]: unknown;
 }

@@ -9,8 +9,8 @@ import {
   ILatexEngine,
   EngineRunOptions,
   EngineRunResult,
-} from '../../ports/engine.port';
-import { ISandboxRunner } from '../../ports/runner.port';
+} from '@/modules/manuscripts/clsi/core/ports/engine.port';
+import { ISandboxRunner } from '@/modules/manuscripts/clsi/core/ports/runner.port';
 
 export class LatexmkEngine implements ILatexEngine {
   readonly name = 'latexmk';
@@ -97,13 +97,18 @@ export class LatexmkEngine implements ILatexEngine {
     const synctexGzPath = path.join(options.cwd, 'output.synctex.gz');
     const synctexPlainPath = path.join(options.cwd, 'output.synctex');
 
-    let [pdfGenerated, altPdfGenerated, synctexGzExists, synctexPlainExists] =
-      await Promise.all([
-        this.fileExists(pdfPath),
-        this.fileExists(altPdfPath),
-        this.fileExists(synctexGzPath),
-        this.fileExists(synctexPlainPath),
-      ]);
+    const [
+      initialPdfGenerated,
+      altPdfGenerated,
+      synctexGzExists,
+      synctexPlainExists,
+    ] = await Promise.all([
+      this.fileExists(pdfPath),
+      this.fileExists(altPdfPath),
+      this.fileExists(synctexGzPath),
+      this.fileExists(synctexPlainPath),
+    ]);
+    let pdfGenerated = initialPdfGenerated;
 
     if (!pdfGenerated && altPdfGenerated) {
       try {

@@ -3,32 +3,52 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { QueryRepository } from '../repositories/query.repository';
-import { CommandRepository } from '../repositories/command.repository';
-import { CreateItemData } from '../types/items.types';
-import { BibliographicReference } from '../../shared-kernel/types/bibliographic.types';
+import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
+import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
+import { CreateItemData } from '@/modules/library/catalog/types/items.types';
+import { BibliographicReference } from '@/modules/library/shared-kernel/types/bibliographic.types';
 import {
   TransactionService,
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
-} from '../../shared-kernel';
-import { ItemsMapper } from '../utils/items.mapper';
+} from '@/modules/library/shared-kernel';
+import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 
-let cachedCite: any = null;
+interface CslItemData {
+  id?: string;
+  title?: string;
+  author?: Array<{ literal?: string; given?: string; family?: string }>;
+  issued?: { 'date-parts'?: Array<Array<number | string>> };
+  'container-title'?: string;
+  journal?: string;
+  volume?: string | number;
+  issue?: string | number;
+  page?: string | number;
+  DOI?: string;
+  URL?: string;
+}
 
-function getCite(): any {
+interface CitationJsInstance {
+  data?: CslItemData[];
+}
+
+type CitationJsConstructor = new (raw: string) => CitationJsInstance;
+
+let cachedCite: CitationJsConstructor | null | undefined = null;
+
+function getCite(): CitationJsConstructor | undefined {
   if (cachedCite === null) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { Cite } = require('@citation-js/core');
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('@citation-js/plugin-bibtex');
-      cachedCite = Cite;
+      cachedCite = Cite as CitationJsConstructor;
     } catch {
       cachedCite = undefined;
     }
   }
-  return cachedCite;
+  return cachedCite ?? undefined;
 }
 
 /**
@@ -63,7 +83,7 @@ export class ItemCurationService {
 
       const cite = new Cite(rawCitations);
       const data = cite.data || [];
-      return data.map((csl: Record<string, any>, index: number) => ({
+      return data.map((csl: CslItemData, index: number) => ({
         id: csl.id || `cite-${index + 1}`,
         rawCitation: rawCitations,
         title: csl.title || 'Untitled',
@@ -225,6 +245,16 @@ export class ItemCurationService {
         return ItemsMapper.toDomain(item);
       });
 
+      if (source.doi?.trim()) {
+        existingDois.add(source.doi.trim().toLowerCase());
+      }
+      if (source.citationKey?.trim()) {
+        existingCitationKeys.add(source.citationKey.trim().toLowerCase());
+      }
+      if (source.title?.trim()) {
+        existingTitles.add(source.title.trim().toLowerCase());
+      }
+
       importedCount++;
     }
 
@@ -256,8 +286,75 @@ export class ItemCurationService {
   }
 }
 
+export interface ImportSourceItem {
+  title: string;
+  year?: number | null;
+  doi?: string | null;
+  abstract?: string | null;
+  itemType?: string | null;
+  publicationTitle?: string | null;
+  publicationDate?: string | null;
+  publisher?: string | null;
+  place?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  section?: string | null;
+  partNumber?: string | null;
+  partTitle?: string | null;
+  pages?: string | null;
+  series?: string | null;
+  seriesTitle?: string | null;
+  seriesText?: string | null;
+  issn?: string | null;
+  isbn?: string | null;
+  pmid?: string | null;
+  pmcid?: string | null;
+  url?: string | null;
+  language?: string | null;
+  journalAbbr?: string | null;
+  shortTitle?: string | null;
+  rights?: string | null;
+  license?: string | null;
+  citationKey?: string | null;
+  libraryCatalog?: string | null;
+  archive?: string | null;
+  archiveLocation?: string | null;
+  callNumber?: string | null;
+  extra?: string | null;
+  arxivId?: string | null;
+  citationCount?: number | null;
+  referenceCount?: number | null;
+  openAccessPdfUrl?: string | null;
+  fileId?: string | null;
+  fileUrl?: string | null;
+  filename?: string | null;
+  mimeType?: string | null;
+  size?: number | bigint | null;
+  fileHash?: string | null;
+  attachments?: Array<{
+    fileId?: string | null;
+    url?: string | null;
+    filename?: string | null;
+    name?: string | null;
+    mimeType?: string | null;
+    size?: number | bigint | null;
+    fileHash?: string | null;
+  }>;
+  itemTags?: Array<{ tag?: { name?: string } }>;
+  notesList?: Array<{ title?: string; contentMd?: string; tags?: string[] }>;
+  contributors?: Array<{
+    creatorType?: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    fullName?: string;
+    orderIndex?: number;
+  }>;
+  identifiers?: Array<{ type: string; value: string; canonicalUri?: string }>;
+  [key: string]: unknown;
+}
+
 export function buildImportItemPayload(
-  source: Record<string, any>,
+  source: ImportSourceItem,
   userId: string,
 ): CreateItemData {
   const primaryAttachment = source.attachments?.[0];
@@ -274,7 +371,9 @@ export function buildImportItemPayload(
     undefined;
   const resolvedMimeType =
     primaryAttachment?.mimeType || source.mimeType || undefined;
-  const resolvedSize = primaryAttachment?.size || source.size || undefined;
+  const rawSize = primaryAttachment?.size ?? source.size;
+  const resolvedSize =
+    rawSize !== undefined && rawSize !== null ? Number(rawSize) : undefined;
   const resolvedFileHash =
     primaryAttachment?.fileHash || source.fileHash || undefined;
 
@@ -341,8 +440,8 @@ export function buildImportItemPayload(
     creators: source.contributors?.map(
       (contributor: {
         creatorType?: string;
-        firstName?: string;
-        lastName?: string;
+        firstName?: string | null;
+        lastName?: string | null;
         fullName?: string;
         orderIndex?: number;
       }) => ({

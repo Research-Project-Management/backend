@@ -1,11 +1,8 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import type { ReferenceData } from '../types/citation.types';
-import {
-  normalizeDoi,
-  cleanBibliographicText,
-} from '../../shared-kernel/utils/bibliographic.utils';
-import { getAcademicUserAgent } from '../../shared-kernel/core/constants/academic-client.constants';
-import { ResilienceRegistryService } from '../../shared-kernel/resilience/resilience-registry.service';
+import type { ReferenceData } from '@/modules/library/citation/types/citation.types';
+import { cleanBibliographicText } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { getAcademicUserAgent } from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
+import { ResilienceRegistryService } from '@/modules/library/shared-kernel/resilience/resilience-registry.service';
 
 export interface DoiCitationResult {
   styleId: string;
@@ -13,6 +10,36 @@ export interface DoiCitationResult {
   bibliographyHtml?: string;
   inText?: string;
   source: 'publisher';
+}
+
+interface CslDateParts {
+  'date-parts'?: Array<Array<number | string>>;
+}
+
+interface CslAuthorInput {
+  given?: string;
+  family?: string;
+  name?: string;
+  literal?: string;
+}
+
+interface CslMetadataInput {
+  title?: string | string[];
+  author?: CslAuthorInput[];
+  'published-print'?: CslDateParts;
+  'published-online'?: CslDateParts;
+  issued?: CslDateParts;
+  'container-title'?: string | string[];
+  publisher?: string;
+  DOI?: string;
+  volume?: string;
+  issue?: string;
+  page?: string;
+  ISSN?: string | string[];
+  ISBN?: string | string[];
+  URL?: string;
+  abstract?: string;
+  type?: string;
 }
 
 @Injectable()
@@ -174,7 +201,7 @@ export class DoiContentNegotiationService {
         this.setWithLru(this.cache, cacheKey, result);
 
         return result;
-      } catch (err: any) {
+      } catch (err: unknown) {
         clearTimeout(timer);
         throw err;
       }
@@ -183,9 +210,10 @@ export class DoiContentNegotiationService {
     try {
       if (this.resilienceRegistry) {
         return await this.resilienceRegistry.execute('doi-org', executeFetch, {
-          fallback: async (err: any) => {
+          fallback: async (err: unknown) => {
+            const errMsg = err instanceof Error ? err.message : String(err);
             this.logger.debug(
-              `DOI Content Negotiation fallback for ${doi} (${normalizedStyle}): ${err?.message || err}`,
+              `DOI Content Negotiation fallback for ${doi} (${normalizedStyle}): ${errMsg}`,
             );
             return null;
           },
@@ -193,9 +221,10 @@ export class DoiContentNegotiationService {
       }
 
       return await executeFetch();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.debug(
-        `DOI Content Negotiation bypassed for ${doi} (${normalizedStyle}): ${err?.message || err}`,
+        `DOI Content Negotiation bypassed for ${doi} (${normalizedStyle}): ${errMsg}`,
       );
       return null;
     }
@@ -282,7 +311,7 @@ export class DoiContentNegotiationService {
         this.setWithLru(this.metaCache, doi, result);
 
         return result;
-      } catch (err: any) {
+      } catch (err: unknown) {
         clearTimeout(timer);
         throw err;
       }
@@ -291,9 +320,10 @@ export class DoiContentNegotiationService {
     try {
       if (this.resilienceRegistry) {
         return await this.resilienceRegistry.execute('doi-org', executeFetch, {
-          fallback: async (err: any) => {
+          fallback: async (err: unknown) => {
+            const errMsg = err instanceof Error ? err.message : String(err);
             this.logger.debug(
-              `DOI Content Negotiation metadata fallback for ${doi}: ${err?.message || err}`,
+              `DOI Content Negotiation metadata fallback for ${doi}: ${errMsg}`,
             );
             return null;
           },
@@ -301,26 +331,28 @@ export class DoiContentNegotiationService {
       }
 
       return await executeFetch();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.debug(
-        `DOI Content Negotiation metadata resolution bypassed for ${doi}: ${err?.message || err}`,
+        `DOI Content Negotiation metadata resolution bypassed for ${doi}: ${errMsg}`,
       );
       return null;
     }
   }
 
   private mapCslJsonToReferenceData(
-    rawCsl: Record<string, any>,
+    rawCsl: Record<string, unknown>,
     fallbackDoi: string,
   ): ReferenceData {
-    const csl =
+    const csl = (
       rawCsl.message && typeof rawCsl.message === 'object'
         ? rawCsl.message
-        : rawCsl;
+        : rawCsl
+    ) as CslMetadataInput;
 
     const rawTitle = Array.isArray(csl.title)
       ? csl.title[0] || 'Untitled'
-      : csl.title || 'Untitled';
+      : (csl.title as string) || 'Untitled';
     const title = cleanBibliographicText(rawTitle) || 'Untitled';
 
     const authors: string[] = [];
@@ -349,9 +381,9 @@ export class DoiContentNegotiationService {
 
     const journal = Array.isArray(csl['container-title'])
       ? csl['container-title'][0]
-      : csl['container-title'] || csl.publisher || '';
+      : (csl['container-title'] as string) || (csl.publisher as string) || '';
 
-    const doi = csl.DOI || fallbackDoi;
+    const doi = (csl.DOI as string) || fallbackDoi;
 
     return {
       doi,

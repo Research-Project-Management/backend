@@ -12,14 +12,16 @@ import {
   ItemDetail,
   ItemSummary,
   DuplicateCandidateItem,
+  QualityAuditCandidateItem,
   CreateItemData,
   UpdateItemData,
 } from './types/items.types';
 import { TagEntity } from './types/tags.types';
 import { StateData } from './types/state.types';
 import { NoteEntity, CreateNoteData } from './types/notes.types';
-import { ItemFieldDefinition } from '../shared-kernel/types/schema.types';
-import { CATALOG_FACADE } from '../shared-kernel/ports/catalog.port';
+import { ItemFieldDefinition } from '@/modules/library/shared-kernel/types/schema.types';
+import { LibraryItemSource } from '@/modules/library/shared-kernel';
+import { CATALOG_FACADE } from '@/modules/library/shared-kernel/ports/catalog.port';
 export { CATALOG_FACADE };
 
 export interface ICatalogFacade {
@@ -50,23 +52,36 @@ export interface ICatalogFacade {
   createItem(
     userId: string,
     data: CreateItemData,
-    options?: any,
+    options?: {
+      expectedVersion?: number;
+      suppressIndexing?: boolean;
+      projectId?: string;
+      source?: string;
+      idempotencyKey?: string;
+      correlationId?: string;
+    },
     projectId?: string,
-  ): Promise<any>;
+  ): Promise<ItemDetail>;
   updateItem(
     userId: string,
     itemId: string,
     data: UpdateItemData,
     options?: { expectedVersion?: number; projectId?: string },
-  ): Promise<any>;
+  ): Promise<ItemDetail>;
   deleteItem(userId: string, itemId: string, projectId?: string): Promise<void>;
   findByIds(
     userId: string,
     itemIds: string[],
     projectId?: string,
   ): Promise<ItemDetail[]>;
-  countItems(userId: string, options?: any): Promise<number>;
-  findMany(userId: string, options?: any): Promise<any[]>;
+  countItems(
+    userId: string,
+    options?: Parameters<QueryRepository['count']>[1],
+  ): Promise<number>;
+  findMany(
+    userId: string,
+    options?: Parameters<QueryRepository['findMany']>[1],
+  ): Promise<ItemDetail[]>;
   validateItemType(type: string): Promise<boolean>;
   getPrimaryCreatorType(itemType: string): string;
   getOrderedFields(itemType: string): ItemFieldDefinition[];
@@ -74,7 +89,7 @@ export interface ICatalogFacade {
     userId: string,
     limit?: number,
     projectId?: string,
-  ): Promise<any[]>;
+  ): Promise<QualityAuditCandidateItem[]>;
   findDuplicateCandidateItems(
     userId: string,
     limit?: number,
@@ -91,7 +106,10 @@ export interface ICatalogFacade {
     projectId?: string,
   ): Promise<NoteEntity[]>;
   createNote(userId: string, data: CreateNoteData): Promise<NoteEntity>;
-  listCollections(userId: string, projectId?: string): Promise<any[]>;
+  listCollections(
+    userId: string,
+    projectId?: string,
+  ): Promise<Awaited<ReturnType<CollectionsService['findAll']>>>;
   findMatchCandidates?(
     scope: { userId?: string; projectId?: string | null } | string,
     criteria: {
@@ -107,7 +125,7 @@ export interface ICatalogFacade {
       id: string;
       title: string;
       matchReason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
-      evidence: Record<string, any>;
+      evidence: Record<string, unknown>;
     } | null;
     candidateItems: Array<{
       id: string;
@@ -179,9 +197,16 @@ export class CatalogFacade implements ICatalogFacade {
   async createItem(
     userId: string,
     data: CreateItemData,
-    options?: any,
+    options?: {
+      expectedVersion?: number;
+      suppressIndexing?: boolean;
+      projectId?: string;
+      source?: LibraryItemSource;
+      idempotencyKey?: string;
+      correlationId?: string;
+    },
     projectId?: string,
-  ): Promise<any> {
+  ): Promise<ItemDetail> {
     return this.itemService.createItem(userId, data, options, projectId);
   }
 
@@ -190,7 +215,7 @@ export class CatalogFacade implements ICatalogFacade {
     itemId: string,
     data: UpdateItemData,
     options?: { expectedVersion?: number; projectId?: string },
-  ): Promise<any> {
+  ): Promise<ItemDetail> {
     return this.itemService.updateItem(
       userId,
       itemId,
@@ -223,12 +248,18 @@ export class CatalogFacade implements ICatalogFacade {
     return this.queryService.findByIds(userId, itemIds, projectId);
   }
 
-  async countItems(userId: string, options?: any): Promise<number> {
+  async countItems(
+    userId: string,
+    options?: Parameters<QueryRepository['count']>[1],
+  ): Promise<number> {
     return this.queryRepo.count(userId, options || { view: 'all' });
   }
 
-  async findMany(userId: string, options?: any): Promise<any[]> {
-    return this.queryRepo.findMany(userId, options);
+  async findMany(
+    userId: string,
+    options?: Parameters<QueryRepository['findMany']>[1],
+  ): Promise<ItemDetail[]> {
+    return this.queryRepo.findMany(userId, options || {});
   }
 
   validateItemType(type: string): Promise<boolean> {
@@ -247,7 +278,7 @@ export class CatalogFacade implements ICatalogFacade {
     userId: string,
     limit?: number,
     projectId?: string,
-  ): Promise<any[]> {
+  ): Promise<QualityAuditCandidateItem[]> {
     return this.queryService.findQualityAuditItems(userId, limit, projectId);
   }
 
@@ -279,6 +310,13 @@ export class CatalogFacade implements ICatalogFacade {
       duplicateItemIds,
       primaryItemId,
     );
+    if (typeof this.notesService?.reassignToItem === 'function') {
+      await this.notesService.reassignToItem(
+        duplicateItemIds,
+        primaryItemId,
+        tx,
+      );
+    }
   }
 
   async listNotes(
@@ -293,7 +331,10 @@ export class CatalogFacade implements ICatalogFacade {
     return this.notesService.createNote(userId, data);
   }
 
-  async listCollections(userId: string, projectId?: string): Promise<any[]> {
+  async listCollections(
+    userId: string,
+    projectId?: string,
+  ): Promise<Awaited<ReturnType<CollectionsService['findAll']>>> {
     return this.collectionsService.findAll(userId, projectId);
   }
 

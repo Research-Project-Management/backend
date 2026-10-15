@@ -22,14 +22,14 @@ export class StorageRedisCacheService {
   async setFolderListing(
     scopeKey: string,
     parentId: string | null | undefined,
-    data: any,
+    data: unknown,
     ttlSeconds = 1800,
   ): Promise<void> {
     const key = this.getTreeKey(scopeKey, parentId);
     await this.redis.set(key, data, ttlSeconds);
   }
 
-  private readonly inFlight = new Map<string, Promise<any>>();
+  private readonly inFlight = new Map<string, Promise<unknown>>();
 
   async wrapFolderListing<T>(
     scopeKey: string,

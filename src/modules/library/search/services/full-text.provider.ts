@@ -56,7 +56,7 @@ export class FullTextProvider {
     term: string,
     pageIndex?: number,
   ): Promise<PageAnchorMatch[]> {
-    const normalizedTerm = term.trim().toLowerCase();
+    const normalizedTerm = (term ?? '').trim().toLowerCase();
     if (!normalizedTerm) return [];
 
     const dbPages = await this.prisma.fullTextIndex.findMany({
@@ -69,14 +69,15 @@ export class FullTextProvider {
 
     const pages: PageTextExtraction[] = dbPages.map((dbPage) => ({
       pageIndex: dbPage.pageIndex,
-      textContent: dbPage.textContent,
+      textContent: dbPage.textContent || '',
       charOffset: dbPage.charOffset,
     }));
 
     const matches: PageAnchorMatch[] = [];
 
     for (const page of pages) {
-      const lower = page.textContent.toLowerCase();
+      const textContent = page.textContent || '';
+      const lower = textContent.toLowerCase();
       let pos = 0;
 
       while ((pos = lower.indexOf(normalizedTerm, pos)) !== -1) {
@@ -86,10 +87,13 @@ export class FullTextProvider {
         // Generate surrounding contextual snippet (60 chars before/after)
         const snippetStart = Math.max(0, pos - 60);
         const snippetEnd = Math.min(
-          page.textContent.length,
+          textContent.length,
           pos + normalizedTerm.length + 60,
         );
-        const snippet = page.textContent.substring(snippetStart, snippetEnd);
+        const snippet = textContent
+          .substring(snippetStart, snippetEnd)
+          .replace(/\s+/g, ' ')
+          .trim();
 
         matches.push({
           attachmentId,

@@ -1,21 +1,23 @@
 /**
  * modules/manuscripts/docstore/index.ts
  * Public entrypoint and barrel export for the Manuscripts Docstore subsystem
- * (Document storage, lines array representation, OCC, hashing).
+ * (Document storage, lines array representation, OCC, hashing, domain logic, controllers, repositories).
  */
 
 export * from './docstore.module';
 export * from './docstore.service';
 export * from './docstore.controller';
 export * from './pages-bridge.controller';
+export * from './controllers';
 
-// Domain
-export * from './core/domain/text-doc.entity';
-export * from './core/domain/doc-range.vo';
-export * from './core/domain/doc-errors';
+// Domain (Pure in-process functions & entities)
+export * from './domain';
+
+// Repositories
+export * from './repositories';
 
 // Ports
-export * from './core/ports/doc-repository.port';
+export { IDocRepository } from './core/ports/doc-repository.port';
 export * from './core/ports/doc-persistor.port';
 export * from './core/ports/doc-hasher.port';
 

@@ -212,10 +212,10 @@ export class ClsiController {
   @ApiOperation({
     summary: 'Prometheus metrics endpoint for CLSI compilation performance',
   })
-  async getMetrics(@Res() res: any) {
+  async getMetrics(@Res() res: FastifyReply) {
     const metricsText = this.clsiService.getPrometheusMetrics();
-    res.setHeader('Content-Type', 'text/plain; version=0.0.4');
-    res.send(metricsText);
+    res.header('Content-Type', 'text/plain; version=0.0.4');
+    return res.send(metricsText);
   }
 
   @Get([

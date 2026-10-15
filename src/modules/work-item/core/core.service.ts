@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  BadRequestException,
   Optional,
   Logger,
 } from '@nestjs/common';
@@ -23,10 +24,21 @@ import {
   ReorderWorkItemDto,
 } from './dto/bulk.dto';
 import { formatWorkItem, mapPriority } from './utils/work-item.util';
-import { isStateCompleted } from '../common/utils/state-completion.util';
+import { isStateCompleted } from '@/modules/work-item/common/utils/state-completion.util';
 import { validateHierarchyCycle } from './utils/hierarchy.util';
-import { WORK_ITEM_REDIS_KEYS } from './constants/redis-keys.constant';
+import {
+  WORK_ITEM_REDIS_KEYS,
+  invalidateWorkItemCache,
+} from '@/modules/work-item/common/constants/redis-keys.constant';
 import { Prisma } from '@prisma/client';
+
+interface ProjectStateRecord {
+  id: string;
+  name: string;
+  group: string;
+  isDefault?: boolean;
+  projectId?: string;
+}
 
 @Injectable()
 export class CoreService {
@@ -47,23 +59,142 @@ export class CoreService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateWorkItemCache(
+  private async invalidateCache(projectId: string, workItemId?: string) {
+    await invalidateWorkItemCache(this.cache, { projectId, workItemId });
+  }
+
+  private async resolveValidAssignees(
     projectId: string,
-    workItemId?: string,
-  ) {
-    if (!this.cache) return;
-    const deletions: Promise<void>[] = [
-      this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
-      this.cache.del(`flux:proj:overview:${projectId}`),
-    ];
-    if (workItemId) {
-      deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)));
-    }
-    await Promise.all(deletions).catch((err) => {
-      this.logger.warn(
-        `Failed to invalidate work item cache: ${(err as Error).message}`,
+    rawIds: string[],
+  ): Promise<string[]> {
+    if (!Array.isArray(rawIds) || rawIds.length === 0) return [];
+    const uniqueRawIds = Array.from(new Set(rawIds));
+    if (typeof this.workItemRepository.filterProjectMembers === 'function') {
+      return this.workItemRepository.filterProjectMembers(
+        projectId,
+        uniqueRawIds,
       );
-    });
+    }
+    const checked = await Promise.all(
+      uniqueRawIds.map(async (uid) => {
+        if (!isUuid(uid)) return null;
+        const isMember = await this.workItemRepository.isProjectMember(
+          projectId,
+          uid,
+        );
+        return isMember ? uid : null;
+      }),
+    );
+    return checked.filter(Boolean) as string[];
+  }
+
+  private matchProjectState(
+    states: ProjectStateRecord[] | undefined,
+    columnId?: string,
+    allowFuzzyKeywords = false,
+  ): ProjectStateRecord | undefined {
+    if (!states || !columnId) return undefined;
+    const normalizedCol = columnId.toLowerCase().trim();
+    return states.find(
+      (s) =>
+        s.id === columnId ||
+        s.name.toLowerCase() === normalizedCol ||
+        s.group.toLowerCase() === normalizedCol ||
+        (allowFuzzyKeywords &&
+          (s.name.toLowerCase().replace(/[\s_-]+/g, '_') ===
+            normalizedCol.replace(/[\s_-]+/g, '_') ||
+            (normalizedCol.includes('progress') && s.group === 'started') ||
+            (normalizedCol.includes('todo') && s.group === 'unstarted') ||
+            (normalizedCol.includes('done') && s.group === 'completed'))),
+    );
+  }
+
+  private async resolveStateAndCompletion(options: {
+    projectId: string;
+    states?: ProjectStateRecord[];
+    columnId?: string;
+    completed?: boolean;
+    isCreate: boolean;
+    existingStateGroup?: string;
+    existingColumnId?: string;
+    existingCompleted?: boolean;
+  }): Promise<{ columnId?: string; isCompleted?: boolean }> {
+    const { projectId, columnId, completed, isCreate } = options;
+    let states = options.states;
+
+    if (isCreate) {
+      const defaultState = states?.find((s) => s.isDefault) || states?.[0];
+      let targetState =
+        this.matchProjectState(states, columnId, true) || defaultState;
+
+      if (completed === true && targetState?.group !== 'completed') {
+        const completedState = states?.find((s) => s.group === 'completed');
+        if (completedState) targetState = completedState;
+      } else if (completed === false && targetState?.group === 'completed') {
+        if (defaultState && defaultState.group !== 'completed') {
+          targetState = defaultState;
+        }
+      }
+
+      const resolvedCol = targetState
+        ? targetState.id
+        : columnId || defaultState?.id || 'backlog';
+      const isCompleted = targetState
+        ? targetState.group === 'completed'
+        : isStateCompleted(resolvedCol || '');
+      return { columnId: resolvedCol, isCompleted };
+    }
+
+    if (columnId !== undefined) {
+      let targetState: ProjectStateRecord | null | undefined =
+        await this.workItemRepository.findStateById(columnId);
+      if (!targetState || targetState.projectId !== projectId) {
+        if (!states) {
+          const rawProject =
+            await this.workItemRepository.findProjectWithColumns(projectId);
+          states = rawProject?.states;
+        }
+        targetState = this.matchProjectState(states, columnId, false);
+      }
+      const resolvedCol = targetState ? targetState.id : columnId;
+      const isCompleted = targetState
+        ? targetState.group === 'completed'
+        : isStateCompleted(resolvedCol);
+      return { columnId: resolvedCol, isCompleted };
+    }
+
+    if (completed !== undefined) {
+      if (!states) {
+        const rawProject =
+          await this.workItemRepository.findProjectWithColumns(projectId);
+        states = rawProject?.states;
+      }
+      const isCurrentlyCompleted =
+        options.existingStateGroup === 'completed' ||
+        options.existingColumnId === 'done' ||
+        Boolean(options.existingCompleted);
+
+      if (completed && !isCurrentlyCompleted) {
+        const completedState = states?.find((s) => s.group === 'completed');
+        return {
+          columnId: completedState?.id,
+          isCompleted: true,
+        };
+      }
+      if (!completed && isCurrentlyCompleted) {
+        const unstartedState =
+          states?.find((s) => s.isDefault) ||
+          states?.find((s) => s.group === 'unstarted') ||
+          states?.[0];
+        return {
+          columnId: unstartedState?.id,
+          isCompleted: false,
+        };
+      }
+      return { isCompleted: completed };
+    }
+
+    return {};
   }
 
   private async buildLabelLookup(
@@ -226,49 +357,15 @@ export class CoreService {
       await this.workItemRepository.findProjectWithColumns(projectId);
     if (!rawProject) throw new NotFoundException('Project not found');
 
-    const defaultState =
-      rawProject.states?.find((s) => s.isDefault) || rawProject.states?.[0];
-    const normalizedCol = (createWorkItemDto.columnId || '')
-      .toLowerCase()
-      .trim();
-    let targetState =
-      rawProject.states?.find(
-        (s) =>
-          s.id === createWorkItemDto.columnId ||
-          s.name.toLowerCase() === normalizedCol ||
-          s.group.toLowerCase() === normalizedCol ||
-          s.name.toLowerCase().replace(/[\s_-]+/g, '_') ===
-            normalizedCol.replace(/[\s_-]+/g, '_') ||
-          (normalizedCol.includes('progress') && s.group === 'started') ||
-          (normalizedCol.includes('todo') && s.group === 'unstarted') ||
-          (normalizedCol.includes('done') && s.group === 'completed'),
-      ) || defaultState;
-
-    if (
-      createWorkItemDto.completed === true &&
-      targetState?.group !== 'completed'
-    ) {
-      const completedState = rawProject.states?.find(
-        (s) => s.group === 'completed',
-      );
-      if (completedState) {
-        targetState = completedState;
-      }
-    } else if (
-      createWorkItemDto.completed === false &&
-      targetState?.group === 'completed'
-    ) {
-      if (defaultState && defaultState.group !== 'completed') {
-        targetState = defaultState;
-      }
-    }
-
-    const targetColumn = targetState
-      ? targetState.id
-      : createWorkItemDto.columnId || defaultState?.id || 'backlog';
-    const isCompleted = targetState
-      ? targetState.group === 'completed'
-      : isStateCompleted(targetColumn || '');
+    const { columnId: resolvedCol, isCompleted } =
+      await this.resolveStateAndCompletion({
+        projectId: rawProject.id,
+        states: rawProject.states,
+        columnId: createWorkItemDto.columnId,
+        completed: createWorkItemDto.completed,
+        isCreate: true,
+      });
+    const targetColumn = resolvedCol || 'backlog';
 
     const columnCount = await this.workItemRepository.countColumnWorkItems(
       rawProject.id,
@@ -294,24 +391,10 @@ export class CoreService {
       : createWorkItemDto.assigneeId
         ? [createWorkItemDto.assigneeId]
         : [];
-    const validAssigneeIds =
-      typeof this.workItemRepository.filterProjectMembers === 'function'
-        ? await this.workItemRepository.filterProjectMembers(
-            rawProject.id,
-            rawAssigneeIds,
-          )
-        : ((
-            await Promise.all(
-              rawAssigneeIds.map(async (uid) => {
-                if (!isUuid(uid)) return null;
-                const isMember = await this.workItemRepository.isProjectMember(
-                  rawProject.id,
-                  uid,
-                );
-                return isMember ? uid : null;
-              }),
-            )
-          ).filter(Boolean) as string[]);
+    const validAssigneeIds = await this.resolveValidAssignees(
+      rawProject.id,
+      rawAssigneeIds,
+    );
     const validAssigneeId = validAssigneeIds[0] || null;
 
     const workItem = await this.workItemRepository.createWorkItem({
@@ -326,7 +409,7 @@ export class CoreService {
             (l) => typeof l === 'string' && l.trim().length > 0,
           )
         : [],
-      completed: isCompleted,
+      completed: Boolean(isCompleted),
       relations:
         (createWorkItemDto.relations as unknown as Prisma.InputJsonValue) || [],
       startDate: createWorkItemDto.startDate
@@ -357,7 +440,7 @@ export class CoreService {
       );
     }
 
-    await this.invalidateWorkItemCache(projectId, workItem.id);
+    await this.invalidateCache(projectId, workItem.id);
     this.eventDispatcher.emitWorkItemCreated({
       workItemId: workItem.id,
       actorId: authorId,
@@ -427,63 +510,16 @@ export class CoreService {
         ? updateWorkItemDto.parentWorkItemId
         : updateWorkItemDto.parentId;
 
-    let targetIsCompleted: boolean | undefined;
-    let targetColumnId: string | undefined;
-    if (updateWorkItemDto.columnId !== undefined) {
-      let targetState:
-        | { id: string; name: string; group: string; projectId?: string }
-        | null
-        | undefined = await this.workItemRepository.findStateById(
-        updateWorkItemDto.columnId,
-      );
-      if (!targetState || targetState.projectId !== existing.projectId) {
-        const rawProject = await this.workItemRepository.findProjectWithColumns(
-          existing.projectId,
-        );
-        targetState = rawProject?.states?.find(
-          (s) =>
-            s.id === updateWorkItemDto.columnId ||
-            s.name.toLowerCase() ===
-              updateWorkItemDto.columnId?.toLowerCase() ||
-            s.group.toLowerCase() === updateWorkItemDto.columnId?.toLowerCase(),
-        );
-      }
-      targetColumnId = targetState
-        ? targetState.id
-        : updateWorkItemDto.columnId;
-      targetIsCompleted = targetState
-        ? targetState.group === 'completed'
-        : isStateCompleted(targetColumnId);
-    } else if (updateWorkItemDto.completed !== undefined) {
-      const rawProject = await this.workItemRepository.findProjectWithColumns(
-        existing.projectId,
-      );
-      const isCurrentlyCompleted =
-        existing.state?.group === 'completed' ||
-        existing.columnId === 'done' ||
-        Boolean(existing.completed);
-
-      if (updateWorkItemDto.completed && !isCurrentlyCompleted) {
-        const completedState = rawProject?.states?.find(
-          (s) => s.group === 'completed',
-        );
-        if (completedState) {
-          targetColumnId = completedState.id;
-        }
-        targetIsCompleted = true;
-      } else if (!updateWorkItemDto.completed && isCurrentlyCompleted) {
-        const unstartedState =
-          rawProject?.states?.find((s) => s.isDefault) ||
-          rawProject?.states?.find((s) => s.group === 'unstarted') ||
-          rawProject?.states?.[0];
-        if (unstartedState) {
-          targetColumnId = unstartedState.id;
-        }
-        targetIsCompleted = false;
-      } else {
-        targetIsCompleted = updateWorkItemDto.completed;
-      }
-    }
+    const { columnId: targetColumnId, isCompleted: targetIsCompleted } =
+      await this.resolveStateAndCompletion({
+        projectId: existing.projectId,
+        columnId: updateWorkItemDto.columnId,
+        completed: updateWorkItemDto.completed,
+        isCreate: false,
+        existingStateGroup: existing.state?.group,
+        existingColumnId: existing.columnId,
+        existingCompleted: existing.completed,
+      });
 
     let assigneeUpdate: Prisma.WorkItemUpdateInput['assignee'] | undefined;
     if (updateWorkItemDto.assigneeId !== undefined) {
@@ -494,56 +530,39 @@ export class CoreService {
           existing.projectId,
           updateWorkItemDto.assigneeId,
         );
-        if (isMember) {
-          assigneeUpdate = {
-            connect: { id: updateWorkItemDto.assigneeId },
-          };
-        } else {
-          assigneeUpdate = { disconnect: true };
-        }
+        assigneeUpdate = isMember
+          ? { connect: { id: updateWorkItemDto.assigneeId } }
+          : { disconnect: true };
       }
     }
 
     let validAssigneeIds: string[] | undefined;
     if (updateWorkItemDto.assigneeIds !== undefined) {
-      if (Array.isArray(updateWorkItemDto.assigneeIds)) {
-        const filtered =
-          typeof this.workItemRepository.filterProjectMembers === 'function'
-            ? await this.workItemRepository.filterProjectMembers(
-                existing.projectId,
-                updateWorkItemDto.assigneeIds,
-              )
-            : ((
-                await Promise.all(
-                  updateWorkItemDto.assigneeIds.map(async (uid) => {
-                    if (!isUuid(uid)) return null;
-                    const isMember =
-                      await this.workItemRepository.isProjectMember(
-                        existing.projectId,
-                        uid,
-                      );
-                    return isMember ? uid : null;
-                  }),
-                )
-              ).filter(Boolean) as string[]);
-        validAssigneeIds = filtered;
-      } else {
-        validAssigneeIds = [];
-      }
+      validAssigneeIds = Array.isArray(updateWorkItemDto.assigneeIds)
+        ? await this.resolveValidAssignees(
+            existing.projectId,
+            updateWorkItemDto.assigneeIds,
+          )
+        : [];
     }
 
     let parentUpdate: Prisma.WorkItemUpdateInput['parentWorkItem'] | undefined;
     if (parentId !== undefined) {
       if (!parentId) {
         parentUpdate = { disconnect: true };
-      } else if (isUuid(parentId) && parentId !== workItemId) {
+      } else if (parentId === workItemId || parentId === existing.id) {
+        throw new BadRequestException(
+          'A work item cannot be set as its own parent',
+        );
+      } else {
         const parent = await this.workItemRepository.findWorkItemById(parentId);
-        if (
-          parent &&
-          parent.projectId === existing.projectId &&
-          parent.id !== workItemId
-        ) {
-          await validateHierarchyCycle(workItemId, parent, (id) =>
+        if (parent && parent.projectId === existing.projectId) {
+          if (parent.id === workItemId || parent.id === existing.id) {
+            throw new BadRequestException(
+              'A work item cannot be set as its own parent',
+            );
+          }
+          await validateHierarchyCycle(existing.id, parent, (id) =>
             this.workItemRepository.findWorkItemById(id),
           );
           parentUpdate = { connect: { id: parent.id } };
@@ -622,7 +641,7 @@ export class CoreService {
       }
     }
 
-    await this.invalidateWorkItemCache(existing.projectId, existing.id);
+    await this.invalidateCache(existing.projectId, existing.id);
 
     this.eventDispatcher.dispatchUpdateEvents(
       existing,
@@ -642,7 +661,7 @@ export class CoreService {
     if (!item) throw new NotFoundException('WorkItem not found');
 
     await this.workItemRepository.softDeleteWorkItem(item.id);
-    await this.invalidateWorkItemCache(item.projectId, item.id);
+    await this.invalidateCache(item.projectId, item.id);
     this.eventDispatcher.emitWorkItemDeleted({
       workItemId: item.id,
       actorId: userId,
@@ -679,7 +698,7 @@ export class CoreService {
 
     if (updates.length > 0) {
       await this.workItemRepository.updateWorkItemsRank(updates);
-      await this.invalidateWorkItemCache(item.projectId);
+      await this.invalidateCache(item.projectId);
     }
 
     this.eventDispatcher.emitWorkItemReordered({
@@ -702,7 +721,7 @@ export class CoreService {
       projectId,
       bulkUpdateWorkItemDto,
       userId,
-      (projId) => this.invalidateWorkItemCache(projId),
+      (projId) => this.invalidateCache(projId),
     );
   }
 
@@ -715,7 +734,7 @@ export class CoreService {
       projectId,
       bulkDeleteWorkItemDto,
       userId,
-      (projId) => this.invalidateWorkItemCache(projId),
+      (projId) => this.invalidateCache(projId),
     );
   }
 
@@ -745,7 +764,7 @@ export class CoreService {
         destinationProjectId,
       );
     const cloned = await this.workItemRepository.createWorkItem(cloneData);
-    await this.invalidateWorkItemCache(targetProjectId, cloned.id);
+    await this.invalidateCache(targetProjectId, cloned.id);
 
     this.eventDispatcher.emitWorkItemDuplicated({
       workItemId: cloned.id,
@@ -769,7 +788,7 @@ export class CoreService {
       item.id,
     );
 
-    await this.invalidateWorkItemCache(item.projectId, item.id);
+    await this.invalidateCache(item.projectId, item.id);
     const formatted = formatWorkItem(updated);
     return {
       message: 'WorkItem converted to root work item successfully',
@@ -777,9 +796,70 @@ export class CoreService {
     };
   }
 
-  getWorkItem = this.getWorkItemById.bind(this);
-  bulkUpdateWorkItems = this.bulkUpdate.bind(this);
-  bulkDeleteWorkItems = this.bulkDelete.bind(this);
+  async convertSubItemToRoot(workItemId: string) {
+    return this.convertToRootWorkItem(workItemId);
+  }
+
+  async getWorkItemAnalytics(projectId: string) {
+    const items = await this.getProjectWorkItems(projectId);
+    const byStateGroup: Record<string, number> = {
+      backlog: 0,
+      unstarted: 0,
+      started: 0,
+      completed: 0,
+      cancelled: 0,
+    };
+    const byPriority: Record<string, number> = {
+      none: 0,
+      low: 0,
+      medium: 0,
+      high: 0,
+      urgent: 0,
+    };
+
+    let completedCount = 0;
+    let overdueCount = 0;
+    let totalTimeSpent = 0;
+    const now = Date.now();
+
+    for (const rawItem of items) {
+      const item = rawItem as Record<string, unknown>;
+      const group = String(item.stateGroup || 'unstarted').toLowerCase();
+      byStateGroup[group] = (byStateGroup[group] || 0) + 1;
+
+      const prio = String(item.priority || 'none').toLowerCase();
+      byPriority[prio] = (byPriority[prio] || 0) + 1;
+
+      const isDone = Boolean(item.completed) || group === 'completed';
+      if (isDone) {
+        completedCount += 1;
+      } else if (
+        group !== 'cancelled' &&
+        item.dueDate &&
+        new Date(String(item.dueDate)).getTime() < now
+      ) {
+        overdueCount += 1;
+      }
+
+      if (typeof item.timeSpent === 'number' && !isNaN(item.timeSpent)) {
+        totalTimeSpent += item.timeSpent;
+      }
+    }
+
+    const total = items.length;
+    const completionRate =
+      total > 0 ? Math.round((completedCount / total) * 100) : 0;
+
+    return {
+      total,
+      completed: completedCount,
+      overdue: overdueCount,
+      completionRate,
+      totalTimeSpent: Number(totalTimeSpent.toFixed(2)),
+      byStateGroup,
+      byPriority,
+    };
+  }
 }
 
 export const WorkItemService = CoreService;

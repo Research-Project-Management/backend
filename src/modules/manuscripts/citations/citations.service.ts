@@ -3,7 +3,9 @@
  * Facade Service orchestrating Citations, BibTeX, DOI/arXiv resolution & Library sync.
  */
 
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { CitationsRepository } from './citations.repository';
+import { RegexAstBibtexParser } from './core/adapters/parser/regex-ast-bibtex.parser';
 import { SearchCitationKeysUseCase } from './core/use-cases/search-citation-keys.use-case';
 import { ResolveIdentifierToBibUseCase } from './core/use-cases/resolve-identifier-to-bib.use-case';
 import { ValidateProjectBibtexUseCase } from './core/use-cases/validate-project-bibtex.use-case';
@@ -24,15 +26,43 @@ import {
 @Injectable()
 export class CitationsService {
   private readonly logger = new Logger(CitationsService.name);
+  private readonly searchKeysUseCase: SearchCitationKeysUseCase;
+  private readonly resolveIdentifierUseCase: ResolveIdentifierToBibUseCase;
+  private readonly validateBibtexUseCase: ValidateProjectBibtexUseCase;
+  private readonly syncLibraryUseCase: SyncLibraryCollectionUseCase;
+  private readonly bibParser: IBibtexParserPort;
 
   constructor(
-    private readonly searchKeysUseCase: SearchCitationKeysUseCase,
-    private readonly resolveIdentifierUseCase: ResolveIdentifierToBibUseCase,
-    private readonly validateBibtexUseCase: ValidateProjectBibtexUseCase,
-    private readonly syncLibraryUseCase: SyncLibraryCollectionUseCase,
-    @Inject(BIBTEX_PARSER_PORT)
-    private readonly bibParser: IBibtexParserPort,
-  ) {}
+    @Optional() searchKeysUseCase?: SearchCitationKeysUseCase,
+    @Optional() resolveIdentifierUseCase?: ResolveIdentifierToBibUseCase,
+    @Optional() validateBibtexUseCase?: ValidateProjectBibtexUseCase,
+    @Optional() syncLibraryUseCase?: SyncLibraryCollectionUseCase,
+    @Optional() @Inject(BIBTEX_PARSER_PORT) bibParser?: IBibtexParserPort,
+    @Optional() repository?: CitationsRepository,
+  ) {
+    const parser = bibParser ?? repository ?? new RegexAstBibtexParser();
+    const aggregator = repository;
+    const resolver = repository;
+    const sync = repository;
+
+    this.searchKeysUseCase =
+      searchKeysUseCase ??
+      (aggregator ? new SearchCitationKeysUseCase(aggregator) : undefined!);
+    this.resolveIdentifierUseCase =
+      resolveIdentifierUseCase ??
+      (resolver && aggregator
+        ? new ResolveIdentifierToBibUseCase(resolver, aggregator)
+        : undefined!);
+    this.validateBibtexUseCase =
+      validateBibtexUseCase ??
+      (aggregator ? new ValidateProjectBibtexUseCase(aggregator) : undefined!);
+    this.syncLibraryUseCase =
+      syncLibraryUseCase ??
+      (sync && parser && aggregator
+        ? new SyncLibraryCollectionUseCase(sync, parser, aggregator)
+        : undefined!);
+    this.bibParser = parser;
+  }
 
   /**
    * Search citation keys in the project to power \cite{...} autocomplete.

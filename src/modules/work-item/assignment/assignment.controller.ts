@@ -69,7 +69,7 @@ export class AssignmentController {
     return this.assignmentService.assignWorkItem(
       projectId,
       workItemId,
-      assignWorkItemDto.assigneeId ?? null,
+      assignWorkItemDto.assigneeId ?? assignWorkItemDto.assignee ?? null,
       userId,
     );
   }

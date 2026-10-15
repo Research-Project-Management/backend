@@ -4,7 +4,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IHistoryRepositoryPort } from '../ports/history-repository.port';
+import { IHistoryRepositoryPort } from '@/modules/manuscripts/project-history/core/ports/history-repository.port';
 
 @Injectable()
 export class DeleteLabelUseCase {

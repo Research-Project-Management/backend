@@ -4,7 +4,6 @@ import {
   IsArray,
   IsInt,
   MaxLength,
-  IsObject,
 } from 'class-validator';
 
 export class CreateNoteDto {

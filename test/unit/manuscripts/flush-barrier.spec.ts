@@ -19,7 +19,10 @@ describe('Pre-Compile Flush Barrier (YjsDocManagerAdapter.flushProject)', () => 
   });
 
   it('should resolve cleanly when flushing a project with no active sessions', async () => {
-    const manager = new YjsDocManagerAdapter(undefined, docstoreServiceMock as DocstoreService);
+    const manager = new YjsDocManagerAdapter(
+      undefined,
+      docstoreServiceMock as DocstoreService,
+    );
 
     const count = await manager.flushProject('non-existent-project');
     expect(count).toBe(0);
@@ -29,11 +32,17 @@ describe('Pre-Compile Flush Barrier (YjsDocManagerAdapter.flushProject)', () => 
   });
 
   it('should flush all in-memory Yjs documents for the specified project to docstore before compile', async () => {
-    const manager = new YjsDocManagerAdapter(undefined, docstoreServiceMock as DocstoreService);
+    const manager = new YjsDocManagerAdapter(
+      undefined,
+      docstoreServiceMock as DocstoreService,
+    );
 
     // Create 2 documents for project-A and 1 for project-B
     const sessionA1 = await manager.getOrCreateDoc('project-A', 'doc-1');
-    sessionA1.yText.insert(0, '\\documentclass{article}\n\\begin{document}\nHello Project A\n\\end{document}');
+    sessionA1.yText.insert(
+      0,
+      '\\documentclass{article}\n\\begin{document}\nHello Project A\n\\end{document}',
+    );
 
     const sessionA2 = await manager.getOrCreateDoc('project-A', 'doc-2');
     sessionA2.yText.insert(0, '\\section{Chapter 2}');
@@ -50,7 +59,10 @@ describe('Pre-Compile Flush Barrier (YjsDocManagerAdapter.flushProject)', () => 
       'project-A',
       'doc-1',
       expect.objectContaining({
-        lines: expect.arrayContaining(['\\documentclass{article}', 'Hello Project A']),
+        lines: expect.arrayContaining([
+          '\\documentclass{article}',
+          'Hello Project A',
+        ]),
       }),
     );
     expect(docstoreServiceMock.updateDoc).toHaveBeenCalledWith(

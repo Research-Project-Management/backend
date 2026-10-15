@@ -1,24 +1,22 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Inject,
-} from '@nestjs/common';
+import { Injectable, BadRequestException, Inject } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { StateRepository } from '../repositories/state.repository';
-import { UpdateStateDto } from '../dto/state.dto';
+import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
+import { UpdateStateDto } from '@/modules/library/catalog/dto/state.dto';
 import {
   StateData,
   ReadingStatus,
   StateEntity,
   UpsertStateData,
-} from '../types/state.types';
+} from '@/modules/library/catalog/types/state.types';
 import {
   TransactionService,
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
-} from '../../shared-kernel';
-import { ITEM_EXISTENCE_PORT, IItemExistencePort } from '../types/items.types';
+} from '@/modules/library/shared-kernel';
+import {
+  ITEM_EXISTENCE_PORT,
+  IItemExistencePort,
+} from '@/modules/library/catalog/types/items.types';
 import {
   toStateResponse,
   isValidRating,
@@ -26,7 +24,7 @@ import {
   shouldAutoAdvanceToReading,
   isValidStateTransition,
   isValidScrollPosition,
-} from '../utils/state.utils';
+} from '@/modules/library/catalog/domain/state.domain';
 
 @Injectable()
 export class StateService {
@@ -318,9 +316,19 @@ export class StateService {
         .sort((a, b) => b.getTime() - a.getTime())[0];
 
       const maxCurrentPage = Math.max(...states.map((s) => s.currentPage || 1));
-      const latestScroll = states.find(
-        (s) => s.scrollPosition !== null,
-      )?.scrollPosition;
+      const statesWithScroll = states.filter((s) => s.scrollPosition !== null);
+      statesWithScroll.sort((a, b) => {
+        const readA = a.lastReadAt ? a.lastReadAt.getTime() : 0;
+        const readB = b.lastReadAt ? b.lastReadAt.getTime() : 0;
+        if (readB !== readA) return readB - readA;
+
+        const openA = a.lastOpenedAt ? a.lastOpenedAt.getTime() : 0;
+        const openB = b.lastOpenedAt ? b.lastOpenedAt.getTime() : 0;
+        if (openB !== openA) return openB - openA;
+
+        return (b.currentPage || 1) - (a.currentPage || 1);
+      });
+      const latestScroll = statesWithScroll[0]?.scrollPosition;
 
       await tx.state.upsert({
         where: {

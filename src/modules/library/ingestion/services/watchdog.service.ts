@@ -7,9 +7,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IngestionStatus } from '@prisma/client';
-import { IngestionRepository } from '../repositories/ingestion.repository';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { QueueService } from './queue.service';
-import { IngestionSubmissionEnvelope } from '../types/submission.types';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 
 export interface WatchdogReconciliationResult {
   reconciled: number;
@@ -61,10 +61,9 @@ export class WatchdogService
   startWatchdog(intervalMs: number) {
     if (this.timer) return;
     this.timer = setInterval(() => {
-      void this.reconcileOrphanedRuns().catch((err: any) => {
-        this.logger.error(
-          `Watchdog reconciliation failed: ${err?.message || err}`,
-        );
+      void this.reconcileOrphanedRuns().catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.error(`Watchdog reconciliation failed: ${msg}`);
       });
     }, intervalMs);
     // Prevent the timer from holding the Node.js event loop open in test environments.
@@ -203,8 +202,9 @@ export class WatchdogService
         );
       }
       return recovered;
-    } catch (err: any) {
-      this.logger.error(`Startup recovery scan failed: ${err?.message || err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Startup recovery scan failed: ${msg}`);
       return 0;
     }
   }

@@ -29,14 +29,14 @@ export class PrismaReviewBundleStoreAdapter extends ReviewBundleStorePort {
   }
 
   private async read(userId: string): Promise<{
-    editorConfig: Record<string, any>;
+    editorConfig: Record<string, unknown>;
     state: StoredState;
   }> {
     const row = await this.prisma.userSettings.findUnique({
       where: { userId },
       select: { editorConfig: true },
     });
-    const editorConfig = (row?.editorConfig as Record<string, any>) || {};
+    const editorConfig = (row?.editorConfig as Record<string, unknown>) || {};
     return {
       editorConfig,
       state: (editorConfig.reviewNotifications as StoredState) || {},
@@ -45,7 +45,7 @@ export class PrismaReviewBundleStoreAdapter extends ReviewBundleStorePort {
 
   private async write(
     userId: string,
-    editorConfig: Record<string, any>,
+    editorConfig: Record<string, unknown>,
     state: StoredState,
   ): Promise<void> {
     const next = {
@@ -82,6 +82,9 @@ export class PrismaReviewBundleStoreAdapter extends ReviewBundleStorePort {
 
   async listDigests(userId: string, limit: number): Promise<ReviewDigest[]> {
     const { state } = await this.read(userId);
-    return (state.digests || []).slice(0, Math.max(1, Math.min(limit, MAX_DIGESTS)));
+    return (state.digests || []).slice(
+      0,
+      Math.max(1, Math.min(limit, MAX_DIGESTS)),
+    );
   }
 }

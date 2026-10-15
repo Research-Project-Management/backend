@@ -102,4 +102,42 @@ export interface BatchAnnotationsResult {
 }
 
 export const ANNOTATION_REPOSITORY_PORT = Symbol('ANNOTATION_REPOSITORY_PORT');
-export type IAnnotationRepositoryPort = any;
+export interface IAnnotationRepositoryPort {
+  findByAttachment(
+    attachmentId: string,
+    pageIndex?: number,
+    type?: AnnotationType,
+    tx?: unknown,
+  ): Promise<AnnotationEntity[]>;
+
+  findById(id: string, tx?: unknown): Promise<AnnotationEntity | null>;
+
+  create(data: CreateAnnotationData, tx?: unknown): Promise<AnnotationEntity>;
+
+  update(
+    id: string,
+    data: UpdateAnnotationData,
+    tx?: unknown,
+  ): Promise<AnnotationEntity>;
+
+  softDelete(
+    id: string,
+    authorId: string,
+    expectedVersion?: number,
+    tx?: unknown,
+  ): Promise<AnnotationEntity>;
+
+  batchUpsert(
+    attachmentId: string,
+    authorId: string,
+    data: BatchAnnotationsData,
+    tx?: unknown,
+  ): Promise<BatchAnnotationsResult>;
+
+  deleteManyByItemId(itemId: string, tx?: unknown): Promise<number>;
+
+  softDeleteByAttachmentIds(
+    attachmentIds: string[],
+    tx?: unknown,
+  ): Promise<number>;
+}

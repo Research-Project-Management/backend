@@ -29,6 +29,7 @@ import { TrashRetentionJob } from '../jobs/trash-retention.cron';
 import { MultipartCleanupJob } from '../jobs/multipart-cleanup.cron';
 import { OrphanBlobJob } from '../jobs/orphan-blob.cron';
 import { PdfThumbnailService } from '../services/pdf-thumbnail.service';
+import { StorageNode } from '../../domain/entities/storage-node.entity';
 
 @Processor(STORAGE_PROCESSING_QUEUE, { concurrency: 3 })
 export class StorageQueueConsumer
@@ -61,7 +62,7 @@ export class StorageQueueConsumer
     }
   }
 
-  async process(job: Job<any>): Promise<any> {
+  async process(job: Job<unknown>): Promise<unknown> {
     switch (job.name) {
       case STORAGE_JOB_MAINTENANCE_TRASH: {
         this.logger.log(
@@ -122,12 +123,18 @@ export class StorageQueueConsumer
       this.logger.log(
         `Completed processing job [${job.id}] for file ${data.fileId}`,
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errorObj = err as {
+        name?: string;
+        Code?: string;
+        message?: string;
+        stack?: string;
+      };
       if (
-        err?.name === 'NoSuchKey' ||
-        err?.Code === 'NoSuchKey' ||
-        err?.message?.includes('NoSuchKey') ||
-        err?.message?.includes('The specified key does not exist')
+        errorObj?.name === 'NoSuchKey' ||
+        errorObj?.Code === 'NoSuchKey' ||
+        errorObj?.message?.includes('NoSuchKey') ||
+        errorObj?.message?.includes('The specified key does not exist')
       ) {
         this.logger.warn(
           `Storage job [${job.id}] skipped for ${data.fileId}: S3 key "${data.s3Key}" not found. File may have been removed or incomplete upload.`,
@@ -135,8 +142,8 @@ export class StorageQueueConsumer
         return;
       }
       this.logger.error(
-        `Failed processing storage job [${job.id}] for ${data.fileId}: ${err?.message}`,
-        err?.stack,
+        `Failed processing storage job [${job.id}] for ${data.fileId}: ${errorObj?.message}`,
+        errorObj?.stack,
       );
       throw err; // Re-throw to trigger BullMQ retry backoff
     }
@@ -144,7 +151,7 @@ export class StorageQueueConsumer
 
   private async processImage(
     data: StorageProcessingJobData,
-    node: any,
+    node: StorageNode,
   ): Promise<void> {
     const { stream } = await this.driver.getStream(data.s3Key);
     const chunks: Buffer[] = [];
@@ -181,7 +188,7 @@ export class StorageQueueConsumer
 
   private async processPdf(
     data: StorageProcessingJobData,
-    node: any,
+    node: StorageNode,
   ): Promise<void> {
     const { stream } = await this.driver.getStream(data.s3Key);
     const chunks: Buffer[] = [];
@@ -195,7 +202,8 @@ export class StorageQueueConsumer
       const pageCount = pdfDoc.getPageCount();
 
       const currentMeta = node.metadata || {};
-      let thumbnailPath: string | null = currentMeta.thumbnail || null;
+      let thumbnailPath: string | null =
+        (currentMeta.thumbnail as string) || null;
 
       // In-process WebP thumbnail generation for page 1
       if (this.pdfThumbnailService && data.blobId) {
@@ -213,9 +221,9 @@ export class StorageQueueConsumer
               `Generated and stored WebP thumbnail for PDF ${data.fileId}`,
             );
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           this.logger.warn(
-            `Could not generate thumbnail for PDF ${data.fileId}: ${err?.message}`,
+            `Could not generate thumbnail for PDF ${data.fileId}: ${(err as Error)?.message}`,
           );
         }
       }
@@ -225,16 +233,16 @@ export class StorageQueueConsumer
         pageCount,
         ...(thumbnailPath ? { thumbnail: thumbnailPath } : {}),
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.warn(
-        `Could not extract page count for PDF ${data.fileId}: ${err?.message}`,
+        `Could not extract page count for PDF ${data.fileId}: ${(err as Error)?.message}`,
       );
     }
   }
 
   private async processDataset(
     data: StorageProcessingJobData,
-    node: any,
+    node: StorageNode,
   ): Promise<void> {
     const { stream } = await this.driver.getStream(data.s3Key);
     const rl = createInterface({

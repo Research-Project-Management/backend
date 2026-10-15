@@ -267,7 +267,10 @@ export class ExportImportController {
         req.body !== null &&
         'buffer' in req.body
       ) {
-        const bodyWithBuffer = req.body as { buffer?: unknown; filename?: string };
+        const bodyWithBuffer = req.body as {
+          buffer?: unknown;
+          filename?: string;
+        };
         if (Buffer.isBuffer(bodyWithBuffer.buffer)) {
           fileBuffer = bodyWithBuffer.buffer;
           if (typeof bodyWithBuffer.filename === 'string') {

@@ -2,12 +2,13 @@
  * filestore/dto/file-response.dto.ts
  */
 
-import { ManuscriptFile } from '../core/domain/entities/manuscript-file.entity';
+import { ManuscriptFile } from '@/modules/manuscripts/filestore/core/domain/entities/manuscript-file.entity';
 
 export class ManuscriptFileResponseDto {
   id!: string;
   projectId!: string;
   name!: string;
+  filename!: string;
   mimeType!: string;
   sizeBytes!: number;
   hash!: string;
@@ -22,6 +23,7 @@ export class ManuscriptFileResponseDto {
     dto.id = entity.id;
     dto.projectId = entity.projectId;
     dto.name = entity.name;
+    dto.filename = entity.name;
     dto.mimeType = entity.mimeType;
     dto.sizeBytes = entity.sizeBytes;
     dto.hash = entity.hash.getValue();

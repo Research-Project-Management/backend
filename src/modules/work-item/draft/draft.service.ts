@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DraftRepository } from './draft.repository';
-import { WorkItemService } from '../core/core.service';
+import { WorkItemService } from '@/modules/work-item/core/core.service';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { UpdateDraftDto } from './dto/update-draft.dto';
 import { PublishDraftDto } from './dto/publish-draft.dto';
@@ -64,10 +64,7 @@ export class DraftService {
     updateDraftDto: UpdateDraftDto,
     authorId: string,
   ) {
-    const existing = await this.draftRepository.findById(id, authorId);
-    if (!existing) {
-      throw new NotFoundException(`Draft ${id} not found`);
-    }
+    await this.getDraft(id, authorId);
     return this.draftRepository.update(id, authorId, updateDraftDto);
   }
 
@@ -76,10 +73,7 @@ export class DraftService {
     publishDraftDto: PublishDraftDto,
     authorId: string,
   ) {
-    const draft = await this.draftRepository.findById(id, authorId);
-    if (!draft) {
-      throw new NotFoundException(`Draft ${id} not found`);
-    }
+    const draft = await this.getDraft(id, authorId);
 
     const targetProjectId = publishDraftDto.projectId || draft.projectId;
     if (!targetProjectId) {
@@ -133,10 +127,7 @@ export class DraftService {
   }
 
   async duplicateDraft(id: string, authorId: string) {
-    const draft = await this.draftRepository.findById(id, authorId);
-    if (!draft) {
-      throw new NotFoundException(`Draft ${id} not found`);
-    }
+    const draft = await this.getDraft(id, authorId);
 
     const title = draft.title ? `${draft.title} (Copy)` : 'Untitled (Copy)';
 
@@ -170,10 +161,7 @@ export class DraftService {
   }
 
   async deleteDraft(id: string, authorId: string) {
-    const existing = await this.draftRepository.findById(id, authorId);
-    if (!existing) {
-      throw new NotFoundException(`Draft ${id} not found`);
-    }
+    await this.getDraft(id, authorId);
     await this.draftRepository.delete(id, authorId);
     return { success: true, id };
   }

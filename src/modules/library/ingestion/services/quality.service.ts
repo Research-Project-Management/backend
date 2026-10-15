@@ -2,7 +2,10 @@ import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
-} from '../types/catalog-gateway.types';
+} from '@/modules/library/ingestion/types/catalog-gateway.types';
+import { DuplicateService } from './duplicate.service';
+import { ItemsMapper } from '@/modules/library/catalog';
+import { DuplicateClusterItem } from '@/modules/library/ingestion/types/curation.types';
 
 export interface CompletenessAnalysis {
   score: number; // 0 - 100
@@ -30,6 +33,8 @@ export class QualityService {
     @Optional()
     @Inject(CATALOG_GATEWAY_PORT)
     private readonly catalogGateway?: ICatalogGatewayPort,
+    @Optional()
+    private readonly duplicateService?: DuplicateService,
   ) {}
 
   /**
@@ -133,9 +138,9 @@ export class QualityService {
     }
 
     // Check type-specific completeness
-    let extraFields: Record<string, any> = {};
+    let extraFields: Record<string, unknown> = {};
     if (item.extraFields && typeof item.extraFields === 'object') {
-      extraFields = item.extraFields;
+      extraFields = item.extraFields as Record<string, unknown>;
     } else if (
       typeof item.extra === 'string' &&
       item.extra.trim().startsWith('{')
@@ -183,17 +188,56 @@ export class QualityService {
     let missingDoi = 0;
     let missingAbstract = 0;
     let missingYear = 0;
+    let missingAuthors = 0;
+    let healthyItems = 0;
+    const flaggedItems: Array<{
+      itemId: string;
+      paperId: string;
+      title: string;
+      issues: string[];
+    }> = [];
 
     for (const it of items) {
       let score = 0;
+      const issues: string[] = [];
+
       if (it.title && it.title.length > 3) score += 25;
+      else issues.push('missing_title');
+
       if (it.contributors && it.contributors.length > 0) score += 25;
+      else {
+        missingAuthors += 1;
+        issues.push('missing_authors');
+      }
+
       if (it.year && it.year > 1900) score += 20;
-      else missingYear += 1;
+      else {
+        missingYear += 1;
+        issues.push('missing_year');
+      }
+
       if (it.doi) score += 15;
-      else missingDoi += 1;
+      else {
+        missingDoi += 1;
+        issues.push('missing_doi');
+      }
+
       if (it.abstract) score += 15;
-      else missingAbstract += 1;
+      else {
+        missingAbstract += 1;
+        issues.push('missing_abstract');
+      }
+
+      if (issues.length === 0) {
+        healthyItems += 1;
+      } else {
+        flaggedItems.push({
+          itemId: it.id,
+          paperId: it.id,
+          title: it.title || 'Untitled',
+          issues,
+        });
+      }
 
       totalScore += score;
     }
@@ -203,12 +247,62 @@ export class QualityService {
 
     return {
       totalItems: items.length,
+      totalPapers: items.length,
+      healthyItems,
+      healthyPapers: healthyItems,
       averageQualityScore,
+      healthScorePercentage: averageQualityScore,
+      missingDoiCount: missingDoi,
+      missingYearCount: missingYear,
+      missingAuthorsCount: missingAuthors,
+      missingAbstractCount: missingAbstract,
+      missingPdfCount: 0,
+      flaggedItems,
       healthReport: {
         missingDoi,
         missingAbstract,
         missingYear,
       },
+    };
+  }
+
+  /**
+   * Retrieves duplicate groups with preserved recommendedMasterId and full domain-projected items
+   * (papers & items) so consumers never need N+1 GET /library/items/:id calls.
+   */
+  async getDuplicates(userId: string, projectId?: string) {
+    const rawClusters = this.duplicateService
+      ? await this.duplicateService.detectDuplicates(userId, projectId)
+      : [];
+
+    const duplicateGroups = rawClusters.map((cluster) => {
+      const domainItems = (cluster.items || []).map((it) =>
+        ItemsMapper.toDomain(it),
+      );
+      return {
+        key: cluster.clusterId,
+        clusterId: cluster.clusterId,
+        matchType:
+          cluster.matchReason === 'EXACT_DOI'
+            ? ('DOI' as const)
+            : ('TITLE_AUTHOR_YEAR' as const),
+        matchReason: cluster.matchReason,
+        confidence:
+          cluster.confidence >= 1 ? ('high' as const) : ('medium' as const),
+        confidenceScore: cluster.confidence,
+        recommendedMasterId: cluster.recommendedMasterId,
+        papers: domainItems,
+        items: domainItems,
+      };
+    });
+
+    return {
+      duplicateGroups,
+      clusters: rawClusters,
+      totalDuplicates: duplicateGroups.reduce(
+        (acc, g) => acc + (g.papers?.length || 0),
+        0,
+      ),
     };
   }
 }

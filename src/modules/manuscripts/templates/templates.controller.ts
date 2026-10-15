@@ -17,6 +17,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { AuthenticatedRequest } from '@/core';
 import { TemplatesService } from './templates.service';
 import {
   QueryTemplatesDto,
@@ -36,12 +37,19 @@ import {
 export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
 
-  private extractUserId(req: any): string {
+  private extractUserId(req?: AuthenticatedRequest): string {
+    const rawHeader = req?.headers?.['x-user-id'];
+    const headerUserId =
+      typeof rawHeader === 'string'
+        ? rawHeader
+        : Array.isArray(rawHeader)
+          ? rawHeader[0]
+          : undefined;
     return (
       req?.user?.id ||
       req?.user?.sub ||
       req?.user?.userId ||
-      req?.headers?.['x-user-id'] ||
+      headerUserId ||
       'anonymous-user'
     );
   }
@@ -79,7 +87,7 @@ export class TemplatesController {
     description: 'Project successfully created from template',
   })
   async instantiateTemplate(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Body() dto: InstantiateTemplateDto,
   ) {
     const userId = this.extractUserId(req);
@@ -111,12 +119,19 @@ export class TemplatesController {
 export class OverleafTemplatesParityController {
   constructor(private readonly templatesService: TemplatesService) {}
 
-  private extractUserId(req: any): string {
+  private extractUserId(req?: AuthenticatedRequest): string {
+    const rawHeader = req?.headers?.['x-user-id'];
+    const headerUserId =
+      typeof rawHeader === 'string'
+        ? rawHeader
+        : Array.isArray(rawHeader)
+          ? rawHeader[0]
+          : undefined;
     return (
       req?.user?.id ||
       req?.user?.sub ||
       req?.user?.userId ||
-      req?.headers?.['x-user-id'] ||
+      headerUserId ||
       'anonymous-user'
     );
   }
@@ -131,7 +146,7 @@ export class OverleafTemplatesParityController {
     description: 'Created project object with project_id',
   })
   async instantiateOverleaf(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Body() dto: OverleafInstantiateTemplateDto,
   ) {
     const userId = this.extractUserId(req);

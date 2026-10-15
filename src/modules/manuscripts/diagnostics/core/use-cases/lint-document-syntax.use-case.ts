@@ -3,8 +3,8 @@
  * Inbound Use Case: Statically lints LaTeX document source for early syntax errors.
  */
 
-import { ISyntaxLinterPort } from '../ports/syntax-linter.port';
-import { DiagnosticReport } from '../domain/entities/diagnostic-report.entity';
+import { ISyntaxLinterPort } from '@/modules/manuscripts/diagnostics/core/ports/syntax-linter.port';
+import { DiagnosticReport } from '@/modules/manuscripts/diagnostics/core/domain/entities/diagnostic-report.entity';
 
 export interface LintDocumentSyntaxCommand {
   source: string;

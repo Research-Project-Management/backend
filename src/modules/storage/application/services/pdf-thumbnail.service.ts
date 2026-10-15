@@ -68,9 +68,9 @@ export class PdfThumbnailService {
       );
 
       return webpBuffer;
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.warn(
-        `Failed to generate in-process PDF thumbnail: ${err?.message}`,
+        `Failed to generate in-process PDF thumbnail: ${(err as Error)?.message}`,
       );
       return null;
     }

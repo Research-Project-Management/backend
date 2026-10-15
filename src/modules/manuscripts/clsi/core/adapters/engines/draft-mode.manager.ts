@@ -35,22 +35,34 @@ export class DraftModeManager {
     }
 
     if (options.draft) {
-      // Check if draft option is already configured
+      // Check if draft option is already configured on an uncommented line
+      const uncommentedSource = source
+        .split(/\r?\n/)
+        .map((l) => l.split(/(?<!\\)%/)[0])
+        .join('\n');
       if (
-        source.includes('\\PassOptionsToPackage{draft}{graphicx}') ||
-        /\\documentclass\[[^\]]*draft[^\]]*\]/i.test(source)
+        uncommentedSource.includes('\\PassOptionsToPackage{draft}{graphicx}') ||
+        /\\documentclass\s*\[[^\]]*\bdraft\b[^\]]*\]/i.test(uncommentedSource)
       ) {
         return { source, isModified: false, engineFlags };
       }
 
-      // Inject before \documentclass
-      const docClassIndex = source.search(/\\documentclass/i);
-      if (docClassIndex !== -1) {
-        const transformed =
-          source.slice(0, docClassIndex) +
-          this.GRAPHICX_DRAFT_INJECTION +
-          source.slice(docClassIndex);
-        return { source: transformed, isModified: true, engineFlags };
+      // Inject before the first uncommented \documentclass
+      const lines = source.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const cleanLine = lines[i].split(/(?<!\\)%/)[0];
+        const matchIdx = cleanLine.search(/\\documentclass/i);
+        if (matchIdx !== -1) {
+          lines[i] =
+            lines[i].slice(0, matchIdx) +
+            this.GRAPHICX_DRAFT_INJECTION +
+            lines[i].slice(matchIdx);
+          return {
+            source: lines.join('\n'),
+            isModified: true,
+            engineFlags,
+          };
+        }
       }
 
       // Fallback: Prepend at the beginning
@@ -65,13 +77,19 @@ export class DraftModeManager {
   }
 
   /**
-   * Detects if the source uses packages that require -shell-escape (e.g. minted, pythontex).
+   * Detects if the source uses packages or primitives that require -shell-escape
+   * (e.g. minted, pythontex, svg, tikz externalization, \write18).
    */
   public static requiresShellEscape(source: string): boolean {
     if (!source) return false;
     return (
-      /\\usepackage(?:\[[^\]]*\])?\{minted\}/i.test(source) ||
-      /\\usepackage(?:\[[^\]]*\])?\{pythontex\}/i.test(source)
+      /\\usepackage(?:\[[^\]]*\])?\{(?:[^}]*,)?\s*(?:minted|pythontex|svg)\s*(?:,[^}]*)?\}/i.test(
+        source,
+      ) ||
+      /\\usetikzlibrary\{(?:[^}]*,)?\s*external\s*(?:,[^}]*)?\}/i.test(
+        source,
+      ) ||
+      /\\(?:immediate\\)?write18\b/.test(source)
     );
   }
 }

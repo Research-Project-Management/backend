@@ -7,11 +7,16 @@ import {
   UseGuards,
   NotFoundException,
 } from '@nestjs/common';
-import { TypesService } from '../services/types.service';
-import { ZoteroSchemaValidatorService } from '../services/zotero-schema-validator.service';
+import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 
-@Controller(['api/v1/library/item-types'])
+@Controller([
+  'api/v1/library/item-types',
+  'api/v1/library/types',
+  'api/v1/projects/:projectId/library/item-types',
+  'api/v1/projects/:projectId/library/types',
+])
 @UseGuards(JwtAuthGuard)
 export class TypeController {
   constructor(
@@ -109,7 +114,7 @@ export class TypeController {
   @Post(':itemType/validate')
   validateItemAgainstSchema(
     @Param('itemType') itemType: string,
-    @Body() body: Record<string, any>,
+    @Body() body: Record<string, unknown>,
   ) {
     const result = this.validator.validateAndSanitizeItem(itemType, body || {});
     return {

@@ -4,9 +4,9 @@
  */
 
 import { ManuscriptFile as PrismaManuscriptFile } from '@prisma/client';
-import { ManuscriptFile } from '../../domain/entities/manuscript-file.entity';
-import { ContentHash } from '../../domain/value-objects/content-hash.vo';
-import { StorageKey } from '../../domain/value-objects/storage-key.vo';
+import { ManuscriptFile } from '@/modules/manuscripts/filestore/core/domain/entities/manuscript-file.entity';
+import { ContentHash } from '@/modules/manuscripts/filestore/core/domain/value-objects/content-hash.vo';
+import { StorageKey } from '@/modules/manuscripts/filestore/core/domain/value-objects/storage-key.vo';
 
 export class ManuscriptFileMapper {
   public static toDomain(row: PrismaManuscriptFile): ManuscriptFile {

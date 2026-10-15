@@ -70,8 +70,9 @@ describe('RetractionScannerProvider', () => {
   });
 
   it('should detect retraction via CrossRef CrossMark publisher update notice', async () => {
-    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(
-      async (url: any) => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (url: any) => {
         const urlStr = String(url);
         if (urlStr.includes('openalex.org')) {
           return {
@@ -97,21 +98,23 @@ describe('RetractionScannerProvider', () => {
           } as any;
         }
         return { ok: false } as any;
-      },
-    );
+      });
 
     const result = await provider.lookup('10.1000/updated-paper');
 
     expect(result.status).toBe('retracted');
     expect((result as any).details?.source).toBe('crossref');
-    expect((result as any).details?.noticeUrl).toBe('https://doi.org/10.1000/notice-doi');
+    expect((result as any).details?.noticeUrl).toBe(
+      'https://doi.org/10.1000/notice-doi',
+    );
     expect(mockDbService.saveRetraction).toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 
   it('should detect expression of concern via CrossRef', async () => {
-    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(
-      async (url: any) => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (url: any) => {
         const urlStr = String(url);
         if (urlStr.includes('openalex.org')) {
           return {
@@ -135,8 +138,7 @@ describe('RetractionScannerProvider', () => {
           } as any;
         }
         return { ok: false } as any;
-      },
-    );
+      });
 
     const result = await provider.lookup('10.1000/concern-paper');
 
@@ -146,8 +148,9 @@ describe('RetractionScannerProvider', () => {
   });
 
   it('should mark paper as clean and cache clean status when both APIs report clean', async () => {
-    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(
-      async (url: any) => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (url: any) => {
         const urlStr = String(url);
         if (urlStr.includes('openalex.org')) {
           return {
@@ -162,8 +165,7 @@ describe('RetractionScannerProvider', () => {
           } as any;
         }
         return { ok: false } as any;
-      },
-    );
+      });
 
     const result = await provider.lookup('10.1007/valid-paper');
 
@@ -176,11 +178,11 @@ describe('RetractionScannerProvider', () => {
   });
 
   it('should return unknown gracefully if external calls fail', async () => {
-    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(
-      async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => {
         throw new Error('Network timeout');
-      },
-    );
+      });
 
     const result = await provider.lookup('10.1007/timeout-paper');
 

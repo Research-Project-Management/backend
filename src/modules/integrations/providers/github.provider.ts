@@ -190,10 +190,9 @@ export class GithubProvider implements IIntegrationProvider {
             userEmail = primary?.email || emails[0]?.email;
           }
         }
-      } catch (err: any) {
-        this.logger.debug(
-          `Could not retrieve private email list: ${err.message}`,
-        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Could not retrieve private email list: ${errMsg}`);
       }
     }
 
@@ -324,9 +323,10 @@ export class GithubProvider implements IIntegrationProvider {
           }
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `Could not fetch bibtex from ${collectionId}: ${err.message}`,
+        `Could not fetch bibtex from ${collectionId}: ${errMsg}`,
       );
     }
 
@@ -733,8 +733,9 @@ export class GithubProvider implements IIntegrationProvider {
           path: item.path,
           data: buffer,
         });
-      } catch (err: any) {
-        this.logger.warn(`Could not pull blob ${item.path}: ${err.message}`);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Could not pull blob ${item.path}: ${errMsg}`);
       }
     }
 

@@ -8,7 +8,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { StateGroup } from '../types/state.types';
+import { StateGroup } from '@/modules/work-item/state/types/state.types';
 
 export class StateOrderItemDto {
   @ApiProperty({ description: 'State ID', example: 'todo' })

@@ -3,8 +3,8 @@
  * Repository contract for Text Documents persistence with Optimistic Concurrency Control (OCC).
  */
 
-import { TextDoc } from '../domain/text-doc.entity';
-import { DocRanges } from '../domain/doc-range.vo';
+import { TextDoc } from '@/modules/manuscripts/docstore/core/domain/text-doc.entity';
+import { DocRanges } from '@/modules/manuscripts/docstore/core/domain/doc-range.vo';
 
 export interface CreateDocData {
   projectId: string;
@@ -31,6 +31,7 @@ export interface PatchDocData {
 
 export abstract class IDocRepository {
   abstract getDoc(projectId: string, docId: string): Promise<TextDoc | null>;
+  abstract getDocById(docId: string): Promise<TextDoc | null>;
   abstract getDocByPath(
     projectId: string,
     path: string,

@@ -3,28 +3,28 @@ import {
   Logger,
   NotFoundException,
   ForbiddenException,
-  BadRequestException,
-  Optional,
-  Inject,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { AnnotationsRepository } from '../repositories/annotations.repository';
+import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import {
   CreateAnnotationData,
   UpdateAnnotationData,
   BatchAnnotationsData,
   BatchAnnotationsResult,
   AnnotationType,
-} from '../types/annotations.types';
-import { AnnotationNormalizer } from '../utils/annotation.normalizer';
-import { TransactionService, TransactionHelpers } from '../../shared-kernel';
+} from '@/modules/library/extraction/types/annotations.types';
+import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
+import {
+  TransactionService,
+  TransactionHelpers,
+} from '@/modules/library/shared-kernel';
 import { AttachmentsService } from './attachments.service';
 import type {
   UpsertSyncAnnotationCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../../shared-kernel/core/types/entity-commands.types';
-import { buildAnnotationSortIndex } from '../../shared-kernel';
+} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
+import { buildAnnotationSortIndex } from '@/modules/library/shared-kernel';
 
 @Injectable()
 export class AnnotationsService {
@@ -77,7 +77,7 @@ export class AnnotationsService {
 
   async createAnnotation(userId: string, data: CreateAnnotationData) {
     return this.libraryTx.executeInTransaction(
-      async (tx: any, helpers: any) => {
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const attachment = await this.attachmentsService.assertAttachmentExists(
           data.attachmentId,
           userId,
@@ -116,7 +116,7 @@ export class AnnotationsService {
     data: UpdateAnnotationData,
   ) {
     return this.libraryTx.executeInTransaction(
-      async (tx: any, helpers: any) => {
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const existing = await this.annotationsRepo.findById(id, tx);
         if (!existing)
           throw new NotFoundException(`Annotation ${id} not found`);
@@ -162,7 +162,7 @@ export class AnnotationsService {
 
   async deleteAnnotation(userId: string, id: string, expectedVersion?: number) {
     return this.libraryTx.executeInTransaction(
-      async (tx: any, helpers: any) => {
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const existing = await this.annotationsRepo.findById(id, tx);
         if (!existing)
           throw new NotFoundException(`Annotation ${id} not found`);
@@ -218,7 +218,7 @@ export class AnnotationsService {
     }
 
     return this.libraryTx.executeInTransaction(
-      async (tx: any, helpers: any) => {
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const attachment = await this.attachmentsService.assertAttachmentExists(
           attachmentId,
           userId,

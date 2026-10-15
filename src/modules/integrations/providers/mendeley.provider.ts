@@ -166,9 +166,11 @@ export class MendeleyProvider implements IIntegrationProvider {
             accountName;
           accountEmail = profile.email || accountEmail;
         }
-      } catch (profileErr: any) {
+      } catch (profileErr: unknown) {
+        const errMsg =
+          profileErr instanceof Error ? profileErr.message : String(profileErr);
         this.logger.warn(
-          `Could not retrieve Mendeley profile details: ${profileErr.message}`,
+          `Could not retrieve Mendeley profile details: ${errMsg}`,
         );
       }
 
@@ -184,11 +186,10 @@ export class MendeleyProvider implements IIntegrationProvider {
           accountName,
         },
       };
-    } catch (err: any) {
-      this.logger.error(
-        `Error exchanging Mendeley token: ${err.message}`,
-        err.stack,
-      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error(`Error exchanging Mendeley token: ${errMsg}`, stack);
       throw err;
     }
   }
@@ -237,11 +238,10 @@ export class MendeleyProvider implements IIntegrationProvider {
         itemCount: folder.total_documents || 0,
         parentCollectionId: folder.parent_id || null,
       }));
-    } catch (err: any) {
-      this.logger.error(
-        `Error fetching Mendeley folders: ${err.message}`,
-        err.stack,
-      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error(`Error fetching Mendeley folders: ${errMsg}`, stack);
       throw err;
     }
   }
@@ -299,11 +299,10 @@ export class MendeleyProvider implements IIntegrationProvider {
       // If returned as JSON documents, parse and format as BibTeX
       const docs = (await response.json()) as MendeleyDocument[];
       return this.convertDocumentsToBibtex(docs);
-    } catch (err: any) {
-      this.logger.error(
-        `Error fetching Mendeley BibTeX: ${err.message}`,
-        err.stack,
-      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error(`Error fetching Mendeley BibTeX: ${errMsg}`, stack);
       throw err;
     }
   }

@@ -3,7 +3,7 @@
  * Outbound SPI Port for checking word correctness and generating spelling suggestions.
  */
 
-import { LanguageCodeVo } from '../domain/value-objects/language-code.vo';
+import { LanguageCodeVo } from '@/modules/manuscripts/spelling/core/domain/value-objects/language-code.vo';
 
 export const SPELL_ENGINE_PORT = Symbol('SPELL_ENGINE_PORT');
 

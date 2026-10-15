@@ -25,6 +25,7 @@ import {
   NotificationsController,
   OverleafNotificationsParityController,
 } from '@/modules/notifications';
+import { AuthenticatedRequest } from '@/core';
 
 describe('Global Notifications & Mentions Subsystem', () => {
   // =========================================================================
@@ -616,9 +617,10 @@ describe('Global Notifications & Mentions Subsystem', () => {
     });
 
     describe('NotificationsController', () => {
-      const mockReq = (userId: string = 'user-123') => ({
-        user: { id: userId },
-      });
+      const mockReq = (userId: string = 'user-123') =>
+        ({
+          user: { id: userId },
+        }) as unknown as AuthenticatedRequest;
 
       it('should handle full notification lifecycle via controller', async () => {
         // 1. Create notification
@@ -857,7 +859,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
 
     describe('ProjectsNotificationsService', () => {
       it('should dispatch and dismiss project invitations via specialized submodule service', async () => {
-        const notif = await service.projects!.notifyProjectInvitation({
+        const notif = await service.projects.notifyProjectInvitation({
           recipientUserId: 'invitee-1',
           projectId: 'proj-invite-1',
           projectName: 'Deep Learning',
@@ -873,7 +875,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
         expect(notif.key).toBe('project_invite_proj-invite-1_invitee-1');
 
         // Dismiss invitation
-        const dismissed = await service.projects!.dismissProjectInvitation(
+        const dismissed = await service.projects.dismissProjectInvitation(
           'proj-invite-1',
           'invitee-1',
         );

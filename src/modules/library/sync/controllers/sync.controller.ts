@@ -9,12 +9,12 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
-import { TransactionService } from '../services/transaction.service';
-import { SyncQueryDto } from '../dto/sync-query.dto';
-import { ResilienceRegistryService } from '../../shared-kernel/resilience/resilience-registry.service';
-import { OutboxWorker } from '../services/outbox.worker';
-import { OutboxMetrics } from '../services/outbox.metrics';
-import { compactLibraryChanges } from '../utils/outbox.utils';
+import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { SyncQueryDto } from '@/modules/library/sync/dto/sync-query.dto';
+import { ResilienceRegistryService } from '@/modules/library/shared-kernel/resilience/resilience-registry.service';
+import { OutboxWorker } from '@/modules/library/sync/services/outbox.worker';
+import { OutboxMetrics } from '@/modules/library/sync/services/outbox.metrics';
+import { compactLibraryChanges } from '@/modules/library/sync/domain/outbox.domain';
 
 function parseSafeBigInt(val?: string): bigint | undefined {
   if (!val) return undefined;
@@ -39,6 +39,20 @@ export class SyncController {
     @Optional() private readonly outboxMetrics?: OutboxMetrics,
   ) {}
 
+  private resolveProjectId(
+    routeProjectId?: string,
+    queryProjectId?: string,
+  ): string | undefined {
+    const raw = routeProjectId ?? queryProjectId;
+    return raw &&
+      raw !== 'user' &&
+      raw !== 'me' &&
+      raw !== 'personal' &&
+      raw !== 'undefined'
+      ? raw
+      : undefined;
+  }
+
   @Get('version')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
@@ -51,7 +65,7 @@ export class SyncController {
     @Param('projectId') routeProjectId?: string,
     @Query('projectId') queryProjectId?: string,
   ) {
-    const projectId = routeProjectId ?? queryProjectId;
+    const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId } : { userId };
     const latestSeq = await this.transactionService.getLatestSequence(scope);
 
@@ -75,7 +89,7 @@ export class SyncController {
     @Param('projectId') routeProjectId?: string,
     @Query('projectId') queryProjectId?: string,
   ) {
-    const projectId = routeProjectId ?? queryProjectId;
+    const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId } : { userId };
     const sinceSeq = parseSafeBigInt(query.since) ?? 0n;
     const limit = query.limit ?? 100;
@@ -124,7 +138,7 @@ export class SyncController {
     @Param('projectId') routeProjectId?: string,
     @Query('projectId') queryProjectId?: string,
   ) {
-    const projectId = routeProjectId ?? queryProjectId;
+    const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId } : { userId };
     const sinceSeq = parseSafeBigInt(query.since);
     const limit = query.limit ?? 100;
@@ -170,7 +184,10 @@ export class SyncController {
       outbox: {
         workerId: this.outboxWorker?.getWorkerId() ?? 'disabled',
         metrics: {
-          dispatches: this.outboxMetrics?.getCounter('outbox_dispatches') ?? 0,
+          dispatches:
+            this.outboxMetrics?.getCounter('outbox_dispatched_total') ||
+            this.outboxMetrics?.getCounter('outbox_dispatches') ||
+            0,
         },
       },
     };

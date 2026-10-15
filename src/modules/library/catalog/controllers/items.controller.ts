@@ -9,13 +9,13 @@ import {
   Query,
   Body,
   Headers,
+  Req,
   UseGuards,
   NotFoundException,
   BadRequestException,
   ParseUUIDPipe,
   Optional,
 } from '@nestjs/common';
-import { CreateItemData } from '../types/items.types';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -32,11 +32,25 @@ import {
   BulkPurgeItemsDto,
   BulkTrashItemsDto,
   BulkRestoreItemsDto,
-} from '../dto/items.dto';
-import { ItemService } from '../services/items.service';
-import { ItemQueryService } from '../services/item-query.service';
-import { ItemCurationService } from '../services/item-curation.service';
-import { VersionMismatchException } from '../../shared-kernel/core/errors/version-mismatch.exception';
+} from '@/modules/library/catalog/dto/items.dto';
+import { ItemService } from '@/modules/library/catalog/services/items.service';
+import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
+import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
+
+interface RequestWithAccessHint {
+  role?: string;
+  projectMember?: {
+    role?: string;
+    permissionOverrides?: Record<string, boolean> | null;
+    effectivePermissions?: readonly string[];
+  };
+  accessContext?: {
+    role?: string;
+    permissionOverrides?: Record<string, boolean> | null;
+    effectivePermissions?: readonly string[];
+  };
+  permissions?: readonly string[];
+}
 
 /**
  * Shared Base Controller for Library Items orchestration.
@@ -49,6 +63,24 @@ export abstract class BaseItemController {
     @Optional() protected readonly queryService?: ItemQueryService,
     @Optional() protected readonly curationService?: ItemCurationService,
   ) {}
+
+  protected get queryRunner(): ItemQueryService | ItemService {
+    return this.queryService ?? this.itemService;
+  }
+
+  protected get curationRunner(): ItemCurationService | ItemService {
+    return this.curationService ?? this.itemService;
+  }
+
+  protected extractAccessHint(req?: RequestWithAccessHint) {
+    if (!req) return undefined;
+    const ctx = req.accessContext || req.projectMember;
+    return {
+      role: ctx?.role || req.role,
+      permissionOverrides: ctx?.permissionOverrides,
+      effectivePermissions: ctx?.effectivePermissions || req.permissions,
+    };
+  }
 
   protected async executeListItems(
     userId: string,
@@ -69,16 +101,15 @@ export abstract class BaseItemController {
     },
     projectId?: string,
   ) {
-    const rawFields = query?.fields;
-    const fieldsList =
-      typeof rawFields === 'string'
-        ? rawFields
-            .split(',')
-            .map((s: string) => s.trim())
-            .filter(Boolean)
-        : Array.isArray(rawFields)
-          ? rawFields
-          : undefined;
+    const effectiveOrderBy = query?.orderBy ?? query?.sortBy;
+    const effectiveOrderDirection = query?.orderDirection ?? query?.sortOrder;
+    const effectiveFromYear = query?.fromYear ?? query?.year;
+    const effectiveToYear = query?.toYear ?? query?.year;
+    const effectiveTag =
+      query?.tag ??
+      (Array.isArray(query?.tags) && query.tags.length > 0
+        ? query.tags[0]
+        : undefined);
 
     const listOptions = {
       view: query?.view,
@@ -88,18 +119,66 @@ export abstract class BaseItemController {
       cursor: query?.cursor,
       limit: query?.limit,
       projectId,
+      ...(query?.page !== undefined ? { page: query.page } : {}),
+      ...(effectiveOrderBy !== undefined ? { orderBy: effectiveOrderBy } : {}),
+      ...(effectiveOrderDirection !== undefined
+        ? { orderDirection: effectiveOrderDirection }
+        : {}),
+      ...(query?.itemType !== undefined ? { itemType: query.itemType } : {}),
+      ...(query?.type !== undefined ? { type: query.type } : {}),
+      ...(effectiveFromYear !== undefined
+        ? { fromYear: effectiveFromYear }
+        : {}),
+      ...(effectiveToYear !== undefined ? { toYear: effectiveToYear } : {}),
+      ...(query?.readStatus !== undefined
+        ? { readStatus: query.readStatus }
+        : {}),
+      ...(query?.hasFile !== undefined ? { hasFile: query.hasFile } : {}),
+      ...(query?.hasNotes !== undefined ? { hasNotes: query.hasNotes } : {}),
+      ...(effectiveTag !== undefined ? { tag: effectiveTag } : {}),
+      ...(query?.collectionIds !== undefined
+        ? { collectionIds: query.collectionIds }
+        : {}),
+      ...(query?.includeSubcollections !== undefined
+        ? { includeSubcollections: query.includeSubcollections }
+        : {}),
+      ...(query?.recursive !== undefined ? { recursive: query.recursive } : {}),
     };
 
-    const result = this.queryService
-      ? await this.queryService.listItems(userId, listOptions)
-      : await this.itemService.listItems(userId, listOptions);
+    const result = await this.queryRunner.listItems(userId, listOptions);
     return { items: result.items, pagination: result.meta, meta: result.meta };
   }
 
-  protected async executeGetCounts(userId: string, projectId?: string) {
-    return this.queryService
-      ? this.queryService.getCounts(userId, projectId)
-      : this.itemService.getCounts(userId, projectId);
+  protected async executeGetCounts(
+    userId: string,
+    projectId?: string,
+    req?: RequestWithAccessHint,
+  ) {
+    return this.queryRunner.getCounts(
+      userId,
+      projectId,
+      this.extractAccessHint(req),
+    );
+  }
+
+  protected async executeGetPermissions(
+    userId: string,
+    projectId?: string,
+    req?: RequestWithAccessHint,
+  ) {
+    if (typeof this.queryRunner.getPermissions === 'function') {
+      return this.queryRunner.getPermissions(
+        userId,
+        projectId,
+        this.extractAccessHint(req),
+      );
+    }
+    const counts = await this.executeGetCounts(userId, projectId, req);
+    return {
+      scope: projectId ? 'project' : 'personal',
+      role: counts.role,
+      permissions: counts.permissions,
+    };
   }
 
   protected async executeImportItems(
@@ -112,17 +191,11 @@ export abstract class BaseItemController {
         'Project ID is required in URL parameter to import items',
       );
     }
-    return this.curationService
-      ? this.curationService.importItemsToProject(
-          userId,
-          projectId,
-          body.itemIds || [],
-        )
-      : this.itemService.importItemsToProject(
-          userId,
-          projectId,
-          body.itemIds || [],
-        );
+    return this.curationRunner.importItemsToProject(
+      userId,
+      projectId,
+      body.itemIds || [],
+    );
   }
 
   protected async executeGetItem(
@@ -133,13 +206,35 @@ export abstract class BaseItemController {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
-    const item = this.queryService
-      ? await this.queryService.getItem(userId, id, projectId)
-      : await this.itemService.getItem(userId, id, projectId);
+    const item = await this.queryRunner.getItem(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
     return item;
+  }
+
+  protected async executeGetItemCollections(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ) {
+    const item = await this.itemService.getItem(userId, itemId, projectId);
+    if (!item) {
+      throw new NotFoundException(`Item with ID ${itemId} not found`);
+    }
+    const rawItem = item as typeof item & {
+      collectionItems?: Array<{ collection?: unknown }>;
+    };
+    const collectionItems = rawItem.collectionItems || [];
+    const collections = collectionItems
+      .map((ci) => ci.collection)
+      .filter(Boolean);
+    return {
+      success: true,
+      count: collections.length,
+      collections,
+      data: collections,
+    };
   }
 
   protected async executeGetMetadataSources(
@@ -150,9 +245,7 @@ export abstract class BaseItemController {
     if (!isUUID(id)) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
-    return this.curationService
-      ? this.curationService.getMetadataSources(userId, id, projectId)
-      : this.itemService.getMetadataSources(userId, id, projectId);
+    return this.curationRunner.getMetadataSources(userId, id, projectId);
   }
 
   protected async executeCreateItem(
@@ -167,7 +260,7 @@ export abstract class BaseItemController {
 
     return this.itemService.createItem(
       userId,
-      cleanBody as CreateItemData,
+      cleanBody,
       {
         projectId: effectiveProjectId,
         source: 'manual',
@@ -184,7 +277,6 @@ export abstract class BaseItemController {
     ifMatch: string | undefined,
     body: UpdateItemDto,
     projectId?: string,
-    correlationId?: string,
   ) {
     const parsedHeaderVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
@@ -217,7 +309,6 @@ export abstract class BaseItemController {
     userId: string,
     ifMatch?: string,
     projectId?: string,
-    correlationId?: string,
   ) {
     if (!isUUID(id)) {
       throw new NotFoundException('Invalid item ID format');
@@ -242,7 +333,6 @@ export abstract class BaseItemController {
     expectedVersionQuery?: string,
     ifMatch?: string,
     projectId?: string,
-    correlationId?: string,
   ) {
     if (!isUUID(id)) {
       throw new NotFoundException(`Trashed item ${id} not found`);
@@ -341,15 +431,32 @@ export class ItemController extends BaseItemController {
       search?: string;
       fields?: string;
     },
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeListItems(userId, query, projectId);
   }
 
   @Get('counts')
   @ApiOperation({ summary: 'Get summary item counts for personal views' })
-  async getCounts(@CurrentUser('id') userId: string, projectId?: string) {
-    return this.executeGetCounts(userId, projectId);
+  async getCounts(
+    @CurrentUser('id') userId: string,
+    @Query('projectId') projectId?: string,
+    @Req() req?: RequestWithAccessHint,
+  ) {
+    return this.executeGetCounts(userId, projectId, req);
+  }
+
+  @Get('permissions')
+  @ApiOperation({
+    summary:
+      'Get authoritative library permissions for personal or project scope',
+  })
+  async getPermissions(
+    @CurrentUser('id') userId: string,
+    @Query('projectId') projectId?: string,
+    @Req() req?: RequestWithAccessHint,
+  ) {
+    return this.executeGetPermissions(userId, projectId, req);
   }
 
   @Post('import')
@@ -367,9 +474,24 @@ export class ItemController extends BaseItemController {
   async getItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeGetItem(id, userId, projectId);
+  }
+
+  @Get(':id/collections')
+  @ApiOperation({ summary: 'Get collections containing this personal item' })
+  async getItemCollections(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    return this.executeGetItemCollections(
+      userId,
+      id,
+      paramProjectId || queryProjectId,
+    );
   }
 
   @Get(':id/metadata-sources')
@@ -379,7 +501,7 @@ export class ItemController extends BaseItemController {
   async getMetadataSources(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeGetMetadataSources(id, userId, projectId);
   }
@@ -388,7 +510,7 @@ export class ItemController extends BaseItemController {
   @ApiOperation({ summary: 'Create a new personal library item' })
   async createItem(
     @CurrentUser('id') userId: string,
-    projectId: string | undefined,
+    @Query('projectId') projectId: string | undefined,
     @Body() body: CreateItemDto,
     @Headers('x-idempotency-key') idempotencyKey?: string,
     @Headers('x-correlation-id') correlationId?: string,
@@ -409,17 +531,9 @@ export class ItemController extends BaseItemController {
     @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateItemDto,
-    projectId?: string,
-    @Headers('x-correlation-id') correlationId?: string,
+    @Query('projectId') projectId?: string,
   ) {
-    return this.executeUpdateItem(
-      id,
-      userId,
-      ifMatch,
-      body,
-      projectId,
-      correlationId,
-    );
+    return this.executeUpdateItem(id, userId, ifMatch, body, projectId);
   }
 
   @Put(':id')
@@ -429,7 +543,7 @@ export class ItemController extends BaseItemController {
     @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateItemDto,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.updateItem(id, userId, ifMatch, body, projectId);
   }
@@ -440,16 +554,9 @@ export class ItemController extends BaseItemController {
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch?: string,
-    projectId?: string,
-    @Headers('x-correlation-id') correlationId?: string,
+    @Query('projectId') projectId?: string,
   ) {
-    return this.executeDeleteItem(
-      id,
-      userId,
-      ifMatch,
-      projectId,
-      correlationId,
-    );
+    return this.executeDeleteItem(id, userId, ifMatch, projectId);
   }
 
   @Post(':id/restore')
@@ -459,8 +566,7 @@ export class ItemController extends BaseItemController {
     @CurrentUser('id') userId: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
-    projectId?: string,
-    @Headers('x-correlation-id') correlationId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeRestoreItem(
       id,
@@ -468,7 +574,6 @@ export class ItemController extends BaseItemController {
       expectedVersionQuery,
       ifMatch,
       projectId,
-      correlationId,
     );
   }
 
@@ -477,7 +582,7 @@ export class ItemController extends BaseItemController {
   async purgeItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executePurgeItem(id, userId, projectId);
   }
@@ -489,7 +594,7 @@ export class ItemController extends BaseItemController {
   async bulkPurgeItems(
     @CurrentUser('id') userId: string,
     @Body() body: BulkPurgeItemsDto,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeBulkPurgeItems(userId, body, projectId);
   }
@@ -501,7 +606,7 @@ export class ItemController extends BaseItemController {
   async bulkTrashItems(
     @CurrentUser('id') userId: string,
     @Body() body: BulkTrashItemsDto,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeBulkTrashItems(userId, body, projectId);
   }
@@ -513,7 +618,7 @@ export class ItemController extends BaseItemController {
   async bulkRestoreItems(
     @CurrentUser('id') userId: string,
     @Body() body: BulkRestoreItemsDto,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeBulkRestoreItems(userId, body, projectId);
   }
@@ -571,8 +676,23 @@ export class ProjectItemController extends BaseItemController {
   async getCounts(
     @CurrentUser('id') userId: string,
     @Param('projectId', new ParseUUIDPipe()) projectId: string,
+    @Req() req?: RequestWithAccessHint,
   ) {
-    return this.executeGetCounts(userId, projectId);
+    return this.executeGetCounts(userId, projectId, req);
+  }
+
+  @Get('permissions')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary: 'Get authoritative library permissions for project scope',
+  })
+  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
+  async getPermissions(
+    @CurrentUser('id') userId: string,
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
+    @Req() req?: RequestWithAccessHint,
+  ) {
+    return this.executeGetPermissions(userId, projectId, req);
   }
 
   @Post('import')
@@ -597,6 +717,18 @@ export class ProjectItemController extends BaseItemController {
     @Param('projectId', new ParseUUIDPipe()) projectId: string,
   ) {
     return this.executeGetItem(id, userId, projectId);
+  }
+
+  @Get(':id/collections')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({ summary: 'Get collections containing this project item' })
+  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
+  async getItemCollections(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
+  ) {
+    return this.executeGetItemCollections(userId, id, projectId);
   }
 
   @Get(':id/metadata-sources')
@@ -643,16 +775,8 @@ export class ProjectItemController extends BaseItemController {
     @Param('projectId', new ParseUUIDPipe()) projectId: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateItemDto,
-    @Headers('x-correlation-id') correlationId?: string,
   ) {
-    return this.executeUpdateItem(
-      id,
-      userId,
-      ifMatch,
-      body,
-      projectId,
-      correlationId,
-    );
+    return this.executeUpdateItem(id, userId, ifMatch, body, projectId);
   }
 
   @Put(':id')
@@ -678,15 +802,8 @@ export class ProjectItemController extends BaseItemController {
     @CurrentUser('id') userId: string,
     @Param('projectId', new ParseUUIDPipe()) projectId: string,
     @Headers('if-match') ifMatch?: string,
-    @Headers('x-correlation-id') correlationId?: string,
   ) {
-    return this.executeDeleteItem(
-      id,
-      userId,
-      ifMatch,
-      projectId,
-      correlationId,
-    );
+    return this.executeDeleteItem(id, userId, ifMatch, projectId);
   }
 
   @Post(':id/restore')
@@ -699,7 +816,6 @@ export class ProjectItemController extends BaseItemController {
     @Param('projectId', new ParseUUIDPipe()) projectId: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
-    @Headers('x-correlation-id') correlationId?: string,
   ) {
     return this.executeRestoreItem(
       id,
@@ -707,7 +823,6 @@ export class ProjectItemController extends BaseItemController {
       expectedVersionQuery,
       ifMatch,
       projectId,
-      correlationId,
     );
   }
 
@@ -763,6 +878,44 @@ export class ProjectItemController extends BaseItemController {
     @Body() body: BulkRestoreItemsDto,
   ) {
     return this.executeBulkRestoreItems(userId, body, projectId);
+  }
+}
+
+/**
+ * Dedicated Library Scope Permissions Controller
+ * Handles GET /api/v1/library/permissions and GET /api/v1/projects/:projectId/library/permissions.
+ */
+@ApiTags('Library Permissions')
+@ApiBearerAuth('JWT-auth')
+@Controller([
+  'api/v1/library',
+  'api/v1/me/library',
+  'api/v1/projects/:projectId/library',
+])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+export class LibraryPermissionsController extends BaseItemController {
+  constructor(
+    itemService: ItemService,
+    @Optional() queryService?: ItemQueryService,
+    @Optional() curationService?: ItemCurationService,
+  ) {
+    super(itemService, queryService, curationService);
+  }
+
+  @Get('permissions')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary:
+      'Get authoritative library permissions for personal or project scope',
+  })
+  async getLibraryPermissions(
+    @CurrentUser('id') userId: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Req() req?: RequestWithAccessHint,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.executeGetPermissions(userId, effectiveProjectId, req);
   }
 }
 

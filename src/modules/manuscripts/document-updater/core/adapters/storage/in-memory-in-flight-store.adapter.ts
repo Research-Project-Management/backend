@@ -5,8 +5,8 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IInFlightStorePort } from '../../ports/in-flight-store.port';
-import { InFlightDoc } from '../../domain/entities/in-flight-doc.entity';
+import { IInFlightStorePort } from '@/modules/manuscripts/document-updater/core/ports/in-flight-store.port';
+import { InFlightDoc } from '@/modules/manuscripts/document-updater/core/domain/entities/in-flight-doc.entity';
 
 @Injectable()
 export class InMemoryInFlightStoreAdapter extends IInFlightStorePort {

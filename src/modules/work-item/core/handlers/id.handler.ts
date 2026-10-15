@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { CoreRepository } from '../core.repository';
+import { CoreRepository } from '@/modules/work-item/core/core.repository';
 import { RedisCacheService } from '@/core';
-import { WORK_ITEM_REDIS_KEYS } from '../../common/constants/redis-keys.constant';
+import { WORK_ITEM_REDIS_KEYS } from '@/modules/work-item/common/constants/redis-keys.constant';
 
 export interface NextIdentifierResult {
   identifier: string;
@@ -18,17 +18,13 @@ export class IdHandler {
   ) {}
 
   async nextIdentifier(projectId: string): Promise<NextIdentifierResult> {
-    const prefix = await this.getProjectPrefix(projectId);
+    const prefix = await this.repository.findProjectPrefix(projectId);
     const sequenceNumber = await this.getNextSequence(projectId);
 
     return {
       identifier: `${prefix}-${sequenceNumber}`,
       sequenceNumber,
     };
-  }
-
-  private async getProjectPrefix(projectId: string): Promise<string> {
-    return this.repository.findProjectPrefix(projectId);
   }
 
   private async getNextSequence(projectId: string): Promise<number> {

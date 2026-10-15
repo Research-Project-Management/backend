@@ -3,11 +3,12 @@
  * Integrates Structure tree and Docstore lines into WorkspaceFile[] for CLSI compilation.
  */
 
-import { Injectable } from '@nestjs/common';
-import { IStructureRepository } from '../ports/structure-repository.port';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { IStructureRepository } from '@/modules/manuscripts/structure/core/ports/structure-repository.port';
 import { ResolveRootDocUseCase } from './resolve-root-doc.use-case';
-import { WorkspaceFile } from '../../../clsi/core/ports/workspace.port';
-import { RootDocNotFoundError } from '../domain/structure-errors';
+import { WorkspaceFile } from '@/modules/manuscripts/clsi/domain';
+import { RootDocNotFoundError } from '@/modules/manuscripts/structure/core/domain/structure-errors';
+import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 
 export interface CompilationPayload {
   rootDocPath: string;
@@ -16,9 +17,12 @@ export interface CompilationPayload {
 
 @Injectable()
 export class BuildCompilerFilesUseCase {
+  private readonly logger = new Logger(BuildCompilerFilesUseCase.name);
+
   constructor(
     private readonly structureRepository: IStructureRepository,
     private readonly resolveRootDocUseCase: ResolveRootDocUseCase,
+    @Optional() private readonly filestoreService?: FilestoreService,
   ) {}
 
   public async execute(
@@ -71,10 +75,29 @@ export class BuildCompilerFilesUseCase {
           hash,
         });
       } else if (node.isFile()) {
-        // Binary files: content or placeholder
+        let binaryContent: Buffer | string = '';
+        if (node.fileId && this.filestoreService) {
+          try {
+            const { stream } = await this.filestoreService.openReadStream(
+              projectId,
+              node.fileId,
+            );
+            const chunks: Buffer[] = [];
+            for await (const chunk of stream) {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            }
+            binaryContent = Buffer.concat(chunks);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(
+              `Failed to read binary file ${node.fileId} (${relativePath}) from filestore: ${msg}`,
+            );
+          }
+        }
+
         files.push({
           path: relativePath,
-          content: '',
+          content: binaryContent,
           hash: node.hash || undefined,
         });
       }

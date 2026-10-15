@@ -5,14 +5,14 @@ import { OutboxDispatchHandler } from './outbox.worker';
 import {
   IEventPublisherPort,
   DomainEventEnvelope,
-} from '../types/event-publisher.types';
+} from '@/modules/library/sync/types/event-publisher.types';
 import { OutboxMetrics } from './outbox.metrics';
-import { LIBRARY_EVENT_REGISTRY } from '../types/outbox.events';
+import { LIBRARY_EVENT_REGISTRY } from '@/modules/library/sync/types/outbox.events';
 
 export const EXTERNAL_BROKER_TRANSPORT = Symbol('EXTERNAL_BROKER_TRANSPORT');
 
 export interface IExternalBrokerTransport {
-  publish<T = any>(envelope: DomainEventEnvelope<T>): Promise<void>;
+  publish<T = unknown>(envelope: DomainEventEnvelope<T>): Promise<void>;
 }
 
 /**
@@ -34,7 +34,7 @@ export class OutboxDispatcher
     private readonly externalBroker?: IExternalBrokerTransport,
   ) {}
 
-  async publish<T = any>(envelope: DomainEventEnvelope<T>): Promise<void> {
+  async publish<T = unknown>(envelope: DomainEventEnvelope<T>): Promise<void> {
     const entry = LIBRARY_EVENT_REGISTRY[envelope.eventType];
     this.logger.debug(
       `[DomainEventDispatcher] Dispatched ${envelope.eventType} for aggregate ${envelope.aggregateId} (scope: ${envelope.scopeId || envelope.projectId || envelope.userId}) - ${entry?.expectedSideEffect || 'internal'}`,
@@ -49,9 +49,10 @@ export class OutboxDispatcher
     if (this.externalBroker) {
       try {
         await this.externalBroker.publish(envelope);
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.error(
-          `[DomainEventDispatcher] External broker publish failed for ${envelope.eventType}: ${err?.message || err}`,
+          `[DomainEventDispatcher] External broker publish failed for ${envelope.eventType}: ${errMsg}`,
         );
       }
     }

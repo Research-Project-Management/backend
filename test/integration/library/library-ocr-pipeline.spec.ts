@@ -1,6 +1,6 @@
 import { getDocumentProxy, getMeta } from 'unpdf';
-import { PdfProvider } from '@/modules/library/extraction/utils/pdf.provider';
-import { OcrProvider } from '@/modules/library/extraction/utils/ocr.provider';
+import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
+import { OcrProvider } from '@/modules/library/extraction/providers/ocr.provider';
 import { OcrSandwichPdfService } from '@/modules/library/extraction/services/ocr-sandwich-pdf.service';
 import { PDFDocument } from 'pdf-lib';
 

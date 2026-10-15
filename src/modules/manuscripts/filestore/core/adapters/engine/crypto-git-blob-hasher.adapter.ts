@@ -14,9 +14,9 @@ import { pipeline } from 'node:stream/promises';
 import {
   IContentHasherPort,
   StreamHashResult,
-} from '../../ports/content-hasher.port';
-import { ContentHash } from '../../domain/value-objects/content-hash.vo';
-import { StorageKey } from '../../domain/value-objects/storage-key.vo';
+} from '@/modules/manuscripts/filestore/core/ports/content-hasher.port';
+import { ContentHash } from '@/modules/manuscripts/filestore/core/domain/value-objects/content-hash.vo';
+import { StorageKey } from '@/modules/manuscripts/filestore/core/domain/value-objects/storage-key.vo';
 
 @Injectable()
 export class CryptoGitBlobHasherAdapter extends IContentHasherPort {

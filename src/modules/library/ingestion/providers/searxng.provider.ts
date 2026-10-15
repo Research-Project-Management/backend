@@ -5,13 +5,13 @@ import {
   ExternalSearchOptions,
   ExternalSearchResult,
   ExternalSearchPaperHit,
-} from '../types/external-search.types';
+} from '@/modules/library/ingestion/types/external-search.types';
 import {
   deriveDoiFromPublisherUrl,
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
-} from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 const DEFAULT_SEARXNG_TIMEOUT_MS = 5000;
 const DEFAULT_LIMIT = 10;
@@ -44,7 +44,11 @@ export class SearxngSearchProvider implements IExternalSearchProvider {
 
   private get baseUrl(): string {
     const configured = this.configService?.get<string>('SEARXNG_BASE_URL');
-    return (configured || process.env.SEARXNG_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '');
+    return (
+      configured ||
+      process.env.SEARXNG_BASE_URL ||
+      'http://localhost:8080'
+    ).replace(/\/+$/, '');
   }
 
   async isAvailable(): Promise<boolean> {
@@ -113,12 +117,16 @@ export class SearxngSearchProvider implements IExternalSearchProvider {
         isAvailable: true,
         statusCode: 200,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       const latencyMs = Date.now() - startTime;
-      const isAbort = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      const isAbort =
+        err &&
+        typeof err === 'object' &&
+        ((err as { name?: string }).name === 'TimeoutError' ||
+          (err as { name?: string }).name === 'AbortError');
       const errorMessage = isAbort
         ? `SearXNG timeout after ${timeoutMs}ms`
-        : `SearXNG connection error: ${err?.message || 'Unknown'}`;
+        : `SearXNG connection error: ${err instanceof Error ? err.message : 'Unknown'}`;
 
       this.logger.debug(errorMessage);
 
@@ -144,7 +152,9 @@ export class SearxngSearchProvider implements IExternalSearchProvider {
 
     let arxivId: string | undefined = item.arxiv_id;
     if (!arxivId && rawUrl) {
-      const match = rawUrl.match(/(?:arxiv\.org\/(?:abs|pdf)\/|arxiv:)([\d.]+v?\d*)/i);
+      const match = rawUrl.match(
+        /(?:arxiv\.org\/(?:abs|pdf)\/|arxiv:)([\d.]+v?\d*)/i,
+      );
       if (match) arxivId = normalizeArxivId(match[1]);
     }
 
@@ -176,7 +186,15 @@ export class SearxngSearchProvider implements IExternalSearchProvider {
     if (doi || arxivId || pmid) confidenceScore += 0.4;
     if (title.length > 5) confidenceScore += 0.3;
     const engine = (item.engine || '').toLowerCase();
-    if (['arxiv', 'pubmed', 'google scholar', 'crossref', 'semantic scholar'].includes(engine)) {
+    if (
+      [
+        'arxiv',
+        'pubmed',
+        'google scholar',
+        'crossref',
+        'semantic scholar',
+      ].includes(engine)
+    ) {
       confidenceScore += 0.2;
     } else {
       confidenceScore += 0.1;

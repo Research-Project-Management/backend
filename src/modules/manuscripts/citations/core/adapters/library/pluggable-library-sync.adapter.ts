@@ -9,7 +9,7 @@ import { PrismaService } from '@/core';
 import {
   ILibrarySyncPort,
   LibraryCollectionSummary,
-} from '../../ports/library-sync.port';
+} from '@/modules/manuscripts/citations/core/ports/library-sync.port';
 import { IntegrationsRepository } from '@/modules/integrations/integrations.repository';
 import { ZoteroProvider } from '@/modules/integrations/providers/zotero.provider';
 import { MendeleyProvider } from '@/modules/integrations/providers/mendeley.provider';
@@ -20,7 +20,7 @@ import {
   formatBibtexName,
   sanitizeCitationKey,
   toBibtexValue,
-} from '../../domain/bibtex-value';
+} from '@/modules/manuscripts/citations/core/domain/bibtex-value';
 
 @Injectable()
 export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
@@ -119,9 +119,9 @@ export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
             itemCount: c._count?.collectionItems ?? c.itemCount ?? 0,
           });
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.warn(
-          `Failed to list collections via LibraryFacade: ${err?.message}`,
+          `Failed to list collections via LibraryFacade: ${(err as Error)?.message}`,
         );
       }
     } else if (this.prisma) {
@@ -232,9 +232,9 @@ export class PluggableLibrarySyncAdapter implements ILibrarySyncPort {
         if (exportRes?.content !== undefined) {
           return exportRes.content;
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.warn(
-          `Failed to export collection BibTeX via LibraryFacade: ${err?.message}`,
+          `Failed to export collection BibTeX via LibraryFacade: ${(err as Error)?.message}`,
         );
       }
     }

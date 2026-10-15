@@ -1,4 +1,4 @@
-import { ItemMetadata } from '../../shared-kernel';
+import { ItemMetadata } from '@/modules/library/shared-kernel';
 
 /**
  * Breakdown of individual field quality scores evaluating extraction reliability.
@@ -43,7 +43,7 @@ export interface TrustedExtractionProvenance {
       confidence: number;
       durationMs: number;
     };
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 

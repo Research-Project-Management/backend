@@ -1,12 +1,12 @@
 import { Module, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { CoreModule } from '@/core';
-import { StorageModule } from '../../storage/storage.module';
-import { CatalogModule } from '../catalog/catalog.module';
+import { StorageModule } from '@/modules/storage/storage.module';
+import { CatalogModule } from '@/modules/library/catalog/catalog.module';
 import {
   SharedKernelModule,
   IOutboxRegistry,
   OUTBOX_REGISTRY_PORT,
-} from '../shared-kernel';
+} from '@/modules/library/shared-kernel';
 
 // Presentation
 import {
@@ -38,17 +38,17 @@ import { AttachmentsRepository } from './repositories/attachments.repository';
 import { ExtractionRepository } from './repositories/extraction.repository';
 import { AnnotationsRepository } from './repositories/annotations.repository';
 
-// Utilities & Providers
-import { PdfProvider } from './utils/pdf.provider';
-import { OcrProvider } from './utils/ocr.provider';
+// Providers & Infrastructure
+import { PdfProvider } from './providers/pdf.provider';
+import { OcrProvider } from './providers/ocr.provider';
 import {
   ExtractionHandler,
   EXTRACTION_EVENT_TYPES,
-} from './utils/extraction.handler';
-import { ItemLifecycleSubscriber } from './utils/item-lifecycle.subscriber';
-import { AnnotationNormalizer } from './utils/annotation.normalizer';
-import { InProcessCatalogGatewayAdapter } from './utils/in-process-catalog-gateway.adapter';
-import { HttpCatalogGatewayAdapter } from './utils/http-catalog-gateway.adapter';
+} from './services/extraction.handler';
+import { ItemLifecycleSubscriber } from './subscribers/item-lifecycle.subscriber';
+import { AnnotationNormalizer } from './domain/annotation.normalizer';
+import { InProcessCatalogGatewayAdapter } from './gateways/in-process-catalog-gateway.adapter';
+import { HttpCatalogGatewayAdapter } from './gateways/http-catalog-gateway.adapter';
 import {
   XmpParser,
   AcademicRegexCatalog,

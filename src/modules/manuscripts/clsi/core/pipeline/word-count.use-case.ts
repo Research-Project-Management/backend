@@ -3,7 +3,10 @@
  * Use case computing word count and structural stats for a LaTeX document
  */
 
-import { IWordCounter, WordCountStats } from '../ports/artifacts.port';
+import {
+  IWordCounter,
+  WordCountStats,
+} from '@/modules/manuscripts/clsi/core/ports/artifacts.port';
 
 export interface WordCountResponse {
   success: boolean;
@@ -28,10 +31,10 @@ export class WordCountUseCase {
         success: true,
         stats,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       return {
         success: false,
-        error: err.message || 'Failed to calculate word count',
+        error: (err as Error)?.message || 'Failed to calculate word count',
       };
     }
   }

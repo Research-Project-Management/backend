@@ -140,10 +140,11 @@ export class CircuitBreaker {
       const result = await fn();
       this.recordSuccess();
       return result;
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.recordFailure(true);
       if (fallback) {
-        return fallback(err);
+        const errorObj = err instanceof Error ? err : new Error(String(err));
+        return fallback(errorObj);
       }
       throw err;
     }

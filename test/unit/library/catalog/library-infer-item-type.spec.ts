@@ -3,9 +3,9 @@
  * inference function used when a PDF upload has no DOI, arXiv ID, or other
  * authoritative identifier.
  *
- * @see src/modules/library/shared-kernel/utils/bibliographic.utils.ts
+ * @see src/modules/library/shared-kernel/domain/bibliographic.domain.ts
  */
-import { inferItemTypeFromPdfSignals } from '@/modules/library/shared-kernel/utils/bibliographic.utils';
+import { inferItemTypeFromPdfSignals } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 describe('inferItemTypeFromPdfSignals', () => {
   // ──────────────────────────────────────────────────────────────

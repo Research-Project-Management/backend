@@ -528,7 +528,7 @@ export class DriveController {
   @ApiOperation({ summary: 'Update file metadata and description' })
   async updateNodeMetadata(
     @Param('id') id: string,
-    @Body() dto: { metaData?: Record<string, any>; description?: string },
+    @Body() dto: { metaData?: Record<string, unknown>; description?: string },
     @CurrentUser('id') userId?: string,
   ) {
     const node =

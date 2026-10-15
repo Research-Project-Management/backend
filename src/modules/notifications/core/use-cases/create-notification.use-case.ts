@@ -23,7 +23,7 @@ export interface CreateNotificationCommand {
   projectId?: string;
   docId?: string;
   actorId?: string;
-  messageOpts?: Record<string, any>;
+  messageOpts?: Record<string, unknown>;
   expiresAt?: Date | string;
   forceCreate?: boolean;
 }

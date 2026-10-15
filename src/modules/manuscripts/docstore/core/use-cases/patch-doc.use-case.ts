@@ -5,8 +5,11 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { IDocRepository, PatchDocData } from '../ports/doc-repository.port';
-import { TextDoc } from '../domain/text-doc.entity';
+import {
+  IDocRepository,
+  PatchDocData,
+} from '@/modules/manuscripts/docstore/core/ports/doc-repository.port';
+import { TextDoc } from '@/modules/manuscripts/docstore/core/domain/text-doc.entity';
 
 @Injectable()
 export class PatchDocUseCase {

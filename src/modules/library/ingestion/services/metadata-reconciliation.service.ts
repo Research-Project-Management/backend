@@ -2,11 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   MetadataCandidate,
   FieldAssertion,
-  ConflictReport,
   MetadataConflict,
   ReconciledMetadataResult,
   ItemMetadata,
-} from '../types/metadata.types';
+} from '@/modules/library/ingestion/types/metadata.types';
+import {
+  ALL_RECONCILABLE_METADATA_FIELDS,
+  resolveBidirectionalBaseFields,
+} from '@/modules/library/shared-kernel/domain/zotero-field-harmonizer.domain';
+import { parseCreatorString } from '@/modules/library/shared-kernel/domain/author.domain';
 
 @Injectable()
 export class ReconciliationService {
@@ -27,6 +31,7 @@ export class ReconciliationService {
       PubMed: 0.95,
       ZoteroSync: 0.93,
       OpenAlex: 0.92,
+      SemanticScholar: 0.92,
       Unpaywall: 0.9,
       BibTeX: 0.9,
       RIS: 0.9,
@@ -37,6 +42,7 @@ export class ReconciliationService {
       UserOverride: 1.0,
       arXiv: 1.0,
       OpenAlex: 0.92,
+      SemanticScholar: 0.92,
       BibTeX: 0.88,
       ZoteroSync: 0.92,
       LocalPDFExtraction: 0.8,
@@ -45,6 +51,7 @@ export class ReconciliationService {
       UserOverride: 1.0,
       PubMed: 1.0,
       OpenAlex: 0.93,
+      SemanticScholar: 0.93,
       ZoteroSync: 0.92,
       BibTeX: 0.88,
     },
@@ -52,6 +59,7 @@ export class ReconciliationService {
       UserOverride: 1.0,
       PubMed: 1.0,
       OpenAlex: 0.92,
+      SemanticScholar: 0.92,
       ZoteroSync: 0.9,
     },
     isbn: {
@@ -78,6 +86,7 @@ export class ReconciliationService {
       CrossRef: 0.97,
       arXiv: 0.94,
       ZoteroSync: 0.93,
+      SemanticScholar: 0.92,
       BibTeX: 0.91,
       RIS: 0.89,
       OpenAlex: 0.87,
@@ -90,6 +99,7 @@ export class ReconciliationService {
       CrossRef: 0.95,
       arXiv: 0.93,
       ZoteroSync: 0.92,
+      SemanticScholar: 0.91,
       BibTeX: 0.9,
       RIS: 0.88,
       OpenAlex: 0.85,
@@ -102,6 +112,7 @@ export class ReconciliationService {
       CrossRef: 0.95,
       arXiv: 0.93,
       ZoteroSync: 0.92,
+      SemanticScholar: 0.91,
       BibTeX: 0.9,
       RIS: 0.88,
       OpenAlex: 0.85,
@@ -112,6 +123,7 @@ export class ReconciliationService {
       UserOverride: 1.0,
       PubMed: 0.97,
       arXiv: 0.97,
+      SemanticScholar: 0.92,
       ZoteroSync: 0.88,
       LocalPDFExtraction: 0.88,
       BibTeX: 0.83,
@@ -122,6 +134,7 @@ export class ReconciliationService {
       UserOverride: 1.0,
       CrossRef: 0.98,
       PubMed: 0.97,
+      SemanticScholar: 0.93,
       BibTeX: 0.92,
       ZoteroSync: 0.92,
       RIS: 0.91,
@@ -137,6 +150,7 @@ export class ReconciliationService {
       CrossRef: 0.97,
       PubMed: 0.97,
       ZoteroSync: 0.9,
+      SemanticScholar: 0.89,
       BibTeX: 0.88,
       RIS: 0.87,
       OpenAlex: 0.87,
@@ -159,6 +173,7 @@ export class ReconciliationService {
       BibTeX: 0.9,
       RIS: 0.89,
       ZoteroSync: 0.9,
+      SemanticScholar: 0.86,
       OpenAlex: 0.85,
       LocalPDFExtraction: 0.7,
       arXiv: 0.5,
@@ -170,6 +185,7 @@ export class ReconciliationService {
       BibTeX: 0.9,
       RIS: 0.89,
       ZoteroSync: 0.9,
+      SemanticScholar: 0.84,
       OpenAlex: 0.82,
       LocalPDFExtraction: 0.6,
       arXiv: 0.4,
@@ -194,6 +210,7 @@ export class ReconciliationService {
       BibTeX: 0.88,
       RIS: 0.86,
       ZoteroSync: 0.86,
+      SemanticScholar: 0.85,
       LocalPDFExtraction: 0.7,
       OpenAlex: 0.78,
     },
@@ -201,17 +218,20 @@ export class ReconciliationService {
       UserOverride: 1.0,
       Unpaywall: 0.99,
       arXiv: 0.98,
+      SemanticScholar: 0.95,
       OpenAlex: 0.93,
       ZoteroSync: 0.85,
     },
     citationCount: {
       UserOverride: 1.0,
       OpenAlex: 0.97,
+      SemanticScholar: 0.96,
       CrossRef: 0.95,
     },
     referenceCount: {
       UserOverride: 1.0,
       OpenAlex: 0.97,
+      SemanticScholar: 0.96,
       CrossRef: 0.95,
       LocalPDFExtraction: 0.88,
       PubMed: 0.85,
@@ -224,6 +244,7 @@ export class ReconciliationService {
       CrossRef: 0.92,
       OpenLibrary: 0.9,
       ZoteroSync: 0.9,
+      SemanticScholar: 0.88,
       OpenAlex: 0.85,
       BibTeX: 0.8,
     },
@@ -264,86 +285,33 @@ export class ReconciliationService {
 
     const resolved: Partial<ItemMetadata> = {};
 
-    const allFields: (keyof ItemMetadata & string)[] = [
-      'doi',
-      'arxivId',
-      'pmid',
-      'pmcid',
-      'isbn',
-      'issn',
-      'url',
+    const dynamicCandidateKeys = new Set<string>([
       'title',
-      'shortTitle',
       'authors',
       'creators',
       'editors',
-      'year',
-      'publicationDate',
-      'date',
-      'accessedAt',
       'itemType',
       'type',
-      'journal',
-      'publicationTitle',
-      'journalAbbr',
-      'publisher',
-      'place',
-      'volume',
-      'issue',
-      'section',
-      'partNumber',
-      'partTitle',
-      'pages',
-      'series',
-      'seriesTitle',
-      'seriesText',
-      'seriesNumber',
-      'language',
-      'abstract',
-      'abstractNote',
+      'extra',
+      'extraFields',
+      'notes',
+      'tags',
       'keywords',
-      'citationCount',
-      'referenceCount',
-      'openAccessPdfUrl',
       'pdfUrl',
       'fileUrl',
       'fileId',
       'filename',
-      'license',
-      'rights',
-      'archive',
-      'archiveLocation',
-      'callNumber',
-      'libraryCatalog',
-      'extra',
-      'extraFields',
-      'citationKey',
-      'tags',
-      'notes',
-      'bookTitle',
-      'proceedingsTitle',
-      'conferenceName',
-      'eventPlace',
-      'websiteTitle',
-      'websiteType',
-      'blogTitle',
-      'university',
-      'institution',
-      'edition',
-      'numPages',
-      'numberOfPages',
-      'reportNumber',
-      'reportType',
-      'thesisType',
-      'versionNumber',
-      'patentNumber',
-      'applicationNumber',
-      'assignee',
-      'issuingAuthority',
-      'distributor',
-      'system',
-      'repository',
-    ];
+      ...ALL_RECONCILABLE_METADATA_FIELDS,
+      ...Object.keys(userOverrides || {}),
+    ]);
+    for (const cand of candidates) {
+      if (cand?.metadata && typeof cand.metadata === 'object') {
+        for (const k of Object.keys(cand.metadata)) {
+          dynamicCandidateKeys.add(k);
+        }
+      }
+    }
+    const allFields = Array.from(dynamicCandidateKeys);
 
     for (const field of allFields) {
       if (
@@ -474,13 +442,56 @@ export class ReconciliationService {
       }
     }
 
+    const itemType = String(resolved.itemType || 'journalArticle');
+    resolveBidirectionalBaseFields(resolved, itemType, undefined, false);
+
     const finalMetadata: ItemMetadata = {
       title: resolved.title || 'Untitled Document',
       authors: resolved.authors ? [...resolved.authors] : [],
       year: resolved.year ?? null,
-      itemType: resolved.itemType || 'journalArticle',
+      itemType,
       ...resolved,
     };
+
+    const finalRecord = finalMetadata as Record<string, unknown>;
+    resolveBidirectionalBaseFields(finalRecord, itemType, undefined, false);
+
+    if (itemType === 'journalArticle') {
+      if (finalMetadata.publicationTitle && !finalMetadata.journal) {
+        finalMetadata.journal = finalMetadata.publicationTitle;
+      } else if (finalMetadata.journal && !finalMetadata.publicationTitle) {
+        finalMetadata.publicationTitle = finalMetadata.journal;
+      }
+    }
+
+    if (
+      Array.isArray(finalMetadata.creators) &&
+      finalMetadata.creators.length > 0 &&
+      (!finalMetadata.authors || finalMetadata.authors.length === 0)
+    ) {
+      const authorCreators = finalMetadata.creators.filter(
+        (c) => c.creatorType === 'author' || !c.creatorType,
+      );
+      const effectiveList =
+        authorCreators.length > 0 ? authorCreators : finalMetadata.creators;
+      finalMetadata.authors = effectiveList
+        .map(
+          (c) =>
+            c.fullName ||
+            c.name ||
+            `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+        )
+        .filter(Boolean);
+    } else if (
+      Array.isArray(finalMetadata.authors) &&
+      finalMetadata.authors.length > 0 &&
+      (!Array.isArray(finalMetadata.creators) ||
+        finalMetadata.creators.length === 0)
+    ) {
+      finalMetadata.creators = finalMetadata.authors
+        .map((authorName, idx) => parseCreatorString(authorName, idx, 'author'))
+        .filter((c): c is NonNullable<typeof c> => c !== null);
+    }
 
     return {
       metadata: finalMetadata,

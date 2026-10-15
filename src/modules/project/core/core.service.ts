@@ -669,7 +669,9 @@ export class CoreService {
 
     const isOwner =
       project.createdById === userId ||
-      project.members?.some((m) => m.userId === userId && m.role === Role.owner);
+      project.members?.some(
+        (m) => m.userId === userId && m.role === Role.owner,
+      );
     if (!isOwner) {
       throw new ForbiddenException('Only project owner can delete project');
     }

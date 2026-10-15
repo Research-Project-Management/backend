@@ -23,6 +23,7 @@ import {
   TemplatesController,
   OverleafTemplatesParityController,
 } from '@/modules/manuscripts/templates';
+import { AuthenticatedRequest } from '@/core';
 
 describe('Manuscripts Templates Subsystem', () => {
   // =========================================================================
@@ -644,7 +645,9 @@ describe('Manuscripts Templates Subsystem', () => {
     });
 
     it('TemplatesController should instantiate template for current user', async () => {
-      const req = { user: { id: 'prof-oak' } };
+      const req = {
+        user: { id: 'prof-oak' },
+      } as unknown as AuthenticatedRequest;
       const res = await templatesController.instantiateTemplate(req, {
         templateId: 'tmpl-ieee-tran-v1',
         projectName: 'Pokedex Research',
@@ -656,7 +659,9 @@ describe('Manuscripts Templates Subsystem', () => {
     });
 
     it('OverleafTemplatesParityController should match Overleaf POST /project/new/template response format', async () => {
-      const req = { headers: { 'x-user-id': 'overleaf-user-99' } };
+      const req = {
+        headers: { 'x-user-id': 'overleaf-user-99' },
+      } as unknown as AuthenticatedRequest;
       const res = await overleafController.instantiateOverleaf(req, {
         template_id: 'tmpl-acm-sigconf-v1',
         project_name: 'Overleaf Compatible Project',

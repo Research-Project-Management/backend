@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import sharp from 'sharp';
-import { OcrPreprocessOptions } from '../types/ocr.types';
+import { OcrPreprocessOptions } from '@/modules/library/extraction/types/ocr.types';
 
 export interface PreprocessResult {
   buffer: Buffer;
@@ -58,8 +58,9 @@ export class OcrPreprocessorService {
             `Deskew applied: rotated ${(-skewAngle).toFixed(1)}° to correct scan skew`,
           );
         }
-      } catch (err: any) {
-        this.logger.debug(`Deskew calculation skipped: ${err?.message || err}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Deskew calculation skipped: ${message}`);
       }
     }
 

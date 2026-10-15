@@ -10,7 +10,7 @@ import {
   CreatorTypeDefinition,
   CanonicalItemType,
 } from './schema.types';
-import rawZoteroSchema from '../data/zotero-schema.json';
+import rawZoteroSchema from '@/modules/library/shared-kernel/data/zotero-schema.json';
 
 export const LIBRARY_SCHEMA_VERSION = rawZoteroSchema.version || 42;
 export const SCHEMA_SOURCE = `zotero-schema-v${LIBRARY_SCHEMA_VERSION}`;
@@ -325,7 +325,7 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
     for (const [, fieldDict] of Object.entries(schema.csl.fields)) {
       if (fieldDict && typeof fieldDict === 'object') {
         for (const [cslField, zoteroFields] of Object.entries(
-          fieldDict as Record<string, any>,
+          fieldDict as Record<string, unknown>,
         )) {
           if (Array.isArray(zoteroFields)) {
             for (const zf of zoteroFields) {

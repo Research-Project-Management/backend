@@ -36,7 +36,7 @@ export class DocumentAiIngestionService {
       return;
     }
 
-    const currentMeta = (file.metaData as Record<string, any>) || {};
+    const currentMeta = (file.metaData as Record<string, unknown>) || {};
 
     // Idempotency: Skip if already indexed
     if (currentMeta.ragStatus === 'indexed' && currentMeta.ragDocId) {
@@ -176,7 +176,8 @@ export class DocumentAiIngestionService {
             select: { id: true, itemId: true, metadata: true },
           });
           if (attachment) {
-            const attMeta = (attachment.metadata as Record<string, unknown>) || {};
+            const attMeta =
+              (attachment.metadata as Record<string, unknown>) || {};
             await this.prisma.attachment.update({
               where: { id: attachment.id },
               data: {
@@ -194,7 +195,8 @@ export class DocumentAiIngestionService {
                 select: { id: true, metadata: true },
               });
               if (item) {
-                const itemMeta = (item.metadata as Record<string, unknown>) || {};
+                const itemMeta =
+                  (item.metadata as Record<string, unknown>) || {};
                 await this.prisma.item.update({
                   where: { id: item.id },
                   data: {
@@ -214,10 +216,12 @@ export class DocumentAiIngestionService {
           );
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
       this.logger.error(
-        `AI RAG Ingestion failed for file ${fileId}: ${err.message}`,
-        err.stack,
+        `AI RAG Ingestion failed for file ${fileId}: ${errorMessage}`,
+        stack,
       );
       await this.prisma.file.update({
         where: { id: fileId },
@@ -225,7 +229,7 @@ export class DocumentAiIngestionService {
           metaData: {
             ...currentMeta,
             ragStatus: 'failed',
-            ragError: err.message,
+            ragError: errorMessage,
           },
         },
       });

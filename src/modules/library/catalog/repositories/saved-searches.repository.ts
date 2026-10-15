@@ -4,15 +4,25 @@ import { Prisma } from '@prisma/client';
 import {
   CreateSavedSearchDto,
   UpdateSavedSearchDto,
-} from '../dto/saved-search.dto';
-import { ExecuteSavedSearchOptions } from '../types/saved-search.types';
+} from '@/modules/library/catalog/dto/saved-search.dto';
+import { ExecuteSavedSearchOptions } from '@/modules/library/catalog/types/saved-search.types';
 
 @Injectable()
 export class SavedSearchesRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private normalizeProjectId(projectId?: string | null): string | undefined {
+    return projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
+      ? projectId
+      : undefined;
+  }
+
   async create(userId: string, dto: CreateSavedSearchDto, projectId?: string) {
-    const effectiveProjectId = projectId || dto.projectId || null;
+    const effectiveProjectId =
+      this.normalizeProjectId(projectId || dto.projectId) || null;
     return this.prisma.savedSearch.create({
       data: {
         userId,
@@ -31,10 +41,10 @@ export class SavedSearchesRepository {
   }
 
   async findById(userId: string, id: string, projectId?: string) {
-    const scopeWhere =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId, projectId: null };
+    const effectiveProjectId = this.normalizeProjectId(projectId);
+    const scopeWhere = effectiveProjectId
+      ? { projectId: effectiveProjectId }
+      : { userId, projectId: null };
     const where: Prisma.SavedSearchWhereInput = {
       id,
       deletedAt: null,
@@ -46,10 +56,10 @@ export class SavedSearchesRepository {
   }
 
   async findAll(userId: string, projectId?: string) {
-    const scopeWhere =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId, projectId: null };
+    const effectiveProjectId = this.normalizeProjectId(projectId);
+    const scopeWhere = effectiveProjectId
+      ? { projectId: effectiveProjectId }
+      : { userId, projectId: null };
     const where: Prisma.SavedSearchWhereInput = {
       deletedAt: null,
       ...scopeWhere,
@@ -66,10 +76,10 @@ export class SavedSearchesRepository {
     dto: UpdateSavedSearchDto,
     projectId?: string,
   ) {
-    const scopeWhere =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId, projectId: null };
+    const effectiveProjectId = this.normalizeProjectId(projectId);
+    const scopeWhere = effectiveProjectId
+      ? { projectId: effectiveProjectId }
+      : { userId, projectId: null };
     const where: Prisma.SavedSearchWhereInput = {
       id,
       deletedAt: null,
@@ -111,10 +121,10 @@ export class SavedSearchesRepository {
   }
 
   async softDelete(userId: string, id: string, projectId?: string) {
-    const scopeWhere =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId, projectId: null };
+    const effectiveProjectId = this.normalizeProjectId(projectId);
+    const scopeWhere = effectiveProjectId
+      ? { projectId: effectiveProjectId }
+      : { userId, projectId: null };
     const where: Prisma.SavedSearchWhereInput = {
       id,
       deletedAt: null,

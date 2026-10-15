@@ -21,10 +21,7 @@ export class LoggerInterceptor implements NestInterceptor {
     const method = req.method || 'GET';
     const url = req.url || '/';
     const startTime = Date.now();
-    const requestId =
-      (req.id as string) ||
-      (req.headers?.['x-request-id'] as string) ||
-      '';
+    const requestId = req.id || (req.headers?.['x-request-id'] as string) || '';
 
     return next.handle().pipe(
       tap({
@@ -36,8 +33,7 @@ export class LoggerInterceptor implements NestInterceptor {
         error: (err: unknown) => {
           const duration = Date.now() - startTime;
           const errorObj = err as
-            | { status?: number; statusCode?: number }
-            | undefined;
+            { status?: number; statusCode?: number } | undefined;
           const statusCode = errorObj?.status || errorObj?.statusCode || 500;
           this.logger.http(method, url, statusCode, duration, requestId);
         },

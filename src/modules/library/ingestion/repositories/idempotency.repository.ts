@@ -155,10 +155,11 @@ export class IdempotencyRepository {
         },
       });
       return { status: 'acquired', leaseToken };
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (!isIdempotencyUniqueViolation(err)) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.error(
-          `Unexpected database error during idempotency claim (key fp: ${keyFingerprint}): ${err?.message}`,
+          `Unexpected database error during idempotency claim (key fp: ${keyFingerprint}): ${errMsg}`,
         );
         throw err;
       }
@@ -222,7 +223,7 @@ export class IdempotencyRepository {
     scope: { userId: string; projectId?: string } | string,
     idempotencyKey: string,
     statusCode: number,
-    responseBody: any,
+    responseBody: unknown,
     leaseToken?: string,
   ): Promise<boolean> {
     const userId = typeof scope === 'object' ? scope.userId : scope;
@@ -241,7 +242,7 @@ export class IdempotencyRepository {
       data: {
         status: 'succeeded',
         statusCode,
-        responseBody: responseBody ?? null,
+        responseBody: (responseBody as Prisma.InputJsonValue) ?? Prisma.DbNull,
       },
     });
     if (res.count === 0 && leaseToken) {
@@ -257,7 +258,7 @@ export class IdempotencyRepository {
     scope: { userId: string; projectId?: string } | string,
     idempotencyKey: string,
     statusCode: number,
-    responseBody: any,
+    responseBody: unknown,
     leaseToken?: string,
   ): Promise<boolean> {
     const userId = typeof scope === 'object' ? scope.userId : scope;
@@ -276,7 +277,7 @@ export class IdempotencyRepository {
       data: {
         status: 'succeeded',
         statusCode,
-        responseBody: responseBody ?? null,
+        responseBody: (responseBody as Prisma.InputJsonValue) ?? Prisma.DbNull,
       },
     });
     if (res.count === 0 && leaseToken) {

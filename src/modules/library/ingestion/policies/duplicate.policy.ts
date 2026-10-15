@@ -1,11 +1,10 @@
-import { ItemMetadata } from '../types/metadata.types';
-import { DuplicateMatchResult } from '../types/metadata-candidate.types';
-import { normalizeDoi } from '../../shared-kernel/utils/bibliographic.utils';
+import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
+import { DuplicateMatchResult } from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { normalizeDoi } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 import {
   calculateTitleSimilarity,
   firstAuthorMatches,
-  normalizeTitleForDedupe,
-} from '../utils/deduplication.utils';
+} from '@/modules/library/ingestion/domain/deduplication.domain';
 
 export interface ExistingItemSummary {
   id: string;
@@ -53,9 +52,11 @@ export class DuplicatePolicy {
         if (!item.title) continue;
         const similarity = calculateTitleSimilarity(proposed.title, item.title);
         if (similarity >= 0.88) {
-          // Same title! Check secondary signals (year or first author)
+          // Same title! Check secondary signals (year within +/-1 or first author)
           const yearMatch =
-            proposed.year && item.year && proposed.year === item.year;
+            proposed.year &&
+            item.year &&
+            Math.abs(Number(proposed.year) - Number(item.year)) <= 1;
           const authorMatch =
             proposed.authors &&
             proposed.authors.length > 0 &&

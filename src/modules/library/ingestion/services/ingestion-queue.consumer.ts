@@ -8,10 +8,10 @@ import { Job } from 'bullmq';
 import {
   LIBRARY_INGESTION_QUEUE_STANDARD,
   LIBRARY_INGESTION_JOB,
-} from '../types/queue.constants';
+} from '@/modules/library/ingestion/types/queue.constants';
 import { QueuedIngestionJob } from './queue.service';
 import { PipelineService } from './pipeline.service';
-import { IngestionRepository } from '../repositories/ingestion.repository';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { IngestionStatus } from '@prisma/client';
 
 @Processor(LIBRARY_INGESTION_QUEUE_STANDARD, { concurrency: 4 })
@@ -36,8 +36,11 @@ export class IngestionQueueConsumer
       this.logger.log(
         `IngestionQueueConsumer registered with BullMQ on queue: ${LIBRARY_INGESTION_QUEUE_STANDARD} (concurrency: 4)`,
       );
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(
+        `IngestionQueueConsumer worker listener skipped: ${msg}`,
+      );
     }
   }
 
@@ -47,10 +50,9 @@ export class IngestionQueueConsumer
         this.logger.log(`Closing IngestionQueueConsumer worker on shutdown...`);
         await this.worker.close();
       }
-    } catch (err: any) {
-      this.logger.warn(
-        `Error closing IngestionQueueConsumer worker: ${err?.message}`,
-      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Error closing IngestionQueueConsumer worker: ${msg}`);
     }
   }
 
@@ -70,9 +72,11 @@ export class IngestionQueueConsumer
     try {
       await this.repo
         .updateRunStatus(projectId, runId, IngestionStatus.RUNNING)
-        .catch((statusErr: any) => {
+        .catch((statusErr: unknown) => {
+          const statusMsg =
+            statusErr instanceof Error ? statusErr.message : String(statusErr);
           this.logger.warn(
-            `Failed to set RUNNING status for run ${runId}: ${statusErr?.message}`,
+            `Failed to set RUNNING status for run ${runId}: ${statusMsg}`,
           );
         });
 
@@ -82,23 +86,27 @@ export class IngestionQueueConsumer
       this.logger.log(
         `[BULLMQ_DONE] Ingestion run ${runId} completed successfully in ${elapsed}s`,
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       const isLastAttempt = job.attemptsMade + 1 >= (job.opts.attempts || 1);
 
       this.logger.error(
-        `[BULLMQ_ERROR] Ingestion run ${runId} failed after ${elapsed}s (isLast: ${isLastAttempt}): ${err?.message || err}`,
+        `[BULLMQ_ERROR] Ingestion run ${runId} failed after ${elapsed}s (isLast: ${isLastAttempt}): ${msg}`,
       );
 
       if (isLastAttempt) {
         await this.repo
           .updateRunStatus(projectId, runId, IngestionStatus.FAILED_FINAL, {
-            lastError:
-              err?.message || 'Ingestion pipeline execution failed permanently',
+            lastError: msg || 'Ingestion pipeline execution failed permanently',
           })
-          .catch((updateErr: any) => {
+          .catch((updateErr: unknown) => {
+            const updateMsg =
+              updateErr instanceof Error
+                ? updateErr.message
+                : String(updateErr);
             this.logger.error(
-              `Failed to update run status for failed run ${runId}: ${updateErr?.message || updateErr}`,
+              `Failed to update run status for failed run ${runId}: ${updateMsg}`,
             );
           });
       }

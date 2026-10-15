@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AttachmentsService } from './services/attachments.service';
-import { PdfProvider, ExtractedPdfDocument } from './utils/pdf.provider';
+import {
+  PdfProvider,
+  ExtractedPdfDocument,
+  ExtractedPdfMetadata,
+} from './providers/pdf.provider';
 import { WebSnapshotService } from './services/web-snapshot.service';
 import { AnnotationsService } from './services/annotations.service';
 import { TrustedExtractionService } from './services/trusted-extraction.service';
@@ -18,13 +22,14 @@ import {
   BatchAnnotationsResult,
   AnnotationType,
 } from './types/annotations.types';
-import { EXTRACTION_FACADE } from '../shared-kernel/ports/extraction.port';
+import { EXTRACTION_FACADE } from '@/modules/library/shared-kernel/ports/extraction.port';
 export { EXTRACTION_FACADE };
 
 export interface IExtractionFacade {
   getItemAttachments(
     userId: string,
     itemId: string,
+    projectId?: string,
   ): Promise<AttachmentEntity[]>;
   getItemAttachment(
     userId: string,
@@ -38,9 +43,9 @@ export interface IExtractionFacade {
   ): Promise<AttachmentEntity>;
   extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: Record<string, any>,
+    options?: { maxPages?: number; headerOnly?: boolean },
   ): Promise<ExtractedPdfDocument>;
-  extractMetadataFromBuffer(buffer: Buffer): Record<string, any>;
+  extractMetadataFromBuffer(buffer: Buffer): ExtractedPdfMetadata;
   extractTrustedMetadata(
     buffer: Buffer,
     preferredFilename?: string,
@@ -114,12 +119,14 @@ export class ExtractionFacade implements IExtractionFacade {
   async getItemAttachments(
     userId: string,
     itemId: string,
+    projectId?: string,
   ): Promise<AttachmentEntity[]> {
     const res = await this.attachmentsService.getItemAttachments(
       userId,
       itemId,
+      projectId,
     );
-    return (res.attachments || []) as unknown as AttachmentEntity[];
+    return res.attachments || [];
   }
 
   async getItemAttachment(
@@ -141,20 +148,17 @@ export class ExtractionFacade implements IExtractionFacade {
     data: CreateAttachmentInput,
     projectId?: string,
   ): Promise<AttachmentEntity> {
-    return (await this.attachmentsService.createAttachment(
-      data,
-      projectId,
-    )) as unknown as AttachmentEntity;
+    return await this.attachmentsService.createAttachment(data, projectId);
   }
 
   async extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: Record<string, any>,
+    options?: { maxPages?: number; headerOnly?: boolean },
   ): Promise<ExtractedPdfDocument> {
     return this.pdfProvider.extractDocumentFromBuffer(buffer, options);
   }
 
-  extractMetadataFromBuffer(buffer: Buffer): Record<string, any> {
+  extractMetadataFromBuffer(buffer: Buffer): ExtractedPdfMetadata {
     return this.pdfProvider.extractMetadataFromBuffer(buffer);
   }
 

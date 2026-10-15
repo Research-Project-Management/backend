@@ -107,20 +107,91 @@ export class SsrfGuardService {
           );
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (
         err instanceof ForbiddenException ||
         err instanceof BadRequestException
       ) {
         throw err;
       }
-      this.logger.debug(
-        `DNS resolution failed for ${rawHostname}: ${err.message}`,
-      );
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(`DNS resolution failed for ${rawHostname}: ${errMsg}`);
       throw new BadRequestException(`Unable to resolve host '${rawHostname}'.`);
     }
 
     return url;
+  }
+
+  /**
+   * Shared multi-hop redirect fetch loop that validates every hop using the provided validator
+   * (or this.assertSafeUrl) and returns both the final Response and resolved finalUrl.
+   */
+  static async executeSafeRedirectFetch(
+    startUrl: string,
+    init: RequestInit = {},
+    options: {
+      maxRedirects?: number;
+      validateUrl?: (url: string) => Promise<unknown>;
+      beforeHop?: (url: string, signal?: AbortSignal | null) => Promise<void>;
+    } = {},
+  ): Promise<{ response: Response; finalUrl: string }> {
+    const maxRedirects = options.maxRedirects ?? 5;
+    let currentUrl = startUrl;
+
+    for (let hop = 0; hop <= maxRedirects; hop++) {
+      if (options.beforeHop) {
+        await options.beforeHop(currentUrl, init.signal);
+      }
+
+      const res = await fetch(currentUrl, {
+        ...init,
+        redirect: 'manual',
+      });
+
+      const status = res.status;
+      const isRedirect =
+        typeof status === 'number' && status >= 300 && status < 400;
+      const location = isRedirect ? res.headers?.get?.('location') : null;
+
+      if (!location) {
+        return { response: res, finalUrl: currentUrl };
+      }
+
+      try {
+        await res.body?.cancel();
+      } catch {
+        /* ignore body cancel errors on redirect hops */
+      }
+
+      if (hop >= maxRedirects) {
+        throw new ForbiddenException(
+          `SSRF Protection: Maximum redirect limit (${maxRedirects}) exceeded.`,
+        );
+      }
+
+      let nextUrl: string;
+      try {
+        nextUrl = new URL(location, currentUrl).toString();
+      } catch {
+        throw new BadRequestException(
+          `Invalid redirect URL in Location header: ${location}`,
+        );
+      }
+
+      if (!/^https?:$/i.test(new URL(nextUrl).protocol)) {
+        throw new ForbiddenException(
+          `Redirect to non-HTTP scheme rejected: "${nextUrl}"`,
+        );
+      }
+
+      if (options.validateUrl) {
+        await options.validateUrl(nextUrl);
+      }
+
+      currentUrl = nextUrl;
+    }
+
+    throw new ForbiddenException('Too many redirects.');
   }
 
   /**
@@ -132,59 +203,30 @@ export class SsrfGuardService {
     init: RequestInit = {},
     options: SsrfGuardOptions = {},
   ): Promise<Response> {
-    const maxRedirects = options.maxRedirects ?? 5;
-    let currentUrl = rawUrl;
-    let redirectCount = 0;
+    await this.assertSafeUrl(rawUrl, options);
+    const { response } = await SsrfGuardService.executeSafeRedirectFetch(
+      rawUrl,
+      init,
+      {
+        maxRedirects: options.maxRedirects,
+        validateUrl: (nextUrl) => this.assertSafeUrl(nextUrl, options),
+      },
+    );
+    return response;
+  }
 
-    while (redirectCount <= maxRedirects) {
-      const validatedUrl = await this.assertSafeUrl(currentUrl, options);
-
-      const response = await fetch(validatedUrl.toString(), {
-        ...init,
-        redirect: 'manual',
-      });
-
-      // Check if 3xx redirect
-      if (
-        response.status === 301 ||
-        response.status === 302 ||
-        response.status === 303 ||
-        response.status === 307 ||
-        response.status === 308
-      ) {
-        redirectCount++;
-        if (redirectCount > maxRedirects) {
-          throw new ForbiddenException(
-            `SSRF Protection: Maximum redirect limit (${maxRedirects}) exceeded.`,
-          );
-        }
-
-        const locationHeader = response.headers.get('location');
-        if (!locationHeader) {
-          throw new BadRequestException(
-            'Redirect response missing Location header.',
-          );
-        }
-
-        // Resolve relative redirects against current URL
-        try {
-          const resolvedRedirect = new URL(
-            locationHeader,
-            validatedUrl,
-          ).toString();
-          currentUrl = resolvedRedirect;
-        } catch {
-          throw new BadRequestException(
-            `Invalid redirect URL in Location header: ${locationHeader}`,
-          );
-        }
-        continue;
-      }
-
-      return response;
-    }
-
-    throw new ForbiddenException('Too many redirects.');
+  async safeFetchWithRedirects(
+    rawUrl: string,
+    init: RequestInit = {},
+    options: SsrfGuardOptions & {
+      beforeHop?: (url: string, signal?: AbortSignal | null) => Promise<void>;
+    } = {},
+  ): Promise<{ response: Response; finalUrl: string }> {
+    return SsrfGuardService.executeSafeRedirectFetch(rawUrl, init, {
+      maxRedirects: options.maxRedirects,
+      validateUrl: (nextUrl) => this.assertSafeUrl(nextUrl, options),
+      beforeHop: options.beforeHop,
+    });
   }
 
   /**

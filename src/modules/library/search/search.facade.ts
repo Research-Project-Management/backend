@@ -68,8 +68,9 @@ export class SearchFacade implements ISearchFacade {
         await this.searchService.invalidateFacetsCache(scopeId);
       }
       return { localIndexed: true };
-    } catch (err: any) {
-      return { localIndexed: false, error: err?.message || String(err) };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      return { localIndexed: false, error: errMsg };
     }
   }
 }

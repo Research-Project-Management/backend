@@ -1,69 +1,80 @@
+import { ItemFieldDefinition } from '@/modules/library/shared-kernel/types/schema.types';
+
 export const CATALOG_FACADE = 'CATALOG_FACADE';
 
 export interface ICatalogFacade {
-  getItem(
+  getItem<T = unknown>(
     userId: string,
     itemId: string,
     projectId?: string,
-  ): Promise<any | null>;
-  getItemSummary(
+  ): Promise<T | null>;
+  getItemSummary<T = unknown>(
     userId: string,
     itemId: string,
     projectId?: string,
-  ): Promise<any | null>;
+  ): Promise<T | null>;
   itemExists(
     userId: string,
     itemId: string,
     projectId?: string,
   ): Promise<boolean>;
-  getTags(
+  getTags<T = unknown>(
     userId: string,
     options?: { includeInactive?: boolean; projectId?: string },
-  ): Promise<any[]>;
-  getItemState(
+  ): Promise<T[]>;
+  getItemState<T = unknown>(
     userId: string,
     itemId: string,
     projectId?: string,
-  ): Promise<any | null>;
-  createItem(
+  ): Promise<T | null>;
+  createItem<T = unknown, D = Record<string, unknown>>(
     userId: string,
-    data: any,
-    options?: any,
+    data: D,
+    options?: Record<string, unknown>,
     projectId?: string,
-  ): Promise<any>;
-  updateItem(
+  ): Promise<T>;
+  updateItem<T = unknown, D = Record<string, unknown>>(
     userId: string,
     itemId: string,
-    data: any,
+    data: D,
     options?: { expectedVersion?: number; projectId?: string },
-  ): Promise<any>;
+  ): Promise<T>;
   deleteItem(userId: string, itemId: string, projectId?: string): Promise<void>;
-  findByIds(
+  findByIds<T = unknown>(
     userId: string,
     itemIds: string[],
     projectId?: string,
-  ): Promise<any[]>;
-  countItems(userId: string, options?: any): Promise<number>;
-  findMany(userId: string, options?: any): Promise<any[]>;
+  ): Promise<T[]>;
+  countItems(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<number>;
+  findMany<T = unknown>(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<T[]>;
   validateItemType?(type: string): Promise<boolean>;
   getPrimaryCreatorType?(itemType: string): string;
-  getOrderedFields?(itemType: string): any[];
-  findQualityAuditItems?(
+  getOrderedFields?(itemType: string): ItemFieldDefinition[];
+  findQualityAuditItems<T = unknown>(
     userId: string,
     limit?: number,
     projectId?: string,
-  ): Promise<any[]>;
-  findDuplicateCandidateItems?(
+  ): Promise<T[]>;
+  findDuplicateCandidateItems<T = unknown>(
     userId: string,
     limit?: number,
     projectId?: string,
-  ): Promise<any[]>;
+  ): Promise<T[]>;
   mergeItems?(
-    tx: any,
+    tx: unknown,
     duplicateItemIds: string[],
     primaryItemId: string,
-  ): Promise<any>;
-  createNote?(userId: string, data: any): Promise<any>;
+  ): Promise<unknown>;
+  createNote?<T = unknown, D = Record<string, unknown>>(
+    userId: string,
+    data: D,
+  ): Promise<T>;
   findMatchCandidates?(
     scope: { userId?: string; projectId?: string | null } | string,
     criteria: {
@@ -74,6 +85,27 @@ export interface ICatalogFacade {
       titleWords?: string[];
       titlePrefix?: string;
     },
-  ): Promise<{ exactMatch: any; candidateItems: any[] }>;
-  [key: string]: any;
+  ): Promise<{
+    exactMatch?: {
+      id: string;
+      title: string;
+      matchReason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
+      evidence: Record<string, unknown>;
+    } | null;
+    candidateItems: Array<{
+      id: string;
+      title: string;
+      score: number;
+      reasons: string[];
+      doi?: string | null;
+      arxivId?: string | null;
+      pmid?: string | null;
+      isbn?: string | null;
+      year?: number | null;
+      itemType?: string | null;
+      authors?: string[];
+      creators?: unknown[];
+    }>;
+  }>;
+  [key: string]: unknown;
 }

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, EntityType } from '@prisma/client';
-import { WorkItemAttachments } from '../types/work-item.types';
+import { WorkItemAttachments } from '@/modules/work-item/core/types/work-item.types';
 
 @Injectable()
 export class AttachmentSyncHandler {

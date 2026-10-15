@@ -69,9 +69,9 @@ export class StorageLifecycleService implements OnApplicationBootstrap {
       this.logger.log(
         'Bucket lifecycle configuration initialized successfully',
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.warn(
-        `Failed to initialize bucket lifecycle rules: ${err?.message}`,
+        `Failed to initialize bucket lifecycle rules: ${(err as Error)?.message}`,
       );
     }
   }

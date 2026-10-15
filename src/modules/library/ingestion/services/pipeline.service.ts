@@ -5,8 +5,8 @@ import {
   Inject,
   BadRequestException,
 } from '@nestjs/common';
-import { IngestionSubmissionEnvelope } from '../types/submission.types';
-import { IngestionRepository } from '../repositories/ingestion.repository';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   IdentifyStage,
   NormalizeStage,
@@ -14,22 +14,35 @@ import {
   ReconcileStage,
   MatchStage,
   CommitStage,
-} from '../stages';
-import { RetractionScannerProvider } from '../providers';
+} from '@/modules/library/ingestion/stages';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
-} from '../types/catalog-gateway.types';
+} from '@/modules/library/ingestion/types/catalog-gateway.types';
 import {
   EXTRACTION_GATEWAY_PORT,
   IExtractionGatewayPort,
-} from '../types/extraction-gateway.types';
-import { LibraryItemSource } from '../../shared-kernel';
+} from '@/modules/library/ingestion/types/extraction-gateway.types';
+import {
+  LibraryItemSource,
+  SCHEMA_V42_DATA,
+  ITEM_COLUMN_METADATA_FIELDS,
+  FIELD_ALIASES,
+  harmonizeZoteroFields,
+} from '@/modules/library/shared-kernel';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
-import { IngestionRunAggregate } from '../types/ingestion-run.aggregate';
-import { IngestionSagaOrchestrator } from './ingestion-saga.orchestrator';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import {
+  IngestionSagaOrchestrator,
+  IngestionSagaSession,
+} from './ingestion-saga.orchestrator';
+import {
+  MetadataCandidate,
+  ReconciliationDecision,
+} from '@/modules/library/ingestion/types/metadata-candidate.types';
 
 const SYSTEM_RESERVED_KEYS = new Set([
   'id',
@@ -45,6 +58,29 @@ const SYSTEM_RESERVED_KEYS = new Set([
   'retractionStatus',
   'isRetracted',
 ]);
+
+const NON_SCALAR_ENRICH_KEYS = new Set([
+  ...SYSTEM_RESERVED_KEYS,
+  'title',
+  'authors',
+  'editors',
+  'creators',
+  'contributors',
+  'keywords',
+  'labels',
+  'tags',
+  'notes',
+  'extraFields',
+]);
+
+const SCALAR_METADATA_FIELDS: string[] = Array.from(
+  new Set([
+    ...SCHEMA_V42_DATA.distinctFieldKeys,
+    ...ITEM_COLUMN_METADATA_FIELDS,
+    ...Object.keys(FIELD_ALIASES),
+    ...Object.values(FIELD_ALIASES),
+  ]),
+).filter((key) => !NON_SCALAR_ENRICH_KEYS.has(key));
 
 function sanitizeOverrides(
   overrides?: Record<string, unknown>,
@@ -164,7 +200,7 @@ export class PipelineService {
     const session = this.orchestrator.createSession(runId, scopeId, aggregate);
 
     // Stage 1: IDENTIFY & PARSE
-    const { initialCandidates, sanitizedOverrides } = await session.executeStep(
+    const { initialCandidates } = await session.executeStep(
       'IDENTIFY',
       async () => {
         const identifiedCandidates = await this.identify.execute(
@@ -180,15 +216,6 @@ export class PipelineService {
             ...overrides,
           },
         }));
-
-        for (const cand of candidates) {
-          await this.repo.createCandidate(runId, {
-            sourceProvider: cand.sourceName,
-            sourceRecordId: cand.sourceRecordId,
-            confidenceScore: cand.confidenceScore,
-            metadataPayload: cand.normalizedMetadata as Prisma.InputJsonValue,
-          });
-        }
 
         if (candidates.length === 0) {
           throw new BadRequestException(
@@ -229,232 +256,16 @@ export class PipelineService {
 
     // ── Multi-Record Ingestion Handling (BibTeX / RIS batches) ────────────────
     if (envelope.payload.kind === 'RECORD' && normalizedCandidates.length > 1) {
-      const createdItemIds: string[] = [];
-      const total = normalizedCandidates.length;
-      let processed = 0;
-      let succeeded = 0;
-      let duplicates = 0;
-      let failed = 0;
-      const progressItems: Array<{
-        title: string;
-        status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
-        itemId?: string;
-        error?: string;
-      }> = [];
-
-      for (const initialCand of normalizedCandidates) {
-        const itemTitle =
-          initialCand.normalizedMetadata?.title ||
-          initialCand.normalizedMetadata?.shortTitle ||
-          'Untitled Record';
-
-        try {
-          const matchingEnriched = enrichedCandidates.filter(
-            (ec) =>
-              ec.sourceKind === 'PROVIDER' &&
-              (ec.rawEvidenceRef === initialCand.candidateId ||
-                (ec.normalizedMetadata?.doi &&
-                  initialCand.normalizedMetadata?.doi &&
-                  ec.normalizedMetadata.doi.toLowerCase() ===
-                    initialCand.normalizedMetadata.doi.toLowerCase()) ||
-                (ec.normalizedMetadata?.title &&
-                  initialCand.normalizedMetadata?.title &&
-                  ec.normalizedMetadata.title.toLowerCase() ===
-                    initialCand.normalizedMetadata.title.toLowerCase())),
-          );
-          const candidatesForRecord = [initialCand, ...matchingEnriched];
-          const itemDecision =
-            await this.reconcile.execute(candidatesForRecord);
-          const matchRes = await this.match.execute(
-            resolvedScope,
-            itemDecision.proposedItem,
-          );
-
-          if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
-            createdItemIds.push(matchRes.targetItemId);
-            duplicates++;
-            progressItems.push({
-              title: itemTitle,
-              status: 'DUPLICATE',
-              itemId: matchRes.targetItemId,
-            });
-          } else {
-            if (this.retractionScanner) {
-              try {
-                const scanRes = await this.retractionScanner.scan(
-                  itemDecision.proposedItem?.doi,
-                  itemDecision.proposedItem?.pmid,
-                  itemDecision.proposedItem?.title,
-                );
-                if (scanRes) {
-                  itemDecision.proposedItem.isRetracted = true;
-                  itemDecision.proposedItem.retractionNature = scanRes.nature;
-                  itemDecision.proposedItem.retractionDetails = scanRes;
-                  itemDecision.proposedItem.retractionCheckedAt =
-                    new Date().toISOString();
-                }
-              } catch {
-                // Non-blocking scan error
-              }
-            }
-
-            const created = await this.commit.execute(
-              resolvedScope.projectId || resolvedScope.userId,
-              itemDecision.proposedItem,
-              {
-                collectionIds: envelope.collectionIds,
-                tagIds: envelope.tagIds,
-                userId: resolvedScope.userId,
-                source: this.mapPayloadToSource(envelope.payload.kind),
-              },
-            );
-            if (created?.id) {
-              createdItemIds.push(created.id);
-              succeeded++;
-              progressItems.push({
-                title: itemTitle,
-                status: 'SUCCEEDED',
-                itemId: created.id,
-              });
-
-              // Materialize metadata.notes[] → Note DB records (C2 fix)
-              // BibTeX `annote` / `note` fields land here as metadata.notes[]
-              const importedNotes = itemDecision.proposedItem?.notes;
-              if (
-                Array.isArray(importedNotes) &&
-                importedNotes.length > 0 &&
-                this.catalogGateway?.createNote
-              ) {
-                for (const noteItem of importedNotes) {
-                  const rawContent =
-                    typeof noteItem === 'object' && noteItem !== null
-                      ? (noteItem as Record<string, unknown>).content
-                      : undefined;
-                  const noteSource =
-                    typeof noteItem === 'object' && noteItem !== null
-                      ? String(
-                          (noteItem as Record<string, unknown>).source ?? '',
-                        )
-                      : '';
-                  const noteContent =
-                    typeof noteItem === 'string'
-                      ? noteItem
-                      : typeof rawContent === 'string'
-                        ? rawContent
-                        : '';
-                  if (!noteContent.trim()) continue;
-                  try {
-                    if (this.catalogGateway?.createNote) {
-                      await this.catalogGateway.createNote(
-                        resolvedScope.userId,
-                        {
-                          itemId: created.id,
-                          contentMd: noteContent.trim(),
-                          title: noteSource || 'Imported Note',
-                          projectId: resolvedScope.projectId,
-                          createdById: resolvedScope.userId,
-                        },
-                      );
-                    }
-                  } catch (noteErr: any) {
-                    this.logger.warn(
-                      `[BATCH] Failed to create note for item ${created.id}: ${noteErr?.message}`,
-                    );
-                  }
-                }
-              }
-            } else {
-              failed++;
-              progressItems.push({
-                title: itemTitle,
-                status: 'FAILED',
-                error: 'Commit returned empty record',
-              });
-            }
-          }
-        } catch (itemErr: any) {
-          failed++;
-          progressItems.push({
-            title: itemTitle,
-            status: 'FAILED',
-            error: itemErr?.message || 'Processing failed',
-          });
-        } finally {
-          processed++;
-          // Leaky Bucket / Throttle Checkpoints:
-          // Avoid flooding the database with hundreds of UPDATE queries in large batches.
-          // Checkpoint every 5 items, or every item if total <= 10, or at the final item.
-          const isFinal = processed === total;
-          const shouldCheckpoint =
-            isFinal ||
-            total <= 10 ||
-            processed % 5 === 0 ||
-            (total > 50 && processed % 10 === 0);
-
-          if (shouldCheckpoint) {
-            try {
-              await this.repo.updateRunProgress(scopeId, runId, {
-                total,
-                processed,
-                succeeded,
-                duplicates,
-                failed,
-                percentage: Math.round((processed / total) * 100),
-                currentTitle: itemTitle,
-                status: 'PROCESSING',
-                items: progressItems.slice(-30),
-              });
-            } catch {
-              // Checkpoint error is non-fatal to the ingestion pipeline
-            }
-          }
-        }
-      }
-
-      await session.executeStep(
-        'COMMIT',
-        async () => {
-          await this.repo.updateRunStatus(
-            scopeId,
-            runId,
-            IngestionStatus.COMPLETED,
-            {
-              itemId: createdItemIds[0],
-              completedAt: new Date(),
-              executionLog: {
-                total,
-                processed,
-                succeeded,
-                duplicates,
-                failed,
-                percentage: 100,
-                status: 'COMPLETED',
-                items: progressItems.slice(-50),
-              } as unknown as Prisma.InputJsonValue,
-            },
-          );
-
-          aggregate.recordProgress(succeeded, failed);
-          aggregate.complete();
-
-          return {
-            itemIds: createdItemIds,
-            totalProcessed: createdItemIds.length,
-            succeeded,
-            duplicates,
-            failed,
-          };
-        },
-        {
-          outputSnapshot: (res) => ({
-            itemIds: res.itemIds,
-            totalProcessed: res.totalProcessed,
-            succeeded: res.succeeded,
-            duplicates: res.duplicates,
-            failed: res.failed,
-          }),
-        },
-      );
+      await this.processRecordBatch({
+        scopeId,
+        runId,
+        envelope,
+        resolvedScope,
+        aggregate,
+        session,
+        normalizedCandidates,
+        enrichedCandidates,
+      });
       return;
     }
 
@@ -470,56 +281,15 @@ export class PipelineService {
       },
     );
 
-    // If upstream site was blocked by WAF/Cloudflare and cannot be processed:
+    // Upstream site blocked by WAF / Cloudflare Turnstile
     if (decision.proposedItem?.extraFields?.ingestionStatus === 'BLOCKED') {
-      const wafKind =
-        (decision.proposedItem.extraFields.wafKind as string) ||
-        'WAF_CLOUDFLARE_TURNSTILE';
-      const blockedSourceLabel =
-        getSubmissionPayloadLabel(envelope.payload) ||
-        decision.proposedItem?.url ||
-        'Document';
-
-      await this.repo.createDecision(runId, {
-        decisionType: 'BLOCKED',
-        decisionReason: `Blocked by upstream anti-bot WAF (${wafKind}). Please upload the PDF directly.`,
-        proposedItem: decision.proposedItem as unknown as Prisma.InputJsonValue,
-      });
-
-      await this.repo.updateRunStatus(
+      await this.handleBlockedSubmission({
         scopeId,
         runId,
-        IngestionStatus.COMPLETED,
-        {
-          completedAt: new Date(),
-          executionLog: {
-            total: 1,
-            processed: 1,
-            succeeded: 0,
-            duplicates: 0,
-            failed: 0,
-            percentage: 100,
-            status: 'BLOCKED',
-            ingestionStatus: 'BLOCKED',
-            wafKind,
-            promptUploadPdf: true,
-            currentTitle: blockedSourceLabel,
-            message:
-              'Website is protected by WAF / Cloudflare Turnstile. Please upload the PDF file directly.',
-            items: [
-              {
-                title: blockedSourceLabel,
-                status: 'BLOCKED',
-                error:
-                  'Website is protected by WAF / Cloudflare Turnstile. Please upload the PDF file directly.',
-              },
-            ],
-          } as unknown as Prisma.InputJsonValue,
-        },
-      );
-
-      aggregate.recordProgress(0, 1);
-      aggregate.complete();
+        envelope,
+        decision,
+        aggregate,
+      });
       return;
     }
 
@@ -532,17 +302,23 @@ export class PipelineService {
       },
     );
 
-    // ── Decision Branching ─────────────────────────────────────────────────────
+    const uploadedFileIdentifier =
+      envelope.payload.kind === 'FILE'
+        ? envelope.payload.fileId
+        : decision.proposedItem?.fileId;
+    const uploadedFilename =
+      envelope.payload.kind === 'FILE'
+        ? envelope.payload.filename || 'document.pdf'
+        : decision.proposedItem?.filename || 'document.pdf';
+    const payloadSize = getSubmissionPayloadSize(envelope.payload);
 
-    // EXACT DOI match → Additive metadata enrichment of the existing item.
+    // EXACT DOI match → Additive metadata enrichment of existing item
     if (matchResult.matchType === 'EXACT' && matchResult.targetItemId) {
       const targetItemId = matchResult.targetItemId;
       await session.executeStep(
         'ENRICH_EXISTING',
         async () => {
-          let enrichedItem: any = null;
-          const enrichPatch: Record<string, any> = {};
-
+          let patchedFields: string[] = [];
           if (this.catalogGateway) {
             const existing = await this.catalogGateway.getItem(
               resolvedScope.userId,
@@ -552,86 +328,14 @@ export class PipelineService {
             const existingRec = existing as
               Record<string, unknown> | null | undefined;
 
-            const p = decision.proposedItem;
+            const enrichPatch = this.buildEnrichmentPatch(
+              existingRec,
+              decision.proposedItem,
+            );
+            patchedFields = Object.keys(enrichPatch);
 
-            const maybeEnrich = (field: string, proposed: any) => {
-              if (proposed == null || proposed === '') return;
-              const current = existingRec?.[field];
-              if (
-                current == null ||
-                current === '' ||
-                (Array.isArray(current) && current.length === 0)
-              ) {
-                enrichPatch[field] = proposed;
-              }
-            };
-
-            maybeEnrich('abstract', p.abstract);
-
-            if (p.title && p.title !== 'Untitled Document') {
-              const currentTitle = String(
-                existing?.title || existingRec?.title || '',
-              ).trim();
-              if (
-                !currentTitle ||
-                currentTitle === 'Untitled Document' ||
-                currentTitle === 'Uploaded Document' ||
-                /\.pdf$/i.test(currentTitle) ||
-                /^10\.\d{4,9}\//.test(currentTitle)
-              ) {
-                enrichPatch['title'] = p.title;
-              }
-            }
-
-            maybeEnrich('journal', p.journal);
-            maybeEnrich('publicationTitle', p.publicationTitle);
-            maybeEnrich('publicationDate', p.publicationDate);
-            maybeEnrich('publisher', p.publisher);
-            maybeEnrich('place', p.place);
-            maybeEnrich('volume', p.volume);
-            maybeEnrich('issue', p.issue);
-            maybeEnrich('pages', p.pages);
-            maybeEnrich('section', p.section);
-            maybeEnrich('partNumber', p.partNumber);
-            maybeEnrich('partTitle', p.partTitle);
-            maybeEnrich('series', p.series);
-            maybeEnrich('seriesTitle', p.seriesTitle);
-            maybeEnrich('seriesText', p.seriesText);
-            maybeEnrich('year', p.year);
-            maybeEnrich('url', p.url);
-            maybeEnrich('arxivId', p.arxivId);
-            maybeEnrich('pmid', p.pmid);
-            maybeEnrich('pmcid', p.pmcid);
-            maybeEnrich('itemType', p.itemType);
-            maybeEnrich('type', p.type);
-            maybeEnrich('citationKey', p.citationKey);
-            maybeEnrich('issn', p.issn);
-            maybeEnrich('isbn', p.isbn);
-            maybeEnrich('language', p.language);
-            maybeEnrich('rights', p.rights);
-            maybeEnrich('license', p.license);
-            maybeEnrich('extra', p.extra);
-            maybeEnrich('libraryCatalog', p.libraryCatalog);
-            maybeEnrich('callNumber', p.callNumber);
-            maybeEnrich('archive', p.archive);
-            maybeEnrich('archiveLocation', p.archiveLocation);
-            maybeEnrich('extraFields', p.extraFields);
-            if (p.authors?.length && !existing?.authors?.length) {
-              enrichPatch['authors'] = p.authors;
-            }
-            if (p.editors?.length && !existing?.editors?.length) {
-              enrichPatch['editors'] = p.editors;
-            }
-            if (p.creators?.length && !existing?.creators?.length) {
-              enrichPatch['creators'] = p.creators;
-            }
-            if (p.keywords?.length && !existing?.keywords?.length) {
-              enrichPatch['keywords'] = p.keywords;
-              enrichPatch['labels'] = p.keywords;
-            }
-
-            if (Object.keys(enrichPatch).length > 0) {
-              enrichedItem = await this.catalogGateway.updateItem(
+            if (patchedFields.length > 0) {
+              await this.catalogGateway.updateItem(
                 resolvedScope.userId,
                 targetItemId,
                 enrichPatch,
@@ -639,106 +343,30 @@ export class PipelineService {
                 resolvedScope.projectId,
               );
               this.logger.log(
-                `[EXACT_MERGE] Enriched item ${targetItemId} with ${Object.keys(enrichPatch).join(', ')}`,
+                `[EXACT_MERGE] Enriched item ${targetItemId} with ${patchedFields.join(', ')}`,
               );
             } else {
-              enrichedItem = existing;
               this.logger.log(
                 `[EXACT_MERGE] Item ${targetItemId} already fully populated — no patch needed`,
               );
             }
 
-            const uploadedFileIdentifier =
-              envelope.payload.kind === 'FILE'
-                ? envelope.payload.fileId
-                : decision.proposedItem?.fileId;
-            const uploadedFilename =
-              envelope.payload.kind === 'FILE'
-                ? envelope.payload.filename || 'document.pdf'
-                : decision.proposedItem?.filename || 'document.pdf';
+            await this.attachFile(
+              resolvedScope.userId,
+              resolvedScope.projectId,
+              targetItemId,
+              uploadedFileIdentifier,
+              uploadedFilename,
+              payloadSize,
+            );
 
-            if (
-              uploadedFileIdentifier &&
-              this.extractionGateway?.createAttachment
-            ) {
-              try {
-                await this.extractionGateway.createAttachment(
-                  {
-                    itemId: matchResult.targetItemId,
-                    fileId: uploadedFileIdentifier,
-                    filename: uploadedFilename,
-                    url: getFileContentPath(uploadedFileIdentifier),
-                    mimeType: 'application/pdf',
-                    size: getSubmissionPayloadSize(envelope.payload),
-                    userId: resolvedScope.userId,
-                  },
-                  resolvedScope.projectId || undefined,
-                );
-                this.logger.log(
-                  `[EXACT_MERGE] Attached file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}`,
-                );
-              } catch (attachmentError: unknown) {
-                const errorMessage =
-                  attachmentError instanceof Error
-                    ? attachmentError.message
-                    : String(attachmentError);
-                this.logger.warn(
-                  `[EXACT_MERGE] Failed to attach file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}: ${errorMessage}`,
-                );
-              }
-            }
-
-            if (
-              Array.isArray(p.notes) &&
-              p.notes.length > 0 &&
-              this.catalogGateway?.createNote
-            ) {
-              for (const noteItem of p.notes) {
-                const rawContent =
-                  typeof noteItem === 'object' && noteItem !== null
-                    ? (noteItem as Record<string, unknown>).content
-                    : undefined;
-                const noteSource =
-                  typeof noteItem === 'object' && noteItem !== null
-                    ? String((noteItem as Record<string, unknown>).source ?? '')
-                    : '';
-                const noteContent =
-                  typeof noteItem === 'string'
-                    ? noteItem
-                    : typeof rawContent === 'string'
-                      ? rawContent
-                      : '';
-                if (!noteContent.trim()) continue;
-                try {
-                  if (this.catalogGateway?.createNote) {
-                    await this.catalogGateway.createNote(resolvedScope.userId, {
-                      itemId: matchResult.targetItemId,
-                      contentMd: noteContent.trim(),
-                      title: noteSource || 'Imported Note',
-                      projectId: resolvedScope.projectId,
-                      createdById: resolvedScope.userId,
-                    });
-                    this.logger.log(
-                      `[EXACT_MERGE] Added imported note to item ${matchResult.targetItemId}`,
-                    );
-                  }
-                } catch (noteErr: any) {
-                  this.logger.warn(
-                    `[EXACT_MERGE] Failed to create note for item ${matchResult.targetItemId}: ${noteErr?.message}`,
-                  );
-                }
-              }
-            }
+            await this.materializeNotes(
+              resolvedScope.userId,
+              resolvedScope.projectId,
+              targetItemId,
+              decision.proposedItem?.notes,
+            );
           }
-
-          await this.repo.createDecision(runId, {
-            decisionType: 'UPDATE',
-            decisionReason:
-              'Exact DOI match — additive enrichment applied to existing item',
-            proposedItem:
-              decision.proposedItem as unknown as Prisma.InputJsonValue,
-            duplicateMatch: matchResult as unknown as Prisma.InputJsonValue,
-          });
 
           const exactSourceLabel =
             getSubmissionPayloadLabel(envelope.payload) ||
@@ -779,8 +407,8 @@ export class PipelineService {
 
           return {
             itemId: matchResult.targetItemId,
-            patchedFields: Object.keys(enrichPatch),
-            patchCount: Object.keys(enrichPatch).length,
+            patchedFields,
+            patchCount: patchedFields.length,
           };
         },
         {
@@ -794,16 +422,8 @@ export class PipelineService {
       return;
     }
 
-    // PROBABLE fuzzy match → Record duplicate suspect for library Duplicate Items view (Zotero model: non-blocking, commit continues)
+    // PROBABLE fuzzy match → Non-blocking duplicate suspect review record
     if (matchResult.matchType === 'PROBABLE' && matchResult.targetItemId) {
-      await this.repo.createDecision(runId, {
-        decisionType: 'DUPLICATE_SUSPECT',
-        decisionReason:
-          'Probable duplicate matched via fuzzy title similarity (recorded for Duplicate Items review)',
-        proposedItem: decision.proposedItem as unknown as Prisma.InputJsonValue,
-        duplicateMatch: matchResult as unknown as Prisma.InputJsonValue,
-      });
-
       await this.repo.createReviewCase(scopeId, runId, {
         targetItemId: matchResult.targetItemId,
         reason: `Probable match with existing item "${matchResult.targetItemTitle}"`,
@@ -816,34 +436,12 @@ export class PipelineService {
           proposedMetadata: decision.proposedItem,
         } as unknown as Prisma.InputJsonValue,
       });
-      // Zotero design: Ingest does not pause or block. Continue to commit so document is immediately in library.
     }
 
     // Retraction Check: Auto-scan against Retraction Watch & Crossref before commit
-    if (this.retractionScanner) {
-      try {
-        const scanRes = await this.retractionScanner.scan(
-          decision.proposedItem?.doi,
-          decision.proposedItem?.pmid,
-          decision.proposedItem?.title,
-        );
-        if (scanRes) {
-          decision.proposedItem.isRetracted = true;
-          decision.proposedItem.retractionNature = scanRes.nature;
-          decision.proposedItem.retractionDetails = scanRes;
-          decision.proposedItem.retractionCheckedAt = new Date().toISOString();
-          this.logger.warn(
-            `[RETRACTION_INGESTION_GUARD] Flagged imported item "${decision.proposedItem?.title}" as ${scanRes.nature}`,
-          );
-        }
-      } catch (scanErr: any) {
-        this.logger.warn(
-          `Retraction check during ingestion skipped: ${scanErr?.message}`,
-        );
-      }
-    }
+    await this.scanRetraction(decision.proposedItem);
 
-    // Stage 6: COMMIT (create new Item via CommitStage with Saga Compensation)
+    // Stage 6: COMMIT (Create new Item via CommitStage with Saga Compensation)
     const createdItem = await session.executeStep(
       'COMMIT',
       async () => {
@@ -855,14 +453,8 @@ export class PipelineService {
             tagIds: envelope.tagIds,
             userId: resolvedScope.userId,
             source: this.mapPayloadToSource(envelope.payload.kind),
-            fileId:
-              envelope.payload.kind === 'FILE'
-                ? envelope.payload.fileId
-                : decision.proposedItem?.fileId,
-            filename:
-              envelope.payload.kind === 'FILE'
-                ? envelope.payload.filename
-                : decision.proposedItem?.filename,
+            fileId: uploadedFileIdentifier,
+            filename: uploadedFilename,
           },
         );
       },
@@ -883,90 +475,22 @@ export class PipelineService {
       },
     );
 
-    const uploadedFileIdentifier =
-      envelope.payload.kind === 'FILE'
-        ? envelope.payload.fileId
-        : decision.proposedItem?.fileId;
-    const uploadedFilename =
-      envelope.payload.kind === 'FILE'
-        ? envelope.payload.filename || 'document.pdf'
-        : decision.proposedItem?.filename || 'document.pdf';
+    if (createdItem?.id) {
+      await this.attachFile(
+        resolvedScope.userId,
+        resolvedScope.projectId,
+        createdItem.id,
+        uploadedFileIdentifier,
+        uploadedFilename,
+        payloadSize,
+      );
 
-    if (
-      createdItem?.id &&
-      uploadedFileIdentifier &&
-      this.extractionGateway?.createAttachment
-    ) {
-      try {
-        await this.extractionGateway.createAttachment(
-          {
-            itemId: createdItem.id,
-            fileId: uploadedFileIdentifier,
-            filename: uploadedFilename,
-            url: getFileContentPath(uploadedFileIdentifier),
-            mimeType: 'application/pdf',
-            size: getSubmissionPayloadSize(envelope.payload),
-            userId: resolvedScope.userId,
-          },
-          resolvedScope.projectId || undefined,
-        );
-        this.logger.log(
-          `[COMMIT] Attached file ${uploadedFileIdentifier} to new item ${createdItem.id}`,
-        );
-      } catch (attachmentError: unknown) {
-        const errorMessage =
-          attachmentError instanceof Error
-            ? attachmentError.message
-            : String(attachmentError);
-        this.logger.warn(
-          `[COMMIT] Failed to attach file ${uploadedFileIdentifier} to new item ${createdItem.id}: ${errorMessage}`,
-        );
-      }
-    }
-
-    // Materialize metadata.notes[] → Note DB records (C2 fix)
-    // Handles BibTeX `annote` / `note` / RIS `N1` / `AB` annotation fields
-    // that survive through IdentifyStage → metadata.notes[]
-    if (createdItem?.id && this.catalogGateway?.createNote) {
-      const importedNotes = decision.proposedItem?.notes;
-      if (Array.isArray(importedNotes) && importedNotes.length > 0) {
-        for (const noteItem of importedNotes) {
-          const rawContent =
-            typeof noteItem === 'object' && noteItem !== null
-              ? (noteItem as Record<string, unknown>).content
-              : undefined;
-          const noteSource =
-            typeof noteItem === 'object' && noteItem !== null
-              ? String((noteItem as Record<string, unknown>).source ?? '')
-              : '';
-          const noteContent =
-            typeof noteItem === 'string'
-              ? noteItem
-              : typeof rawContent === 'string'
-                ? rawContent
-                : '';
-          if (!noteContent.trim()) continue;
-          try {
-            if (this.catalogGateway?.createNote) {
-              await this.catalogGateway.createNote(resolvedScope.userId, {
-                itemId: createdItem.id,
-                contentMd: noteContent.trim(),
-                // Use the source field (e.g. 'annote', 'note', 'abstract') as title
-                title: noteSource || 'Imported Note',
-                projectId: resolvedScope.projectId,
-                createdById: resolvedScope.userId,
-              });
-              this.logger.log(
-                `[COMMIT] Created imported note for new item ${createdItem.id} (source: ${noteSource || 'unknown'})`,
-              );
-            }
-          } catch (noteErr: any) {
-            this.logger.warn(
-              `[COMMIT] Failed to create note for item ${createdItem.id}: ${noteErr?.message}`,
-            );
-          }
-        }
-      }
+      await this.materializeNotes(
+        resolvedScope.userId,
+        resolvedScope.projectId,
+        createdItem.id,
+        decision.proposedItem?.notes,
+      );
     }
 
     try {
@@ -1006,9 +530,461 @@ export class PipelineService {
 
       aggregate.recordProgress(1, 0);
       aggregate.complete();
-    } catch (finalErr: any) {
-      await session.rollback('COMMIT', finalErr?.message || String(finalErr));
+    } catch (finalErr: unknown) {
+      const errMsg =
+        finalErr instanceof Error ? finalErr.message : String(finalErr);
+      await session.rollback('COMMIT', errMsg);
       throw finalErr;
+    }
+  }
+
+  // ── Helper Domain Routines ──────────────────────────────────────────────────
+
+  private async processRecordBatch(params: {
+    scopeId: string;
+    runId: string;
+    envelope: IngestionSubmissionEnvelope;
+    resolvedScope: { userId: string; projectId?: string };
+    aggregate: IngestionRunAggregate;
+    session: IngestionSagaSession;
+    normalizedCandidates: MetadataCandidate[];
+    enrichedCandidates: MetadataCandidate[];
+  }): Promise<void> {
+    const {
+      scopeId,
+      runId,
+      envelope,
+      resolvedScope,
+      aggregate,
+      session,
+      normalizedCandidates,
+      enrichedCandidates,
+    } = params;
+
+    const createdItemIds: string[] = [];
+    const total = normalizedCandidates.length;
+    let processed = 0;
+    let succeeded = 0;
+    let duplicates = 0;
+    let failed = 0;
+    const progressItems: Array<{
+      title: string;
+      status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
+      itemId?: string;
+      error?: string;
+    }> = [];
+
+    for (const initialCand of normalizedCandidates) {
+      const itemTitle =
+        initialCand.normalizedMetadata?.title ||
+        initialCand.normalizedMetadata?.shortTitle ||
+        'Untitled Record';
+
+      try {
+        const matchingEnriched = enrichedCandidates.filter(
+          (ec) =>
+            ec.sourceKind === 'PROVIDER' &&
+            (ec.rawEvidenceRef === initialCand.candidateId ||
+              (ec.normalizedMetadata?.doi &&
+                initialCand.normalizedMetadata?.doi &&
+                ec.normalizedMetadata.doi.toLowerCase() ===
+                  initialCand.normalizedMetadata.doi.toLowerCase()) ||
+              (ec.normalizedMetadata?.title &&
+                initialCand.normalizedMetadata?.title &&
+                ec.normalizedMetadata.title.toLowerCase() ===
+                  initialCand.normalizedMetadata.title.toLowerCase())),
+        );
+        const candidatesForRecord = [initialCand, ...matchingEnriched];
+        const itemDecision = await this.reconcile.execute(candidatesForRecord);
+        const matchRes = await this.match.execute(
+          resolvedScope,
+          itemDecision.proposedItem,
+        );
+
+        if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
+          createdItemIds.push(matchRes.targetItemId);
+          duplicates++;
+          progressItems.push({
+            title: itemTitle,
+            status: 'DUPLICATE',
+            itemId: matchRes.targetItemId,
+          });
+        } else {
+          await this.scanRetraction(itemDecision.proposedItem);
+
+          const created = await this.commit.execute(
+            resolvedScope.projectId || resolvedScope.userId,
+            itemDecision.proposedItem,
+            {
+              collectionIds: envelope.collectionIds,
+              tagIds: envelope.tagIds,
+              userId: resolvedScope.userId,
+              source: this.mapPayloadToSource(envelope.payload.kind),
+            },
+          );
+          if (created?.id) {
+            createdItemIds.push(created.id);
+            succeeded++;
+            progressItems.push({
+              title: itemTitle,
+              status: 'SUCCEEDED',
+              itemId: created.id,
+            });
+
+            await this.materializeNotes(
+              resolvedScope.userId,
+              resolvedScope.projectId,
+              created.id,
+              itemDecision.proposedItem?.notes,
+            );
+          } else {
+            failed++;
+            progressItems.push({
+              title: itemTitle,
+              status: 'FAILED',
+              error: 'Commit returned empty record',
+            });
+          }
+        }
+      } catch (itemErr: unknown) {
+        failed++;
+        progressItems.push({
+          title: itemTitle,
+          status: 'FAILED',
+          error:
+            itemErr instanceof Error ? itemErr.message : 'Processing failed',
+        });
+      } finally {
+        processed++;
+        const isFinal = processed === total;
+        const shouldCheckpoint =
+          isFinal ||
+          total <= 10 ||
+          processed % 5 === 0 ||
+          (total > 50 && processed % 10 === 0);
+
+        if (shouldCheckpoint) {
+          try {
+            await this.repo.updateRunProgress(scopeId, runId, {
+              total,
+              processed,
+              succeeded,
+              duplicates,
+              failed,
+              percentage: Math.round((processed / total) * 100),
+              status: 'RUNNING',
+              currentTitle: itemTitle,
+              items: progressItems.slice(-20),
+            });
+          } catch {
+            // Non-critical progress checkpoint failure
+          }
+        }
+      }
+    }
+
+    await session.executeStep(
+      'COMMIT',
+      async () => {
+        await this.repo.updateRunStatus(
+          scopeId,
+          runId,
+          IngestionStatus.COMPLETED,
+          {
+            itemId: createdItemIds[0],
+            completedAt: new Date(),
+            executionLog: {
+              total,
+              processed,
+              succeeded,
+              duplicates,
+              failed,
+              percentage: 100,
+              status: 'COMPLETED',
+              items: progressItems.slice(-50),
+            } as unknown as Prisma.InputJsonValue,
+          },
+        );
+
+        aggregate.recordProgress(succeeded, failed);
+        aggregate.complete();
+
+        return {
+          itemIds: createdItemIds,
+          totalProcessed: createdItemIds.length,
+          succeeded,
+          duplicates,
+          failed,
+        };
+      },
+      {
+        outputSnapshot: (res: {
+          itemIds: string[];
+          totalProcessed: number;
+          succeeded: number;
+          duplicates: number;
+          failed: number;
+        }) => ({
+          itemIds: res.itemIds,
+          totalProcessed: res.totalProcessed,
+          succeeded: res.succeeded,
+          duplicates: res.duplicates,
+          failed: res.failed,
+        }),
+      },
+    );
+  }
+
+  private async handleBlockedSubmission(params: {
+    scopeId: string;
+    runId: string;
+    envelope: IngestionSubmissionEnvelope;
+    decision: ReconciliationDecision;
+    aggregate: IngestionRunAggregate;
+  }): Promise<void> {
+    const { scopeId, runId, envelope, decision, aggregate } = params;
+    const wafKind =
+      (decision.proposedItem?.extraFields?.wafKind as string) ||
+      'WAF_CLOUDFLARE_TURNSTILE';
+    const blockedSourceLabel =
+      getSubmissionPayloadLabel(envelope.payload) ||
+      decision.proposedItem?.url ||
+      'Document';
+
+    await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.COMPLETED, {
+      completedAt: new Date(),
+      executionLog: {
+        total: 1,
+        processed: 1,
+        succeeded: 0,
+        duplicates: 0,
+        failed: 0,
+        percentage: 100,
+        status: 'BLOCKED',
+        ingestionStatus: 'BLOCKED',
+        wafKind,
+        promptUploadPdf: true,
+        currentTitle: blockedSourceLabel,
+        message:
+          'Website is protected by WAF / Cloudflare Turnstile. Please upload the PDF file directly.',
+        items: [
+          {
+            title: blockedSourceLabel,
+            status: 'BLOCKED',
+            error:
+              'Website is protected by WAF / Cloudflare Turnstile. Please upload the PDF file directly.',
+          },
+        ],
+      } as unknown as Prisma.InputJsonValue,
+    });
+
+    aggregate.recordProgress(0, 1);
+    aggregate.complete();
+  }
+
+  private buildEnrichmentPatch(
+    existingRec: Record<string, unknown> | null | undefined,
+    rawProposed: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const resolvedType =
+      (typeof rawProposed.itemType === 'string' && rawProposed.itemType) ||
+      (typeof existingRec?.itemType === 'string' && existingRec.itemType) ||
+      'journalArticle';
+    const p = harmonizeZoteroFields(rawProposed, {
+      itemType: resolvedType,
+      syncExtraFields: true,
+    });
+    const enrichPatch: Record<string, unknown> = {};
+
+    const maybeEnrich = (field: string, val: unknown) => {
+      if (val == null || val === '') return;
+      const current = existingRec?.[field];
+      if (
+        current == null ||
+        current === '' ||
+        (Array.isArray(current) && current.length === 0)
+      ) {
+        enrichPatch[field] = val;
+      }
+    };
+
+    if (p.title && p.title !== 'Untitled Document') {
+      const currentTitle = String(existingRec?.title || '').trim();
+      if (
+        !currentTitle ||
+        currentTitle === 'Untitled Document' ||
+        currentTitle === 'Uploaded Document' ||
+        /\.pdf$/i.test(currentTitle) ||
+        /^10\.\d{4,9}\//.test(currentTitle)
+      ) {
+        enrichPatch['title'] = p.title;
+      }
+    }
+
+    for (const field of SCALAR_METADATA_FIELDS) {
+      maybeEnrich(field, p[field]);
+    }
+
+    const pExtra =
+      p.extraFields &&
+      typeof p.extraFields === 'object' &&
+      !Array.isArray(p.extraFields)
+        ? (p.extraFields as Record<string, unknown>)
+        : undefined;
+    if (pExtra) {
+      const existingExtra =
+        existingRec?.extraFields &&
+        typeof existingRec.extraFields === 'object' &&
+        !Array.isArray(existingRec.extraFields)
+          ? (existingRec.extraFields as Record<string, unknown>)
+          : {};
+      const mergedExtra: Record<string, unknown> = { ...existingExtra };
+      let extraChanged = false;
+      for (const [efKey, efVal] of Object.entries(pExtra)) {
+        if (efVal == null || efVal === '') continue;
+        if (mergedExtra[efKey] == null || mergedExtra[efKey] === '') {
+          mergedExtra[efKey] = efVal;
+          extraChanged = true;
+        }
+        maybeEnrich(efKey, efVal);
+      }
+      if (extraChanged) {
+        enrichPatch['extraFields'] = mergedExtra;
+      }
+    }
+
+    const existingAuthors = existingRec?.authors as unknown[] | undefined;
+    const existingEditors = existingRec?.editors as unknown[] | undefined;
+    const existingCreators = existingRec?.creators as unknown[] | undefined;
+    const existingKeywords = (existingRec?.keywords || existingRec?.labels) as
+      unknown[] | undefined;
+
+    const pAuthors = p.authors as unknown[] | undefined;
+    const pEditors = p.editors as unknown[] | undefined;
+    const pCreators = p.creators as unknown[] | undefined;
+    const pKeywords = p.keywords as unknown[] | undefined;
+
+    if (pAuthors?.length && !existingAuthors?.length) {
+      enrichPatch['authors'] = pAuthors;
+    }
+    if (pEditors?.length && !existingEditors?.length) {
+      enrichPatch['editors'] = pEditors;
+    }
+    if (pCreators?.length && !existingCreators?.length) {
+      enrichPatch['creators'] = pCreators;
+    }
+    if (pKeywords?.length && !existingKeywords?.length) {
+      enrichPatch['keywords'] = pKeywords;
+      enrichPatch['labels'] = pKeywords;
+    }
+
+    return enrichPatch;
+  }
+
+  private async scanRetraction(
+    proposedItem?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.retractionScanner || !proposedItem) return;
+    try {
+      const scanRes = await this.retractionScanner.scan(
+        typeof proposedItem.doi === 'string' ? proposedItem.doi : undefined,
+        typeof proposedItem.pmid === 'string' ? proposedItem.pmid : undefined,
+        typeof proposedItem.title === 'string' ? proposedItem.title : undefined,
+      );
+      if (scanRes) {
+        proposedItem.isRetracted = true;
+        proposedItem.retractionNature = scanRes.nature;
+        proposedItem.retractionDetails = scanRes;
+        proposedItem.retractionCheckedAt = new Date().toISOString();
+        this.logger.warn(
+          `[RETRACTION_INGESTION_GUARD] Flagged imported item "${String(proposedItem.title ?? '')}" as ${scanRes.nature}`,
+        );
+      }
+    } catch (scanErr: unknown) {
+      const msg = scanErr instanceof Error ? scanErr.message : String(scanErr);
+      this.logger.warn(`Retraction check during ingestion skipped: ${msg}`);
+    }
+  }
+
+  private async attachFile(
+    userId: string,
+    projectId: string | undefined,
+    itemId: string,
+    fileId?: string,
+    filename?: string,
+    size?: number,
+  ): Promise<void> {
+    if (!fileId || !this.extractionGateway?.createAttachment) return;
+    try {
+      await this.extractionGateway.createAttachment(
+        {
+          itemId,
+          fileId,
+          filename: filename || 'document.pdf',
+          url: getFileContentPath(fileId),
+          mimeType: 'application/pdf',
+          size: size || 0,
+          userId,
+        },
+        projectId,
+      );
+      this.logger.log(`[ATTACHMENT] Attached file ${fileId} to item ${itemId}`);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[ATTACHMENT] Failed to attach file ${fileId} to item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private async materializeNotes(
+    userId: string,
+    projectId: string | undefined,
+    itemId: string,
+    notes?: unknown[],
+  ): Promise<void> {
+    if (
+      !Array.isArray(notes) ||
+      notes.length === 0 ||
+      !this.catalogGateway?.createNote
+    ) {
+      return;
+    }
+
+    for (const noteItem of notes) {
+      const rawContent =
+        typeof noteItem === 'object' && noteItem !== null
+          ? (noteItem as Record<string, unknown>).content
+          : undefined;
+      const noteSource =
+        typeof noteItem === 'object' && noteItem !== null
+          ? String((noteItem as Record<string, unknown>).source ?? '')
+          : '';
+      const noteContent =
+        typeof noteItem === 'string'
+          ? noteItem
+          : typeof rawContent === 'string'
+            ? rawContent
+            : '';
+
+      if (!noteContent.trim()) continue;
+
+      try {
+        await this.catalogGateway.createNote(userId, {
+          itemId,
+          contentMd: noteContent.trim(),
+          title: noteSource || 'Imported Note',
+          projectId,
+          createdById: userId,
+        });
+        this.logger.log(
+          `[NOTE] Created note for item ${itemId} (source: ${noteSource || 'unknown'})`,
+        );
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `[NOTE] Failed to create note for item ${itemId}: ${msg}`,
+        );
+      }
     }
   }
 

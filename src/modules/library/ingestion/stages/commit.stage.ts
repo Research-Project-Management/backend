@@ -2,16 +2,31 @@ import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
-} from '../types/catalog-gateway.types';
-import { ItemMetadata } from '../types/metadata.types';
-import { CreateItemData } from '../../shared-kernel/types/bibliographic.types';
+} from '@/modules/library/ingestion/types/catalog-gateway.types';
+import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
+import {
+  CreateItemData,
+  CreatorCreditInput,
+} from '@/modules/library/shared-kernel/types/bibliographic.types';
+import { ItemDetail } from '@/modules/library/catalog';
 import {
   splitAuthorString,
+  parseCreatorString,
+} from '@/modules/library/shared-kernel/domain/author.domain';
+import {
   cleanAbstractText,
   cleanCommentText,
-  parseCreatorString,
-} from '../../shared-kernel/utils/bibliographic.utils';
-import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
+} from '@/modules/library/shared-kernel/domain/academic-text.domain';
+import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+import {
+  IWorkflowStage,
+  CommitStageInput,
+} from '@/modules/library/ingestion/types/workflow-stage.types';
+import {
+  getEffectiveBaseFieldMap,
+  harmonizeZoteroFields,
+  resolveCanonicalCreatorRole,
+} from '@/modules/library/shared-kernel/domain/zotero-field-harmonizer.domain';
 
 export type LibraryItemSource =
   | 'WEB_CAPTURE'
@@ -36,7 +51,6 @@ function normalizeAccessedAt(
 ): Date | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
-
   const parsed = value instanceof Date ? value : new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
@@ -60,20 +74,16 @@ function extractAuthorString(input: unknown): string {
     const parts = [obj.firstName, obj.lastName].filter(
       (p): p is string => typeof p === 'string' && Boolean(p.trim()),
     );
-    if (parts.length > 0) {
-      return parts.join(' ');
-    }
-    return '';
+    return parts.join(' ');
   }
-  if (typeof input === 'number' || typeof input === 'boolean') {
-    return String(input);
-  }
-  return '';
+  return typeof input === 'number' || typeof input === 'boolean'
+    ? String(input)
+    : '';
 }
 
 function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
   const initialCreators = metadata.creators || [];
-  const creators: any[] = [];
+  const creators: CreatorCreditInput[] = [];
   const knownCreators = new Set<string>();
 
   const append = (
@@ -81,21 +91,37 @@ function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
     creatorType: string = primaryRole,
     firstName?: string,
     lastName?: string,
+    fieldMode?: number,
+    shortName?: string,
   ) => {
     const cleanName = (name || '').trim();
     let finalFirst = firstName?.trim() || '';
     let finalLast = lastName?.trim() || '';
     let finalFull = cleanName;
+    let finalFieldMode = fieldMode;
 
-    if (cleanName.includes(',') || (!finalFirst && !finalLast)) {
+    if (finalFieldMode === 1) {
+      const single = finalLast || finalFull || finalFirst;
+      if (!single) return;
+      finalFirst = '';
+      finalLast = single;
+      finalFull = single;
+    } else if (cleanName.includes(',') || (!finalFirst && !finalLast)) {
       const parsed = parseCreatorString(
         cleanName || `${finalFirst} ${finalLast}`.trim(),
         0,
         creatorType,
       );
-      finalFirst = parsed.firstName || finalFirst;
-      finalLast = parsed.lastName || finalLast;
-      finalFull = parsed.fullName;
+      if (parsed.fieldMode === 1) {
+        finalFieldMode = 1;
+        finalFirst = '';
+        finalLast = parsed.lastName || parsed.fullName;
+        finalFull = parsed.fullName;
+      } else {
+        finalFirst = parsed.firstName || finalFirst;
+        finalLast = parsed.lastName || finalLast;
+        finalFull = parsed.fullName;
+      }
     } else if (!finalFull) {
       finalFull = `${finalFirst} ${finalLast}`.trim();
     }
@@ -106,29 +132,53 @@ function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
       finalLast || finalFirst
         ? `${creatorType}:${finalLast.toLowerCase()}:${finalFirst.toLowerCase()}`
         : `${creatorType}:${finalFull.toLowerCase()}`;
-
     if (knownCreators.has(dedupKey)) return;
     knownCreators.add(dedupKey);
 
+    const displayFull = finalFull || `${finalFirst} ${finalLast}`.trim();
     creators.push({
-      name: finalFull || `${finalFirst} ${finalLast}`.trim(),
-      fullName: finalFull || `${finalFirst} ${finalLast}`.trim(),
+      name: displayFull,
+      fullName: displayFull,
       creatorType,
-      firstName: finalFirst || '',
+      firstName: finalFieldMode === 1 ? '' : finalFirst || '',
       lastName: finalLast || '',
+      ...(finalFieldMode !== undefined ? { fieldMode: finalFieldMode } : {}),
+      ...(shortName ? { shortName } : {}),
     });
   };
 
   for (const c of initialCreators) {
-    const creatorType = c.creatorType || primaryRole;
+    const creatorType = resolveCanonicalCreatorRole(
+      c.creatorType || primaryRole,
+      { itemType: metadata.itemType },
+    );
+    const cRec = c as unknown as Record<string, unknown>;
+    const cFieldMode =
+      typeof cRec.fieldMode === 'number' ? cRec.fieldMode : undefined;
+    const cShortName =
+      typeof cRec.shortName === 'string' && cRec.shortName.trim()
+        ? cRec.shortName.trim()
+        : undefined;
+
+    if (cFieldMode === 1) {
+      const singleName =
+        c.lastName || c.fullName || c.name || c.firstName || '';
+      append(singleName, creatorType, '', singleName, 1, cShortName);
+      continue;
+    }
+
     const rawName = extractAuthorString(c);
     if (rawName) {
-      for (const p of splitAuthorString(rawName)) {
+      const parts =
+        c.firstName || c.lastName ? [rawName] : splitAuthorString(rawName);
+      for (const p of parts) {
         append(
           p,
           creatorType,
           c.firstName || undefined,
           c.lastName || undefined,
+          cFieldMode,
+          cShortName,
         );
       }
     } else if (c.firstName || c.lastName) {
@@ -137,24 +187,62 @@ function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
         creatorType,
         c.firstName || undefined,
         c.lastName || undefined,
+        cFieldMode,
+        cShortName,
       );
     }
   }
 
-  for (const rawAuthor of metadata.authors || []) {
-    for (const author of splitAuthorString(extractAuthorString(rawAuthor))) {
-      append(author, primaryRole);
+  const appendStringRoleList = (
+    list: unknown[] | undefined,
+    role: string,
+    checkAnyInitialRole: boolean,
+  ) => {
+    for (const rawEntry of list || []) {
+      const rawStr = extractAuthorString(rawEntry).trim();
+      if (!rawStr) continue;
+      const lowerStr = rawStr.toLowerCase();
+      if (
+        checkAnyInitialRole &&
+        initialCreators.some(
+          (ic) => extractAuthorString(ic).trim().toLowerCase() === lowerStr,
+        )
+      ) {
+        continue;
+      }
+      if (
+        knownCreators.has(`${role}:${lowerStr}:`) ||
+        knownCreators.has(`${role}:${lowerStr}`)
+      ) {
+        continue;
+      }
+      for (const splitPart of splitAuthorString(rawStr)) {
+        append(splitPart, role);
+      }
     }
-  }
+  };
 
-  for (const rawEditor of metadata.editors || []) {
-    for (const editor of splitAuthorString(extractAuthorString(rawEditor))) {
-      append(editor, 'editor');
-    }
-  }
+  appendStringRoleList(metadata.authors, primaryRole, true);
+  appendStringRoleList(metadata.editors, 'editor', false);
 
   return creators.length > 0 ? creators : undefined;
 }
+
+const CITATION_KEY_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'on',
+  'in',
+  'for',
+  'of',
+  'and',
+  'with',
+  'via',
+  'to',
+  'is',
+  'are',
+]);
 
 function generateBibtexCitationKey(
   metadata: ItemMetadata,
@@ -167,9 +255,8 @@ function generateBibtexCitationKey(
     metadata.authors?.[0] ||
     metadata.creators?.[0]?.lastName ||
     metadata.creators?.[0]?.fullName;
-  if (!firstAuthor && !metadata.title) {
-    return undefined;
-  }
+  if (!firstAuthor && !metadata.title) return undefined;
+
   let authorPart = 'ref';
   if (firstAuthor) {
     const authorTokens = firstAuthor.trim().split(/\s+/);
@@ -178,51 +265,57 @@ function generateBibtexCitationKey(
       .replace(/[^a-z0-9]/gi, '');
   }
   const yearPart = metadata.year ? String(metadata.year) : '';
-  const stopWords = new Set([
-    'a',
-    'an',
-    'the',
-    'on',
-    'in',
-    'for',
-    'of',
-    'and',
-    'with',
-    'via',
-    'to',
-    'is',
-    'are',
-  ]);
   let titlePart = 'paper';
   if (metadata.title) {
     for (const wordItem of metadata.title.trim().split(/\s+/)) {
       const cleanWord = wordItem.replace(/[^a-z0-9]/gi, '').toLowerCase();
-      if (cleanWord && !stopWords.has(cleanWord)) {
+      if (cleanWord && !CITATION_KEY_STOP_WORDS.has(cleanWord)) {
         titlePart = cleanWord;
         break;
       }
     }
   }
+
   const baseKey = `${authorPart || 'ref'}${yearPart}${titlePart || 'paper'}`;
-  if (!existingKeys || !existingKeys.has(baseKey)) {
-    return baseKey;
-  }
-  const letters = 'abcdefghijklmnopqrstuvwxyz';
-  for (let i = 0; i < letters.length; i++) {
-    const candidate = `${baseKey}${letters[i]}`;
-    if (!existingKeys.has(candidate)) {
-      return candidate;
-    }
+  if (!existingKeys || !existingKeys.has(baseKey)) return baseKey;
+
+  for (const ch of 'abcdefghijklmnopqrstuvwxyz') {
+    const candidate = `${baseKey}${ch}`;
+    if (!existingKeys.has(candidate)) return candidate;
   }
   let counter = 2;
-  while (existingKeys.has(`${baseKey}_${counter}`)) {
-    counter++;
-  }
+  while (existingKeys.has(`${baseKey}_${counter}`)) counter++;
   return `${baseKey}_${counter}`;
 }
 
-/** Converts reconciled provider metadata to the Item persistence contract.
- * This is the sole conversion used by the asynchronous ingestion path. */
+const EXCLUDED_RAW_METADATA_KEYS = new Set([
+  'title',
+  'abstract',
+  'abstractNote',
+  'itemType',
+  'type',
+  'creators',
+  'authors',
+  'editors',
+  'tags',
+  'keywords',
+  'labels',
+  'notes',
+  'extraFields',
+  'seeAlso',
+  'relations',
+  'provenance',
+  'uploadedById',
+  'projectId',
+  'collectionId',
+  'collectionIds',
+  'conferenceName',
+]);
+
+/**
+ * Converts reconciled provider metadata to the Item persistence contract.
+ * This is the sole conversion used by the asynchronous ingestion path.
+ */
 export function toItemData(
   metadata: ItemMetadata,
   options?: CommitStageOptions,
@@ -233,9 +326,6 @@ export function toItemData(
   );
   const extraFields: Record<string, unknown> = {
     ...(metadata.extraFields || {}),
-    ...(metadata.edition ? { edition: metadata.edition } : {}),
-    ...(metadata.repository ? { repository: metadata.repository } : {}),
-    ...(metadata.bookTitle ? { bookTitle: metadata.bookTitle } : {}),
     ...(metadata.conferenceName &&
     metadata.conferenceName !==
       (metadata.publicationTitle ??
@@ -243,111 +333,131 @@ export function toItemData(
         metadata.journal)
       ? { conferenceName: metadata.conferenceName }
       : {}),
-    ...(metadata.eventPlace ? { eventPlace: metadata.eventPlace } : {}),
-    ...(metadata.websiteTitle ? { websiteTitle: metadata.websiteTitle } : {}),
-    ...(metadata.websiteType ? { websiteType: metadata.websiteType } : {}),
-    ...(metadata.blogTitle ? { blogTitle: metadata.blogTitle } : {}),
-    ...(metadata.university ? { university: metadata.university } : {}),
-    ...(metadata.institution ? { institution: metadata.institution } : {}),
-    ...(metadata.numPages !== undefined ? { numPages: metadata.numPages } : {}),
-    ...(metadata.numberOfPages !== undefined
-      ? { numberOfPages: metadata.numberOfPages }
-      : {}),
-    ...(metadata.reportNumber ? { reportNumber: metadata.reportNumber } : {}),
-    ...(metadata.reportType ? { reportType: metadata.reportType } : {}),
-    ...(metadata.thesisType ? { thesisType: metadata.thesisType } : {}),
-    ...(metadata.versionNumber
-      ? { versionNumber: metadata.versionNumber }
-      : {}),
-    ...(metadata.patentNumber ? { patentNumber: metadata.patentNumber } : {}),
-    ...(metadata.applicationNumber
-      ? { applicationNumber: metadata.applicationNumber }
-      : {}),
-    ...(metadata.assignee ? { assignee: metadata.assignee } : {}),
-    ...(metadata.issuingAuthority
-      ? { issuingAuthority: metadata.issuingAuthority }
-      : {}),
-    ...(metadata.distributor ? { distributor: metadata.distributor } : {}),
-    ...(metadata.system ? { system: metadata.system } : {}),
   };
-
-  const EXCLUDED_RAW_METADATA_KEYS = new Set([
-    'title',
-    'abstract',
-    'abstractNote',
-    'itemType',
-    'type',
-    'creators',
-    'authors',
-    'editors',
-    'tags',
-    'keywords',
-    'labels',
-    'notes',
-    'extraFields',
-    'seeAlso',
-    'relations',
-    'provenance',
-    'uploadedById',
-    'projectId',
-    'collectionId',
-    'collectionIds',
-  ]);
 
   for (const [key, val] of Object.entries(metadata)) {
     if (
       val !== undefined &&
       val !== null &&
       val !== '' &&
-      !EXCLUDED_RAW_METADATA_KEYS.has(key)
+      !EXCLUDED_RAW_METADATA_KEYS.has(key) &&
+      extraFields[key] === undefined
     ) {
-      if (extraFields[key] === undefined) {
-        extraFields[key] = val;
+      extraFields[key] = val;
+    }
+  }
+
+  const effectiveType = metadata.itemType || 'journalArticle';
+  const baseMapForType = getEffectiveBaseFieldMap(effectiveType);
+  const harmonized = harmonizeZoteroFields(
+    { ...metadata, extraFields },
+    { itemType: effectiveType, syncExtraFields: true },
+  ) as ItemMetadata & Record<string, unknown>;
+  const syncedExtraFields =
+    harmonized.extraFields && typeof harmonized.extraFields === 'object'
+      ? { ...harmonized.extraFields }
+      : { ...extraFields };
+
+  const resolvedTitle =
+    harmonized.title ||
+    (typeof syncedExtraFields.caseName === 'string' &&
+      syncedExtraFields.caseName) ||
+    (typeof syncedExtraFields.nameOfAct === 'string' &&
+      syncedExtraFields.nameOfAct) ||
+    (typeof syncedExtraFields.subject === 'string' &&
+      syncedExtraFields.subject) ||
+    'Untitled Document';
+
+  if (
+    baseMapForType.title &&
+    resolvedTitle !== 'Untitled Document' &&
+    syncedExtraFields[baseMapForType.title] === undefined
+  ) {
+    syncedExtraFields[baseMapForType.title] = resolvedTitle;
+  }
+
+  const resolvedPubDate =
+    harmonized.publicationDate ??
+    harmonized.date ??
+    (typeof syncedExtraFields.filingDate === 'string'
+      ? syncedExtraFields.filingDate
+      : undefined);
+
+  let resolvedYear = harmonized.year ?? undefined;
+  if (!resolvedYear && resolvedPubDate) {
+    const match = String(resolvedPubDate).match(/\b(?:1\d{3}|20\d{2})\b/);
+    if (match) resolvedYear = parseInt(match[0], 10);
+  }
+
+  const mappedTypeKey = baseMapForType.type || baseMapForType.medium;
+  const mappedTypeVal =
+    mappedTypeKey && typeof harmonized[mappedTypeKey] === 'string'
+      ? harmonized[mappedTypeKey]
+      : undefined;
+
+  const potentialComment =
+    typeof extraFields.comment === 'string'
+      ? cleanCommentText(extraFields.comment)
+      : undefined;
+  delete syncedExtraFields.comment;
+  if (metadata.primaryCategory && !syncedExtraFields.primaryCategory) {
+    syncedExtraFields.primaryCategory = metadata.primaryCategory;
+  }
+
+  const consolidatedNotes: Array<Record<string, unknown> | string> =
+    Array.isArray(metadata.notes) ? [...metadata.notes] : [];
+  if (potentialComment) {
+    const hasExistingCommentNote = consolidatedNotes.some((singleNote) => {
+      if (typeof singleNote === 'string') {
+        return singleNote.includes(potentialComment);
       }
+      return (
+        typeof singleNote === 'object' &&
+        singleNote !== null &&
+        typeof singleNote.content === 'string' &&
+        singleNote.content.includes(potentialComment)
+      );
+    });
+    if (!hasExistingCommentNote) {
+      consolidatedNotes.push({
+        content: `Comment: ${potentialComment}`,
+        source: 'arXiv',
+      });
     }
   }
 
   return {
-    ...extraFields,
-    title: metadata.title || 'Untitled Document',
-    itemType: metadata.itemType || 'journalArticle',
-    type: metadata.type,
-    doi: metadata.doi,
-    arxivId: metadata.arxivId,
-    primaryCategory: metadata.primaryCategory,
-    pmid: metadata.pmid,
-    pmcid: metadata.pmcid,
-    issn: metadata.issn,
-    isbn: metadata.isbn,
-    year: metadata.year ?? undefined,
-    publicationDate: metadata.publicationDate ?? metadata.date,
-    publicationTitle:
-      metadata.publicationTitle ??
-      metadata.journal ??
-      metadata.bookTitle ??
-      metadata.proceedingsTitle ??
-      metadata.websiteTitle ??
-      metadata.blogTitle,
+    ...syncedExtraFields,
+    title: resolvedTitle,
+    itemType: effectiveType,
+    type: metadata.type ?? mappedTypeVal,
+    doi: harmonized.doi,
+    arxivId: harmonized.arxivId,
+    primaryCategory: harmonized.primaryCategory,
+    pmid: harmonized.pmid,
+    pmcid: harmonized.pmcid,
+    issn: harmonized.issn,
+    isbn: harmonized.isbn,
+    year: resolvedYear,
+    publicationDate: resolvedPubDate,
+    publicationTitle: harmonized.publicationTitle ?? harmonized.journal,
     journal: metadata.journal,
-    journalAbbr: metadata.journalAbbr,
-    publisher:
-      metadata.publisher ?? metadata.institution ?? metadata.university,
-    place: metadata.place ?? metadata.eventPlace,
-    volume: metadata.volume,
-    issue: metadata.issue,
-    section: metadata.section,
-    partNumber: metadata.partNumber,
-    partTitle: metadata.partTitle,
-    pages: metadata.pages || undefined,
-    series: metadata.series,
-    seriesTitle: metadata.seriesTitle,
-    seriesText: metadata.seriesText,
-    seriesNumber: metadata.seriesNumber,
-    abstract:
-      cleanAbstractText(metadata.abstract ?? metadata.abstractNote) ??
-      undefined,
-    url: metadata.url,
-    citationKey: metadata.citationKey || generateBibtexCitationKey(metadata),
+    journalAbbr: harmonized.journalAbbr,
+    publisher: harmonized.publisher,
+    place: harmonized.place,
+    volume: harmonized.volume != null ? String(harmonized.volume) : undefined,
+    issue: harmonized.issue != null ? String(harmonized.issue) : undefined,
+    section: harmonized.section,
+    partNumber: harmonized.partNumber,
+    partTitle: harmonized.partTitle,
+    pages: harmonized.pages ? String(harmonized.pages) : undefined,
+    series: harmonized.series,
+    seriesTitle: harmonized.seriesTitle,
+    seriesText: harmonized.seriesText,
+    seriesNumber: harmonized.seriesNumber,
+    abstract: cleanAbstractText(harmonized.abstract) ?? undefined,
+    url: harmonized.url,
+    citationKey: harmonized.citationKey || generateBibtexCitationKey(metadata),
     shortTitle: metadata.shortTitle,
     creators: mergeCreators(metadata, primaryRole),
     tags: rawTags,
@@ -363,54 +473,24 @@ export function toItemData(
     openAccessPdfUrl: metadata.openAccessPdfUrl || undefined,
     attachments: metadata.attachments || undefined,
     language: metadata.language,
-    rights: metadata.rights,
-    license: metadata.license,
+    rights: harmonized.rights,
+    license: harmonized.license,
     archive: metadata.archive,
     archiveLocation: metadata.archiveLocation,
     libraryCatalog: metadata.libraryCatalog,
     callNumber: metadata.callNumber,
-    accessedAt: normalizeAccessedAt(metadata.accessedAt),
+    accessedAt: normalizeAccessedAt(
+      metadata.accessedAt ??
+        (typeof extraFields.accessDate === 'string' ||
+        extraFields.accessDate instanceof Date
+          ? extraFields.accessDate
+          : undefined),
+    ),
     citationCount: metadata.citationCount ?? null,
     referenceCount: metadata.referenceCount ?? null,
     extra: metadata.extra,
-    extraFields: (() => {
-      const cleanEf = { ...extraFields };
-      delete cleanEf.comment;
-      if (metadata.primaryCategory && !cleanEf.primaryCategory) {
-        cleanEf.primaryCategory = metadata.primaryCategory;
-      }
-      return cleanEf;
-    })(),
-    notes: (() => {
-      const consolidatedNotes: Array<Record<string, unknown> | string> =
-        Array.isArray(metadata.notes) ? [...metadata.notes] : [];
-      const potentialComment =
-        typeof extraFields.comment === 'string'
-          ? cleanCommentText(extraFields.comment)
-          : undefined;
-      if (potentialComment) {
-        const hasExistingCommentNote = consolidatedNotes.some((singleNote) => {
-          if (typeof singleNote === 'string') {
-            return singleNote.includes(potentialComment);
-          }
-          if (typeof singleNote === 'object' && singleNote !== null) {
-            const noteObj = singleNote;
-            const content =
-              typeof noteObj.content === 'string' ? noteObj.content : '';
-            return content.includes(potentialComment);
-          }
-          return false;
-        });
-
-        if (!hasExistingCommentNote) {
-          consolidatedNotes.push({
-            content: `Comment: ${potentialComment}`,
-            source: 'arXiv',
-          });
-        }
-      }
-      return consolidatedNotes;
-    })(),
+    extraFields: syncedExtraFields,
+    notes: consolidatedNotes,
     collectionId: options?.collectionIds?.[0] || null,
     collectionIds: options?.collectionIds,
     uploadedById: options?.userId || '',
@@ -422,37 +502,50 @@ export function toItemData(
 }
 
 @Injectable()
-export class CommitStage {
+export class CommitStage implements IWorkflowStage<
+  CommitStageInput | { userId?: string; projectId?: string | null } | string,
+  ItemDetail
+> {
+  readonly stageName = 'COMMIT' as const;
   constructor(
     @Inject(CATALOG_GATEWAY_PORT)
     private readonly catalogGateway: ICatalogGatewayPort,
   ) {}
 
-  /**
-   * Executes canonical Item commit for a reconciled item proposal.
-   * Persists Item, child attachments, tags/keywords, and literature notes.
-   */
   async execute(
-    scope: { userId?: string; projectId?: string | null } | string,
-    metadata: ItemMetadata,
+    scopeOrInput:
+      | CommitStageInput
+      | { userId?: string; projectId?: string | null }
+      | string,
+    metadata?: ItemMetadata,
     options?: CommitStageOptions,
-  ): Promise<any> {
+  ): Promise<ItemDetail> {
+    const isStageInput =
+      typeof scopeOrInput === 'object' &&
+      scopeOrInput !== null &&
+      'scopeId' in scopeOrInput &&
+      'item' in scopeOrInput;
+    const scope = isStageInput ? scopeOrInput.scopeId : scopeOrInput;
+    const actualMetadata = isStageInput ? scopeOrInput.item : metadata!;
+    const actualOptions = isStageInput ? scopeOrInput.options : options;
+
     const primaryRole =
       this.catalogGateway?.getPrimaryCreatorType?.(
-        metadata.itemType || 'journalArticle',
+        actualMetadata.itemType || 'journalArticle',
       ) || 'author';
-    const createData = toItemData(metadata, options, primaryRole);
+    const createData = toItemData(actualMetadata, actualOptions, primaryRole);
 
     let effectiveUserId: string;
     let effectiveProjectId: string | undefined;
 
     if (typeof scope === 'object' && scope !== null) {
-      effectiveUserId = scope.userId || options?.userId || '';
+      effectiveUserId = scope.userId || actualOptions?.userId || '';
       effectiveProjectId = scope.projectId || undefined;
     } else {
       const isProject =
-        Boolean(scope) && scope !== 'user' && scope !== options?.userId;
-      effectiveUserId = options?.userId || (scope && !isProject ? scope : '');
+        Boolean(scope) && scope !== 'user' && scope !== actualOptions?.userId;
+      effectiveUserId =
+        actualOptions?.userId || (scope && !isProject ? scope : '');
       effectiveProjectId = isProject ? scope : undefined;
     }
 
@@ -463,18 +556,13 @@ export class CommitStage {
     }
 
     createData.uploadedById = effectiveUserId;
-
     if (effectiveProjectId) {
       createData.projectId = effectiveProjectId;
     }
 
-    const createdItem = await this.catalogGateway.createItem(
-      effectiveUserId,
-      createData,
-      { projectId: effectiveProjectId, ...options },
-      effectiveProjectId,
-    );
-
-    return createdItem;
+    return await this.catalogGateway.createItem(effectiveUserId, createData, {
+      projectId: effectiveProjectId,
+      source: actualOptions?.source,
+    });
   }
 }

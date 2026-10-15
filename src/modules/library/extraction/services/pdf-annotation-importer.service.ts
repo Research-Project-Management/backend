@@ -6,12 +6,12 @@ import {
   Inject,
   Optional,
 } from '@nestjs/common';
-import { AnnotationsRepository } from '../repositories/annotations.repository';
-import { AttachmentsRepository } from '../repositories/attachments.repository';
+import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
+import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { AnnotationsService } from './annotations.service';
 import { AttachmentsService } from './attachments.service';
-import { AnnotationType } from '../types/annotations.types';
+import { AnnotationType } from '@/modules/library/extraction/types/annotations.types';
 import { getDocumentProxy } from 'unpdf';
 
 export interface ImportAnnotationsResult {
@@ -52,20 +52,13 @@ export class PdfAnnotationImporterService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    if (attachment.item) {
-      if (attachment.item.projectId) {
-        if (attachment.item.userId !== userId) {
-          const isMember = await this.attachmentsRepo.checkProjectMember(
-            attachment.item.projectId,
-            userId,
-          );
-          if (!isMember) {
-            throw new NotFoundException(`Attachment ${attachmentId} not found`);
-          }
-        }
-      } else if (attachment.item.userId && attachment.item.userId !== userId) {
-        throw new NotFoundException(`Attachment ${attachmentId} not found`);
-      }
+    if (
+      attachment.item &&
+      !attachment.item.projectId &&
+      attachment.item.userId &&
+      attachment.item.userId !== userId
+    ) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
     const fileId =
@@ -92,156 +85,190 @@ export class PdfAnnotationImporterService {
     const clonedData = new Uint8Array(buffer.byteLength);
     clonedData.set(buffer);
 
-    let documentProxy: any;
+    let documentProxy: Awaited<ReturnType<typeof getDocumentProxy>>;
     try {
-      documentProxy = await getDocumentProxy(clonedData);
-    } catch (err: any) {
+      documentProxy = await this.loadPdfDocument(clonedData);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
-        `Failed to parse PDF document proxy for attachment ${attachmentId}: ${err?.message}`,
+        `Failed to parse PDF document proxy for attachment ${attachmentId}: ${message}`,
       );
       throw new BadRequestException(
-        `Failed to parse PDF structure: ${err?.message || 'Invalid PDF'}`,
+        `Failed to parse PDF structure: ${message || 'Invalid PDF'}`,
       );
     }
 
-    const numPages = documentProxy.numPages || 0;
-    if (numPages === 0) {
-      return { imported: 0, totalFound: 0, pagesScanned: 0 };
-    }
+    try {
+      const numPages = documentProxy.numPages || 0;
+      if (numPages === 0) {
+        return { imported: 0, totalFound: 0, pagesScanned: 0 };
+      }
 
-    const existingAnnotations =
-      await this.annotationsRepo.findExistingForImport(attachmentId);
+      const existingAnnotations =
+        await this.annotationsRepo.findExistingForImport(attachmentId);
 
-    let totalFound = 0;
-    let imported = 0;
+      let totalFound = 0;
+      let imported = 0;
 
-    for (let p = 1; p <= numPages; p++) {
-      try {
-        const page = await documentProxy.getPage(p);
-        const annots = await page.getAnnotations();
-        if (!annots || !Array.isArray(annots) || annots.length === 0) {
-          continue;
-        }
-
-        const viewport =
-          typeof page.getViewport === 'function'
-            ? page.getViewport({ scale: 1.0 })
-            : null;
-        const [vx1 = 0, vy1 = 0, vx2 = 612, vy2 = 792] = page.view || [];
-        const pageWidth = viewport?.width || Math.abs(vx2 - vx1) || 612;
-        const pageHeight = viewport?.height || Math.abs(vy2 - vy1) || 792;
-        const pageIndex = p - 1;
-
-        for (const annot of annots) {
-          const mappedType = this.mapSubtype(annot.subtype);
-          if (!mappedType) continue;
-
-          totalFound++;
-
-          const rect = annot.rect;
-          if (!rect || !Array.isArray(rect) || rect.length < 4) continue;
-
-          const rx1 = Math.min(rect[0], rect[2]);
-          const rx2 = Math.max(rect[0], rect[2]);
-          const ry1 = Math.min(rect[1], rect[3]);
-          const ry2 = Math.max(rect[1], rect[3]);
-
-          const normX1 = Math.max(0, rx1 / pageWidth);
-          const normY1 = Math.max(0, (pageHeight - ry2) / pageHeight);
-          const normW = Math.min(1 - normX1, (rx2 - rx1) / pageWidth);
-          const normH = Math.min(1 - normY1, (ry2 - ry1) / pageHeight);
-
-          if (normW <= 0.001 || normH <= 0.001) continue;
-
-          const normalizedRect = {
-            x1: normX1,
-            y1: normY1,
-            x2: normX1 + normW,
-            y2: normY1 + normH,
-            width: normW,
-            height: normH,
-          };
-
-          interface RectCoordLike {
-            x1?: number;
-            y1?: number;
-          }
-          interface ExistingAnnotationLike {
-            pageIndex?: number;
-            type?: string;
-            rectCoords?: unknown;
+      for (let p = 1; p <= numPages; p++) {
+        try {
+          const page = await documentProxy.getPage(p);
+          const annots = await page.getAnnotations();
+          if (!annots || !Array.isArray(annots) || annots.length === 0) {
+            continue;
           }
 
-          const isDuplicate = existingAnnotations.some(
-            (ea: ExistingAnnotationLike) => {
-              if (ea.pageIndex !== pageIndex || ea.type !== mappedType)
-                return false;
-              const eaRects = Array.isArray(ea.rectCoords)
-                ? (ea.rectCoords as RectCoordLike[])
-                : [];
-              if (eaRects.length === 0) return false;
-              const first = eaRects[0];
-              return (
-                Math.abs((first?.x1 ?? 0) - normX1) < 0.02 &&
-                Math.abs((first?.y1 ?? 0) - normY1) < 0.02
-              );
-            },
+          const viewport =
+            typeof page.getViewport === 'function'
+              ? page.getViewport({ scale: 1.0 })
+              : null;
+          const [vx1 = 0, vy1 = 0, vx2 = 612, vy2 = 792] = page.view || [];
+          const pageWidth = viewport?.width || Math.abs(vx2 - vx1) || 612;
+          const pageHeight = viewport?.height || Math.abs(vy2 - vy1) || 792;
+          const pageIndex = p - 1;
+
+          for (const annot of annots) {
+            const mappedType = this.mapSubtype(annot.subtype);
+            if (!mappedType) continue;
+
+            totalFound++;
+
+            const rect = annot.rect;
+            if (!rect || !Array.isArray(rect) || rect.length < 4) continue;
+
+            const rx1 = Math.min(rect[0], rect[2]);
+            const rx2 = Math.max(rect[0], rect[2]);
+            const ry1 = Math.min(rect[1], rect[3]);
+            const ry2 = Math.max(rect[1], rect[3]);
+
+            const normX1 = Math.max(0, rx1 / pageWidth);
+            const normY1 = Math.max(0, (pageHeight - ry2) / pageHeight);
+            const normW = Math.min(1 - normX1, (rx2 - rx1) / pageWidth);
+            const normH = Math.min(1 - normY1, (ry2 - ry1) / pageHeight);
+
+            if (normW <= 0.001 || normH <= 0.001) continue;
+
+            const normalizedRect = {
+              x1: normX1,
+              y1: normY1,
+              x2: normX1 + normW,
+              y2: normY1 + normH,
+              width: normW,
+              height: normH,
+            };
+
+            interface RectCoordLike {
+              x1?: number;
+              y1?: number;
+              x?: number;
+              y?: number;
+            }
+            interface ExistingAnnotationLike {
+              pageIndex?: number;
+              type?: string;
+              rectCoords?: unknown;
+            }
+
+            const isDuplicate = existingAnnotations.some(
+              (ea: ExistingAnnotationLike) => {
+                if (ea.pageIndex !== pageIndex || ea.type !== mappedType)
+                  return false;
+                if (!Array.isArray(ea.rectCoords) || ea.rectCoords.length === 0)
+                  return false;
+
+                // Handle 4-number tuple [x1, y1, x2, y2]
+                if (
+                  ea.rectCoords.length === 4 &&
+                  typeof ea.rectCoords[0] === 'number' &&
+                  typeof ea.rectCoords[1] === 'number'
+                ) {
+                  return (
+                    Math.abs(ea.rectCoords[0] - normX1) < 0.02 &&
+                    Math.abs(ea.rectCoords[1] - normY1) < 0.02
+                  );
+                }
+
+                // Handle array of rect objects [{ x1, y1, ... }]
+                const first = ea.rectCoords[0] as RectCoordLike | undefined;
+                if (!first || typeof first !== 'object') return false;
+                const firstX1 = first.x1 ?? first.x ?? 0;
+                const firstY1 = first.y1 ?? first.y ?? 0;
+                return (
+                  Math.abs(firstX1 - normX1) < 0.02 &&
+                  Math.abs(firstY1 - normY1) < 0.02
+                );
+              },
+            );
+
+            if (isDuplicate) continue;
+
+            const colorHex = this.formatColor(annot.color, mappedType);
+            const contentText =
+              annot.contents ||
+              (typeof annot.contentsObj === 'object'
+                ? annot.contentsObj?.str
+                : '') ||
+              '';
+
+            await this.annotationsService.createAnnotation(userId, {
+              attachmentId,
+              type: mappedType,
+              pageIndex,
+              y: normY1,
+              x: normX1,
+              color: colorHex,
+              quoteText:
+                contentText ||
+                (mappedType === AnnotationType.highlight
+                  ? 'Imported Highlight'
+                  : undefined),
+              comment:
+                contentText && mappedType !== AnnotationType.highlight
+                  ? contentText
+                  : '',
+              rectCoords: [normalizedRect],
+              authorId: userId,
+            });
+
+            existingAnnotations.push({
+              pageIndex,
+              type: mappedType,
+              rectCoords: [normalizedRect],
+            });
+
+            imported++;
+          }
+        } catch (pageErr: unknown) {
+          const message =
+            pageErr instanceof Error ? pageErr.message : String(pageErr);
+          this.logger.warn(
+            `Failed extracting annotations from page ${p} of attachment ${attachmentId}: ${message}`,
           );
-
-          if (isDuplicate) continue;
-
-          const colorHex = this.formatColor(annot.color, mappedType);
-          const contentText =
-            annot.contents ||
-            (typeof annot.contentsObj === 'object'
-              ? annot.contentsObj?.str
-              : '') ||
-            '';
-
-          await this.annotationsService.createAnnotation(userId, {
-            attachmentId,
-            type: mappedType,
-            pageIndex,
-            y: normY1,
-            x: normX1,
-            color: colorHex,
-            quoteText:
-              contentText ||
-              (mappedType === AnnotationType.highlight
-                ? 'Imported Highlight'
-                : undefined),
-            comment:
-              contentText && mappedType !== AnnotationType.highlight
-                ? contentText
-                : '',
-            rectCoords: [normalizedRect],
-            authorId: userId,
-          });
-
-          existingAnnotations.push({
-            pageIndex,
-            type: mappedType,
-            rectCoords: [normalizedRect],
-          });
-
-          imported++;
         }
-      } catch (pageErr: any) {
-        this.logger.warn(
-          `Failed extracting annotations from page ${p} of attachment ${attachmentId}: ${pageErr?.message}`,
-        );
+      }
+
+      this.logger.log(
+        `[PdfAnnotationImporter] Attachment ${attachmentId}: Scanned ${numPages} pages, found ${totalFound} external annotations, imported ${imported} new annotations.`,
+      );
+
+      return {
+        imported,
+        totalFound,
+        pagesScanned: numPages,
+      };
+    } finally {
+      try {
+        await (
+          documentProxy as { destroy?: () => Promise<void> | void }
+        ).destroy?.();
+      } catch {
+        // Ignore cleanup errors
       }
     }
+  }
 
-    this.logger.log(
-      `[PdfAnnotationImporter] Attachment ${attachmentId}: Scanned ${numPages} pages, found ${totalFound} external annotations, imported ${imported} new annotations.`,
-    );
-
-    return {
-      imported,
-      totalFound,
-      pagesScanned: numPages,
-    };
+  protected async loadPdfDocument(data: Uint8Array) {
+    return getDocumentProxy(data);
   }
 
   private mapSubtype(subtype?: string): AnnotationType | null {

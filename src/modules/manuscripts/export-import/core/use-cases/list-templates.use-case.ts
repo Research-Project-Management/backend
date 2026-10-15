@@ -4,8 +4,8 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ITemplateCatalogPort } from '../ports/template-catalog.port';
-import { ProjectTemplate } from '../domain/entities/project-template.entity';
+import { ITemplateCatalogPort } from '@/modules/manuscripts/export-import/core/ports/template-catalog.port';
+import { ProjectTemplate } from '@/modules/manuscripts/export-import/core/domain/entities/project-template.entity';
 
 @Injectable()
 export class ListTemplatesUseCase {

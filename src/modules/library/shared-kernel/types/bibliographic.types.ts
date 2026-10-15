@@ -292,7 +292,7 @@ export interface ItemMetadata {
   retractionDetails?: unknown;
   retractionCheckedAt?: string;
 
-  provenance?: any;
+  provenance?: unknown;
   [key: string]: unknown;
 }
 

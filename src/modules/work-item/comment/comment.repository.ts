@@ -1,41 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
+import {
+  USER_MINIMAL_SELECT,
+  mapUserMinimal,
+  UserProfileSource,
+} from '@/modules/work-item/common/types/shared.types';
 
-const AUTHOR_SELECT = {
-  id: true,
-  email: true,
-  profile: {
-    select: {
-      name: true,
-      avatar: true,
-    },
-  },
-} as const;
-
-interface CommentAuthorSource {
-  id: string;
-  email: string | null;
-  name?: string | null;
-  avatar?: string | null;
-  profile?: { name?: string | null; avatar?: string | null } | null;
-}
-
-function mapCommentAuthor<T extends { author?: CommentAuthorSource | null }>(
+function mapCommentAuthor<T extends { author?: UserProfileSource | null }>(
   comment: T | null,
 ) {
   if (!comment) return null;
-  const author = comment.author
-    ? {
-        id: comment.author.id,
-        email: comment.author.email,
-        name: comment.author.profile?.name ?? comment.author.name ?? 'User',
-        avatar: comment.author.profile?.avatar ?? comment.author.avatar ?? null,
-      }
-    : comment.author;
   return {
     ...comment,
-    author,
+    author: comment.author ? mapUserMinimal(comment.author) : comment.author,
   };
 }
 
@@ -62,15 +40,9 @@ export class CommentRepository {
   async findAuthorById(userId: string) {
     const user = await this.prismaService.user.findUnique({
       where: { id: userId },
-      select: AUTHOR_SELECT,
+      select: USER_MINIMAL_SELECT,
     });
-    if (!user) return null;
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.profile?.name ?? 'User',
-      avatar: user.profile?.avatar ?? null,
-    };
+    return mapUserMinimal(user);
   }
 
   async findWorkItemComments(workItemId: string) {
@@ -80,7 +52,7 @@ export class CommentRepository {
       where: { workItemId: itemUuid },
       orderBy: { createdAt: 'asc' },
       include: {
-        author: { select: AUTHOR_SELECT },
+        author: { select: USER_MINIMAL_SELECT },
       },
     });
     return comments.map((c) => mapCommentAuthor(c));
@@ -90,7 +62,7 @@ export class CommentRepository {
     const comment = await this.prismaService.workItemComment.findUnique({
       where: { id: commentId },
       include: {
-        author: { select: AUTHOR_SELECT },
+        author: { select: USER_MINIMAL_SELECT },
       },
     });
     return mapCommentAuthor(comment);
@@ -128,7 +100,7 @@ export class CommentRepository {
         attachments: data.attachments ?? [],
       },
       include: {
-        author: { select: AUTHOR_SELECT },
+        author: { select: USER_MINIMAL_SELECT },
       },
     });
     return mapCommentAuthor(comment)!;
@@ -148,7 +120,7 @@ export class CommentRepository {
       where: { id: commentId },
       data,
       include: {
-        author: { select: AUTHOR_SELECT },
+        author: { select: USER_MINIMAL_SELECT },
       },
     });
     return mapCommentAuthor(comment)!;

@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
-import { SearchService } from '../services/search.service';
-import { SearchItemsQueryDto } from '../dto/search.dto';
+import { SearchService } from '@/modules/library/search/services/search.service';
+import { SearchItemsQueryDto } from '@/modules/library/search/dto/search.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
@@ -30,16 +30,20 @@ export class SearchController {
   async searchAnchors(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
-    @Query('term') term: string,
+    @Query('term') term?: string,
+    @Query('q') q?: string,
     @Query('pageIndex') pageIndex?: string,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     const parsedPage =
       pageIndex !== undefined ? parseInt(pageIndex, 10) : undefined;
     return this.searchService.searchPageAnchors(
       userId,
       attachmentId,
-      term,
+      term ?? q ?? '',
       parsedPage,
+      routeProjectId || queryProjectId,
     );
   }
 }

@@ -121,6 +121,16 @@ export interface ILibraryFacade {
     citeKeys: string[],
     projectId?: string,
   ): Promise<{ content: string } | null>;
+  exportByCitationKeys(
+    userId: string,
+    citeKeys: string[],
+    projectId?: string,
+  ): Promise<{
+    content: string;
+    count: number;
+    foundKeys: string[];
+    missingKeys: string[];
+  }>;
   getItem(
     userId: string,
     itemId: string,
@@ -139,7 +149,7 @@ export interface ILibraryFacade {
   ): Promise<LibraryItemSummary[]>;
   extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: any,
+    options?: { maxPages?: number; headerOnly?: boolean },
   ): Promise<ExtractedPdfDocument>;
   getSyncVersion(
     scope: { userId?: string; projectId?: string } | string,
@@ -197,6 +207,26 @@ export class LibraryFacade implements ILibraryFacade {
     return this.citationFacade.exportBibliography(userId, citeKeys, projectId);
   }
 
+  async exportByCitationKeys(
+    userId: string,
+    citeKeys: string[],
+    projectId?: string,
+  ): Promise<{
+    content: string;
+    count: number;
+    foundKeys: string[];
+    missingKeys: string[];
+  }> {
+    if (!this.citationFacade) {
+      return { content: '', count: 0, foundKeys: [], missingKeys: citeKeys };
+    }
+    return this.citationFacade.exportByCitationKeys(
+      userId,
+      citeKeys,
+      projectId,
+    );
+  }
+
   async getItem(
     userId: string,
     itemId: string,
@@ -227,7 +257,7 @@ export class LibraryFacade implements ILibraryFacade {
     const [catalogItem, attachmentsRes, notes] = await Promise.all([
       this.catalogFacade.getItem(userId, itemId, projectId),
       this.extractionFacade
-        ? this.extractionFacade.getItemAttachments(userId, itemId)
+        ? this.extractionFacade.getItemAttachments(userId, itemId, projectId)
         : Promise.resolve([]),
       this.catalogFacade.listNotes(userId, itemId, projectId),
     ]);
@@ -264,12 +294,8 @@ export class LibraryFacade implements ILibraryFacade {
       updatedAt: note.updatedAt,
     }));
 
-    const tags = this.extractTagSummaries(
-      catalogItem as CatalogItemWithRelations,
-    );
-    const collections = this.extractCollectionSummaries(
-      catalogItem as CatalogItemWithRelations,
-    );
+    const tags = this.extractTagSummaries(catalogItem);
+    const collections = this.extractCollectionSummaries(catalogItem);
 
     return {
       id: catalogItem.id,
@@ -365,7 +391,7 @@ export class LibraryFacade implements ILibraryFacade {
       ...(projectId ? { projectId } : {}),
     });
 
-    return items.map((catalogItem: any) => ({
+    return items.map((catalogItem) => ({
       id: catalogItem.id,
       title: catalogItem.title,
       doi: catalogItem.doi,
@@ -378,7 +404,7 @@ export class LibraryFacade implements ILibraryFacade {
 
   async extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: any,
+    options?: { maxPages?: number; headerOnly?: boolean },
   ): Promise<ExtractedPdfDocument> {
     if (!this.extractionFacade) {
       throw new Error('ExtractionFacade is not available');

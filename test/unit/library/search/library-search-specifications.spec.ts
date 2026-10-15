@@ -7,8 +7,8 @@ import {
   CollectionSpecification,
   TagSpecification,
   TextSearchSpecification,
-} from '@/modules/library/search/types/item-specifications';
-import { SearchSpecificationBuilder } from '@/modules/library/search/types/search-specification.builder';
+  SearchSpecificationBuilder,
+} from '@/modules/library/search/domain';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import { SearchService } from '@/modules/library/search/services/search.service';
 import { SearchEventsSubscriber as CatalogEventsSubscriber } from '@/modules/library/search/services/search-events.subscriber';
@@ -54,6 +54,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
 
       expect(userSpec.toPrismaWhere()).toEqual({
         userId: 'user-1',
+        projectId: null,
       });
 
       const projectSpec = new ScopeSpecification('user-1', 'proj-1');

@@ -3,7 +3,7 @@
  * Outbound SPI Port for fast static linting of LaTeX source documents.
  */
 
-import { DiagnosticItem } from '../domain/entities/diagnostic-item.entity';
+import { DiagnosticItem } from '@/modules/manuscripts/diagnostics/core/domain/entities/diagnostic-item.entity';
 
 export const SYNTAX_LINTER_PORT = Symbol('SYNTAX_LINTER_PORT');
 

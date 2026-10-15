@@ -145,7 +145,7 @@ export class DocSyncDto {
   step?: string | number;
 
   @IsNotEmpty()
-  data!: any;
+  data!: unknown;
 }
 
 export class ProjectChatSendDto {

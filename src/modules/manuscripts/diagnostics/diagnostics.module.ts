@@ -1,39 +1,34 @@
 /**
- * diagnostics/diagnostics.module.ts
- * NestJS Module for Manuscripts Diagnostics subsystem.
+ * modules/manuscripts/diagnostics/diagnostics.module.ts
+ * NestJS Module for Manuscripts Diagnostics subsystem (Adaptive Modular Monolith).
  */
 
 import { Module } from '@nestjs/common';
 import { DiagnosticsController } from './diagnostics.controller';
 import { DiagnosticsService } from './diagnostics.service';
+import { DiagnosticsRepository } from './diagnostics.repository';
 
-// Ports
+// Ports & Adapters
 import { LATEX_LOG_PARSER_PORT } from './core/ports/latex-log-parser.port';
 import { SYNTAX_LINTER_PORT } from './core/ports/syntax-linter.port';
 import { ERROR_EXPLAINER_PORT } from './core/ports/error-explainer.port';
 
-// Adapters
 import { KnowledgeBaseExplainerAdapter } from './core/adapters/explainer/knowledge-base-explainer.adapter';
 import { TexParenTreeLogParser } from './core/adapters/parser/tex-paren-tree-log.parser';
 import { TectonicLogParser } from './core/adapters/parser/tectonic-log.parser';
 import { FastSyntaxLinterAdapter } from './core/adapters/linter/fast-syntax-linter.adapter';
-
-import { ParseCompileLogUseCase } from './core/use-cases/parse-compile-log.use-case';
-import { LintDocumentSyntaxUseCase } from './core/use-cases/lint-document-syntax.use-case';
-import { GetErrorExplanationUseCase } from './core/use-cases/get-error-explanation.use-case';
-import { DocstoreModule } from '../docstore/docstore.module';
+import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 
 @Module({
   imports: [DocstoreModule],
   controllers: [DiagnosticsController],
   providers: [
-    // 1. Explainer Adapter
+    DiagnosticsService,
+    DiagnosticsRepository,
     {
       provide: ERROR_EXPLAINER_PORT,
-      useClass: KnowledgeBaseExplainerAdapter,
+      useExisting: DiagnosticsRepository,
     },
-
-    // 2. Parser Adapters
     {
       provide: LATEX_LOG_PARSER_PORT,
       inject: [ERROR_EXPLAINER_PORT],
@@ -48,8 +43,6 @@ import { DocstoreModule } from '../docstore/docstore.module';
         return new TectonicLogParser(explainer);
       },
     },
-
-    // 3. Linter Adapter
     {
       provide: SYNTAX_LINTER_PORT,
       inject: [ERROR_EXPLAINER_PORT],
@@ -57,38 +50,10 @@ import { DocstoreModule } from '../docstore/docstore.module';
         return new FastSyntaxLinterAdapter(explainer);
       },
     },
-
-    // 4. Inbound Use Cases
-    {
-      provide: ParseCompileLogUseCase,
-      inject: [LATEX_LOG_PARSER_PORT, TectonicLogParser],
-      useFactory: (
-        defaultParser: TexParenTreeLogParser,
-        tectonicParser: TectonicLogParser,
-      ) => {
-        return new ParseCompileLogUseCase(defaultParser, tectonicParser);
-      },
-    },
-    {
-      provide: LintDocumentSyntaxUseCase,
-      inject: [SYNTAX_LINTER_PORT],
-      useFactory: (linter: FastSyntaxLinterAdapter) => {
-        return new LintDocumentSyntaxUseCase(linter);
-      },
-    },
-    {
-      provide: GetErrorExplanationUseCase,
-      inject: [ERROR_EXPLAINER_PORT],
-      useFactory: (explainer: KnowledgeBaseExplainerAdapter) => {
-        return new GetErrorExplanationUseCase(explainer);
-      },
-    },
-
-    // 5. Facade Service
-    DiagnosticsService,
   ],
   exports: [
     DiagnosticsService,
+    DiagnosticsRepository,
     LATEX_LOG_PARSER_PORT,
     SYNTAX_LINTER_PORT,
     ERROR_EXPLAINER_PORT,

@@ -26,13 +26,13 @@ import {
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
-import { AttachmentsService } from '../services/attachments.service';
+import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import {
   PresignUploadDto,
   CompletePresignDto,
   InitiateMultipartDto,
   CompleteMultipartDto,
-} from '../dto/attachments.dto';
+} from '@/modules/library/extraction/dto/attachments.dto';
 
 /**
  * Shared Base Adapter for Library Attachment Binary Storage Operations.
@@ -386,7 +386,7 @@ export abstract class BaseAttachmentStorageController {
   protected sendAttachmentPayload(
     res: FastifyReply,
     payload: {
-      content: any;
+      content: Buffer | Uint8Array | NodeJS.ReadableStream | string;
       filename: string;
       size: number;
       mimeType?: string;
@@ -448,7 +448,12 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
     );
   }
 
-  @Post(['attachments/presign-upload', 'files/presign-upload'])
+  @Post([
+    'attachments/presign-upload',
+    'attachments/presign',
+    'files/presign-upload',
+    'files/presign',
+  ])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Obtain presigned upload URL for direct S3 upload' })
   async presignUpload(
@@ -464,7 +469,12 @@ export class AttachmentStorageController extends BaseAttachmentStorageController
     );
   }
 
-  @Post(['attachments/complete-upload', 'files/complete-upload'])
+  @Post([
+    'attachments/complete-upload',
+    'attachments/presign/complete',
+    'files/complete-upload',
+    'files/presign/complete',
+  ])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Complete and verify presigned S3 upload' })
   async completePresignedUpload(
@@ -643,7 +653,12 @@ export class ProjectAttachmentStorageController extends BaseAttachmentStorageCon
     return this.executeUploadLibraryFile(userId, req, projectId);
   }
 
-  @Post(['attachments/presign-upload', 'files/presign-upload'])
+  @Post([
+    'attachments/presign-upload',
+    'attachments/presign',
+    'files/presign-upload',
+    'files/presign',
+  ])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Obtain presigned upload URL for direct S3 upload' })
@@ -656,7 +671,12 @@ export class ProjectAttachmentStorageController extends BaseAttachmentStorageCon
     return this.executePresignUpload(userId, dto, projectId);
   }
 
-  @Post(['attachments/complete-upload', 'files/complete-upload'])
+  @Post([
+    'attachments/complete-upload',
+    'attachments/presign/complete',
+    'files/complete-upload',
+    'files/presign/complete',
+  ])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Complete and verify presigned S3 upload' })

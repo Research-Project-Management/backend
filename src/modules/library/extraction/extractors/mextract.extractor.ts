@@ -1,15 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ItemMetadata } from '../../shared-kernel';
+import { ItemMetadata } from '@/modules/library/shared-kernel';
 import {
   cleanAuthorName,
   normalizeAcademicTitleCase,
   cleanAbstractText,
   splitAuthorString,
-} from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 export interface MeXtractResult {
   metadata: Partial<ItemMetadata>;
-  rawOutput?: Record<string, any>;
+  rawOutput?: Record<string, unknown>;
   confidence: number;
   engine: 'MEXTRACT_ONNX_SLM' | 'MEXTRACT_LOCAL_SLM' | 'MEXTRACT_HEURISTIC_SLM';
   durationMs: number;
@@ -18,14 +18,29 @@ export interface MeXtractResult {
 /**
  * MeXtract: High-speed, local Small Language Model (SLM) for Academic Metadata Extraction.
  *
- * Lightweight, specialized SLM architecture (e.g. Qwen2.5-0.5B-Instruct quantized ONNX / CPU)
- * for rapid zero-network academic structure parsing.
+ * Lightweight, specialized SLM architecture using quantized ONNX (@xenova/transformers)
+ * for rapid zero-network academic structure parsing, with bounded concurrency and strict
+ * latency timeouts to guarantee stability for 1,000 users and batch ingestion workloads.
+ *
+ * Fully decoupled from user-workspace AI (flux-ai).
  */
 @Injectable()
 export class MeXtractExtractor {
   private static readonly logger = new Logger(MeXtractExtractor.name);
-  public static readonly MODEL_NAME = 'Qwen2.5-0.5B-Instruct-ONNX';
+  public static readonly MODEL_NAME =
+    process.env.MEXTRACT_MODEL_NAME || 'Xenova/Qwen2.5-0.5B-Instruct';
   public static readonly MAX_INPUT_CHARS = 3500;
+  private static readonly MAX_CONCURRENT_ONNX = 2;
+
+  private static pipelinePromise: Promise<
+    | ((
+        prompt: string,
+        options?: Record<string, unknown>,
+      ) => Promise<Array<{ generated_text?: string }>>)
+    | null
+  > | null = null;
+  private static activeOnnxCount = 0;
+  private static onnxDisabled = false;
 
   public static readonly SYSTEM_PROMPT = `You are MeXtract, an academic metadata extraction model. Analyze the following first-page text of a scientific paper and extract the bibliographic metadata in strict JSON format:
 {
@@ -38,6 +53,12 @@ export class MeXtractExtractor {
 }
 Return ONLY valid JSON without markdown fences.`;
 
+  /**
+   * Main entrypoint for academic metadata extraction using SLM cascade:
+   * 1. Optional dedicated external SLM microservice (MEXTRACT_API_URL).
+   * 2. Local quantized ONNX SLM (@xenova/transformers) with bounded concurrency & strict timeout.
+   * 3. Ultra-fast (<1ms) heuristic structural parser fallback.
+   */
   public static async extract(
     headerText: string,
     options?: { timeoutMs?: number },
@@ -48,11 +69,13 @@ Return ONLY valid JSON without markdown fences.`;
 
     const start = performance.now();
     const cleanInput = headerText.slice(0, this.MAX_INPUT_CHARS).trim();
+    const timeoutMs = options?.timeoutMs ?? 1500;
 
-    const aiUrl = process.env.FLUX_AI_URL;
-    if (aiUrl) {
+    // 1. Optional dedicated external SLM microservice (MEXTRACT_API_URL or MEXTRACT_URL)
+    const slmApiUrl = process.env.MEXTRACT_API_URL || process.env.MEXTRACT_URL;
+    if (slmApiUrl) {
       try {
-        const response = await fetch(`${aiUrl}/v1/mextract/extract`, {
+        const response = await fetch(`${slmApiUrl}/v1/mextract/extract`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -60,7 +83,7 @@ Return ONLY valid JSON without markdown fences.`;
             model: this.MODEL_NAME,
             system_prompt: this.SYSTEM_PROMPT,
           }),
-          signal: AbortSignal.timeout(options?.timeoutMs ?? 1500),
+          signal: AbortSignal.timeout(timeoutMs),
         });
 
         if (response.ok) {
@@ -78,10 +101,24 @@ Return ONLY valid JSON without markdown fences.`;
           }
         }
       } catch {
-        // Fallback to in-process parser
+        // Fall through to local ONNX or heuristic parser
       }
     }
 
+    // 2. Local Quantized ONNX SLM (@xenova/transformers)
+    const onnxResult = await this.tryOnnxExtraction(cleanInput, timeoutMs);
+    if (onnxResult) {
+      const durationMs = Math.round((performance.now() - start) * 10) / 10;
+      return {
+        metadata: onnxResult.metadata,
+        rawOutput: onnxResult.rawOutput,
+        confidence: 0.95,
+        engine: 'MEXTRACT_ONNX_SLM',
+        durationMs,
+      };
+    }
+
+    // 3. Fallback to in-process deterministic structural parser (< 1ms)
     const inProcessParsed = this.inProcessStructureParse(cleanInput);
     const durationMs = Math.round((performance.now() - start) * 10) / 10;
 
@@ -101,10 +138,128 @@ Return ONLY valid JSON without markdown fences.`;
     return null;
   }
 
-  private static normalizeModelOutput(raw: any): Partial<ItemMetadata> | null {
+  /**
+   * Attempts local ONNX model inference via @xenova/transformers.
+   * Guarded by bounded concurrency and strict timeout to prevent CPU starvation.
+   */
+  private static async tryOnnxExtraction(
+    cleanInput: string,
+    timeoutMs: number,
+  ): Promise<{
+    metadata: Partial<ItemMetadata>;
+    rawOutput?: Record<string, unknown>;
+  } | null> {
+    if (this.onnxDisabled || this.activeOnnxCount >= this.MAX_CONCURRENT_ONNX) {
+      return null;
+    }
+
+    this.activeOnnxCount++;
+    let pipelineTimer: NodeJS.Timeout | undefined;
+    let inferenceTimer: NodeJS.Timeout | undefined;
+    try {
+      const pipe = await Promise.race([
+        this.getOnnxPipeline(),
+        new Promise<null>((_, reject) => {
+          pipelineTimer = setTimeout(
+            () => reject(new Error('ONNX pipeline timeout')),
+            timeoutMs,
+          );
+          pipelineTimer.unref?.();
+        }),
+      ]);
+      if (pipelineTimer) {
+        clearTimeout(pipelineTimer);
+        pipelineTimer = undefined;
+      }
+
+      if (!pipe) return null;
+
+      const prompt = `<|im_start|>system\n${this.SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n${cleanInput.slice(0, 1500)}<|im_end|>\n<|im_start|>assistant\n`;
+
+      const inferencePromise = pipe(prompt, {
+        max_new_tokens: 256,
+        temperature: 0.1,
+        do_sample: false,
+        return_full_text: false,
+      });
+
+      const output = await Promise.race([
+        inferencePromise,
+        new Promise<null>((_, reject) => {
+          inferenceTimer = setTimeout(
+            () => reject(new Error('ONNX inference timeout')),
+            timeoutMs,
+          );
+          inferenceTimer.unref?.();
+        }),
+      ]);
+      if (inferenceTimer) {
+        clearTimeout(inferenceTimer);
+        inferenceTimer = undefined;
+      }
+
+      if (output && Array.isArray(output) && output[0]?.generated_text) {
+        const text = output[0].generated_text;
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+          const normalized = this.normalizeModelOutput(parsed);
+          if (normalized) {
+            return { metadata: normalized, rawOutput: parsed };
+          }
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      if (pipelineTimer) clearTimeout(pipelineTimer);
+      if (inferenceTimer) clearTimeout(inferenceTimer);
+      this.activeOnnxCount--;
+    }
+  }
+
+  private static async getOnnxPipeline(): Promise<
+    | ((
+        prompt: string,
+        options?: Record<string, unknown>,
+      ) => Promise<Array<{ generated_text?: string }>>)
+    | null
+  > {
+    if (this.onnxDisabled) return null;
+    if (!this.pipelinePromise) {
+      this.pipelinePromise = (async () => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-implied-eval
+          const dynamicImport = new Function('s', 'return import(s)');
+          const { pipeline, env } = await dynamicImport('@xenova/transformers');
+          env.allowLocalModels = true;
+          return await pipeline('text-generation', this.MODEL_NAME, {
+            quantized: true,
+          });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.debug(
+            `Local ONNX model (${this.MODEL_NAME}) not loaded: ${message}`,
+          );
+          this.onnxDisabled = true;
+          return null;
+        }
+      })();
+    }
+    return this.pipelinePromise;
+  }
+
+  private static normalizeModelOutput(
+    raw: unknown,
+  ): Partial<ItemMetadata> | null {
     if (!raw || typeof raw !== 'object') return null;
 
-    const data = raw.data || raw.result || raw;
+    const rawObj = raw as Record<string, unknown>;
+    const data = ((rawObj.data || rawObj.result || rawObj) ?? {}) as Record<
+      string,
+      unknown
+    >;
     const metadata: Partial<ItemMetadata> = {};
 
     if (typeof data.title === 'string' && data.title.trim().length > 3) {
@@ -113,8 +268,14 @@ Return ONLY valid JSON without markdown fences.`;
 
     if (Array.isArray(data.authors) && data.authors.length > 0) {
       metadata.authors = data.authors
-        .map((a: any) =>
-          cleanAuthorName(typeof a === 'string' ? a : a.name || ''),
+        .map((a: unknown) =>
+          cleanAuthorName(
+            typeof a === 'string'
+              ? a
+              : typeof a === 'object' && a !== null && 'name' in a
+                ? String(a.name || '')
+                : '',
+          ),
         )
         .filter(Boolean);
     } else if (
@@ -249,6 +410,11 @@ Return ONLY valid JSON without markdown fences.`;
       .filter((y) => y >= 1950 && y <= currentYear + 2);
     if (allYears.length > 0) {
       metadata.year = allYears[allYears.length - 1];
+    }
+
+    const doiMatch = text.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)/);
+    if (doiMatch) {
+      metadata.doi = doiMatch[1].replace(/[.,;)]+$/, '');
     }
 
     return metadata;

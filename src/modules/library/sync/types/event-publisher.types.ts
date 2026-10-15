@@ -1,5 +1,5 @@
-export { EVENT_PUBLISHER_PORT } from '../../shared-kernel';
+export { EVENT_PUBLISHER_PORT } from '@/modules/library/shared-kernel';
 export type {
   DomainEventEnvelope,
   IEventPublisherPort,
-} from '../../shared-kernel';
+} from '@/modules/library/shared-kernel';

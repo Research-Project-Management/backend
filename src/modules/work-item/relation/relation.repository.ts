@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService, isUuid } from '@/core';
-import { WorkItem, Prisma } from '@prisma/client';
+import { PrismaService } from '@/core';
+import { WorkItem, Prisma, WorkItemRelationType } from '@prisma/client';
 import { WorkItemRelationItem } from './types/relation.types';
+import { buildWorkItemIdOrIdentifierWhere } from '@/modules/work-item/common/types/shared.types';
 
 @Injectable()
 export class RelationRepository {
@@ -12,16 +13,8 @@ export class RelationRepository {
   }
 
   async findWorkItem(workItemId: string): Promise<WorkItem | null> {
-    if (isUuid(workItemId)) {
-      return this.prismaService.workItem.findFirst({
-        where: { id: workItemId, deletedAt: null },
-      });
-    }
     return this.prismaService.workItem.findFirst({
-      where: {
-        identifier: { equals: workItemId, mode: 'insensitive' },
-        deletedAt: null,
-      },
+      where: buildWorkItemIdOrIdentifierWhere(workItemId),
     });
   }
 
@@ -35,97 +28,74 @@ export class RelationRepository {
     });
   }
 
-  async updateWorkItemRelations(
-    workItemId: string,
-    relations: Prisma.InputJsonValue,
-  ): Promise<WorkItem> {
-    return this.prismaService.workItem.update({
-      where: { id: workItemId },
-      data: { relations },
-    });
-  }
-
-  async executeTransaction<T = unknown>(
-    operations: Prisma.PrismaPromise<T>[],
-  ): Promise<T[]> {
-    return this.prismaService.$transaction(operations);
-  }
-
   async findProjectGraphEdges(
     projectId: string,
     relationCategory: 'blocks' | 'duplicate_of',
   ): Promise<Array<{ sourceId: string; targetId: string }>> {
     const edges: Array<{ sourceId: string; targetId: string }> = [];
+    const isBlocks = relationCategory === 'blocks';
+    const forwardTypes = isBlocks
+      ? [
+          'blocks',
+          'finish_to_start',
+          'FINISH_TO_START',
+          'start_to_start',
+          'START_TO_START',
+          'finish_to_finish',
+          'FINISH_TO_FINISH',
+          'start_to_finish',
+          'START_TO_FINISH',
+          'starts_before',
+          'finishes_before',
+        ]
+      : ['duplicate_of'];
+    const inverseTypes = isBlocks
+      ? ['blocked_by', 'starts_after', 'finishes_after']
+      : ['duplicated_by'];
 
-    if (relationCategory === 'blocks') {
-      const [dbRelations, items] = await Promise.all([
-        this.prismaService.workItemRelation.findMany({
-          where: {
-            sourceWorkItem: { projectId, deletedAt: null },
-            targetWorkItem: { projectId, deletedAt: null },
-            type: { in: ['blocks', 'blocked_by'] },
-          },
-          select: { sourceId: true, targetId: true, type: true },
-        }),
-        this.prismaService.workItem.findMany({
-          where: {
-            projectId,
-            deletedAt: null,
-            relations: { not: Prisma.DbNull },
-          },
-          select: { id: true, relations: true },
-        }),
-      ]);
+    const prismaRelationTypes: WorkItemRelationType[] = isBlocks
+      ? [WorkItemRelationType.blocks, WorkItemRelationType.blocked_by]
+      : [WorkItemRelationType.duplicate_of];
 
-      for (const rel of dbRelations) {
-        if (rel.type === 'blocks') {
-          edges.push({ sourceId: rel.sourceId, targetId: rel.targetId });
-        } else if (rel.type === 'blocked_by') {
-          edges.push({ sourceId: rel.targetId, targetId: rel.sourceId });
-        }
-      }
+    const [dbRelations, items] = await Promise.all([
+      this.prismaService.workItemRelation.findMany({
+        where: {
+          sourceWorkItem: { projectId, deletedAt: null },
+          targetWorkItem: { projectId, deletedAt: null },
+          type: { in: prismaRelationTypes },
+        },
+        select: { sourceId: true, targetId: true, type: true },
+      }),
+      this.prismaService.workItem.findMany({
+        where: {
+          projectId,
+          deletedAt: null,
+          relations: { not: Prisma.DbNull },
+        },
+        select: { id: true, relations: true },
+      }),
+    ]);
 
-      for (const item of items) {
-        if (Array.isArray(item.relations)) {
-          for (const r of item.relations as unknown as WorkItemRelationItem[]) {
-            if (r.type === 'blocks' && r.targetWorkItemId) {
-              edges.push({ sourceId: item.id, targetId: r.targetWorkItemId });
-            } else if (r.type === 'blocked_by' && r.targetWorkItemId) {
-              edges.push({ sourceId: r.targetWorkItemId, targetId: item.id });
-            }
-          }
-        }
-      }
-    } else if (relationCategory === 'duplicate_of') {
-      const [dbRelations, items] = await Promise.all([
-        this.prismaService.workItemRelation.findMany({
-          where: {
-            sourceWorkItem: { projectId, deletedAt: null },
-            targetWorkItem: { projectId, deletedAt: null },
-            type: 'duplicate_of',
-          },
-          select: { sourceId: true, targetId: true },
-        }),
-        this.prismaService.workItem.findMany({
-          where: {
-            projectId,
-            deletedAt: null,
-            relations: { not: Prisma.DbNull },
-          },
-          select: { id: true, relations: true },
-        }),
-      ]);
-
-      for (const rel of dbRelations) {
+    for (const rel of dbRelations as Array<{
+      sourceId: string;
+      targetId: string;
+      type?: string;
+    }>) {
+      if (rel.type && inverseTypes.includes(rel.type)) {
+        edges.push({ sourceId: rel.targetId, targetId: rel.sourceId });
+      } else {
         edges.push({ sourceId: rel.sourceId, targetId: rel.targetId });
       }
+    }
 
-      for (const item of items) {
-        if (Array.isArray(item.relations)) {
-          for (const r of item.relations as unknown as WorkItemRelationItem[]) {
-            if (r.type === 'duplicate_of' && r.targetWorkItemId) {
-              edges.push({ sourceId: item.id, targetId: r.targetWorkItemId });
-            }
+    for (const item of items) {
+      if (Array.isArray(item.relations)) {
+        for (const r of item.relations as unknown as WorkItemRelationItem[]) {
+          if (!r.targetWorkItemId) continue;
+          if (forwardTypes.includes(r.type)) {
+            edges.push({ sourceId: item.id, targetId: r.targetWorkItemId });
+          } else if (inverseTypes.includes(r.type)) {
+            edges.push({ sourceId: r.targetWorkItemId, targetId: item.id });
           }
         }
       }

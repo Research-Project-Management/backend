@@ -4,10 +4,10 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { IZipEnginePort } from '../ports/zip-engine.port';
-import { IManuscriptHydratorPort } from '../ports/manuscript-hydrator.port';
-import { ImportSummaryVo } from '../domain/value-objects/import-summary.vo';
-import { InvalidZipArchiveException } from '../domain/exceptions/invalid-zip-archive.exception';
+import { IZipEnginePort } from '@/modules/manuscripts/export-import/core/ports/zip-engine.port';
+import { IManuscriptHydratorPort } from '@/modules/manuscripts/export-import/core/ports/manuscript-hydrator.port';
+import { ImportSummaryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/import-summary.vo';
+import { InvalidZipArchiveException } from '@/modules/manuscripts/export-import/core/domain/exceptions/invalid-zip-archive.exception';
 import { BadRequestException } from '@nestjs/common';
 
 export interface ImportProjectZipInput {

@@ -1,9 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
 import { ItemsController } from '@/modules/library/catalog/controllers/items.controller';
-import {
-  ItemConcurrencyDomainException,
-  ItemNotFoundDomainException,
-} from '@/modules/library/catalog/core/domain/item-domain.exception';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
 
 describe('ItemsController (Hexagonal Driver Adapter)', () => {

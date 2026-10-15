@@ -202,6 +202,10 @@ export class IntegrationsController {
         redirectUri,
       });
 
+      const clientUrl = (
+        process.env.CLIENT_URL || 'http://localhost:2915'
+      ).replace(/\/$/, '');
+
       const html = `<!DOCTYPE html>
 <html>
 <head><title>Authorization Successful</title></head>
@@ -214,10 +218,13 @@ export class IntegrationsController {
     try {
       if (window.opener) {
         window.opener.postMessage({ type: 'OAUTH_SUCCESS', provider: '${provider}' }, '*');
-        setTimeout(() => window.close(), 500);
-      } else {
-        window.location.href = '/settings/integrations';
       }
+      setTimeout(() => {
+        window.close();
+        setTimeout(() => {
+          window.location.href = '${clientUrl}/settings/integrations';
+        }, 400);
+      }, 400);
     } catch (e) {
       window.close();
     }
@@ -226,14 +233,16 @@ export class IntegrationsController {
 </html>`;
 
       res.type('text/html').send(html);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg =
+        err instanceof Error ? err.message : 'Failed to exchange credentials';
       const errorHtml = `<!DOCTYPE html>
 <html>
 <head><title>Authorization Failed</title></head>
 <body style="font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #09090b; color: #ef4444;">
   <div style="text-align: center;">
     <h2>Authorization Error</h2>
-    <p>${err.message || 'Failed to exchange credentials'}</p>
+    <p>${errMsg}</p>
     <button onclick="window.close()" style="margin-top: 1rem; padding: 0.5rem 1rem; cursor: pointer;">Close Window</button>
   </div>
 </body>

@@ -4,9 +4,12 @@ import {
   parseCreatorString,
   isNoiseAuthorName,
   sanitizeItemTitle,
-} from '@/modules/library/shared-kernel/utils/bibliographic.utils';
+  isVietnameseName,
+  hasVietnameseDiacritics,
+  extractFamilyName,
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
-describe('Author Parsing and Cleaning Suite (bibliographic.utils)', () => {
+describe('Author Parsing and Cleaning Suite (bibliographic.domain)', () => {
   describe('cleanAuthorName', () => {
     it('should strip footnote markers, affiliation numbers, and OCR superscripts', () => {
       expect(cleanAuthorName('Karen Simonyan 1,2*')).toBe('Karen Simonyan');
@@ -148,6 +151,61 @@ describe('Author Parsing and Cleaning Suite (bibliographic.utils)', () => {
       ).toBe(
         'Very Deep Convolutional Networks for Large-Scale Image Recognition',
       );
+    });
+  });
+
+  describe('Vietnamese and East Asian Name Handling', () => {
+    it('should detect Vietnamese names with diacritics', () => {
+      expect(isVietnameseName('Nguyễn Văn An')).toBe(true);
+      expect(isVietnameseName('Trần Thị Mai')).toBe(true);
+      expect(isVietnameseName('Võ Nguyên Giáp')).toBe(true);
+      expect(isVietnameseName('Đặng Thị Ngọc Thịnh')).toBe(true);
+      expect(hasVietnameseDiacritics('Nguyễn')).toBe(true);
+      expect(hasVietnameseDiacritics('Smith')).toBe(false);
+    });
+
+    it('should detect unaccented Vietnamese names', () => {
+      expect(isVietnameseName('Nguyen Van An')).toBe(true);
+      expect(isVietnameseName('Tran Thi Mai')).toBe(true);
+      expect(isVietnameseName('Pham Quoc Cuong')).toBe(true);
+    });
+
+    it('should correctly parse Vietnamese names in two-field mode (Family Name First)', () => {
+      const p = parseCreatorString('Nguyễn Văn An');
+      expect(p.lastName).toBe('Nguyễn');
+      expect(p.firstName).toBe('Văn An');
+      expect(p.fullName).toBe('Nguyễn Văn An');
+      expect(p.fieldMode).toBe(0);
+
+      const p2 = parseCreatorString('Trần Thị Mai');
+      expect(p2.lastName).toBe('Trần');
+      expect(p2.firstName).toBe('Thị Mai');
+      expect(p2.fullName).toBe('Trần Thị Mai');
+    });
+
+    it('should support Single-Field mode for Vietnamese names when requested', () => {
+      const p = parseCreatorString('Nguyễn Văn An', 0, 'author', {
+        preferSingleFieldForVietnamese: true,
+      });
+      expect(p.fieldMode).toBe(1);
+      expect(p.lastName).toBe('Nguyễn Văn An');
+      expect(p.firstName).toBe('');
+      expect(p.fullName).toBe('Nguyễn Văn An');
+    });
+
+    it('should correctly extract family names for Vietnamese and Western authors', () => {
+      expect(extractFamilyName('Nguyễn Văn An')).toBe('Nguyễn');
+      expect(extractFamilyName('Nguyen Van An')).toBe('Nguyen');
+      expect(extractFamilyName('Trần Thị Mai')).toBe('Trần');
+      // Western order
+      expect(extractFamilyName('Donald E. Knuth')).toBe('Knuth');
+      expect(extractFamilyName('Knuth, Donald E.')).toBe('Knuth');
+    });
+
+    it('should not confuse Western names with Vietnamese names', () => {
+      expect(isVietnameseName('Karen Simonyan')).toBe(false);
+      expect(isVietnameseName('Andrew Zisserman')).toBe(false);
+      expect(isVietnameseName('Martin Luther King Jr.')).toBe(false);
     });
   });
 });

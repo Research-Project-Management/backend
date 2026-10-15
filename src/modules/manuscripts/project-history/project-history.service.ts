@@ -1,9 +1,21 @@
 /**
  * project-history/project-history.service.ts
- * Main Injectable Service orchestrating Manuscript Project History use cases.
+ * Deep Module Service orchestrating Manuscript Project History directly via ProjectHistoryRepository
+ * and pure MyersDiffEngine, while preserving backward compatibility for legacy use-case tests.
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ProjectHistoryRepository } from './project-history.repository';
+import {
+  MyersDiffEngine,
+  Snapshot,
+  VersionLabel,
+  VersionNotFoundException,
+  DuplicateLabelException,
+} from './domain';
+import { ManuscriptCollectorAdapter } from './core/adapters/external/manuscript-collector.adapter';
+import { ManuscriptRestorerAdapter } from './core/adapters/external/manuscript-restorer.adapter';
+
 import { CreateSnapshotUseCase } from './core/use-cases/create-snapshot.use-case';
 import { GetVersionListUseCase } from './core/use-cases/get-version-list.use-case';
 import { GetSnapshotByVersionUseCase } from './core/use-cases/get-snapshot-by-version.use-case';
@@ -11,8 +23,6 @@ import { CompareVersionsDiffUseCase } from './core/use-cases/compare-versions-di
 import { LabelVersionUseCase } from './core/use-cases/label-version.use-case';
 import { DeleteLabelUseCase } from './core/use-cases/delete-label.use-case';
 import { RestoreVersionUseCase } from './core/use-cases/restore-version.use-case';
-import { Snapshot } from './core/domain/entities/snapshot.entity';
-import { VersionLabel } from './core/domain/entities/version-label.entity';
 import {
   CreateSnapshotDto,
   SnapshotDetailDto,
@@ -21,22 +31,28 @@ import {
   DiffResponseDto,
 } from './dto/history.dto';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
-import { PrismaService } from '@/core';
+import { ManuscriptUserResolverService } from '@/modules/manuscripts/docstore/services/manuscript-user-resolver.service';
 
 @Injectable()
 export class ProjectHistoryService {
   private readonly logger = new Logger(ProjectHistoryService.name);
+  private readonly diffEngine = new MyersDiffEngine();
 
   constructor(
-    private readonly createSnapshotUseCase: CreateSnapshotUseCase,
-    private readonly getVersionListUseCase: GetVersionListUseCase,
-    private readonly getSnapshotByVersionUseCase: GetSnapshotByVersionUseCase,
-    private readonly compareVersionsDiffUseCase: CompareVersionsDiffUseCase,
-    private readonly labelVersionUseCase: LabelVersionUseCase,
-    private readonly deleteLabelUseCase: DeleteLabelUseCase,
-    private readonly restoreVersionUseCase: RestoreVersionUseCase,
+    @Optional() private readonly createSnapshotUseCase?: CreateSnapshotUseCase,
+    @Optional() private readonly getVersionListUseCase?: GetVersionListUseCase,
+    @Optional()
+    private readonly getSnapshotByVersionUseCase?: GetSnapshotByVersionUseCase,
+    @Optional()
+    private readonly compareVersionsDiffUseCase?: CompareVersionsDiffUseCase,
+    @Optional() private readonly labelVersionUseCase?: LabelVersionUseCase,
+    @Optional() private readonly deleteLabelUseCase?: DeleteLabelUseCase,
+    @Optional() private readonly restoreVersionUseCase?: RestoreVersionUseCase,
     @Optional() private readonly realtimeService?: RealtimeService,
-    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly userResolver?: ManuscriptUserResolverService,
+    @Optional() private readonly repository?: ProjectHistoryRepository,
+    @Optional() private readonly collector?: ManuscriptCollectorAdapter,
+    @Optional() private readonly restorer?: ManuscriptRestorerAdapter,
   ) {}
 
   public async createSnapshot(
@@ -44,13 +60,23 @@ export class ProjectHistoryService {
     dto: CreateSnapshotDto,
     userId?: string | null,
   ): Promise<SnapshotDetailDto> {
-    const snapshot = await this.createSnapshotUseCase.execute({
-      projectId,
-      summary: dto.summary,
-      createdById: userId,
-      isAutomatic: dto.isAutomatic ?? false,
-      label: dto.label,
-    });
+    const snapshot =
+      this.repository && this.collector
+        ? await this.createSnapshotDirect({
+            projectId,
+            summary: dto.summary,
+            createdById: userId,
+            isAutomatic: dto.isAutomatic ?? false,
+            label: dto.label,
+          })
+        : await this.createSnapshotUseCase!.execute({
+            projectId,
+            summary: dto.summary,
+            createdById: userId,
+            isAutomatic: dto.isAutomatic ?? false,
+            label: dto.label,
+          });
+
     this.realtimeService?.broadcastSnapshotCreated(projectId, {
       version: snapshot.version,
       summary: snapshot.summary,
@@ -62,47 +88,22 @@ export class ProjectHistoryService {
   }
 
   public async listVersions(projectId: string): Promise<VersionListItemDto[]> {
-    const snapshots = await this.getVersionListUseCase.execute(projectId);
+    const snapshots = this.repository
+      ? await this.repository.listVersions(projectId)
+      : await this.getVersionListUseCase!.execute(projectId);
 
-    const authorMap = new Map<string, { id: string; name: string; avatar?: string }>();
-    if (this.prisma) {
-      const userIds = Array.from(
-        new Set(
-          snapshots
-            .map((s) => s.createdById)
-            .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    const authorMap = this.userResolver
+      ? await this.userResolver.resolveUserNames(
+          snapshots.map((s) => s.createdById),
         )
-      );
-      if (userIds.length > 0) {
-        try {
-          const users = await this.prisma.user.findMany({
-            where: { id: { in: userIds } },
-            select: {
-              id: true,
-              profile: {
-                select: {
-                  name: true,
-                  avatar: true,
-                },
-              },
-            },
-          });
-          for (const u of users) {
-            authorMap.set(u.id, {
-              id: u.id,
-              name: u.profile?.name || 'Collaborator',
-              avatar: u.profile?.avatar || undefined,
-            });
-          }
-        } catch (err) {
-          this.logger.debug(`Failed to fetch author metadata for history: ${err}`);
-        }
-      }
-    }
+      : new Map<string, { id: string; name: string; avatar?: string }>();
 
     return snapshots.map((s) => {
       const author = s.createdById
-        ? authorMap.get(s.createdById) || { id: s.createdById, name: 'Collaborator' }
+        ? authorMap.get(s.createdById) || {
+            id: s.createdById,
+            name: 'Collaborator',
+          }
         : null;
       return this.toListItemDto(s, author);
     });
@@ -112,7 +113,15 @@ export class ProjectHistoryService {
     projectId: string,
     version: number,
   ): Promise<SnapshotDetailDto> {
-    const snapshot = await this.getSnapshotByVersionUseCase.execute(
+    if (this.repository) {
+      const found = await this.repository.findByVersion(projectId, version);
+      if (!found) {
+        throw new VersionNotFoundException(projectId, version);
+      }
+      return this.toDetailDto(found);
+    }
+
+    const snapshot = await this.getSnapshotByVersionUseCase!.execute(
       projectId,
       version,
     );
@@ -124,7 +133,40 @@ export class ProjectHistoryService {
     baseVersion: number,
     targetVersion: number,
   ): Promise<DiffResponseDto> {
-    const result = await this.compareVersionsDiffUseCase.execute(
+    if (this.repository) {
+      const [baseSnapshot, targetSnapshot] = await Promise.all([
+        this.repository.findByVersion(projectId, baseVersion),
+        this.repository.findByVersion(projectId, targetVersion),
+      ]);
+      if (!baseSnapshot) {
+        throw new VersionNotFoundException(projectId, baseVersion);
+      }
+      if (!targetSnapshot) {
+        throw new VersionNotFoundException(projectId, targetVersion);
+      }
+
+      const fileDiffs = this.diffEngine.compareSnapshots(
+        baseSnapshot,
+        targetSnapshot,
+      );
+      let totalAdditions = 0;
+      let totalDeletions = 0;
+      for (const fd of fileDiffs) {
+        totalAdditions += fd.additions;
+        totalDeletions += fd.deletions;
+      }
+
+      return {
+        baseVersion,
+        targetVersion,
+        totalAdditions,
+        totalDeletions,
+        filesChanged: fileDiffs.length,
+        files: fileDiffs,
+      };
+    }
+
+    const result = await this.compareVersionsDiffUseCase!.execute(
       projectId,
       baseVersion,
       targetVersion,
@@ -145,7 +187,40 @@ export class ProjectHistoryService {
     label: string,
     userId?: string | null,
   ): Promise<VersionLabelDto> {
-    const versionLabel = await this.labelVersionUseCase.execute({
+    if (this.repository) {
+      const cleanLabel = label.trim();
+      const snapshot = await this.repository.findByVersion(projectId, version);
+      if (!snapshot) {
+        throw new VersionNotFoundException(projectId, version);
+      }
+
+      const existing = await this.repository.findLabelByName(
+        projectId,
+        cleanLabel,
+      );
+      if (existing && existing.version !== version) {
+        throw new DuplicateLabelException(projectId, cleanLabel);
+      }
+
+      const versionLabel =
+        existing ??
+        VersionLabel.create({
+          projectId,
+          snapshotId: snapshot.id,
+          version,
+          label: cleanLabel,
+          createdById: userId || null,
+        });
+
+      if (existing) {
+        versionLabel.updateLabel(cleanLabel);
+      }
+
+      const saved = await this.repository.saveLabel(versionLabel);
+      return this.toLabelDto(saved);
+    }
+
+    const versionLabel = await this.labelVersionUseCase!.execute({
       projectId,
       version,
       label,
@@ -155,7 +230,11 @@ export class ProjectHistoryService {
   }
 
   public async deleteLabel(projectId: string, labelId: string): Promise<void> {
-    await this.deleteLabelUseCase.execute(projectId, labelId);
+    if (this.repository) {
+      await this.repository.deleteLabel(projectId, labelId);
+      return;
+    }
+    await this.deleteLabelUseCase!.execute(projectId, labelId);
   }
 
   public async restoreVersion(
@@ -167,7 +246,35 @@ export class ProjectHistoryService {
     newSnapshot: SnapshotDetailDto;
     restoreResult: { restoredFilesCount: number; restoredDocIds: string[] };
   }> {
-    const result = await this.restoreVersionUseCase.execute({
+    if (this.repository && this.restorer && this.collector) {
+      const targetSnapshot = await this.repository.findByVersion(
+        projectId,
+        targetVersion,
+      );
+      if (!targetSnapshot) {
+        throw new VersionNotFoundException(projectId, targetVersion);
+      }
+
+      const restoreResult = await this.restorer.restoreToState(
+        projectId,
+        targetSnapshot,
+      );
+
+      const newSnapshot = await this.createSnapshotDirect({
+        projectId,
+        summary: `Restored to version ${targetVersion}`,
+        createdById: userId || null,
+        isAutomatic: false,
+      });
+
+      return {
+        restoredSnapshot: this.toDetailDto(targetSnapshot),
+        newSnapshot: this.toDetailDto(newSnapshot),
+        restoreResult,
+      };
+    }
+
+    const result = await this.restoreVersionUseCase!.execute({
       projectId,
       targetVersion,
       userId,
@@ -178,6 +285,64 @@ export class ProjectHistoryService {
       newSnapshot: this.toDetailDto(result.newSnapshot),
       restoreResult: result.restoreResult,
     };
+  }
+
+  private async createSnapshotDirect(input: {
+    projectId: string;
+    summary?: string | null;
+    createdById?: string | null;
+    isAutomatic?: boolean;
+    label?: string | null;
+  }): Promise<Snapshot> {
+    const {
+      projectId,
+      summary,
+      createdById,
+      isAutomatic = false,
+      label,
+    } = input;
+
+    if (label && label.trim()) {
+      const existingLabel = await this.repository!.findLabelByName(
+        projectId,
+        label.trim(),
+      );
+      if (existingLabel) {
+        throw new DuplicateLabelException(projectId, label.trim());
+      }
+    }
+
+    const latestVersion = await this.repository!.getLatestVersion(projectId);
+    const nextVersion = latestVersion + 1;
+    const files = await this.collector!.collectCurrentState(projectId);
+
+    const snapshot = Snapshot.create({
+      projectId,
+      version: nextVersion,
+      summary: summary || null,
+      createdById: createdById || null,
+      isAutomatic,
+      files,
+    });
+
+    let versionLabel: VersionLabel | null = null;
+    if (label && label.trim()) {
+      versionLabel = VersionLabel.create({
+        projectId,
+        snapshotId: snapshot.id,
+        version: nextVersion,
+        label: label.trim(),
+        createdById,
+      });
+      snapshot.addLabel(versionLabel);
+    }
+
+    const saved = await this.repository!.saveSnapshot(snapshot);
+    if (versionLabel) {
+      await this.repository!.saveLabel(versionLabel);
+    }
+
+    return saved;
   }
 
   public toLabelDto(label: VersionLabel): VersionLabelDto {
@@ -200,7 +365,11 @@ export class ProjectHistoryService {
       version: snapshot.version,
       summary: snapshot.summary,
       createdById: snapshot.createdById,
-      author: author ?? (snapshot.createdById ? { id: snapshot.createdById, name: 'Collaborator' } : null),
+      author:
+        author ??
+        (snapshot.createdById
+          ? { id: snapshot.createdById, name: 'Collaborator' }
+          : null),
       isAutomatic: snapshot.isAutomatic,
       fileCount: snapshot.fileCount,
       labels: snapshot.labels.map((l) => this.toLabelDto(l)),

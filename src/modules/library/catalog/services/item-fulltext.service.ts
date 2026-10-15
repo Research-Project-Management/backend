@@ -4,10 +4,10 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { QueryRepository } from '../repositories/query.repository';
+import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '../../shared-kernel/core/constants/redis-keys.constants';
-import { DocumentFulltextResponse } from '../dto/items.dto';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
 
 /**
  * ItemFulltextService — Dedicated Domain Service for Academic Document Intelligence.
@@ -34,7 +34,12 @@ export class ItemFulltextService {
     const cacheKey = LIBRARY_REDIS_KEYS.itemFulltext(id);
     if (this.cache) {
       try {
-        const cached = await this.cache.get<any>(cacheKey);
+        const cached = await this.cache.get<
+          DocumentFulltextResponse & {
+            userId?: string;
+            projectId?: string | null;
+          }
+        >(cacheKey);
         if (cached) {
           if (cached.userId) {
             const isOwner = cached.userId === userId;
@@ -49,10 +54,9 @@ export class ItemFulltextService {
             );
           }
         }
-      } catch (err: any) {
-        this.logger.debug(
-          `Cache lookup error for ${cacheKey}: ${err?.message || err}`,
-        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Cache lookup error for ${cacheKey}: ${message}`);
       }
     }
 
@@ -73,37 +77,62 @@ export class ItemFulltextService {
       fulltextRecord?.rawPayload &&
       typeof fulltextRecord.rawPayload === 'object'
     ) {
-      const payload = fulltextRecord.rawPayload as Record<string, any>;
+      const payload = fulltextRecord.rawPayload as Record<string, unknown>;
       result = {
-        title: payload.title || item.title,
-        abstract: payload.abstract || item.abstract || undefined,
-        sections: Array.isArray(payload.sections) ? payload.sections : [],
-        figures: Array.isArray(payload.figures) ? payload.figures : [],
-        tables: Array.isArray(payload.tables) ? payload.tables : [],
-        formulas: Array.isArray(payload.formulas) ? payload.formulas : [],
-        references: Array.isArray(payload.references) ? payload.references : [],
+        title:
+          (typeof payload.title === 'string' ? payload.title : undefined) ||
+          item.title,
+        abstract:
+          (typeof payload.abstract === 'string'
+            ? payload.abstract
+            : undefined) ||
+          item.abstract ||
+          undefined,
+        sections: (Array.isArray(payload.sections)
+          ? payload.sections
+          : []) as DocumentFulltextResponse['sections'],
+        figures: (Array.isArray(payload.figures)
+          ? payload.figures
+          : []) as DocumentFulltextResponse['figures'],
+        tables: (Array.isArray(payload.tables)
+          ? payload.tables
+          : []) as DocumentFulltextResponse['tables'],
+        formulas: (Array.isArray(payload.formulas)
+          ? payload.formulas
+          : []) as DocumentFulltextResponse['formulas'],
+        references: (Array.isArray(payload.references)
+          ? payload.references
+          : []) as DocumentFulltextResponse['references'],
       };
     } else {
       // 2. Fallback to header/metadata extraction record if available
-      const headerRecord =
-        (await this.query.findMetadataSourceRecord(id, 'trusted_extraction')) ||
-        (await this.query.findMetadataSourceRecord(id, 'mextract'));
+      const headerRecord = await this.query.findMetadataSourceRecord(
+        id,
+        'mextract',
+      );
 
       if (
         headerRecord?.rawPayload &&
         typeof headerRecord.rawPayload === 'object'
       ) {
-        const payload = headerRecord.rawPayload as Record<string, any>;
+        const payload = headerRecord.rawPayload as Record<string, unknown>;
         result = {
-          title: payload.title || item.title,
-          abstract: payload.abstract || item.abstract || undefined,
+          title:
+            (typeof payload.title === 'string' ? payload.title : undefined) ||
+            item.title,
+          abstract:
+            (typeof payload.abstract === 'string'
+              ? payload.abstract
+              : undefined) ||
+            item.abstract ||
+            undefined,
           sections: [],
           figures: [],
           tables: [],
           formulas: [],
-          references: Array.isArray(payload.references)
+          references: (Array.isArray(payload.references)
             ? payload.references
-            : [],
+            : []) as DocumentFulltextResponse['references'],
         };
       } else {
         // 3. Return clean empty structure instead of 404 so Reader renders gracefully
@@ -127,10 +156,9 @@ export class ItemFulltextService {
           projectId: item.projectId ?? null,
         };
         await this.cache.set(cacheKey, cachedPayload, 600); // 10 min TTL
-      } catch (err: any) {
-        this.logger.debug(
-          `Cache set error for ${cacheKey}: ${err?.message || err}`,
-        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Cache set error for ${cacheKey}: ${message}`);
       }
     }
 

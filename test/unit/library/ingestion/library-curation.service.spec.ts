@@ -21,7 +21,7 @@ import {
   normalizeTitleForDedupe,
   extractFirstAuthorFamily,
   generateDedupeBucketKey,
-} from '@/modules/library/ingestion/utils/deduplication.utils';
+} from '@/modules/library/ingestion/domain/deduplication.domain';
 
 describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';

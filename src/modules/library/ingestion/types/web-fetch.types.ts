@@ -19,7 +19,13 @@ export interface MirrorBibliographicMetadata {
   journal?: string;
   isOpenAccess?: boolean;
   pdfUrl?: string;
-  sourceMirror: 'EuropePMC' | 'arXiv' | 'PubMedCentral' | 'OpenMirror';
+  sourceMirror:
+    | 'EuropePMC'
+    | 'arXiv'
+    | 'PubMedCentral'
+    | 'OpenMirror'
+    | 'CrossRef'
+    | 'OpenAlex';
 }
 
 export interface WebFetchResponse {
@@ -38,6 +44,7 @@ export interface WebFetchResponse {
     doi?: string;
     arxivId?: string;
     pmid?: string;
+    pmcid?: string;
   };
   mirrorMetadata?: MirrorBibliographicMetadata;
   headers?: Record<string, string>;

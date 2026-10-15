@@ -113,7 +113,7 @@ export class AuthGuard implements CanActivate {
           isInternalService: true,
         };
         return true;
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (err instanceof UnauthorizedException) throw err;
         throw new UnauthorizedException(
           'Delegation token is invalid or expired',
@@ -171,7 +171,7 @@ export class AuthGuard implements CanActivate {
               );
             }
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           if (err instanceof UnauthorizedException) throw err;
           // Non-blocking if Redis is down/bypassed
         }
@@ -179,7 +179,7 @@ export class AuthGuard implements CanActivate {
 
       request.user = payload;
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof UnauthorizedException) {
         throw err;
       }

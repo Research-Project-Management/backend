@@ -7,7 +7,7 @@ import {
   OcrBoundingBox,
   OcrWord,
   OcrWorkerPoolOptions,
-} from '../types/ocr.types';
+} from '@/modules/library/extraction/types/ocr.types';
 
 export interface RawOcrRecognitionResult {
   text: string;
@@ -107,9 +107,10 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
       this.logger.log(
         `Tesseract Worker Pool successfully online with ${createdWorkers.length} active workers.`,
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
-        `Failed to initialize Tesseract Worker Pool: ${error?.message || error}`,
+        `Failed to initialize Tesseract Worker Pool: ${message}`,
       );
       for (const w of createdWorkers) {
         try {
@@ -153,11 +154,42 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
       jobPromise.finally(() => clearTimeout(timer));
     });
 
-    let result: any;
+    let result:
+      | {
+          data?: {
+            text?: string;
+            confidence?: number;
+            words?: Array<{
+              text?: string;
+              confidence?: number;
+              bbox?: { x0?: number; y0?: number; x1?: number; y1?: number };
+            }>;
+            blocks?: Array<{
+              text?: string;
+              confidence?: number;
+              bbox?: { x0?: number; y0?: number; x1?: number; y1?: number };
+              lines?: Array<{
+                text?: string;
+                confidence?: number;
+                bbox?: { x0?: number; y0?: number; x1?: number; y1?: number };
+                words?: Array<{
+                  text?: string;
+                  confidence?: number;
+                  bbox?: { x0?: number; y0?: number; x1?: number; y1?: number };
+                }>;
+              }>;
+            }>;
+          };
+        }
+      | undefined;
     try {
-      result = await Promise.race([jobPromise, timeoutPromise]);
-    } catch (err: any) {
-      if (err?.message?.includes('timed out')) {
+      result = (await Promise.race([
+        jobPromise,
+        timeoutPromise,
+      ])) as typeof result;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('timed out')) {
         this.logger.warn(
           `OCR recognition timed out after ${timeoutMs}ms. Recycling worker pool to prevent scheduler starvation.`,
         );
@@ -199,7 +231,7 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
         };
 
         const lines = Array.isArray(b.lines)
-          ? b.lines.map((l: any) => ({
+          ? b.lines.map((l) => ({
               text: (l.text || '').trim(),
               confidence: Number(l.confidence) || 0,
               bbox: {
@@ -209,7 +241,7 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
                 y1: l.bbox?.y1 ?? 0,
               },
               words: Array.isArray(l.words)
-                ? l.words.map((w: any) => ({
+                ? l.words.map((w) => ({
                     text: (w.text || '').trim(),
                     confidence: Number(w.confidence) || 0,
                     bbox: {
@@ -252,9 +284,10 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
     if (deadScheduler) {
       try {
         await deadScheduler.terminate();
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.debug(
-          `Old Tesseract scheduler termination completed: ${err?.message || err}`,
+          `Old Tesseract scheduler termination completed: ${message}`,
         );
       }
     }
@@ -266,10 +299,9 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
       this.logger.log('Gracefully terminating Tesseract Worker Pool...');
       try {
         await this.scheduler.terminate();
-      } catch (err: any) {
-        this.logger.warn(
-          `Error terminating Tesseract scheduler: ${err?.message || err}`,
-        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Error terminating Tesseract scheduler: ${message}`);
       }
       this.scheduler = undefined;
       this.workers = [];

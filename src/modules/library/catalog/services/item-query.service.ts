@@ -1,22 +1,52 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { QueryRepository } from '../repositories/query.repository';
+import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '../../shared-kernel/core/constants/redis-keys.constants';
-import { ItemsMapper } from '../utils/items.mapper';
-import { CursorPaginatedResult } from '../dto/items.dto';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import { CursorPaginatedResult } from '@/modules/library/catalog/dto/items.dto';
 import {
   IItemReadPort,
   IItemExistencePort,
-  ItemDetail,
-  ItemSummary,
   QualityAuditCandidateItem,
   DuplicateCandidateItem,
-} from '../types/items.types';
+  ItemDetail,
+} from '@/modules/library/catalog/types/items.types';
+import { AccessService, Permission } from '@/modules/project/access';
+
+export interface LibraryPermissionsContract {
+  canRead: boolean;
+  canCreateItem: boolean;
+  canEditItem: boolean;
+  canDeleteItem: boolean;
+  canPurgeItem: boolean;
+  canManageCollections: boolean;
+  canImport: boolean;
+  canExport: boolean;
+  canAnnotate: boolean;
+}
+
+export interface LibraryScopeAccessContract {
+  scope: 'personal' | 'project';
+  role: 'owner' | 'coordinator' | 'contributor' | 'reviewer';
+  permissions: LibraryPermissionsContract;
+}
+
+const PERSONAL_LIBRARY_PERMISSIONS: LibraryPermissionsContract = {
+  canRead: true,
+  canCreateItem: true,
+  canEditItem: true,
+  canDeleteItem: true,
+  canPurgeItem: true,
+  canManageCollections: true,
+  canImport: true,
+  canExport: true,
+  canAnnotate: true,
+};
 
 /**
  * ItemQueryService — Dedicated Domain Service for Item Information Retrieval.
  * Implements IItemReadPort and IItemExistencePort:
- * - Caches counts (total, unfiled, starred, trash)
+ * - Caches counts (total, unfiled, starred, trash, itemTypes) + authoritative permissions
  * - Single item detail retrieval with Redis acceleration
  * - Cursor pagination and filtered listing
  * - Port methods for existence checks and duplicate candidate queries
@@ -28,70 +58,212 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
   constructor(
     private readonly query: QueryRepository,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly accessService?: AccessService,
   ) {}
 
-  private mapFlattenedState(
-    item: Record<string, any>,
+  private mapFlattenedState<T extends Record<string, unknown>>(
+    item: T,
     userId?: string,
-  ): Record<string, any> | null {
+  ):
+    | (T & { readStatus: string; rating: number; lastReadAt: string | null })
+    | null {
     return ItemsMapper.mapFlattenedState(item, userId);
   }
 
   /**
-   * Retrieves high-performance aggregated system counts (unfiled, starred, trash, total)
-   * for fast sidebar rendering without downloading item arrays.
+   * Computes authoritative Library permissions and role for a given user and scope (Personal or Project).
+   * Respects both role baseline and per-member permissionOverrides when AccessService is present.
+   */
+  async getPermissions(
+    userId: string,
+    projectId?: string,
+    accessHint?: {
+      role?: string;
+      permissionOverrides?: Record<string, boolean> | null;
+      effectivePermissions?: readonly string[];
+    },
+  ): Promise<LibraryScopeAccessContract> {
+    const isProjectScope = Boolean(
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal',
+    );
+
+    if (!isProjectScope || !projectId) {
+      return {
+        scope: 'personal',
+        role: 'owner',
+        permissions: { ...PERSONAL_LIBRARY_PERMISSIONS },
+      };
+    }
+
+    let resolvedRole: string | null = accessHint?.role ?? null;
+    let overrides: Record<string, boolean> | null | undefined =
+      accessHint?.permissionOverrides;
+    let effectivePerms: readonly string[] | undefined =
+      accessHint?.effectivePermissions;
+
+    if (!resolvedRole && this.accessService?.getMemberAccessContext) {
+      try {
+        const ctx = await this.accessService.getMemberAccessContext(
+          projectId,
+          userId,
+        );
+        if (ctx) {
+          resolvedRole = ctx.role;
+          overrides = ctx.permissionOverrides;
+          effectivePerms = ctx.effectivePermissions;
+        }
+      } catch {
+        // Fallback to repository lookup
+      }
+    }
+
+    if (
+      !resolvedRole &&
+      typeof this.query.getProjectMemberRole === 'function'
+    ) {
+      try {
+        resolvedRole = await this.query.getProjectMemberRole(userId, projectId);
+      } catch {
+        resolvedRole = null;
+      }
+    }
+
+    const normalizedRole = (
+      resolvedRole ? String(resolvedRole).toLowerCase() : 'reviewer'
+    ) as 'owner' | 'coordinator' | 'contributor' | 'reviewer';
+
+    const hasPerm = (perm: Permission, roleDefault: boolean): boolean => {
+      if (normalizedRole === 'owner') return true;
+      if (overrides && typeof overrides[perm] === 'boolean') {
+        return overrides[perm];
+      }
+      if (Array.isArray(effectivePerms)) {
+        return effectivePerms.includes(perm);
+      }
+      if (this.accessService?.hasPermission) {
+        return this.accessService.hasPermission(
+          normalizedRole,
+          perm,
+          overrides,
+        );
+      }
+      return roleDefault;
+    };
+
+    const isWriteRole =
+      normalizedRole === 'owner' ||
+      normalizedRole === 'coordinator' ||
+      normalizedRole === 'contributor';
+    const isOwnerRole = normalizedRole === 'owner';
+
+    const canRead = hasPerm(Permission.LIBRARY_READ, true);
+    const canUpload = hasPerm(Permission.LIBRARY_UPLOAD, isWriteRole);
+    const canUpdate = hasPerm(Permission.LIBRARY_UPDATE, isWriteRole);
+    const canPurge = hasPerm(Permission.LIBRARY_DELETE, isOwnerRole);
+    const canExport = hasPerm(Permission.LIBRARY_EXPORT, true);
+    const canAnnotate = hasPerm(Permission.LIBRARY_ANNOTATE, true);
+
+    return {
+      scope: 'project',
+      role: normalizedRole,
+      permissions: {
+        canRead,
+        canCreateItem: canUpload,
+        canEditItem: canUpdate,
+        canDeleteItem: canUpdate,
+        canPurgeItem: canPurge,
+        canManageCollections: canUpdate,
+        canImport: canUpload,
+        canExport,
+        canAnnotate,
+      },
+    };
+  }
+
+  /**
+   * Retrieves high-performance aggregated system counts (unfiled, starred, trash, total, itemTypes)
+   * and authoritative scope permissions for fast sidebar rendering without downloading item arrays.
    */
   async getCounts(
     userId: string,
     projectId?: string,
+    accessHint?: {
+      role?: string;
+      permissionOverrides?: Record<string, boolean> | null;
+      effectivePermissions?: readonly string[];
+    },
   ): Promise<{
     total: number;
     unfiled: number;
     starred: number;
     trash: number;
+    itemTypes: Record<string, number>;
+    role: 'owner' | 'coordinator' | 'contributor' | 'reviewer';
+    permissions: LibraryPermissionsContract;
   }> {
     const cacheKey = projectId
       ? `library:counts:proj:${projectId}`
       : `library:counts:user:${userId}`;
 
-    if (this.cache && typeof this.cache.wrap === 'function') {
-      return this.cache.wrap(
-        cacheKey,
-        async () => {
-          const [total, unfiled, starred, trash] = await Promise.all([
-            this.query.count(userId, { view: 'all', projectId }),
-            this.query.count(userId, { view: 'unfiled', projectId }),
-            this.query.count(userId, { view: 'starred', projectId }),
-            this.query.count(userId, { view: 'trash', projectId }),
-          ]);
-          return { total, unfiled, starred, trash };
-        },
-        15, // 15s TTL for high navigation speed
-      );
-    }
+    const fetchCountsData = async () => {
+      const [total, unfiled, starred, trash, itemTypes] = await Promise.all([
+        this.query.count(userId, { view: 'all', projectId }),
+        this.query.count(userId, { view: 'unfiled', projectId }),
+        this.query.count(userId, { view: 'starred', projectId }),
+        this.query.count(userId, { view: 'trash', projectId }),
+        typeof this.query.countByItemType === 'function'
+          ? this.query.countByItemType(userId, projectId)
+          : Promise.resolve({} as Record<string, number>),
+      ]);
+      return {
+        total,
+        unfiled,
+        starred,
+        trash,
+        itemTypes: itemTypes || {},
+      };
+    };
 
-    const [total, unfiled, starred, trash] = await Promise.all([
-      this.query.count(userId, { view: 'all', projectId }),
-      this.query.count(userId, { view: 'unfiled', projectId }),
-      this.query.count(userId, { view: 'starred', projectId }),
-      this.query.count(userId, { view: 'trash', projectId }),
+    const [countsData, accessContract] = await Promise.all([
+      this.cache && typeof this.cache.wrap === 'function'
+        ? this.cache.wrap(cacheKey, fetchCountsData, 15)
+        : fetchCountsData(),
+      this.getPermissions(userId, projectId, accessHint),
     ]);
-    return { total, unfiled, starred, trash };
+
+    return {
+      ...countsData,
+      itemTypes: countsData.itemTypes || {},
+      role: accessContract.role,
+      permissions: accessContract.permissions,
+    };
   }
 
   async getItem(userId: string, id: string, projectId?: string) {
     const cacheKey = LIBRARY_REDIS_KEYS.item(id);
     const fetchRaw = () => this.query.findById(userId, id, projectId);
 
-    let item: Record<string, any> | null = null;
+    let item: ItemDetail | Record<string, unknown> | null = null;
 
     if (this.cache) {
       try {
-        const cached = await this.cache.get<Record<string, any>>(cacheKey);
+        const cached = await this.cache.get<
+          ItemDetail | Record<string, unknown>
+        >(cacheKey);
         if (cached) {
           const isOwner = cached.userId === userId;
           const isProjectMatch = projectId && cached.projectId === projectId;
           if (isOwner || isProjectMatch) {
+            if (
+              Array.isArray((cached as Record<string, unknown>).states) ||
+              Array.isArray((cached as Record<string, unknown>).userStates) ||
+              (cached as Record<string, unknown>).readStatus !== undefined
+            ) {
+              return this.mapFlattenedState(cached, userId);
+            }
             return cached;
           }
         }
@@ -114,19 +286,13 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
 
     if (!item) return null;
 
-    // Access check: verify ownership, project match, or project membership
-    const isOwner = item.userId === userId;
-    const isProjectMatch = projectId && item.projectId === projectId;
-    if (!isOwner && !isProjectMatch) {
-      if (item.projectId) {
-        const member = await this.query.findProjectMember(
-          item.projectId,
-          userId,
-        );
-        if (!member) return null;
-      } else {
-        return null;
-      }
+    // Access check: verify personal ownership or project scope match
+    const isProjectScope = Boolean(projectId && projectId !== 'user');
+    const isAuthorized = isProjectScope
+      ? item.projectId === projectId
+      : item.userId === userId && !item.projectId;
+    if (!isAuthorized) {
+      return null;
     }
 
     // Dynamically project user-specific reading state (starred, readStatus, rating, lastReadAt)
@@ -147,37 +313,78 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
         | 'starred'
         | 'retracted';
       collectionId?: string;
+      collectionIds?: string[];
+      includeSubcollections?: boolean;
+      recursive?: boolean;
       tagId?: string;
+      tag?: string;
       search?: string;
       limit?: number;
       cursor?: string;
+      page?: number;
+      orderBy?: string;
+      orderDirection?: 'asc' | 'desc';
+      itemType?: string;
+      type?: string;
+      fromYear?: number;
+      toYear?: number;
+      readStatus?: string;
+      hasFile?: boolean;
+      hasNotes?: boolean;
       projectId?: string;
     },
-  ): Promise<CursorPaginatedResult<any>> {
+  ): Promise<CursorPaginatedResult<ItemDetail | Record<string, unknown>>> {
     const limit = Math.min(options.limit ?? 50, 100);
     const scopeKey =
       options.projectId && options.projectId !== 'user'
         ? `proj:${options.projectId}`
         : userId;
     const canCache = !options.search && !options.cursor;
+    const extraCacheParts = [
+      options.page !== undefined && options.page > 1 ? `p=${options.page}` : '',
+      options.orderBy ? `ob=${options.orderBy}` : '',
+      options.orderDirection ? `od=${options.orderDirection}` : '',
+      options.itemType || options.type
+        ? `it=${options.itemType || options.type}`
+        : '',
+      options.fromYear !== undefined ? `fy=${options.fromYear}` : '',
+      options.toYear !== undefined ? `ty=${options.toYear}` : '',
+      options.readStatus ? `rs=${options.readStatus}` : '',
+      options.hasFile !== undefined ? `hf=${options.hasFile}` : '',
+      options.hasNotes !== undefined ? `hn=${options.hasNotes}` : '',
+      options.tag ? `t=${options.tag}` : '',
+      options.collectionIds?.length
+        ? `cids=${options.collectionIds.join(',')}`
+        : '',
+      options.includeSubcollections !== undefined
+        ? `sub=${options.includeSubcollections}`
+        : '',
+      options.recursive !== undefined ? `rec=${options.recursive}` : '',
+    ]
+      .filter(Boolean)
+      .join(':');
+    const baseCacheSuffix = `${options.view || 'all'}:${options.collectionId || ''}:${options.tagId || ''}:${limit}`;
     const cacheKey = canCache
       ? LIBRARY_REDIS_KEYS.itemsList(
           scopeKey,
-          `${options.view || 'all'}:${options.collectionId || ''}:${options.tagId || ''}:${limit}`,
+          extraCacheParts
+            ? `${baseCacheSuffix}:${extraCacheParts}`
+            : baseCacheSuffix,
         )
       : null;
 
     if (canCache && cacheKey && this.cache) {
       try {
         const cached =
-          await this.cache.get<CursorPaginatedResult<any>>(cacheKey);
+          await this.cache.get<
+            CursorPaginatedResult<ItemDetail | Record<string, unknown>>
+          >(cacheKey);
         if (cached) {
           return cached;
         }
-      } catch (err: any) {
-        this.logger.debug(
-          `Cache lookup error for ${cacheKey}: ${err?.message || err}`,
-        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Cache lookup error for ${cacheKey}: ${message}`);
       }
     }
 
@@ -190,7 +397,7 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
         : Promise.resolve(undefined),
       this.query.findMany(userId, {
         ...queryOptions,
-        limit: limit + 1,
+        limit,
       }),
     ]);
 
@@ -205,24 +412,25 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
 
     const items = rawItems
       .slice(0, limit)
-      .map((it) => this.mapFlattenedState(it, userId));
+      .map((it) => this.mapFlattenedState(it, userId))
+      .filter((it): it is NonNullable<typeof it> => it !== null);
 
-    const result: CursorPaginatedResult<any> = {
-      items,
-      meta: {
-        cursor: nextCursor,
-        hasNextPage,
-        totalCount,
-      },
-    };
+    const result: CursorPaginatedResult<ItemDetail | Record<string, unknown>> =
+      {
+        items,
+        meta: {
+          cursor: nextCursor,
+          hasNextPage,
+          totalCount,
+        },
+      };
 
     if (canCache && cacheKey && this.cache) {
       try {
         await this.cache.set(cacheKey, result, 60); // 60s TTL
-      } catch (err: any) {
-        this.logger.debug(
-          `Cache set error for ${cacheKey}: ${err?.message || err}`,
-        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Cache set error for ${cacheKey}: ${message}`);
       }
     }
 
@@ -302,9 +510,11 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
   async findSummariesByIds(
     userId: string,
     itemIds: string[],
-    _projectId?: string,
+    projectId?: string,
   ) {
-    return this.query.findSummariesByIds(userId, itemIds);
+    return projectId !== undefined
+      ? this.query.findSummariesByIds(userId, itemIds, projectId)
+      : this.query.findSummariesByIds(userId, itemIds);
   }
 
   async findQualityAuditItems(

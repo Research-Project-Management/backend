@@ -4,8 +4,8 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ILinkedFilesRepositoryPort } from '../ports/linked-files-repository.port';
-import { LinkedFileEntity } from '../domain/entities/linked-file.entity';
+import { ILinkedFilesRepositoryPort } from '@/modules/manuscripts/linked-files/core/ports/linked-files-repository.port';
+import { LinkedFileEntity } from '@/modules/manuscripts/linked-files/core/domain/entities/linked-file.entity';
 
 @Injectable()
 export class ListLinkedFilesUseCase {

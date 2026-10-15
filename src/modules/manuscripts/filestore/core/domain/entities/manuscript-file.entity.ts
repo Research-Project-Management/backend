@@ -3,9 +3,9 @@
  * Domain Entity representing a Binary Asset in the Manuscripts Subsystem.
  */
 
-import { ContentHash } from '../value-objects/content-hash.vo';
-import { StorageKey } from '../value-objects/storage-key.vo';
-import { StorageQuotaExceededException } from '../exceptions/storage-quota-exceeded.exception';
+import { ContentHash } from '@/modules/manuscripts/filestore/core/domain/value-objects/content-hash.vo';
+import { StorageKey } from '@/modules/manuscripts/filestore/core/domain/value-objects/storage-key.vo';
+import { StorageQuotaExceededException } from '@/modules/manuscripts/filestore/core/domain/exceptions/storage-quota-exceeded.exception';
 
 export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB (Overleaf Parity)
 

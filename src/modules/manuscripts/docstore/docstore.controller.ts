@@ -59,7 +59,7 @@ export class DocstoreController {
     @Optional() private readonly realtimeService?: RealtimeService,
   ) {}
 
-  private handleError(error: any): never {
+  private handleError(error: unknown): never {
     if (error instanceof DocNotFoundError) {
       throw new NotFoundException(error.message);
     }

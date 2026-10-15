@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { RawXmpMetadata } from '../types/trusted-extraction.types';
+import { RawXmpMetadata } from '@/modules/library/extraction/types/trusted-extraction.types';
 
 /**
  * High-performance, zero-dependency XMP (Extensible Metadata Platform) XML parser.

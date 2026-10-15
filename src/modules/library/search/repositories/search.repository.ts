@@ -4,10 +4,13 @@ import { PrismaService } from '@/core';
 import { RedisCacheService } from '@/core';
 import { Prisma } from '@prisma/client';
 
-import { SearchOptions, FacetResult } from '../types/search.types';
-import { buildBaseSearchWhere } from '../utils/search.utils';
-import { SearchSpecificationBuilder } from '../types/search-specification.builder';
-import { TextSearchSpecification } from '../types/item-specifications';
+import {
+  SearchOptions,
+  FacetResult,
+  SearchSpecificationBuilder,
+  TextSearchSpecification,
+  sanitizeSearchQuery,
+} from '@/modules/library/search/domain';
 
 export type { SearchOptions, FacetResult };
 
@@ -28,6 +31,15 @@ export class SearchRepository implements OnModuleInit {
     return tx || this.prisma;
   }
 
+  private isProjectScope(projectId?: string): projectId is string {
+    return Boolean(
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal',
+    );
+  }
+
   /**
    * Builds the base Prisma WHERE clause for non-text filters using Specification Pattern.
    * Text search is handled separately via raw FTS or ILIKE fallback.
@@ -46,8 +58,8 @@ export class SearchRepository implements OnModuleInit {
    * Builds a Prisma text-search OR clause using Specification Pattern.
    * Used as fallback when tsvector is not available.
    */
-  private buildTextWhereIlike(q: string): Prisma.ItemWhereInput {
-    return new TextSearchSpecification(q).toPrismaWhere();
+  private buildTextWhereIlike(queryText: string): Prisma.ItemWhereInput {
+    return new TextSearchSpecification(queryText).toPrismaWhere();
   }
 
   async searchItems(
@@ -56,45 +68,46 @@ export class SearchRepository implements OnModuleInit {
     tx?: Prisma.TransactionClient,
   ) {
     const limit = Math.min(options.limit ?? 20, 100);
-    const q = options.q?.trim();
+    const queryText = options.q?.trim();
 
     if (!tx && this.cache) {
-      const scopeKey = options.projectId
+      const scopeKey = this.isProjectScope(options.projectId)
         ? `proj:${options.projectId}`
         : `user:${userId}`;
       const filterHash = createHash('sha256')
-        .update(JSON.stringify({ ...options, limit, q }))
+        .update(JSON.stringify({ ...options, limit, q: queryText }))
         .digest('hex');
       const cacheKey = `library:search:items:${scopeKey}:${filterHash}`;
 
       return this.cache.wrap(
         cacheKey,
-        () => this.executeSearchItems(userId, options, q, limit, tx),
+        () => this.executeSearchItems(userId, options, queryText, limit, tx),
         60, // 60s TTL for fast navigation & debounced typing
       );
     }
 
-    return this.executeSearchItems(userId, options, q, limit, tx);
+    return this.executeSearchItems(userId, options, queryText, limit, tx);
   }
 
   private async executeSearchItems(
     userId: string,
     options: SearchOptions,
-    q: string | undefined,
+    queryText: string | undefined,
     limit: number,
     tx?: Prisma.TransactionClient,
   ) {
     // ── Full-Text Search via PostgreSQL tsvector ────────────────────────────
     // Uses generated column `search_vector` (GIN index) added by migration
-    // `add_catalog_item_fts`. Falls back to ILIKE if migration hasn't run yet.
-    if (q && this.hasFtsColumn()) {
+    // `add_catalog_item_fts`. Falls back to ILIKE if migration hasn't run yet
+    // or if the query consists only of punctuation/symbols that strip to empty in tsquery.
+    const ftsSanitized = sanitizeSearchQuery(queryText);
+    if (queryText && ftsSanitized && this.hasFtsColumn()) {
       try {
-        return await this.searchItemsFts(userId, options, q, limit, tx);
-      } catch (err: any) {
+        return await this.searchItemsFts(userId, options, queryText, limit, tx);
+      } catch (err: unknown) {
         // Column might not exist yet (pre-migration) — fall through to ILIKE
-        this.logger.warn(
-          `FTS query failed, falling back to ILIKE: ${err?.message}`,
-        );
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`FTS query failed, falling back to ILIKE: ${errMsg}`);
       }
     }
     // ── ILIKE fallback (pre-migration or no text query) ────────────────────
@@ -104,16 +117,12 @@ export class SearchRepository implements OnModuleInit {
   private async searchItemsFts(
     userId: string,
     options: SearchOptions,
-    q: string,
+    queryText: string,
     limit: number,
     tx?: Prisma.TransactionClient,
   ) {
     // Build structured filters as SQL fragment
-    const hasProject = Boolean(
-      options.projectId &&
-      options.projectId !== 'user' &&
-      options.projectId !== 'me',
-    );
+    const hasProject = this.isProjectScope(options.projectId);
     const baseFilters: string[] = [
       hasProject
         ? `project_id = $1::uuid`
@@ -121,7 +130,10 @@ export class SearchRepository implements OnModuleInit {
       `deleted_at IS NULL`,
       `search_vector @@ plainto_tsquery('english', $2)`,
     ];
-    const params: any[] = [hasProject ? options.projectId : userId, q];
+    const params: unknown[] = [
+      hasProject ? options.projectId : userId,
+      queryText,
+    ];
     let paramIdx = 3;
 
     if (options.itemType) {
@@ -276,7 +288,7 @@ export class SearchRepository implements OnModuleInit {
     tx?: Prisma.TransactionClient,
   ): Promise<FacetResult> {
     // 1. Check Facet Cache (Cache-Aside)
-    const scopeKey = options.projectId
+    const scopeKey = this.isProjectScope(options.projectId)
       ? `proj:${options.projectId}`
       : `user:${userId}`;
     const filterHash = createHash('md5')
@@ -290,8 +302,9 @@ export class SearchRepository implements OnModuleInit {
         if (cached) {
           return cached;
         }
-      } catch (err: any) {
-        this.logger.debug(`Facet cache lookup error: ${err?.message}`);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Facet cache lookup error: ${errMsg}`);
       }
     }
 
@@ -459,22 +472,13 @@ export class SearchRepository implements OnModuleInit {
           'PostgreSQL FTS: search_vector column not found on table "items" — run migration "add_catalog_item_fts" to enable. Falling back to ILIKE.',
         );
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.ftsColumnExists = false;
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `PostgreSQL FTS: search_vector column check failed (${err?.message}) — falling back to ILIKE.`,
+        `PostgreSQL FTS: search_vector column check failed (${errMsg}) — falling back to ILIKE.`,
       );
     }
-  }
-
-  // ── Project Scope Operations ─────────────────────────────────────────────
-  async checkProjectMember(projectId: string, userId: string) {
-    return this.prisma.projectMember.findUnique({
-      where: {
-        projectId_userId: { projectId, userId },
-      },
-      select: { role: true },
-    });
   }
 
   // ── Search Attachment Anchor Operations ──────────────────────────────────
@@ -510,6 +514,22 @@ export class SearchRepository implements OnModuleInit {
   async deleteFullTextIndexByAttachmentId(attachmentId: string): Promise<void> {
     await this.prisma.fullTextIndex.deleteMany({
       where: { attachmentId },
+    });
+  }
+
+  async countIndexedAttachments(userId: string): Promise<number> {
+    if (typeof this.prisma?.attachment?.count !== 'function') {
+      return 0;
+    }
+    return this.prisma.attachment.count({
+      where: {
+        deletedAt: null,
+        item: {
+          userId,
+          projectId: null,
+          deletedAt: null,
+        },
+      },
     });
   }
 }

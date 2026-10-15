@@ -4,14 +4,14 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ITrackChangesRepositoryPort } from '../ports/track-changes-repository.port';
-import { IRealtimeNotifierPort } from '../ports/realtime-notifier.port';
-import { CommentThread } from '../domain/entities/comment-thread.entity';
-import { CommentReply } from '../domain/entities/comment-reply.entity';
+import { ITrackChangesRepositoryPort } from '@/modules/manuscripts/track-changes/core/ports/track-changes-repository.port';
+import { IRealtimeNotifierPort } from '@/modules/manuscripts/track-changes/core/ports/realtime-notifier.port';
+import { CommentThread } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-thread.entity';
+import { CommentReply } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-reply.entity';
 import {
   TextRangeVo,
   TextRangeProps,
-} from '../domain/value-objects/text-range.vo';
+} from '@/modules/manuscripts/track-changes/core/domain/value-objects/text-range.vo';
 
 export interface CreateCommentThreadInput {
   projectId: string;

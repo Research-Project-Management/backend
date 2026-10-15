@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { IngestionValidationException } from '../types/ingestion.errors';
-import { normalizeDoi } from '../../shared-kernel/utils/bibliographic.utils';
+import { IngestionValidationException } from '@/modules/library/ingestion/types/ingestion.errors';
+import { normalizeDoi } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 @Injectable()
 export class DoiParser {

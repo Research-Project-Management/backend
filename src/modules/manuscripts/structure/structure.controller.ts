@@ -41,7 +41,7 @@ import {
   CannotDeleteRootFolderError,
   RootDocNotFoundError,
   MaxProjectFilesExceededError,
-} from './core/domain/structure-errors';
+} from './domain';
 
 @ApiTags('Manuscripts - Project Structure & File Tree')
 @ApiBearerAuth('JWT-auth')
@@ -57,7 +57,7 @@ import {
 export class StructureController {
   constructor(private readonly structureService: StructureService) {}
 
-  private handleError(error: any): never {
+  private handleError(error: unknown): never {
     if (
       error instanceof NodeNotFoundError ||
       error instanceof RootDocNotFoundError

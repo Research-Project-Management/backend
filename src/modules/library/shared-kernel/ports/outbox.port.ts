@@ -2,14 +2,14 @@ export interface OutboxEventRecord {
   id: string;
   aggregateId: string;
   eventType: string;
-  payload: any;
+  payload: unknown;
   status: string;
   retryCount: number;
   userId: string;
   projectId?: string | null;
   createdAt: Date;
   processedAt?: Date | null;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface OutboxDispatchHandler {

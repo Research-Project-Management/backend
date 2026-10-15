@@ -1,12 +1,26 @@
-import { IsString, IsOptional, IsNumber, IsArray } from 'class-validator';
-import type { LinkMode, AttachmentType } from '../types/attachments.types';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsArray,
+  IsBoolean,
+} from 'class-validator';
+import type {
+  LinkMode,
+  AttachmentType,
+} from '@/modules/library/extraction/types/attachments.types';
 
 export class CreateAttachmentDto {
   @IsString()
   filename!: string;
 
+  @IsOptional()
   @IsString()
-  url!: string;
+  url?: string;
+
+  @IsOptional()
+  @IsString()
+  title?: string;
 
   @IsOptional()
   @IsString()
@@ -35,6 +49,20 @@ export class CreateAttachmentDto {
   @IsString()
   @IsOptional()
   attachmentType?: AttachmentType;
+
+  @IsOptional()
+  @IsBoolean()
+  isPrimary?: boolean;
+}
+
+export class CaptureSnapshotDto {
+  @IsOptional()
+  @IsString()
+  url?: string;
+
+  @IsOptional()
+  @IsString()
+  title?: string;
 }
 
 export class ReplaceAttachmentFileDto {

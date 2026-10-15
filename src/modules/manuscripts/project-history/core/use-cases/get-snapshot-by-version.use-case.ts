@@ -4,9 +4,9 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IHistoryRepositoryPort } from '../ports/history-repository.port';
-import { Snapshot } from '../domain/entities/snapshot.entity';
-import { VersionNotFoundException } from '../domain/exceptions/version-not-found.exception';
+import { IHistoryRepositoryPort } from '@/modules/manuscripts/project-history/core/ports/history-repository.port';
+import { Snapshot } from '@/modules/manuscripts/project-history/core/domain/entities/snapshot.entity';
+import { VersionNotFoundException } from '@/modules/manuscripts/project-history/core/domain/exceptions/version-not-found.exception';
 
 @Injectable()
 export class GetSnapshotByVersionUseCase {

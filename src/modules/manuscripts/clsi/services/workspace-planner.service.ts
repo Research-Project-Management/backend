@@ -1,0 +1,301 @@
+/**
+ * modules/manuscripts/clsi/services/workspace-planner.service.ts
+ * Service encapsulating project resolution, lightweight metadata planning,
+ * database document hydration (including Docstore cold-storage unarchiving
+ * and Filestore binary asset streaming), and post-compile snapshot checkpointing.
+ */
+
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import * as crypto from 'crypto';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '@/core';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
+import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { CompileManuscriptDto } from '../dto/clsi.dto';
+import {
+  planDbFileSet,
+  planInlineFileSet,
+  linesToText,
+  PlannedFileSet,
+} from '../domain/compile-fileset.planner';
+
+@Injectable()
+export class ClsiWorkspacePlannerService {
+  private readonly logger = new Logger(ClsiWorkspacePlannerService.name);
+  private readonly lastAutoSnapshotTimes = new Map<string, number>();
+
+  constructor(
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly docstoreService?: DocstoreService,
+    @Optional() private readonly filestoreService?: FilestoreService,
+    @Optional() private readonly realtimeService?: RealtimeService,
+  ) {}
+
+  /**
+   * Resolve the owning project when only a page/doc id was supplied.
+   */
+  public async resolveProjectId(dto: {
+    projectId?: string;
+    project_id?: string;
+    pageId?: string;
+    page_id?: string;
+  }): Promise<string> {
+    const projectId = dto.projectId || dto.project_id || '';
+    if (projectId) return projectId;
+
+    const pageId = dto.pageId || dto.page_id;
+    if (pageId && this.prisma) {
+      try {
+        const pageDoc = await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+          select: { projectId: true },
+        });
+        if (pageDoc?.projectId) return pageDoc.projectId;
+      } catch {
+        /* fall through to default project */
+      }
+    }
+    return 'default';
+  }
+
+  /**
+   * Plans the compile file set from lightweight metadata (no document bodies are read),
+   * so the cache can be consulted before any heavy I/O happens.
+   */
+  public async planFiles(
+    projectId: string,
+    dto: CompileManuscriptDto,
+  ): Promise<PlannedFileSet> {
+    const incomingFiles = { ...(dto.files || {}) };
+    const mainFile = dto.main_file || undefined;
+    const source = dto.source || '';
+
+    if (this.prisma && projectId !== 'default') {
+      try {
+        const [nodes, docs] = await Promise.all([
+          this.prisma.manuscriptNode.findMany({
+            where: { projectId },
+            orderBy: { sortOrder: 'asc' },
+            select: {
+              id: true,
+              docId: true,
+              path: true,
+              name: true,
+              type: true,
+              isRootDoc: true,
+            },
+          }),
+          this.prisma.manuscriptDoc.findMany({
+            where: { projectId, deleted: false },
+            select: {
+              id: true,
+              path: true,
+              rev: true,
+              sizeBytes: true,
+              updatedAt: true,
+              inStorage: true,
+            },
+          }),
+        ]);
+        return planDbFileSet({
+          nodes,
+          docs,
+          incomingFiles,
+          source,
+          mainFile,
+          pageId: dto.pageId || dto.page_id,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Could not load project documents from database: ${msg}`,
+        );
+      }
+    }
+    return planInlineFileSet({ incomingFiles, source, mainFile });
+  }
+
+  /**
+   * Loads document bodies for DB-backed entries in ONE `id IN (…)` query,
+   * unarchiving cold-storage docs via DocstoreService if available, and
+   * materializing binary ManuscriptFile blobs via FilestoreService.
+   */
+  public async hydrateFiles(
+    projectId: string,
+    plan: PlannedFileSet,
+  ): Promise<Record<string, string | Buffer>> {
+    const dbIds: string[] = [];
+    for (const s of plan.files.values()) {
+      if (s.kind !== 'db') continue;
+      dbIds.push(s.docId);
+    }
+
+    const contentById = new Map<string, string>();
+    if (dbIds.length > 0 && this.prisma) {
+      const rows = await this.prisma.manuscriptDoc.findMany({
+        where: { id: { in: dbIds } },
+        select: { id: true, lines: true, inStorage: true, sizeBytes: true },
+      });
+      for (const row of rows) {
+        const hasInlineLines = Array.isArray(row.lines) && row.lines.length > 0;
+        if (row.inStorage && row.sizeBytes > 0 && !hasInlineLines) {
+          if (this.docstoreService) {
+            try {
+              const hydratedDoc = await this.docstoreService.getDoc(
+                projectId,
+                row.id,
+              );
+              contentById.set(row.id, linesToText(hydratedDoc.lines));
+              continue;
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
+              this.logger.warn(
+                `Failed to unarchive cold-storage doc ${row.id} via DocstoreService: ${msg}`,
+              );
+            }
+          } else {
+            this.logger.warn(
+              `Cold-storage doc ${row.id} (${row.sizeBytes}B) has no inline body and DocstoreService is unavailable; compiling as empty.`,
+            );
+          }
+        }
+        contentById.set(row.id, linesToText(row.lines));
+      }
+    }
+
+    const out: Record<string, string | Buffer> = {};
+    for (const [filePath, s] of plan.files) {
+      out[filePath] =
+        s.kind === 'inline' ? s.content : (contentById.get(s.docId) ?? '');
+    }
+
+    if (this.prisma && this.filestoreService && projectId !== 'default') {
+      try {
+        const [binaryFiles, fileNodes] = await Promise.all([
+          this.prisma.manuscriptFile.findMany({
+            where: { projectId, deleted: false, deletedAt: null },
+            select: { id: true, name: true },
+          }),
+          this.prisma.manuscriptNode.findMany({
+            where: { projectId, type: 'FILE' },
+            select: { fileId: true, path: true, name: true },
+          }),
+        ]);
+
+        const pathByFileId = new Map<string, string>();
+        for (const n of fileNodes) {
+          if (n.fileId) {
+            const clean = (n.path || n.name || '')
+              .trim()
+              .replace(/\\/g, '/')
+              .replace(/^(\.\/)+/, '')
+              .replace(/^\/+/, '');
+            if (clean) pathByFileId.set(n.fileId, clean);
+          }
+        }
+
+        for (const bf of binaryFiles) {
+          const relPath =
+            pathByFileId.get(bf.id) ||
+            bf.name
+              .trim()
+              .replace(/\\/g, '/')
+              .replace(/^(\.\/)+/, '')
+              .replace(/^\/+/, '');
+          if (!relPath || out[relPath] !== undefined) continue;
+          try {
+            const { stream } = await this.filestoreService.openReadStream(
+              projectId,
+              bf.id,
+            );
+            const chunks: Buffer[] = [];
+            for await (const chunk of stream) {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            }
+            out[relPath] = Buffer.concat(chunks);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.debug(
+              `Skipping missing binary asset ${bf.id} (${relPath}): ${msg}`,
+            );
+          }
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Failed to load binary ManuscriptFile assets for project ${projectId}: ${msg}`,
+        );
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * Continuous Automated History Checkpoint (Overleaf Parity)
+   */
+  public async recordCompileSnapshotIfEligible(
+    projectId: string,
+    mergedFiles: Record<string, string | Buffer>,
+    metricEngine: string,
+    userId?: string,
+  ): Promise<void> {
+    if (!this.prisma || !projectId || projectId === 'default') return;
+
+    const lastTime = this.lastAutoSnapshotTimes.get(projectId) || 0;
+    if (Date.now() - lastTime < 30000) return;
+
+    try {
+      const latest = await this.prisma.manuscriptSnapshot.findFirst({
+        where: { projectId },
+        orderBy: { version: 'desc' },
+        select: { version: true },
+      });
+      const nextVersion = (latest?.version ?? 0) + 1;
+      const filesJson: Record<string, unknown> = {};
+      for (const [p, content] of Object.entries(mergedFiles)) {
+        if (typeof content !== 'string') continue;
+        const normalizedPath = p.startsWith('/') ? p : `/${p}`;
+        const hash = crypto.createHash('sha256').update(content).digest('hex');
+        const sizeBytes = Buffer.byteLength(content, 'utf8');
+        const lines = content.split('\n');
+        filesJson[normalizedPath] = {
+          path: normalizedPath,
+          type: 'doc',
+          lines,
+          content,
+          textContent: content,
+          hash,
+          contentHash: hash,
+          sizeBytes,
+          sizeInBytes: sizeBytes,
+          isRootDoc: normalizedPath === '/main.tex',
+        };
+      }
+      if (Object.keys(filesJson).length === 0) return;
+      await this.prisma.manuscriptSnapshot.create({
+        data: {
+          projectId,
+          version: nextVersion,
+          summary: `Compilation milestone (${metricEngine})`,
+          createdById: userId || null,
+          isAutomatic: true,
+          files: filesJson as unknown as Prisma.InputJsonValue,
+        },
+      });
+      this.lastAutoSnapshotTimes.set(projectId, Date.now());
+      this.realtimeService?.broadcastSnapshotCreated(projectId, {
+        version: nextVersion,
+        summary: `Compilation milestone (${metricEngine})`,
+        label: null,
+      });
+    } catch (snapErr) {
+      this.logger.debug(
+        `Continuous history auto-snapshot skipped for ${projectId}: ${snapErr}`,
+      );
+    }
+  }
+}
+
+export { ClsiWorkspacePlannerService as WorkspacePlannerService };

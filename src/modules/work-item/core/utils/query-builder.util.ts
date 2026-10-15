@@ -1,5 +1,5 @@
 import { Prisma, WorkItemPriority } from '@prisma/client';
-import { WorkItemFilterOptions } from '../types/work-item.types';
+import { WorkItemFilterOptions } from '@/modules/work-item/core/types/work-item.types';
 import { isUuid } from '@/core';
 
 export interface BuiltWorkItemQuery {

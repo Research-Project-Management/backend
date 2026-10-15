@@ -1,3 +1,14 @@
+import { Prisma } from '@prisma/client';
+import {
+  ItemDetail,
+  DuplicateCandidateItem,
+  CreateItemData,
+  UpdateItemData,
+  NoteEntity,
+  CreateNoteData,
+} from '@/modules/library/catalog';
+import { ItemFieldDefinition } from '@/modules/library/shared-kernel';
+
 export const CATALOG_GATEWAY_PORT = Symbol('CATALOG_GATEWAY_PORT');
 
 export interface ICatalogGatewayPort {
@@ -5,29 +16,40 @@ export interface ICatalogGatewayPort {
     userId: string,
     itemId: string,
     projectId?: string,
-  ): Promise<any | null>;
+  ): Promise<ItemDetail | null>;
   createItem(
     userId: string,
-    data: any,
-    options?: any,
+    data: CreateItemData,
+    options?: {
+      expectedVersion?: number;
+      suppressIndexing?: boolean;
+      projectId?: string;
+      source?: string;
+      idempotencyKey?: string;
+      correlationId?: string;
+    },
     projectId?: string,
-  ): Promise<any>;
+  ): Promise<ItemDetail>;
   updateItem(
     userId: string,
     itemId: string,
-    data: any,
+    data: UpdateItemData,
     expectedVersion?: number,
     projectId?: string,
-  ): Promise<any>;
+  ): Promise<ItemDetail>;
   deleteItem(userId: string, itemId: string, projectId?: string): Promise<void>;
   findDuplicateCandidateItems(
     userId: string,
     limit?: number,
     projectId?: string,
-  ): Promise<any[]>;
-  findByIds(userId: string, ids: string[], projectId?: string): Promise<any[]>;
+  ): Promise<DuplicateCandidateItem[]>;
+  findByIds(
+    userId: string,
+    ids: string[],
+    projectId?: string,
+  ): Promise<ItemDetail[]>;
   mergeItems(
-    tx: any,
+    tx: Prisma.TransactionClient,
     duplicateItemIds: string[],
     primaryItemId: string,
   ): Promise<void>;
@@ -35,10 +57,10 @@ export interface ICatalogGatewayPort {
     userId: string,
     limit?: number,
     projectId?: string,
-  ): Promise<any[]>;
-  getOrderedFields?(itemType: string): any[];
+  ): Promise<ItemDetail[]>;
+  getOrderedFields?(itemType: string): ItemFieldDefinition[];
   getPrimaryCreatorType?(itemType: string): string;
-  createNote?(userId: string, data: any): Promise<any>;
+  createNote?(userId: string, data: CreateNoteData): Promise<NoteEntity>;
   itemExists?(
     userId: string,
     itemId: string,
@@ -59,15 +81,22 @@ export interface ICatalogGatewayPort {
       id: string;
       title: string;
       matchReason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
-      evidence: Record<string, any>;
+      evidence: Record<string, unknown>;
     } | null;
     candidateItems: Array<{
       id: string;
       title: string;
-      doi: string | null;
-      year: number | null;
-      citationKey: string | null;
-      authors: string[];
+      score?: number;
+      reasons?: string[];
+      doi?: string | null;
+      arxivId?: string | null;
+      pmid?: string | null;
+      isbn?: string | null;
+      year?: number | null;
+      itemType?: string | null;
+      authors?: string[];
+      citationKey?: string | null;
+      creators?: unknown[];
     }>;
   }>;
 }

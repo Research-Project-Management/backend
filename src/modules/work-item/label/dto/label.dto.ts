@@ -119,7 +119,7 @@ export class ReorderLabelsDto {
   labels!: ReorderLabelItemDto[];
 }
 
-// ── Generic / Legacy DTOs ────────────────────────────────────────────────────
+// ── Workspace-Level Label DTOs ───────────────────────────────────────────────
 
 export class QueryLabelDto {
   @ApiPropertyOptional()
@@ -133,17 +133,7 @@ export class QueryLabelDto {
   projectId?: string;
 }
 
-export class CreateLabelDto {
-  @ApiProperty({ description: 'Label name' })
-  @IsString()
-  @IsNotEmpty({ message: 'Label name is required' })
-  name!: string;
-
-  @ApiPropertyOptional()
-  @IsString()
-  @IsOptional()
-  color?: string;
-
+export class CreateLabelDto extends CreateProjectLabelDto {
   @ApiPropertyOptional()
   @IsString()
   @IsOptional()
@@ -153,45 +143,11 @@ export class CreateLabelDto {
   @IsString()
   @IsOptional()
   projectId?: string;
-
-  @ApiPropertyOptional()
-  @IsString()
-  @IsOptional()
-  description?: string;
-
-  @ApiPropertyOptional()
-  @IsUUID()
-  @IsOptional()
-  parentId?: string;
 }
 
-export class UpdateLabelDto {
-  @ApiPropertyOptional()
-  @IsString()
-  @IsOptional()
-  name?: string;
-
-  @ApiPropertyOptional()
-  @IsString()
-  @IsOptional()
-  color?: string;
-
+export class UpdateLabelDto extends UpdateProjectLabelDto {
   @ApiPropertyOptional()
   @IsString()
   @IsOptional()
   type?: string;
-
-  @ApiPropertyOptional()
-  @IsString()
-  @IsOptional()
-  description?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  parentId?: string | null;
-
-  @ApiPropertyOptional()
-  @IsNumber()
-  @IsOptional()
-  sortOrder?: number;
 }

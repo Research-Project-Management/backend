@@ -2,7 +2,11 @@ import {
   ItemMetadata,
   CreatorInput,
   CreatorType,
-} from '../types/metadata.types';
+} from '@/modules/library/ingestion/types/metadata.types';
+import {
+  SCHEMA_V42_DATA,
+  FIELD_ALIASES,
+} from '@/modules/library/shared-kernel/types/schema.constants';
 import {
   cleanBibliographicText,
   cleanAbstractText,
@@ -21,8 +25,77 @@ import {
   normalizePageRange,
   isInstitutionName,
   stripLatexBraces,
-} from '../../shared-kernel/utils/bibliographic.utils';
-import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+import {
+  resolveBidirectionalBaseFields,
+  resolveCanonicalCreatorRole,
+} from '@/modules/library/shared-kernel/domain/zotero-field-harmonizer.domain';
+
+const SPECIALLY_NORMALIZED_KEYS = new Set([
+  'title',
+  'shortTitle',
+  'itemType',
+  'doi',
+  'DOI',
+  'arxivId',
+  'archiveID',
+  'archiveId',
+  'pmid',
+  'PMID',
+  'pmcid',
+  'PMCID',
+  'isbn',
+  'ISBN',
+  'issn',
+  'ISSN',
+  'year',
+  'publicationDate',
+  'date',
+  'accessedAt',
+  'accessDate',
+  'creators',
+  'authors',
+  'editors',
+  'contributors',
+  'publicationTitle',
+  'publisher',
+  'volume',
+  'issue',
+  'pages',
+  'abstract',
+  'abstractNote',
+  'url',
+  'URL',
+  'openAccessPdfUrl',
+  'tags',
+  'keywords',
+  'labels',
+  'notes',
+  'extra',
+  'extraFields',
+  'citationCount',
+  'referenceCount',
+  'numberOfPages',
+  'pageCount',
+]);
+
+const SCHEMA_DRIVEN_STRING_FIELDS: string[] = Array.from(
+  new Set([
+    ...SCHEMA_V42_DATA.distinctFieldKeys,
+    ...Object.keys(FIELD_ALIASES),
+    ...Object.values(FIELD_ALIASES),
+    'journal',
+    'journalAbbr',
+    'type',
+    'partNumber',
+    'partTitle',
+    'eventPlace',
+    'priorityDate',
+    'chapter',
+    'license',
+  ]),
+).filter((key) => !SPECIALLY_NORMALIZED_KEYS.has(key));
 
 export class NormalizationPolicy {
   private static readonly BANNED_STRINGS = new Set([
@@ -41,17 +114,54 @@ export class NormalizationPolicy {
    */
   normalize(raw: Partial<ItemMetadata>): ItemMetadata {
     const result: ItemMetadata = {};
+    const rawRecord = raw as Record<string, unknown>;
+    const rawExtra =
+      raw.extraFields && typeof raw.extraFields === 'object'
+        ? raw.extraFields
+        : {};
+    const getRawVal = (key: string): unknown => {
+      if (rawRecord[key] !== undefined && rawRecord[key] !== null) {
+        return rawRecord[key];
+      }
+      return rawExtra[key];
+    };
 
-    // 1. Title (Only set if present in candidate)
-    if (raw.title) {
-      const cleanTitle = this.cleanString(raw.title);
-      if (cleanTitle) {
-        result.title = normalizeAcademicTitleCase(stripLatexBraces(cleanTitle));
+    // 2. Item Type — normalise first so base field mappings can use it
+    const rawItemType = getRawVal('itemType');
+    if (rawItemType) {
+      const cleaned = this.cleanString(rawItemType);
+      if (cleaned) {
+        const canonical = normalizeItemType(cleaned);
+        result.itemType = canonical;
       }
     }
 
-    if (raw.shortTitle) {
-      const cleanShort = this.cleanString(raw.shortTitle);
+    const baseMapForType = result.itemType
+      ? (SCHEMA_V42_DATA.baseFieldMappings?.[result.itemType] ?? {})
+      : {};
+
+    // 1. Title (Only set if present in candidate or mapped base title field like caseName / nameOfAct / subject)
+    const mappedTitleKey = baseMapForType.title;
+    const rawTitleVal =
+      raw.title ?? (mappedTitleKey ? getRawVal(mappedTitleKey) : undefined);
+    if (rawTitleVal) {
+      const cleanTitle = this.cleanString(rawTitleVal);
+      if (cleanTitle) {
+        const formattedTitle = normalizeAcademicTitleCase(
+          stripLatexBraces(cleanTitle),
+        );
+        result.title = formattedTitle;
+        if (mappedTitleKey) {
+          (result as Record<string, unknown>)[mappedTitleKey] =
+            this.cleanString(getRawVal(mappedTitleKey)) || formattedTitle;
+        }
+      }
+    }
+
+    if (raw.shortTitle ?? getRawVal('shortTitle')) {
+      const cleanShort = this.cleanString(
+        raw.shortTitle ?? getRawVal('shortTitle'),
+      );
       if (cleanShort) {
         result.shortTitle = normalizeAcademicTitleCase(
           stripLatexBraces(cleanShort),
@@ -59,43 +169,49 @@ export class NormalizationPolicy {
       }
     }
 
-    // 2. Item Type — normalise only when a value is present.
-    if (raw.itemType) {
-      const cleaned = this.cleanString(raw.itemType);
-      if (cleaned) {
-        const canonical = normalizeItemType(cleaned);
-        result.itemType = canonical;
-      }
-    }
-
     // 3. DOI
-    if (raw.doi) {
-      const cleanDoi = this.cleanString(raw.doi);
+    const rawDoi = raw.doi ?? getRawVal('DOI') ?? getRawVal('doi');
+    if (rawDoi) {
+      const cleanDoi = this.cleanString(rawDoi);
       if (cleanDoi) {
         result.doi = normalizeDoi(cleanDoi) || cleanDoi;
       }
     }
 
     // 4. Other Identifiers
-    if (raw.arxivId) {
-      const cleanArxiv = this.cleanString(raw.arxivId);
-      if (cleanArxiv)
-        result.arxivId = normalizeArxivId(cleanArxiv) || cleanArxiv;
+    const rawArxiv =
+      raw.arxivId ??
+      getRawVal('archiveID') ??
+      getRawVal('archiveId') ??
+      getRawVal('arxivId');
+    if (rawArxiv) {
+      const cleanArxiv = this.cleanString(rawArxiv);
+      if (cleanArxiv) {
+        const normArxiv = normalizeArxivId(cleanArxiv) || cleanArxiv;
+        result.arxivId = normArxiv;
+        if (getRawVal('archiveID') !== undefined) {
+          (result as Record<string, unknown>).archiveID = cleanArxiv;
+        }
+      }
     }
-    if (raw.pmid) {
-      const cleanPmid = this.cleanString(raw.pmid);
+    const rawPmid = raw.pmid ?? getRawVal('PMID') ?? getRawVal('pmid');
+    if (rawPmid) {
+      const cleanPmid = this.cleanString(rawPmid);
       if (cleanPmid) result.pmid = normalizePmid(cleanPmid) || cleanPmid;
     }
-    if (raw.pmcid) {
-      const cleanPmcid = this.cleanString(raw.pmcid);
+    const rawPmcid = raw.pmcid ?? getRawVal('PMCID') ?? getRawVal('pmcid');
+    if (rawPmcid) {
+      const cleanPmcid = this.cleanString(rawPmcid);
       if (cleanPmcid) result.pmcid = normalizePmcid(cleanPmcid) || cleanPmcid;
     }
-    if (raw.isbn) {
-      const cleanIsbn = this.cleanString(raw.isbn);
+    const rawIsbn = raw.isbn ?? getRawVal('ISBN') ?? getRawVal('isbn');
+    if (rawIsbn) {
+      const cleanIsbn = this.cleanString(rawIsbn);
       if (cleanIsbn) result.isbn = normalizeIsbn(cleanIsbn) || cleanIsbn;
     }
-    if (raw.issn) {
-      const cleanIssn = this.cleanString(raw.issn);
+    const rawIssn = raw.issn ?? getRawVal('ISSN') ?? getRawVal('issn');
+    if (rawIssn) {
+      const cleanIssn = this.cleanString(rawIssn);
       if (cleanIssn) result.issn = normalizeIssn(cleanIssn) || cleanIssn;
     }
 
@@ -110,25 +226,39 @@ export class NormalizationPolicy {
       }
     }
 
-    if (raw.publicationDate) {
-      const cleanDate = this.cleanString(raw.publicationDate);
+    const mappedDateKey = baseMapForType.date;
+    const rawPubDate =
+      raw.publicationDate ??
+      raw.date ??
+      (mappedDateKey ? getRawVal(mappedDateKey) : undefined) ??
+      getRawVal('filingDate');
+    if (rawPubDate) {
+      const cleanDate = this.cleanString(rawPubDate);
       if (cleanDate) {
-        result.publicationDate = cleanDate;
+        if (raw.publicationDate || mappedDateKey) {
+          result.publicationDate = cleanDate;
+        }
+        if (raw.date && !result.publicationDate) {
+          result.date = cleanDate;
+        } else if (raw.date) {
+          result.date = this.cleanString(raw.date) || cleanDate;
+        }
+        if (mappedDateKey) {
+          (result as Record<string, unknown>)[mappedDateKey] =
+            this.cleanString(getRawVal(mappedDateKey)) || cleanDate;
+        }
         if (!result.year) {
           const match = cleanDate.match(/\b(?:1\d{3}|20\d{2})\b/);
           if (match) result.year = parseInt(match[0], 10);
         }
       }
     }
-    if (raw.date && !result.publicationDate) {
-      const cleanDate = this.cleanString(raw.date);
-      if (cleanDate) result.date = cleanDate;
-    }
-    if (raw.accessedAt) {
+    const rawAccessed = raw.accessedAt ?? getRawVal('accessDate');
+    if (rawAccessed) {
       const parsed =
-        raw.accessedAt instanceof Date
-          ? raw.accessedAt
-          : new Date(String(raw.accessedAt));
+        rawAccessed instanceof Date
+          ? rawAccessed
+          : new Date(String(rawAccessed));
       if (!Number.isNaN(parsed.getTime())) result.accessedAt = parsed;
     }
 
@@ -137,6 +267,7 @@ export class NormalizationPolicy {
       raw.creators,
       raw.authors,
       raw.editors,
+      result.itemType,
     );
     if (creators.length > 0) {
       result.creators = creators;
@@ -149,37 +280,43 @@ export class NormalizationPolicy {
     }
 
     // 7. Publication Details
-    const pubTitle = this.cleanString(raw.publicationTitle || raw.journal);
+    const mappedPubTitleKey = baseMapForType.publicationTitle;
+    const pubTitle = this.cleanString(
+      raw.publicationTitle ||
+        raw.journal ||
+        (mappedPubTitleKey ? getRawVal(mappedPubTitleKey) : undefined),
+    );
     if (pubTitle) result.publicationTitle = pubTitle;
 
-    const publisher = this.cleanString(raw.publisher);
+    const mappedPublisherKey = baseMapForType.publisher;
+    const publisher = this.cleanString(
+      raw.publisher ||
+        (mappedPublisherKey ? getRawVal(mappedPublisherKey) : undefined),
+    );
     if (publisher) result.publisher = publisher;
 
-    const volume = this.cleanString(raw.volume);
+    const mappedVolumeKey = baseMapForType.volume;
+    const volume = this.cleanString(
+      raw.volume || (mappedVolumeKey ? getRawVal(mappedVolumeKey) : undefined),
+    );
     if (volume) result.volume = volume;
 
-    const issue = this.cleanString(raw.issue);
+    const mappedIssueKey = baseMapForType.issue || baseMapForType.number;
+    const issue = this.cleanString(
+      raw.issue || (mappedIssueKey ? getRawVal(mappedIssueKey) : undefined),
+    );
     if (issue) result.issue = issue;
 
-    const stringFields: (keyof ItemMetadata)[] = [
-      'journal',
-      'journalAbbr',
-      'place',
-      'section',
-      'partNumber',
-      'partTitle',
-      'series',
-      'seriesTitle',
-      'seriesText',
-      'seriesNumber',
-      'edition',
-      'repository',
-      'type',
-      'archiveLocation',
-    ];
-    for (const field of stringFields) {
-      const value = this.cleanString(raw[field]);
-      if (value) (result as Record<string, unknown>)[String(field)] = value;
+    for (const field of SCHEMA_DRIVEN_STRING_FIELDS) {
+      const value = this.cleanString(getRawVal(field));
+      if (value) (result as Record<string, unknown>)[field] = value;
+    }
+    const jAbbr = this.cleanString(
+      getRawVal('journalAbbr') ?? getRawVal('journalAbbreviation'),
+    );
+    if (jAbbr) {
+      result.journalAbbr = jAbbr;
+      (result as Record<string, unknown>).journalAbbreviation = jAbbr;
     }
 
     const pageNum = raw.numberOfPages ?? raw.numPages ?? raw.pageCount;
@@ -187,6 +324,8 @@ export class NormalizationPolicy {
       const cleanNum =
         typeof pageNum === 'number' ? pageNum : parseInt(String(pageNum), 10);
       if (!isNaN(cleanNum) && cleanNum > 0) {
+        result.numberOfPages = cleanNum;
+        result.numPages = String(cleanNum);
         result.extraFields = {
           ...(result.extraFields || {}),
           numberOfPages: cleanNum,
@@ -195,11 +334,21 @@ export class NormalizationPolicy {
       }
     }
 
-    const pages = this.cleanString(raw.pages);
+    const mappedPagesKey = baseMapForType.pages;
+    const pages = this.cleanString(
+      raw.pages || (mappedPagesKey ? getRawVal(mappedPagesKey) : undefined),
+    );
     if (pages) result.pages = normalizePageRange(pages) || pages;
 
     // 8. Abstract
-    const rawAbsBoth = [raw.abstract, raw.abstractNote]
+    const rawAbsBoth = [
+      raw.abstract,
+      raw.abstractNote,
+      typeof rawExtra.abstractNote === 'string'
+        ? rawExtra.abstractNote
+        : undefined,
+      typeof rawExtra.abstract === 'string' ? rawExtra.abstract : undefined,
+    ]
       .filter(Boolean)
       .sort((a, b) => (b?.length ?? 0) - (a?.length ?? 0))[0];
     const abstractText =
@@ -210,8 +359,9 @@ export class NormalizationPolicy {
     }
 
     // 9. URL
-    if (raw.url) {
-      const cleanUrl = this.cleanString(raw.url);
+    const rawUrl = raw.url ?? getRawVal('URL') ?? getRawVal('url');
+    if (rawUrl) {
+      const cleanUrl = this.cleanString(rawUrl);
       if (cleanUrl && /^https?:\/\//i.test(cleanUrl)) {
         result.url = cleanUrl;
       }
@@ -294,7 +444,7 @@ export class NormalizationPolicy {
     }
     if (Array.isArray(raw.seeAlso) && raw.seeAlso.length > 0) {
       result.seeAlso = raw.seeAlso
-        .map((s: any) => (typeof s === 'string' ? s.trim() : ''))
+        .map((s: unknown) => (typeof s === 'string' ? s.trim() : ''))
         .filter(Boolean);
     }
     if (raw.relations && typeof raw.relations === 'object') {
@@ -315,8 +465,10 @@ export class NormalizationPolicy {
 
     if (Array.isArray(raw.editors)) {
       const editors = raw.editors
-        .map((editor: any) => this.cleanString(editor))
-        .filter((editor: any): editor is string => Boolean(editor));
+        .map((editor: unknown) => this.cleanString(editor))
+        .filter((editor: string | undefined): editor is string =>
+          Boolean(editor),
+        );
       if (editors.length > 0) result.editors = editors;
     }
 
@@ -406,6 +558,10 @@ export class NormalizationPolicy {
       };
     }
 
+    if (result.itemType) {
+      resolveBidirectionalBaseFields(result, result.itemType, undefined, false);
+    }
+
     return result;
   }
 
@@ -436,9 +592,14 @@ export class NormalizationPolicy {
       if (typeof value === 'string' && !value.trim()) continue;
       if (Array.isArray(value) && value.length === 0) continue;
 
-      const key = rawKey === 'archiveID' ? 'archiveId' : rawKey;
-      if (key === 'archiveId' && cleaned[key] !== undefined) continue;
-      cleaned[key] = value;
+      if (rawKey === 'archiveID') {
+        cleaned.archiveID = value;
+        if (cleaned.archiveId === undefined) {
+          cleaned.archiveId = value;
+        }
+        continue;
+      }
+      cleaned[rawKey] = value;
     }
 
     return cleaned;
@@ -448,15 +609,19 @@ export class NormalizationPolicy {
     creatorsInput?: CreatorInput[],
     authorsInput?: string[],
     editorsInput?: string[],
+    itemType?: string,
   ): CreatorInput[] {
     const list: CreatorInput[] = [];
 
     const append = (creator: CreatorInput) => {
-      const creatorType = (creator.creatorType as CreatorType) || 'author';
+      const creatorType = resolveCanonicalCreatorRole(creator.creatorType, {
+        itemType,
+      });
       let firstName = (creator.firstName || '').trim();
       let lastName = (creator.lastName || '').trim();
       let fullName = (creator.fullName || creator.name || '').trim();
       let fieldMode: number | undefined = creator.fieldMode;
+      const shortName = this.cleanString(creator.shortName);
 
       if (fieldMode === 1) {
         const single = this.cleanString(lastName || fullName || firstName);
@@ -467,6 +632,7 @@ export class NormalizationPolicy {
           fullName: single,
           lastName: single,
           fieldMode: 1,
+          ...(shortName ? { shortName } : {}),
         });
         return;
       }
@@ -521,6 +687,7 @@ export class NormalizationPolicy {
         firstName: fieldMode === 1 ? undefined : cleanFirst || undefined,
         lastName: cleanLast || (fieldMode === 1 ? effectiveName : undefined),
         fieldMode: fieldMode === 1 ? 1 : 0,
+        ...(shortName ? { shortName } : {}),
       });
     };
 

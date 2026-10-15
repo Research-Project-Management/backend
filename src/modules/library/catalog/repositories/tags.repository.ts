@@ -168,15 +168,84 @@ export class TagsRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
-    const scopeWhere: Prisma.TagWhereInput =
-      projectId && projectId !== 'user'
-        ? { id, projectId }
-        : { id, userId, projectId: null };
+    const isProject = Boolean(projectId && projectId !== 'user');
+    const scopeWhere: Prisma.TagWhereInput = isProject
+      ? { id, projectId }
+      : { id, userId, projectId: null };
 
     const tag = await client.tag.findFirst({
       where: scopeWhere,
     });
     if (!tag) return null;
+
+    // If renaming to a name that already exists on another tag in the same scope,
+    // non-destructively merge itemTags into the existing target tag and remove the duplicate tag.
+    if (
+      data.name !== undefined &&
+      data.name.trim().toLowerCase() !== tag.name.trim().toLowerCase()
+    ) {
+      const targetWhere: Prisma.TagWhereInput = isProject
+        ? {
+            projectId,
+            id: { not: tag.id },
+            name: { equals: data.name, mode: 'insensitive' },
+          }
+        : {
+            userId,
+            projectId: null,
+            id: { not: tag.id },
+            name: { equals: data.name, mode: 'insensitive' },
+          };
+      const conflictingTag = await client.tag.findFirst({
+        where: targetWhere,
+      });
+
+      if (conflictingTag) {
+        if (
+          typeof client.itemTag?.findMany === 'function' &&
+          typeof client.itemTag?.deleteMany === 'function'
+        ) {
+          const sourceLinks = await client.itemTag.findMany({
+            where: { tagId: tag.id },
+            select: { itemId: true },
+          });
+          const targetLinks = await client.itemTag.findMany({
+            where: { tagId: conflictingTag.id },
+            select: { itemId: true },
+          });
+          const targetItemIds = new Set(targetLinks.map((l) => l.itemId));
+          const missingItemIds = sourceLinks
+            .map((l) => l.itemId)
+            .filter((itemId) => !targetItemIds.has(itemId));
+
+          if (
+            missingItemIds.length > 0 &&
+            typeof client.itemTag.createMany === 'function'
+          ) {
+            await client.itemTag.createMany({
+              data: missingItemIds.map((itemId) => ({
+                tagId: conflictingTag.id,
+                itemId,
+              })),
+              skipDuplicates: true,
+            });
+          }
+          await client.itemTag.deleteMany({
+            where: { tagId: tag.id },
+          });
+        }
+        await client.tag.delete({
+          where: { id: tag.id },
+        });
+        return client.tag.update({
+          where: { id: conflictingTag.id },
+          data: {
+            ...(data.color !== undefined ? { color: data.color } : {}),
+            ...(data.type !== undefined ? { type: data.type } : {}),
+          },
+        });
+      }
+    }
 
     return client.tag.update({
       where: { id: tag.id },

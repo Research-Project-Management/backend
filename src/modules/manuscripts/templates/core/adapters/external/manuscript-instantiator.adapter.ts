@@ -10,10 +10,10 @@ import {
   IProjectInstantiatorPort,
   InstantiateProjectInput,
   InstantiatedProjectResult,
-} from '../../ports/project-instantiator.port';
+} from '@/modules/manuscripts/templates/core/ports/project-instantiator.port';
 import { PrismaService } from '@/core';
-import { StructureService } from '../../../../structure/structure.service';
-import { DocstoreService } from '../../../../docstore/docstore.service';
+import { StructureService } from '@/modules/manuscripts/structure/structure.service';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 
 @Injectable()
 export class ManuscriptInstantiatorAdapter implements IProjectInstantiatorPort {
@@ -115,24 +115,32 @@ export class ManuscriptInstantiatorAdapter implements IProjectInstantiatorPort {
             parentFolderId = dirNode.id;
           }
 
-          // Create structure node
-          const node = await this.structureService.createNode(finalProjectId, {
+          const isRootDoc =
+            filePath === template.mainFile ||
+            `/${filePath.replace(/^\//, '')}` ===
+              `/${template.mainFile.replace(/^\//, '')}`;
+
+          // Create doc in Docstore first so docId exists in manuscript_docs
+          const createdDoc = await this.docstoreService.createDoc(
+            finalProjectId,
+            {
+              path: filePath.startsWith('/') ? filePath : `/${filePath}`,
+              lines: content.split('\n'),
+              version: 1,
+            },
+          );
+
+          // Create structure node linked to the created docId
+          await this.structureService.createNode(finalProjectId, {
             name: fileName,
             type: 'DOC',
             parentId: parentFolderId,
+            docId: createdDoc._id,
+            isRootDoc,
           });
-
-          // Populate doc content in Docstore
-          if (node?.docId) {
-            await this.docstoreService.updateDoc(finalProjectId, node.docId, {
-              lines: content.split('\n'),
-              version: 1,
-            });
-          }
-        } catch (err: any) {
-          this.logger.debug(
-            `Could not write node/doc for ${filePath}: ${err?.message}`,
-          );
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.debug(`Could not write node/doc for ${filePath}: ${msg}`);
         }
       }
     }

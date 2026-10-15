@@ -1,10 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService, isUuid } from '@/core';
-import { WorkItem, ProjectMember, Prisma } from '@prisma/client';
+import { PrismaService } from '@/core';
+import { WorkItem, ProjectMember } from '@prisma/client';
 import {
   ProjectSettingsWithAssignee,
   ELIGIBLE_ASSIGNEE_ROLES,
 } from './types/assignment.types';
+import {
+  USER_MINIMAL_SELECT,
+  mapUserMinimal,
+  buildWorkItemIdOrIdentifierWhere,
+} from '@/modules/work-item/common/types/shared.types';
 
 export type WorkItemWithProject = WorkItem & {
   /** JSON array of all assignee user IDs (multi-assignee). Prisma v6 field. */
@@ -26,31 +31,16 @@ export class AssignmentRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
   async findWorkItem(workItemId: string): Promise<WorkItem | null> {
-    if (isUuid(workItemId)) {
-      return this.prismaService.workItem.findFirst({
-        where: { id: workItemId, deletedAt: null },
-      });
-    }
     return this.prismaService.workItem.findFirst({
-      where: {
-        identifier: { equals: workItemId, mode: 'insensitive' },
-        deletedAt: null,
-      },
+      where: buildWorkItemIdOrIdentifierWhere(workItemId),
     });
   }
 
   async findWorkItemWithProject(
     workItemId: string,
   ): Promise<WorkItemWithProject | null> {
-    const whereClause: Prisma.WorkItemWhereInput = isUuid(workItemId)
-      ? { id: workItemId, deletedAt: null }
-      : {
-          identifier: { equals: workItemId, mode: 'insensitive' },
-          deletedAt: null,
-        };
-
     const item = await this.prismaService.workItem.findFirst({
-      where: whereClause,
+      where: buildWorkItemIdOrIdentifierWhere(workItemId),
       include: {
         project: {
           select: {
@@ -59,30 +49,14 @@ export class AssignmentRepository {
           },
         },
         assignee: {
-          select: {
-            id: true,
-            email: true,
-            profile: {
-              select: {
-                name: true,
-                avatar: true,
-              },
-            },
-          },
+          select: USER_MINIMAL_SELECT,
         },
       },
     });
     if (!item) return null;
     return {
       ...item,
-      assignee: item.assignee
-        ? {
-            id: item.assignee.id,
-            email: item.assignee.email,
-            name: item.assignee.profile?.name ?? 'User',
-            avatar: item.assignee.profile?.avatar ?? null,
-          }
-        : null,
+      assignee: mapUserMinimal(item.assignee),
     };
   }
 
@@ -99,16 +73,7 @@ export class AssignmentRepository {
       },
       include: {
         user: {
-          select: {
-            id: true,
-            email: true,
-            profile: {
-              select: {
-                name: true,
-                avatar: true,
-              },
-            },
-          },
+          select: USER_MINIMAL_SELECT,
         },
       },
     });
@@ -126,16 +91,7 @@ export class AssignmentRepository {
       },
       include: {
         user: {
-          select: {
-            id: true,
-            email: true,
-            profile: {
-              select: {
-                name: true,
-                avatar: true,
-              },
-            },
-          },
+          select: USER_MINIMAL_SELECT,
         },
       },
     });
@@ -160,16 +116,7 @@ export class AssignmentRepository {
       },
       include: {
         user: {
-          select: {
-            id: true,
-            email: true,
-            profile: {
-              select: {
-                name: true,
-                avatar: true,
-              },
-            },
-          },
+          select: USER_MINIMAL_SELECT,
         },
       },
       orderBy: {
@@ -179,12 +126,7 @@ export class AssignmentRepository {
 
     return members.map((m) => ({
       ...m,
-      user: {
-        id: m.user.id,
-        email: m.user.email,
-        name: m.user.profile?.name ?? 'User',
-        avatar: m.user.profile?.avatar ?? null,
-      },
+      user: mapUserMinimal(m.user),
     }));
   }
 
@@ -338,30 +280,11 @@ export class AssignmentRepository {
 
     const users = await this.prismaService.user.findMany({
       where: { id: { in: userIds } },
-      select: {
-        id: true,
-        email: true,
-        profile: {
-          select: {
-            name: true,
-            avatar: true,
-          },
-        },
-      },
+      select: USER_MINIMAL_SELECT,
     });
 
     // Preserve the original order (important: primary assignee is first)
-    const userMap = new Map(
-      users.map((u) => [
-        u.id,
-        {
-          id: u.id,
-          email: u.email,
-          name: u.profile?.name ?? 'User',
-          avatar: u.profile?.avatar ?? null,
-        },
-      ]),
-    );
+    const userMap = new Map(users.map((u) => [u.id, mapUserMinimal(u)]));
     return userIds
       .map((id) => userMap.get(id))
       .filter(

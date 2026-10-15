@@ -7,10 +7,14 @@ import {
   ProviderName,
   ProviderResult,
   QueryType,
-} from '../types/metadata.types';
-import { normalizeIsbn } from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/metadata-executor.service';
-import { getAcademicUserAgent } from '../../shared-kernel/core/constants/academic-client.constants';
+} from '@/modules/library/ingestion/types/metadata.types';
+import {
+  normalizeIsbn,
+  normalizeTags,
+} from '@/modules/library/ingestion/domain/metadata.domain';
+import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
+import { getAcademicUserAgent } from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
+import { parseCreatorString } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 @Injectable()
 export class OpenLibraryProvider implements MetadataProvider {
@@ -87,8 +91,19 @@ export class OpenLibraryProvider implements MetadataProvider {
     cleanIsbn: string,
   ): ProviderResult {
     const rawTitle =
-      typeof item.title === 'string' ? item.title.trim() : 'Untitled Book';
-    const title = rawTitle || 'Untitled Book';
+      typeof item.title === 'string' && item.title.trim()
+        ? item.title.trim()
+        : 'Untitled Book';
+    const rawSubtitle =
+      typeof item.subtitle === 'string' && item.subtitle.trim()
+        ? item.subtitle.trim()
+        : undefined;
+    const title =
+      rawSubtitle && !rawTitle.includes(':')
+        ? `${rawTitle}: ${rawSubtitle}`
+        : rawTitle;
+    const shortTitle =
+      rawSubtitle && !rawTitle.includes(':') ? rawTitle : undefined;
 
     const authors: string[] = [];
     if (Array.isArray(item.authors)) {
@@ -112,16 +127,55 @@ export class OpenLibraryProvider implements MetadataProvider {
     let publisher: string | undefined;
     if (Array.isArray(item.publishers) && item.publishers[0]) {
       const firstPub = item.publishers[0] as { name?: string };
-      if (typeof firstPub.name === 'string') {
-        publisher = firstPub.name;
+      if (typeof firstPub.name === 'string' && firstPub.name.trim()) {
+        publisher = firstPub.name.trim();
       }
     }
+
+    let place: string | undefined;
+    if (Array.isArray(item.publish_places) && item.publish_places[0]) {
+      const firstPlace = item.publish_places[0] as { name?: string } | string;
+      if (typeof firstPlace === 'string' && firstPlace.trim()) {
+        place = firstPlace.trim();
+      } else if (
+        firstPlace &&
+        typeof firstPlace === 'object' &&
+        typeof firstPlace.name === 'string' &&
+        firstPlace.name.trim()
+      ) {
+        place = firstPlace.name.trim();
+      }
+    }
+
+    const edition =
+      typeof item.edition_name === 'string' && item.edition_name.trim()
+        ? item.edition_name.trim()
+        : undefined;
+
+    const rawSubjects: string[] = [];
+    if (Array.isArray(item.subjects)) {
+      for (const s of item.subjects.slice(0, 8)) {
+        if (typeof s === 'string' && s.trim()) {
+          rawSubjects.push(s.trim());
+        } else if (
+          s &&
+          typeof s === 'object' &&
+          typeof (s as { name?: string }).name === 'string' &&
+          (s as { name: string }).name.trim()
+        ) {
+          rawSubjects.push((s as { name: string }).name.trim());
+        }
+      }
+    }
+    const keywords = normalizeTags(rawSubjects).slice(0, 8);
 
     const pages =
       typeof item.number_of_pages === 'number' ||
       typeof item.number_of_pages === 'string'
         ? String(item.number_of_pages)
         : undefined;
+    const numberOfPages =
+      pages && !Number.isNaN(Number(pages)) ? Number(pages) : undefined;
 
     const rawVersion = createHash('md5')
       .update(JSON.stringify(item))
@@ -130,27 +184,35 @@ export class OpenLibraryProvider implements MetadataProvider {
     const rawUrl = typeof item.url === 'string' ? item.url : undefined;
     const canonicalUrl = rawUrl || `https://openlibrary.org/isbn/${cleanIsbn}`;
 
-    const creators = authors.map((name, idx) => ({
-      orderIndex: idx,
-      creatorType: 'author',
-      fullName: name,
-    }));
+    const creators = authors.map((name, idx) =>
+      parseCreatorString(name, idx, 'author'),
+    );
 
     return {
       provider: this.id,
       metadata: {
         title,
+        ...(shortTitle ? { shortTitle } : {}),
         authors,
         creators,
         year,
         isbn: cleanIsbn,
         publisher,
+        ...(place ? { place } : {}),
+        ...(edition ? { edition } : {}),
         pages,
+        ...(pages ? { numPages: pages } : {}),
+        ...(numberOfPages ? { numberOfPages } : {}),
+        ...(keywords.length > 0 ? { keywords, tags: keywords } : {}),
         itemType: 'book',
         url: canonicalUrl,
+        libraryCatalog: 'Open Library',
         extraFields: {
           numPages: pages,
+          ...(numberOfPages ? { numberOfPages } : {}),
           isbn: cleanIsbn,
+          ...(place ? { place } : {}),
+          ...(edition ? { edition } : {}),
         },
         provenance: {
           originProvider: this.id,

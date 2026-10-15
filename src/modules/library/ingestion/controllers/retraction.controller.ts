@@ -9,12 +9,13 @@ import {
   UseGuards,
   ForbiddenException,
 } from '@nestjs/common';
-import { RetractionService } from '../services/retraction.service';
+import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
   FlagRetractionDto,
   BatchCheckRetractionDto,
-} from '../dto/retraction.dto';
+  SyncRetractionDto,
+} from '@/modules/library/ingestion/dto/retraction.dto';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @Controller([
@@ -84,15 +85,14 @@ export class RetractionController {
   @ProjectRoles('owner', 'coordinator', 'contributor')
   async syncLibrary(
     @CurrentUser('id') userId: string,
-    @Body('maxDays') maxDays?: number,
-    @Body('limit') limit?: number,
+    @Body() dto?: SyncRetractionDto,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.service.syncLibrary(userId, effectiveProjectId, {
-      maxDays: maxDays ? Number(maxDays) : undefined,
-      limit: limit ? Number(limit) : undefined,
+      maxDays: dto?.maxDays ? Number(dto.maxDays) : undefined,
+      limit: dto?.limit ? Number(dto.limit) : undefined,
     });
   }
 

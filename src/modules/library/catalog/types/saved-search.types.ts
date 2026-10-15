@@ -78,16 +78,28 @@ export type SavedSearchField =
 export type SavedSearchOperator =
   | 'is'
   | 'isNot'
+  | 'is_not'
   | 'contains'
   | 'doesNotContain'
+  | 'does_not_contain'
   | 'beginsWith'
+  | 'begins_with'
   | 'endsWith'
+  | 'ends_with'
   | 'isGreaterThan'
+  | 'greater_than'
+  | 'gt'
   | 'isLessThan'
+  | 'less_than'
+  | 'lt'
   | 'isBetween'
+  | 'between'
   | 'isInTheLast'
+  | 'in_the_last'
   | 'isPresent'
-  | 'isAbsent';
+  | 'is_present'
+  | 'isAbsent'
+  | 'is_absent';
 
 export interface SavedSearchScopeOptions {
   searchSubcollections?: boolean;
@@ -103,7 +115,8 @@ export interface SavedSearchCondition {
 }
 
 export interface SavedSearchConditionGroup {
-  conjunction: 'AND' | 'OR';
+  conjunction?: 'AND' | 'OR';
+  matchMode?: 'all' | 'any' | 'AND' | 'OR';
   conditions: (SavedSearchCondition | SavedSearchConditionGroup)[];
   scopeOptions?: SavedSearchScopeOptions;
 }
@@ -111,7 +124,12 @@ export interface SavedSearchConditionGroup {
 export function isConditionGroup(
   node: SavedSearchCondition | SavedSearchConditionGroup,
 ): node is SavedSearchConditionGroup {
-  return 'conjunction' in node && Array.isArray(node.conditions);
+  return (
+    typeof node === 'object' &&
+    node !== null &&
+    ('conjunction' in node || 'matchMode' in node) &&
+    Array.isArray(node.conditions)
+  );
 }
 
 export interface ExecuteSavedSearchOptions {

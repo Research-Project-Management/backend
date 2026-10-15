@@ -6,17 +6,11 @@
 export * from './project-history.module';
 export * from './project-history.service';
 export * from './project-history.controller';
+export * from './project-history.repository';
 export * from './dto/history.dto';
 
 // Domain
-export * from './core/domain/entities/snapshot.entity';
-export * from './core/domain/entities/version-label.entity';
-export * from './core/domain/value-objects/file-snapshot.vo';
-export * from './core/domain/value-objects/file-diff.vo';
-export * from './core/domain/value-objects/diff-hunk.vo';
-export * from './core/domain/exceptions/version-not-found.exception';
-export * from './core/domain/exceptions/duplicate-label.exception';
-export * from './core/domain/exceptions/empty-project.exception';
+export * from './domain';
 
 // Ports
 export * from './core/ports/history-repository.port';

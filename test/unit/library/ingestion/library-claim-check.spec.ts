@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import zlib from 'zlib';
-import { ExtractionHandler } from '@/modules/library/extraction/utils/extraction.handler';
+import { ExtractionHandler } from '@/modules/library/extraction/services/extraction.handler';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
-import { PdfProvider } from '@/modules/library/extraction/utils/pdf.provider';
+import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { PrismaService } from '@/core';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';

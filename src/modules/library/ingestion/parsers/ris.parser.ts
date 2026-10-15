@@ -1,16 +1,77 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ItemMetadata, CreatorInput } from '../types/metadata.types';
-import { IngestionValidationException } from '../types/ingestion.errors';
+import {
+  ItemMetadata,
+  CreatorInput,
+} from '@/modules/library/ingestion/types/metadata.types';
+import { IngestionValidationException } from '@/modules/library/ingestion/types/ingestion.errors';
 import {
   cleanAbstractText,
   mapCslTypeToZoteroItemType,
-} from '../../shared-kernel/utils/bibliographic.utils';
-import { normalizeAcademicTags } from '../../shared-kernel/utils/tag.utils';
+  normalizeDoi,
+  parseCreatorString,
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Cite } = require('@citation-js/core');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 require('@citation-js/plugin-ris');
+
+export interface RisItem extends ItemMetadata {
+  pmid?: string;
+  pmcid?: string;
+  shortTitle?: string;
+  journalAbbr?: string;
+  accessedAt?: string | Date | null;
+  university?: string;
+  institution?: string;
+  bookTitle?: string;
+  proceedingsTitle?: string;
+  conferenceName?: string;
+  reportNumber?: string;
+  patentNumber?: string;
+  thesisType?: string;
+}
+
+interface CslRisPerson {
+  family?: string;
+  given?: string;
+  literal?: string;
+}
+
+interface CslRisItem {
+  author?: CslRisPerson[];
+  editor?: CslRisPerson[];
+  keyword?: string | string[];
+  issued?: {
+    'date-parts'?: (number | string)[][];
+  };
+  type?: string;
+  title?: string;
+  'title-short'?: string;
+  'container-title'?: string;
+  'container-title-short'?: string;
+  publisher?: string;
+  'publisher-place'?: string;
+  volume?: string | number;
+  issue?: string | number;
+  page?: string | number;
+  DOI?: string;
+  ISBN?: string;
+  ISSN?: string;
+  URL?: string;
+  abstract?: string;
+  'collection-title'?: string;
+  edition?: string | number;
+  language?: string;
+  rights?: string;
+  archive?: string;
+  'call-number'?: string;
+  note?: string;
+  annote?: string;
+  comment?: string;
+  [key: string]: unknown;
+}
 
 @Injectable()
 export class RisParser {
@@ -19,7 +80,7 @@ export class RisParser {
   /**
    * Asynchronously parses raw RIS text using standard in-process citation parser.
    */
-  async parseAsync(content: string): Promise<ItemMetadata[]> {
+  async parseAsync(content: string): Promise<RisItem[]> {
     if (!content || typeof content !== 'string' || !content.trim()) {
       throw new IngestionValidationException(
         'RIS content must be a non-empty string',
@@ -32,7 +93,7 @@ export class RisParser {
   /**
    * Parses a raw RIS string into one or more ItemMetadata objects using @citation-js engine.
    */
-  parse(content: string): ItemMetadata[] {
+  parse(content: string): RisItem[] {
     if (!content || typeof content !== 'string' || !content.trim()) {
       throw new IngestionValidationException(
         'RIS content must be a non-empty string',
@@ -53,11 +114,11 @@ export class RisParser {
         return this.fallbackParse(content);
       }
 
-      return data.map((csl: any, idx: number) => {
+      return (data as CslRisItem[]).map((csl: CslRisItem, idx: number) => {
         const rawAuthors: string[] = [];
         const creators: CreatorInput[] = [];
 
-        (csl.author || []).forEach((a: any) => {
+        (csl.author || []).forEach((a: CslRisPerson) => {
           const family = a.family?.trim() || '';
           const given = a.given?.trim() || '';
           const fullName =
@@ -69,13 +130,15 @@ export class RisParser {
             creators.push({
               firstName: given || undefined,
               lastName: family || undefined,
+              fullName,
               creatorType: 'author',
+              ...(a.literal && !family && !given ? { fieldMode: 1 } : {}),
             });
           }
         });
 
         const rawEditors: string[] = [];
-        (csl.editor || []).forEach((e: any) => {
+        (csl.editor || []).forEach((e: CslRisPerson) => {
           const family = e.family?.trim() || '';
           const given = e.given?.trim() || '';
           const fullName =
@@ -89,6 +152,7 @@ export class RisParser {
               lastName: family || undefined,
               fullName,
               creatorType: 'editor',
+              ...(e.literal && !family && !given ? { fieldMode: 1 } : {}),
             });
           }
         });
@@ -111,21 +175,18 @@ export class RisParser {
               )
             ) {
               rawEditors.push(edStr);
-              const parts = edStr.split(',').map((p) => p.trim());
-              if (parts.length >= 2) {
-                creators.push({
-                  lastName: parts[0],
-                  firstName: parts.slice(1).join(' '),
-                  fullName: `${parts.slice(1).join(' ')} ${parts[0]}`,
-                  creatorType: 'editor',
-                });
-              } else {
-                creators.push({
-                  lastName: edStr,
-                  fullName: edStr,
-                  creatorType: 'editor',
-                });
-              }
+              const parsed = parseCreatorString(
+                edStr,
+                creators.length,
+                'editor',
+              );
+              creators.push({
+                lastName: parsed.lastName,
+                firstName: parsed.firstName || undefined,
+                fullName: parsed.fullName,
+                creatorType: 'editor',
+                ...(parsed.fieldMode === 1 ? { fieldMode: 1 } : {}),
+              });
             }
           }
         }
@@ -156,14 +217,37 @@ export class RisParser {
         }
         const tags = normalizeAcademicTags(rawKeywords);
 
-        const year =
+        let year =
           csl.issued?.['date-parts']?.[0]?.[0] != null
             ? Number(csl.issued['date-parts'][0][0])
             : undefined;
+        if ((!year || Number.isNaN(year)) && currentRawRecord) {
+          const pyMatch = currentRawRecord.match(
+            /^(?:PY|Y1|DA)\s*-\s*.*?((?:19|20)\d{2})\b/im,
+          );
+          if (pyMatch) {
+            year = parseInt(pyMatch[1], 10);
+          } else {
+            year = undefined;
+          }
+        }
 
-        const itemType = this.mapCslTypeToItemType(
-          csl.type || 'article-journal',
-        );
+        let itemType = this.mapCslTypeToItemType(csl.type || 'article-journal');
+        if (currentRawRecord) {
+          const tyMatch = currentRawRecord.match(/^TY\s*-\s*(\S+)/im);
+          if (tyMatch?.[1]) {
+            const rawRisType = this.mapRisTypeToItemType(tyMatch[1]);
+            if (
+              rawRisType === 'patent' ||
+              rawRisType === 'thesis' ||
+              rawRisType === 'report' ||
+              rawRisType === 'bookSection' ||
+              rawRisType === 'conferencePaper'
+            ) {
+              itemType = rawRisType;
+            }
+          }
+        }
 
         // Notes extraction (including RN Research Notes and N1 Notes)
         const consolidatedNotes: Array<{ content: string; source?: string }> =
@@ -200,6 +284,31 @@ export class RisParser {
         let edition = csl.edition ? String(csl.edition).trim() : undefined;
         let language = csl.language ? String(csl.language).trim() : undefined;
         let place = csl['publisher-place'] || undefined;
+        let pages = csl.page ? String(csl.page).trim() : undefined;
+        let shortTitle = csl['title-short']
+          ? String(csl['title-short']).trim()
+          : undefined;
+        let journalAbbr = csl['container-title-short']
+          ? String(csl['container-title-short']).trim()
+          : undefined;
+        let accessedAt: string | undefined;
+        let pmid: string | undefined;
+        let pmcid: string | undefined;
+        let arxivId: string | undefined;
+        let rawPublisher = csl.publisher
+          ? String(csl.publisher).trim()
+          : undefined;
+        let rawM1: string | undefined;
+        let rawM3: string | undefined;
+        let rawU1: string | undefined;
+        let rawSn: string | undefined;
+        let rawIs: string | undefined = csl.issue
+          ? String(csl.issue).trim()
+          : undefined;
+        let rawT2: string | undefined = csl['container-title']
+          ? String(csl['container-title']).trim()
+          : undefined;
+        let rawC3: string | undefined;
 
         if (currentRawRecord) {
           if (!archive) {
@@ -230,34 +339,180 @@ export class RisParser {
             );
             if (placeMatch) place = placeMatch[1].trim();
           }
+          const spMatch = currentRawRecord.match(/^SP\s*-\s*(.+)$/im);
+          const epMatch = currentRawRecord.match(/^EP\s*-\s*(.+)$/im);
+          const sp = spMatch?.[1]?.trim();
+          const ep = epMatch?.[1]?.trim();
+          if (sp || ep) {
+            const combinedPages =
+              sp && ep && sp !== ep ? `${sp}-${ep}` : sp || ep;
+            if (!pages || (!pages.includes('-') && sp && ep && sp !== ep)) {
+              pages = combinedPages;
+            }
+          }
+
+          if (!shortTitle) {
+            const stMatch = currentRawRecord.match(/^ST\s*-\s*(.+)$/im);
+            if (stMatch) shortTitle = stMatch[1].trim();
+          }
+          if (!journalAbbr) {
+            const j2Match = currentRawRecord.match(/^(?:J2|JA)\s*-\s*(.+)$/im);
+            if (j2Match) journalAbbr = j2Match[1].trim();
+          }
+          const y2Match = currentRawRecord.match(/^Y2\s*-\s*(.+)$/im);
+          if (y2Match?.[1]) {
+            accessedAt = y2Match[1].trim().replace(/\//g, '-');
+          }
+          if (!rawPublisher) {
+            const pbMatch = currentRawRecord.match(
+              /^(?:PB|INST)\s*-\s*(.+)$/im,
+            );
+            if (pbMatch) rawPublisher = pbMatch[1].trim();
+          }
+          const m1Match = currentRawRecord.match(/^M1\s*-\s*(.+)$/im);
+          if (m1Match) rawM1 = m1Match[1].trim();
+          const m3Match = currentRawRecord.match(/^M3\s*-\s*(.+)$/im);
+          if (m3Match) rawM3 = m3Match[1].trim();
+          const u1Match = currentRawRecord.match(/^U1\s*-\s*(.+)$/im);
+          if (u1Match) rawU1 = u1Match[1].trim();
+          const snMatch = currentRawRecord.match(/^SN\s*-\s*(.+)$/im);
+          if (snMatch) rawSn = snMatch[1].trim();
+          if (!rawIs) {
+            const isMatch = currentRawRecord.match(/^IS\s*-\s*(.+)$/im);
+            if (isMatch) rawIs = isMatch[1].trim();
+          }
+          const t2Match = currentRawRecord.match(
+            /^(?:T2|BT|JO|JF)\s*-\s*(.+)$/im,
+          );
+          if (t2Match) rawT2 = t2Match[1].trim();
+          const c3Match = currentRawRecord.match(/^(?:C3|T3)\s*-\s*(.+)$/im);
+          if (c3Match) rawC3 = c3Match[1].trim();
+
+          // Identifier extraction from AN, C2, M3, N1, UR, DB
+          const dbMatch = currentRawRecord.match(/^DB\s*-\s*(.+)$/im);
+          const isPubMedDb = dbMatch
+            ? /pubmed|medline|ncbi/i.test(dbMatch[1])
+            : false;
+          const idLines = [
+            ...currentRawRecord.matchAll(/^(?:AN|C2|M3|N1|UR)\s*-\s*(.+)$/gim),
+          ].map((m) => ({
+            tag: m[0].slice(0, 2).toUpperCase(),
+            val: m[1].trim(),
+          }));
+
+          for (const { tag, val } of idLines) {
+            if (!pmcid) {
+              const pmcMatch = val.match(/\b(PMC\d{5,12})\b/i);
+              if (pmcMatch) pmcid = pmcMatch[1].toUpperCase();
+            }
+            if (!pmid) {
+              const pmidMatch = val.match(/PMID[:\s]*(\d{5,10})\b/i);
+              if (pmidMatch) {
+                pmid = pmidMatch[1];
+              } else if (
+                tag === 'AN' &&
+                (isPubMedDb || /^\d{7,9}$/.test(val)) &&
+                /^\d{6,10}$/.test(val)
+              ) {
+                pmid = val;
+              }
+            }
+            if (!arxivId) {
+              const axMatch = val.match(
+                /arXiv[:\s/]*(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+              );
+              if (axMatch) arxivId = axMatch[1];
+            }
+          }
         }
+
+        let rawDoi = csl.DOI || undefined;
+        if (!rawDoi && currentRawRecord) {
+          const doMatch = currentRawRecord.match(/^DO\s*-\s*(.+)$/im);
+          if (doMatch) rawDoi = doMatch[1].trim();
+        }
+        const doi = rawDoi ? normalizeDoi(rawDoi) || rawDoi : undefined;
+
+        const university =
+          itemType === 'thesis' ? rawPublisher || undefined : undefined;
+        const thesisType =
+          itemType === 'thesis' ? rawM3 || rawU1 || undefined : undefined;
+        const institution =
+          itemType === 'report' ? rawPublisher || undefined : undefined;
+        const reportNumber =
+          itemType === 'report' ? rawM1 || rawIs || undefined : undefined;
+        const patentNumber =
+          itemType === 'patent'
+            ? rawM1 || rawIs || rawSn || undefined
+            : undefined;
+        const bookTitle =
+          itemType === 'bookSection' ? rawT2 || undefined : undefined;
+        const proceedingsTitle =
+          itemType === 'conferencePaper' ? rawT2 || undefined : undefined;
+        const conferenceName =
+          itemType === 'conferencePaper' ? rawC3 || undefined : undefined;
+
+        const extraFields: Record<string, unknown> = {
+          ...(university ? { university } : {}),
+          ...(institution ? { institution } : {}),
+          ...(thesisType ? { thesisType } : {}),
+          ...(reportNumber ? { reportNumber } : {}),
+          ...(patentNumber ? { patentNumber } : {}),
+          ...(bookTitle ? { bookTitle } : {}),
+          ...(proceedingsTitle ? { proceedingsTitle } : {}),
+          ...(conferenceName ? { conferenceName } : {}),
+        };
 
         return {
           itemType,
           title: (csl.title || 'Untitled Reference').trim(),
+          shortTitle,
           authors: rawAuthors,
           creators,
           editors: rawEditors.length > 0 ? rawEditors : undefined,
           year,
           publicationDate: year ? String(year) : undefined,
-          journal: csl['container-title'] || undefined,
-          publicationTitle: csl['container-title'] || undefined,
-          publisher: csl.publisher || undefined,
+          journal: rawT2,
+          publicationTitle: rawT2,
+          journalAbbr,
+          publisher: rawPublisher,
+          university,
+          institution,
+          thesisType,
+          reportNumber,
+          patentNumber,
+          bookTitle,
+          proceedingsTitle,
+          conferenceName,
           place,
           volume: csl.volume ? String(csl.volume) : undefined,
-          issue: csl.issue ? String(csl.issue) : undefined,
-          pages: csl.page ? String(csl.page) : undefined,
-          doi: csl.DOI || undefined,
-          isbn: csl.ISBN || undefined,
+          issue:
+            itemType === 'report' || itemType === 'patent' ? undefined : rawIs,
+          pages,
+          doi,
+          pmid,
+          pmcid,
+          arxivId,
+          isbn: itemType === 'patent' ? undefined : csl.ISBN || undefined,
           issn: csl.ISSN || undefined,
           url: csl.URL || undefined,
+          accessedAt,
           abstract: (() => {
             let rawAbstract = csl.abstract || undefined;
-            if (!rawAbstract && currentRawRecord) {
+            if (currentRawRecord) {
               const abMatch = currentRawRecord.match(
                 /^(?:AB|N2)\s*-\s*([\s\S]*?)(?=\n[A-Z0-9]{2}\s*-|$)/im,
               );
-              if (abMatch) rawAbstract = abMatch[1].trim();
+              if (abMatch) {
+                const fullRawAb = abMatch[1].trim();
+                if (
+                  !rawAbstract ||
+                  fullRawAb.replace(/\s+/g, ' ').length >
+                    rawAbstract.replace(/\s+/g, ' ').length
+                ) {
+                  rawAbstract = fullRawAb;
+                }
+              }
             }
             return cleanAbstractText(rawAbstract);
           })(),
@@ -270,11 +525,14 @@ export class RisParser {
           tags,
           keywords: tags,
           notes,
+          extraFields:
+            Object.keys(extraFields).length > 0 ? extraFields : undefined,
         };
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `Citation.js RIS parser error: ${err?.message || err}. Falling back to manual line parser.`,
+        `Citation.js RIS parser error: ${errMsg}. Falling back to manual line parser.`,
       );
       return this.fallbackParse(content);
     }
@@ -326,17 +584,23 @@ export class RisParser {
   /**
    * Resilient line-by-line parser for non-standard RIS dialect variations
    */
-  private fallbackParse(content: string): ItemMetadata[] {
+  private fallbackParse(content: string): RisItem[] {
     const lines = content.split(/\r?\n/);
-    const records: ItemMetadata[] = [];
+    const records: RisItem[] = [];
     let currentRecord:
-      | (Partial<ItemMetadata> & {
+      | (Partial<RisItem> & {
           rawAuthors: string[];
           rawEditors?: string[];
           rawTags: string[];
           rawNotes?: string[];
           startPage?: string;
           endPage?: string;
+          rawM1?: string;
+          rawM3?: string;
+          rawU1?: string;
+          rawSn?: string;
+          rawC3?: string;
+          isPubMedDb?: boolean;
         })
       | null = null;
     let lastTag = '';
@@ -345,7 +609,7 @@ export class RisParser {
       const line = rawLine.trim();
       if (!line) continue;
 
-      const match = rawLine.match(/^([A-Z0-9]{2})\s*-\s*(.*)$/);
+      const match = rawLine.match(/^([A-Z0-9]{2,4})\s*-\s*(.*)$/);
       if (!match) {
         if (currentRecord && line) {
           if (lastTag === 'AB' || lastTag === 'N2') {
@@ -399,6 +663,9 @@ export class RisParser {
         case 'T1':
           currentRecord.title = value;
           break;
+        case 'ST':
+          currentRecord.shortTitle = value;
+          break;
         case 'AU':
         case 'A1':
           currentRecord.rawAuthors.push(value);
@@ -414,11 +681,19 @@ export class RisParser {
           if (yearMatch) currentRecord.year = parseInt(yearMatch[0], 10);
           break;
         }
+        case 'Y2':
+          currentRecord.accessedAt = value.replace(/\//g, '-');
+          break;
         case 'JO':
         case 'JF':
         case 'T2':
+        case 'BT':
           currentRecord.publicationTitle = value;
           currentRecord.journal = value;
+          break;
+        case 'J2':
+        case 'JA':
+          currentRecord.journalAbbr = value;
           break;
         case 'VL':
           currentRecord.volume = value;
@@ -436,6 +711,7 @@ export class RisParser {
           currentRecord.doi = value;
           break;
         case 'PB':
+        case 'INST':
           currentRecord.publisher = value;
           break;
         case 'CY':
@@ -446,16 +722,59 @@ export class RisParser {
           currentRecord.language = value;
           break;
         case 'SN':
+          currentRecord.rawSn = value;
           if (value.replace(/[^0-9X]/gi, '').length === 8) {
             currentRecord.issn = value;
           } else {
             currentRecord.isbn = value;
           }
           break;
-        case 'UR':
-        case 'L1':
-          if (!currentRecord.url) currentRecord.url = value;
+        case 'M1':
+          currentRecord.rawM1 = value;
           break;
+        case 'M3':
+          currentRecord.rawM3 = value;
+          break;
+        case 'U1':
+          currentRecord.rawU1 = value;
+          break;
+        case 'C3':
+          currentRecord.rawC3 = value;
+          break;
+        case 'DB':
+          if (/pubmed|medline|ncbi/i.test(value)) {
+            currentRecord.isPubMedDb = true;
+          }
+          break;
+        case 'AN':
+        case 'C2': {
+          const pmcMatch = value.match(/\b(PMC\d{5,12})\b/i);
+          if (pmcMatch) currentRecord.pmcid = pmcMatch[1].toUpperCase();
+          const pmidMatch = value.match(/PMID[:\s]*(\d{5,10})\b/i);
+          if (pmidMatch) {
+            currentRecord.pmid = pmidMatch[1];
+          } else if (
+            tag === 'AN' &&
+            (currentRecord.isPubMedDb || /^\d{7,9}$/.test(value)) &&
+            /^\d{6,10}$/.test(value)
+          ) {
+            currentRecord.pmid = value;
+          }
+          const axMatch = value.match(/arXiv[:\s/]*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
+          if (axMatch && !currentRecord.arxivId) {
+            currentRecord.arxivId = axMatch[1];
+          }
+          break;
+        }
+        case 'UR':
+        case 'L1': {
+          if (!currentRecord.url) currentRecord.url = value;
+          const axMatch = value.match(/arXiv[:\s/]*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
+          if (axMatch && !currentRecord.arxivId) {
+            currentRecord.arxivId = axMatch[1];
+          }
+          break;
+        }
         case 'ET':
           currentRecord.edition = value;
           break;
@@ -470,15 +789,29 @@ export class RisParser {
         case 'T3':
         case 'SE':
           currentRecord.series = value;
+          if (!currentRecord.rawC3) currentRecord.rawC3 = value;
           break;
         case 'KW':
           currentRecord.rawTags.push(value);
           break;
         case 'RN':
-        case 'N1':
+        case 'N1': {
           if (!currentRecord.rawNotes) currentRecord.rawNotes = [];
           currentRecord.rawNotes.push(value);
+          const pmcMatch = value.match(/\b(PMC\d{5,12})\b/i);
+          if (pmcMatch && !currentRecord.pmcid) {
+            currentRecord.pmcid = pmcMatch[1].toUpperCase();
+          }
+          const pmidMatch = value.match(/PMID[:\s]*(\d{5,10})\b/i);
+          if (pmidMatch && !currentRecord.pmid) {
+            currentRecord.pmid = pmidMatch[1];
+          }
+          const axMatch = value.match(/arXiv[:\s/]*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
+          if (axMatch && !currentRecord.arxivId) {
+            currentRecord.arxivId = axMatch[1];
+          }
           break;
+        }
         case 'AB':
         case 'N2':
           currentRecord.abstract = value;
@@ -494,64 +827,99 @@ export class RisParser {
   }
 
   private finalizeRecord(
-    record: Partial<ItemMetadata> & {
+    record: Partial<RisItem> & {
       rawAuthors: string[];
       rawEditors?: string[];
       rawTags: string[];
       rawNotes?: string[];
       startPage?: string;
       endPage?: string;
+      rawM1?: string;
+      rawM3?: string;
+      rawU1?: string;
+      rawSn?: string;
+      rawC3?: string;
     },
-  ): ItemMetadata {
+  ): RisItem {
     const creators: CreatorInput[] = record.rawAuthors.map(
-      (authorStr: string) => {
-        const parts = authorStr.split(',').map((p: string) => p.trim());
-        if (parts.length >= 2) {
-          return {
-            lastName: parts[0],
-            firstName: parts.slice(1).join(' '),
-            fullName: `${parts.slice(1).join(' ')} ${parts[0]}`,
-            creatorType: 'author',
-          };
-        }
+      (authorStr: string, idx: number) => {
+        const parsed = parseCreatorString(authorStr, idx, 'author');
         return {
-          lastName: authorStr,
-          fullName: authorStr,
+          lastName: parsed.lastName,
+          firstName: parsed.firstName || undefined,
+          fullName: parsed.fullName,
           creatorType: 'author',
+          ...(parsed.fieldMode === 1 ? { fieldMode: 1 } : {}),
         };
       },
     );
 
     if (record.rawEditors && record.rawEditors.length > 0) {
       for (const editorStr of record.rawEditors) {
-        const parts = editorStr.split(',').map((p: string) => p.trim());
-        if (parts.length >= 2) {
-          creators.push({
-            lastName: parts[0],
-            firstName: parts.slice(1).join(' '),
-            fullName: `${parts.slice(1).join(' ')} ${parts[0]}`,
-            creatorType: 'editor',
-          });
-        } else {
-          creators.push({
-            lastName: editorStr,
-            fullName: editorStr,
-            creatorType: 'editor',
-          });
-        }
+        const parsed = parseCreatorString(editorStr, creators.length, 'editor');
+        creators.push({
+          lastName: parsed.lastName,
+          firstName: parsed.firstName || undefined,
+          fullName: parsed.fullName,
+          creatorType: 'editor',
+          ...(parsed.fieldMode === 1 ? { fieldMode: 1 } : {}),
+        });
       }
     }
 
     let pages = record.pages;
-    if (!pages && record.startPage) {
-      pages = record.endPage
-        ? `${record.startPage}-${record.endPage}`
-        : record.startPage;
+    if (!pages && (record.startPage || record.endPage)) {
+      pages =
+        record.startPage &&
+        record.endPage &&
+        record.startPage !== record.endPage
+          ? `${record.startPage}-${record.endPage}`
+          : record.startPage || record.endPage;
     }
 
+    const itemType = record.itemType || 'journalArticle';
+    const university =
+      itemType === 'thesis' ? record.publisher || undefined : undefined;
+    const thesisType =
+      itemType === 'thesis'
+        ? record.rawM3 || record.rawU1 || undefined
+        : undefined;
+    const institution =
+      itemType === 'report' ? record.publisher || undefined : undefined;
+    const reportNumber =
+      itemType === 'report'
+        ? record.rawM1 || record.issue || undefined
+        : undefined;
+    const patentNumber =
+      itemType === 'patent'
+        ? record.rawM1 || record.issue || record.rawSn || undefined
+        : undefined;
+    const bookTitle =
+      itemType === 'bookSection'
+        ? record.publicationTitle || undefined
+        : undefined;
+    const proceedingsTitle =
+      itemType === 'conferencePaper'
+        ? record.publicationTitle || undefined
+        : undefined;
+    const conferenceName =
+      itemType === 'conferencePaper' ? record.rawC3 || undefined : undefined;
+
+    const extraFields: Record<string, unknown> = {
+      ...(university ? { university } : {}),
+      ...(institution ? { institution } : {}),
+      ...(thesisType ? { thesisType } : {}),
+      ...(reportNumber ? { reportNumber } : {}),
+      ...(patentNumber ? { patentNumber } : {}),
+      ...(bookTitle ? { bookTitle } : {}),
+      ...(proceedingsTitle ? { proceedingsTitle } : {}),
+      ...(conferenceName ? { conferenceName } : {}),
+    };
+
     return {
-      itemType: record.itemType || 'journalArticle',
+      itemType,
       title: record.title || 'Untitled Reference',
+      shortTitle: record.shortTitle,
       authors: record.rawAuthors,
       editors:
         record.rawEditors && record.rawEditors.length > 0
@@ -562,15 +930,31 @@ export class RisParser {
       publicationDate: record.year ? String(record.year) : undefined,
       journal: record.journal,
       publicationTitle: record.publicationTitle,
+      journalAbbr: record.journalAbbr,
       publisher: record.publisher,
+      university,
+      institution,
+      thesisType,
+      reportNumber,
+      patentNumber,
+      bookTitle,
+      proceedingsTitle,
+      conferenceName,
       place: record.place,
       volume: record.volume,
-      issue: record.issue,
+      issue:
+        itemType === 'report' || itemType === 'patent'
+          ? undefined
+          : record.issue,
       pages,
-      doi: record.doi,
-      isbn: record.isbn,
+      doi: record.doi ? normalizeDoi(record.doi) || record.doi : undefined,
+      pmid: record.pmid,
+      pmcid: record.pmcid,
+      arxivId: record.arxivId,
+      isbn: itemType === 'patent' ? undefined : record.isbn,
       issn: record.issn,
       url: record.url,
+      accessedAt: record.accessedAt,
       language: record.language,
       edition: record.edition,
       callNumber: record.callNumber,
@@ -583,6 +967,8 @@ export class RisParser {
         record.rawNotes && record.rawNotes.length > 0
           ? record.rawNotes.map((n: string) => ({ content: n, source: 'ris' }))
           : undefined,
+      extraFields:
+        Object.keys(extraFields).length > 0 ? extraFields : undefined,
     };
   }
 }

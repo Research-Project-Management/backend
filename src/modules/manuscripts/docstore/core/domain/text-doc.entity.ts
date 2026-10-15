@@ -4,7 +4,7 @@
  */
 
 import { DocRanges, DocRangeVo } from './doc-range.vo';
-import { WorkspaceFile } from '@/modules/manuscripts/clsi/core/ports/workspace.port';
+import { WorkspaceFile } from '@/modules/manuscripts/clsi/domain';
 
 export interface TextDocProps {
   id: string;

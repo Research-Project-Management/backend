@@ -4,11 +4,11 @@
  * (CrossRef Content Negotiation & arXiv Atom Export API).
  */
 
-import { IIdentifierResolverPort } from '../../ports/identifier-resolver.port';
-import { AcademicIdentifierVo } from '../../domain/value-objects/academic-identifier.vo';
-import { BibEntry } from '../../domain/entities/bib-entry.entity';
-import { RegexAstBibtexParser } from '../parser/regex-ast-bibtex.parser';
-import { sanitizeCitationKey } from '../../domain/bibtex-value';
+import { IIdentifierResolverPort } from '@/modules/manuscripts/citations/core/ports/identifier-resolver.port';
+import { AcademicIdentifierVo } from '@/modules/manuscripts/citations/core/domain/value-objects/academic-identifier.vo';
+import { BibEntry } from '@/modules/manuscripts/citations/core/domain/entities/bib-entry.entity';
+import { RegexAstBibtexParser } from '@/modules/manuscripts/citations/core/adapters/parser/regex-ast-bibtex.parser';
+import { sanitizeCitationKey } from '@/modules/manuscripts/citations/core/domain/bibtex-value';
 
 /** CrossRef work type -> BibTeX entry type + container field. */
 const CROSSREF_TYPE_MAP: Record<string, { type: string; container?: string }> =
@@ -94,8 +94,14 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
           const year = yearRaw ? String(yearRaw) : undefined;
 
           // Plain "Family, Given" names; organizations wrapped as {Name}
-          const authors = (item.author || [])
-            .map((a: any) => {
+          const authors = (
+            (item.author as Array<{
+              family?: string;
+              given?: string;
+              name?: string;
+            }>) || []
+          )
+            .map((a) => {
               if (a.family && a.given) return `${a.family}, ${a.given}`;
               if (a.family) return String(a.family);
               if (a.name) return `{${a.name}}`;
@@ -103,8 +109,14 @@ export class CrossrefArxivResolverAdapter implements IIdentifierResolverPort {
             })
             .filter(Boolean)
             .join(' and ');
-          const editors = (item.editor || [])
-            .map((a: any) =>
+          const editors = (
+            (item.editor as Array<{
+              family?: string;
+              given?: string;
+              name?: string;
+            }>) || []
+          )
+            .map((a) =>
               a.family && a.given
                 ? `${a.family}, ${a.given}`
                 : a.family || (a.name ? `{${a.name}}` : ''),

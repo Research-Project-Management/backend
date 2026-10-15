@@ -4,12 +4,12 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { IInFlightStorePort } from '../ports/in-flight-store.port';
-import { IDocstoreWriterPort } from '../ports/docstore-writer.port';
-import { IUpdaterLockPort } from '../ports/updater-lock.port';
-import { IDebounceTimerPort } from '../ports/debounce-timer.port';
-import { DocumentLockedException } from '../domain/exceptions/document-locked.exception';
-import { DocUpdaterConflictException } from '../domain/exceptions/doc-updater-conflict.exception';
+import { IInFlightStorePort } from '@/modules/manuscripts/document-updater/core/ports/in-flight-store.port';
+import { IDocstoreWriterPort } from '@/modules/manuscripts/document-updater/core/ports/docstore-writer.port';
+import { IUpdaterLockPort } from '@/modules/manuscripts/document-updater/core/ports/updater-lock.port';
+import { IDebounceTimerPort } from '@/modules/manuscripts/document-updater/core/ports/debounce-timer.port';
+import { DocumentLockedException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/document-locked.exception';
+import { DocUpdaterConflictException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/doc-updater-conflict.exception';
 
 export interface FlushSingleDocInput {
   projectId: string;

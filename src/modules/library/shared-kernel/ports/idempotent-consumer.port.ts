@@ -1,4 +1,4 @@
-export interface IdempotentConsumerOptions<T = any> {
+export interface IdempotentConsumerOptions<T = unknown> {
   consumer: string;
   eventId: string;
   leaseTtlSeconds?: number;
@@ -6,7 +6,7 @@ export interface IdempotentConsumerOptions<T = any> {
   handler: () => Promise<T>;
 }
 
-export interface IdempotentResult<T = any> {
+export interface IdempotentResult<T = unknown> {
   executed: boolean;
   skipped: boolean;
   reason?: 'ALREADY_COMPLETED' | 'IN_FLIGHT';

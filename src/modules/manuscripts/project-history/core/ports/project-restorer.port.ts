@@ -3,7 +3,7 @@
  * Outbound Port (SPI) for applying a historical snapshot back into Structure and Docstore.
  */
 
-import { Snapshot } from '../domain/entities/snapshot.entity';
+import { Snapshot } from '@/modules/manuscripts/project-history/core/domain/entities/snapshot.entity';
 
 export interface RestoreResult {
   restoredFilesCount: number;

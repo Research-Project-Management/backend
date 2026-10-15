@@ -3,9 +3,9 @@
  * Inbound Use Case: Retrieves detailed error explanation and suggested remedy by code.
  */
 
-import { IErrorExplainerPort } from '../ports/error-explainer.port';
-import { ErrorExplanationVo } from '../domain/value-objects/error-explanation.vo';
-import { ExplanationNotFoundException } from '../domain/exceptions/explanation-not-found.exception';
+import { IErrorExplainerPort } from '@/modules/manuscripts/diagnostics/core/ports/error-explainer.port';
+import { ErrorExplanationVo } from '@/modules/manuscripts/diagnostics/core/domain/value-objects/error-explanation.vo';
+import { ExplanationNotFoundException } from '@/modules/manuscripts/diagnostics/core/domain/exceptions/explanation-not-found.exception';
 
 export class GetErrorExplanationUseCase {
   constructor(private readonly explainer: IErrorExplainerPort) {}

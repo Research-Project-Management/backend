@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { RetractionRepository } from '../repositories/retraction.repository';
-import { RetractionScannerProvider } from '../providers/retraction-scanner.provider';
+import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import {
   RetractionDatabaseService,
   RetractionDatabaseStats,
@@ -13,13 +13,13 @@ import {
 import {
   FlagRetractionDto,
   BatchCheckRetractionDto,
-} from '../dto/retraction.dto';
+} from '@/modules/library/ingestion/dto/retraction.dto';
 import {
   RetractionCheckResult,
   RetractionStats,
   RetractionDetails,
   RetractionNature,
-} from '../types/retraction.types';
+} from '@/modules/library/ingestion/types/retraction.types';
 
 @Injectable()
 export class RetractionService {
@@ -150,8 +150,9 @@ export class RetractionService {
           await this.repo.updateItemRetraction(item.id, false, null, null, now);
         }
         // unknown: leave stored status untouched
-      } catch (err: any) {
-        this.logger.warn(`Error scanning item ${item.id}: ${err?.message}`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Error scanning item ${item.id}: ${msg}`);
       }
     }
 

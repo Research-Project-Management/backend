@@ -5,10 +5,10 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { IDocRepository } from '../ports/doc-repository.port';
-import { TextDoc } from '../domain/text-doc.entity';
+import { IDocRepository } from '@/modules/manuscripts/docstore/core/ports/doc-repository.port';
+import { TextDoc } from '@/modules/manuscripts/docstore/core/domain/text-doc.entity';
 import { GetDocUseCase } from './get-doc.use-case';
-import { WorkspaceFile } from '@/modules/manuscripts/clsi/core/ports/workspace.port';
+import { WorkspaceFile } from '@/modules/manuscripts/clsi/domain';
 import { mapWithConcurrency } from '@/core';
 
 const COLD_HYDRATION_CONCURRENCY = 8;

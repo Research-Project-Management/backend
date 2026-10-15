@@ -109,12 +109,5 @@ export class DuplicateWorkItemDto {
   projectId?: string;
 }
 
-export class AssignWorkItemDto {
-  @ApiPropertyOptional({ description: 'Assignee user ID or null to unassign' })
-  @IsString()
-  @IsOptional()
-  assigneeId?: string | null;
-}
-
 export const BulkDto = BulkUpdateWorkItemDto;
 export type BulkDto = BulkUpdateWorkItemDto;

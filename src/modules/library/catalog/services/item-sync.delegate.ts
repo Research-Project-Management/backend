@@ -4,19 +4,19 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { CommandRepository } from '../repositories/command.repository';
-import { QueryRepository } from '../repositories/query.repository';
+import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
+import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import {
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
-} from '../../shared-kernel';
-import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
+} from '@/modules/library/shared-kernel';
+import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
 import type {
   UpsertSyncItemCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../../shared-kernel/core/types/entity-commands.types';
+} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
 
 @Injectable()
 export class ItemSyncDelegate {
@@ -61,15 +61,14 @@ export class ItemSyncDelegate {
         );
       }
 
-      const existingTagNames = (existing.itemTags || []).map(
-        (it: any) => it.tag?.name || it.name,
-      );
+      const existingTagNames = existing.tags || [];
       const mergedTags = normalizeTags([
         ...existingTagNames,
         ...(command.tags || []),
       ]);
 
-      const itemProjectId = command.projectId || undefined;
+      const itemProjectId: string | undefined =
+        (command.projectId || existing.projectId) ?? undefined;
       const syncScope = { userId, projectId: itemProjectId };
 
       const updated = await this.command.update(
@@ -157,7 +156,8 @@ export class ItemSyncDelegate {
       );
     }
 
-    const itemProjectId = existing.projectId || command.projectId || undefined;
+    const itemProjectId: string | undefined =
+      (existing.projectId || command.projectId) ?? undefined;
     const syncScope = { userId: targetUserId, projectId: itemProjectId };
 
     await this.command.delete(

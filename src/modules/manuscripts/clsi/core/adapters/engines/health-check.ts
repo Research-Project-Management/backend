@@ -6,7 +6,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ISandboxRunner } from '../../ports/runner.port';
+import { ISandboxRunner } from '@/modules/manuscripts/clsi/core/ports/runner.port';
 
 export interface BinaryStatus {
   available: boolean;
@@ -112,8 +112,8 @@ export class ClsiHealthCheck {
       }
 
       return { available: false, error: `Exited with code ${result.exitCode}` };
-    } catch (err: any) {
-      return { available: false, error: err.message };
+    } catch (err: unknown) {
+      return { available: false, error: (err as Error)?.message };
     }
   }
 

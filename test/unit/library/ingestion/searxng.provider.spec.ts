@@ -23,7 +23,9 @@ describe('SearxngSearchProvider', () => {
     });
 
     it('returns false when SearXNG server is unreachable', async () => {
-      global.fetch = jest.fn().mockRejectedValue(new Error('Connection refused'));
+      global.fetch = jest
+        .fn()
+        .mockRejectedValue(new Error('Connection refused'));
 
       const available = await provider.isAvailable();
       expect(available).toBe(false);
@@ -39,7 +41,8 @@ describe('SearxngSearchProvider', () => {
           {
             title: 'Attention Is All You Need',
             url: 'https://arxiv.org/abs/1706.03762',
-            content: 'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks...',
+            content:
+              'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks...',
             engine: 'arxiv',
             publishedDate: '2017-06-12',
           },

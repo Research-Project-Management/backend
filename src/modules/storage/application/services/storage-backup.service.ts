@@ -134,9 +134,9 @@ export class StorageBackupService {
               path: entryPath,
             });
             fileCount++;
-          } catch (err: any) {
+          } catch (err: unknown) {
             this.logger.warn(
-              `Failed to read file ${node.id} for backup: ${err.message}`,
+              `Failed to read file ${node.id} for backup: ${(err as Error)?.message}`,
             );
           }
         }

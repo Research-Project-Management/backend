@@ -45,7 +45,7 @@ export class CursorPositionVo {
     return new CursorPositionVo(props);
   }
 
-  public toJSON(): Record<string, any> {
+  public toJSON(): CursorPositionProps {
     return {
       row: this.row,
       column: this.column,

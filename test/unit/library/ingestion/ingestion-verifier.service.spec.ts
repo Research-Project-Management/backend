@@ -21,7 +21,10 @@ describe('IngestionVerifierService', () => {
         year: 2017,
       };
 
-      const fp = verifier.extractFingerprint(meta, 'first page raw text sample');
+      const fp = verifier.extractFingerprint(
+        meta,
+        'first page raw text sample',
+      );
       expect(fp.title).toBe('Attention Is All You Need');
       expect(fp.firstAuthorSurname).toBe('vaswani');
       expect(fp.doi).toBe('10.48550/arXiv.1706.03762');
@@ -49,7 +52,8 @@ describe('IngestionVerifierService', () => {
       arxivId: '1706.03762',
       firstAuthorSurname: 'vaswani',
       year: 2017,
-      firstPageText: 'Attention Is All You Need Ashish Vaswani Noam Shazeer 1706.03762',
+      firstPageText:
+        'Attention Is All You Need Ashish Vaswani Noam Shazeer 1706.03762',
     };
 
     it('scores 1.0 (COMPLETE) when DOI, Title, Author, Year, and Venue all match', () => {
@@ -64,7 +68,11 @@ describe('IngestionVerifierService', () => {
           'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder.',
       };
 
-      const res = verifier.verifyWebCandidate(fingerprint, candidate, 'web:arxiv.org');
+      const res = verifier.verifyWebCandidate(
+        fingerprint,
+        candidate,
+        'web:arxiv.org',
+      );
       expect(res.verificationScore).toBe(1.0);
       expect(res.isVerified).toBe(true);
       expect(res.status).toBe('COMPLETE');
@@ -106,7 +114,8 @@ describe('IngestionVerifierService', () => {
       const res = verifier.verifyWebCandidate(fingerprint, candidate);
       expect(res.isVerified).toBe(false);
       expect(res.status).toBe('NEEDS_REVIEW');
-      expect(res.warnings.length).toBeGreaterThan(0);
+      expect(res.warnings).toContain('cited_paper_doi_mismatch');
+      expect(res.isDisambiguationMismatch).toBe(true);
     });
 
     it('returns FAILED when candidate has no title or score < 0.30', () => {
@@ -170,27 +179,45 @@ describe('IngestionVerifierService', () => {
 
   describe('detectBlockedStatus', () => {
     it('detects HTTP 403 and 429 as blocked', () => {
-      const res403 = verifier.detectBlockedStatus('https://biorxiv.org', '', 403);
+      const res403 = verifier.detectBlockedStatus(
+        'https://biorxiv.org',
+        '',
+        403,
+      );
       expect(res403.isBlocked).toBe(true);
       expect(res403.wafKind).toBe('HTTP_403_FORBIDDEN');
       expect(res403.promptUploadPdf).toBe(true);
 
-      const res429 = verifier.detectBlockedStatus('https://example.com', '', 429);
+      const res429 = verifier.detectBlockedStatus(
+        'https://example.com',
+        '',
+        429,
+      );
       expect(res429.isBlocked).toBe(true);
       expect(res429.wafKind).toBe('RATE_LIMITED');
     });
 
     it('detects Cloudflare bot challenge titles', () => {
-      const html = '<html><head><title>Just a moment...</title></head><body></body></html>';
-      const res = verifier.detectBlockedStatus('https://biorxiv.org', html, 200);
+      const html =
+        '<html><head><title>Just a moment...</title></head><body></body></html>';
+      const res = verifier.detectBlockedStatus(
+        'https://biorxiv.org',
+        html,
+        200,
+      );
       expect(res.isBlocked).toBe(true);
       expect(res.wafKind).toBe('BOT_CHALLENGE_TITLE');
       expect(res.promptUploadPdf).toBe(true);
     });
 
     it('detects WAF body signatures (PerimeterX, Cloudflare challenge-platform)', () => {
-      const html = '<html><body><div id="cf-challenge-running">Please wait...</div></body></html>';
-      const res = verifier.detectBlockedStatus('https://example.com', html, 200);
+      const html =
+        '<html><body><div id="cf-challenge-running">Please wait...</div></body></html>';
+      const res = verifier.detectBlockedStatus(
+        'https://example.com',
+        html,
+        200,
+      );
       expect(res.isBlocked).toBe(true);
       expect(res.wafKind).toBe('WAF_INTERSTITIAL_BODY');
     });
@@ -198,7 +225,11 @@ describe('IngestionVerifierService', () => {
     it('returns isBlocked = false for normal academic HTML', () => {
       const html =
         '<html><head><title>Attention Is All You Need</title></head><body>Normal content</body></html>';
-      const res = verifier.detectBlockedStatus('https://arxiv.org/abs/1706.03762', html, 200);
+      const res = verifier.detectBlockedStatus(
+        'https://arxiv.org/abs/1706.03762',
+        html,
+        200,
+      );
       expect(res.isBlocked).toBe(false);
       expect(res.promptUploadPdf).toBe(false);
     });

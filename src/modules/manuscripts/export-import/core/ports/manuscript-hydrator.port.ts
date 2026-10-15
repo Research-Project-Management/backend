@@ -3,8 +3,8 @@
  * Outbound Port (SPI) for reconstituting an imported archive into structure, docstore, and filestore.
  */
 
-import { ArchiveEntryVo } from '../domain/value-objects/archive-entry.vo';
-import { ImportSummaryVo } from '../domain/value-objects/import-summary.vo';
+import { ArchiveEntryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/archive-entry.vo';
+import { ImportSummaryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/import-summary.vo';
 
 export abstract class IManuscriptHydratorPort {
   /**

@@ -1,15 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, AnnotationType } from '@prisma/client';
-import { VersionMismatchException } from '../../shared-kernel/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
 import {
   AnnotationEntity,
   CreateAnnotationData,
   UpdateAnnotationData,
   UpsertAnnotationItem,
   BatchAnnotationsResult,
-} from '../types/annotations.types';
-import { buildAnnotationSortIndex } from '../../shared-kernel';
+} from '@/modules/library/extraction/types/annotations.types';
+import { buildAnnotationSortIndex } from '@/modules/library/shared-kernel';
 
 export type { AnnotationEntity, CreateAnnotationData, UpdateAnnotationData };
 
@@ -203,11 +207,17 @@ export class AnnotationsRepository {
     for (const item of upserts) {
       if (item.id) {
         const current = await tx.annotation.findFirst({
-          where: { id: item.id, deletedAt: null },
+          where: { id: item.id, attachmentId, deletedAt: null },
           select: ANNOTATION_SELECT,
         });
         if (!current)
           throw new NotFoundException(`Annotation ${item.id} not found`);
+
+        if (current.authorId && current.authorId !== authorId) {
+          throw new ForbiddenException(
+            'You can only modify your own annotations',
+          );
+        }
 
         if (
           item.expectedVersion !== undefined &&
@@ -277,7 +287,12 @@ export class AnnotationsRepository {
 
     for (const id of deletes) {
       const result = await tx.annotation.updateMany({
-        where: { id, deletedAt: null },
+        where: {
+          id,
+          attachmentId,
+          deletedAt: null,
+          authorId,
+        },
         data: { deletedAt: new Date() },
       });
       if (result.count > 0) deleted.push(id);

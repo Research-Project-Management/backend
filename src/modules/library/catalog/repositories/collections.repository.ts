@@ -2,8 +2,8 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
-import { VersionMismatchException } from '../../shared-kernel/core/errors/version-mismatch.exception';
-import { CollectionDeleteStrategy } from '../types/collections.types';
+import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
 
 export interface CreateCollectionInput {
   name: string;
@@ -34,8 +34,33 @@ export class CollectionsRepository {
     return tx ?? this.prisma;
   }
 
+  private normalizeProjectScopeId(
+    projectId?: string | null,
+  ): string | undefined {
+    if (
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal' &&
+      isUUID(projectId)
+    ) {
+      return projectId;
+    }
+    return undefined;
+  }
+
+  private buildScopeWhere(
+    userId: string,
+    projectId?: string | null,
+  ): Prisma.CollectionWhereInput {
+    const validProjectId = this.normalizeProjectScopeId(projectId);
+    return validProjectId
+      ? { projectId: validProjectId }
+      : { userId, projectId: null };
+  }
+
   /**
-   * Finds a collection by ID with strict user isolation.
+   * Finds a collection by ID with strict user/project isolation.
    */
   async findById(
     userId: string,
@@ -44,10 +69,7 @@ export class CollectionsRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
-    const scopeWhere: Prisma.CollectionWhereInput =
-      projectId && projectId !== 'user' && isUUID(projectId)
-        ? { projectId }
-        : { userId, projectId: null };
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
     const where: Prisma.CollectionWhereInput = {
       id,
       deletedAt: null,
@@ -75,19 +97,15 @@ export class CollectionsRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const projectId =
-      typeof projectIdOrTx === 'string' &&
-      projectIdOrTx !== 'user' &&
-      projectIdOrTx !== 'me' &&
-      projectIdOrTx !== 'personal' &&
-      isUUID(projectIdOrTx)
-        ? projectIdOrTx
+      typeof projectIdOrTx === 'string'
+        ? this.normalizeProjectScopeId(projectIdOrTx)
         : undefined;
-    const client = this.getClient(
-      typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
-    );
-    const where: Prisma.CollectionWhereInput = projectId
-      ? { projectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
+    const clientTx = typeof projectIdOrTx === 'object' ? projectIdOrTx : tx;
+    const client = this.getClient(clientTx);
+    const where: Prisma.CollectionWhereInput = {
+      ...this.buildScopeWhere(userId, projectId),
+      deletedAt: null,
+    };
 
     return client.collection.findMany({
       where,
@@ -135,7 +153,7 @@ export class CollectionsRepository {
     }
 
     const effectiveProjectId =
-      input.projectId && input.projectId !== 'user' ? input.projectId : null;
+      this.normalizeProjectScopeId(input.projectId) ?? null;
 
     const client = this.getClient(clientTx);
     return client.collection.create({
@@ -222,10 +240,7 @@ export class CollectionsRepository {
     const strategy = typeof strategyOrTx === 'string' ? strategyOrTx : 'orphan';
 
     const client = this.getClient(clientTx);
-    const scopeWhere: Prisma.CollectionWhereInput =
-      projectId && projectId !== 'user' && isUUID(projectId)
-        ? { projectId }
-        : { userId, projectId: null };
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
 
     if (strategy === 'cascade') {
       const children = await client.collection.findMany({
@@ -358,9 +373,7 @@ export class CollectionsRepository {
         },
       });
     } else {
-      for (const itemId of itemIds) {
-        await this.addItemToCollection(userId, targetCollectionId, itemId, tx);
-      }
+      await this.addItemsToCollection(userId, targetCollectionId, itemIds, tx);
     }
   }
 
@@ -377,15 +390,27 @@ export class CollectionsRepository {
     projectId?: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    const client = this.getClient(tx);
-    for (const c of collections) {
-      await client.collection.updateMany({
-        where: projectId ? { id: c.id, projectId } : { id: c.id, userId },
-        data: {
-          ...(c.parentId !== undefined ? { parentId: c.parentId } : {}),
-          ...(c.orderIndex !== undefined ? { orderIndex: c.orderIndex } : {}),
-        },
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
+    const runUpdates = async (
+      client: Prisma.TransactionClient | PrismaService,
+    ) => {
+      for (const c of collections) {
+        await client.collection.updateMany({
+          where: { id: c.id, ...scopeWhere },
+          data: {
+            ...(c.parentId !== undefined ? { parentId: c.parentId } : {}),
+            ...(c.orderIndex !== undefined ? { orderIndex: c.orderIndex } : {}),
+          },
+        });
+      }
+    };
+
+    if (!tx && typeof this.prisma.$transaction === 'function') {
+      await this.prisma.$transaction(async (innerTx) => {
+        await runUpdates(innerTx);
       });
+    } else {
+      await runUpdates(this.getClient(tx));
     }
   }
 
@@ -416,7 +441,7 @@ export class CollectionsRepository {
 
   async findOwnedItemIds(
     itemIds: string[],
-    scopeWhere: any,
+    scopeWhere: Prisma.ItemWhereInput,
   ): Promise<string[]> {
     const owned = await this.prisma.item.findMany({
       where: { id: { in: itemIds }, ...scopeWhere },
@@ -427,7 +452,7 @@ export class CollectionsRepository {
 
   async findValidItemIds(
     itemIds: string[],
-    scopeWhere: any,
+    scopeWhere: Prisma.ItemWhereInput,
   ): Promise<string[]> {
     const valid = await this.prisma.item.findMany({
       where: { id: { in: itemIds }, ...scopeWhere, deletedAt: null },
@@ -436,7 +461,10 @@ export class CollectionsRepository {
     return valid.map((i) => i.id);
   }
 
-  async verifyItemInScope(itemId: string, scopeWhere: any): Promise<boolean> {
+  async verifyItemInScope(
+    itemId: string,
+    scopeWhere: Prisma.ItemWhereInput,
+  ): Promise<boolean> {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, ...scopeWhere, deletedAt: null },
       select: { id: true },

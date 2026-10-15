@@ -2,11 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   MetadataCandidate,
   FieldEvidence,
-} from '../types/metadata-candidate.types';
-import { NormalizationPolicy } from '../policies/normalization.policy';
+} from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { IWorkflowStage } from '@/modules/library/ingestion/types/workflow-stage.types';
 
 @Injectable()
-export class NormalizeStage {
+export class NormalizeStage implements IWorkflowStage<
+  MetadataCandidate[],
+  MetadataCandidate[]
+> {
+  readonly stageName = 'NORMALIZE' as const;
   private readonly logger = new Logger(NormalizeStage.name);
 
   constructor(private readonly normalizer: NormalizationPolicy) {}
@@ -17,8 +22,17 @@ export class NormalizeStage {
   execute(candidates: MetadataCandidate[]): Promise<MetadataCandidate[]> {
     return Promise.resolve(
       candidates.map((candidate) => {
+        // Fast-path passthrough: avoid redundant re-normalization if candidate was already normalized
+        if (
+          candidate.normalizedMetadata &&
+          candidate.fields &&
+          Object.keys(candidate.fields).length > 0
+        ) {
+          return candidate;
+        }
+
         const normalized = this.normalizer.normalize(
-          candidate.normalizedMetadata,
+          candidate.normalizedMetadata || {},
         );
         const fields: Record<string, FieldEvidence> = {};
 

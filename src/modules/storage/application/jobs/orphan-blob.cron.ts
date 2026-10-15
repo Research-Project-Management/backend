@@ -36,16 +36,16 @@ export class OrphanBlobJob {
             try {
               await this.blobRepo.delete(blob.id);
               deletedCount++;
-            } catch (err: any) {
+            } catch (err: unknown) {
               this.logger.error(
-                `Failed to delete tombstoned blob ${blob.id} from DB: ${err.message}`,
+                `Failed to delete tombstoned blob ${blob.id} from DB: ${(err as Error)?.message}`,
               );
             }
           }
           continue;
-        } catch (batchErr: any) {
+        } catch (batchErr: unknown) {
           this.logger.warn(
-            `Batch deletion failed, falling back to sequential reclamation: ${batchErr.message}`,
+            `Batch deletion failed, falling back to sequential reclamation: ${(batchErr as Error)?.message}`,
           );
         }
       }
@@ -56,9 +56,9 @@ export class OrphanBlobJob {
           await this.driver.delete(blob.s3Key.value());
           await this.blobRepo.delete(blob.id);
           deletedCount++;
-        } catch (err: any) {
+        } catch (err: unknown) {
           this.logger.error(
-            `Failed to sweep orphan blob ${blob.id} from S3: ${err.message}`,
+            `Failed to sweep orphan blob ${blob.id} from S3: ${(err as Error)?.message}`,
           );
         }
       }

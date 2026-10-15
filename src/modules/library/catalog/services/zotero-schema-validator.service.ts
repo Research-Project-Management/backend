@@ -3,29 +3,87 @@ import { TypesService } from './types.service';
 import {
   SchemaValidationResult,
   CreatorHarmonizationChange,
-} from '../../shared-kernel/types/schema.types';
+  CreatorTypeDefinition,
+  ItemFieldDefinition,
+} from '@/modules/library/shared-kernel/types/schema.types';
 import {
   FIELD_ALIASES,
   REVERSE_FIELD_ALIASES,
-} from '../../shared-kernel/types/schema.constants';
+  BASE_FIELD_MAPPINGS,
+  REVERSE_BASE_FIELD_MAPPINGS,
+  SCHEMA_V42_DATA,
+} from '@/modules/library/shared-kernel/types/schema.constants';
+import {
+  CreatorCreditInput,
+  ITEM_COLUMN_METADATA_FIELDS,
+  getValidCreatorMapForType,
+} from '@/modules/library/shared-kernel';
+
+const SYSTEM_AND_TELEMETRY_KEYS = new Set([
+  'id',
+  'projectId',
+  'workspaceId',
+  'userId',
+  'createdById',
+  'uploadedById',
+  'createdAt',
+  'updatedAt',
+  'deletedAt',
+  'version',
+  'expectedVersion',
+  'isDeleted',
+  'silent',
+  'provenance',
+  'fieldProvenance',
+  'ingestionStatus',
+  'verificationScore',
+  'isVerified',
+  'matchedSignals',
+  'missingFields',
+  'isSelfSufficient',
+  'qualityScore',
+  'engineUsed',
+  'dismissedDuplicateIds',
+  'mergedFromIds',
+  'crossrefEnriched',
+  'ragDocId',
+  'ragIndexedAt',
+  'ragLastAttemptAt',
+  'ragAttempts',
+  'ragError',
+  'ragStatus',
+  'isRetracted',
+  'retractionNature',
+  'retractionDetails',
+  'retractionCheckedAt',
+  'isMyPublication',
+  'publicationConfirmedAt',
+  'userStates',
+  'states',
+  'readStatus',
+  'rating',
+  'lastReadAt',
+]);
 
 const UNIVERSAL_FIELDS = new Set([
-  'id',
-  'title',
-  'itemType',
-  'type',
-  'projectId',
+  ...SYSTEM_AND_TELEMETRY_KEYS,
+  ...SCHEMA_V42_DATA.distinctFieldKeys,
+  ...ITEM_COLUMN_METADATA_FIELDS,
+  ...Object.keys(FIELD_ALIASES),
+  ...Object.values(FIELD_ALIASES),
   'creators',
   'authors',
   'editors',
   'contributors',
   'tags',
   'labels',
+  'itemTags',
   'keywords',
   'keywordsList',
   'collectionId',
   'collectionIds',
   'collections',
+  'collectionItems',
   'notes',
   'notesList',
   'fileUrl',
@@ -36,39 +94,16 @@ const UNIVERSAL_FIELDS = new Set([
   'primaryFile',
   'attachments',
   'identifiers',
-  'doi',
-  'DOI',
-  'arxivId',
-  'archiveID',
-  'archiveId',
-  'pmid',
-  'PMID',
-  'pmcid',
-  'PMCID',
-  'isbn',
-  'ISBN',
-  'issn',
-  'ISSN',
-  'url',
-  'URL',
-  'extra',
   'extraFields',
-  'citationKey',
-  'citeKey',
-  'citationCount',
-  'referenceCount',
-  'openAccessPdfUrl',
-  'uploadedById',
-  'createdAt',
-  'updatedAt',
-  'deletedAt',
-  'expectedVersion',
-  'provenance',
-  'userStates',
-  'states',
-  'readStatus',
-  'rating',
-  'lastReadAt',
+  'URL',
+  'numberOfPages',
+  'chapter',
+  'chapterNumber',
+  'formatType',
+  'priorityDate',
+  'journalRef',
+  'primaryCategory',
+  'categories',
 ]);
 
 @Injectable()
@@ -89,23 +124,29 @@ export class ZoteroSchemaValidatorService {
 
   validateAndHarmonizeCreators(
     itemType: string,
-    creators?: any[],
+    creators?: CreatorCreditInput[],
   ): {
-    creators: any[];
+    creators: CreatorCreditInput[];
     changes: CreatorHarmonizationChange[];
   } {
     if (!Array.isArray(creators) || creators.length === 0) {
       return { creators: [], changes: [] };
     }
 
-    const validCreatorTypes = new Set(
-      this.typesService
-        .getValidCreatorTypes(itemType)
-        .map((c: any) => c.creatorType.toLowerCase()),
-    );
-    const primaryCreator = this.typesService
-      .getPrimaryCreatorType(itemType)
-      .toLowerCase();
+    const serviceCreatorTypes =
+      this.typesService.getValidCreatorTypes(itemType);
+    const validCreatorMap =
+      Array.isArray(serviceCreatorTypes) && serviceCreatorTypes.length > 0
+        ? new Map(
+            serviceCreatorTypes.map((c: CreatorTypeDefinition) => [
+              c.creatorType.toLowerCase(),
+              c.creatorType,
+            ]),
+          )
+        : getValidCreatorMapForType(itemType);
+    const primaryCreatorRaw = this.typesService.getPrimaryCreatorType(itemType);
+    const primaryCreator =
+      validCreatorMap.get(primaryCreatorRaw.toLowerCase()) || primaryCreatorRaw;
 
     const changes: CreatorHarmonizationChange[] = [];
     const harmonizedCreators = creators.map((c, index) => {
@@ -113,10 +154,11 @@ export class ZoteroSchemaValidatorService {
       const rawRole = (c.creatorType || 'author').trim();
       const lowerRole = rawRole.toLowerCase();
 
-      if (validCreatorTypes.has(lowerRole)) {
+      const canonicalRole = validCreatorMap.get(lowerRole);
+      if (canonicalRole) {
         return {
           ...c,
-          creatorType: lowerRole,
+          creatorType: canonicalRole,
         };
       }
 
@@ -124,8 +166,9 @@ export class ZoteroSchemaValidatorService {
       let reason: CreatorHarmonizationChange['reason'] =
         'normalized-to-primary';
 
-      if (index > 0 && validCreatorTypes.has('contributor')) {
-        targetRole = 'contributor';
+      const contributorCanonical = validCreatorMap.get('contributor');
+      if (index > 0 && contributorCanonical) {
+        targetRole = contributorCanonical;
         reason = 'fallback-to-contributor';
       }
 
@@ -158,18 +201,22 @@ export class ZoteroSchemaValidatorService {
 
   validateAndSanitizeFields(
     itemType: string,
-    data: Record<string, any>,
+    data: Record<string, unknown>,
   ): {
-    cleanFields: Record<string, any>;
-    demotedToExtra: Record<string, any>;
+    cleanFields: Record<string, unknown>;
+    demotedToExtra: Record<string, unknown>;
     warnings: string[];
   } {
     const validFields = new Set(
-      this.typesService.getOrderedFields(itemType).map((f: any) => f.key),
+      this.typesService
+        .getOrderedFields(itemType)
+        .map((f: ItemFieldDefinition) => f.key),
     );
+    const typeBaseMap = BASE_FIELD_MAPPINGS[itemType] || {};
+    const typeReverseBaseMap = REVERSE_BASE_FIELD_MAPPINGS[itemType] || {};
 
-    const cleanFields: Record<string, any> = {};
-    const demotedToExtra: Record<string, any> = {};
+    const cleanFields: Record<string, unknown> = {};
+    const demotedToExtra: Record<string, unknown> = {};
     const warnings: string[] = [];
 
     const extraLines: string[] = [];
@@ -183,16 +230,28 @@ export class ZoteroSchemaValidatorService {
         continue;
       }
 
-      if (UNIVERSAL_FIELDS.has(key)) {
+      if (SYSTEM_AND_TELEMETRY_KEYS.has(key) || UNIVERSAL_FIELDS.has(key)) {
         cleanFields[key] = value;
         continue;
       }
 
       const canonicalAlias = FIELD_ALIASES[key] || REVERSE_FIELD_ALIASES[key];
-      const isValidDirect = validFields.has(key);
-      const isValidAlias = canonicalAlias && validFields.has(canonicalAlias);
+      const mappedBase =
+        typeBaseMap[key] ||
+        typeReverseBaseMap[key] ||
+        (canonicalAlias
+          ? typeBaseMap[canonicalAlias] || typeReverseBaseMap[canonicalAlias]
+          : undefined);
 
-      if (isValidDirect || isValidAlias) {
+      const isValidDirect = validFields.has(key);
+      const isValidAlias = Boolean(
+        canonicalAlias && validFields.has(canonicalAlias),
+      );
+      const isValidMappedBase = Boolean(
+        mappedBase && validFields.has(mappedBase),
+      );
+
+      if (isValidDirect || isValidAlias || isValidMappedBase) {
         cleanFields[key] = value;
         continue;
       }
@@ -203,9 +262,10 @@ export class ZoteroSchemaValidatorService {
       warnings.push(warningMsg);
 
       if (
-        typeof value === 'string' ||
-        typeof value === 'number' ||
-        typeof value === 'boolean'
+        !SYSTEM_AND_TELEMETRY_KEYS.has(key) &&
+        (typeof value === 'string' ||
+          typeof value === 'number' ||
+          typeof value === 'boolean')
       ) {
         const line = `${key}: ${value}`;
         if (!extraLines.some((l) => l.startsWith(`${key}:`))) {
@@ -221,27 +281,36 @@ export class ZoteroSchemaValidatorService {
 
   validateAndSanitizeItem(
     rawType: string | undefined | null,
-    rawData: Record<string, any>,
+    rawData: Record<string, unknown>,
   ): SchemaValidationResult {
     const itemType = this.validateItemType(
-      rawType || rawData.itemType || rawData.type,
+      rawType ||
+        (rawData.itemType as string | undefined) ||
+        (rawData.type as string | undefined),
     );
 
-    let creators = rawData.creators;
+    let creators = rawData.creators as CreatorCreditInput[] | undefined;
     let changes: CreatorHarmonizationChange[] = [];
     if (rawData.creators !== undefined) {
       const harm = this.validateAndHarmonizeCreators(
         itemType,
-        rawData.creators,
+        rawData.creators as CreatorCreditInput[],
       );
       creators = harm.creators;
       changes = harm.changes;
     }
 
-    const dataWithCreators: Record<string, any> = {
+    const rawTypeFieldVal =
+      typeof rawData.type === 'string' &&
+      rawData.type.trim().toLowerCase() !== itemType.toLowerCase() &&
+      !this.typesService.isValidItemType(rawData.type.trim())
+        ? rawData.type.trim()
+        : undefined;
+
+    const dataWithCreators: Record<string, unknown> = {
       ...rawData,
       itemType,
-      type: itemType,
+      type: rawTypeFieldVal ?? itemType,
       ...(rawData.creators !== undefined ? { creators } : {}),
     };
 

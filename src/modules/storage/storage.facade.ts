@@ -310,7 +310,7 @@ export class StorageFacade implements IStoragePort {
     contentHash?: string;
     projectId?: string | null;
     parentId?: string | null;
-    scope?: any;
+    scope?: FileScope | string;
   }): Promise<{
     uploadUrl: string;
     storageKey: string;
@@ -324,7 +324,10 @@ export class StorageFacade implements IStoragePort {
     mimeType?: string;
   }> {
     if (this.presignUploadUseCase) {
-      return this.presignUploadUseCase.execute(input);
+      return this.presignUploadUseCase.execute({
+        ...input,
+        scope: input.scope as FileScope | undefined,
+      });
     }
     const cleanExt = (input.filename.split('.').pop() || 'bin').replace(
       /[^a-zA-Z0-9]/g,
@@ -354,7 +357,7 @@ export class StorageFacade implements IStoragePort {
     mimeType?: string;
     projectId?: string | null;
     parentId?: string | null;
-    scope?: any;
+    scope?: FileScope | string;
     contentHash?: string;
   }): Promise<{
     fileId: string;
@@ -375,7 +378,7 @@ export class StorageFacade implements IStoragePort {
       mimeType: input.mimeType,
       projectId: input.projectId,
       parentId: input.parentId,
-      scope: input.scope,
+      scope: input.scope as FileScope | undefined,
       contentHash: input.contentHash,
     });
     return {
@@ -395,7 +398,7 @@ export class StorageFacade implements IStoragePort {
     totalSize: number;
     projectId?: string | null;
     parentId?: string | null;
-    scope?: any;
+    scope?: FileScope | string;
     expectedHash?: string;
   }): Promise<{
     sessionId: string;
@@ -406,7 +409,10 @@ export class StorageFacade implements IStoragePort {
     if (!this.multipartUploadUseCase) {
       throw new Error('MultipartUploadUseCase is not available');
     }
-    return this.multipartUploadUseCase.initiate(input);
+    return this.multipartUploadUseCase.initiate({
+      ...input,
+      scope: input.scope as FileScope | undefined,
+    });
   }
 
   async getMultipartPartUrl(

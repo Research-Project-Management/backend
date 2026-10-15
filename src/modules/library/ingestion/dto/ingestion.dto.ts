@@ -8,12 +8,43 @@ import {
 
 export class UnifiedIngestionDto {
   @IsString()
-  @IsIn(['doi', 'url', 'bibtex', 'pdf'])
-  source!: 'doi' | 'url' | 'bibtex' | 'pdf';
+  @IsIn([
+    'doi',
+    'arxiv',
+    'pmid',
+    'isbn',
+    'url',
+    'bibtex',
+    'ris',
+    'pdf',
+    'zotero',
+  ])
+  source!:
+    | 'doi'
+    | 'arxiv'
+    | 'pmid'
+    | 'isbn'
+    | 'url'
+    | 'bibtex'
+    | 'ris'
+    | 'pdf'
+    | 'zotero';
 
   @IsOptional()
   @IsString()
   doi?: string;
+
+  @IsOptional()
+  @IsString()
+  arxivId?: string;
+
+  @IsOptional()
+  @IsString()
+  pmid?: string;
+
+  @IsOptional()
+  @IsString()
+  isbn?: string;
 
   @IsOptional()
   @IsString()
@@ -29,11 +60,15 @@ export class UnifiedIngestionDto {
 
   @IsOptional()
   @IsString()
-  content?: string; // For BibTeX or raw text
+  content?: string; // For BibTeX, RIS, or raw text
 
   @IsOptional()
   @IsString()
   bibtex?: string; // Alias for content
+
+  @IsOptional()
+  @IsString()
+  ris?: string; // Alias for content
 
   @IsOptional()
   @IsString()
@@ -42,6 +77,14 @@ export class UnifiedIngestionDto {
   @IsOptional()
   @IsString()
   filename?: string;
+
+  @IsOptional()
+  @IsString()
+  connectionId?: string;
+
+  @IsOptional()
+  @IsString()
+  externalItemKey?: string;
 
   @IsOptional()
   @IsString()

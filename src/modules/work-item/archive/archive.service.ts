@@ -10,7 +10,10 @@ import { EntityType } from '@prisma/client';
 import { ArchiveRepository } from './archive.repository';
 import { BulkArchiveDto } from './dto/bulk-archive.dto';
 import { RedisCacheService } from '@/core';
-import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
+import {
+  WORK_ITEM_REDIS_KEYS,
+  invalidateWorkItemCache,
+} from '@/modules/work-item/common/constants/redis-keys.constant';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 
 @Injectable()
@@ -23,26 +26,6 @@ export class ArchiveService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateWorkItemCache(
-    workItemId: string,
-    projectId?: string,
-  ) {
-    if (!this.cache) return;
-    const promises: Promise<void>[] = [
-      this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)),
-    ];
-    if (projectId) {
-      promises.push(
-        this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
-      );
-    }
-    await Promise.all(promises).catch((err) => {
-      this.logger.warn(
-        `Failed to invalidate cache for work item ${workItemId}: ${(err as Error).message}`,
-      );
-    });
-  }
-
   private async invalidateWorkItemsBulk(
     workItems: Array<{ id: string; projectId?: string | null }>,
   ) {
@@ -52,7 +35,7 @@ export class ArchiveService {
       keys.add(WORK_ITEM_REDIS_KEYS.workItem(item.id));
       if (item.projectId) {
         keys.add(WORK_ITEM_REDIS_KEYS.projectWorkItems(item.projectId));
-        keys.add(`flux:proj:overview:${item.projectId}`);
+        keys.add(WORK_ITEM_REDIS_KEYS.projectOverview(item.projectId));
       }
     }
     const promises = Array.from(keys).map((key) => this.cache!.del(key));
@@ -63,173 +46,144 @@ export class ArchiveService {
     });
   }
 
-  async archiveWorkItem(workItemId: string, userId: string) {
+  private async setArchiveState(
+    workItemId: string,
+    userId: string,
+    archive: boolean,
+  ) {
     const workItem =
       await this.archiveRepository.findWorkItemWithProject(workItemId);
     if (!workItem) {
       throw new NotFoundException(`Work item "${workItemId}" not found`);
     }
-    if (workItem.archivedAt) {
+
+    const displayId = workItem.identifier || workItem.id;
+    if (archive && workItem.archivedAt) {
       throw new BadRequestException(
-        `Work item "${workItem.identifier || workItem.id}" is already archived`,
+        `Work item "${displayId}" is already archived`,
       );
     }
+    if (!archive && !workItem.archivedAt) {
+      throw new BadRequestException(`Work item "${displayId}" is not archived`);
+    }
 
-    const updated = await this.archiveRepository.archiveWorkItem(workItem.id);
-    await this.invalidateWorkItemCache(workItem.id, workItem.projectId);
+    const updated = archive
+      ? await this.archiveRepository.archiveWorkItem(workItem.id)
+      : await this.archiveRepository.restoreWorkItem(workItem.id);
 
+    await invalidateWorkItemCache(this.cache, {
+      workItemId: workItem.id,
+      projectId: workItem.projectId,
+    });
+
+    const verb = archive ? 'archived' : 'restored';
     if (this.eventEmitter) {
-      this.eventEmitter.emit('work-item.archived', {
+      this.eventEmitter.emit(`work-item.${verb}`, {
+        entityType: EntityType.work_item,
+        entityId: workItem.id,
         workItemId: workItem.id,
         identifier: workItem.identifier,
         projectId: workItem.projectId,
+        verb,
+        actorId: userId,
         userId,
       });
-
-      this.eventEmitter.emit(
-        'activity.log',
-        new DomainActivityEvent({
-          entityType: EntityType.work_item,
-          entityId: workItem.id,
-          verb: 'archived',
-          actorId: userId,
-          projectId: workItem.projectId,
-        }),
-      );
     }
 
     return {
       success: true,
-      message: `Work item "${workItem.identifier || workItem.id}" has been archived`,
+      message: archive
+        ? `Work item "${displayId}" has been archived`
+        : `Work item "${displayId}" has been restored to active boards`,
       workItem: updated,
       item: updated,
     };
+  }
+
+  private async bulkSetArchiveState(
+    bulkArchiveDto: BulkArchiveDto,
+    userId: string,
+    archive: boolean,
+  ) {
+    const actionLabel = archive ? 'archive' : 'restore';
+    const verb = archive ? 'archived' : 'restored';
+    const rawIds = bulkArchiveDto.workItemIds || bulkArchiveDto.ids || [];
+    const ids = Array.from(
+      new Set(
+        (Array.isArray(rawIds) ? rawIds : [])
+          .filter((id): id is string => typeof id === 'string')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ).sort();
+    if (ids.length === 0) {
+      throw new BadRequestException(
+        `No work item IDs provided to ${actionLabel}`,
+      );
+    }
+    const workItems = await this.archiveRepository.findWorkItemsByIds(ids);
+    if (workItems.length === 0) {
+      throw new BadRequestException(
+        `No valid work items found to ${actionLabel}`,
+      );
+    }
+
+    const result = archive
+      ? await this.archiveRepository.bulkArchive(ids)
+      : await this.archiveRepository.bulkRestore(ids);
+    await this.invalidateWorkItemsBulk(workItems);
+
+    if (this.eventEmitter) {
+      const projectId = bulkArchiveDto.projectId || workItems[0]?.projectId;
+      this.eventEmitter.emit(`work-item.bulk-${verb}`, {
+        entityType: EntityType.project,
+        entityId: projectId,
+        workItemIds: ids,
+        count: result.count,
+        projectId,
+        verb,
+        actorId: userId,
+        userId,
+        ...(archive ? { reason: bulkArchiveDto.reason } : {}),
+      });
+
+      for (const workItem of workItems) {
+        this.eventEmitter.emit(
+          'activity.event',
+          new DomainActivityEvent({
+            entityType: EntityType.work_item,
+            entityId: workItem.id,
+            verb,
+            actorId: userId,
+            projectId: workItem.projectId,
+          }),
+        );
+      }
+    }
+
+    return {
+      success: true,
+      count: result.count,
+      message: archive
+        ? `Successfully archived ${result.count} work item(s)`
+        : `Successfully restored ${result.count} work item(s) to active boards`,
+    };
+  }
+
+  async archiveWorkItem(workItemId: string, userId: string) {
+    return this.setArchiveState(workItemId, userId, true);
   }
 
   async restoreWorkItem(workItemId: string, userId: string) {
-    const workItem =
-      await this.archiveRepository.findWorkItemWithProject(workItemId);
-    if (!workItem) {
-      throw new NotFoundException(`Work item "${workItemId}" not found`);
-    }
-    if (!workItem.archivedAt) {
-      throw new BadRequestException(
-        `Work item "${workItem.identifier || workItem.id}" is not archived`,
-      );
-    }
-
-    const updated = await this.archiveRepository.restoreWorkItem(workItem.id);
-    await this.invalidateWorkItemCache(workItem.id, workItem.projectId);
-
-    if (this.eventEmitter) {
-      this.eventEmitter.emit('work-item.restored', {
-        workItemId: workItem.id,
-        identifier: workItem.identifier,
-        projectId: workItem.projectId,
-        userId,
-      });
-
-      this.eventEmitter.emit(
-        'activity.log',
-        new DomainActivityEvent({
-          entityType: EntityType.work_item,
-          entityId: workItem.id,
-          verb: 'restored',
-          actorId: userId,
-          projectId: workItem.projectId,
-        }),
-      );
-    }
-
-    return {
-      success: true,
-      message: `Work item "${workItem.identifier || workItem.id}" has been restored to active boards`,
-      workItem: updated,
-      item: updated,
-    };
+    return this.setArchiveState(workItemId, userId, false);
   }
 
   async bulkArchiveWorkItems(bulkArchiveDto: BulkArchiveDto, userId: string) {
-    const ids = bulkArchiveDto.workItemIds || bulkArchiveDto.ids || [];
-    if (!Array.isArray(ids) || ids.length === 0) {
-      throw new BadRequestException('No work item IDs provided to archive');
-    }
-    const workItems = await this.archiveRepository.findWorkItemsByIds(ids);
-    if (workItems.length === 0) {
-      throw new BadRequestException('No valid work items found to archive');
-    }
-
-    const archiveResult = await this.archiveRepository.bulkArchive(ids);
-    await this.invalidateWorkItemsBulk(workItems);
-
-    if (this.eventEmitter) {
-      this.eventEmitter.emit('work-item.bulk-archived', {
-        workItemIds: ids,
-        count: archiveResult.count,
-        userId,
-        reason: bulkArchiveDto.reason,
-      });
-
-      for (const workItem of workItems) {
-        this.eventEmitter.emit(
-          'activity.log',
-          new DomainActivityEvent({
-            entityType: EntityType.work_item,
-            entityId: workItem.id,
-            verb: 'archived',
-            actorId: userId,
-            projectId: workItem.projectId,
-          }),
-        );
-      }
-    }
-
-    return {
-      success: true,
-      count: archiveResult.count,
-      message: `Successfully archived ${archiveResult.count} work item(s)`,
-    };
+    return this.bulkSetArchiveState(bulkArchiveDto, userId, true);
   }
 
   async bulkRestoreWorkItems(bulkArchiveDto: BulkArchiveDto, userId: string) {
-    const ids = bulkArchiveDto.workItemIds || bulkArchiveDto.ids || [];
-    if (!Array.isArray(ids) || ids.length === 0) {
-      throw new BadRequestException('No work item IDs provided to restore');
-    }
-    const workItems = await this.archiveRepository.findWorkItemsByIds(ids);
-    if (workItems.length === 0) {
-      throw new BadRequestException('No valid work items found to restore');
-    }
-
-    const restoreResult = await this.archiveRepository.bulkRestore(ids);
-    await this.invalidateWorkItemsBulk(workItems);
-
-    if (this.eventEmitter) {
-      this.eventEmitter.emit('work-item.bulk-restored', {
-        workItemIds: ids,
-        count: restoreResult.count,
-        userId,
-      });
-
-      for (const workItem of workItems) {
-        this.eventEmitter.emit(
-          'activity.log',
-          new DomainActivityEvent({
-            entityType: EntityType.work_item,
-            entityId: workItem.id,
-            verb: 'restored',
-            actorId: userId,
-            projectId: workItem.projectId,
-          }),
-        );
-      }
-    }
-
-    return {
-      success: true,
-      count: restoreResult.count,
-      message: `Successfully restored ${restoreResult.count} work item(s) to active boards`,
-    };
+    return this.bulkSetArchiveState(bulkArchiveDto, userId, false);
   }
 
   async getArchivedWorkItems(

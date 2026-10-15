@@ -1,36 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { EntityType } from '@prisma/client';
-
-const USER_SELECT = {
-  id: true,
-  email: true,
-  profile: {
-    select: {
-      name: true,
-      avatar: true,
-    },
-  },
-} as const;
-
-function mapUser<
-  T extends
-    | {
-        id: string;
-        email: string | null;
-        profile?: { name: string; avatar: string | null } | null;
-      }
-    | null
-    | undefined,
->(user: T) {
-  if (!user) return null;
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.profile?.name ?? 'User',
-    avatar: user.profile?.avatar ?? null,
-  };
-}
+import {
+  USER_MINIMAL_SELECT,
+  mapUserMinimal,
+} from '@/modules/work-item/common/types/shared.types';
 
 @Injectable()
 export class HistoryRepository {
@@ -66,13 +40,13 @@ export class HistoryRepository {
       orderBy: { createdAt: sort },
       include: {
         actor: {
-          select: USER_SELECT,
+          select: USER_MINIMAL_SELECT,
         },
       },
     });
     return events.map((e) => ({
       ...e,
-      actor: mapUser(e.actor),
+      actor: mapUserMinimal(e.actor),
     }));
   }
 }

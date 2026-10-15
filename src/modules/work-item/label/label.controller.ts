@@ -80,24 +80,13 @@ export class LabelController {
   }
 
   @Patch('projects/:projectId/labels/:labelId')
+  @Put('projects/:projectId/labels/:labelId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Update project label attributes or parent',
   })
   async updateProjectLabel(
-    @Param('projectId') projectId: string,
-    @Param('labelId') labelId: string,
-    @Body() dto: UpdateProjectLabelDto,
-  ) {
-    return this.labelService.updateProjectLabel(projectId, labelId, dto);
-  }
-
-  @Put('projects/:projectId/labels/:labelId')
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Update project label (PUT alias)' })
-  async putProjectLabel(
     @Param('projectId') projectId: string,
     @Param('labelId') labelId: string,
     @Body() dto: UpdateProjectLabelDto,
@@ -139,7 +128,7 @@ export class LabelController {
     @Query() query?: QueryLabelDto,
   ) {
     if (query?.projectId) {
-      return this.labelService.getProjectLabels(query.projectId);
+      return this.labelService.getProjectLabels(query.projectId, query?.type);
     }
     return this.labelService.getLabels(userId, query?.type, undefined);
   }

@@ -10,7 +10,7 @@ export abstract class IRealtimeBroadcasterPort {
   abstract broadcastToProject(
     projectId: string,
     event: string,
-    payload: any,
+    payload: unknown,
     excludeSocketId?: string,
   ): void;
 
@@ -21,7 +21,7 @@ export abstract class IRealtimeBroadcasterPort {
     projectId: string,
     docId: string,
     event: string,
-    payload: any,
+    payload: unknown,
     excludeSocketId?: string,
     volatile?: boolean,
   ): void;
@@ -29,5 +29,9 @@ export abstract class IRealtimeBroadcasterPort {
   /**
    * Sends a targeted message to a single specific socket client.
    */
-  abstract sendToSocket(socketId: string, event: string, payload: any): void;
+  abstract sendToSocket(
+    socketId: string,
+    event: string,
+    payload: unknown,
+  ): void;
 }

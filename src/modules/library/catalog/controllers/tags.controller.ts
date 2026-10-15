@@ -13,8 +13,11 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { CreateTagDto, UpdateTagDto } from '../dto/tags.dto';
-import { TagsService } from '../services/tags.service';
+import {
+  CreateTagDto,
+  UpdateTagDto,
+} from '@/modules/library/catalog/dto/tags.dto';
+import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { TagType } from '@prisma/client';
@@ -67,11 +70,17 @@ export class TagController {
     @CurrentUser('id') userId: string,
     @Param('id') id: string,
     @Body() dto: UpdateTagDto,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
-    return this.tagsService.updateTag(userId, id, {
+    const projectId = routeProjectId ?? queryProjectId;
+    const payload = {
       ...dto,
       type: dto.type as TagType | undefined,
-    });
+    };
+    return projectId
+      ? this.tagsService.updateTag(userId, id, payload, projectId)
+      : this.tagsService.updateTag(userId, id, payload);
   }
 
   @Delete('automatic')
@@ -90,8 +99,16 @@ export class TagController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete a tag' })
-  async deleteTag(@CurrentUser('id') userId: string, @Param('id') id: string) {
-    return this.tagsService.deleteTag(userId, id);
+  async deleteTag(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+  ) {
+    const projectId = routeProjectId ?? queryProjectId;
+    return projectId
+      ? this.tagsService.deleteTag(userId, id, projectId)
+      : this.tagsService.deleteTag(userId, id);
   }
 
   @Post([':tagId/items/:itemId', 'items/:itemId/assign'])
@@ -102,17 +119,28 @@ export class TagController {
     @Param('itemId') itemId: string,
     @Param('tagId') paramTagId?: string,
     @Body() body?: { tagId?: string; type?: string },
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     const effectiveTagId = paramTagId || body?.tagId;
     if (!effectiveTagId) {
       throw new BadRequestException('tagId is required');
     }
-    return this.tagsService.assignTagToItem(
-      userId,
-      itemId,
-      effectiveTagId,
-      body?.type as TagType | undefined,
-    );
+    const projectId = routeProjectId ?? queryProjectId;
+    return projectId
+      ? this.tagsService.assignTagToItem(
+          userId,
+          itemId,
+          effectiveTagId,
+          body?.type as TagType | undefined,
+          projectId,
+        )
+      : this.tagsService.assignTagToItem(
+          userId,
+          itemId,
+          effectiveTagId,
+          body?.type as TagType | undefined,
+        );
   }
 
   @Delete([':tagId/items/:itemId', 'items/:itemId/tags/:tagId'])
@@ -123,7 +151,12 @@ export class TagController {
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
     @Param('tagId') tagId: string,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
-    return this.tagsService.detachTagFromItem(userId, itemId, tagId);
+    const projectId = routeProjectId ?? queryProjectId;
+    return projectId
+      ? this.tagsService.detachTagFromItem(userId, itemId, tagId, projectId)
+      : this.tagsService.detachTagFromItem(userId, itemId, tagId);
   }
 }

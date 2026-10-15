@@ -11,9 +11,13 @@ import { IngestionRunSnapshot } from './types/ingestion.types';
 import { DuplicateClusterResult } from './types/curation.types';
 import { RetractionCheckResult } from './types/retraction.types';
 
-export const INGESTION_FACADE = 'INGESTION_FACADE';
+import {
+  INGESTION_FACADE,
+  IIngestionFacade as IKernelIngestionFacade,
+} from '@/modules/library/shared-kernel/ports/ingestion.port';
+export { INGESTION_FACADE };
 
-export interface IIngestionFacade {
+export interface IIngestionFacade extends IKernelIngestionFacade {
   submitIngestion(
     envelope: IngestionSubmissionEnvelope,
     options?: { enqueue?: boolean },
@@ -35,6 +39,20 @@ export interface IIngestionFacade {
     itemId: string,
     projectId?: string,
   ): Promise<RetractionCheckResult>;
+  reResolveMetadata(
+    userId: string,
+    itemId: string,
+    options?: {
+      doi?: string;
+      arxivId?: string;
+      pmid?: string;
+      isbn?: string;
+      title?: string;
+      forceRefresh?: boolean;
+      expectedVersion?: number;
+    },
+    projectId?: string,
+  ): Promise<Awaited<ReturnType<IngestionService['reResolveMetadata']>>>;
 }
 
 /**
@@ -84,5 +102,27 @@ export class IngestionFacade implements IIngestionFacade {
     projectId?: string,
   ): Promise<RetractionCheckResult> {
     return this.retractionService.checkItem(userId, itemId, projectId);
+  }
+
+  async reResolveMetadata(
+    userId: string,
+    itemId: string,
+    options?: {
+      doi?: string;
+      arxivId?: string;
+      pmid?: string;
+      isbn?: string;
+      title?: string;
+      forceRefresh?: boolean;
+      expectedVersion?: number;
+    },
+    projectId?: string,
+  ): Promise<Awaited<ReturnType<IngestionService['reResolveMetadata']>>> {
+    return this.ingestionService.reResolveMetadata(
+      userId,
+      itemId,
+      options,
+      projectId,
+    );
   }
 }

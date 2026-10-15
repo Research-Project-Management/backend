@@ -519,7 +519,15 @@ export class AiService {
         throw new ForbiddenException('You do not have access to this file');
       }
 
-      const meta = (file.metaData as Record<string, any>) || {};
+      interface FileDocMetadata {
+        title?: string;
+        authors?: string[] | string;
+        year?: number | string;
+        doi?: string;
+        abstract?: string;
+        ragDocId?: string | null;
+      }
+      const meta = (file.metaData as FileDocMetadata | null) || {};
       const scopeId =
         file.linkedToType === 'project' && file.linkedToId
           ? file.linkedToId

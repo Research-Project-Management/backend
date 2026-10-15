@@ -4,19 +4,19 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { SavedSearchesRepository } from '../repositories/saved-searches.repository';
-import { ConditionEvaluatorEngine } from '../utils/condition-evaluator.engine';
+import { SavedSearchesRepository } from '@/modules/library/catalog/repositories/saved-searches.repository';
+import { ConditionEvaluatorEngine } from '@/modules/library/catalog/domain/condition-evaluator.engine';
 import {
   CreateSavedSearchDto,
   UpdateSavedSearchDto,
   PreviewSavedSearchDto,
   ExecuteSavedSearchQueryDto,
-} from '../dto/saved-search.dto';
-import { ItemsMapper } from '../utils/items.mapper';
+} from '@/modules/library/catalog/dto/saved-search.dto';
+import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import {
   SavedSearchConditionGroup,
   ExecuteSavedSearchOptions,
-} from '../types/saved-search.types';
+} from '@/modules/library/catalog/types/saved-search.types';
 
 @Injectable()
 export class SavedSearchesService {
@@ -90,8 +90,9 @@ export class SavedSearchesService {
         );
         const count = await this.repo.countMatchingItems(where);
         await this.repo.updateCachedCount(id, count);
-      } catch (err: any) {
-        this.logger.warn(`Failed to update cached count: ${err?.message}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to update cached count: ${message}`);
       }
     }
 

@@ -84,19 +84,10 @@ export class RecordChangeDto {
 
 export class BatchResolveDto {
   @ApiProperty({
-    enum: [
-      'accept_all',
-      'reject_all',
-      'accept_selected',
-      'reject_selected',
-    ],
+    enum: ['accept_all', 'reject_all', 'accept_selected', 'reject_selected'],
   })
   @IsEnum(['accept_all', 'reject_all', 'accept_selected', 'reject_selected'])
-  action!:
-    | 'accept_all'
-    | 'reject_all'
-    | 'accept_selected'
-    | 'reject_selected';
+  action!: 'accept_all' | 'reject_all' | 'accept_selected' | 'reject_selected';
 
   @ApiPropertyOptional({
     description:
@@ -190,6 +181,9 @@ export class TrackChangeResponseDto {
   createdById?: string | null;
 
   @ApiPropertyOptional()
+  authorId?: string | null;
+
+  @ApiPropertyOptional()
   resolvedById?: string | null;
 
   @ApiPropertyOptional()
@@ -215,6 +209,9 @@ export class CommentReplyResponseDto {
   @ApiPropertyOptional()
   createdById?: string | null;
 
+  @ApiPropertyOptional()
+  authorId?: string | null;
+
   @ApiProperty()
   createdAt!: string;
 
@@ -235,6 +232,12 @@ export class CommentThreadResponseDto {
   @ApiPropertyOptional()
   quote?: string | null;
 
+  @ApiPropertyOptional()
+  selectedText?: string | null;
+
+  @ApiPropertyOptional()
+  content?: string | null;
+
   @ApiProperty({ type: TextRangeDto })
   range!: TextRangeDto;
 
@@ -242,7 +245,13 @@ export class CommentThreadResponseDto {
   isResolved!: boolean;
 
   @ApiPropertyOptional()
+  resolved?: boolean;
+
+  @ApiPropertyOptional()
   createdById?: string | null;
+
+  @ApiPropertyOptional()
+  authorId?: string | null;
 
   @ApiPropertyOptional()
   resolvedById?: string | null;

@@ -31,7 +31,7 @@ import {
   AttachmentStorageController,
 } from '@/modules/library/extraction/controllers';
 import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
-import { ExtractionHandler } from '@/modules/library/extraction/utils/extraction.handler';
+import { ExtractionHandler } from '@/modules/library/extraction/services/extraction.handler';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { IStoragePort } from '@/modules/storage/storage.port';
 

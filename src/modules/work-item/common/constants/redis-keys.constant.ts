@@ -37,13 +37,39 @@ export const WORK_ITEM_REDIS_KEYS = {
   states: (projectId: string) => `flux:wi:states:${projectId}`,
 
   /**
+   * Project overview cache key
+   */
+  projectOverview: (projectId: string) => `flux:proj:overview:${projectId}`,
+
+  /**
    * Aliases for cleaner shorthand
    */
   list: (projectId: string) => `flux:wi:work-items:${projectId}`,
   item: (id: string) => `flux:wi:work-item:${id}`,
 } as const;
 
-/**
- * Backward compatibility alias
- */
-export const WORKFLOW_REDIS_KEYS = WORK_ITEM_REDIS_KEYS;
+export async function invalidateWorkItemCache(
+  cache: { del: (key: string) => Promise<unknown> } | null | undefined,
+  options: {
+    projectId?: string | null;
+    workItemId?: string | null;
+    identifier?: string | null;
+  },
+): Promise<void> {
+  if (!cache) return;
+  const keys = new Set<string>();
+  if (options.projectId) {
+    keys.add(WORK_ITEM_REDIS_KEYS.projectWorkItems(options.projectId));
+    keys.add(WORK_ITEM_REDIS_KEYS.projectOverview(options.projectId));
+  }
+  if (options.workItemId) {
+    keys.add(WORK_ITEM_REDIS_KEYS.workItem(options.workItemId));
+  }
+  if (options.identifier) {
+    keys.add(WORK_ITEM_REDIS_KEYS.workItem(options.identifier));
+  }
+  if (keys.size === 0) return;
+  await Promise.all(Array.from(keys).map((k) => cache.del(k))).catch(() => {
+    // Best-effort cache invalidation
+  });
+}

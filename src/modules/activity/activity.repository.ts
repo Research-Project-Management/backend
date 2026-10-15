@@ -9,16 +9,25 @@ import {
   ACTOR_MINIMAL_SELECT,
 } from './types/activity-repository.interface';
 
-function mapActivityEvent(event: any) {
+type RawActivityEventWithActor = Prisma.ActivityEventGetPayload<{
+  include: {
+    actor: { select: typeof ACTOR_MINIMAL_SELECT };
+    project: { select: { id: true; name: true } };
+  };
+}>;
+
+function mapActivityEvent(
+  event: RawActivityEventWithActor,
+): ActivityEventWithActor {
   if (!event) return event;
   const actor = event.actor
     ? {
         id: event.actor.id,
         email: event.actor.email,
-        name: event.actor.profile?.name ?? event.actor.name ?? 'User',
-        avatar: event.actor.profile?.avatar ?? event.actor.avatar ?? null,
+        name: event.actor.profile?.name ?? 'User',
+        avatar: event.actor.profile?.avatar ?? null,
       }
-    : event.actor;
+    : null;
   return {
     ...event,
     actor,
@@ -59,7 +68,7 @@ export class ActivityRepository implements IActivityRepository {
     const limit = options?.limit ?? 50;
     const offset = options?.offset ?? 0;
 
-    const where: any = { projectId };
+    const where: Prisma.ActivityEventWhereInput = { projectId };
     if (options?.entityType) {
       where.entityType = options.entityType;
     }
@@ -98,7 +107,7 @@ export class ActivityRepository implements IActivityRepository {
     const limit = options?.limit ?? 50;
     const offset = options?.offset ?? 0;
 
-    const where: any = {
+    const where: Prisma.ActivityEventWhereInput = {
       OR: [{ actorId: userId }, { project: { members: { some: { userId } } } }],
     };
     if (options?.entityType) {
@@ -201,9 +210,7 @@ export class ActivityRepository implements IActivityRepository {
       map.set(`work_item:${t.id}`, t.title);
     });
     papers.forEach((p) => map.set(`paper:${p.id}`, p.title));
-    pages.forEach((pg: any) =>
-      map.set(`page:${pg.id}`, pg.path || pg.title || 'Manuscript'),
-    );
+    pages.forEach((pg) => map.set(`page:${pg.id}`, pg.path || 'Manuscript'));
     return map;
   }
 
@@ -291,14 +298,14 @@ export class ActivityRepository implements IActivityRepository {
         author: { select: ACTOR_MINIMAL_SELECT },
       },
     });
-    return comments.map((c: any) => ({
+    return comments.map((c) => ({
       ...c,
       author: c.author
         ? {
             id: c.author.id,
             email: c.author.email,
-            name: c.author.profile?.name ?? c.author.name ?? 'User',
-            avatar: c.author.profile?.avatar ?? c.author.avatar ?? null,
+            name: c.author.profile?.name ?? 'User',
+            avatar: c.author.profile?.avatar ?? null,
           }
         : c.author,
     }));

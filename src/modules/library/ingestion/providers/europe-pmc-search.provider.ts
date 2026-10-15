@@ -4,10 +4,8 @@ import {
   ExternalSearchOptions,
   ExternalSearchResult,
   ExternalSearchPaperHit,
-} from '../types/external-search.types';
-import {
-  cleanAbstractText,
-} from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/ingestion/types/external-search.types';
+import { cleanAbstractText } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 const DEFAULT_TIMEOUT_MS = 6000;
 const DEFAULT_LIMIT = 5;
@@ -54,13 +52,13 @@ export class EuropePmcSearchProvider implements IExternalSearchProvider {
         };
       }
 
-      const data = (await res.json()) as any;
+      const data = await res.json();
       const records = Array.isArray(data?.resultList?.result)
         ? data.resultList.result
         : [];
 
-      const hits: ExternalSearchPaperHit[] = records.map((record: any) =>
-        this.mapToHit(record),
+      const hits: ExternalSearchPaperHit[] = records.map((record: unknown) =>
+        this.mapToHit(record as Record<string, unknown>),
       );
 
       return {
@@ -71,12 +69,16 @@ export class EuropePmcSearchProvider implements IExternalSearchProvider {
         isAvailable: true,
         statusCode: 200,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       const latencyMs = Date.now() - startTime;
-      const isAbort = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      const isAbort =
+        err &&
+        typeof err === 'object' &&
+        ((err as { name?: string }).name === 'TimeoutError' ||
+          (err as { name?: string }).name === 'AbortError');
       const errorMessage = isAbort
         ? `EuropePMC timeout after ${timeoutMs}ms`
-        : `EuropePMC error: ${err?.message || 'Unknown'}`;
+        : `EuropePMC error: ${err instanceof Error ? err.message : 'Unknown'}`;
 
       this.logger.debug(errorMessage);
 
@@ -91,15 +93,28 @@ export class EuropePmcSearchProvider implements IExternalSearchProvider {
     }
   }
 
-  private mapToHit(record: any): ExternalSearchPaperHit {
-    const title = (record.title || '').replace(/<[^>]+>/g, '').trim();
-    const doi = record.doi;
-    const pmid = record.pmid;
-    const pmcid = record.pmcid;
+  private mapToHit(record: Record<string, unknown>): ExternalSearchPaperHit {
+    const title = String(record.title || '')
+      .replace(/<[^>]+>/g, '')
+      .trim();
+    const doi = typeof record.doi === 'string' ? record.doi : undefined;
+    const pmid = typeof record.pmid === 'string' ? record.pmid : undefined;
+    const pmcid = typeof record.pmcid === 'string' ? record.pmcid : undefined;
 
     const authors: string[] = [];
-    if (Array.isArray(record.authorList?.author)) {
-      for (const a of record.authorList.author) {
+    const authorList = (
+      record.authorList as
+        | {
+            author?: Array<{
+              fullName?: string;
+              lastName?: string;
+              firstName?: string;
+            }>;
+          }
+        | undefined
+    )?.author;
+    if (Array.isArray(authorList)) {
+      for (const a of authorList) {
         if (a.fullName) authors.push(a.fullName.trim());
         else if (a.lastName) {
           authors.push(
@@ -110,9 +125,14 @@ export class EuropePmcSearchProvider implements IExternalSearchProvider {
     }
 
     let pdfUrl: string | undefined;
-    if (Array.isArray(record.fullTextUrlList?.fullTextUrl)) {
-      const pdfEntry = record.fullTextUrlList.fullTextUrl.find(
-        (u: any) =>
+    const fullTextUrls = (
+      record.fullTextUrlList as
+        | { fullTextUrl?: Array<{ documentStyle?: string; url?: string }> }
+        | undefined
+    )?.fullTextUrl;
+    if (Array.isArray(fullTextUrls)) {
+      const pdfEntry = fullTextUrls.find(
+        (u) =>
           u.documentStyle === 'pdf' ||
           (typeof u.url === 'string' && u.url.toLowerCase().endsWith('.pdf')),
       );
@@ -121,10 +141,16 @@ export class EuropePmcSearchProvider implements IExternalSearchProvider {
       }
     }
 
-    const year = record.pubYear ? parseInt(record.pubYear, 10) : undefined;
-    const cleanAbstract = record.abstractText
-      ? cleanAbstractText(record.abstractText.replace(/<[^>]+>/g, ' '))
-      : undefined;
+    const year =
+      typeof record.pubYear === 'string'
+        ? parseInt(record.pubYear, 10)
+        : typeof record.pubYear === 'number'
+          ? record.pubYear
+          : undefined;
+    const cleanAbstract =
+      typeof record.abstractText === 'string'
+        ? cleanAbstractText(record.abstractText.replace(/<[^>]+>/g, ' '))
+        : undefined;
 
     const url = doi
       ? `https://doi.org/${doi}`

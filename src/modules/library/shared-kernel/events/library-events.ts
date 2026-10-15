@@ -63,7 +63,7 @@ export interface ItemCreatedOutboxPayload {
   title: string;
   source: LibraryItemSource;
   doi?: string | null;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export function buildItemCreatedOutboxPayload(input: {
@@ -73,7 +73,7 @@ export function buildItemCreatedOutboxPayload(input: {
   title: string;
   source: LibraryItemSource;
   doi?: string | null;
-  [key: string]: any;
+  [key: string]: unknown;
 }): ItemCreatedOutboxPayload {
   return {
     itemId: input.itemId,

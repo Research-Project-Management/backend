@@ -3,7 +3,7 @@ import {
   StateGroup,
   STATE_GROUPS,
   WorkItemState,
-} from '../types/state.types';
+} from '@/modules/work-item/state/types/state.types';
 
 /**
  * Automatically infers the state group from a state identifier or name.
@@ -160,7 +160,7 @@ export function parseWorkItemStates(raw: unknown): WorkItemState[] {
   return result;
 }
 
-export { isStateCompleted } from '../../common/utils/state-completion.util';
+export { isStateCompleted } from '@/modules/work-item/common/utils/state-completion.util';
 
 /**
  * Generates a URL-friendly unique slug from a state name.

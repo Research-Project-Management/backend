@@ -46,7 +46,8 @@ describe('ReconcileStage with IngestionVerifierService', () => {
         arxivId: '1706.03762v7',
         doi: '10.48550/arXiv.1706.03762',
         journal: 'arXiv',
-        abstract: 'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.',
+        abstract:
+          'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.',
       },
       confidenceScore: 0.95,
     };
@@ -128,5 +129,65 @@ describe('ReconcileStage with IngestionVerifierService', () => {
     expect(extra.promptUploadPdf).toBe(true);
     expect(extra.wafKind).toBe('CLOUDFLARE_TURNSTILE');
     expect(extra.isVerified).toBe(false);
+  });
+
+  it('discards external candidate and revokes cited DOI when Page-1 citation trap is detected', async () => {
+    // Local authentic PDF extraction
+    const fileCandidate: MetadataCandidate = {
+      candidateId: 'pdf-my-paper',
+      sourceKind: 'FILE',
+      sourceName: 'TrustedPaper',
+      retrievedAt: new Date().toISOString(),
+      schemaVersion: '1.0.0',
+      fields: {},
+      normalizedMetadata: {
+        title: 'Deep Transfer Learning for Vietnamese Rice Disease Detection',
+        authors: ['Nguyễn Văn An', 'Trần Thị Mai'],
+        year: 2023,
+        doi: '10.48550/arXiv.1706.03762', // Accidental cited DOI from page 1 footnote
+      },
+      confidenceScore: 0.9,
+    };
+
+    // External provider candidate resolved from the cited DOI (e.g. CrossRef)
+    const externalCitedCandidate: MetadataCandidate = {
+      candidateId: 'crossref-cited-paper',
+      sourceKind: 'PROVIDER',
+      sourceName: 'EnrichedProvider',
+      retrievedAt: new Date().toISOString(),
+      schemaVersion: '1.0.0',
+      fields: {},
+      normalizedMetadata: {
+        title: 'Attention Is All You Need',
+        authors: ['Ashish Vaswani', 'Noam Shazeer'],
+        year: 2017,
+        doi: '10.48550/arXiv.1706.03762',
+        journal: 'NeurIPS',
+      },
+      confidenceScore: 0.95,
+    };
+
+    const decision = await stage.execute([
+      fileCandidate,
+      externalCitedCandidate,
+    ]);
+
+    // Must NOT adopt the cited paper's title or authors!
+    expect(decision.proposedItem.title).toBe(
+      'Deep Transfer Learning for Vietnamese Rice Disease Detection',
+    );
+    expect(decision.proposedItem.authors).toEqual([
+      'Nguyễn Văn An',
+      'Trần Thị Mai',
+    ]);
+    // The cited DOI must be revoked from the main item
+    expect(decision.proposedItem.doi).toBeUndefined();
+
+    // Warnings and extraFields must record the disambiguation action
+    const extra = decision.proposedItem.extraFields!;
+    expect(extra.disambiguationWarning).toContain(
+      'Page-1 cited paper DOI mismatch discarded',
+    );
+    expect(extra.rejectedCitedDoi).toBe('10.48550/arXiv.1706.03762');
   });
 });

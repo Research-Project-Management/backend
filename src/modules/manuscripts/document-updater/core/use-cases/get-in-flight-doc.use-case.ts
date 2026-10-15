@@ -4,11 +4,11 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IInFlightStorePort } from '../ports/in-flight-store.port';
-import { IDocstoreWriterPort } from '../ports/docstore-writer.port';
-import { InFlightDoc } from '../domain/entities/in-flight-doc.entity';
-import { DocumentVersionVo } from '../domain/value-objects/document-version.vo';
-import { InFlightNotFoundException } from '../domain/exceptions/in-flight-not-found.exception';
+import { IInFlightStorePort } from '@/modules/manuscripts/document-updater/core/ports/in-flight-store.port';
+import { IDocstoreWriterPort } from '@/modules/manuscripts/document-updater/core/ports/docstore-writer.port';
+import { InFlightDoc } from '@/modules/manuscripts/document-updater/core/domain/entities/in-flight-doc.entity';
+import { DocumentVersionVo } from '@/modules/manuscripts/document-updater/core/domain/value-objects/document-version.vo';
+import { InFlightNotFoundException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/in-flight-not-found.exception';
 
 export interface GetInFlightDocInput {
   projectId: string;

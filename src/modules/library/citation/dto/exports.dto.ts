@@ -1,5 +1,5 @@
 import { IsString, IsOptional, IsArray } from 'class-validator';
-import { ExportFormatType } from '../types/exports.types';
+import { ExportFormatType } from '@/modules/library/citation/types/exports.types';
 
 export type { ExportFormatType };
 

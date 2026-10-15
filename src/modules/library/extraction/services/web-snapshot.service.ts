@@ -5,10 +5,11 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
+import type { Attachment } from '@prisma/client';
 import { createHash } from 'crypto';
 import { AttachmentsService } from './attachments.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { SsrfGuardService } from '../../shared-kernel/core/services/ssrf-guard.service';
+import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
 
 export interface SnapshotResult {
   title: string;
@@ -24,6 +25,7 @@ export interface SnapshotResult {
 export interface CaptureAndAttachOptions {
   title?: string;
   uploadedById?: string;
+  projectId?: string;
 }
 
 @Injectable()
@@ -110,22 +112,26 @@ export class WebSnapshotService {
       } else {
         rawHtml = await response.text();
       }
-    } catch (fetchErr: any) {
-      if (fetchErr.name === 'AbortError') {
+    } catch (fetchErr: unknown) {
+      if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
         throw new BadRequestException(
           `Request timed out while capturing ${canonicalUrl}`,
         );
       }
       if (
         fetchErr instanceof BadRequestException ||
-        fetchErr?.name === 'ForbiddenException' ||
-        fetchErr?.status === 400 ||
-        fetchErr?.status === 403
+        (fetchErr instanceof Error && fetchErr.name === 'ForbiddenException') ||
+        (typeof fetchErr === 'object' &&
+          fetchErr !== null &&
+          'status' in fetchErr &&
+          (fetchErr.status === 400 || fetchErr.status === 403))
       ) {
         throw fetchErr;
       }
+      const message =
+        fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
       throw new BadRequestException(
-        `Failed to fetch target URL for snapshot: ${fetchErr?.message || fetchErr}`,
+        `Failed to fetch target URL for snapshot: ${message}`,
       );
     } finally {
       clearTimeout(timer);
@@ -412,7 +418,7 @@ export class WebSnapshotService {
     itemId: string,
     userId: string,
     options?: CaptureAndAttachOptions,
-  ): Promise<{ attachment: any; snapshot: SnapshotResult }> {
+  ): Promise<{ attachment: Attachment; snapshot: SnapshotResult }> {
     this.logger.log(`Capturing web snapshot for item ${itemId} from ${url}`);
 
     const snapshot = await this.captureHtmlSnapshot(url, {
@@ -444,9 +450,10 @@ export class WebSnapshotService {
         });
         fileUrl = uploadResult.url;
         resolvedFileId = uploadResult.fileId;
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Storage uploadFile failed, falling back to uploadBuffer: ${err?.message}`,
+          `Storage uploadFile failed, falling back to uploadBuffer: ${message}`,
         );
       }
     }
@@ -459,14 +466,15 @@ export class WebSnapshotService {
           'text/html; charset=utf-8',
         );
         fileUrl = uploadResult.url;
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Storage upload failed, using fallback URL: ${err?.message}`,
+          `Storage upload failed, using fallback URL: ${message}`,
         );
       }
     }
 
-    const attachment = await this.attachmentsService.createAttachment({
+    const createPayload = {
       userId,
       itemId,
       filename,
@@ -475,9 +483,15 @@ export class WebSnapshotService {
       mimeType: 'text/html',
       size: snapshot.sizeBytes,
       fileHash: snapshot.checksum,
-      linkMode: 'imported_url',
-      attachmentType: 'snapshot',
-    });
+      linkMode: 'imported_url' as const,
+      attachmentType: 'snapshot' as const,
+    };
+    const attachment = options?.projectId
+      ? await this.attachmentsService.createAttachment(
+          createPayload,
+          options.projectId,
+        )
+      : await this.attachmentsService.createAttachment(createPayload);
 
     this.logger.log(
       `Snapshot successfully attached to item ${itemId}: ${filename} (${(snapshot.sizeBytes / 1024).toFixed(1)} KB)`,

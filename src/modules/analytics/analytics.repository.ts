@@ -171,17 +171,16 @@ export class AnalyticsRepository {
       },
     });
 
-    return items.map((item: any) => ({
+    return items.map((item) => ({
       ...item,
       assignee: item.assignee
         ? {
             id: item.assignee.id,
             email: item.assignee.email,
-            name: item.assignee.profile?.name ?? item.assignee.name ?? 'User',
-            avatar:
-              item.assignee.profile?.avatar ?? item.assignee.avatar ?? null,
+            name: item.assignee.profile?.name ?? 'User',
+            avatar: item.assignee.profile?.avatar ?? null,
           }
-        : item.assignee,
+        : null,
     }));
   }
 

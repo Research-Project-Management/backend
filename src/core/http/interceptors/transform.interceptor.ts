@@ -40,7 +40,7 @@ export class TransformInterceptor<T> implements NestInterceptor<T, unknown> {
           data &&
           typeof data === 'object' &&
           'url' in data &&
-          typeof (data as { url: unknown }).url === 'string'
+          typeof data.url === 'string'
         ) {
           return data;
         }

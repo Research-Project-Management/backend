@@ -1,49 +1,31 @@
 /**
  * filestore/filestore.module.ts
- * NestJS Composition Root for Manuscripts Filestore Subsystem (Hexagonal Architecture).
+ * NestJS Module for Manuscripts Filestore Subsystem.
  */
 
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PrismaModule } from '@/core';
 import { FilestoreController } from './filestore.controller';
 import { FilestoreService } from './filestore.service';
+import { FilestoreRepository } from './filestore.repository';
 
-// Use Cases
-import { UploadManuscriptFileUseCase } from './core/use-cases/upload-manuscript-file.use-case';
-import { StreamManuscriptFileUseCase } from './core/use-cases/stream-manuscript-file.use-case';
-import { GetManuscriptFileHeadUseCase } from './core/use-cases/get-manuscript-file-head.use-case';
-import { DeleteManuscriptFileUseCase } from './core/use-cases/delete-manuscript-file.use-case';
-import { GetSignedDownloadUrlUseCase } from './core/use-cases/get-signed-download-url.use-case';
-
-// Ports
+// Ports & Adapters
 import { IBinaryStoragePort } from './core/ports/binary-storage.port';
 import { IManuscriptFileRepository } from './core/ports/manuscript-file-repository.port';
 import { IContentHasherPort } from './core/ports/content-hasher.port';
-
-// Adapters
 import { LocalDiskBinaryStorageAdapter } from './core/adapters/storage/local-disk-binary-storage.adapter';
 import { S3BinaryStorageAdapter } from './core/adapters/storage/s3-binary-storage.adapter';
-import { PrismaManuscriptFileRepository } from './core/adapters/database/prisma-manuscript-file.repository';
 import { CryptoGitBlobHasherAdapter } from './core/adapters/engine/crypto-git-blob-hasher.adapter';
 
 @Module({
   imports: [ConfigModule, PrismaModule],
   controllers: [FilestoreController],
   providers: [
-    FilestoreService,
-    UploadManuscriptFileUseCase,
-    StreamManuscriptFileUseCase,
-    GetManuscriptFileHeadUseCase,
-    DeleteManuscriptFileUseCase,
-    GetSignedDownloadUrlUseCase,
-    {
-      provide: IManuscriptFileRepository,
-      useClass: PrismaManuscriptFileRepository,
-    },
+    CryptoGitBlobHasherAdapter,
     {
       provide: IContentHasherPort,
-      useClass: CryptoGitBlobHasherAdapter,
+      useExisting: CryptoGitBlobHasherAdapter,
     },
     {
       provide: IBinaryStoragePort,
@@ -60,9 +42,16 @@ import { CryptoGitBlobHasherAdapter } from './core/adapters/engine/crypto-git-bl
       },
       inject: [ConfigService],
     },
+    FilestoreRepository,
+    {
+      provide: IManuscriptFileRepository,
+      useExisting: FilestoreRepository,
+    },
+    FilestoreService,
   ],
   exports: [
     FilestoreService,
+    FilestoreRepository,
     IBinaryStoragePort,
     IManuscriptFileRepository,
     IContentHasherPort,

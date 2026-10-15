@@ -15,7 +15,6 @@ import {
   UnauthorizedException,
   HttpCode,
   HttpStatus,
-  Optional,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -24,16 +23,16 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
-import { AnnotationType } from '../types/annotations.types';
-import { PdfAnnotationImporterService } from '../services/pdf-annotation-importer.service';
+import { AnnotationType } from '@/modules/library/extraction/types/annotations.types';
+import { PdfAnnotationImporterService } from '@/modules/library/extraction/services/pdf-annotation-importer.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
   CreateAnnotationDto,
   UpdateAnnotationDto,
   BatchAnnotationsDto,
-} from '../dto/annotations.dto';
+} from '@/modules/library/extraction/dto/annotations.dto';
 import { ProjectRoleGuard } from '@/modules/project/access';
-import { AnnotationsService } from '../services/annotations.service';
+import { AnnotationsService } from '@/modules/library/extraction/services/annotations.service';
 
 @ApiTags('Annotations')
 @ApiBearerAuth('JWT-auth')
@@ -79,7 +78,9 @@ export class AnnotationsController {
       );
     }
 
-    if (typeof this.annotationsService.getAnnotationsByAttachment === 'function') {
+    if (
+      typeof this.annotationsService.getAnnotationsByAttachment === 'function'
+    ) {
       return this.annotationsService.getAnnotationsByAttachment(
         userId,
         attachmentId,

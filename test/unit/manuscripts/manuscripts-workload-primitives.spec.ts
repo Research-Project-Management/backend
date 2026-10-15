@@ -2,10 +2,7 @@
  * Unit tests for the manuscripts workload primitives:
  * mapWithConcurrency, FairSemaphore, compile-fileset planner.
  */
-import {
-  mapWithConcurrency,
-  mapSettledWithConcurrency,
-} from '@/core';
+import { mapWithConcurrency, mapSettledWithConcurrency } from '@/core';
 import {
   FairSemaphore,
   SemaphoreQueueFullError,

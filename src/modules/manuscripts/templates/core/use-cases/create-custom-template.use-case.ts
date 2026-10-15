@@ -2,12 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   ITemplateRepositoryPort,
   TEMPLATE_REPOSITORY_PORT,
-} from '../ports/template-repository.port';
+} from '@/modules/manuscripts/templates/core/ports/template-repository.port';
 import {
   ManuscriptTemplateEntity,
   CreateManuscriptTemplateProps,
-} from '../domain/entities/manuscript-template.entity';
-import { InvalidTemplateException } from '../domain/exceptions/invalid-template.exception';
+} from '@/modules/manuscripts/templates/core/domain/entities/manuscript-template.entity';
+import { InvalidTemplateException } from '@/modules/manuscripts/templates/core/domain/exceptions/invalid-template.exception';
 
 @Injectable()
 export class CreateCustomTemplateUseCase {

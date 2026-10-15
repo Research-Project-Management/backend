@@ -41,7 +41,7 @@ export class RealtimeService {
    */
   public broadcastFileTreeChange(
     projectId: string,
-    change: { action: string; node: any },
+    change: { action: string; node: unknown },
   ): void {
     this.broadcastProjectEventUseCase.execute({
       projectId,
@@ -91,7 +91,11 @@ export class RealtimeService {
   /**
    * Generic project-wide event dispatch.
    */
-  public broadcastEvent(projectId: string, event: string, payload: any): void {
+  public broadcastEvent(
+    projectId: string,
+    event: string,
+    payload: unknown,
+  ): void {
     this.broadcastProjectEventUseCase.execute({
       projectId,
       event,
@@ -103,7 +107,7 @@ export class RealtimeService {
    * User Notification Dispatch:
    * Sends real-time notification or unread count to a specific user room.
    */
-  public notifyUser(userId: string, event: string, payload: any): void {
+  public notifyUser(userId: string, event: string, payload: unknown): void {
     if (this.notificationGateway) {
       this.notificationGateway.sendToUser(userId, event, payload);
     }
@@ -113,7 +117,7 @@ export class RealtimeService {
    * Global System Broadcast:
    * Emits system-wide alert to all connected sockets.
    */
-  public broadcastSystem(event: string, payload: any): void {
+  public broadcastSystem(event: string, payload: unknown): void {
     if (this.notificationGateway) {
       this.notificationGateway.broadcastSystem(event, payload);
     }

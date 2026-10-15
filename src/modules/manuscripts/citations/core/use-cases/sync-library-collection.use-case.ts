@@ -3,9 +3,9 @@
  * Inbound Use Case: Synchronizes an external reference collection (Zotero / Flux Library) into the project.
  */
 
-import { ILibrarySyncPort } from '../ports/library-sync.port';
-import { IBibtexParserPort } from '../ports/bibtex-parser.port';
-import { ICitationsAggregatorPort } from '../ports/citations-aggregator.port';
+import { ILibrarySyncPort } from '@/modules/manuscripts/citations/core/ports/library-sync.port';
+import { IBibtexParserPort } from '@/modules/manuscripts/citations/core/ports/bibtex-parser.port';
+import { ICitationsAggregatorPort } from '@/modules/manuscripts/citations/core/ports/citations-aggregator.port';
 
 export interface SyncLibraryCollectionCommand {
   projectId: string;

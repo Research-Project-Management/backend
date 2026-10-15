@@ -6,7 +6,7 @@
 import {
   ManuscriptNodeEntity,
   ManuscriptNodeType,
-} from '../domain/manuscript-node.entity';
+} from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
 
 export interface CreateNodeParams {
   projectId: string;
@@ -57,5 +57,12 @@ export abstract class IStructureRepository {
     nodeId: string,
     sortOrder: number,
   ): Promise<void>;
+  abstract updateNodeFileId(
+    projectId: string,
+    nodeId: string,
+    fileId: string,
+    sizeBytes?: number,
+    hash?: string | null,
+  ): Promise<ManuscriptNodeEntity>;
   abstract countNodes(projectId: string): Promise<number>;
 }

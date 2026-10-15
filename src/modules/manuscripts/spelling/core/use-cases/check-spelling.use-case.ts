@@ -4,12 +4,12 @@
  * verifying against system dictionary and project/user custom dictionaries.
  */
 
-import { ILatexTokenizerPort } from '../ports/latex-tokenizer.port';
-import { ISpellEnginePort } from '../ports/spell-engine.port';
-import { ICustomDictionaryRepositoryPort } from '../ports/custom-dictionary-repository.port';
-import { LanguageCodeVo } from '../domain/value-objects/language-code.vo';
-import { MisspelledWord } from '../domain/entities/misspelled-word.entity';
-import { SpellingReport } from '../domain/entities/spelling-report.entity';
+import { ILatexTokenizerPort } from '@/modules/manuscripts/spelling/core/ports/latex-tokenizer.port';
+import { ISpellEnginePort } from '@/modules/manuscripts/spelling/core/ports/spell-engine.port';
+import { ICustomDictionaryRepositoryPort } from '@/modules/manuscripts/spelling/core/ports/custom-dictionary-repository.port';
+import { LanguageCodeVo } from '@/modules/manuscripts/spelling/core/domain/value-objects/language-code.vo';
+import { MisspelledWord } from '@/modules/manuscripts/spelling/core/domain/entities/misspelled-word.entity';
+import { SpellingReport } from '@/modules/manuscripts/spelling/core/domain/entities/spelling-report.entity';
 
 export interface CheckSpellingCommand {
   text?: string;

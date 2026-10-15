@@ -57,10 +57,12 @@ export class FileUploadedAiListener {
 
     try {
       await this.ingestionService.ingestFile(event);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
       this.logger.error(
-        `Uncaught error during automated AI ingestion for file ${event.fileId}: ${err.message}`,
-        err.stack,
+        `Uncaught error during automated AI ingestion for file ${event.fileId}: ${errorMessage}`,
+        stack,
       );
     }
   }

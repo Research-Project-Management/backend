@@ -15,7 +15,7 @@ import {
   ArrayMinSize,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { AnnotationType } from '../types/annotations.types';
+import { AnnotationType } from '@/modules/library/extraction/types/annotations.types';
 
 // ─── Shared color validator ───────────────────────────────────────────────────
 

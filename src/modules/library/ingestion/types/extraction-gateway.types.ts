@@ -1,20 +1,27 @@
 export const EXTRACTION_GATEWAY_PORT = Symbol('EXTRACTION_GATEWAY_PORT');
 
 export interface IExtractionGatewayPort {
-  extractDocumentFromBuffer?(
+  extractTrustedMetadata<T = unknown>(
+    buffer: Buffer,
+    preferredFilename?: string,
+  ): Promise<T | null>;
+  extractDocumentFromBuffer<T = unknown>(
     buffer: Buffer,
     options?: Record<string, unknown>,
-  ): Promise<any>;
-  extractMetadataFromBuffer?(buffer: Buffer): Promise<any>;
-  captureWebSnapshot?(
+  ): Promise<T | null>;
+  extractMetadataFromBuffer<T = unknown>(buffer: Buffer): Promise<T | null>;
+  captureWebSnapshot<T = unknown>(
     url: string,
     itemId: string,
     userId: string,
-  ): Promise<any>;
-  createAttachment?(data: any, projectId?: string): Promise<any>;
-  reassignContentToItem?(
+  ): Promise<T | null>;
+  createAttachment<T = unknown, D = Record<string, unknown>>(
+    data: D,
+    projectId?: string,
+  ): Promise<T | null>;
+  reassignContentToItem(
     duplicateItemIds: string[],
     primaryItemId: string,
-    tx?: any,
+    tx?: unknown,
   ): Promise<void>;
 }

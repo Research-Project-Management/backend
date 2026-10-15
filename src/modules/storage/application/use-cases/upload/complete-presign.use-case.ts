@@ -115,7 +115,7 @@ export class CompletePresignUseCase {
           validateMagicBytes(headerBuffer, actualMime, cleanFilename);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof BadRequestException) {
         // Immediate cleanup of malicious payload from physical storage
         this.driver.delete(input.storageKey).catch(() => {});
@@ -153,7 +153,7 @@ export class CompletePresignUseCase {
       // Cost Optimization: Immediately reclaim redundant physical S3/R2 object
       // to eliminate orphan storage cost leaks when identical blob already exists.
       if (input.storageKey !== existingBlob.s3Key.value()) {
-        this.driver.delete(input.storageKey).catch((err: any) => {
+        this.driver.delete(input.storageKey).catch(() => {
           // Non-blocking catch to prevent failing the response
         });
       }

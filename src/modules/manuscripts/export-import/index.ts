@@ -1,5 +1,5 @@
 /**
- * export-import/index.ts
+ * modules/manuscripts/export-import/index.ts
  * Barrel export for Manuscripts Export-Import subsystem.
  */
 
@@ -8,15 +8,34 @@ export * from './export-import.service';
 export * from './export-import.controller';
 export * from './dto/export-import.dto';
 
-// Domain
-export * from './core/domain/value-objects/archive-entry.vo';
-export * from './core/domain/value-objects/import-summary.vo';
-export * from './core/domain/entities/project-template.entity';
-export * from './core/domain/entities/archive-manifest.entity';
-export * from './core/domain/exceptions/invalid-zip-archive.exception';
-export * from './core/domain/exceptions/zip-slip-security.exception';
-export * from './core/domain/exceptions/archive-size-exceeded.exception';
-export { TemplateNotFoundException as ProjectArchiveTemplateNotFoundException } from './core/domain/exceptions/template-not-found.exception';
+// Repositories
+export * from './repositories/manuscript-aggregator.repository';
+
+// Domain (Pure in-process computation & validation)
+export {
+  ArchiveEntryVo,
+  KNOWN_TEXT_EXTENSIONS,
+  KNOWN_BINARY_EXTENSIONS,
+  ARXIV_ALLOWED_EXTENSIONS,
+  isArxivAllowed,
+  validateExtractedArchiveEntries,
+  ImportSummaryVo,
+  ProjectTemplate,
+  ArchiveManifest,
+  InvalidZipArchiveException,
+  ZipSlipSecurityException,
+  ArchiveSizeExceededException,
+  TemplateNotFoundException as ProjectArchiveTemplateNotFoundException,
+} from './domain/archive-validator';
+export type {
+  EntryStorageType,
+  ArchiveEntryProps,
+} from './domain/archive-validator';
+export {
+  DocumentTranspilerAdapter,
+  DocumentTranspiler,
+} from './domain/document-transpiler';
+export type { TranspiledProjectResult } from './domain/document-transpiler';
 
 // Ports
 export * from './core/ports/zip-engine.port';

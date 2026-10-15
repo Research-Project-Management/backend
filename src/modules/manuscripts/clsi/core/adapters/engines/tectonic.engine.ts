@@ -9,8 +9,8 @@ import {
   ILatexEngine,
   EngineRunOptions,
   EngineRunResult,
-} from '../../ports/engine.port';
-import { ISandboxRunner } from '../../ports/runner.port';
+} from '@/modules/manuscripts/clsi/core/ports/engine.port';
+import { ISandboxRunner } from '@/modules/manuscripts/clsi/core/ports/runner.port';
 
 export class TectonicEngine implements ILatexEngine {
   readonly name = 'tectonic';
@@ -39,6 +39,7 @@ export class TectonicEngine implements ILatexEngine {
       '-X',
       'compile',
       '--synctex',
+      ...(options.shellEscape ? ['-Z', 'shell-escape'] : []),
       '--outdir',
       options.cwd,
       options.mainFile,
@@ -53,7 +54,7 @@ export class TectonicEngine implements ILatexEngine {
 
     const durationMs = Date.now() - startTime;
 
-    // Normalize output artifact filenames to Overleaf CLSI standards (output.pdf & output.synctex.gz)
+    // Normalize output artifact filenames to Overleaf CLSI standards (output.pdf, output.synctex.gz, output.log, output.bbl)
     const baseName = options.mainFile.replace(/\.[^/.]+$/, '');
     const generatedPdf = path.join(options.cwd, `${baseName}.pdf`);
     const targetPdf = path.join(options.cwd, 'output.pdf');
@@ -71,6 +72,28 @@ export class TectonicEngine implements ILatexEngine {
         generatedSynctex !== targetSynctex
       ) {
         await fs.copyFile(generatedSynctex, targetSynctex);
+      }
+    } catch {}
+
+    const generatedBbl = path.join(options.cwd, `${baseName}.bbl`);
+    const targetBbl = path.join(options.cwd, 'output.bbl');
+    try {
+      if ((await this.fileExists(generatedBbl)) && generatedBbl !== targetBbl) {
+        await fs.copyFile(generatedBbl, targetBbl);
+      }
+    } catch {}
+
+    const targetLog = path.join(options.cwd, 'output.log');
+    const generatedLog = path.join(options.cwd, `${baseName}.log`);
+    try {
+      if (!(await this.fileExists(targetLog))) {
+        if (await this.fileExists(generatedLog)) {
+          await fs.copyFile(generatedLog, targetLog);
+        } else {
+          const logContent =
+            `${execResult.stdout || ''}\n${execResult.stderr || ''}`.trim();
+          await fs.writeFile(targetLog, logContent, 'utf8');
+        }
       }
     } catch {}
 

@@ -5,8 +5,8 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { IInFlightStorePort } from '../ports/in-flight-store.port';
-import { IDebounceTimerPort } from '../ports/debounce-timer.port';
+import { IInFlightStorePort } from '@/modules/manuscripts/document-updater/core/ports/in-flight-store.port';
+import { IDebounceTimerPort } from '@/modules/manuscripts/document-updater/core/ports/debounce-timer.port';
 import { FlushSingleDocUseCase } from './flush-single-doc.use-case';
 
 export interface EvictDocBufferInput {

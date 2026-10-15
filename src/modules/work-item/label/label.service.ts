@@ -16,7 +16,10 @@ import {
 } from './dto/label.dto';
 import { WorkItemLabel as Label } from '@prisma/client';
 import { RedisCacheService } from '@/core';
-import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
+import {
+  WORK_ITEM_REDIS_KEYS,
+  invalidateWorkItemCache,
+} from '@/modules/work-item/common/constants/redis-keys.constant';
 import { LabelWithChildren } from './types/label.types';
 
 export const DEFAULT_LABEL_PALETTE = [
@@ -41,14 +44,22 @@ export class LabelService {
 
   private async invalidateLabelCache(userId?: string, projectId?: string) {
     if (!this.cache) return;
-    const promises: Promise<void>[] = [];
+    const promises: Promise<unknown>[] = [];
     if (userId) {
       promises.push(this.cache.del(WORK_ITEM_REDIS_KEYS.labels(userId)));
     }
     if (projectId) {
       promises.push(
         this.cache.del(WORK_ITEM_REDIS_KEYS.projectLabels(projectId)),
+        invalidateWorkItemCache(this.cache, { projectId }),
       );
+      if (typeof this.cache.delPattern === 'function') {
+        promises.push(
+          this.cache.delPattern(
+            `${WORK_ITEM_REDIS_KEYS.projectLabels(projectId)}:*`,
+          ),
+        );
+      }
     }
     await Promise.all(promises);
   }
@@ -58,6 +69,46 @@ export class LabelService {
       Math.random() * DEFAULT_LABEL_PALETTE.length,
     );
     return DEFAULT_LABEL_PALETTE[paletteIndex];
+  }
+
+  private async requireProjectLabel(
+    projectId: string,
+    labelId: string,
+  ): Promise<LabelWithChildren> {
+    const label = await this.labelRepository.findById(labelId);
+    if (!label) {
+      throw new NotFoundException('Label not found');
+    }
+    if (label.projectId && label.projectId !== projectId) {
+      throw new ForbiddenException('Label does not belong to this project');
+    }
+    return label;
+  }
+
+  private async validateParentLabel(
+    projectId: string,
+    parentId: string,
+    excludeLabelId?: string,
+  ): Promise<void> {
+    if (excludeLabelId && parentId === excludeLabelId) {
+      throw new BadRequestException('A label cannot be its own parent');
+    }
+    const parent = await this.labelRepository.findById(parentId);
+    if (!parent) {
+      throw new NotFoundException('Parent label not found');
+    }
+    if (parent.projectId !== projectId) {
+      throw new BadRequestException(
+        'Parent label must belong to the same project',
+      );
+    }
+    if (parent.parentId) {
+      throw new BadRequestException(
+        excludeLabelId
+          ? 'Nesting is limited to 1 level deep. Target parent cannot be a sub-label.'
+          : 'Nesting is limited to 1 level deep. Parent label cannot be a sub-label.',
+      );
+    }
   }
 
   // ── 1. Project-Scoped Methods ───────────────────────────────────────────────
@@ -91,13 +142,7 @@ export class LabelService {
   }
 
   async getProjectLabelById(projectId: string, labelId: string) {
-    const label = await this.labelRepository.findById(labelId);
-    if (!label) {
-      throw new NotFoundException('Label not found');
-    }
-    if (label.projectId && label.projectId !== projectId) {
-      throw new ForbiddenException('Label does not belong to this project');
-    }
+    const label = await this.requireProjectLabel(projectId, labelId);
     return { label };
   }
 
@@ -111,7 +156,6 @@ export class LabelService {
       throw new NotFoundException(`Project not found: ${projectId}`);
     }
 
-    // 1. Uniqueness check in project
     const existing = await this.labelRepository.findByNameInProject(
       projectId,
       dto.name,
@@ -122,25 +166,10 @@ export class LabelService {
       );
     }
 
-    // 2. Hierarchy validation
     if (dto.parentId) {
-      const parent = await this.labelRepository.findById(dto.parentId);
-      if (!parent) {
-        throw new NotFoundException('Parent label not found');
-      }
-      if (parent.projectId !== projectId) {
-        throw new BadRequestException(
-          'Parent label must belong to the same project',
-        );
-      }
-      if (parent.parentId) {
-        throw new BadRequestException(
-          'Nesting is limited to 1 level deep. Parent label cannot be a sub-label.',
-        );
-      }
+      await this.validateParentLabel(projectId, dto.parentId);
     }
 
-    // 3. Calculate sortOrder if omitted
     let sortOrder = dto.sortOrder;
     if (sortOrder === undefined) {
       const lastSortOrder = await this.labelRepository.getLastSortOrder(
@@ -171,15 +200,8 @@ export class LabelService {
     labelId: string,
     dto: UpdateProjectLabelDto,
   ) {
-    const existing = await this.labelRepository.findById(labelId);
-    if (!existing) {
-      throw new NotFoundException('Label not found');
-    }
-    if (existing.projectId && existing.projectId !== projectId) {
-      throw new ForbiddenException('Label does not belong to this project');
-    }
+    const existing = await this.requireProjectLabel(projectId, labelId);
 
-    // 1. Name uniqueness check if changing name
     if (
       dto.name &&
       dto.name.trim().toLowerCase() !== existing.name.toLowerCase()
@@ -196,7 +218,6 @@ export class LabelService {
       }
     }
 
-    // 2. Hierarchy validation
     if (dto.parentId !== undefined) {
       if (dto.parentId === labelId) {
         throw new BadRequestException('A label cannot be its own parent');
@@ -207,32 +228,7 @@ export class LabelService {
             'Cannot nest a label that already contains sub-labels. Nesting is limited to 1 level deep.',
           );
         }
-        const parent = await this.labelRepository.findById(dto.parentId);
-        if (!parent) {
-          throw new NotFoundException('Parent label not found');
-        }
-        if (parent.projectId !== projectId) {
-          throw new BadRequestException(
-            'Parent label must belong to the same project',
-          );
-        }
-        if (parent.parentId) {
-          throw new BadRequestException(
-            'Nesting is limited to 1 level deep. Target parent cannot be a sub-label.',
-          );
-        }
-        // Prevent circular dependency: parent cannot have labelId as its ancestor
-        let currentParent: LabelWithChildren | null = parent;
-        while (currentParent?.parentId) {
-          if (currentParent.parentId === labelId) {
-            throw new BadRequestException(
-              'Circular hierarchy detected: cannot set descendant as parent',
-            );
-          }
-          currentParent = await this.labelRepository.findById(
-            currentParent.parentId,
-          );
-        }
+        await this.validateParentLabel(projectId, dto.parentId, labelId);
       }
     }
 
@@ -251,15 +247,8 @@ export class LabelService {
   }
 
   async deleteProjectLabel(projectId: string, labelId: string) {
-    const label = await this.labelRepository.findById(labelId);
-    if (!label) {
-      throw new NotFoundException('Label not found');
-    }
-    if (label.projectId && label.projectId !== projectId) {
-      throw new ForbiddenException('Label does not belong to this project');
-    }
+    const label = await this.requireProjectLabel(projectId, labelId);
 
-    // 1. Detach label and all its sub-labels from all work items in project (cascade safe deletion)
     const labelIdsToDetach = [labelId];
     const labelNamesToDetach = [label.name];
     if (label.children && label.children.length > 0) {
@@ -274,7 +263,6 @@ export class LabelService {
       labelNamesToDetach,
     );
 
-    // 2. Delete label (Cascade in DB deletes sub-labels)
     await this.labelRepository.delete(labelId);
 
     await this.invalidateLabelCache(label.createdById, projectId);
@@ -317,12 +305,7 @@ export class LabelService {
 
   async createLabel(userId: string, dto: CreateLabelDto) {
     if (dto.projectId) {
-      return this.createProjectLabel(dto.projectId, userId, {
-        name: dto.name,
-        color: dto.color,
-        description: dto.description,
-        parentId: dto.parentId,
-      });
+      return this.createProjectLabel(dto.projectId, userId, dto);
     }
 
     const existing = await this.labelRepository.findDuplicate?.({

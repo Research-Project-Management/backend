@@ -3,7 +3,7 @@
  * Outbound SPI Port for matching LaTeX errors with human-friendly explanations and fixes.
  */
 
-import { ErrorExplanationVo } from '../domain/value-objects/error-explanation.vo';
+import { ErrorExplanationVo } from '@/modules/manuscripts/diagnostics/core/domain/value-objects/error-explanation.vo';
 
 export const ERROR_EXPLAINER_PORT = Symbol('ERROR_EXPLAINER_PORT');
 

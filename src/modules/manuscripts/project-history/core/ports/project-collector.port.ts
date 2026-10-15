@@ -3,7 +3,7 @@
  * Outbound Port (SPI) for aggregating current live project files from Structure, Docstore, and Filestore.
  */
 
-import { FileSnapshotVo } from '../domain/value-objects/file-snapshot.vo';
+import { FileSnapshotVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/file-snapshot.vo';
 
 export abstract class IProjectCollectorPort {
   /**

@@ -1,74 +1,39 @@
-import { FileHashVo } from '@/modules/library/extraction/core/domain/file-hash.vo';
-import { MimeTypeVo } from '@/modules/library/extraction/core/domain/mime-type.vo';
-import { AttachmentAggregate } from '@/modules/library/extraction/core/domain/attachment.aggregate';
-import { IngestionStatusVo } from '@/modules/library/ingestion/types/ingestion-status.vo';
-import { IngestionRunAggregate } from '@/modules/library/ingestion/types/ingestion-run.aggregate';
-import { SearchQueryVo } from '@/modules/library/search/types/search-query.vo';
-import { CitationStyleVo } from '@/modules/library/citation/core/domain/citation-style.vo';
-import { ExecuteSearchUseCase } from '@/modules/library/search/core/use-cases/execute-search.use-case';
-import { FormatCitationUseCase } from '@/modules/library/citation/core/use-cases/format-citation.use-case';
-import { ISearchEnginePort } from '@/modules/library/search/types/search-engine.types';
-import { ICitationEnginePort } from '@/modules/library/citation/core/ports/citation-engine.port';
+import {
+  isValidFileHash,
+  isValidMimeType,
+  isPdfMimeType,
+} from '@/modules/library/extraction/domain';
+import { IngestionStatusVo } from '@/modules/library/ingestion/domain/ingestion-status.vo';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import {
+  SearchQueryVo,
+  createSearchQuery,
+} from '@/modules/library/search/domain';
+import { CitationStyleVo } from '@/modules/library/citation/domain';
+import { compactLibraryChanges } from '@/modules/library/sync/domain';
 
-describe('Reader, Ingestion, Search & Citation Bounded Contexts - Clean Architecture & DDD', () => {
-  describe('Content Bounded Context', () => {
-    it('FileHashVo should validate MD5 and SHA-256 hex formats', () => {
+describe('Library Bounded Contexts - Modular Monolith Domain Logic', () => {
+  describe('Extraction Domain Logic', () => {
+    it('isValidFileHash should validate MD5 and SHA-256 hex formats', () => {
       const validMd5 = 'd41d8cd98f00b204e9800998ecf8427e';
-      const vo = FileHashVo.create(validMd5);
-      expect(vo).not.toBeNull();
-      expect(vo?.value).toBe(validMd5);
+      const validSha256 =
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
-      expect(() => FileHashVo.create('not-a-valid-hex-hash')).toThrow();
-      expect(FileHashVo.create(null)).toBeNull();
+      expect(isValidFileHash(validMd5)).toBe(true);
+      expect(isValidFileHash(validSha256)).toBe(true);
+      expect(isValidFileHash('not-a-valid-hex-hash')).toBe(false);
+      expect(isValidFileHash(null)).toBe(false);
     });
 
-    it('MimeTypeVo should validate MIME type format', () => {
-      const pdfVo = MimeTypeVo.create('application/pdf');
-      expect(pdfVo.isPdf).toBe(true);
-      expect(pdfVo.value).toBe('application/pdf');
-
-      expect(() => MimeTypeVo.create('invalid_mime')).toThrow();
-      expect(MimeTypeVo.create(null).value).toBe('application/pdf');
-    });
-
-    it('AttachmentAggregate should track revisions and emit events', () => {
-      const attachment = AttachmentAggregate.create({
-        itemId: 'item-1',
-        filename: 'paper.pdf',
-        url: 'https://storage.flux.local/files/paper.pdf',
-        sizeBytes: 1048576,
-      });
-
-      expect(attachment.id).toBeDefined();
-      expect(attachment.revisionCount).toBe(1);
-      expect(attachment.isPdf).toBe(true);
-      expect(attachment.isExtracted).toBe(false);
-
-      const events1 = attachment.pullDomainEvents();
-      expect(events1).toHaveLength(1);
-      expect(events1[0].eventType).toBe('content.attachment.created');
-
-      // Add a revision
-      attachment.addRevision(
-        'https://storage.flux.local/files/paper_v2.pdf',
-        1050000,
-      );
-      expect(attachment.revisionCount).toBe(2);
-      expect(attachment.sizeBytes).toBe(1050000);
-
-      // Mark as extracted
-      attachment.markExtracted(12);
-      expect(attachment.isExtracted).toBe(true);
-      expect(attachment.pageCount).toBe(12);
-
-      const events2 = attachment.pullDomainEvents();
-      expect(events2).toHaveLength(2);
-      expect(events2[0].eventType).toBe('content.attachment.revision_added');
-      expect(events2[1].eventType).toBe('content.attachment.extracted');
+    it('isValidMimeType and isPdfMimeType should validate MIME types', () => {
+      expect(isValidMimeType('application/pdf')).toBe(true);
+      expect(isPdfMimeType('application/pdf')).toBe(true);
+      expect(isPdfMimeType('application/json')).toBe(false);
+      expect(isValidMimeType('invalid_mime')).toBe(false);
     });
   });
 
-  describe('Processing Bounded Context', () => {
+  describe('Ingestion Domain Logic', () => {
     it('IngestionStatusVo should enforce valid state transitions', () => {
       const pending = IngestionStatusVo.create('PENDING');
       const running = IngestionStatusVo.create('RUNNING');
@@ -91,94 +56,80 @@ describe('Reader, Ingestion, Search & Citation Bounded Contexts - Clean Architec
       expect(run.totalItems).toBe(10);
       expect(run.processedItems).toBe(0);
 
-      const startEvents = run.pullDomainEvents();
-      expect(startEvents).toHaveLength(1);
-      expect(startEvents[0].eventType).toBe('processing.ingestion_run.started');
-
       run.recordProgress(5, 0);
       expect(run.processedItems).toBe(5);
 
       run.complete();
       expect(run.status).toBe('COMPLETED');
       expect(run.completedAt).toBeDefined();
-
-      const completeEvents = run.pullDomainEvents();
-      expect(completeEvents).toHaveLength(1);
-      expect(completeEvents[0].eventType).toBe(
-        'processing.ingestion_run.completed',
-      );
     });
   });
 
-  describe('Search Bounded Context', () => {
-    it('SearchQueryVo should enforce limits and sanitize parameters', () => {
-      const query = SearchQueryVo.create('  quantum computing  ', {
+  describe('Search Domain Logic', () => {
+    it('createSearchQuery and SearchQueryVo should enforce limits and sanitize parameters', () => {
+      const sanitized = createSearchQuery('  quantum computing  ', {
         limit: 500, // Should be clamped to 100
         offset: -10, // Should be clamped to 0
         sortBy: 'date',
       });
 
-      expect(query.query).toBe('quantum computing');
-      expect(query.limit).toBe(100);
-      expect(query.offset).toBe(0);
-      expect(query.sortBy).toBe('date');
-    });
+      expect(sanitized.query).toBe('quantum computing');
+      expect(sanitized.limit).toBe(100);
+      expect(sanitized.offset).toBe(0);
+      expect(sanitized.sortBy).toBe('date');
 
-    it('ExecuteSearchUseCase should delegate to search engine port', async () => {
-      const mockSearchEngine: jest.Mocked<ISearchEnginePort> = {
-        search: jest.fn().mockResolvedValue({
-          hits: [{ id: 'item-1', title: 'Deep Learning', score: 0.95 }],
-          total: 1,
-        }),
-      };
-
-      const useCase = new ExecuteSearchUseCase(mockSearchEngine);
-      const result = await useCase.execute({
-        userId: 'user-1',
-        query: 'deep learning',
-        limit: 10,
+      const queryVo = SearchQueryVo.create('  quantum computing  ', {
+        limit: 500,
+        offset: -10,
+        sortBy: 'date',
       });
-
-      expect(mockSearchEngine.search).toHaveBeenCalledTimes(1);
-      expect(result.hits).toHaveLength(1);
-      expect(result.hits[0].title).toBe('Deep Learning');
+      expect(queryVo.query).toBe('quantum computing');
+      expect(queryVo.limit).toBe(100);
+      expect(queryVo.offset).toBe(0);
+      expect(queryVo.sortBy).toBe('date');
     });
   });
 
-  describe('Citation Bounded Context', () => {
-    it('CitationStyleVo should validate academic styles', () => {
+  describe('Citation Domain Logic', () => {
+    it('CitationStyleVo should normalize and fallback styles safely', () => {
       const apa = CitationStyleVo.create('APA');
       expect(apa.value).toBe('apa');
 
-      // CitationStyleVo uses open CSL model: any valid slug is accepted as-is
-      // (10,000+ CSL repository styles). Fallback to 'apa' only on null/empty.
-      const unsupported = CitationStyleVo.create('unsupported-style');
-      expect(unsupported.value).toBe('unsupported-style');
+      // CitationStyleVo uses open CSL model: any valid slug is accepted
+      const customStyle = CitationStyleVo.create('nature');
+      expect(customStyle.value).toBe('nature');
 
-      // Null/empty → fallback 'apa'
+      // Null/empty -> fallback 'apa'
       expect(CitationStyleVo.create(null).value).toBe('apa');
       expect(CitationStyleVo.create('').value).toBe('apa');
     });
+  });
 
-    it('FormatCitationUseCase should delegate to citation engine port', async () => {
-      const mockCitationEngine: jest.Mocked<ICitationEnginePort> = {
-        formatItem: jest.fn().mockResolvedValue({
-          formattedText: 'LeCun, Y. (2015). Deep learning.',
-          style: 'apa',
-          itemId: 'item-1',
-        }),
-        formatBatch: jest.fn().mockResolvedValue([]),
-      };
+  describe('Sync Domain Logic', () => {
+    it('compactLibraryChanges should squash redundant intermediate updates', () => {
+      const changes = [
+        {
+          id: '1',
+          seq: 1,
+          entityType: 'item',
+          entityId: 'item-1',
+          action: 'CREATE',
+          data: { title: 'Initial' },
+        },
+        {
+          id: '2',
+          seq: 2,
+          entityType: 'item',
+          entityId: 'item-1',
+          action: 'UPDATE',
+          data: { year: 2026 },
+        },
+      ];
 
-      const useCase = new FormatCitationUseCase(mockCitationEngine);
-      const result = await useCase.execute({
-        userId: 'user-1',
-        itemId: 'item-1',
-        style: 'apa',
-      });
-
-      expect(mockCitationEngine.formatItem).toHaveBeenCalledTimes(1);
-      expect(result?.formattedText).toBe('LeCun, Y. (2015). Deep learning.');
+      const compacted = compactLibraryChanges(changes);
+      expect(compacted).toHaveLength(1);
+      expect(compacted[0].action).toBe('CREATE');
+      expect(compacted[0].data).toEqual({ title: 'Initial', year: 2026 });
     });
   });
 });

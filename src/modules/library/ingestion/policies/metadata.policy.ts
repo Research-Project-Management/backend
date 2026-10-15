@@ -1,6 +1,9 @@
-import { BaseDomainException } from '../../shared-kernel/core/errors/domain.exception';
-import { ProviderName, QueryType } from '../types/metadata.types';
-import { SsrfGuardService } from '../../shared-kernel/core/services/ssrf-guard.service';
+import { BaseDomainException } from '@/modules/library/shared-kernel/core/errors/domain.exception';
+import {
+  ProviderName,
+  QueryType,
+} from '@/modules/library/ingestion/types/metadata.types';
+import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
 
 export class SsrfBlockedDomainException extends BaseDomainException {
   constructor(message: string) {
@@ -53,22 +56,22 @@ export class MetadataRoutingPolicy {
       case 'DOI':
         return {
           authoritative: ['CrossRef'],
-          enrichment: ['Unpaywall', 'OpenAlex'],
-          fallback: ['OpenAlex'],
+          enrichment: ['Unpaywall', 'OpenAlex', 'SemanticScholar'],
+          fallback: ['OpenAlex', 'SemanticScholar', 'DBLP'],
         };
 
       case 'ARXIV':
         return {
           authoritative: ['arXiv'],
-          enrichment: ['OpenAlex'],
-          fallback: ['CrossRef', 'OpenAlex'],
+          enrichment: ['OpenAlex', 'SemanticScholar'],
+          fallback: ['CrossRef', 'OpenAlex', 'SemanticScholar'],
         };
 
       case 'PMID':
         return {
           authoritative: ['PubMed'],
-          enrichment: ['OpenAlex'],
-          fallback: ['OpenAlex'],
+          enrichment: ['OpenAlex', 'SemanticScholar'],
+          fallback: ['OpenAlex', 'SemanticScholar'],
         };
 
       case 'ISBN':
@@ -89,8 +92,8 @@ export class MetadataRoutingPolicy {
       default:
         return {
           authoritative: ['CrossRef'],
-          enrichment: ['OpenAlex'],
-          fallback: ['OpenAlex'],
+          enrichment: ['OpenAlex', 'SemanticScholar', 'DBLP'],
+          fallback: ['OpenAlex', 'DBLP', 'SemanticScholar'],
         };
     }
   }
@@ -107,10 +110,11 @@ export class MetadataRoutingPolicy {
       try {
         await ssrfGuard.assertSafeUrl(rawUrl);
         return;
-      } catch (err: any) {
+      } catch (err: unknown) {
         throw new SsrfBlockedDomainException(
-          err?.message ||
-            'SSRF Protection: Destination blocked by security policy',
+          err instanceof Error
+            ? err.message
+            : 'SSRF Protection: Destination blocked by security policy',
         );
       }
     }

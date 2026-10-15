@@ -1,15 +1,22 @@
 /**
  * project-history/core/adapters/database/manuscript-history.mapper.ts
- * Mapper transforming between Prisma persistence models and Domain entities.
+ * Mapper transforming between Prisma persistence models and Domain entities,
+ * delegating pure JSON snapshot normalization to SnapshotNormalizer.
  */
 
 import {
   ManuscriptSnapshot as PrismaSnapshot,
   ManuscriptLabel as PrismaLabel,
 } from '@prisma/client';
-import { Snapshot } from '../../domain/entities/snapshot.entity';
-import { VersionLabel } from '../../domain/entities/version-label.entity';
-import { FileSnapshotVo } from '../../domain/value-objects/file-snapshot.vo';
+import { Snapshot } from '@/modules/manuscripts/project-history/core/domain/entities/snapshot.entity';
+import { VersionLabel } from '@/modules/manuscripts/project-history/core/domain/entities/version-label.entity';
+import { FileSnapshotVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/file-snapshot.vo';
+import {
+  SnapshotNormalizer,
+  RawSnapshotFileEntry,
+} from '../../../domain/snapshot-normalizer';
+
+export type { RawSnapshotFileEntry };
 
 export type PrismaSnapshotWithLabels = PrismaSnapshot & {
   labels?: PrismaLabel[];
@@ -29,17 +36,17 @@ export class ManuscriptHistoryMapper {
     });
   }
 
+  public static parseSnapshotFiles(
+    rawFiles: unknown,
+  ): Map<string, FileSnapshotVo> {
+    return SnapshotNormalizer.parseSnapshotFiles(rawFiles);
+  }
+
   public static toDomainSnapshot(prisma: PrismaSnapshotWithLabels): Snapshot {
-    const rawFiles = prisma.files as Record<string, any>;
-    const filesMap = new Map<string, FileSnapshotVo>();
-
-    if (rawFiles && typeof rawFiles === 'object') {
-      for (const [path, data] of Object.entries(rawFiles)) {
-        filesMap.set(path, FileSnapshotVo.fromProps(data));
-      }
-    }
-
-    const labels = prisma.labels ? prisma.labels.map(this.toDomainLabel) : [];
+    const filesMap = SnapshotNormalizer.parseSnapshotFiles(prisma.files);
+    const labels = prisma.labels
+      ? prisma.labels.map((l) => this.toDomainLabel(l))
+      : [];
 
     return Snapshot.create({
       id: prisma.id,
@@ -52,5 +59,9 @@ export class ManuscriptHistoryMapper {
       labels,
       createdAt: prisma.createdAt,
     });
+  }
+
+  public static toDomain(prisma: PrismaSnapshotWithLabels): Snapshot {
+    return this.toDomainSnapshot(prisma);
   }
 }

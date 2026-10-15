@@ -39,7 +39,10 @@ describe('EuropePmcSearchProvider', () => {
               isOpenAccess: 'Y',
               fullTextUrlList: {
                 fullTextUrl: [
-                  { documentStyle: 'pdf', url: 'https://europepmc.org/articles/PMC1234567?pdf=render' },
+                  {
+                    documentStyle: 'pdf',
+                    url: 'https://europepmc.org/articles/PMC1234567?pdf=render',
+                  },
                 ],
               },
             },
@@ -61,9 +64,14 @@ describe('EuropePmcSearchProvider', () => {
       expect(hit.title).toBe('CRISPR Cas9 Advances');
       expect(hit.doi).toBe('10.1038/s41586-019-1234-5');
       expect(hit.pmid).toBe('31234567');
-      expect(hit.authors).toEqual(['Jennifer Doudna', 'Emmanuelle Charpentier']);
+      expect(hit.authors).toEqual([
+        'Jennifer Doudna',
+        'Emmanuelle Charpentier',
+      ]);
       expect(hit.year).toBe(2020);
-      expect(hit.pdfUrl).toBe('https://europepmc.org/articles/PMC1234567?pdf=render');
+      expect(hit.pdfUrl).toBe(
+        'https://europepmc.org/articles/PMC1234567?pdf=render',
+      );
       expect(hit.sourceEngine).toBe('europepmc');
       // Score: DOI/PMID (+0.4) + Title (+0.3) + Scientific db (+0.2) + Direct PDF (+0.1) = 1.0
       expect(hit.confidenceScore).toBe(1.0);

@@ -3,7 +3,7 @@
  * Outbound Port for transpiling Word (.docx) and Markdown (.md) documents into LaTeX projects.
  */
 
-import { ArchiveEntryVo } from '../domain/value-objects/archive-entry.vo';
+import { ArchiveEntryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/archive-entry.vo';
 
 export interface TranspiledProjectResult {
   mainTex: string;

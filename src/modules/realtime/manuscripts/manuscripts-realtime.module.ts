@@ -36,7 +36,7 @@ import { ProjectAccessVerifierAdapter } from './core/adapters/external/project-a
 import { SocketIoBroadcasterAdapter } from './core/adapters/broadcast/socket-io-broadcaster.adapter';
 import { YjsDocManagerAdapter } from './core/adapters/crdt/yjs-doc-manager.adapter';
 import { LiveCollaborationAdapter } from './core/adapters/external/live-collaboration.adapter';
-import { LiveCollaborationPort } from '@/modules/manuscripts/docstore/core/ports/live-collaboration.port';
+import { LiveCollaborationPort } from '@/modules/manuscripts/docstore/domain';
 
 @Module({
   imports: [

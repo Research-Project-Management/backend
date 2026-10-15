@@ -5,8 +5,8 @@ import {
   BaseIntegrationEvent,
   IIntegrationEventBus,
   INTEGRATION_EVENT_BUS,
-} from '../../shared-kernel/events/integration-events';
-import { TransactionHelpers } from '../../shared-kernel';
+} from '@/modules/library/shared-kernel/events/integration-events';
+import { TransactionHelpers } from '@/modules/library/shared-kernel';
 
 export { INTEGRATION_EVENT_BUS };
 export type { IIntegrationEventBus };

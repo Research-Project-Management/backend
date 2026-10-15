@@ -58,7 +58,10 @@ export class ReviewNotificationBundlingUseCase {
    * digest, persists it, and marks the bundled notifications as read.
    * Returns null when nothing is pending.
    */
-  async flush(userId: string, projectId?: string): Promise<ReviewDigest | null> {
+  async flush(
+    userId: string,
+    projectId?: string,
+  ): Promise<ReviewDigest | null> {
     const settings = await this.store.getSettings(userId);
     const pending = await this.unreadReview(userId, projectId);
     if (pending.length === 0) return null;

@@ -38,9 +38,12 @@ import {
   VersionListItemDto,
   VersionLabelDto,
 } from './dto/history.dto';
-import { VersionNotFoundException } from './core/domain/exceptions/version-not-found.exception';
-import { DuplicateLabelException } from './core/domain/exceptions/duplicate-label.exception';
-import { EmptyProjectException } from './core/domain/exceptions/empty-project.exception';
+import {
+  VersionNotFoundException,
+  DuplicateLabelException,
+  EmptyProjectException,
+} from './domain';
+import { AuthenticatedRequest } from '@/core';
 
 @ApiTags('Manuscripts - Project History & Snapshots')
 @ApiBearerAuth('JWT-auth')
@@ -54,7 +57,7 @@ import { EmptyProjectException } from './core/domain/exceptions/empty-project.ex
 export class ProjectHistoryController {
   constructor(private readonly historyService: ProjectHistoryService) {}
 
-  private handleError(error: any): never {
+  private handleError(error: unknown): never {
     if (error instanceof VersionNotFoundException) {
       throw new NotFoundException(error.message);
     }
@@ -90,7 +93,7 @@ export class ProjectHistoryController {
   async createSnapshot(
     @Param('projectId') projectId: string,
     @Body() dto: CreateSnapshotDto,
-    @Req() req?: any,
+    @Req() req?: AuthenticatedRequest,
   ): Promise<SnapshotDetailDto> {
     try {
       const userId =
@@ -149,7 +152,7 @@ export class ProjectHistoryController {
     @Param('projectId') projectId: string,
     @Param('version', ParseIntPipe) version: number,
     @Body() dto: LabelVersionDto,
-    @Req() req?: any,
+    @Req() req?: AuthenticatedRequest,
   ): Promise<VersionLabelDto> {
     try {
       const userId =
@@ -189,7 +192,7 @@ export class ProjectHistoryController {
   async restoreVersion(
     @Param('projectId') projectId: string,
     @Body() dto: RestoreVersionDto,
-    @Req() req?: any,
+    @Req() req?: AuthenticatedRequest,
   ) {
     try {
       const userId =

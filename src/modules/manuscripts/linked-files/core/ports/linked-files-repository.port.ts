@@ -3,7 +3,7 @@
  * Driven port interface for Linked Files persistent storage.
  */
 
-import { LinkedFileEntity } from '../domain/entities/linked-file.entity';
+import { LinkedFileEntity } from '@/modules/manuscripts/linked-files/core/domain/entities/linked-file.entity';
 
 export abstract class ILinkedFilesRepositoryPort {
   abstract save(entity: LinkedFileEntity): Promise<LinkedFileEntity>;

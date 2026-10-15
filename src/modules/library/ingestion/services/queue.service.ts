@@ -2,15 +2,15 @@ import { Injectable, Logger, Optional, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { IngestionSubmissionEnvelope } from '../types/submission.types';
+import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 import { PipelineService } from './pipeline.service';
-import { IngestionRepository } from '../repositories/ingestion.repository';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { IngestionStatus } from '@prisma/client';
 import {
   LIBRARY_INGESTION_QUEUE,
   LIBRARY_INGESTION_JOB,
   IngestionQueueTier,
-} from '../types/queue.constants';
+} from '@/modules/library/ingestion/types/queue.constants';
 
 export interface QueuedIngestionJob {
   runId: string;
@@ -43,11 +43,8 @@ export class QueueService implements OnModuleInit {
     @InjectQueue(LIBRARY_INGESTION_QUEUE)
     private readonly bullQueue?: Queue,
   ) {
-    const queueEmitter = this.bullQueue as unknown as {
-      on?: (event: string, cb: (err: unknown) => void) => void;
-    };
-    if (typeof queueEmitter?.on === 'function') {
-      queueEmitter.on('error', (err: unknown) => {
+    if (typeof this.bullQueue?.on === 'function') {
+      this.bullQueue.on('error', (err: Error) => {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Ingestion BullMQ queue error notice: ${message}`);
       });
@@ -91,9 +88,10 @@ export class QueueService implements OnModuleInit {
           );
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(
-        `Failed to scan for orphaned ingestion runs on startup: ${err?.message}`,
+        `Failed to scan for orphaned ingestion runs on startup: ${msg}`,
       );
     }
   }
@@ -147,9 +145,10 @@ export class QueueService implements OnModuleInit {
           `[BullMQ] Enqueued run ${runId} (jobPriority=${jobPriority}, fastPath=${isFastPath}, tier=${tier ?? 'standard'}) for project ${projectId}`,
         );
         return true;
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         this.logger.error(
-          `Failed to dispatch run ${runId} to BullMQ: ${err?.message || err}. Falling back to in-memory queue.`,
+          `Failed to dispatch run ${runId} to BullMQ: ${msg}. Falling back to in-memory queue.`,
         );
       }
     }
@@ -202,9 +201,10 @@ export class QueueService implements OnModuleInit {
             state === 'prioritized'
           );
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `[QueueService] Failed to check BullMQ job state for runId "${runId}": ${err?.message}`,
+          `[QueueService] Failed to check BullMQ job state for runId "${runId}": ${msg}`,
         );
       }
     }
@@ -223,9 +223,10 @@ export class QueueService implements OnModuleInit {
           this.bullQueue.getActiveCount(),
           this.bullQueue.getWaitingCount(),
         ]);
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `[QueueService] Failed to fetch BullMQ queue metrics: ${err?.message}`,
+          `[QueueService] Failed to fetch BullMQ queue metrics: ${msg}`,
         );
       }
     }
@@ -265,9 +266,11 @@ export class QueueService implements OnModuleInit {
       );
       await this.repo
         .updateRunStatus(projectId, runId, IngestionStatus.RUNNING)
-        .catch((statusErr: any) => {
+        .catch((statusErr: unknown) => {
+          const msg =
+            statusErr instanceof Error ? statusErr.message : String(statusErr);
           this.logger.warn(
-            `Failed to set RUNNING status for run ${runId}: ${statusErr?.message}`,
+            `Failed to set RUNNING status for run ${runId}: ${msg}`,
           );
         });
       await this.pipeline.executePipeline(runId, projectId, envelope);
@@ -275,18 +278,21 @@ export class QueueService implements OnModuleInit {
       this.logger.log(
         `[QUEUE_DONE] Run ${runId} completed successfully in ${elapsed}s`,
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.error(
-        `[QUEUE_ERROR] Run ${runId} failed after ${elapsed}s: ${err?.message || err}`,
+        `[QUEUE_ERROR] Run ${runId} failed after ${elapsed}s: ${msg}`,
       );
       await this.repo
         .updateRunStatus(projectId, runId, IngestionStatus.FAILED_FINAL, {
-          lastError: err?.message || 'Ingestion pipeline execution failed',
+          lastError: msg || 'Ingestion pipeline execution failed',
         })
-        .catch((updateErr: any) => {
+        .catch((updateErr: unknown) => {
+          const updateMsg =
+            updateErr instanceof Error ? updateErr.message : String(updateErr);
           this.logger.error(
-            `Failed to update run status for failed run ${runId}: ${updateErr?.message || updateErr}`,
+            `Failed to update run status for failed run ${runId}: ${updateMsg}`,
           );
         });
     } finally {

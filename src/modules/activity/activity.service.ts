@@ -10,6 +10,18 @@ import { EntityType } from '@prisma/client';
 import { RecentItemResponse } from './dto/activity.dto';
 import { RedisCacheService } from '@/core';
 import { ACTIVITY_REDIS_KEYS } from './constants/redis-keys.constant';
+import {
+  ActivityActor,
+  ActivityEventWithActor,
+} from './types/activity-repository.interface';
+
+export interface FeedResult {
+  items: ActivityEventWithActor[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
 
 function formatDuration(ms: number): string {
   if (ms < 0) ms = 0;
@@ -29,18 +41,26 @@ function formatDuration(ms: number): string {
   return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
 }
 
+interface ProjectColumnState {
+  id?: string;
+  slug?: string;
+  title?: string;
+  name?: string;
+  accentColor?: string;
+  color?: string;
+  group?: string;
+}
+
 function resolveStateInfo(
   stateId: string | null | undefined,
-  states: any,
+  states: unknown,
 ): { id: string; name: string; color: string; group: string } {
   if (!stateId) {
     return { id: '', name: 'None', color: '#94a3b8', group: 'backlog' };
   }
 
-  const columns = Array.isArray(states) ? states : [];
-  const found = columns.find(
-    (c: any) => c.id === stateId || c.slug === stateId,
-  );
+  const columns = Array.isArray(states) ? (states as ProjectColumnState[]) : [];
+  const found = columns.find((c) => c.id === stateId || c.slug === stateId);
   if (found) {
     return {
       id: found.id || stateId,
@@ -110,7 +130,7 @@ export class ActivityService {
   async invalidateFeedCache(event: DomainActivityEvent) {
     if (!this.cache) return;
     try {
-      const deletions: Promise<any>[] = [
+      const deletions: Promise<unknown>[] = [
         this.cache.del(
           ACTIVITY_REDIS_KEYS.entityFeed(event.entityType, event.entityId),
         ),
@@ -149,7 +169,7 @@ export class ActivityService {
     const cacheKey = ACTIVITY_REDIS_KEYS.projectFeed(projectId);
 
     if (this.cache && isDefaultQuery) {
-      const cached = await this.cache.get<any>(cacheKey);
+      const cached = await this.cache.get<FeedResult>(cacheKey);
       if (cached) return cached;
     }
 
@@ -198,7 +218,7 @@ export class ActivityService {
     const cacheKey = ACTIVITY_REDIS_KEYS.userFeed(userId);
 
     if (this.cache && isDefaultQuery) {
-      const cached = await this.cache.get<any>(cacheKey);
+      const cached = await this.cache.get<FeedResult>(cacheKey);
       if (cached) return cached;
     }
 
@@ -285,7 +305,7 @@ export class ActivityService {
     const cacheKey = ACTIVITY_REDIS_KEYS.entityFeed(entityType, entityId);
 
     if (this.cache && limit === 50) {
-      const cached = await this.cache.get<any>(cacheKey);
+      const cached = await this.cache.get<{ activities: unknown[] }>(cacheKey);
       if (cached) return cached;
     }
 
@@ -365,7 +385,7 @@ export class ActivityService {
       id: string;
       fromState: { id: string; name: string; color: string; group: string };
       toState: { id: string; name: string; color: string; group: string };
-      actor?: any;
+      actor?: ActivityActor | null;
       transitionedAt: Date;
       timeInStateMs: number;
       timeInStateFormatted: string;
@@ -550,11 +570,11 @@ export class ActivityService {
       id: string;
       type: 'comment' | 'activity' | 'transition' | 'history';
       timestamp: Date;
-      actor: any;
-      comment?: any;
-      activity?: any;
-      transition?: any;
-      history?: any;
+      actor: ActivityActor | null;
+      comment?: unknown;
+      activity?: unknown;
+      transition?: unknown;
+      history?: unknown;
     }> = [];
 
     for (const c of comments) {

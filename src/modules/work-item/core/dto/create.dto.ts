@@ -9,7 +9,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WorkItemPriority } from '@prisma/client';
-import type { WorkItemAttachments } from '../types/work-item.types';
+import type { WorkItemAttachments } from '@/modules/work-item/core/types/work-item.types';
 
 export class CreateWorkItemDto {
   @ApiProperty({

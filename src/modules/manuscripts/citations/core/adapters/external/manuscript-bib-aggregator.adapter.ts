@@ -6,16 +6,16 @@
  */
 
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
-import { ICitationsAggregatorPort } from '../../ports/citations-aggregator.port';
+import { ICitationsAggregatorPort } from '@/modules/manuscripts/citations/core/ports/citations-aggregator.port';
 import {
   IBibtexParserPort,
   BIBTEX_PARSER_PORT,
-} from '../../ports/bibtex-parser.port';
-import { BibliographyFile } from '../../domain/entities/bibliography-file.entity';
-import { BibEntry } from '../../domain/entities/bib-entry.entity';
-import { StructureService } from '../../../../structure/structure.service';
-import { DocstoreService } from '../../../../docstore/docstore.service';
-import { ManuscriptNodeEntity } from '../../../../structure/core/domain/manuscript-node.entity';
+} from '@/modules/manuscripts/citations/core/ports/bibtex-parser.port';
+import { BibliographyFile } from '@/modules/manuscripts/citations/core/domain/entities/bibliography-file.entity';
+import { BibEntry } from '@/modules/manuscripts/citations/core/domain/entities/bib-entry.entity';
+import { StructureService } from '@/modules/manuscripts/structure/structure.service';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
 
 @Injectable()
 export class ManuscriptBibAggregatorAdapter implements ICitationsAggregatorPort {
@@ -52,15 +52,15 @@ export class ManuscriptBibAggregatorAdapter implements ICitationsAggregatorPort 
               entries,
             }),
           );
-        } catch (err: any) {
+        } catch (err: unknown) {
           this.logger.warn(
-            `Failed to read doc ${node.docId} for ${node.path}: ${err.message}`,
+            `Failed to read doc ${node.docId} for ${node.path}: ${(err as Error)?.message}`,
           );
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.error(
-        `Error scanning bib nodes for project ${projectId}: ${err.message}`,
+        `Error scanning bib nodes for project ${projectId}: ${(err as Error)?.message}`,
       );
     }
 

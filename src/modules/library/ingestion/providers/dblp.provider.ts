@@ -1,0 +1,218 @@
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { createHash } from 'crypto';
+import {
+  MetadataProvider,
+  MetadataRequest,
+  ProviderCapability,
+  ProviderName,
+  ProviderResult,
+  QueryType,
+  CreatorCreditInput,
+} from '@/modules/library/ingestion/types/metadata.types';
+import {
+  cleanBibliographicText,
+  normalizeDoi,
+  normalizePageRange,
+  parseCreatorString,
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { getAcademicUserAgent } from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
+import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
+
+/**
+ * DBLP Computer Science Bibliography Provider.
+ *
+ * Gold standard open bibliographic database for computer science, AI, and software engineering.
+ * Fast, open API with zero recurring cost and authoritative proceedings indexing for
+ * NeurIPS, ICML, ICLR, CVPR, ICCV, ECCV, ACL, EMNLP, IEEE, and ACM conferences.
+ */
+@Injectable()
+export class DblpProvider implements MetadataProvider {
+  readonly id: ProviderName = 'DBLP';
+  readonly capabilities: ProviderCapability = {
+    queryTypes: ['DOI', 'TITLE'],
+    isAuthoritative: false,
+    timeoutMs: 5000,
+    maxConcurrency: 2,
+  };
+
+  private readonly logger = new Logger(DblpProvider.name);
+  private readonly BASE_URL =
+    process.env.DBLP_API_URL || 'https://dblp.org/search/publ/api';
+
+  constructor(
+    @Optional() private readonly rateLimiter?: DomainRateLimiterService,
+  ) {}
+
+  supports(queryType: QueryType): boolean {
+    return this.capabilities.queryTypes.includes(queryType);
+  }
+
+  async resolve(
+    request: MetadataRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderResult | null> {
+    const rawQuery = request.query?.trim();
+    if (!rawQuery) return null;
+
+    const cleanDoi = normalizeDoi(rawQuery);
+    const isDoiQuery = Boolean(cleanDoi) || request.queryType === 'DOI';
+
+    const searchQuery = isDoiQuery && cleanDoi ? `doi:${cleanDoi}` : rawQuery;
+    const url = `${this.BASE_URL}?q=${encodeURIComponent(searchQuery)}&format=json&h=3`;
+
+    if (this.rateLimiter) {
+      await this.rateLimiter.acquire('dblp', signal);
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          'User-Agent': getAcademicUserAgent('Dblp'),
+          Accept: 'application/json, text/json',
+        },
+        signal,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.debug(`DBLP fetch skipped/failed non-fatally: ${message}`);
+      return null;
+    }
+
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      this.logger.debug(
+        `DBLP returned HTTP ${response.status} for query: ${searchQuery}`,
+      );
+      return null;
+    }
+
+    let payload: Record<string, unknown> | null = null;
+    try {
+      payload = (await response.json()) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+
+    const hits = (
+      payload as {
+        result?: {
+          hits?: {
+            hit?:
+              | Array<{ info?: Record<string, unknown> }>
+              | { info?: Record<string, unknown> };
+          };
+        };
+      }
+    )?.result?.hits?.hit;
+    if (!hits) return null;
+
+    const hitList = Array.isArray(hits) ? hits : [hits];
+    if (hitList.length === 0) return null;
+
+    const firstHit = hitList[0]?.info;
+    if (!firstHit || !firstHit.title) return null;
+
+    return this.mapHitToProviderResult(
+      firstHit,
+      isDoiQuery ? cleanDoi || rawQuery : rawQuery,
+      isDoiQuery,
+    );
+  }
+
+  private mapHitToProviderResult(
+    info: Record<string, unknown>,
+    identifier: string,
+    isDoiQuery: boolean,
+  ): ProviderResult {
+    // 1. Clean Title (DBLP titles often end with a dot)
+    const rawTitle =
+      typeof info.title === 'string'
+        ? info.title
+        : (info.title as { text?: string })?.text || '';
+    const cleanTitle = (cleanBibliographicText(rawTitle) || '')
+      .replace(/\.$/, '')
+      .trim();
+
+    // 2. Authors
+    const rawAuthors = (info.authors as { author?: unknown })?.author;
+    const authorNames: string[] = [];
+    if (Array.isArray(rawAuthors)) {
+      for (const a of rawAuthors) {
+        const name = typeof a === 'string' ? a : (a as { text?: string })?.text;
+        if (name && typeof name === 'string')
+          authorNames.push(name.replace(/\s+\d+$/, '')); // Strip DBLP disambiguation digits (e.g. "John Smith 0001")
+      }
+    } else if (rawAuthors) {
+      const name =
+        typeof rawAuthors === 'string'
+          ? rawAuthors
+          : (rawAuthors as { text?: string })?.text;
+      if (name && typeof name === 'string')
+        authorNames.push(name.replace(/\s+\d+$/, ''));
+    }
+
+    const creators = authorNames.map((a, idx) =>
+      parseCreatorString(a, idx, 'author'),
+    );
+
+    // 3. Year
+    let year: number | undefined;
+    if (info.year) {
+      const parsedYear = parseInt(String(info.year).trim(), 10);
+      if (!isNaN(parsedYear) && parsedYear >= 1900 && parsedYear <= 2100) {
+        year = parsedYear;
+      }
+    }
+
+    // 4. Item Type & Venue
+    const rawType = String(info.type || '').toLowerCase();
+    const venue =
+      typeof info.venue === 'string' ? info.venue.trim() : undefined;
+    const isConference =
+      rawType.includes('conference') || rawType.includes('workshop');
+
+    const itemType = isConference ? 'conferencePaper' : 'journalArticle';
+    const doi =
+      typeof info.doi === 'string' ? normalizeDoi(info.doi) : undefined;
+    const pages = info.pages
+      ? normalizePageRange(String(info.pages))
+      : undefined;
+    const volume = info.volume ? String(info.volume).trim() : undefined;
+    const issue = info.number ? String(info.number).trim() : undefined;
+    const url =
+      typeof info.ee === 'string'
+        ? info.ee
+        : typeof info.url === 'string'
+          ? info.url
+          : undefined;
+
+    const rawVersion = createHash('md5')
+      .update(JSON.stringify({ title: cleanTitle, venue, year, doi }))
+      .digest('hex');
+
+    return {
+      provider: this.id,
+      confidence: isDoiQuery ? 0.9 : 0.85,
+      identifier,
+      fetchedAt: new Date().toISOString(),
+      rawVersion,
+      metadata: {
+        itemType,
+        title: cleanTitle,
+        creators: creators,
+        authors: authorNames,
+        year,
+        doi,
+        journal: !isConference ? venue : undefined,
+        publicationTitle: venue,
+        proceedingsTitle: isConference ? venue : undefined,
+        conferenceName: isConference ? venue : undefined,
+        pages,
+        volume,
+        issue,
+        url,
+      },
+    };
+  }
+}

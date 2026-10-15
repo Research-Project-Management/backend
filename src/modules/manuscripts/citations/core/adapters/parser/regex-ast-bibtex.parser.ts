@@ -4,11 +4,26 @@
  * Robust against nested braces, multiline fields, quotes, and comments.
  */
 
-import { IBibtexParserPort } from '../../ports/bibtex-parser.port';
-import { BibEntry } from '../../domain/entities/bib-entry.entity';
-import { CitationKeyVo } from '../../domain/value-objects/citation-key.vo';
+import { IBibtexParserPort } from '@/modules/manuscripts/citations/core/ports/bibtex-parser.port';
+import { BibEntry } from '@/modules/manuscripts/citations/core/domain/entities/bib-entry.entity';
+import { CitationKeyVo } from '@/modules/manuscripts/citations/core/domain/value-objects/citation-key.vo';
 
 export class RegexAstBibtexParser implements IBibtexParserPort {
+  private static readonly STANDARD_MONTH_MACROS: Record<string, string> = {
+    jan: 'January',
+    feb: 'February',
+    mar: 'March',
+    apr: 'April',
+    may: 'May',
+    jun: 'June',
+    jul: 'July',
+    aug: 'August',
+    sep: 'September',
+    oct: 'October',
+    nov: 'November',
+    dec: 'December',
+  };
+
   /**
    * Parse a raw BibTeX string into an array of BibEntry entities.
    */
@@ -17,16 +32,40 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
 
     const entries: BibEntry[] = [];
     const cleanSource = this.stripComments(rawBibtex);
+    const stringMacros: Record<string, string> = {
+      ...RegexAstBibtexParser.STANDARD_MONTH_MACROS,
+    };
 
-    // Regex to locate the start of an entry: @entryType{key,
-    const entryStartRegex = /@([a-zA-Z]+)\s*\{\s*([^,\s]+)\s*,/g;
+    // 1. Pre-scan @string{key = value} or @string(key = value) macro definitions
+    const stringDefRegex = /@string\s*([{(])/gi;
+    let strMatch: RegExpExecArray | null;
+    while ((strMatch = stringDefRegex.exec(cleanSource)) !== null) {
+      const openChar = strMatch[1];
+      const openIdx = strMatch.index + strMatch[0].length - 1;
+      const closeIdx =
+        openChar === '('
+          ? this.findMatchingClosingParen(cleanSource, openIdx)
+          : this.findMatchingClosingBrace(cleanSource, openIdx);
+      if (closeIdx !== -1) {
+        const body = cleanSource.slice(openIdx + 1, closeIdx);
+        const parsedMacro = this.parseFields(body, stringMacros);
+        for (const [k, v] of Object.entries(parsedMacro)) {
+          stringMacros[k.toLowerCase()] = v;
+        }
+        stringDefRegex.lastIndex = closeIdx + 1;
+      }
+    }
+
+    // 2. Locate the start of each entry: @entryType{key, or @entryType(key,
+    const entryStartRegex = /@([a-zA-Z]+)\s*([{(])\s*([^,\s}()]+)\s*,/g;
 
     let match: RegExpExecArray | null;
     while ((match = entryStartRegex.exec(cleanSource)) !== null) {
       const entryType = match[1].toLowerCase();
-      const rawKey = match[2];
+      const openDelim = match[2];
+      const rawKey = match[3];
 
-      // Skip @comment or @preamble
+      // Skip @comment, @preamble, or @string
       if (
         entryType === 'comment' ||
         entryType === 'preamble' ||
@@ -35,12 +74,12 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
         continue;
       }
 
-      // Find the matching closing brace for this entry
+      const openDelimIndex = match.index + match[0].indexOf(openDelim);
       const bodyStartIndex = match.index + match[0].length;
-      const bodyEndIndex = this.findMatchingClosingBrace(
-        cleanSource,
-        match.index + match[0].indexOf('{'),
-      );
+      const bodyEndIndex =
+        openDelim === '('
+          ? this.findMatchingClosingParen(cleanSource, openDelimIndex)
+          : this.findMatchingClosingBrace(cleanSource, openDelimIndex);
 
       if (bodyEndIndex === -1) {
         // Unclosed entry: parse as much as possible up to next '@' or EOF
@@ -49,7 +88,7 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
           nextAt !== -1
             ? cleanSource.slice(bodyStartIndex, nextAt)
             : cleanSource.slice(bodyStartIndex);
-        const fields = this.parseFields(bodyContent);
+        const fields = this.parseFields(bodyContent, stringMacros);
         try {
           entries.push(new BibEntry({ key: rawKey, entryType, fields }));
         } catch {
@@ -59,7 +98,7 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
       }
 
       const bodyContent = cleanSource.slice(bodyStartIndex, bodyEndIndex);
-      const fields = this.parseFields(bodyContent);
+      const fields = this.parseFields(bodyContent, stringMacros);
       const rawSnippet = cleanSource.slice(match.index, bodyEndIndex + 1);
 
       try {
@@ -91,9 +130,13 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
   }
 
   /**
-   * Extract key-value field pairs from the body of a BibTeX entry.
+   * Extract key-value field pairs from the body of a BibTeX entry,
+   * supporting # string concatenation and @string macro expansion.
    */
-  private parseFields(body: string): Record<string, string> {
+  private parseFields(
+    body: string,
+    stringMacros: Record<string, string> = {},
+  ): Record<string, string> {
     const fields: Record<string, string> = {};
     let pos = 0;
 
@@ -109,58 +152,87 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
       const fieldName = rawFieldName.toLowerCase();
       pos = eqIndex + 1;
 
-      // Skip whitespace
-      while (pos < body.length && /\s/.test(body[pos])) {
-        pos++;
-      }
+      const parts: string[] = [];
 
-      if (pos >= body.length) break;
-
-      const firstChar = body[pos];
-      let value = '';
-
-      if (firstChar === '{') {
-        // Delimited by curly braces: handle nested braces!
-        const closeBraceIdx = this.findMatchingClosingBrace(body, pos);
-        if (closeBraceIdx !== -1) {
-          value = body.slice(pos + 1, closeBraceIdx);
-          pos = closeBraceIdx + 1;
-        } else {
-          value = body.slice(pos + 1);
-          pos = body.length;
+      // Read one or more value segments joined by '#'
+      while (pos < body.length) {
+        while (pos < body.length && /\s/.test(body[pos])) {
+          pos++;
         }
-      } else if (firstChar === '"') {
-        // Delimited by double quotes
-        let endQuoteIdx = -1;
-        for (let j = pos + 1; j < body.length; j++) {
-          if (body[j] === '"' && body[j - 1] !== '\\') {
-            endQuoteIdx = j;
-            break;
+        if (pos >= body.length) break;
+
+        const firstChar = body[pos];
+        let segmentValue = '';
+
+        if (firstChar === '{') {
+          // Delimited by curly braces: handle nested braces!
+          const closeBraceIdx = this.findMatchingClosingBrace(body, pos);
+          if (closeBraceIdx !== -1) {
+            segmentValue = body.slice(pos + 1, closeBraceIdx);
+            pos = closeBraceIdx + 1;
+          } else {
+            segmentValue = body.slice(pos + 1);
+            pos = body.length;
           }
-        }
-        if (endQuoteIdx !== -1) {
-          value = body.slice(pos + 1, endQuoteIdx);
-          pos = endQuoteIdx + 1;
+        } else if (firstChar === '"') {
+          // Delimited by double quotes (respecting nested braces or escaped quotes)
+          let endQuoteIdx = -1;
+          let braceDepth = 0;
+          for (let j = pos + 1; j < body.length; j++) {
+            if (body[j] === '{' && body[j - 1] !== '\\') braceDepth++;
+            else if (body[j] === '}' && body[j - 1] !== '\\')
+              braceDepth = Math.max(0, braceDepth - 1);
+            else if (
+              body[j] === '"' &&
+              body[j - 1] !== '\\' &&
+              braceDepth === 0
+            ) {
+              endQuoteIdx = j;
+              break;
+            }
+          }
+          if (endQuoteIdx !== -1) {
+            segmentValue = body.slice(pos + 1, endQuoteIdx);
+            pos = endQuoteIdx + 1;
+          } else {
+            segmentValue = body.slice(pos + 1);
+            pos = body.length;
+          }
         } else {
-          value = body.slice(pos + 1);
-          pos = body.length;
+          // Naked value (e.g. number 2024 or @string macro identifier) up to '#', ',', or end of block
+          let tokenEnd = pos;
+          while (
+            tokenEnd < body.length &&
+            body[tokenEnd] !== ',' &&
+            body[tokenEnd] !== '#'
+          ) {
+            tokenEnd++;
+          }
+          const rawToken = body.slice(pos, tokenEnd).trim();
+          const macroLookup = stringMacros[rawToken.toLowerCase()];
+          segmentValue = macroLookup !== undefined ? macroLookup : rawToken;
+          pos = tokenEnd;
         }
-      } else {
-        // Naked value (e.g. number 2024 or string macro) up to comma or end of block
-        const commaIdx = body.indexOf(',', pos);
-        if (commaIdx !== -1) {
-          value = body.slice(pos, commaIdx).trim();
-          pos = commaIdx + 1;
+
+        parts.push(segmentValue);
+
+        // Skip whitespace and check if '#' concatenation follows
+        while (pos < body.length && /\s/.test(body[pos])) {
+          pos++;
+        }
+        if (pos < body.length && body[pos] === '#') {
+          pos++; // consume '#' and loop to read next concatenated segment
         } else {
-          value = body.slice(pos).trim();
-          pos = body.length;
+          break;
         }
       }
+
+      const value = parts.join('');
 
       if (
         fieldName &&
         fieldName.length > 0 &&
-        /^[a-zA-Z0-9_-]+$/.test(fieldName)
+        /^[a-zA-Z0-9_.:-]+$/.test(fieldName)
       ) {
         // Clean whitespace and linebreaks in values
         fields[fieldName] = value.replace(/\s+/g, ' ').trim();
@@ -176,7 +248,7 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
   }
 
   /**
-   * Finds the closing brace corresponding to an opening brace at startIdx.
+   * Finds the closing brace corresponding to an opening brace at openBraceIdx.
    */
   private findMatchingClosingBrace(text: string, openBraceIdx: number): number {
     let depth = 0;
@@ -188,6 +260,27 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
         if (depth === 0) {
           return i;
         }
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * Finds the closing parenthesis corresponding to an opening parenthesis at openParenIdx
+   * (for @article(...) or @string(...) entries).
+   */
+  private findMatchingClosingParen(text: string, openParenIdx: number): number {
+    let parenDepth = 0;
+    let braceDepth = 0;
+    for (let i = openParenIdx; i < text.length; i++) {
+      const ch = text[i];
+      if (i > 0 && text[i - 1] === '\\') continue;
+      if (ch === '{') braceDepth++;
+      else if (ch === '}') braceDepth = Math.max(0, braceDepth - 1);
+      else if (ch === '(' && braceDepth === 0) parenDepth++;
+      else if (ch === ')' && braceDepth === 0) {
+        parenDepth--;
+        if (parenDepth === 0) return i;
       }
     }
     return -1;

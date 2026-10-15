@@ -14,7 +14,7 @@ import * as decoding from 'lib0/decoding';
 
 import { RedisCacheService } from '@/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { LineArrayEngine } from '@/modules/manuscripts/docstore/core/adapters/engine/line-array.engine';
+import { LineArrayEngine } from '@/modules/manuscripts/docstore/domain';
 
 export interface ActiveDocSession {
   doc: Y.Doc;
@@ -173,9 +173,9 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
                 );
               }
             }
-          } catch (err: any) {
+          } catch (err: unknown) {
             this.logger.warn(
-              `Failed to read Y.Doc from Redis: ${err?.message}`,
+              `Failed to read Y.Doc from Redis: ${(err as Error)?.message}`,
             );
           }
         }
@@ -195,9 +195,9 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
                 `Hydrated Y.Doc from Docstore baseline (${rawText.length} chars): ${key}`,
               );
             }
-          } catch (err: any) {
+          } catch (err: unknown) {
             this.logger.debug(
-              `Docstore baseline not found for ${key}, starting with empty doc: ${err?.message}`,
+              `Docstore baseline not found for ${key}, starting with empty doc: ${(err as Error)?.message}`,
             );
           }
         }
@@ -211,7 +211,7 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
         };
 
         // 3. Setup update listener to cache in Redis and schedule flush
-        doc.on('update', (update: Uint8Array, origin: any) => {
+        doc.on('update', (_update: Uint8Array, origin: unknown) => {
           if (origin === 'redis-init' || origin === 'docstore-init') return;
           this.handleDocUpdated(projectId, docId, session);
         });
@@ -281,9 +281,9 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
         broadcastUpdate,
         msgType,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.warn(
-        `Failed to decode or process sync message for ${projectId}:${docId}: ${err?.message}`,
+        `Failed to decode or process sync message for ${projectId}:${docId}: ${(err as Error)?.message}`,
       );
       return { reply: null, broadcastUpdate: null };
     }
@@ -317,8 +317,8 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
       syncProtocol.writeSyncStep2(encoder, session.doc, stateVectorToUse);
       syncProtocol.writeSyncStep1(encoder, session.doc);
       return Buffer.from(encoding.toUint8Array(encoder));
-    } catch (err: any) {
-      this.logger.warn(`handleSyncStep1 error: ${err?.message}`);
+    } catch (err: unknown) {
+      this.logger.warn(`handleSyncStep1 error: ${(err as Error)?.message}`);
       return Buffer.alloc(0);
     }
   }
@@ -356,8 +356,8 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     // 2. Direct apply as raw Y.Doc binary update
     try {
       Y.applyUpdate(session.doc, rawUpdate, origin);
-    } catch (err: any) {
-      this.logger.warn(`handleSyncStep2 error: ${err?.message}`);
+    } catch (err: unknown) {
+      this.logger.warn(`handleSyncStep2 error: ${(err as Error)?.message}`);
     }
   }
 
@@ -410,8 +410,8 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
       const encoder = encoding.createEncoder();
       syncProtocol.writeUpdate(encoder, updateToApply);
       return Buffer.from(encoding.toUint8Array(encoder));
-    } catch (err: any) {
-      this.logger.warn(`handleSyncUpdate error: ${err?.message}`);
+    } catch (err: unknown) {
+      this.logger.warn(`handleSyncUpdate error: ${(err as Error)?.message}`);
       return Buffer.alloc(0);
     }
   }
@@ -448,6 +448,15 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     let prefix = 0;
     const maxPrefix = Math.min(current.length, nextText.length);
     while (prefix < maxPrefix && current[prefix] === nextText[prefix]) prefix++;
+    // Step back if prefix split a UTF-16 surrogate pair (high surrogate 0xD800..0xDBFF)
+    if (
+      prefix > 0 &&
+      current.charCodeAt(prefix - 1) >= 0xd800 &&
+      current.charCodeAt(prefix - 1) <= 0xdbff
+    ) {
+      prefix--;
+    }
+
     let suffix = 0;
     const maxSuffix = Math.min(current.length, nextText.length) - prefix;
     while (
@@ -456,6 +465,14 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
         nextText[nextText.length - 1 - suffix]
     ) {
       suffix++;
+    }
+    // Step back if suffix split a UTF-16 surrogate pair (low surrogate 0xDC00..0xDFFF)
+    if (
+      suffix > 0 &&
+      current.charCodeAt(current.length - suffix) >= 0xdc00 &&
+      current.charCodeAt(current.length - suffix) <= 0xdfff
+    ) {
+      suffix--;
     }
 
     const deleteLen = current.length - prefix - suffix;
@@ -497,7 +514,7 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     session.firstUnflushedAt = undefined;
 
     try {
-      const tasks: Promise<any>[] = [];
+      const tasks: Promise<unknown>[] = [];
 
       // 1. Cache binary update in Redis in parallel (raw Buffer: zero Base64 overhead, 33% memory saving)
       if (this.redis && this.redis.isReady()) {
@@ -536,10 +553,10 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
       }
 
       await Promise.all(tasks);
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.error(
-        `Error flushing Y.Doc ${key}: ${err?.message}`,
-        err?.stack,
+        `Error flushing Y.Doc ${key}: ${(err as Error)?.message}`,
+        (err as Error)?.stack,
       );
     }
   }
@@ -597,9 +614,9 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
         clearTimeout(session.flushTimeout);
         session.flushTimeout = undefined;
       }
-      this.flushDoc(projectId, docId).catch((err) => {
+      this.flushDoc(projectId, docId).catch((err: unknown) => {
         this.logger.warn(
-          `Bounded flush failed for ${projectId}:${docId}: ${err?.message}`,
+          `Bounded flush failed for ${projectId}:${docId}: ${(err as Error)?.message}`,
         );
       });
       return;
@@ -611,15 +628,15 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     }
 
     session.flushTimeout = setTimeout(() => {
-      this.flushDoc(projectId, docId).catch((err) => {
+      this.flushDoc(projectId, docId).catch((err: unknown) => {
         this.logger.warn(
-          `Debounced flush failed for ${projectId}:${docId}: ${err?.message}`,
+          `Debounced flush failed for ${projectId}:${docId}: ${(err as Error)?.message}`,
         );
       });
     }, this.FLUSH_DEBOUNCE_MS);
   }
 
-  private normalizeToUint8Array(data: any): Uint8Array {
+  private normalizeToUint8Array(data: unknown): Uint8Array {
     if (data instanceof Uint8Array) {
       return data;
     }
@@ -632,7 +649,7 @@ export class YjsDocManagerAdapter implements OnModuleDestroy {
     if (typeof data === 'string') {
       return new Uint8Array(Buffer.from(data, 'base64'));
     }
-    if (data && typeof data === 'object' && data.data) {
+    if (data && typeof data === 'object' && 'data' in data) {
       return this.normalizeToUint8Array(data.data);
     }
     return new Uint8Array(0);

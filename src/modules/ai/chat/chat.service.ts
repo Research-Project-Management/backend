@@ -72,7 +72,7 @@ export class ChatService {
     projectId?: string | null,
   ) {
     if (!this.cache) return;
-    const promises: Promise<any>[] = [
+    const promises: Promise<unknown>[] = [
       this.cache.del(AI_REDIS_KEYS.userChats(userId, projectId)),
       this.cache.del(AI_REDIS_KEYS.userChats(userId, null)),
     ];
@@ -288,9 +288,11 @@ export class ChatService {
       const formattedMessages = dto.messages.map((m) => ({
         role: validateAndSanitizeRole(m.role),
         content: sanitizeChatMessageContent(m.content),
-        sources: (m.attachments || m.sources) as Prisma.InputJsonValue | undefined,
+        sources: (m.attachments || m.sources) as
+          Prisma.InputJsonValue | undefined,
         widgets: m.widgets as Prisma.InputJsonValue | undefined,
-        selectionContext: m.selectionContext as Prisma.InputJsonValue | undefined,
+        selectionContext: m.selectionContext as
+          Prisma.InputJsonValue | undefined,
       }));
       const updated = await this.chatRepo.createMessages(
         created.id,
@@ -327,7 +329,8 @@ export class ChatService {
     const formattedMessages = dto.messages.map((m) => ({
       role: validateAndSanitizeRole(m.role),
       content: sanitizeChatMessageContent(m.content),
-      sources: (m.attachments || m.sources) as Prisma.InputJsonValue | undefined,
+      sources: (m.attachments || m.sources) as
+        Prisma.InputJsonValue | undefined,
       widgets: m.widgets as Prisma.InputJsonValue | undefined,
       selectionContext: m.selectionContext as Prisma.InputJsonValue | undefined,
     }));

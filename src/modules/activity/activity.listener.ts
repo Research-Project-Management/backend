@@ -12,10 +12,15 @@ export interface WorkItemEventPayload {
   authorId?: string;
   projectId?: string;
   field?: string;
-  oldValue?: any;
-  newValue?: any;
+  oldValue?: string;
+  newValue?: string;
   columnId?: string;
-  [key: string]: any;
+  [key: string]: unknown;
+}
+
+export interface CommentEventPayload extends WorkItemEventPayload {
+  commentId?: string;
+  content?: string;
 }
 
 @Injectable()
@@ -53,8 +58,10 @@ export class ActivityListener {
         actorId: event.actorId || event.authorId || '',
         projectId: event.projectId,
         field: event.field,
-        oldValue: event.oldValue,
-        newValue: event.newValue,
+        oldValue:
+          event.oldValue !== undefined ? String(event.oldValue) : undefined,
+        newValue:
+          event.newValue !== undefined ? String(event.newValue) : undefined,
       });
       await this.handleGenericActivity(activityEvent);
 
@@ -76,7 +83,7 @@ export class ActivityListener {
   }
 
   @OnEvent('comment.*', { async: true })
-  async handleCommentEvents(event: any) {
+  async handleCommentEvents(event: CommentEventPayload) {
     const targetId = event.workItemId;
     if (!targetId) return;
 
@@ -117,7 +124,7 @@ export class ActivityListener {
   }
 
   @OnEvent('state.*', { async: true })
-  async handleStateEvents(event: any) {
+  async handleStateEvents(event: DomainActivityEvent | WorkItemEventPayload) {
     if (event instanceof DomainActivityEvent) {
       return this.handleGenericActivity(event);
     }

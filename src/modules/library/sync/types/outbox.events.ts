@@ -6,4 +6,4 @@ export {
   buildItemCreatedOutboxPayload,
   type EventRegistryEntry,
   LIBRARY_EVENT_REGISTRY,
-} from '../../shared-kernel/events/library-events';
+} from '@/modules/library/shared-kernel/events/library-events';

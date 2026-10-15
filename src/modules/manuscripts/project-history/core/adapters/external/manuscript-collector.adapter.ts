@@ -4,14 +4,14 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { IProjectCollectorPort } from '../../ports/project-collector.port';
-import { FileSnapshotVo } from '../../domain/value-objects/file-snapshot.vo';
+import { IProjectCollectorPort } from '@/modules/manuscripts/project-history/core/ports/project-collector.port';
+import { FileSnapshotVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/file-snapshot.vo';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { DocumentUpdaterService } from '@/modules/manuscripts/document-updater/document-updater.service';
 import { mapWithConcurrency } from '@/core';
-import type { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
+import type { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
 
 const COLLECT_CONCURRENCY = 6;
 

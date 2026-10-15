@@ -5,9 +5,12 @@
 
 export * from './linked-files.module';
 export * from './linked-files.service';
+export * from './linked-files.repository';
 export * from './linked-files.controller';
 export * from './dto/linked-file.dto';
-export * from './core/domain/entities/linked-file.entity';
+export * from './domain';
+
+// Backward-compatible re-exports on core/*
 export * from './core/ports/linked-files-repository.port';
 export * from './core/use-cases/create-linked-file.use-case';
 export * from './core/use-cases/refresh-linked-file.use-case';

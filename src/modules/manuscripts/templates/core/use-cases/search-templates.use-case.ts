@@ -4,7 +4,7 @@ import {
   TEMPLATE_REPOSITORY_PORT,
   SearchTemplatesFilter,
   FindTemplatesResult,
-} from '../ports/template-repository.port';
+} from '@/modules/manuscripts/templates/core/ports/template-repository.port';
 
 @Injectable()
 export class SearchTemplatesUseCase {

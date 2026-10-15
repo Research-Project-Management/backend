@@ -16,6 +16,17 @@ export interface UserPresenceProps {
   lastSeenAt?: Date;
 }
 
+export interface UserPresenceJSON {
+  userId: string;
+  socketId: string;
+  name: string;
+  color: string;
+  avatar: string | null;
+  activeDocId: string | null;
+  cursor: ReturnType<CursorPositionVo['toJSON']> | null;
+  lastSeenAt: string;
+}
+
 export class UserPresenceVo {
   public readonly userId: string;
   public readonly socketId: string;
@@ -37,7 +48,7 @@ export class UserPresenceVo {
     this.lastSeenAt = props.lastSeenAt ?? new Date();
   }
 
-  public toJSON(): Record<string, any> {
+  public toJSON(): UserPresenceJSON {
     return {
       userId: this.userId,
       socketId: this.socketId,
@@ -50,27 +61,34 @@ export class UserPresenceVo {
     };
   }
 
-  public static fromJSON(raw: any): UserPresenceVo {
-    if (!raw) {
-      throw new Error('Cannot construct UserPresenceVo from null or undefined');
+  public static fromJSON(raw: unknown): UserPresenceVo {
+    if (!raw || typeof raw !== 'object') {
+      throw new Error(
+        'Cannot construct UserPresenceVo from null or non-object',
+      );
     }
+    const r = raw as Record<string, unknown>;
     let cursor: CursorPositionVo | null = null;
-    if (raw.cursor) {
+    if (r.cursor && typeof r.cursor === 'object') {
+      const c = r.cursor as Record<string, unknown>;
       cursor = CursorPositionVo.create({
-        row: raw.cursor.row,
-        column: raw.cursor.column,
-        selection: raw.cursor.selection,
+        row: Number(c.row) || 0,
+        column: Number(c.column) || 0,
+        selection:
+          (c.selection as Parameters<
+            typeof CursorPositionVo.create
+          >[0]['selection']) ?? null,
       });
     }
     return new UserPresenceVo({
-      userId: raw.userId,
-      socketId: raw.socketId,
-      name: raw.name,
-      color: raw.color,
-      avatar: raw.avatar,
-      activeDocId: raw.activeDocId,
+      userId: String(r.userId || ''),
+      socketId: String(r.socketId || ''),
+      name: String(r.name || 'Anonymous Collaborator'),
+      color: String(r.color || '#3b82f6'),
+      avatar: typeof r.avatar === 'string' ? r.avatar : null,
+      activeDocId: typeof r.activeDocId === 'string' ? r.activeDocId : null,
       cursor,
-      lastSeenAt: raw.lastSeenAt ? new Date(raw.lastSeenAt) : new Date(),
+      lastSeenAt: r.lastSeenAt ? new Date(String(r.lastSeenAt)) : new Date(),
     });
   }
 }

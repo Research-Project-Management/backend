@@ -23,6 +23,16 @@ export interface ICitationFacade {
     citeKeys: string[],
     projectId?: string,
   ): Promise<{ content: string } | null>;
+  exportByCitationKeys(
+    userId: string,
+    citeKeys: string[],
+    projectId?: string,
+  ): Promise<{
+    content: string;
+    count: number;
+    foundKeys: string[];
+    missingKeys: string[];
+  }>;
   exportLibrary(
     userId: string,
     options?: ExportLibraryDto,
@@ -64,6 +74,23 @@ export class CitationFacade implements ICitationFacade {
     );
     if (!res || !res.content) return null;
     return { content: res.content };
+  }
+
+  async exportByCitationKeys(
+    userId: string,
+    citeKeys: string[],
+    projectId?: string,
+  ): Promise<{
+    content: string;
+    count: number;
+    foundKeys: string[];
+    missingKeys: string[];
+  }> {
+    return this.exportsService.exportByCitationKeys(
+      userId,
+      citeKeys,
+      projectId,
+    );
   }
 
   async exportLibrary(

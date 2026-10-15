@@ -1,7 +1,7 @@
-import { HttpCatalogGatewayAdapter as ExtractionCatalogGateway } from '@/modules/library/extraction/utils/http-catalog-gateway.adapter';
-import { HttpCatalogGatewayAdapter as CitationCatalogGateway } from '@/modules/library/citation/utils/http-catalog-gateway.adapter';
-import { HttpCatalogGatewayAdapter as IngestionCatalogGateway } from '@/modules/library/ingestion/utils/http-catalog-gateway.adapter';
-import { HttpExtractionGatewayAdapter as IngestionExtractionGateway } from '@/modules/library/ingestion/utils/http-extraction-gateway.adapter';
+import { HttpCatalogGatewayAdapter as ExtractionCatalogGateway } from '@/modules/library/extraction/gateways/http-catalog-gateway.adapter';
+import { HttpCatalogGatewayAdapter as CitationCatalogGateway } from '@/modules/library/citation/gateways/http-catalog-gateway.adapter';
+import { HttpCatalogGatewayAdapter as IngestionCatalogGateway } from '@/modules/library/ingestion/gateways/http-catalog-gateway.adapter';
+import { HttpExtractionGatewayAdapter as IngestionExtractionGateway } from '@/modules/library/ingestion/gateways/http-extraction-gateway.adapter';
 import { ResilienceRegistryService } from '@/modules/library/shared-kernel/resilience/resilience-registry.service';
 
 describe('Phase 0: Remote HTTP Gateway Adapters', () => {
@@ -183,13 +183,13 @@ describe('Phase 0: Remote HTTP Gateway Adapters', () => {
       });
 
       const adapter = new IngestionExtractionGateway(undefined, undefined);
-      const res = await adapter.captureWebSnapshot(
+      const res = await adapter.captureWebSnapshot<{ snapshotId: string }>(
         'https://arxiv.org/abs/2301.00001',
         'item-1',
         'user-1',
       );
 
-      expect(res.snapshotId).toBe('snap-1');
+      expect(res?.snapshotId).toBe('snap-1');
       expect(global.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/v1/library/attachments/snapshot'),
         expect.objectContaining({

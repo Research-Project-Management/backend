@@ -13,7 +13,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { FileDiffVo } from '../core/domain/value-objects/file-diff.vo';
+import { FileDiffVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/file-diff.vo';
 
 export class CreateSnapshotDto {
   @ApiPropertyOptional({
@@ -119,7 +119,7 @@ export class SnapshotDetailDto extends VersionListItemDto {
   @ApiProperty({
     description: 'Full dictionary of file snapshots indexed by path',
   })
-  files!: Record<string, any>;
+  files!: Record<string, unknown>;
 }
 
 export class DiffQueryDto {

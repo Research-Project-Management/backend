@@ -34,9 +34,8 @@ import { createGunzip } from 'zlib';
 import { Readable } from 'stream';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { GitCliAdapter } from './core/adapters/git-cli.adapter';
-import { GitAccessUseCase } from './core/use-cases/git-access.use-case';
-import { GitSyncUseCase } from './core/use-cases/git-sync.use-case';
+import { GitBridgeService } from './git-bridge.service';
+import { CreateGitTokenDto } from './dto/git-bridge.dto';
 import {
   canRead,
   canWrite,
@@ -44,7 +43,7 @@ import {
   GIT_SERVICES,
   GitService,
   parseRepoName,
-} from './core/domain/git-bridge.domain';
+} from './domain/git-bridge.domain';
 
 function pktLine(s: string): Buffer {
   const len = (Buffer.byteLength(s) + 4).toString(16).padStart(4, '0');
@@ -56,15 +55,14 @@ function pktLine(s: string): Buffer {
 export class GitBridgeController {
   private readonly logger = new Logger(GitBridgeController.name);
 
-  constructor(
-    private readonly access: GitAccessUseCase,
-    private readonly sync: GitSyncUseCase,
-    private readonly git: GitCliAdapter,
-  ) {}
+  constructor(private readonly gitBridgeService: GitBridgeService) {}
 
   // ─── Smart HTTP ──────────────────────────────────────────────────────────────
 
-  private unauthorized(reply: FastifyReply, message = 'Authentication required') {
+  private unauthorized(
+    reply: FastifyReply,
+    message = 'Authentication required',
+  ) {
     reply.raw.writeHead(401, {
       'WWW-Authenticate': 'Basic realm="Flux Git", charset="UTF-8"',
       'Content-Type': 'text/plain; charset=utf-8',
@@ -77,7 +75,9 @@ export class GitBridgeController {
       reply.raw.end();
       return;
     }
-    reply.raw.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' });
+    reply.raw.writeHead(status, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
     reply.raw.end(`${message}\n`);
   }
 
@@ -93,12 +93,14 @@ export class GitBridgeController {
       this.fail(reply, 404, 'Repository not found');
       return null;
     }
-    const userId = await this.access.authenticate(req.headers?.authorization);
+    const userId = await this.gitBridgeService.authenticate(
+      req.headers?.authorization,
+    );
     if (!userId) {
       this.unauthorized(reply, 'Invalid or missing Git token');
       return null;
     }
-    const role = await this.access.resolveRole(projectId, userId);
+    const role = await this.gitBridgeService.resolveRole(projectId, userId);
     if (!canRead(role)) {
       this.fail(reply, 404, 'Repository not found');
       return null;
@@ -125,10 +127,13 @@ export class GitBridgeController {
     const projectId = await this.authorize(req, reply, repo, svc);
     if (!projectId) return;
     try {
-      const refs = await this.sync.withProjectLock(projectId, async () => {
-        await this.sync.materialize(projectId);
-        return this.git.advertiseRefs(projectId, svc);
-      });
+      const refs = await this.gitBridgeService.withProjectLock(
+        projectId,
+        async () => {
+          await this.gitBridgeService.materialize(projectId);
+          return this.gitBridgeService.advertiseRefs(projectId, svc);
+        },
+      );
       reply.raw.writeHead(200, {
         'Content-Type': `application/x-${svc}-advertisement`,
         'Cache-Control': 'no-cache, max-age=0, must-revalidate',
@@ -137,8 +142,9 @@ export class GitBridgeController {
       reply.raw.write(pktLine(`# service=${svc}\n`));
       reply.raw.write('0000');
       reply.raw.end(refs);
-    } catch (err: any) {
-      this.logger.error(`info/refs failed for ${projectId}: ${err?.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`info/refs failed for ${projectId}: ${msg}`);
       this.fail(reply, 500, 'Failed to prepare repository');
     }
   }
@@ -147,7 +153,7 @@ export class GitBridgeController {
     const raw: Readable =
       req.body && typeof (req.body as Readable).pipe === 'function'
         ? (req.body as Readable)
-        : (req.raw as Readable);
+        : req.raw;
     const enc = String(req.headers?.['content-encoding'] || '').toLowerCase();
     return enc === 'gzip' || enc === 'x-gzip' ? raw.pipe(createGunzip()) : raw;
   }
@@ -162,7 +168,7 @@ export class GitBridgeController {
     const projectId = await this.authorize(req, reply, repo, 'git-upload-pack');
     if (!projectId) return;
     try {
-      const result = await this.git.serviceRpc(
+      const result = await this.gitBridgeService.serviceRpc(
         projectId,
         'git-upload-pack',
         this.requestBody(req),
@@ -189,42 +195,58 @@ export class GitBridgeController {
     @Req() req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
-    const projectId = await this.authorize(req, reply, repo, 'git-receive-pack');
+    const projectId = await this.authorize(
+      req,
+      reply,
+      repo,
+      'git-receive-pack',
+    );
     if (!projectId) return;
     try {
-      const outcome = await this.sync.withProjectLock(projectId, async () => {
-        // Make sure the repo reflects the latest project state before accepting.
-        const before = await this.sync.materialize(projectId);
-        const result = await this.git.serviceRpc(
-          projectId,
-          'git-receive-pack',
-          this.requestBody(req),
-        );
-        const after = await this.git.resolveRef(projectId);
+      const outcome = await this.gitBridgeService.withProjectLock(
+        projectId,
+        async () => {
+          const before = await this.gitBridgeService.materialize(projectId);
+          const result = await this.gitBridgeService.serviceRpc(
+            projectId,
+            'git-receive-pack',
+            this.requestBody(req),
+          );
+          const after = await this.gitBridgeService.resolveRef(projectId);
 
-        // Only `main` is synchronized; drop any other refs that were pushed.
-        const mainRef = `refs/heads/${GIT_DEFAULT_BRANCH}`;
-        const extra = (await this.git.listRefs(projectId)).filter((r) => r !== mainRef);
-        for (const ref of extra) await this.git.deleteRef(projectId, ref);
-
-        if (after && after !== before) {
-          try {
-            const applied = await this.sync.applyPush(projectId, before, after);
-            this.logger.log(
-              `git push ${projectId}: +${applied.created.length} ~${applied.updated.length} -${applied.deleted.length}`,
-            );
-            // Commit DB-normalized state (e.g. CRLF -> LF) on top if it differs.
-            await this.sync.materialize(projectId);
-          } catch (applyErr) {
-            // Roll the ref back so Git and the project never diverge silently.
-            await this.git.setMainRef(projectId, before, after).catch(() => undefined);
-            throw applyErr;
+          const mainRef = `refs/heads/${GIT_DEFAULT_BRANCH}`;
+          const extra = (
+            await this.gitBridgeService.listRefs(projectId)
+          ).filter((r) => r !== mainRef);
+          for (const ref of extra) {
+            await this.gitBridgeService.deleteRef(projectId, ref);
           }
-        } else if (extra.length > 0 && after === before) {
-          return { rejected: `Only the '${GIT_DEFAULT_BRANCH}' branch can be pushed` };
-        }
-        return { stdout: result.stdout };
-      });
+
+          if (after && after !== before) {
+            try {
+              const applied = await this.gitBridgeService.applyPush(
+                projectId,
+                before,
+                after,
+              );
+              this.logger.log(
+                `git push ${projectId}: +${applied.created.length} ~${applied.updated.length} -${applied.deleted.length}`,
+              );
+              await this.gitBridgeService.materialize(projectId);
+            } catch (applyErr) {
+              await this.gitBridgeService
+                .setMainRef(projectId, before, after)
+                .catch(() => undefined);
+              throw applyErr;
+            }
+          } else if (extra.length > 0 && after === before) {
+            return {
+              rejected: `Only the '${GIT_DEFAULT_BRANCH}' branch can be pushed`,
+            };
+          }
+          return { stdout: result.stdout };
+        },
+      );
 
       if ('rejected' in outcome) {
         return this.fail(reply, 403, outcome.rejected as string);
@@ -264,15 +286,16 @@ export class GitBridgeController {
     @CurrentUser('id') userId: string,
     @Req() req: FastifyRequest,
   ) {
-    if (!parseRepoName(projectId)) throw new BadRequestException('Invalid project id');
-    const role = await this.access.resolveRole(projectId, userId);
+    if (!parseRepoName(projectId))
+      throw new BadRequestException('Invalid project id');
+    const role = await this.gitBridgeService.resolveRole(projectId, userId);
     if (!canRead(role)) throw new NotFoundException('Project not found');
     return {
       enabled: true,
       cloneUrl: this.cloneUrl(req, projectId),
       branch: GIT_DEFAULT_BRANCH,
       canPush: canWrite(role),
-      tokens: await this.access.listTokens(userId),
+      tokens: await this.gitBridgeService.listTokens(userId),
     };
   }
 
@@ -280,7 +303,7 @@ export class GitBridgeController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
   async listTokens(@CurrentUser('id') userId: string) {
-    return { tokens: await this.access.listTokens(userId) };
+    return { tokens: await this.gitBridgeService.listTokens(userId) };
   }
 
   @Post(['api/v1/manuscripts/git/tokens', 'v1/manuscripts/git/tokens'])
@@ -289,24 +312,31 @@ export class GitBridgeController {
   @HttpCode(HttpStatus.CREATED)
   async createToken(
     @CurrentUser('id') userId: string,
-    @Body() body: { label?: string },
+    @Body() body: CreateGitTokenDto,
   ) {
     try {
-      return { token: await this.access.createToken(userId, body?.label) };
+      const created = await this.gitBridgeService.createToken(
+        userId,
+        body?.label,
+      );
+      return { ...created, token: created.token };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to create token';
       throw new ForbiddenException(msg);
     }
   }
 
-  @Delete(['api/v1/manuscripts/git/tokens/:tokenId', 'v1/manuscripts/git/tokens/:tokenId'])
+  @Delete([
+    'api/v1/manuscripts/git/tokens/:tokenId',
+    'v1/manuscripts/git/tokens/:tokenId',
+  ])
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
   async revokeToken(
     @CurrentUser('id') userId: string,
     @Param('tokenId') tokenId: string,
   ) {
-    const revoked = await this.access.revokeToken(userId, tokenId);
+    const revoked = await this.gitBridgeService.revokeToken(userId, tokenId);
     if (!revoked) throw new NotFoundException('Token not found');
     return { success: true };
   }

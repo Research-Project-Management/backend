@@ -4,9 +4,9 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { FileNotFoundException } from '../domain/exceptions/file-not-found.exception';
-import { IBinaryStoragePort } from '../ports/binary-storage.port';
-import { IManuscriptFileRepository } from '../ports/manuscript-file-repository.port';
+import { FileNotFoundException } from '@/modules/manuscripts/filestore/core/domain/exceptions/file-not-found.exception';
+import { IBinaryStoragePort } from '@/modules/manuscripts/filestore/core/ports/binary-storage.port';
+import { IManuscriptFileRepository } from '@/modules/manuscripts/filestore/core/ports/manuscript-file-repository.port';
 
 export interface DeleteManuscriptFileInput {
   projectId: string;

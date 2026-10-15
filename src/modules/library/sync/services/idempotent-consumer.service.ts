@@ -4,7 +4,7 @@ import {
   IdempotentConsumerService as SharedIdempotentConsumerService,
   IdempotentConsumerOptions,
   IdempotentResult,
-} from '../../shared-kernel';
+} from '@/modules/library/shared-kernel';
 
 export type { IdempotentConsumerOptions, IdempotentResult };
 
@@ -118,8 +118,9 @@ export class IdempotentConsumerService extends SharedIdempotentConsumerService {
             return parsed.status === 'completed';
           }
         }
-      } catch (err: any) {
-        this.logger.debug(`Error checking Redis for ${key}: ${err.message}`);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Error checking Redis for ${key}: ${errMsg}`);
       }
     }
 
@@ -139,10 +140,9 @@ export class IdempotentConsumerService extends SharedIdempotentConsumerService {
         if (client) {
           await client.del(key);
         }
-      } catch (err: any) {
-        this.logger.warn(
-          `Failed to reset Redis inbox key ${key}: ${err.message}`,
-        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to reset Redis inbox key ${key}: ${errMsg}`);
       }
     }
   }
@@ -208,9 +208,10 @@ export class IdempotentConsumerService extends SharedIdempotentConsumerService {
               return { acquired: false, reason: 'IN_FLIGHT' };
             }
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
           this.logger.warn(
-            `Redis atomic lease acquisition failed (${err.message}). Falling back to memory store.`,
+            `Redis atomic lease acquisition failed (${errMsg}). Falling back to memory store.`,
           );
         }
       }
@@ -248,9 +249,10 @@ export class IdempotentConsumerService extends SharedIdempotentConsumerService {
       if (client) {
         try {
           await client.set(key, completedPayload, 'EX', retentionTtlSeconds);
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
           this.logger.warn(
-            `Failed to mark event completed in Redis: ${err.message}`,
+            `Failed to mark event completed in Redis: ${errMsg}`,
           );
         }
       }
@@ -265,8 +267,9 @@ export class IdempotentConsumerService extends SharedIdempotentConsumerService {
       if (client) {
         try {
           await client.del(key);
-        } catch (err: any) {
-          this.logger.warn(`Failed to release lease in Redis: ${err.message}`);
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Failed to release lease in Redis: ${errMsg}`);
         }
       }
     }

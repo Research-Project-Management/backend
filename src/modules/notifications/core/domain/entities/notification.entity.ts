@@ -16,6 +16,23 @@ export interface NotificationProps {
   readAt?: Date | null;
 }
 
+export interface NotificationPlain {
+  [key: string]: unknown;
+  id: string;
+  userId: string;
+  key: string | null;
+  templateKey: string;
+  type: NotificationTypeString;
+  projectId: string | null;
+  docId: string | null;
+  actorId: string | null;
+  messageOpts: Record<string, unknown>;
+  isRead: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
 export class NotificationEntity {
   readonly id: string;
   readonly userId: string;
@@ -72,7 +89,7 @@ export class NotificationEntity {
     return this.expiresAt.getTime() <= now.getTime();
   }
 
-  toPlain(): Record<string, any> {
+  toPlain(): NotificationPlain {
     return {
       id: this.id,
       userId: this.userId,

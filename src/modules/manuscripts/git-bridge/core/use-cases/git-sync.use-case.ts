@@ -9,21 +9,24 @@
  *    soft-deleting (never purging) removed docs/files.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { Readable } from 'stream';
-import { DocstoreService } from '../../../docstore/docstore.service';
-import { FilestoreService } from '../../../filestore/filestore.service';
-import { StructureService } from '../../../structure/structure.service';
-import { LiveCollaborationPort } from '../../../docstore/core/ports/live-collaboration.port';
-import { GitCliAdapter } from '../adapters/git-cli.adapter';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
+import { StructureService } from '@/modules/manuscripts/structure/structure.service';
+import { LiveCollaborationPort } from '@/modules/manuscripts/docstore/domain';
+import {
+  GIT_CLI_PORT,
+  type IGitCliPort,
+} from '@/modules/manuscripts/git-bridge/core/ports/git-cli.port';
 import {
   GitChange,
   isTextPath,
   parseNameStatusZ,
   toProjectPath,
   toRepoPath,
-} from '../domain/git-bridge.domain';
+} from '@/modules/manuscripts/git-bridge/core/domain/git-bridge.domain';
 
 export interface PushApplyResult {
   created: string[];
@@ -33,12 +36,17 @@ export interface PushApplyResult {
 
 async function streamToBuffer(stream: Readable): Promise<Buffer> {
   const chunks: Buffer[] = [];
-  for await (const c of stream) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+  for await (const c of stream)
+    chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
   return Buffer.concat(chunks);
 }
 
 function splitLines(text: string): string[] {
-  return text.replace(/\r\n/g, '\n').split('\n');
+  return text
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n');
 }
 
 @Injectable()
@@ -47,7 +55,8 @@ export class GitSyncUseCase {
   private readonly locks = new Map<string, Promise<unknown>>();
 
   constructor(
-    private readonly git: GitCliAdapter,
+    @Inject(GIT_CLI_PORT)
+    private readonly git: IGitCliPort,
     private readonly docstore: DocstoreService,
     private readonly filestore: FilestoreService,
     private readonly structure: StructureService,
@@ -68,7 +77,9 @@ export class GitSyncUseCase {
 
   private live(): LiveCollaborationPort | null {
     try {
-      return this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ?? null;
+      return (
+        this.moduleRef?.get(LiveCollaborationPort, { strict: false }) ?? null
+      );
     } catch {
       return null;
     }
@@ -82,9 +93,13 @@ export class GitSyncUseCase {
     const live = this.live();
     if (live) {
       const docIds = nodes.filter((n) => n.docId).map((n) => n.docId as string);
-      await live.flushDocs(projectId, docIds).catch((e) =>
-        this.logger.warn(`Live flush before git snapshot failed: ${e?.message}`),
-      );
+      await live
+        .flushDocs(projectId, docIds)
+        .catch((e) =>
+          this.logger.warn(
+            `Live flush before git snapshot failed: ${e?.message}`,
+          ),
+        );
     }
 
     const files: Array<{ path: string; content: Buffer }> = [];
@@ -99,15 +114,20 @@ export class GitSyncUseCase {
             path: repoPath,
             content: Buffer.from((doc.lines || []).join('\n'), 'utf8'),
           });
-        } catch (err: any) {
-          this.logger.warn(`Skipping doc ${node.path}: ${err?.message}`);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Skipping doc ${node.path}: ${msg}`);
         }
       } else if (node.fileId) {
         try {
-          const { stream } = await this.filestore.openReadStream(projectId, node.fileId);
+          const { stream } = await this.filestore.openReadStream(
+            projectId,
+            node.fileId,
+          );
           files.push({ path: repoPath, content: await streamToBuffer(stream) });
-        } catch (err: any) {
-          this.logger.warn(`Skipping file ${node.path}: ${err?.message}`);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Skipping file ${node.path}: ${msg}`);
         }
       }
     }
@@ -151,7 +171,10 @@ export class GitSyncUseCase {
     return result;
   }
 
-  private async removeEntry(projectId: string, projectPath: string): Promise<boolean> {
+  private async removeEntry(
+    projectId: string,
+    projectPath: string,
+  ): Promise<boolean> {
     const node = await this.structure.getNodeByPath(projectId, projectPath);
     if (!node) return false;
     if (node.docId) {
@@ -194,8 +217,10 @@ export class GitSyncUseCase {
     }
 
     const name = projectPath.split('/').pop() as string;
-    const dir = projectPath.slice(0, projectPath.length - name.length - 1) || '/';
-    const parent = dir === '/' ? null : await this.structure.mkdirp(projectId, dir);
+    const dir =
+      projectPath.slice(0, projectPath.length - name.length - 1) || '/';
+    const parent =
+      dir === '/' ? null : await this.structure.mkdirp(projectId, dir);
 
     if (asText) {
       const doc = await this.docstore.createDoc(projectId, {
@@ -209,7 +234,11 @@ export class GitSyncUseCase {
         docId: doc.id ?? doc._id,
       });
     } else {
-      const file = await this.filestore.uploadFileFromBuffer(projectId, name, content);
+      const file = await this.filestore.uploadFileFromBuffer(
+        projectId,
+        name,
+        content,
+      );
       await this.structure.createNode(projectId, {
         name,
         parentId: parent?.id ?? null,

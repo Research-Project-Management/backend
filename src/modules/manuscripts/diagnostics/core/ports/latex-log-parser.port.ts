@@ -3,7 +3,7 @@
  * Outbound SPI Port for parsing raw TeX compilation logs.
  */
 
-import { DiagnosticItem } from '../domain/entities/diagnostic-item.entity';
+import { DiagnosticItem } from '@/modules/manuscripts/diagnostics/core/domain/entities/diagnostic-item.entity';
 
 export const LATEX_LOG_PARSER_PORT = Symbol('LATEX_LOG_PARSER_PORT');
 

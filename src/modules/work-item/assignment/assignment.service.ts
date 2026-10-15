@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RedisCacheService } from '@/core';
-import { AssignmentRepository } from './assignment.repository';
+import {
+  AssignmentRepository,
+  WorkItemWithProject,
+} from './assignment.repository';
 import {
   AssignWorkItemResult,
   BulkAssignResult,
@@ -18,7 +21,10 @@ import {
   SetAssigneesDto,
   AddAssigneeDto,
 } from './dto/assignment.dto';
-import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
+import {
+  WORK_ITEM_REDIS_KEYS,
+  invalidateWorkItemCache,
+} from '@/modules/work-item/common/constants/redis-keys.constant';
 
 @Injectable()
 export class AssignmentService {
@@ -27,6 +33,106 @@ export class AssignmentService {
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
+
+  private async requireProjectWorkItem(
+    projectId: string,
+    workItemId: string,
+  ): Promise<WorkItemWithProject> {
+    const item =
+      await this.assignmentRepository.findWorkItemWithProject(workItemId);
+    if (!item || item.projectId !== projectId) {
+      throw new NotFoundException('Work item not found in this project');
+    }
+    return item;
+  }
+
+  private async validateEligibleMember(
+    projectId: string,
+    userId: string,
+    notMemberMessage = 'Assignee is not a member of this project',
+    invalidRoleMessage?: (role: string) => string,
+  ) {
+    const member = await this.assignmentRepository.findProjectMember(
+      projectId,
+      userId,
+    );
+    if (!member) {
+      throw new BadRequestException(notMemberMessage);
+    }
+    if (!ELIGIBLE_ASSIGNEE_ROLES.includes(member.role)) {
+      const msg = invalidRoleMessage
+        ? invalidRoleMessage(member.role)
+        : `Cannot assign WorkItem to member with role "${member.role}". Only active "${ELIGIBLE_ASSIGNEE_ROLES.join(', ')}" members can be assigned work items.`;
+      throw new BadRequestException(msg);
+    }
+    return member;
+  }
+
+  private extractAssigneeIds(item: WorkItemWithProject): string[] {
+    if (Array.isArray(item.assigneeIds)) {
+      return item.assigneeIds as string[];
+    }
+    return item.assigneeId ? [item.assigneeId] : [];
+  }
+
+  private async invalidateCache(
+    projectId: string,
+    workItemId: string,
+    identifier?: string | null,
+  ): Promise<void> {
+    await invalidateWorkItemCache(this.cache, {
+      projectId,
+      workItemId,
+      identifier,
+    });
+  }
+
+  private async performAssign(
+    projectId: string,
+    item: WorkItemWithProject,
+    normalizedAssigneeId: string | null,
+    actorId?: string,
+  ): Promise<AssignWorkItemResult> {
+    const previousAssigneeId = item.assigneeId;
+
+    if (previousAssigneeId === normalizedAssigneeId) {
+      return {
+        workItem: item,
+        previousAssigneeId,
+        newAssigneeId: normalizedAssigneeId,
+      };
+    }
+
+    const updatedItem = await this.assignmentRepository.assignWorkItem(
+      item.id,
+      normalizedAssigneeId,
+    );
+
+    await this.invalidateCache(projectId, item.id, item.identifier);
+
+    if (this.eventEmitter) {
+      const verb = normalizedAssigneeId ? 'assigned' : 'unassigned';
+      const payload = {
+        entityType: 'work_item',
+        entityId: item.id,
+        workItemId: item.id,
+        verb,
+        field: 'assigneeId',
+        oldValue: previousAssigneeId || undefined,
+        newValue: normalizedAssigneeId || undefined,
+        actorId: actorId || '',
+        projectId,
+      };
+      this.eventEmitter.emit(`work-item.${verb}`, payload);
+      this.eventEmitter.emit('work-item.updated', payload);
+    }
+
+    return {
+      workItem: updatedItem,
+      previousAssigneeId,
+      newAssigneeId: normalizedAssigneeId,
+    };
+  }
 
   /**
    * Assigns or unassigns a work item to a project member.
@@ -41,88 +147,14 @@ export class AssignmentService {
     assigneeId: string | null | undefined,
     actorId?: string,
   ): Promise<AssignWorkItemResult> {
-    const item =
-      await this.assignmentRepository.findWorkItemWithProject(workItemId);
-    if (!item || item.projectId !== projectId) {
-      throw new NotFoundException('Work item not found in this project');
-    }
-
+    const item = await this.requireProjectWorkItem(projectId, workItemId);
     const normalizedAssigneeId = assigneeId ? assigneeId.trim() : null;
 
     if (normalizedAssigneeId) {
-      const member = await this.assignmentRepository.findProjectMember(
-        projectId,
-        normalizedAssigneeId,
-      );
-
-      if (!member) {
-        throw new BadRequestException(
-          'Assignee is not a member of this project',
-        );
-      }
-
-      if (!ELIGIBLE_ASSIGNEE_ROLES.includes(member.role)) {
-        throw new BadRequestException(
-          `Cannot assign WorkItem to member with role "${member.role}". Only active "${ELIGIBLE_ASSIGNEE_ROLES.join(', ')}" members can be assigned work items.`,
-        );
-      }
+      await this.validateEligibleMember(projectId, normalizedAssigneeId);
     }
 
-    const previousAssigneeId = item.assigneeId;
-
-    // Idempotent check
-    if (previousAssigneeId === normalizedAssigneeId) {
-      return {
-        workItem: item,
-        previousAssigneeId,
-        newAssigneeId: normalizedAssigneeId,
-      };
-    }
-
-    const updatedItem = await this.assignmentRepository.assignWorkItem(
-      item.id,
-      normalizedAssigneeId,
-    );
-
-    await this.invalidateWorkItemCache(projectId, item.id, item.identifier);
-
-    if (this.eventEmitter) {
-      if (normalizedAssigneeId) {
-        const payload = {
-          entityType: 'work_item',
-          entityId: item.id,
-          workItemId: item.id,
-          verb: 'assigned',
-          field: 'assigneeId',
-          oldValue: previousAssigneeId || undefined,
-          newValue: normalizedAssigneeId,
-          actorId: actorId || '',
-          projectId,
-        };
-        this.eventEmitter.emit('work-item.assigned', payload);
-        this.eventEmitter.emit('work-item.updated', payload);
-      } else {
-        const payload = {
-          entityType: 'work_item',
-          entityId: item.id,
-          workItemId: item.id,
-          verb: 'unassigned',
-          field: 'assigneeId',
-          oldValue: previousAssigneeId || undefined,
-          newValue: undefined,
-          actorId: actorId || '',
-          projectId,
-        };
-        this.eventEmitter.emit('work-item.unassigned', payload);
-        this.eventEmitter.emit('work-item.updated', payload);
-      }
-    }
-
-    return {
-      workItem: updatedItem,
-      previousAssigneeId,
-      newAssigneeId: normalizedAssigneeId,
-    };
+    return this.performAssign(projectId, item, normalizedAssigneeId, actorId);
   }
 
   /**
@@ -144,11 +176,7 @@ export class AssignmentService {
     workItemId: string,
     userId: string,
   ): Promise<AssignWorkItemResult> {
-    const item =
-      await this.assignmentRepository.findWorkItemWithProject(workItemId);
-    if (!item || item.projectId !== projectId) {
-      throw new NotFoundException('Work item not found in this project');
-    }
+    const item = await this.requireProjectWorkItem(projectId, workItemId);
 
     if (item.assigneeId === userId) {
       throw new BadRequestException(
@@ -166,7 +194,7 @@ export class AssignmentService {
       );
     }
 
-    return this.assignWorkItem(projectId, workItemId, userId, userId);
+    return this.performAssign(projectId, item, userId, userId);
   }
 
   /**
@@ -177,11 +205,7 @@ export class AssignmentService {
     workItemId: string,
     userId: string,
   ): Promise<AssignWorkItemResult> {
-    const item =
-      await this.assignmentRepository.findWorkItemWithProject(workItemId);
-    if (!item || item.projectId !== projectId) {
-      throw new NotFoundException('Work item not found in this project');
-    }
+    const item = await this.requireProjectWorkItem(projectId, workItemId);
 
     if (item.assigneeId !== userId) {
       throw new BadRequestException(
@@ -189,7 +213,7 @@ export class AssignmentService {
       );
     }
 
-    return this.assignWorkItem(projectId, workItemId, null, userId);
+    return this.performAssign(projectId, item, null, userId);
   }
 
   /**
@@ -198,7 +222,7 @@ export class AssignmentService {
   async bulkAssign(
     projectId: string,
     bulkAssignWorkItemDto: BulkAssignWorkItemDto,
-    actorId?: string,
+    _actorId?: string,
   ): Promise<BulkAssignResult> {
     const rawTargetId =
       bulkAssignWorkItemDto.assigneeId !== undefined
@@ -207,25 +231,26 @@ export class AssignmentService {
     const normalizedAssigneeId = rawTargetId ? rawTargetId.trim() : null;
 
     if (normalizedAssigneeId) {
-      const member = await this.assignmentRepository.findProjectMember(
+      await this.validateEligibleMember(
         projectId,
         normalizedAssigneeId,
+        'Assignee is not a member of this project',
+        (role) =>
+          `Cannot assign work items to member with role "${role}". Only active "${ELIGIBLE_ASSIGNEE_ROLES.join(', ')}" members can be assigned work items.`,
       );
-
-      if (!member) {
-        throw new BadRequestException(
-          'Assignee is not a member of this project',
-        );
-      }
-
-      if (!ELIGIBLE_ASSIGNEE_ROLES.includes(member.role)) {
-        throw new BadRequestException(
-          `Cannot assign work items to member with role "${member.role}". Only active "${ELIGIBLE_ASSIGNEE_ROLES.join(', ')}" members can be assigned work items.`,
-        );
-      }
     }
 
-    const rawItemIds = bulkAssignWorkItemDto.workItemIds || [];
+    const rawItemIds = Array.from(
+      new Set(
+        (Array.isArray(bulkAssignWorkItemDto.workItemIds)
+          ? bulkAssignWorkItemDto.workItemIds
+          : []
+        )
+          .filter((id): id is string => typeof id === 'string')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ).sort();
 
     if (rawItemIds.length === 0) {
       throw new BadRequestException(
@@ -240,13 +265,13 @@ export class AssignmentService {
     );
 
     if (this.cache) {
-      await Promise.all(
-        rawItemIds.map((id: string) =>
+      await Promise.all([
+        ...rawItemIds.map((id: string) =>
           this.cache!.del(WORK_ITEM_REDIS_KEYS.workItem(id)),
         ),
-      );
-      await this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId));
-      await this.cache.del(`flux:wi:proj:${projectId}`);
+        this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
+        this.cache.del(`flux:wi:proj:${projectId}`),
+      ]);
     }
 
     return {
@@ -296,25 +321,6 @@ export class AssignmentService {
     return settings.defaultAssigneeId;
   }
 
-  private async invalidateWorkItemCache(
-    projectId: string,
-    workItemId: string,
-    identifier?: string | null,
-  ): Promise<void> {
-    if (!this.cache) return;
-    try {
-      await Promise.all([
-        this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)),
-        ...(identifier
-          ? [this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(identifier))]
-          : []),
-        this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
-      ]);
-    } catch {
-      // Best effort cache invalidation
-    }
-  }
-
   // ── MULTI-ASSIGNEE METHODS ──────────────────────────────────────────────────
 
   /**
@@ -332,17 +338,8 @@ export class AssignmentService {
       avatar: string | null;
     }[];
   }> {
-    const item =
-      await this.assignmentRepository.findWorkItemWithProject(workItemId);
-    if (!item || item.projectId !== projectId) {
-      throw new NotFoundException('Work item not found in this project');
-    }
-
-    const assigneeIds: string[] = Array.isArray(item.assigneeIds)
-      ? (item.assigneeIds as string[])
-      : item.assigneeId
-        ? [item.assigneeId]
-        : [];
+    const item = await this.requireProjectWorkItem(projectId, workItemId);
+    const assigneeIds = this.extractAssigneeIds(item);
 
     if (assigneeIds.length === 0) return { assignees: [] };
 
@@ -362,13 +359,8 @@ export class AssignmentService {
     setAssigneesDto: SetAssigneesDto,
     actorId?: string,
   ): Promise<{ assignees: string[]; primaryAssigneeId: string | null }> {
-    const item =
-      await this.assignmentRepository.findWorkItemWithProject(workItemId);
-    if (!item || item.projectId !== projectId) {
-      throw new NotFoundException('Work item not found in this project');
-    }
+    const item = await this.requireProjectWorkItem(projectId, workItemId);
 
-    // Validate all assignees with a single batch query (eliminating N+1 query anti-pattern)
     const members = await this.assignmentRepository.findProjectMembers(
       projectId,
       setAssigneesDto.assigneeIds,
@@ -397,7 +389,7 @@ export class AssignmentService {
       deduped,
       primaryAssigneeId,
     );
-    await this.invalidateWorkItemCache(projectId, item.id, item.identifier);
+    await this.invalidateCache(projectId, item.id, item.identifier);
 
     const assigneesPayload = {
       entityType: 'work_item',
@@ -425,33 +417,17 @@ export class AssignmentService {
     addAssigneeDto: AddAssigneeDto,
     actorId?: string,
   ): Promise<{ assignees: string[]; primaryAssigneeId: string | null }> {
-    const item =
-      await this.assignmentRepository.findWorkItemWithProject(workItemId);
-    if (!item || item.projectId !== projectId) {
-      throw new NotFoundException('Work item not found in this project');
-    }
+    const item = await this.requireProjectWorkItem(projectId, workItemId);
 
-    const member = await this.assignmentRepository.findProjectMember(
+    await this.validateEligibleMember(
       projectId,
       addAssigneeDto.assigneeId,
+      'User is not a member of this project',
+      (role) => `User has role "${role}" and cannot be assigned work items`,
     );
-    if (!member) {
-      throw new BadRequestException('User is not a member of this project');
-    }
-    if (!ELIGIBLE_ASSIGNEE_ROLES.includes(member.role)) {
-      throw new BadRequestException(
-        `User has role "${member.role}" and cannot be assigned work items`,
-      );
-    }
 
-    const existing: string[] = Array.isArray(item.assigneeIds)
-      ? (item.assigneeIds as string[])
-      : item.assigneeId
-        ? [item.assigneeId]
-        : [];
-
+    const existing = this.extractAssigneeIds(item);
     if (existing.includes(addAssigneeDto.assigneeId)) {
-      // Idempotent — already assigned
       return { assignees: existing, primaryAssigneeId: existing[0] ?? null };
     }
 
@@ -463,7 +439,7 @@ export class AssignmentService {
       updated,
       primaryAssigneeId,
     );
-    await this.invalidateWorkItemCache(projectId, item.id, item.identifier);
+    await this.invalidateCache(projectId, item.id, item.identifier);
 
     const addPayload = {
       entityType: 'work_item',
@@ -490,18 +466,9 @@ export class AssignmentService {
     targetUserId: string,
     actorId?: string,
   ): Promise<{ assignees: string[]; primaryAssigneeId: string | null }> {
-    const item =
-      await this.assignmentRepository.findWorkItemWithProject(workItemId);
-    if (!item || item.projectId !== projectId) {
-      throw new NotFoundException('Work item not found in this project');
-    }
+    const item = await this.requireProjectWorkItem(projectId, workItemId);
 
-    const existing: string[] = Array.isArray(item.assigneeIds)
-      ? (item.assigneeIds as string[])
-      : item.assigneeId
-        ? [item.assigneeId]
-        : [];
-
+    const existing = this.extractAssigneeIds(item);
     const updated = existing.filter((id) => id !== targetUserId);
     const primaryAssigneeId = updated[0] ?? null;
 
@@ -510,7 +477,7 @@ export class AssignmentService {
       updated,
       primaryAssigneeId,
     );
-    await this.invalidateWorkItemCache(projectId, item.id, item.identifier);
+    await this.invalidateCache(projectId, item.id, item.identifier);
 
     const removePayload = {
       entityType: 'work_item',
@@ -527,31 +494,28 @@ export class AssignmentService {
     return { assignees: updated, primaryAssigneeId };
   }
 
-  /**
-   * Subscribe current user to notifications for a work item.
-   */
-  async subscribeMe(
+  private async updateSubscription(
     projectId: string,
     workItemId: string,
     userId: string,
+    subscribe: boolean,
   ): Promise<{ subscribers: string[] }> {
-    const item =
-      await this.assignmentRepository.findWorkItemWithProject(workItemId);
-    if (!item || item.projectId !== projectId) {
-      throw new NotFoundException('Work item not found in this project');
-    }
+    const item = await this.requireProjectWorkItem(projectId, workItemId);
 
     const currentSubscribers: string[] = Array.isArray(item.subscriberIds)
       ? (item.subscriberIds as string[])
       : [];
 
-    if (currentSubscribers.includes(userId)) {
+    if (subscribe && currentSubscribers.includes(userId)) {
       return { subscribers: currentSubscribers };
     }
 
-    const updated = [...currentSubscribers, userId];
+    const updated = subscribe
+      ? [...currentSubscribers, userId]
+      : currentSubscribers.filter((id) => id !== userId);
+
     await this.assignmentRepository.setSubscriberIds(item.id, updated);
-    await this.invalidateWorkItemCache(projectId, item.id, item.identifier);
+    await this.invalidateCache(projectId, item.id, item.identifier);
 
     const payload = {
       entityType: 'work_item',
@@ -568,6 +532,17 @@ export class AssignmentService {
   }
 
   /**
+   * Subscribe current user to notifications for a work item.
+   */
+  async subscribeMe(
+    projectId: string,
+    workItemId: string,
+    userId: string,
+  ): Promise<{ subscribers: string[] }> {
+    return this.updateSubscription(projectId, workItemId, userId, true);
+  }
+
+  /**
    * Unsubscribe current user from notifications for a work item.
    */
   async unsubscribeMe(
@@ -575,31 +550,6 @@ export class AssignmentService {
     workItemId: string,
     userId: string,
   ): Promise<{ subscribers: string[] }> {
-    const item =
-      await this.assignmentRepository.findWorkItemWithProject(workItemId);
-    if (!item || item.projectId !== projectId) {
-      throw new NotFoundException('Work item not found in this project');
-    }
-
-    const currentSubscribers: string[] = Array.isArray(item.subscriberIds)
-      ? (item.subscriberIds as string[])
-      : [];
-
-    const updated = currentSubscribers.filter((id) => id !== userId);
-    await this.assignmentRepository.setSubscriberIds(item.id, updated);
-    await this.invalidateWorkItemCache(projectId, item.id, item.identifier);
-
-    const payload = {
-      entityType: 'work_item',
-      entityId: item.id,
-      workItemId: item.id,
-      subscriberIds: updated,
-      actorId: userId,
-      projectId,
-      verb: 'updated',
-    };
-    this.eventEmitter?.emit('work-item.updated', payload);
-
-    return { subscribers: updated };
+    return this.updateSubscription(projectId, workItemId, userId, false);
   }
 }

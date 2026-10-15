@@ -1,4 +1,7 @@
-import { ClassifiedQuery, QueryType } from '../types/metadata.types';
+import {
+  ClassifiedQuery,
+  QueryType,
+} from '@/modules/library/ingestion/types/metadata.types';
 
 export class QueryClassifier {
   private static readonly DOI_REGEX =
@@ -33,15 +36,39 @@ export class QueryClassifier {
 
   private static readonly GENERIC_URL_REGEX = /^https?:\/\/[^\s$.?#].[^\s]*$/i;
 
-  private static cleanDoiString(doi: string): string {
-    let clean = doi.replace(/[.,;]+$/, '');
-    if (clean.endsWith(')') && !clean.includes('(')) {
-      clean = clean.slice(0, -1);
-    }
-    if (clean.endsWith(']') && !clean.includes('[')) {
-      clean = clean.slice(0, -1);
+  private static stripOuterPunctuation(input: string): string {
+    let clean = input.trim();
+    let prev = '';
+    while (clean !== prev) {
+      prev = clean;
+      clean = clean.replace(/[.,;]+$/, '').trim();
+      if (
+        (clean.startsWith('(') && clean.endsWith(')')) ||
+        (clean.startsWith('[') && clean.endsWith(']')) ||
+        (clean.startsWith('<') && clean.endsWith('>')) ||
+        (clean.startsWith('"') && clean.endsWith('"')) ||
+        (clean.startsWith("'") && clean.endsWith("'"))
+      ) {
+        clean = clean.slice(1, -1).trim();
+      }
+      if (clean.endsWith(')') && !clean.includes('(')) {
+        clean = clean.slice(0, -1).trim();
+      }
+      if (clean.endsWith(']') && !clean.includes('[')) {
+        clean = clean.slice(0, -1).trim();
+      }
+      if (clean.startsWith('(') && !clean.includes(')')) {
+        clean = clean.slice(1).trim();
+      }
+      if (clean.startsWith('[') && !clean.includes(']')) {
+        clean = clean.slice(1).trim();
+      }
     }
     return clean;
+  }
+
+  private static cleanDoiString(doi: string): string {
+    return this.stripOuterPunctuation(doi);
   }
 
   static classify(rawQuery: string): ClassifiedQuery {
@@ -50,31 +77,39 @@ export class QueryClassifier {
     }
 
     const trimmed = rawQuery.trim();
+    const candidate = this.stripOuterPunctuation(trimmed);
 
-    // 1. arXiv (URLs and IDs)
-    const arxivMatch = trimmed.match(this.ARXIV_REGEX);
+    // 1. arXiv (URLs, arXiv IDs, and 10.48550/arXiv.* DOIs)
+    const arxivDoiMatch = candidate.match(
+      /^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.48550\/arxiv\.(\d{4}\.\d{4,5}(?:v\d+)?)$/i,
+    );
+    if (arxivDoiMatch && arxivDoiMatch[1]) {
+      return { raw: trimmed, clean: arxivDoiMatch[1], type: 'ARXIV' };
+    }
+
+    const arxivMatch = candidate.match(this.ARXIV_REGEX);
     if (arxivMatch && arxivMatch[1]) {
       return { raw: trimmed, clean: arxivMatch[1], type: 'ARXIV' };
     }
 
     // 2. PubMed Central (PMC URLs or bare PMCID)
-    const pmcMatch = trimmed.match(this.PMC_REGEX);
+    const pmcMatch = candidate.match(this.PMC_REGEX);
     if (pmcMatch && pmcMatch[1]) {
       return { raw: trimmed, clean: pmcMatch[1].toUpperCase(), type: 'PMID' };
     }
 
     // 3. Nature Articles (nature.com/articles/<slug> -> 10.1038/<slug>)
-    const natureMatch = trimmed.match(this.NATURE_REGEX);
+    const natureMatch = candidate.match(this.NATURE_REGEX);
     if (natureMatch && natureMatch[1]) {
       return {
         raw: trimmed,
-        clean: `10.1038/${natureMatch[1]}`,
+        clean: `10.1038/${this.cleanDoiString(natureMatch[1])}`,
         type: 'DOI',
       };
     }
 
     // 4. Zenodo Records (zenodo.org/records/<id> -> 10.5281/zenodo.<id>)
-    const zenodoMatch = trimmed.match(this.ZENODO_REGEX);
+    const zenodoMatch = candidate.match(this.ZENODO_REGEX);
     if (zenodoMatch && zenodoMatch[1]) {
       return {
         raw: trimmed,
@@ -84,7 +119,7 @@ export class QueryClassifier {
     }
 
     // 5. BioRxiv / MedRxiv preprints
-    const biorxivMatch = trimmed.match(this.BIORXIV_MEDRXIV_REGEX);
+    const biorxivMatch = candidate.match(this.BIORXIV_MEDRXIV_REGEX);
     if (biorxivMatch && biorxivMatch[1]) {
       return {
         raw: trimmed,
@@ -94,7 +129,7 @@ export class QueryClassifier {
     }
 
     // 6. PLOS Articles (journals.plos.org/.../article?id=...)
-    const plosMatch = trimmed.match(this.PLOS_REGEX);
+    const plosMatch = candidate.match(this.PLOS_REGEX);
     if (plosMatch && plosMatch[1]) {
       return {
         raw: trimmed,
@@ -104,7 +139,7 @@ export class QueryClassifier {
     }
 
     // 7. Embedded DOI in publisher URLs (ACM, Wiley, Science, PNAS, Springer, OUP, etc.)
-    const embeddedDoiMatch = trimmed.match(this.EMBEDDED_DOI_REGEX);
+    const embeddedDoiMatch = candidate.match(this.EMBEDDED_DOI_REGEX);
     if (embeddedDoiMatch && embeddedDoiMatch[1]) {
       return {
         raw: trimmed,
@@ -114,7 +149,7 @@ export class QueryClassifier {
     }
 
     // 8. Direct or doi.org DOIs
-    const doiMatch = trimmed.match(this.DOI_REGEX);
+    const doiMatch = candidate.match(this.DOI_REGEX);
     if (doiMatch && doiMatch[1]) {
       return {
         raw: trimmed,
@@ -124,33 +159,71 @@ export class QueryClassifier {
     }
 
     // 9. PubMed (pubmed.ncbi.nlm.nih.gov/... or pmid:...)
-    const pmidMatch = trimmed.match(this.PMID_REGEX);
+    const pmidMatch = candidate.match(this.PMID_REGEX);
     if (pmidMatch && pmidMatch[1]) {
       return { raw: trimmed, clean: pmidMatch[1], type: 'PMID' };
     }
 
     // 10. Bare numeric ID: if 1-9 digits, treat as PMID
-    if (/^\d{1,9}$/.test(trimmed)) {
-      return { raw: trimmed, clean: trimmed, type: 'PMID' };
+    if (/^\d{1,9}$/.test(candidate)) {
+      return { raw: trimmed, clean: candidate, type: 'PMID' };
     }
 
-    // 11. ISBN
-    const isbnMatch = trimmed.match(this.ISBN_REGEX);
+    // 11. ISBN (including ISBN-10 and ISBN-13 with optional prefix)
+    const isbnCandidate = candidate.replace(/^isbn(?:-1[03])?:?\s*/i, '');
+    const isbnMatch = isbnCandidate.match(this.ISBN_REGEX);
     if (isbnMatch && isbnMatch[1]) {
       return {
         raw: trimmed,
-        clean: isbnMatch[1].replace(/[-\s]/g, ''),
+        clean: isbnMatch[1].replace(/[-\s]/g, '').toUpperCase(),
         type: 'ISBN',
       };
     }
 
     // 12. Generic URL
-    if (this.GENERIC_URL_REGEX.test(trimmed)) {
-      return { raw: trimmed, clean: trimmed, type: 'URL' };
+    if (this.GENERIC_URL_REGEX.test(candidate)) {
+      return { raw: trimmed, clean: candidate, type: 'URL' };
     }
 
     // 13. Default: Title or keyword search
     return { raw: trimmed, clean: trimmed, type: 'TITLE' };
+  }
+
+  /**
+   * Splits and classifies a Zotero "Add Item by Identifier" batch input string
+   * containing multiple space-, comma-, or newline-separated identifiers (DOIs, ISBNs, PMIDs, arXiv IDs).
+   */
+  static classifyBatch(rawInput: string): ClassifiedQuery[] {
+    if (!rawInput || typeof rawInput !== 'string') return [];
+    const lines = rawInput
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const results: ClassifiedQuery[] = [];
+
+    for (const line of lines) {
+      const single = this.classify(line);
+      if (single.type !== 'TITLE') {
+        results.push(single);
+        continue;
+      }
+      // Try splitting space/comma/semicolon separated tokens if the line contains multiple identifiers
+      const tokens = line
+        .split(/[\s,;]+/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const tokenClassified = tokens.map((t) => this.classify(t));
+      if (
+        tokenClassified.length > 1 &&
+        tokenClassified.every((c) => c.type !== 'TITLE')
+      ) {
+        results.push(...tokenClassified);
+      } else {
+        results.push(single);
+      }
+    }
+
+    return results;
   }
 }
 

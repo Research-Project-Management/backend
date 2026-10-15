@@ -4,10 +4,13 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { IDocRepository } from '../ports/doc-repository.port';
-import { IDocPersistor } from '../ports/doc-persistor.port';
-import { TextDoc } from '../domain/text-doc.entity';
-import { DocNotFoundError, Md5MismatchError } from '../domain/doc-errors';
+import { IDocRepository } from '@/modules/manuscripts/docstore/core/ports/doc-repository.port';
+import { IDocPersistor } from '@/modules/manuscripts/docstore/core/ports/doc-persistor.port';
+import { TextDoc } from '@/modules/manuscripts/docstore/core/domain/text-doc.entity';
+import {
+  DocNotFoundError,
+  Md5MismatchError,
+} from '@/modules/manuscripts/docstore/core/domain/doc-errors';
 import * as crypto from 'crypto';
 
 @Injectable()

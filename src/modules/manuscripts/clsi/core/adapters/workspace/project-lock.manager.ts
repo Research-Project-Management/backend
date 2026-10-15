@@ -69,11 +69,12 @@ export class ProjectLockManager {
             // Lockfile may have already been cleaned
           }
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errCode = (err as { code?: string })?.code;
         if (
-          err.code === 'EEXIST' ||
-          err.code === 'EPERM' ||
-          err.code === 'EBUSY'
+          errCode === 'EEXIST' ||
+          errCode === 'EPERM' ||
+          errCode === 'EBUSY'
         ) {
           // Check if existing lockfile is stale (> staleMs)
           try {
@@ -91,7 +92,7 @@ export class ProjectLockManager {
 
           // Wait before next attempt
           await new Promise((resolve) => setTimeout(resolve, interval));
-        } else if (err.code === 'ENOENT') {
+        } else if (errCode === 'ENOENT') {
           // Directory doesn't exist yet, create it and retry
           await fs.mkdir(scratchDir, { recursive: true });
         } else {

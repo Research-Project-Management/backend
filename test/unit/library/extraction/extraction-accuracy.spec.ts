@@ -3,7 +3,7 @@ import {
   splitConcatenatedAuthors,
   yearFromArxivId,
   repairFragmentedTitle,
-} from '@/modules/library/shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 describe('PDF first-page accuracy helpers', () => {
   describe('yearFromArxivId', () => {
@@ -29,7 +29,10 @@ describe('PDF first-page accuracy helpers', () => {
   describe('splitConcatenatedAuthors', () => {
     it('splits the ResNet author run (4 names, no delimiter)', () => {
       expect(
-        splitConcatenatedAuthors('Kaiming He Xiangyu Zhang Shaoqing Ren Jian Sun', 4),
+        splitConcatenatedAuthors(
+          'Kaiming He Xiangyu Zhang Shaoqing Ren Jian Sun',
+          4,
+        ),
       ).toEqual(['Kaiming He', 'Xiangyu Zhang', 'Shaoqing Ren', 'Jian Sun']);
     });
 
@@ -69,7 +72,10 @@ describe('PDF first-page accuracy helpers', () => {
     it('falls back to the original string when a name cannot be paired', () => {
       // "Li Wei Chen" leaves a dangling token -> ambiguous -> untouched
       expect(
-        splitConcatenatedAuthors('Anna Smith Pieter van der Berg Li Wei Chen', 4),
+        splitConcatenatedAuthors(
+          'Anna Smith Pieter van der Berg Li Wei Chen',
+          4,
+        ),
       ).toEqual(['Anna Smith Pieter van der Berg Li Wei Chen']);
     });
 
@@ -77,17 +83,22 @@ describe('PDF first-page accuracy helpers', () => {
       expect(splitConcatenatedAuthors('Ashish Vaswani, Noam Shazeer')).toEqual([
         'Ashish Vaswani, Noam Shazeer',
       ]);
-      expect(splitConcatenatedAuthors('Jacob Devlin')).toEqual(['Jacob Devlin']);
+      expect(splitConcatenatedAuthors('Jacob Devlin')).toEqual([
+        'Jacob Devlin',
+      ]);
       expect(
-        splitConcatenatedAuthors('Stanford University Computer Science Department', 4),
+        splitConcatenatedAuthors(
+          'Stanford University Computer Science Department',
+          4,
+        ),
       ).toHaveLength(1);
     });
 
     it('returns the input unchanged when it does not parse cleanly', () => {
       // odd token count -> ambiguous -> leave alone
-      expect(splitConcatenatedAuthors('Maria Del Carmen Lopez Garcia', 4)).toEqual([
-        'Maria Del Carmen Lopez Garcia',
-      ]);
+      expect(
+        splitConcatenatedAuthors('Maria Del Carmen Lopez Garcia', 4),
+      ).toEqual(['Maria Del Carmen Lopez Garcia']);
     });
   });
 
@@ -130,7 +141,10 @@ describe('PDF first-page accuracy helpers', () => {
 
     it('never alters a legitimate title that merely starts with "A"', () => {
       expect(
-        repairFragmentedTitle('A Survey of Deep Learning', 'A Survey of Deep Learning'),
+        repairFragmentedTitle(
+          'A Survey of Deep Learning',
+          'A Survey of Deep Learning',
+        ),
       ).toBeUndefined();
       expect(
         repairFragmentedTitle('A B Testing for A I Systems', 'unrelated text'),

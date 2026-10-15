@@ -15,6 +15,10 @@ import { PartialType, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class CreatorDto {
   @IsOptional()
   @IsString()
+  id?: string;
+
+  @IsOptional()
+  @IsString()
   name?: string;
 
   @IsOptional()
@@ -32,6 +36,15 @@ export class CreatorDto {
   @IsOptional()
   @IsString()
   creatorType?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  fieldMode?: number;
+
+  @IsOptional()
+  @IsString()
+  shortName?: string;
 
   @IsOptional()
   @IsNumber()
@@ -60,6 +73,12 @@ export class CreateItemDto {
   @ValidateNested({ each: true })
   @Type(() => CreatorDto)
   creators?: CreatorDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreatorDto)
+  contributors?: CreatorDto[];
 
   @IsOptional()
   @IsNumber()
@@ -400,6 +419,39 @@ export class CreateItemDto {
   @IsOptional() @IsString() ISSN?: string;
   @IsOptional() @IsString() PMID?: string;
   @IsOptional() @IsString() PMCID?: string;
+  @IsOptional()
+  @Transform(({ value }) => (value != null ? String(value) : value))
+  @IsString()
+  numberOfPages?: string;
+  @IsOptional() @IsString() archiveId?: string;
+  @IsOptional() @IsString() authority?: string;
+  @IsOptional() @IsString() bibtex?: string;
+  @IsOptional() @IsString() citeKey?: string;
+  @IsOptional() @IsBoolean() isStarred?: boolean;
+  @IsOptional() @IsString() readStatus?: string;
+  @IsOptional() @IsNumber() rating?: number;
+  @IsOptional() @IsBoolean() isMyPublication?: boolean;
+  @IsOptional() @IsBoolean() isRetracted?: boolean;
+  @IsOptional() @IsString() retractionNature?: string;
+  @IsOptional() retractionDetails?: Record<string, unknown> | null;
+  @IsOptional() @IsString() retractionCheckedAt?: string;
+  @IsOptional() metadata?: Record<string, unknown>;
+  @IsOptional() relations?: Record<string, unknown>;
+  @IsOptional() seeAlso?: string[];
+  @IsOptional()
+  @IsArray()
+  attachments?: Array<{
+    id?: string;
+    title?: string;
+    filename?: string;
+    url?: string;
+    fileId?: string | null;
+    fileHash?: string | null;
+    fileSize?: number;
+    mimeType?: string;
+    linkMode?: string;
+    metadata?: Record<string, unknown>;
+  }>;
 
   @IsOptional()
   extraFields?: Record<string, unknown>;
@@ -415,17 +467,35 @@ export class UpdateItemDto extends PartialType(CreateItemDto) {
 }
 
 export class TypeConversionPreviewDto {
+  @IsOptional()
   @IsString()
-  targetItemType!: string;
+  targetType?: string;
+
+  @IsOptional()
+  @IsString()
+  targetItemType?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  retainUnmappedInExtra?: boolean;
 }
 
 export class TypeConversionDto {
+  @IsOptional()
   @IsString()
-  targetItemType!: string;
+  targetType?: string;
+
+  @IsOptional()
+  @IsString()
+  targetItemType?: string;
 
   @IsOptional()
   @IsNumber()
   expectedVersion?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  retainUnmappedInExtra?: boolean;
 
   @IsOptional()
   @IsObject()
@@ -459,6 +529,72 @@ export class BulkTagItemsDto {
 }
 
 export class CursorPaginationQueryDto {
+  @IsOptional()
+  @IsString()
+  view?:
+    | 'all'
+    | 'recent'
+    | 'unfiled'
+    | 'trash'
+    | 'my-publications'
+    | 'publications'
+    | 'starred'
+    | 'retracted';
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsString()
+  tagId?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (Array.isArray(value))
+      return value.map((s) => String(s).trim()).filter(Boolean);
+    if (typeof value === 'string')
+      return value
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    return undefined;
+  })
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
+
+  @IsOptional()
+  @IsString()
+  fields?: string;
+
+  @IsOptional()
+  @IsString()
+  smartFilter?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  year?: number;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
+  @IsString()
+  sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  skip?: number;
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
+
   @IsOptional()
   @IsString()
   cursor?: string;
@@ -544,6 +680,16 @@ export class CursorPaginationQueryDto {
   collectionId?: string;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (Array.isArray(value))
+      return value.map((s) => String(s).trim()).filter(Boolean);
+    if (typeof value === 'string')
+      return value
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    return undefined;
+  })
   @IsArray()
   @IsString({ each: true })
   collectionIds?: string[];

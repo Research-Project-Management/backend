@@ -11,7 +11,7 @@ export interface StorageNodeProps {
   blobId?: string | null;
   scope?: FileScope;
   starred?: boolean;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   authorId: string;
   trashedAt?: Date | null;
   createdAt?: Date;
@@ -36,7 +36,7 @@ export class StorageNode {
   private _blobId: string | null;
   private _scope: FileScope;
   private _starred: boolean;
-  private _metadata: Record<string, any>;
+  private _metadata: Record<string, unknown>;
   private _trashedAt: Date | null;
   private _updatedAt: Date;
 
@@ -86,7 +86,7 @@ export class StorageNode {
   get starred(): boolean {
     return this._starred;
   }
-  get metadata(): Record<string, any> {
+  get metadata(): Record<string, unknown> {
     return this._metadata;
   }
   get trashedAt(): Date | null {
@@ -161,7 +161,7 @@ export class StorageNode {
     this._updatedAt = new Date();
   }
 
-  public updateMetadata(metadata: Record<string, any>): void {
+  public updateMetadata(metadata: Record<string, unknown>): void {
     this._metadata = { ...this._metadata, ...metadata };
     this._updatedAt = new Date();
   }

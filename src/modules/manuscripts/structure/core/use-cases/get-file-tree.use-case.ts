@@ -4,9 +4,10 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IStructureRepository } from '../ports/structure-repository.port';
-import { ManuscriptNodeEntity } from '../domain/manuscript-node.entity';
-import { TreeNodeDto } from '../../dto/node.dto';
+import { IStructureRepository } from '@/modules/manuscripts/structure/core/ports/structure-repository.port';
+import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
+import { TreeNodeDto } from '@/modules/manuscripts/structure/dto/node.dto';
+import { FileTreeBuilder } from '@/modules/manuscripts/structure/domain/file-tree.builder';
 
 @Injectable()
 export class GetFileTreeUseCase {
@@ -22,57 +23,6 @@ export class GetFileTreeUseCase {
    * Folders are sorted before files; within the same type, sorted by sortOrder then name.
    */
   public buildTreeHierarchy(nodes: ManuscriptNodeEntity[]): TreeNodeDto[] {
-    const nodeMap = new Map<string, TreeNodeDto>();
-    const rootNodes: TreeNodeDto[] = [];
-
-    // 1. Initialize tree node DTOs
-    for (const node of nodes) {
-      nodeMap.set(node.id, {
-        id: node.id,
-        name: node.name,
-        path: node.path,
-        type: node.type,
-        depth: node.depth,
-        isRootDoc: node.isRootDoc,
-        docId: node.docId,
-        fileId: node.fileId,
-        sizeBytes: node.sizeBytes,
-        hash: node.hash,
-        sortOrder: node.sortOrder,
-        children: [],
-      });
-    }
-
-    // 2. Build parent-child relationships
-    for (const node of nodes) {
-      const treeNode = nodeMap.get(node.id)!;
-      if (node.parentId && nodeMap.has(node.parentId)) {
-        nodeMap.get(node.parentId)!.children.push(treeNode);
-      } else {
-        rootNodes.push(treeNode);
-      }
-    }
-
-    // 3. Sort nodes recursively: FOLDERS first, then DOCs & FILEs, then alphabetical
-    const sortFn = (a: TreeNodeDto, b: TreeNodeDto): number => {
-      if (a.type === 'FOLDER' && b.type !== 'FOLDER') return -1;
-      if (a.type !== 'FOLDER' && b.type === 'FOLDER') return 1;
-      if (a.isRootDoc && !b.isRootDoc) return -1;
-      if (!a.isRootDoc && b.isRootDoc) return 1;
-      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
-      return a.name.localeCompare(b.name);
-    };
-
-    const sortRecursively = (list: TreeNodeDto[]) => {
-      list.sort(sortFn);
-      for (const item of list) {
-        if (item.children.length > 0) {
-          sortRecursively(item.children);
-        }
-      }
-    };
-
-    sortRecursively(rootNodes);
-    return rootNodes;
+    return FileTreeBuilder.buildTreeHierarchy(nodes);
   }
 }

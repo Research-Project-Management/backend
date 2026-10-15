@@ -1,20 +1,29 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { ItemMetadata } from '../types/metadata.types';
-import { DuplicateMatchResult } from '../types/metadata-candidate.types';
+import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
+import { DuplicateMatchResult } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import {
   DuplicatePolicy,
   ExistingItemSummary,
-} from '../policies/duplicate.policy';
-import { tokenizeTitleWords } from '../utils/deduplication.utils';
+} from '@/modules/library/ingestion/policies/duplicate.policy';
+import { tokenizeTitleWords } from '@/modules/library/ingestion/domain/deduplication.domain';
 import { isUUID } from 'class-validator';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
-} from '../types/catalog-gateway.types';
+} from '@/modules/library/ingestion/types/catalog-gateway.types';
+import {
+  IWorkflowStage,
+  MatchStageInput,
+} from '@/modules/library/ingestion/types/workflow-stage.types';
 
 @Injectable()
-export class MatchStage {
+export class MatchStage implements IWorkflowStage<
+  MatchStageInput | { userId?: string; projectId?: string | null } | string,
+  DuplicateMatchResult
+> {
+  readonly stageName = 'MATCH' as const;
   private readonly logger = new Logger(MatchStage.name);
 
   private static readonly STOPWORDS = new Set([
@@ -58,26 +67,36 @@ export class MatchStage {
    *  3. Fuzzy: Pre-filter by title keywords, then in-memory Jaccard similarity.
    */
   async execute(
-    scope: { userId?: string; projectId?: string | null } | string,
-    proposed: ItemMetadata,
+    scopeOrInput:
+      MatchStageInput | { userId?: string; projectId?: string | null } | string,
+    proposed?: ItemMetadata,
   ): Promise<DuplicateMatchResult> {
+    const isStageInput =
+      typeof scopeOrInput === 'object' &&
+      scopeOrInput !== null &&
+      'scope' in scopeOrInput;
+    const scope = isStageInput ? scopeOrInput.scope : scopeOrInput;
+    const actualProposed = isStageInput
+      ? scopeOrInput.proposedItem || {}
+      : proposed || {};
+
     const nestedMeta =
-      'metadata' in proposed &&
-      proposed.metadata &&
-      typeof proposed.metadata === 'object'
-        ? (proposed.metadata as Record<string, unknown>)
+      'metadata' in actualProposed &&
+      actualProposed.metadata &&
+      typeof actualProposed.metadata === 'object'
+        ? (actualProposed.metadata as Record<string, unknown>)
         : undefined;
 
-    const proposedDoi = proposed.doi?.toLowerCase().trim();
-    const rawArxiv = proposed.arxivId || nestedMeta?.arxivId;
+    const proposedDoi = actualProposed.doi?.toLowerCase().trim();
+    const rawArxiv = actualProposed.arxivId || nestedMeta?.arxivId;
     const cleanArxiv = rawArxiv ? String(rawArxiv).trim() : undefined;
-    const rawPmid = proposed.pmid || nestedMeta?.pmid;
+    const rawPmid = actualProposed.pmid || nestedMeta?.pmid;
     const cleanPmid = rawPmid ? String(rawPmid).trim() : undefined;
-    const rawIsbn = proposed.isbn || nestedMeta?.isbn;
+    const rawIsbn = actualProposed.isbn || nestedMeta?.isbn;
     const cleanIsbn = rawIsbn
       ? String(rawIsbn).replace(/[-\s]/g, '').trim()
       : undefined;
-    const proposedTitle = proposed.title?.trim();
+    const proposedTitle = actualProposed.title?.trim();
     const significantWords =
       proposedTitle && proposedTitle.length > 5
         ? tokenizeTitleWords(proposedTitle)
@@ -109,7 +128,7 @@ export class MatchStage {
 
       if (matchResult.candidateItems && matchResult.candidateItems.length > 0) {
         return this.duplicatePolicy.evaluate(
-          proposed,
+          actualProposed,
           matchResult.candidateItems,
         );
       }
@@ -117,7 +136,7 @@ export class MatchStage {
       return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
     }
 
-    // ── Fallback Path: Direct DB Query (Preserved for legacy test contexts) ─
+    // ── Fallback Path: Direct DB Query (Fallback when Gateway Port is omitted) ──
     if (!this.prisma) {
       this.logger.warn(
         'MatchStage invoked without catalogGateway or prisma; skipping duplicate matching',
@@ -129,13 +148,13 @@ export class MatchStage {
       'MatchStage falling back to direct Prisma queries. Inject CATALOG_GATEWAY_PORT for DDD compliance.',
     );
 
-    let scopeFilter: Record<string, any> | null = null;
+    let scopeFilter: Prisma.ItemWhereInput | null = null;
 
     if (typeof scope === 'object' && scope !== null) {
       if (scope.projectId && isUUID(scope.projectId)) {
         scopeFilter = { projectId: scope.projectId };
       } else if (scope.userId && isUUID(scope.userId)) {
-        scopeFilter = { userId: scope.userId };
+        scopeFilter = { userId: scope.userId, projectId: null };
       }
     } else if (typeof scope === 'string' && isUUID(scope)) {
       scopeFilter = {
@@ -281,15 +300,15 @@ export class MatchStage {
       return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
     }
 
-    const summaries: ExistingItemSummary[] = candidateItems.map((it: any) => ({
+    const summaries: ExistingItemSummary[] = candidateItems.map((it) => ({
       id: it.id,
       title: it.title,
       doi: it.doi,
       year: it.year,
       citationKey: it.citationKey,
-      authors: it.contributors.map((c: any) => c.fullName),
+      authors: it.contributors.map((c) => c.fullName),
     }));
 
-    return this.duplicatePolicy.evaluate(proposed, summaries);
+    return this.duplicatePolicy.evaluate(actualProposed, summaries);
   }
 }

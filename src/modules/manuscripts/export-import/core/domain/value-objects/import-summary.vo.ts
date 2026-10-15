@@ -32,7 +32,7 @@ export class ImportSummaryVo {
     this.rootDocPath = props.rootDocPath;
   }
 
-  public toJSON(): Record<string, any> {
+  public toJSON(): ImportSummaryProps {
     return {
       projectId: this.projectId,
       totalEntries: this.totalEntries,

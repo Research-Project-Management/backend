@@ -3,7 +3,7 @@
  * Outbound Port (SPI) for Database Persistence of ManuscriptFile metadata.
  */
 
-import { ManuscriptFile } from '../domain/entities/manuscript-file.entity';
+import { ManuscriptFile } from '@/modules/manuscripts/filestore/core/domain/entities/manuscript-file.entity';
 
 export abstract class IManuscriptFileRepository {
   abstract save(file: ManuscriptFile): Promise<ManuscriptFile>;

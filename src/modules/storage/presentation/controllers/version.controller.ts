@@ -20,8 +20,6 @@ import { GetFileVersionsUseCase } from '../../application/use-cases/version/get-
 import { DownloadFileVersionUseCase } from '../../application/use-cases/version/download-file-version.use-case';
 import { RevertFileVersionUseCase } from '../../application/use-cases/version/revert-file-version.use-case';
 
-
-
 @ApiTags('Storage File Versions')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/storage/files', 'api/files', 'api/file'])

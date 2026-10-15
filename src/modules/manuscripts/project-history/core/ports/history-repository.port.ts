@@ -3,8 +3,8 @@
  * Outbound Port (SPI) for persisting and querying snapshots and version labels in PostgreSQL.
  */
 
-import { Snapshot } from '../domain/entities/snapshot.entity';
-import { VersionLabel } from '../domain/entities/version-label.entity';
+import { Snapshot } from '@/modules/manuscripts/project-history/core/domain/entities/snapshot.entity';
+import { VersionLabel } from '@/modules/manuscripts/project-history/core/domain/entities/version-label.entity';
 
 export abstract class IHistoryRepositoryPort {
   /**

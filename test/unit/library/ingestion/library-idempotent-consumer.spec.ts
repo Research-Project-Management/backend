@@ -1,5 +1,5 @@
 import { IdempotentConsumerService } from '@/modules/library/sync/services/idempotent-consumer.service';
-import { ExtractionHandler } from '@/modules/library/extraction/utils/extraction.handler';
+import { ExtractionHandler } from '@/modules/library/extraction/services/extraction.handler';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { OutboxEvent } from '@prisma/client';
 

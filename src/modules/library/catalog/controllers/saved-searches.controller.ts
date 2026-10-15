@@ -16,14 +16,14 @@ import {
   ApiOperation,
   ApiParam,
 } from '@nestjs/swagger';
-import { SavedSearchesService } from '../services/saved-searches.service';
+import { SavedSearchesService } from '@/modules/library/catalog/services/saved-searches.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
   CreateSavedSearchDto,
   UpdateSavedSearchDto,
   PreviewSavedSearchDto,
   ExecuteSavedSearchQueryDto,
-} from '../dto/saved-search.dto';
+} from '@/modules/library/catalog/dto/saved-search.dto';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 /**

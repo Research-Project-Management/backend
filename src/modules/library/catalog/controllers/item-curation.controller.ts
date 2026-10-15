@@ -6,11 +6,13 @@ import {
   Param,
   Body,
   Headers,
+  Query,
   UseGuards,
   NotFoundException,
   BadRequestException,
   ParseUUIDPipe,
   Optional,
+  Inject,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -20,11 +22,16 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
-import { ParseCitationsDto } from '../dto/items.dto';
-import { ItemService } from '../services/items.service';
-import { ItemCurationService } from '../services/item-curation.service';
-import { ItemFulltextService } from '../services/item-fulltext.service';
-import { ItemTypeConversionService } from '../services/item-type-conversion.service';
+import { ParseCitationsDto } from '@/modules/library/catalog/dto/items.dto';
+import { ItemService } from '@/modules/library/catalog/services/items.service';
+import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
+import { ItemFulltextService } from '@/modules/library/catalog/services/item-fulltext.service';
+import { ItemTypeConversionService } from '@/modules/library/catalog/services/item-type-conversion.service';
+import {
+  INGESTION_FACADE,
+  IIngestionFacade,
+  ReResolveMetadataOptions,
+} from '@/modules/library/shared-kernel';
 
 /**
  * Shared Base Adapter for Library Item Curation & Scholarly Enrichment.
@@ -36,14 +43,43 @@ export abstract class BaseItemCurationController {
     protected readonly itemService: ItemService,
     @Optional() protected readonly curationService?: ItemCurationService,
     @Optional() protected readonly fulltextService?: ItemFulltextService,
-    @Optional() protected readonly typeConversionService?: ItemTypeConversionService,
+    @Optional()
+    protected readonly typeConversionService?: ItemTypeConversionService,
+    @Optional()
+    @Inject(INGESTION_FACADE)
+    protected readonly ingestionFacade?: IIngestionFacade,
   ) {}
+
+  protected get curationRunner(): ItemCurationService | ItemService {
+    return this.curationService ?? this.itemService;
+  }
+
+  protected get fulltextRunner(): ItemFulltextService | ItemService {
+    return this.fulltextService ?? this.itemService;
+  }
+
+  protected get typeConversionRunner():
+    ItemTypeConversionService | ItemService {
+    return this.typeConversionService ?? this.itemService;
+  }
+
+  protected async executeReResolveMetadata(
+    id: string,
+    userId: string,
+    body?: ReResolveMetadataOptions,
+    projectId?: string,
+  ) {
+    if (!this.ingestionFacade || !this.ingestionFacade.reResolveMetadata) {
+      throw new BadRequestException(
+        'Ingestion service is not available for metadata re-resolution',
+      );
+    }
+    return this.ingestionFacade.reResolveMetadata(userId, id, body, projectId);
+  }
 
   protected async executeParseCitations(dto: ParseCitationsDto) {
     const rawCitations = dto.citations || dto.rawCitations || '';
-    const references = this.curationService
-      ? await this.curationService.parseCitations(rawCitations)
-      : await this.itemService.parseCitations(rawCitations);
+    const references = await this.curationRunner.parseCitations(rawCitations);
     return {
       success: true,
       count: references.length,
@@ -57,9 +93,11 @@ export abstract class BaseItemCurationController {
     userId: string,
     projectId?: string,
   ) {
-    const fulltext = this.fulltextService
-      ? await this.fulltextService.getFulltext(userId, id, projectId)
-      : await this.itemService.getFulltext(userId, id, projectId);
+    const fulltext = await this.fulltextRunner.getFulltext(
+      userId,
+      id,
+      projectId,
+    );
     return { success: true, data: fulltext, ...fulltext };
   }
 
@@ -74,20 +112,26 @@ export abstract class BaseItemCurationController {
   protected async executePreviewTypeConversion(
     id: string,
     userId: string,
-    body: { targetType: string; retainUnmappedInExtra?: boolean },
+    body: {
+      targetType?: string;
+      targetItemType?: string;
+      retainUnmappedInExtra?: boolean;
+    },
     projectId?: string,
   ) {
     const item = await this.itemService.getItem(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
-    const preview = this.typeConversionService
-      ? this.typeConversionService.previewTypeConversion(item, body.targetType, {
-          retainUnmappedInExtra: body.retainUnmappedInExtra ?? true,
-        })
-      : this.itemService.previewTypeConversion(item, body.targetType, {
-          retainUnmappedInExtra: body.retainUnmappedInExtra ?? true,
-        });
+    const resolvedTargetType =
+      body?.targetType || body?.targetItemType || 'journalArticle';
+    const preview = this.typeConversionRunner.previewTypeConversion(
+      item,
+      resolvedTargetType,
+      {
+        retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
+      },
+    );
     return { success: true, preview, data: preview };
   }
 
@@ -96,11 +140,12 @@ export abstract class BaseItemCurationController {
     userId: string,
     ifMatch: string | undefined,
     body?: {
-      targetType: string;
+      targetType?: string;
+      targetItemType?: string;
       expectedVersion?: number;
       retainUnmappedInExtra?: boolean;
     },
-    projectId?: string,
+    _projectId?: string,
   ) {
     const expectedVersion =
       body?.expectedVersion !== undefined
@@ -109,25 +154,17 @@ export abstract class BaseItemCurationController {
           ? parseInt(ifMatch.replace(/["']/g, ''), 10)
           : undefined;
 
-    const result = this.typeConversionService
-      ? await this.typeConversionService.convertItemType(
-          userId,
-          id,
-          body?.targetType || 'journalArticle',
-          {
-            expectedVersion,
-            retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
-          },
-        )
-      : await this.itemService.convertItemType(
-          userId,
-          id,
-          body?.targetType || 'journalArticle',
-          {
-            expectedVersion,
-            retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
-          },
-        );
+    const resolvedTargetType =
+      body?.targetType || body?.targetItemType || 'journalArticle';
+    const result = await this.typeConversionRunner.convertItemType(
+      userId,
+      id,
+      resolvedTargetType,
+      {
+        expectedVersion,
+        retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
+      },
+    );
 
     return {
       success: true,
@@ -193,8 +230,34 @@ export class ItemCurationController extends BaseItemCurationController {
     @Optional() curationService?: ItemCurationService,
     @Optional() fulltextService?: ItemFulltextService,
     @Optional() typeConversionService?: ItemTypeConversionService,
+    @Optional()
+    @Inject(INGESTION_FACADE)
+    ingestionFacade?: IIngestionFacade,
   ) {
-    super(itemService, curationService, fulltextService, typeConversionService);
+    super(
+      itemService,
+      curationService,
+      fulltextService,
+      typeConversionService,
+      ingestionFacade,
+    );
+  }
+
+  @Post(':id/re-resolve')
+  @ApiOperation({
+    summary:
+      'Re-resolve metadata on demand for an item from Open Academic Mirrors',
+  })
+  async reResolveMetadata(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: ReResolveMetadataOptions,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId =
+      paramProjectId || queryProjectId || body?.projectId;
+    return this.executeReResolveMetadata(id, userId, body, effectiveProjectId);
   }
 
   @Post('citations/parse')
@@ -211,7 +274,7 @@ export class ItemCurationController extends BaseItemCurationController {
   async getFulltext(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeGetFulltext(id, userId, projectId);
   }
@@ -221,7 +284,7 @@ export class ItemCurationController extends BaseItemCurationController {
   async reindexItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeReindexItem(id, userId, projectId);
   }
@@ -231,8 +294,13 @@ export class ItemCurationController extends BaseItemCurationController {
   async previewTypeConversion(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Body() body: { targetType: string; retainUnmappedInExtra?: boolean },
-    projectId?: string,
+    @Body()
+    body: {
+      targetType?: string;
+      targetItemType?: string;
+      retainUnmappedInExtra?: boolean;
+    },
+    @Query('projectId') projectId?: string,
   ) {
     return this.executePreviewTypeConversion(id, userId, body, projectId);
   }
@@ -245,11 +313,12 @@ export class ItemCurationController extends BaseItemCurationController {
     @Headers('if-match') ifMatch?: string,
     @Body()
     body?: {
-      targetType: string;
+      targetType?: string;
+      targetItemType?: string;
       expectedVersion?: number;
       retainUnmappedInExtra?: boolean;
     },
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeConvertItemType(id, userId, ifMatch, body, projectId);
   }
@@ -259,7 +328,7 @@ export class ItemCurationController extends BaseItemCurationController {
   async getRelatedItems(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeGetRelatedItems(id, userId, projectId);
   }
@@ -276,7 +345,7 @@ export class ItemCurationController extends BaseItemCurationController {
       note?: string;
     },
     @CurrentUser('id') userId: string,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeLinkItems(id, body, userId, projectId);
   }
@@ -287,7 +356,7 @@ export class ItemCurationController extends BaseItemCurationController {
     @Param('id') id: string,
     @Param('targetId') targetItemId: string,
     @CurrentUser('id') userId: string,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeUnlinkItems(id, targetItemId, userId, projectId);
   }
@@ -325,8 +394,33 @@ export class ProjectItemCurationController extends BaseItemCurationController {
     @Optional() curationService?: ItemCurationService,
     @Optional() fulltextService?: ItemFulltextService,
     @Optional() typeConversionService?: ItemTypeConversionService,
+    @Optional()
+    @Inject(INGESTION_FACADE)
+    ingestionFacade?: IIngestionFacade,
   ) {
-    super(itemService, curationService, fulltextService, typeConversionService);
+    super(
+      itemService,
+      curationService,
+      fulltextService,
+      typeConversionService,
+      ingestionFacade,
+    );
+  }
+
+  @Post(':id/re-resolve')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary:
+      'Re-resolve metadata on demand for a project item from Open Academic Mirrors',
+  })
+  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
+  async reResolveMetadata(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
+    @Body() body: ReResolveMetadataOptions,
+  ) {
+    return this.executeReResolveMetadata(id, userId, body, projectId);
   }
 
   @Post('citations/parse')
@@ -371,7 +465,12 @@ export class ProjectItemCurationController extends BaseItemCurationController {
   async previewTypeConversion(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Body() body: { targetType: string; retainUnmappedInExtra?: boolean },
+    @Body()
+    body: {
+      targetType?: string;
+      targetItemType?: string;
+      retainUnmappedInExtra?: boolean;
+    },
     @Param('projectId', new ParseUUIDPipe()) projectId: string,
   ) {
     return this.executePreviewTypeConversion(id, userId, body, projectId);
@@ -388,7 +487,8 @@ export class ProjectItemCurationController extends BaseItemCurationController {
     @Headers('if-match') ifMatch?: string,
     @Body()
     body?: {
-      targetType: string;
+      targetType?: string;
+      targetItemType?: string;
       expectedVersion?: number;
       retainUnmappedInExtra?: boolean;
     },

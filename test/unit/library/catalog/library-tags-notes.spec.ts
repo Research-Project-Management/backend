@@ -1,5 +1,5 @@
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
-import { buildTipTapDocFromText } from '@/modules/library/shared-kernel/utils/tiptap.utils';
+import { buildTipTapDocFromText } from '@/modules/library/shared-kernel/domain/tiptap.domain';
 
 describe('Academic Tags & Notes Synchronization', () => {
   describe('1. TipTap AST JSON Generation for Literature Notes', () => {

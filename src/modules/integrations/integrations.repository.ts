@@ -20,7 +20,7 @@ export class IntegrationsRepository {
       where: {
         userId_provider: {
           userId,
-          provider: provider as IntegrationProvider,
+          provider: provider,
         },
       },
     });
@@ -44,14 +44,13 @@ export class IntegrationsRepository {
     accountEmail?: string | null;
     metadata?: Record<string, unknown> | null;
   }): Promise<UserIntegration> {
-    const metadataValue =
-      (data.metadata as Prisma.InputJsonValue) ?? undefined;
+    const metadataValue = (data.metadata as Prisma.InputJsonValue) ?? undefined;
 
     return this.prisma.userIntegration.upsert({
       where: {
         userId_provider: {
           userId: data.userId,
-          provider: data.provider as IntegrationProvider,
+          provider: data.provider,
         },
       },
       update: {
@@ -68,7 +67,7 @@ export class IntegrationsRepository {
       },
       create: {
         userId: data.userId,
-        provider: data.provider as IntegrationProvider,
+        provider: data.provider,
         status: 'connected',
         accessToken: data.accessToken,
         refreshToken: data.refreshToken,
@@ -88,7 +87,7 @@ export class IntegrationsRepository {
     await this.prisma.userIntegration.updateMany({
       where: {
         userId,
-        provider: provider as IntegrationProvider,
+        provider: provider,
       },
       data: {
         status: 'error',
@@ -104,7 +103,7 @@ export class IntegrationsRepository {
     await this.prisma.userIntegration.deleteMany({
       where: {
         userId,
-        provider: provider as IntegrationProvider,
+        provider: provider,
       },
     });
   }

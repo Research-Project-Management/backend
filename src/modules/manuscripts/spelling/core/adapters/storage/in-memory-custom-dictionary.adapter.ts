@@ -5,7 +5,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ICustomDictionaryRepositoryPort } from '../../ports/custom-dictionary-repository.port';
+import { ICustomDictionaryRepositoryPort } from '@/modules/manuscripts/spelling/core/ports/custom-dictionary-repository.port';
 
 @Injectable()
 export class InMemoryCustomDictionaryAdapter implements ICustomDictionaryRepositoryPort {

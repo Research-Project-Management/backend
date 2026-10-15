@@ -4,13 +4,13 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ManuscriptFile } from '../domain/entities/manuscript-file.entity';
-import { FileNotFoundException } from '../domain/exceptions/file-not-found.exception';
+import { ManuscriptFile } from '@/modules/manuscripts/filestore/core/domain/entities/manuscript-file.entity';
+import { FileNotFoundException } from '@/modules/manuscripts/filestore/core/domain/exceptions/file-not-found.exception';
 import {
   IBinaryStoragePort,
   StorageObjectMetadata,
-} from '../ports/binary-storage.port';
-import { IManuscriptFileRepository } from '../ports/manuscript-file-repository.port';
+} from '@/modules/manuscripts/filestore/core/ports/binary-storage.port';
+import { IManuscriptFileRepository } from '@/modules/manuscripts/filestore/core/ports/manuscript-file-repository.port';
 
 export interface GetFileHeadInput {
   projectId: string;

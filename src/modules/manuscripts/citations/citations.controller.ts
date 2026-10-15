@@ -41,6 +41,11 @@ import { IdentifierNotFoundException } from './core/domain/exceptions/identifier
 import { DuplicateCitationKeyException } from './core/domain/exceptions/duplicate-citation-key.exception';
 import { InvalidBibtexException } from './core/domain/exceptions/invalid-bibtex.exception';
 
+interface RequestWithUser {
+  user?: { id?: string; sub?: string; userId?: string };
+  headers?: Record<string, string | string[] | undefined>;
+}
+
 @ApiTags('Manuscripts - Citations & Bibliography')
 @ApiBearerAuth('JWT-auth')
 @Controller([
@@ -53,7 +58,7 @@ import { InvalidBibtexException } from './core/domain/exceptions/invalid-bibtex.
 export class CitationsController {
   constructor(private readonly citationsService: CitationsService) {}
 
-  private handleError(error: any): never {
+  private handleError(error: unknown): never {
     if (error instanceof IdentifierNotFoundException) {
       throw new NotFoundException(error.message);
     }
@@ -138,11 +143,13 @@ export class CitationsController {
   async syncLibrary(
     @Param('projectId') projectId: string,
     @Body() dto: SyncLibraryDto,
-    @Req() req: any,
+    @Req() req: RequestWithUser,
   ): Promise<SyncLibraryResultDto> {
     try {
       const userId =
-        req?.user?.id || req?.headers?.['x-user-id'] || 'user-default';
+        req?.user?.id ||
+        (req?.headers?.['x-user-id'] as string | undefined) ||
+        'user-default';
       return await this.citationsService.syncLibraryCollection(
         projectId,
         userId,
@@ -169,9 +176,11 @@ export class CitationsUtilityController {
   @ApiOperation({
     summary: 'List available bibliography collections from external library',
   })
-  async listLibraryCollections(@Req() req: any) {
+  async listLibraryCollections(@Req() req: RequestWithUser) {
     const userId =
-      req?.user?.id || req?.headers?.['x-user-id'] || 'user-default';
+      req?.user?.id ||
+      (req?.headers?.['x-user-id'] as string | undefined) ||
+      'user-default';
     return this.citationsService.listUserLibraryCollections(userId);
   }
 
@@ -183,7 +192,7 @@ export class CitationsUtilityController {
   parseRawBibtex(@Body() dto: ParseRawBibtexDto): BibEntryDto[] {
     try {
       return this.citationsService.parseRawBibtex(dto.rawBibtex);
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof InvalidBibtexException) {
         throw new BadRequestException(err.message);
       }

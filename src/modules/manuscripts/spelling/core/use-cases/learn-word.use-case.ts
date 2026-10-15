@@ -3,9 +3,9 @@
  * Inbound Use Case: Adds a new word to the Project or User custom dictionary.
  */
 
-import { ICustomDictionaryRepositoryPort } from '../ports/custom-dictionary-repository.port';
-import { DictionaryScopeVo } from '../domain/value-objects/dictionary-scope.vo';
-import { InvalidWordException } from '../domain/exceptions/invalid-word.exception';
+import { ICustomDictionaryRepositoryPort } from '@/modules/manuscripts/spelling/core/ports/custom-dictionary-repository.port';
+import { DictionaryScopeVo } from '@/modules/manuscripts/spelling/core/domain/value-objects/dictionary-scope.vo';
+import { InvalidWordException } from '@/modules/manuscripts/spelling/core/domain/exceptions/invalid-word.exception';
 
 export interface LearnWordCommand {
   word: string;

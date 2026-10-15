@@ -14,6 +14,7 @@ import {
   ListPartsCommand,
   PutBucketLifecycleConfigurationCommand,
   GetBucketLifecycleConfigurationCommand,
+  LifecycleRule,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
@@ -144,8 +145,15 @@ export class S3StorageDriver implements IStorageDriver {
     try {
       await this.stat(key);
       return true;
-    } catch (err: any) {
-      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+    } catch (err: unknown) {
+      const errorObj = err as {
+        name?: string;
+        $metadata?: { httpStatusCode?: number };
+      };
+      if (
+        errorObj?.name === 'NotFound' ||
+        errorObj?.$metadata?.httpStatusCode === 404
+      ) {
         return false;
       }
       throw err;
@@ -315,7 +323,7 @@ export class S3StorageDriver implements IStorageDriver {
     ];
 
     const s3Rules = rules.map((r) => {
-      const ruleDef: any = {
+      const ruleDef: LifecycleRule = {
         ID: r.id,
         Status: r.status,
         Filter: { Prefix: r.prefix ?? '' },
@@ -349,9 +357,9 @@ export class S3StorageDriver implements IStorageDriver {
       this.logger.log(
         `Bucket lifecycle configuration applied to ${this.bucket} (${s3Rules.length} rules)`,
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.warn(
-        `Failed to apply bucket lifecycle configuration on ${this.bucket}: ${err?.message}`,
+        `Failed to apply bucket lifecycle configuration on ${this.bucket}: ${(err as Error)?.message}`,
       );
     }
   }

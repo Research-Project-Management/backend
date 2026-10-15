@@ -26,7 +26,7 @@ import {
   cleanAbstractText,
   extractYearFromDate,
   repairFragmentedTitle,
-} from '@/modules/library/shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 import { IngestionVerifierService } from '@/modules/library/ingestion/services/ingestion-verifier.service';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 
@@ -71,7 +71,13 @@ interface SyntheticPdfItem {
 
 interface SyntheticUrlItem {
   id: string;
-  category: 'arxiv' | 'biorxiv' | 'openreview' | 'acl' | 'publisher_doi' | 'waf_protected';
+  category:
+    | 'arxiv'
+    | 'biorxiv'
+    | 'openreview'
+    | 'acl'
+    | 'publisher_doi'
+    | 'waf_protected';
   rawUrl: string;
   expectedDoi?: string;
   expectedArxivId?: string;
@@ -80,22 +86,36 @@ interface SyntheticUrlItem {
 function generate100PdfDataset(): SyntheticPdfItem[] {
   const venues = [
     { type: 'arXiv', prefix: 'arxiv:', publisher: 'arXiv.org' },
-    { type: 'Nature', prefix: '10.1038/s41586-', publisher: 'Nature Publishing Group' },
+    {
+      type: 'Nature',
+      prefix: '10.1038/s41586-',
+      publisher: 'Nature Publishing Group',
+    },
     { type: 'ScienceDirect', prefix: '10.1016/j.', publisher: 'Elsevier' },
     { type: 'Springer', prefix: '10.1007/s', publisher: 'Springer' },
     { type: 'IEEE', prefix: '10.1109/TPAMI.', publisher: 'IEEE' },
     { type: 'ACM', prefix: '10.1145/', publisher: 'ACM' },
-    { type: 'BioRxiv', prefix: '10.1101/202', publisher: 'Cold Spring Harbor Laboratory' },
+    {
+      type: 'BioRxiv',
+      prefix: '10.1101/202',
+      publisher: 'Cold Spring Harbor Laboratory',
+    },
     { type: 'OpenReview', prefix: 'openreview:', publisher: 'OpenReview' },
     { type: 'MDPI', prefix: '10.3390/s', publisher: 'MDPI' },
     { type: 'Frontiers', prefix: '10.3389/fninf.', publisher: 'Frontiers' },
   ];
 
   const topics = [
-    'Deep Residual Learning', 'Attention Is All You Need', 'Generative Adversarial Nets',
-    'Language Models are Few-Shot Learners', 'Mastering the Game of Go', 'BERT Pre-training',
-    'Diffusion Models Beat GANs', 'Transformers in Vision', 'Neural Machine Translation',
-    'Convex Optimization Methods'
+    'Deep Residual Learning',
+    'Attention Is All You Need',
+    'Generative Adversarial Nets',
+    'Language Models are Few-Shot Learners',
+    'Mastering the Game of Go',
+    'BERT Pre-training',
+    'Diffusion Models Beat GANs',
+    'Transformers in Vision',
+    'Neural Machine Translation',
+    'Convex Optimization Methods',
   ];
 
   const items: SyntheticPdfItem[] = [];
@@ -105,10 +125,16 @@ function generate100PdfDataset(): SyntheticPdfItem[] {
     const topic = topics[(i - 1) % topics.length];
     const year = 2015 + ((i * 7) % 11); // 2015 - 2025
     const isArxiv = venue.type === 'arXiv';
-    const arxivId = isArxiv ? `${(year % 100).toString().padStart(2, '0')}${(i % 12 + 1).toString().padStart(2, '0')}.${(1000 + i).toString()}` : undefined;
+    const arxivId = isArxiv
+      ? `${(year % 100).toString().padStart(2, '0')}${((i % 12) + 1).toString().padStart(2, '0')}.${(1000 + i).toString()}`
+      : undefined;
     const doi = isArxiv ? undefined : `${venue.prefix}202${i % 9}-${10000 + i}`;
     const title = `${topic} for Scientific Discovery Part ${i}`;
-    const authors = [`Author ${i} Alpha`, `Coauthor ${i} Beta`, `Senior ${i} Gamma`];
+    const authors = [
+      `Author ${i} Alpha`,
+      `Coauthor ${i} Beta`,
+      `Senior ${i} Gamma`,
+    ];
 
     // Construct realistic academic PDF page 1 text layout
     let rawText = '';
@@ -153,7 +179,10 @@ function generate100UrlDataset(): SyntheticUrlItem[] {
     items.push({
       id: `url-arxiv-${i}`,
       category: 'arxiv',
-      rawUrl: i % 2 === 0 ? `https://arxiv.org/abs/${id}` : `https://arxiv.org/html/${id}v2`,
+      rawUrl:
+        i % 2 === 0
+          ? `https://arxiv.org/abs/${id}`
+          : `https://arxiv.org/html/${id}v2`,
       expectedArxivId: id,
     });
   }
@@ -188,7 +217,13 @@ function generate100UrlDataset(): SyntheticUrlItem[] {
   }
 
   // 4. 25 Major Publisher URLs with embed DOIs
-  const publishers = ['nature.com/articles', 'sciencedirect.com/science/article/pii', 'link.springer.com/article', 'onlinelibrary.wiley.com/doi', 'ieeexplore.ieee.org/document'];
+  const publishers = [
+    'nature.com/articles',
+    'sciencedirect.com/science/article/pii',
+    'link.springer.com/article',
+    'onlinelibrary.wiley.com/doi',
+    'ieeexplore.ieee.org/document',
+  ];
   for (let i = 1; i <= 25; i++) {
     const pub = publishers[(i - 1) % publishers.length];
     const doi = `10.1038/s41586-02${i % 5}-${(20000 + i).toString()}`;
@@ -236,7 +271,7 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
       let doiOrArxivCount = 0;
       let titleExtractedCount = 0;
       let completeVerificationCount = 0;
-      let externalApiCallsMade = 0; // ZERO API
+      const externalApiCallsMade = 0; // ZERO API
 
       const suiteStartNs = process.hrtime.bigint();
 
@@ -247,24 +282,40 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
         let extractedDoi: string | undefined;
         let extractedArxivId: string | undefined;
 
-        const doiMatch = pdf.rawText.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/);
+        const doiMatch = pdf.rawText.match(
+          /\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/,
+        );
         if (doiMatch) extractedDoi = normalizeDoi(doiMatch[1]);
 
-        const arxivMatch = pdf.rawText.match(/(?:arxiv[:\s]*)?([0-2]\d{3}\.\d{4,5}(?:v\d+)?)/i);
+        const arxivMatch = pdf.rawText.match(
+          /(?:arxiv[:\s]*)?([0-2]\d{3}\.\d{4,5}(?:v\d+)?)/i,
+        );
         if (arxivMatch) extractedArxivId = normalizeArxivId(arxivMatch[1]);
 
         // 2. Title Extraction from first lines
-        const lines = pdf.rawText.split('\n').map((l) => l.trim()).filter(Boolean);
-        const candidateTitle = lines.find((l) => l.length > 15 && !l.startsWith('arXiv:') && !l.startsWith('http'));
-        const cleanTitle = candidateTitle ? normalizeAcademicTitleCase(candidateTitle) : undefined;
+        const lines = pdf.rawText
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean);
+        const candidateTitle = lines.find(
+          (l) =>
+            l.length > 15 && !l.startsWith('arXiv:') && !l.startsWith('http'),
+        );
+        const cleanTitle = candidateTitle
+          ? normalizeAcademicTitleCase(candidateTitle)
+          : undefined;
 
         // 3. Year extraction
         const yearMatch = pdf.rawText.match(/\b(19\d\d|20\d\d)\b/);
         const cleanYear = yearMatch ? parseInt(yearMatch[1], 10) : undefined;
 
         // 4. Authors split
-        const authorLine = lines.find((l) => l.includes('Alpha') || l.includes('Beta') || l.includes('and'));
-        const authors = authorLine ? splitAuthorString(authorLine.replace(/[¹²³⁴⁵]/g, '')) : [];
+        const authorLine = lines.find(
+          (l) => l.includes('Alpha') || l.includes('Beta') || l.includes('and'),
+        );
+        const authors = authorLine
+          ? splitAuthorString(authorLine.replace(/[¹²³⁴⁵]/g, ''))
+          : [];
 
         // 5. Verification Scoring (Local)
         const proposedItem = normalizer.normalize({
@@ -275,7 +326,11 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
           authors,
         });
 
-        const verifyResult = verifier.evaluateLocalResult(proposedItem, 'LOCAL_REGEX_PDF', 0.95);
+        const verifyResult = verifier.evaluateLocalResult(
+          proposedItem,
+          'LOCAL_REGEX_PDF',
+          0.95,
+        );
 
         const itemLatencyMs = hrtimeMs(itemStartNs);
         latencies.push(itemLatencyMs);
@@ -283,7 +338,10 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
         // Verification checks
         if (cleanTitle) titleExtractedCount++;
         if (extractedDoi || extractedArxivId) doiOrArxivCount++;
-        if (verifyResult.status === 'COMPLETE' || verifyResult.verificationScore >= 0.85) {
+        if (
+          verifyResult.status === 'COMPLETE' ||
+          verifyResult.verificationScore >= 0.85
+        ) {
           completeVerificationCount++;
         }
         successCount++;
@@ -293,21 +351,41 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
       const stats = calculatePercentiles(latencies);
 
       // Print Benchmark Report to console
-      console.log('\n===============================================================');
-      console.log('BENCHMARK 1: 100 PDF EXTRACTION (CURRENT ZERO-API ARCHITECTURE)');
-      console.log('===============================================================');
+      console.log(
+        '\n===============================================================',
+      );
+      console.log(
+        'BENCHMARK 1: 100 PDF EXTRACTION (CURRENT ZERO-API ARCHITECTURE)',
+      );
+      console.log(
+        '===============================================================',
+      );
       console.log(`Total Documents Processed : 100 PDFs`);
-      console.log(`Total Execution Time      : ${totalDurationMs.toFixed(2)} ms`);
-      console.log(`Throughput Rate           : ${(100 / (totalDurationMs / 1000)).toFixed(1)} docs/sec`);
+      console.log(
+        `Total Execution Time      : ${totalDurationMs.toFixed(2)} ms`,
+      );
+      console.log(
+        `Throughput Rate           : ${(100 / (totalDurationMs / 1000)).toFixed(1)} docs/sec`,
+      );
       console.log(`Latency p50 (Median)      : ${stats.p50} ms`);
       console.log(`Latency p90               : ${stats.p90} ms`);
       console.log(`Latency p95               : ${stats.p95} ms`);
       console.log(`Latency p99               : ${stats.p99} ms`);
-      console.log(`External API Calls Made   : ${externalApiCallsMade} (0đ - 100% Offline)`);
-      console.log(`Title Extraction Rate     : ${(titleExtractedCount / 100 * 100).toFixed(1)}%`);
-      console.log(`Identifier Match Rate     : ${(doiOrArxivCount / 100 * 100).toFixed(1)}%`);
-      console.log(`High-Confidence Complete  : ${(completeVerificationCount / 100 * 100).toFixed(1)}%`);
-      console.log('===============================================================\n');
+      console.log(
+        `External API Calls Made   : ${externalApiCallsMade} (0đ - 100% Offline)`,
+      );
+      console.log(
+        `Title Extraction Rate     : ${((titleExtractedCount / 100) * 100).toFixed(1)}%`,
+      );
+      console.log(
+        `Identifier Match Rate     : ${((doiOrArxivCount / 100) * 100).toFixed(1)}%`,
+      );
+      console.log(
+        `High-Confidence Complete  : ${((completeVerificationCount / 100) * 100).toFixed(1)}%`,
+      );
+      console.log(
+        '===============================================================\n',
+      );
 
       // Assertions
       expect(totalDurationMs).toBeLessThan(1000); // 100 PDFs must complete in < 1 second!
@@ -338,17 +416,33 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
       }
 
       const legacyStats = calculatePercentiles(simulatedLatencies);
-      const estimatedTotalTimeSec = (simulatedLatencies.reduce((a, b) => a + b, 0) / 1000).toFixed(1);
+      const estimatedTotalTimeSec = (
+        simulatedLatencies.reduce((a, b) => a + b, 0) / 1000
+      ).toFixed(1);
 
-      console.log('\n---------------------------------------------------------------');
+      console.log(
+        '\n---------------------------------------------------------------',
+      );
       console.log('SIMULATION: LEGACY API ARCHITECTURE ON 100 PDFs');
-      console.log('---------------------------------------------------------------');
+      console.log(
+        '---------------------------------------------------------------',
+      );
       console.log(`Total Outbound API Calls  : ${apiCalls} requests`);
-      console.log(`Estimated Latency p50     : ${legacyStats.p50} ms (vs Current: 0.1ms - 2ms)`);
-      console.log(`Estimated Total Run Time  : ~${estimatedTotalTimeSec} seconds`);
-      console.log(`Rate-limit (429) Failures : ${rateLimitFailures} out of 100 requests (30% drop)`);
-      console.log(`Speedup Factor (Current)  : ~${(legacyStats.avg / 0.5).toFixed(0)}x FASTER`);
-      console.log('---------------------------------------------------------------\n');
+      console.log(
+        `Estimated Latency p50     : ${legacyStats.p50} ms (vs Current: 0.1ms - 2ms)`,
+      );
+      console.log(
+        `Estimated Total Run Time  : ~${estimatedTotalTimeSec} seconds`,
+      );
+      console.log(
+        `Rate-limit (429) Failures : ${rateLimitFailures} out of 100 requests (30% drop)`,
+      );
+      console.log(
+        `Speedup Factor (Current)  : ~${(legacyStats.avg / 0.5).toFixed(0)}x FASTER`,
+      );
+      console.log(
+        '---------------------------------------------------------------\n',
+      );
 
       expect(rateLimitFailures).toBeGreaterThan(15);
       expect(apiCalls).toBe(100);
@@ -366,7 +460,7 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
       let directPdfResolvedCount = 0;
       let doiResolvedOfflineCount = 0;
       let wafBlockedHandledCount = 0;
-      let externalApiCallsMade = 0;
+      const externalApiCallsMade = 0;
 
       const suiteStartNs = process.hrtime.bigint();
 
@@ -398,19 +492,37 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
       const totalDurationMs = hrtimeMs(suiteStartNs);
       const stats = calculatePercentiles(latencies);
 
-      console.log('\n===============================================================');
-      console.log('BENCHMARK 2: 100 URL RESOLUTION (CURRENT DIRECT STREAM ARCHITECTURE)');
-      console.log('===============================================================');
+      console.log(
+        '\n===============================================================',
+      );
+      console.log(
+        'BENCHMARK 2: 100 URL RESOLUTION (CURRENT DIRECT STREAM ARCHITECTURE)',
+      );
+      console.log(
+        '===============================================================',
+      );
       console.log(`Total URLs Processed      : 100 URLs`);
-      console.log(`Total Execution Time      : ${totalDurationMs.toFixed(2)} ms`);
-      console.log(`Throughput Rate           : ${(100 / (totalDurationMs / 1000)).toFixed(1)} URLs/sec`);
+      console.log(
+        `Total Execution Time      : ${totalDurationMs.toFixed(2)} ms`,
+      );
+      console.log(
+        `Throughput Rate           : ${(100 / (totalDurationMs / 1000)).toFixed(1)} URLs/sec`,
+      );
       console.log(`Latency p50 (Median)      : ${stats.p50} ms`);
       console.log(`Latency p95               : ${stats.p95} ms`);
-      console.log(`Direct PDF Stream Yield   : ${directPdfResolvedCount} / 65 open repos (${((directPdfResolvedCount / 65) * 100).toFixed(1)}%)`);
-      console.log(`Offline DOI Derivation    : ${doiResolvedOfflineCount} / 25 publisher links (${((doiResolvedOfflineCount / 25) * 100).toFixed(1)}%)`);
-      console.log(`WAF Protected Handled     : ${wafBlockedHandledCount} / 10 (Graceful BLOCKED, 0 crash)`);
+      console.log(
+        `Direct PDF Stream Yield   : ${directPdfResolvedCount} / 65 open repos (${((directPdfResolvedCount / 65) * 100).toFixed(1)}%)`,
+      );
+      console.log(
+        `Offline DOI Derivation    : ${doiResolvedOfflineCount} / 25 publisher links (${((doiResolvedOfflineCount / 25) * 100).toFixed(1)}%)`,
+      );
+      console.log(
+        `WAF Protected Handled     : ${wafBlockedHandledCount} / 10 (Graceful BLOCKED, 0 crash)`,
+      );
       console.log(`External API Calls Made   : ${externalApiCallsMade} (0đ)`);
-      console.log('===============================================================\n');
+      console.log(
+        '===============================================================\n',
+      );
 
       expect(totalDurationMs).toBeLessThan(500); // 100 URLs resolved in < 500ms!
       expect(stats.p50).toBeLessThan(1); // Median < 1ms per URL
@@ -434,8 +546,10 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
         },
         {
           Metric: 'Total External API Calls',
-          Legacy_API_Architecture: '200 - 450 HTTP Calls (Crossref/OpenAlex/Tavily)',
-          Current_Zero_API_Architecture: '0 External API Calls (Pure Regex + Direct Stream)',
+          Legacy_API_Architecture:
+            '200 - 450 HTTP Calls (Crossref/OpenAlex/Tavily)',
+          Current_Zero_API_Architecture:
+            '0 External API Calls (Pure Regex + Direct Stream)',
           Difference_Impact: '100% Reduction (Zero external dependency)',
         },
         {
@@ -453,7 +567,8 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
         {
           Metric: 'Cloudflare WAF (403) Handling',
           Legacy_API_Architecture: 'Timeout / Unhandled Error',
-          Current_Zero_API_Architecture: 'deriveDirectPdfUrl + Safe BLOCKED fallback',
+          Current_Zero_API_Architecture:
+            'deriveDirectPdfUrl + Safe BLOCKED fallback',
           Difference_Impact: 'Zero server crash, graceful UX',
         },
         {
@@ -464,11 +579,19 @@ describe('Benchmark Suite: 100 PDFs & 100 Links — Legacy API vs Current Zero-A
         },
       ];
 
-      console.log('\n=============================================================================================');
-      console.log('FINAL HEAD-TO-HEAD SCORECARD: LEGACY API VS CURRENT ZERO-API ARCHITECTURE');
-      console.log('=============================================================================================');
+      console.log(
+        '\n=============================================================================================',
+      );
+      console.log(
+        'FINAL HEAD-TO-HEAD SCORECARD: LEGACY API VS CURRENT ZERO-API ARCHITECTURE',
+      );
+      console.log(
+        '=============================================================================================',
+      );
       console.table(summaryTable);
-      console.log('=============================================================================================\n');
+      console.log(
+        '=============================================================================================\n',
+      );
 
       expect(summaryTable).toHaveLength(6);
     });

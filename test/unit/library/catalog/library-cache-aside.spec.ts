@@ -6,7 +6,7 @@ import { CommandRepository } from '@/modules/library/catalog/repositories/comman
 import { TransactionService } from '@/modules/library/shared-kernel';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
-import { ItemTransformer } from '@/modules/library/catalog/utils/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
 

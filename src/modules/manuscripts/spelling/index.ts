@@ -1,26 +1,21 @@
 /**
- * spelling/index.ts
+ * modules/manuscripts/spelling/index.ts
  * Public entrypoint and barrel export for the Manuscripts Spelling subsystem.
  */
 
 export * from './spelling.module';
 export * from './spelling.service';
 export * from './spelling.controller';
+export * from './spelling.repository';
 export * from './dto/spelling.dto';
+
+// Pure Domain
+export * from './domain';
 
 // Ports
 export * from './core/ports/latex-tokenizer.port';
 export * from './core/ports/spell-engine.port';
 export * from './core/ports/custom-dictionary-repository.port';
-
-// Domain
-export * from './core/domain/entities/misspelled-word.entity';
-export * from './core/domain/entities/spelling-report.entity';
-export * from './core/domain/value-objects/language-code.vo';
-export * from './core/domain/value-objects/word-token.vo';
-export * from './core/domain/value-objects/dictionary-scope.vo';
-export * from './core/domain/exceptions/unsupported-language.exception';
-export * from './core/domain/exceptions/invalid-word.exception';
 
 // Use Cases
 export * from './core/use-cases/check-spelling.use-case';

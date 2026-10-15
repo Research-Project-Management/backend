@@ -4,9 +4,9 @@ import {
   CreatorTypeDefinition,
   ItemTypeDefinition,
   SchemaRegistrySnapshot,
-} from '../../shared-kernel/types/schema.types';
-import { SCHEMA_V42_DATA } from '../../shared-kernel/types/schema.constants';
-import { normalizeCanonicalItemType } from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/types/schema.types';
+import { SCHEMA_V42_DATA } from '@/modules/library/shared-kernel/types/schema.constants';
+import { normalizeCanonicalItemType } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 @Injectable()
 export class TypesService {
@@ -34,7 +34,7 @@ export class TypesService {
     if (includeSpecial) {
       return types;
     }
-    return types.filter((t: any) => t.isBibliographic);
+    return types.filter((t: ItemTypeDefinition) => t.isBibliographic);
   }
 
   getItemTypes(
@@ -79,7 +79,7 @@ export class TypesService {
   isValidFieldForType(itemType: string, fieldKey: string): boolean {
     const def = this.getItemType(itemType);
     if (!def) return false;
-    return def.fields.some((f: any) => f.key === fieldKey);
+    return def.fields.some((f: ItemFieldDefinition) => f.key === fieldKey);
   }
 
   getValidCreatorTypes(itemType: string): CreatorTypeDefinition[] {

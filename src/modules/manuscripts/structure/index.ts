@@ -7,11 +7,10 @@
 export * from './structure.module';
 export * from './structure.service';
 export * from './structure.controller';
+export * from './structure.repository';
 
-// Domain
-export * from './core/domain/manuscript-node.entity';
-export * from './core/domain/node-path.vo';
-export * from './core/domain/structure-errors';
+// Pure Domain
+export * from './domain';
 
 // Ports
 export * from './core/ports/structure-repository.port';

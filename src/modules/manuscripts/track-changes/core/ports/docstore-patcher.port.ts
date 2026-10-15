@@ -3,7 +3,7 @@
  * Outbound Port (SPI) for applying or reverting text modifications on the persistent Docstore lines array.
  */
 
-import { TrackChange } from '../domain/entities/track-change.entity';
+import { TrackChange } from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
 
 export interface PatcherResult {
   lines: string[];

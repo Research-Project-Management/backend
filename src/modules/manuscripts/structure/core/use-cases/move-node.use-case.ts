@@ -4,17 +4,17 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IStructureRepository } from '../ports/structure-repository.port';
-import { ITreePublisher } from '../ports/tree-publisher.port';
-import { NodePathVo } from '../domain/node-path.vo';
-import { ManuscriptNodeEntity } from '../domain/manuscript-node.entity';
+import { IStructureRepository } from '@/modules/manuscripts/structure/core/ports/structure-repository.port';
+import { ITreePublisher } from '@/modules/manuscripts/structure/core/ports/tree-publisher.port';
+import { NodePathVo } from '@/modules/manuscripts/structure/core/domain/node-path.vo';
+import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
 import {
   NodeNotFoundError,
   CyclicMoveError,
   DuplicateNodePathError,
   CannotDeleteRootFolderError,
-} from '../domain/structure-errors';
-import { MoveNodeDto } from '../../dto/node.dto';
+} from '@/modules/manuscripts/structure/core/domain/structure-errors';
+import { MoveNodeDto } from '@/modules/manuscripts/structure/dto/node.dto';
 
 @Injectable()
 export class MoveNodeUseCase {
@@ -38,14 +38,16 @@ export class MoveNodeUseCase {
 
     let destPath: string;
     let newParentId: string | null = null;
+    const targetParentId =
+      dto.destParentId !== undefined ? dto.destParentId : dto.parentId;
 
-    if (dto.destParentId) {
+    if (targetParentId) {
       const destParent = await this.structureRepository.findById(
         projectId,
-        dto.destParentId,
+        targetParentId,
       );
       if (!destParent) {
-        throw new NodeNotFoundError(dto.destParentId);
+        throw new NodeNotFoundError(targetParentId);
       }
       if (!destParent.isFolder()) {
         throw new Error('Destination parent must be a FOLDER');
@@ -54,12 +56,16 @@ export class MoveNodeUseCase {
       newParentId = destParent.id;
     } else if (dto.destPath) {
       destPath = NodePathVo.normalize(dto.destPath);
+      NodePathVo.validateFilename(NodePathVo.basename(destPath));
       const parentPath = NodePathVo.dirname(destPath);
       if (parentPath !== '/') {
         const parentNode = await this.structureRepository.findByPath(
           projectId,
           parentPath,
         );
+        if (parentNode && !parentNode.isFolder()) {
+          throw new Error('Destination parent must be a FOLDER');
+        }
         newParentId = parentNode ? parentNode.id : null;
       }
     } else {

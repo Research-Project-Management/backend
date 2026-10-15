@@ -1,4 +1,4 @@
-import { CreatorCreditInput } from '../../shared-kernel/types/bibliographic.types';
+import { CreatorCreditInput } from '@/modules/library/shared-kernel/types/bibliographic.types';
 
 export interface IngestionStage {
   id: string;
@@ -64,12 +64,21 @@ export type IngestionStatus =
   | 'completed'
   | 'failed';
 
-export type IngestionSourceType = 'doi' | 'url' | 'bibtex' | 'pdf';
+export type IngestionSourceType =
+  | 'doi'
+  | 'arxiv'
+  | 'pmid'
+  | 'isbn'
+  | 'url'
+  | 'bibtex'
+  | 'ris'
+  | 'pdf'
+  | 'zotero';
 
 export type IngestionCommand =
   | {
       source: 'doi';
-      projectId: string;
+      projectId?: string;
       scopeId?: string;
       doi: string;
       userId?: string;
@@ -78,8 +87,38 @@ export type IngestionCommand =
       overrides?: Record<string, unknown>;
     }
   | {
+      source: 'arxiv';
+      projectId?: string;
+      scopeId?: string;
+      arxivId: string;
+      userId?: string;
+      collectionId?: string;
+      idempotencyKey?: string;
+      overrides?: Record<string, unknown>;
+    }
+  | {
+      source: 'pmid';
+      projectId?: string;
+      scopeId?: string;
+      pmid: string;
+      userId?: string;
+      collectionId?: string;
+      idempotencyKey?: string;
+      overrides?: Record<string, unknown>;
+    }
+  | {
+      source: 'isbn';
+      projectId?: string;
+      scopeId?: string;
+      isbn: string;
+      userId?: string;
+      collectionId?: string;
+      idempotencyKey?: string;
+      overrides?: Record<string, unknown>;
+    }
+  | {
       source: 'url';
-      projectId: string;
+      projectId?: string;
       scopeId?: string;
       url: string;
       previewToken?: string;
@@ -100,7 +139,16 @@ export type IngestionCommand =
     }
   | {
       source: 'bibtex';
-      projectId: string;
+      projectId?: string;
+      scopeId?: string;
+      content: string;
+      userId?: string;
+      collectionId?: string;
+      idempotencyKey?: string;
+    }
+  | {
+      source: 'ris';
+      projectId?: string;
       scopeId?: string;
       content: string;
       userId?: string;
@@ -109,14 +157,43 @@ export type IngestionCommand =
     }
   | {
       source: 'pdf';
-      projectId: string;
+      projectId?: string;
       scopeId?: string;
-      fileId: string;
+      fileId?: string;
       filename?: string;
       userId?: string;
       collectionId?: string;
       overrides?: Record<string, unknown>;
       idempotencyKey?: string;
+    }
+  | {
+      source: 'zotero';
+      projectId?: string;
+      scopeId?: string;
+      connectionId?: string;
+      externalItemKey?: string;
+      userId?: string;
+      collectionId?: string;
+      idempotencyKey?: string;
+    }
+  | {
+      source: string;
+      projectId?: string;
+      scopeId?: string;
+      content?: string;
+      doi?: string;
+      arxivId?: string;
+      pmid?: string;
+      isbn?: string;
+      url?: string;
+      fileId?: string;
+      filename?: string;
+      connectionId?: string;
+      externalItemKey?: string;
+      userId?: string;
+      collectionId?: string;
+      idempotencyKey?: string;
+      overrides?: Record<string, unknown>;
     };
 
 export interface IngestionResult {
@@ -144,7 +221,7 @@ export interface IngestionRunSnapshot {
   completedAt?: Date | null;
   lastError?: string | null;
   itemId?: string | null;
-  item?: any;
+  item?: Record<string, unknown> | null;
   stages: IngestionStage[];
   candidates: IngestionCandidate[];
   decisions: IngestionDecision[];

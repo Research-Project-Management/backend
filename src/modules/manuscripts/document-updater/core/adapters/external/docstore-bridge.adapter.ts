@@ -8,13 +8,13 @@ import {
   BaseDocData,
   CommitResult,
   IDocstoreWriterPort,
-} from '../../ports/docstore-writer.port';
-import { DocstoreService } from '../../../../docstore/docstore.service';
+} from '@/modules/manuscripts/document-updater/core/ports/docstore-writer.port';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import {
   DocModifiedError,
   DocNotFoundError,
-} from '../../../../docstore/core/domain/doc-errors';
-import { DocUpdaterConflictException } from '../../domain/exceptions/doc-updater-conflict.exception';
+} from '@/modules/manuscripts/docstore/domain';
+import { DocUpdaterConflictException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/doc-updater-conflict.exception';
 
 @Injectable()
 export class DocstoreBridgeAdapter extends IDocstoreWriterPort {
@@ -54,7 +54,6 @@ export class DocstoreBridgeAdapter extends IDocstoreWriterPort {
     try {
       const result = await this.docstoreService.updateDoc(projectId, docId, {
         lines,
-        version: 0,
         expectedRev: rev,
       });
 

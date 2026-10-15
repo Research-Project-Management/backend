@@ -4,11 +4,11 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ITrackChangesRepositoryPort } from '../ports/track-changes-repository.port';
-import { IRealtimeNotifierPort } from '../ports/realtime-notifier.port';
-import { CommentReply } from '../domain/entities/comment-reply.entity';
-import { ThreadNotFoundException } from '../domain/exceptions/thread-not-found.exception';
-import { ResolvedThreadException } from '../domain/exceptions/resolved-thread.exception';
+import { ITrackChangesRepositoryPort } from '@/modules/manuscripts/track-changes/core/ports/track-changes-repository.port';
+import { IRealtimeNotifierPort } from '@/modules/manuscripts/track-changes/core/ports/realtime-notifier.port';
+import { CommentReply } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-reply.entity';
+import { ThreadNotFoundException } from '@/modules/manuscripts/track-changes/core/domain/exceptions/thread-not-found.exception';
+import { ResolvedThreadException } from '@/modules/manuscripts/track-changes/core/domain/exceptions/resolved-thread.exception';
 
 export interface AddCommentReplyInput {
   projectId: string;

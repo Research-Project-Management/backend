@@ -1,6 +1,6 @@
 export type {
   OutboxEventRecord,
   OutboxDispatchHandler,
-} from '../../shared-kernel';
+} from '@/modules/library/shared-kernel';
 
 export type { DomainEventEnvelope } from './event-publisher.types';

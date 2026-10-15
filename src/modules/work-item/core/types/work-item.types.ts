@@ -11,7 +11,7 @@ export { WorkItemPriority };
 import {
   USER_MINIMAL_SELECT,
   type UserMinimal,
-} from '../../common/types/shared.types';
+} from '@/modules/work-item/common/types/shared.types';
 export { USER_MINIMAL_SELECT, type UserMinimal };
 
 export const STATE_MINIMAL_SELECT = {
@@ -79,6 +79,7 @@ export interface LabelMinimal {
 
 export interface AttachPageItem {
   id: string;
+  pageId?: string;
   title: string;
   slug?: string | null;
   addedAt: string;
@@ -86,6 +87,7 @@ export interface AttachPageItem {
 
 export interface AttachPaperItem {
   id: string;
+  paperId?: string;
   title: string;
   doi?: string | null;
   citationKey?: string | null;
@@ -96,12 +98,14 @@ export interface AttachFileItem {
   id: string;
   name: string;
   url: string;
-  size?: number | null;
+  size?: number | string | null;
   type?: string | null;
+  createdAt?: string;
   uploadedAt: string;
 }
 
 export interface AttachLinkItem {
+  id?: string;
   title: string;
   url: string;
   addedAt: string;

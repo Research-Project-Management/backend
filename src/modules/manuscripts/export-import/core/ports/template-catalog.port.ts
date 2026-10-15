@@ -3,7 +3,7 @@
  * Outbound Port (SPI) for listing and retrieving academic LaTeX project starter templates.
  */
 
-import { ProjectTemplate } from '../domain/entities/project-template.entity';
+import { ProjectTemplate } from '@/modules/manuscripts/export-import/core/domain/entities/project-template.entity';
 
 export abstract class ITemplateCatalogPort {
   /**

@@ -19,6 +19,19 @@ export interface PresenceSessionProps {
   lastSeenAt?: Date;
 }
 
+export interface PresenceSessionJSON {
+  userId: string;
+  socketId: string;
+  projectId: string;
+  name: string;
+  color: string;
+  avatar: string | null;
+  activeDocId: string | null;
+  cursor: ReturnType<CursorPositionVo['toJSON']> | null;
+  connectedAt: string;
+  lastSeenAt: string;
+}
+
 export class PresenceSession {
   private readonly _userId: string;
   private readonly _socketId: string;
@@ -107,7 +120,7 @@ export class PresenceSession {
     });
   }
 
-  public toJSON(): Record<string, any> {
+  public toJSON(): PresenceSessionJSON {
     return {
       userId: this._userId,
       socketId: this._socketId,
@@ -122,31 +135,38 @@ export class PresenceSession {
     };
   }
 
-  public static fromJSON(raw: any): PresenceSession {
-    if (!raw) {
+  public static fromJSON(raw: unknown): PresenceSession {
+    if (!raw || typeof raw !== 'object') {
       throw new Error(
         'Cannot construct PresenceSession from null or undefined',
       );
     }
+    const data = raw as Partial<PresenceSessionJSON> & {
+      cursor?: {
+        row?: number;
+        column?: number;
+        selection?: CursorPositionVo['selection'];
+      } | null;
+    };
     let cursor: CursorPositionVo | null = null;
-    if (raw.cursor) {
+    if (data.cursor && typeof data.cursor === 'object') {
       cursor = CursorPositionVo.create({
-        row: raw.cursor.row,
-        column: raw.cursor.column,
-        selection: raw.cursor.selection,
+        row: typeof data.cursor.row === 'number' ? data.cursor.row : 0,
+        column: typeof data.cursor.column === 'number' ? data.cursor.column : 0,
+        selection: data.cursor.selection ?? null,
       });
     }
     return new PresenceSession({
-      userId: raw.userId,
-      socketId: raw.socketId,
-      projectId: raw.projectId,
-      name: raw.name,
-      color: raw.color,
-      avatar: raw.avatar,
-      activeDocId: raw.activeDocId,
+      userId: data.userId || '',
+      socketId: data.socketId || '',
+      projectId: data.projectId || '',
+      name: data.name,
+      color: data.color,
+      avatar: data.avatar,
+      activeDocId: data.activeDocId,
       cursor,
-      connectedAt: raw.connectedAt ? new Date(raw.connectedAt) : new Date(),
-      lastSeenAt: raw.lastSeenAt ? new Date(raw.lastSeenAt) : new Date(),
+      connectedAt: data.connectedAt ? new Date(data.connectedAt) : new Date(),
+      lastSeenAt: data.lastSeenAt ? new Date(data.lastSeenAt) : new Date(),
     });
   }
 

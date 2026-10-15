@@ -23,7 +23,7 @@ export class SocketIoBroadcasterAdapter extends IRealtimeBroadcasterPort {
   public broadcastToProject(
     projectId: string,
     event: string,
-    payload: any,
+    payload: unknown,
     excludeSocketId?: string,
   ): void {
     if (!this.ioServer) {
@@ -41,7 +41,7 @@ export class SocketIoBroadcasterAdapter extends IRealtimeBroadcasterPort {
     projectId: string,
     docId: string,
     event: string,
-    payload: any,
+    payload: unknown,
     excludeSocketId?: string,
     volatile = false,
   ): void {
@@ -57,7 +57,7 @@ export class SocketIoBroadcasterAdapter extends IRealtimeBroadcasterPort {
     }
   }
 
-  public sendToSocket(socketId: string, event: string, payload: any): void {
+  public sendToSocket(socketId: string, event: string, payload: unknown): void {
     if (!this.ioServer) {
       return;
     }

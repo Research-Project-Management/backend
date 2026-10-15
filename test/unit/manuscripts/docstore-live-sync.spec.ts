@@ -10,7 +10,9 @@ import * as decoding from 'lib0/decoding';
 describe('line-diff', () => {
   it('produces real hunks and stats', () => {
     const a = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'].join('\n');
-    const b = ['a', 'b', 'X', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'].join('\n');
+    const b = ['a', 'b', 'X', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'].join(
+      '\n',
+    );
     const r = computeLineDiff(a, b, { from: 'v1', to: 'v2' });
     expect(r.stats).toEqual({ additions: 2, deletions: 1, unchanged: 9 });
     expect(r.hunks).toHaveLength(2);

@@ -7,7 +7,7 @@ import {
   ProviderName,
   ProviderResult,
   QueryType,
-} from '../types/metadata.types';
+} from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeDoi,
   normalizeIsbn,
@@ -16,13 +16,13 @@ import {
   cleanAbstractText,
   titleSimilarity,
   TITLE_MATCH_THRESHOLD,
-} from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/metadata-executor.service';
-import { getAcademicContactEmail } from '../../shared-kernel/core/constants/academic-client.constants';
+} from '@/modules/library/ingestion/domain/metadata.domain';
+import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
+import { getAcademicContactEmail } from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
 import {
   CSL_TYPE_TO_ITEM_TYPE,
   normalizePageRange,
-} from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 @Injectable()
 export class CrossRefProvider implements MetadataProvider {
@@ -410,16 +410,77 @@ export class CrossRefProvider implements MetadataProvider {
       .update(JSON.stringify(message))
       .digest('hex');
 
-    const publisher = cleanBibliographicText(
+    // Extract institution object/array (used by CrossRef for dissertation, report, posted-content, dataset)
+    let institutionName: string | undefined;
+    let institutionPlace: string | undefined;
+    const rawInst = message.institution;
+    const instObj = Array.isArray(rawInst)
+      ? rawInst[0] && typeof rawInst[0] === 'object'
+        ? (rawInst[0] as Record<string, unknown>)
+        : undefined
+      : rawInst && typeof rawInst === 'object'
+        ? (rawInst as Record<string, unknown>)
+        : undefined;
+    if (instObj) {
+      if (typeof instObj.name === 'string' && instObj.name.trim()) {
+        institutionName = cleanBibliographicText(instObj.name);
+      }
+      const rawInstPlace = instObj.place;
+      if (Array.isArray(rawInstPlace) && typeof rawInstPlace[0] === 'string') {
+        institutionPlace = cleanBibliographicText(rawInstPlace[0]);
+      } else if (typeof rawInstPlace === 'string') {
+        institutionPlace = cleanBibliographicText(rawInstPlace);
+      }
+    }
+
+    const rawPublisher = cleanBibliographicText(
       typeof message.publisher === 'string' ? message.publisher : undefined,
     );
+    const publisher = rawPublisher || institutionName;
+    const effectivePlace = place || institutionPlace;
+
+    const rawEdition = message['edition-number'] ?? message.edition;
+    const edition =
+      typeof rawEdition === 'string' && rawEdition.trim()
+        ? rawEdition.trim()
+        : typeof rawEdition === 'number'
+          ? String(rawEdition)
+          : undefined;
+
+    const rawDegree = message.degree;
+    const degreeStr = Array.isArray(rawDegree)
+      ? typeof rawDegree[0] === 'string'
+        ? rawDegree[0].trim()
+        : undefined
+      : typeof rawDegree === 'string'
+        ? rawDegree.trim()
+        : undefined;
+    const subtypeStr =
+      typeof message.subtype === 'string' && message.subtype.trim()
+        ? message.subtype.trim()
+        : undefined;
+
+    const rawReportNumber =
+      message['report-number'] ?? message.number ?? message['standard-number'];
+    const reportNumberStr =
+      typeof rawReportNumber === 'string' && rawReportNumber.trim()
+        ? rawReportNumber.trim()
+        : typeof rawReportNumber === 'number'
+          ? String(rawReportNumber)
+          : undefined;
+
     const volume =
       typeof message.volume === 'string' ? message.volume : undefined;
     const issue = typeof message.issue === 'string' ? message.issue : undefined;
-    const pages =
-      typeof message.page === 'string'
-        ? normalizePageRange(message.page)
+    const rawArticleNumber =
+      typeof message['article-number'] === 'string' &&
+      message['article-number'].trim()
+        ? message['article-number'].trim()
         : undefined;
+    const pages =
+      typeof message.page === 'string' && message.page.trim()
+        ? normalizePageRange(message.page)
+        : rawArticleNumber;
 
     const rawIssn = message.ISSN;
     const rawIssnStr = Array.isArray(rawIssn)
@@ -487,7 +548,12 @@ export class CrossRefProvider implements MetadataProvider {
       : typeof shortTitleRaw === 'string'
         ? shortTitleRaw.trim()
         : undefined;
-    const shortTitle = cleanBibliographicText(rawShortTitle);
+    const explicitShortTitle = cleanBibliographicText(rawShortTitle);
+    const shortTitle =
+      explicitShortTitle ||
+      (subtitle && title !== baseTitle && baseTitle !== 'Untitled'
+        ? baseTitle
+        : undefined);
 
     const rawRefByCount = message['is-referenced-by-count'];
     const citationCount =
@@ -504,6 +570,19 @@ export class CrossRefProvider implements MetadataProvider {
         : typeof rawRefCount === 'string' && Number(rawRefCount) > 0
           ? Number(rawRefCount)
           : undefined;
+
+    const university =
+      itemType === 'thesis' ? institutionName || rawPublisher : undefined;
+    const institution =
+      itemType === 'report' || itemType === 'preprint' || itemType === 'dataset'
+        ? institutionName || rawPublisher
+        : institutionName;
+    const thesisType = itemType === 'thesis' ? degreeStr : undefined;
+    const reportType = itemType === 'report' ? subtypeStr : undefined;
+    const reportNumber =
+      itemType === 'report' || itemType === 'standard'
+        ? reportNumberStr
+        : undefined;
 
     return {
       provider: this.id,
@@ -536,9 +615,16 @@ export class CrossRefProvider implements MetadataProvider {
             ? proceedingsTitle || journal
             : undefined,
         bookTitle: itemType === 'bookSection' ? journal || series : undefined,
-        place,
+        place: effectivePlace,
         journalAbbr,
         publisher,
+        university,
+        institution,
+        thesisType,
+        reportType,
+        reportNumber,
+        number: reportNumberStr,
+        edition,
         volume,
         issue,
         pages,

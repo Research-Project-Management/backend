@@ -4,8 +4,11 @@
  * Matches Overleaf DocManager.js diff checking optimization.
  */
 
-import { TextDoc } from '../../domain/text-doc.entity';
-import { DocRanges, DocRangeVo } from '../../domain/doc-range.vo';
+import { TextDoc } from '@/modules/manuscripts/docstore/core/domain/text-doc.entity';
+import {
+  DocRanges,
+  DocRangeVo,
+} from '@/modules/manuscripts/docstore/core/domain/doc-range.vo';
 
 export interface DiffCheckResult {
   shouldUpdate: boolean;

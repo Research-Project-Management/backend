@@ -26,6 +26,7 @@ export * from './infrastructure/idempotency/idempotency.service';
 // HTTP - Contracts
 export * from './http/contracts/response.type';
 export * from './http/contracts/idempotency.type';
+export * from './http/contracts/request.type';
 
 // HTTP - Decorators
 export * from './http/decorators/bypass.decorator';
@@ -37,7 +38,6 @@ export * from './http/filters/exception.filter';
 export * from './http/interceptors/transform.interceptor';
 export * from './http/interceptors/logger.interceptor';
 export * from './http/interceptors/idempotency.interceptor';
-
 
 // Logger
 export * from './logger/logger.module';

@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import { ConditionEvaluatorEngine } from '@/modules/library/catalog/utils/condition-evaluator.engine';
+import { ConditionEvaluatorEngine } from '@/modules/library/catalog/domain/condition-evaluator.engine';
 import { SavedSearchesService } from '@/modules/library/catalog/services/saved-searches.service';
 import { SavedSearchesRepository } from '@/modules/library/catalog/repositories/saved-searches.repository';
 import { SavedSearchConditionGroup } from '@/modules/library/catalog/types/saved-search.types';
@@ -53,7 +53,7 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
       const result = engine.compile(mockUserId, group);
       expect(result).toEqual({
         AND: [
-          { userId: mockUserId, deletedAt: null },
+          { userId: mockUserId, projectId: null, deletedAt: null },
           {
             AND: [{ title: { contains: 'Quantum', mode: 'insensitive' } }],
           },
@@ -89,7 +89,11 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
       };
 
       const personalResult = engine.compile(mockUserId, group);
-      expect(personalResult).toEqual({ userId: mockUserId, deletedAt: null });
+      expect(personalResult).toEqual({
+        userId: mockUserId,
+        projectId: null,
+        deletedAt: null,
+      });
 
       const projectResult = engine.compile(mockUserId, group, mockProjectId);
       expect(projectResult).toEqual({

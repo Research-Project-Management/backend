@@ -6,9 +6,9 @@
 import {
   TrackChange,
   ChangeStatus,
-} from '../domain/entities/track-change.entity';
-import { CommentThread } from '../domain/entities/comment-thread.entity';
-import { CommentReply } from '../domain/entities/comment-reply.entity';
+} from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
+import { CommentThread } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-thread.entity';
+import { CommentReply } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-reply.entity';
 
 export abstract class ITrackChangesRepositoryPort {
   abstract saveChange(change: TrackChange): Promise<TrackChange>;

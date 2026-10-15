@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { Prisma } from '@prisma/client';
-import { USER_MINIMAL_SELECT } from '../common/types/shared.types';
+import {
+  USER_MINIMAL_SELECT,
+  buildWorkItemIdOrIdentifierWhere,
+} from '@/modules/work-item/common/types/shared.types';
 
 @Injectable()
 export class ArchiveRepository {
@@ -24,15 +27,8 @@ export class ArchiveRepository {
   }
 
   async findWorkItemWithProject(workItemId: string) {
-    const where: Prisma.WorkItemWhereInput = isUuid(workItemId)
-      ? { id: workItemId, deletedAt: null }
-      : {
-          identifier: { equals: workItemId, mode: 'insensitive' },
-          deletedAt: null,
-        };
-
     return this.prisma.workItem.findFirst({
-      where,
+      where: buildWorkItemIdOrIdentifierWhere(workItemId),
       include: {
         project: {
           select: {
@@ -65,50 +61,43 @@ export class ArchiveRepository {
     });
   }
 
-  async archiveWorkItem(workItemId: string) {
+  private setArchiveState(workItemId: string, archived: boolean) {
     return this.prisma.workItem.update({
       where: { id: workItemId },
-      data: { archivedAt: new Date() },
+      data: { archivedAt: archived ? new Date() : null },
       include: {
         project: { select: { id: true } },
       },
     });
+  }
+
+  private async bulkSetArchiveState(workItemIds: string[], archived: boolean) {
+    const validIds = workItemIds.filter(isUuid);
+    if (validIds.length === 0) return { count: 0 };
+
+    return this.prisma.workItem.updateMany({
+      where: {
+        id: { in: validIds },
+        deletedAt: null,
+      },
+      data: { archivedAt: archived ? new Date() : null },
+    });
+  }
+
+  async archiveWorkItem(workItemId: string) {
+    return this.setArchiveState(workItemId, true);
   }
 
   async restoreWorkItem(workItemId: string) {
-    return this.prisma.workItem.update({
-      where: { id: workItemId },
-      data: { archivedAt: null },
-      include: {
-        project: { select: { id: true } },
-      },
-    });
+    return this.setArchiveState(workItemId, false);
   }
 
   async bulkArchive(workItemIds: string[]) {
-    const validIds = workItemIds.filter(isUuid);
-    if (validIds.length === 0) return { count: 0 };
-
-    return this.prisma.workItem.updateMany({
-      where: {
-        id: { in: validIds },
-        deletedAt: null,
-      },
-      data: { archivedAt: new Date() },
-    });
+    return this.bulkSetArchiveState(workItemIds, true);
   }
 
   async bulkRestore(workItemIds: string[]) {
-    const validIds = workItemIds.filter(isUuid);
-    if (validIds.length === 0) return { count: 0 };
-
-    return this.prisma.workItem.updateMany({
-      where: {
-        id: { in: validIds },
-        deletedAt: null,
-      },
-      data: { archivedAt: null },
-    });
+    return this.bulkSetArchiveState(workItemIds, false);
   }
 
   async findArchivedWorkItems(

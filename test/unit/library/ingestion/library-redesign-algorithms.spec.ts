@@ -4,11 +4,11 @@ import {
   tokenizeTitleWords,
   jaroWinkler,
   firstAuthorMatches,
-} from '@/modules/library/ingestion/utils/deduplication.utils';
+} from '@/modules/library/ingestion/domain/deduplication.domain';
 import {
   compactLibraryChanges,
   CompactableChange,
-} from '@/modules/library/sync/utils/outbox.utils';
+} from '@/modules/library/sync/domain/outbox.domain';
 
 describe('Library Redesign Algorithms — Deduplication & Sync Compaction Suite', () => {
   describe('Algorithm 1: Advanced Token Sort Ratio & Word Normalization', () => {

@@ -1,13 +1,17 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { RetractionRepository } from '../repositories/retraction.repository';
+import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import {
   RetractionDetails,
   RetractionNature,
   RetractionSource,
-} from '../types/retraction.types';
+} from '@/modules/library/ingestion/types/retraction.types';
 import * as path from 'path';
 import * as fs from 'fs';
+import {
+  normalizeDoi,
+  normalizePmid,
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 export interface RetractionSeedItem {
   doi: string;
@@ -58,8 +62,9 @@ export class RetractionDatabaseService implements OnModuleInit {
     try {
       await this.seedIfEmpty();
       await this.warmMemoryIndex();
-    } catch (err: any) {
-      this.logger.warn(`Retraction dataset warmup skipped: ${err?.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Retraction dataset warmup skipped: ${msg}`);
     }
   }
 
@@ -77,15 +82,16 @@ export class RetractionDatabaseService implements OnModuleInit {
       }
 
       const candidatePaths = [
+        path.resolve(__dirname, '../data/retraction-watch-seed.json'),
+        path.resolve(
+          process.cwd(),
+          'src/modules/library/ingestion/data/retraction-watch-seed.json',
+        ),
+        path.resolve(
+          process.cwd(),
+          'dist/modules/library/ingestion/data/retraction-watch-seed.json',
+        ),
         path.resolve(__dirname, '../repositories/retraction-watch-seed.json'),
-        path.resolve(
-          process.cwd(),
-          'src/modules/library/ingestion/repositories/retraction-watch-seed.json',
-        ),
-        path.resolve(
-          process.cwd(),
-          'dist/modules/library/ingestion/repositories/retraction-watch-seed.json',
-        ),
       ];
       const seedPath = candidatePaths.find((p) => fs.existsSync(p));
       if (!seedPath) {
@@ -104,7 +110,8 @@ export class RetractionDatabaseService implements OnModuleInit {
       let seeded = 0;
 
       for (const item of seedData) {
-        const cleanDoi = item.doi.trim().toLowerCase();
+        const cleanDoi =
+          normalizeDoi(item.doi) || item.doi.trim().toLowerCase();
         const cleanPmid = item.pmid?.trim() || null;
 
         await this.repo.upsertRetractionRecord({
@@ -146,10 +153,9 @@ export class RetractionDatabaseService implements OnModuleInit {
         `Successfully seeded ${seeded} Retraction Watch records.`,
       );
       return seeded;
-    } catch (err: any) {
-      this.logger.error(
-        `Error seeding Retraction Watch dataset: ${err?.message}`,
-      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Error seeding Retraction Watch dataset: ${msg}`);
       return 0;
     }
   }
@@ -181,8 +187,9 @@ export class RetractionDatabaseService implements OnModuleInit {
       this.logger.log(
         `Warmed retraction memory cache (${this.memoryDoiMap.size} DOIs, ${this.memoryPmidMap.size} PMIDs).`,
       );
-    } catch (err: any) {
-      this.logger.warn(`Could not warm retraction index: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Could not warm retraction index: ${msg}`);
     }
   }
 
@@ -194,8 +201,10 @@ export class RetractionDatabaseService implements OnModuleInit {
     doi?: string | null,
     pmid?: string | null,
   ): Promise<RetractionDetails | false | null> {
-    const cleanDoi = doi ? doi.trim().toLowerCase() : null;
-    const cleanPmid = pmid ? pmid.trim().toLowerCase() : null;
+    const cleanDoi = doi ? normalizeDoi(doi) || doi.trim().toLowerCase() : null;
+    const cleanPmid = pmid
+      ? (normalizePmid(pmid) || pmid.trim()).toLowerCase()
+      : null;
 
     // 1. In-Memory Fast Lookup (0ms)
     if (cleanDoi && this.memoryDoiMap.has(cleanDoi)) {
@@ -263,8 +272,8 @@ export class RetractionDatabaseService implements OnModuleInit {
     details: RetractionDetails,
     pmid?: string | null,
   ): Promise<void> {
-    const cleanDoi = doi.trim().toLowerCase();
-    const cleanPmid = pmid?.trim() || null;
+    const cleanDoi = normalizeDoi(doi) || doi.trim().toLowerCase();
+    const cleanPmid = pmid ? normalizePmid(pmid) || pmid.trim() : null;
 
     await this.repo.upsertRetractionRecord({
       where: { doi: cleanDoi },
@@ -300,8 +309,8 @@ export class RetractionDatabaseService implements OnModuleInit {
    * Records a paper as verified clean (not retracted) to avoid redundant online scans.
    */
   async saveClean(doi: string, pmid?: string | null): Promise<void> {
-    const cleanDoi = doi.trim().toLowerCase();
-    const cleanPmid = pmid?.trim() || null;
+    const cleanDoi = normalizeDoi(doi) || doi.trim().toLowerCase();
+    const cleanPmid = pmid ? normalizePmid(pmid) || pmid.trim() : null;
 
     this.cleanDoiCache.set(cleanDoi, Date.now() + this.CLEAN_CACHE_TTL_MS);
 
@@ -320,10 +329,9 @@ export class RetractionDatabaseService implements OnModuleInit {
           checkedAt: new Date(),
         },
       });
-    } catch (err: any) {
-      this.logger.debug(
-        `Could not save clean record for ${cleanDoi}: ${err.message}`,
-      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(`Could not save clean record for ${cleanDoi}: ${msg}`);
     }
   }
 
@@ -341,7 +349,7 @@ export class RetractionDatabaseService implements OnModuleInit {
       await Promise.all(
         batch.map(async (r) => {
           if (!r.doi) return;
-          const cleanDoi = r.doi.trim().toLowerCase();
+          const cleanDoi = normalizeDoi(r.doi) || r.doi.trim().toLowerCase();
           const cleanPmid = r.pmid?.trim() || null;
 
           await this.repo.upsertRetractionRecord({

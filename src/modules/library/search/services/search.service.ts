@@ -1,12 +1,12 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { SearchRepository } from '../repositories/search.repository';
-import { SearchOptions } from '../types/search.types';
+import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
+import { SearchOptions } from '@/modules/library/search/domain';
 import {
   FullTextProvider,
   PageAnchorMatch,
   PageTextExtraction,
 } from './full-text.provider';
-import { SearchItemsQueryDto } from '../dto/search.dto';
+import { SearchItemsQueryDto } from '@/modules/library/search/dto/search.dto';
 
 @Injectable()
 export class SearchService {
@@ -21,13 +21,19 @@ export class SearchService {
    * Faceted search returning items, facets, and cursor pagination metadata.
    */
   async search(userId: string, dto: SearchItemsQueryDto) {
+    const effectiveQuery = dto.query ?? dto.q ?? '';
     const searchOptions: SearchOptions = {
-      q: dto.query,
+      q: effectiveQuery,
       collectionId: dto.collectionId,
       tagId: dto.tagId,
       limit: dto.limit,
       cursor: dto.cursor,
       projectId: dto.projectId,
+      ...(dto.itemType !== undefined ? { itemType: dto.itemType } : {}),
+      ...(dto.yearFrom !== undefined ? { yearFrom: dto.yearFrom } : {}),
+      ...(dto.yearTo !== undefined ? { yearTo: dto.yearTo } : {}),
+      ...(dto.sortBy !== undefined ? { sortBy: dto.sortBy } : {}),
+      ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
     };
 
     const [searchResult, facets] = await Promise.all([
@@ -35,15 +41,18 @@ export class SearchService {
       this.repo.computeFacets(userId, searchOptions),
     ]);
 
+    const pageCount = searchResult.items.length;
+
     return {
       items: searchResult.items,
+      total: pageCount,
       facets,
+      nextCursor: searchResult.nextCursor ?? null,
       meta: {
         cursor: searchResult.nextCursor,
         hasNextPage: searchResult.hasNextPage,
-        // NOTE: pageCount reflects items on this page only, NOT the full result set total.
-        // Replace with a dedicated COUNT query from the repository when available.
-        pageCount: searchResult.items.length,
+        pageCount,
+        totalCount: pageCount,
       },
     };
   }
@@ -56,6 +65,7 @@ export class SearchService {
     attachmentId: string,
     term: string,
     pageIndex?: number,
+    projectId?: string,
   ): Promise<PageAnchorMatch[]> {
     const attachment = await this.repo.findAttachmentWithItem(attachmentId);
 
@@ -63,17 +73,22 @@ export class SearchService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    if (attachment.item.userId !== userId) {
-      if (!attachment.item.projectId) {
+    const isProjectScope = Boolean(
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal',
+    );
+    if (isProjectScope) {
+      if (attachment.item.projectId !== projectId) {
         throw new NotFoundException(`Attachment ${attachmentId} not found`);
       }
-      const member = await this.repo.checkProjectMember(
-        attachment.item.projectId,
-        userId,
-      );
-      if (!member) {
-        throw new NotFoundException(`Attachment ${attachmentId} not found`);
-      }
+    } else if (attachment.item.userId !== userId || attachment.item.projectId) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+
+    if (!term || !term.trim()) {
+      return [];
     }
 
     return this.fullText.searchPageAnchors(attachmentId, term, pageIndex);
@@ -93,17 +108,24 @@ export class SearchService {
     userId: string,
   ): Promise<{ indexedItems: number; indexedAttachments: number }> {
     this.logger.log(`Rebuilding search index for user ${userId}...`);
+    if (typeof this.repo.invalidateFacets === 'function') {
+      await this.repo.invalidateFacets(userId);
+    }
     const facets = await this.repo.computeFacets(userId, {});
-    const totalTypes = Object.values(facets.itemTypes).reduce(
-      (a, b) => a + b,
+    const totalTypes = Object.values(facets.itemTypes).reduce<number>(
+      (a: number, b: unknown) => a + Number(b || 0),
       0,
     );
+    const indexedAttachments =
+      typeof this.repo.countIndexedAttachments === 'function'
+        ? await this.repo.countIndexedAttachments(userId)
+        : 0;
     this.logger.log(
-      `Search index validated for user ${userId}: ${totalTypes} active items indexed.`,
+      `Search index validated for user ${userId}: ${totalTypes} active items, ${indexedAttachments} attachments indexed.`,
     );
     return {
       indexedItems: totalTypes,
-      indexedAttachments: 0,
+      indexedAttachments,
     };
   }
 

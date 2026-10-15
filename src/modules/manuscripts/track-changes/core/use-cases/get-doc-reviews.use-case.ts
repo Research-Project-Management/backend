@@ -4,9 +4,9 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ITrackChangesRepositoryPort } from '../ports/track-changes-repository.port';
-import { TrackChange } from '../domain/entities/track-change.entity';
-import { CommentThread } from '../domain/entities/comment-thread.entity';
+import { ITrackChangesRepositoryPort } from '@/modules/manuscripts/track-changes/core/ports/track-changes-repository.port';
+import { TrackChange } from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
+import { CommentThread } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-thread.entity';
 
 export interface GetDocReviewsOutput {
   changes: TrackChange[];

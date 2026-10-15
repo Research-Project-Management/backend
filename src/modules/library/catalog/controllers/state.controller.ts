@@ -4,6 +4,7 @@ import {
   Patch,
   Post,
   Param,
+  Query,
   Body,
   UseGuards,
   ParseUUIDPipe,
@@ -15,8 +16,11 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { StateService } from '../services/state.service';
-import { UpdateStateDto, GetBatchStatesDto } from '../dto/state.dto';
+import { StateService } from '@/modules/library/catalog/services/state.service';
+import {
+  UpdateStateDto,
+  GetBatchStatesDto,
+} from '@/modules/library/catalog/dto/state.dto';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 /**
@@ -69,7 +73,7 @@ export class StateController extends BaseStateController {
   async getState(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeGetState(userId, itemId, projectId);
   }
@@ -80,7 +84,7 @@ export class StateController extends BaseStateController {
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateStateDto,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeUpdateState(userId, itemId, dto, projectId);
   }
@@ -90,7 +94,7 @@ export class StateController extends BaseStateController {
   async markAsRead(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeMarkAsRead(userId, itemId, projectId);
   }
@@ -179,7 +183,7 @@ export class StateBatchController extends BaseStateBatchController {
   async getBatchStates(
     @CurrentUser('id') userId: string,
     @Body() body: GetBatchStatesDto,
-    projectId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     return this.executeGetBatchStates(userId, body.itemIds || [], projectId);
   }

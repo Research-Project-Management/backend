@@ -4,15 +4,16 @@
  * Matches Overleaf DocManager.updateDoc semantics.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
-import { IDocRepository } from '../ports/doc-repository.port';
-import { IDocHasher } from '../ports/doc-hasher.port';
-import { TextDoc } from '../domain/text-doc.entity';
-import { DocRanges } from '../domain/doc-range.vo';
-import { DocNotFoundError } from '../domain/doc-errors';
-import { LineArrayEngine } from '../adapters/engine/line-array.engine';
-import { NoopDiffChecker } from '../adapters/engine/noop-diff.checker';
-import { DocstoreMetrics } from '../adapters/telemetry/docstore.metrics';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { IDocRepository } from '@/modules/manuscripts/docstore/core/ports/doc-repository.port';
+import { IDocHasher } from '@/modules/manuscripts/docstore/core/ports/doc-hasher.port';
+import { computeDocSha256 } from '@/modules/manuscripts/docstore/domain/doc-hasher';
+import { TextDoc } from '@/modules/manuscripts/docstore/core/domain/text-doc.entity';
+import { DocRanges } from '@/modules/manuscripts/docstore/core/domain/doc-range.vo';
+import { DocNotFoundError } from '@/modules/manuscripts/docstore/core/domain/doc-errors';
+import { LineArrayEngine } from '@/modules/manuscripts/docstore/core/adapters/engine/line-array.engine';
+import { NoopDiffChecker } from '@/modules/manuscripts/docstore/core/adapters/engine/noop-diff.checker';
+import { DocstoreMetrics } from '@/modules/manuscripts/docstore/core/adapters/telemetry/docstore.metrics';
 
 export interface UpdateDocResult {
   doc: TextDoc;
@@ -26,7 +27,7 @@ export class UpdateDocUseCase {
 
   constructor(
     private readonly docRepository: IDocRepository,
-    private readonly docHasher: IDocHasher,
+    @Optional() private readonly docHasher?: IDocHasher,
   ) {}
 
   public async execute(
@@ -70,8 +71,10 @@ export class UpdateDocUseCase {
       };
     }
 
-    // 4. Compute updated hash fingerprint for CLSI incremental sync
-    const hash = this.docHasher.computeHash(lines);
+    // 4. Compute updated hash fingerprint for CLSI incremental sync via pure domain function
+    const hash = this.docHasher
+      ? this.docHasher.computeHash(lines)
+      : computeDocSha256(lines);
 
     // 5. Commit atomic update with OCC verification
     const { doc, modified } = await this.docRepository.updateDoc(

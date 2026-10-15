@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
-import { BaseDomainException } from '../errors/domain.exception';
+import { BaseDomainException } from '@/modules/library/shared-kernel/core/errors/domain.exception';
 
 /**
  * Clean Architecture Interface Adapter:

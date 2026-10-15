@@ -6,12 +6,12 @@ import {
 } from '@nestjs/common';
 import { CollectionsService } from '@/modules/library/catalog/services/collections.service';
 import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';
-import { TreeEngine } from '@/modules/library/catalog/utils/tree.engine';
+import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import { PrismaService } from '@/core';
 import {
   sanitizeCollectionName,
   sanitizeCollectionDescription,
-} from '@/modules/library/catalog/utils/collections.utils';
+} from '@/modules/library/catalog/domain/collections.domain';
 
 describe('Library Collections — Tree Invariants & Sanitization', () => {
   describe('Collection Sanitization Utilities', () => {

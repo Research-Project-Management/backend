@@ -6,7 +6,7 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
-import { CslStyleRegistry } from '../utils/csl-style-registry';
+import { CslStyleRegistry } from '@/modules/library/citation/domain/csl-style-registry';
 import {
   CitationStyleId,
   CitationItemInput,
@@ -14,18 +14,24 @@ import {
   ReferenceData,
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
-} from '../types/citation.types';
+} from '@/modules/library/citation/types/citation.types';
 import { DoiContentNegotiationService } from './doi-content-negotiation.service';
 import { CslEngineService } from './csl-engine.service';
-import { CslJsonMapper } from '../utils/csl-json.mapper';
-import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
+import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
+import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,
-} from '../../shared-kernel/core/constants/academic-client.constants';
+} from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
 import { CslRepositoryService } from './csl-repository.service';
 
 export type { ReferenceData };
+
+interface MetadataPortResolveResult {
+  metadata?: Record<string, unknown>;
+  provenance?: Record<string, { provider?: string }>;
+  queryType?: string;
+}
 
 @Injectable()
 export class CitationService {
@@ -45,7 +51,10 @@ export class CitationService {
     @Optional()
     @Inject('METADATA_PORT')
     private readonly metadataPort?: {
-      resolve: (req: { query: string; userId?: string }) => Promise<any>;
+      resolve: (req: {
+        query: string;
+        userId?: string;
+      }) => Promise<MetadataPortResolveResult | null | undefined>;
     },
   ) {}
 
@@ -95,7 +104,10 @@ export class CitationService {
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
   ): FormattedCitationResult {
-    if (!this.registry.has(styleId)) {
+    const isSupported =
+      this.registry.has(styleId) ||
+      Boolean(this.cslEngine?.isStyleSupported?.(styleId));
+    if (!isSupported) {
       throw new BadRequestException(`Unsupported citation style: ${styleId}`);
     }
     const style = this.registry.getStyle(styleId);
@@ -111,9 +123,10 @@ export class CitationService {
           bibliographyHtml: res.bibliographyHtml,
           source: 'csl-engine',
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `CslEngineService format error: ${err?.message || err}. Falling back to default format.`,
+          `CslEngineService format error: ${errMsg}. Falling back to default format.`,
         );
       }
     }
@@ -130,7 +143,14 @@ export class CitationService {
     index: number = 1,
   ): Promise<FormattedCitationResult> {
     if (this.cslEngine) {
-      await this.cslEngine.ensureTemplate(styleId);
+      const loaded = await this.cslEngine.ensureTemplate(styleId);
+      if (loaded && !this.registry.has(styleId)) {
+        this.registry.registerStyle({
+          id: styleId,
+          name: styleId,
+          category: 'author-date',
+        });
+      }
     }
     return this.formatItem(item, styleId, index);
   }
@@ -153,10 +173,13 @@ export class CitationService {
       bibliographyHtml?: string;
     }>;
   } {
-    const style = this.registry.getStyle(styleId);
-    if (!style) {
+    const isSupported =
+      this.registry.has(styleId) ||
+      Boolean(this.cslEngine?.isStyleSupported?.(styleId));
+    if (!isSupported) {
       throw new BadRequestException(`Unsupported citation style: ${styleId}`);
     }
+    const style = this.registry.getStyle(styleId);
 
     if (this.cslEngine) {
       try {
@@ -169,9 +192,10 @@ export class CitationService {
           bibliographyHtml: res.bibliographyHtml,
           citations: res.citations,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `CslEngineService batch error: ${err?.message || err}. Falling back to default format.`,
+          `CslEngineService batch error: ${errMsg}. Falling back to default format.`,
         );
       }
     }
@@ -204,6 +228,26 @@ export class CitationService {
       bibliographyText,
       citations,
     };
+  }
+
+  /**
+   * Asynchronously formats a batch of citation items, ensuring dynamic CSL templates are loaded on-demand.
+   */
+  async formatBatchAsync(
+    items: CitationItemInput[],
+    styleId: CitationStyleId = 'apa-7th',
+  ) {
+    if (this.cslEngine) {
+      const loaded = await this.cslEngine.ensureTemplate(styleId);
+      if (loaded && !this.registry.has(styleId)) {
+        this.registry.registerStyle({
+          id: styleId,
+          name: styleId,
+          category: 'author-date',
+        });
+      }
+    }
+    return this.formatBatch(items, styleId);
   }
 
   private get crossRefMailto(): string {
@@ -247,13 +291,14 @@ export class CitationService {
       const json = await res.json();
       const message = json?.message;
       return this.mapCrossRefMessage(message);
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (
         err instanceof NotFoundException ||
         err instanceof BadRequestException
       )
         throw err;
-      throw new BadRequestException(`Failed to resolve DOI: ${err.message}`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      throw new BadRequestException(`Failed to resolve DOI: ${errMsg}`);
     }
   }
 
@@ -291,7 +336,9 @@ export class CitationService {
       const json = await res.json();
       const items = json?.message?.items || [];
       const totalResults = json?.message?.['total-results'] || items.length;
-      const works = items.map((item: any) => this.mapCrossRefMessage(item));
+      const works = (
+        items as Array<Parameters<typeof this.mapCrossRefMessage>[0]>
+      ).map((item) => this.mapCrossRefMessage(item));
       return { works, totalResults };
     } catch {
       return { works: [], totalResults: 0 };
@@ -299,17 +346,23 @@ export class CitationService {
   }
 
   private mapItemMetadataToReferenceData(
-    metadata: Record<string, any>,
+    metadata: Record<string, unknown>,
   ): ReferenceData {
     let authors: string[] = [];
     if (Array.isArray(metadata.authors) && metadata.authors.length > 0) {
-      authors = metadata.authors;
+      authors = metadata.authors as string[];
     } else if (
       Array.isArray(metadata.creators) &&
       metadata.creators.length > 0
     ) {
-      authors = metadata.creators
-        .map((c: any) => {
+      authors = (
+        metadata.creators as Array<{
+          name?: string;
+          firstName?: string;
+          lastName?: string;
+        }>
+      )
+        .map((c) => {
           if (c.name) return c.name;
           const parts = [c.firstName, c.lastName].filter(Boolean);
           return parts.join(' ');
@@ -317,13 +370,16 @@ export class CitationService {
         .filter(Boolean);
     }
 
-    let year: number | string | undefined = metadata.year ?? undefined;
+    let year: number | string | undefined =
+      (metadata.year as number | string) ?? undefined;
     if (!year && metadata.publicationDate) {
       const yearMatch = String(metadata.publicationDate).match(/\b(\d{4})\b/);
       if (yearMatch) {
         year = parseInt(yearMatch[1], 10);
       } else {
-        const parsedYear = new Date(metadata.publicationDate).getUTCFullYear();
+        const parsedYear = new Date(
+          metadata.publicationDate as string | number | Date,
+        ).getUTCFullYear();
         if (!isNaN(parsedYear)) {
           year = parsedYear;
         }
@@ -331,15 +387,24 @@ export class CitationService {
     }
 
     const combinedTags = normalizeTags([
-      ...(metadata.keywords || []),
-      ...(metadata.tags || []),
+      ...((metadata.keywords as string[]) || []),
+      ...((metadata.tags as string[]) || []),
     ]);
 
     return {
-      doi: metadata.doi,
-      title: metadata.title || '',
+      doi: metadata.doi as string | undefined,
+      title: (metadata.title as string) || '',
       authors: authors.length > 0 ? authors : undefined,
-      creators: metadata.creators?.map((c: any) => ({
+      creators: (
+        metadata.creators as
+          | Array<{
+              creatorType?: string;
+              name?: string;
+              firstName?: string;
+              lastName?: string;
+            }>
+          | undefined
+      )?.map((c) => ({
         creatorType: c.creatorType || 'author',
         name:
           c.name || [c.firstName, c.lastName].filter(Boolean).join(' ').trim(),
@@ -347,31 +412,42 @@ export class CitationService {
         lastName: c.lastName ?? undefined,
       })),
       year,
-      journal: metadata.journal || metadata.publicationTitle,
-      publicationTitle: metadata.publicationTitle || metadata.journal,
-      publicationDate: metadata.publicationDate || metadata.date,
-      publisher: metadata.publisher,
-      volume: metadata.volume,
-      issue: metadata.issue,
-      pages: metadata.pages,
-      issn: metadata.issn,
-      isbn: metadata.isbn,
-      arxivId: metadata.arxivId,
-      pmid: metadata.pmid,
-      pmcid: metadata.pmcid,
+      journal: (metadata.journal || metadata.publicationTitle) as
+        string | undefined,
+      publicationTitle: (metadata.publicationTitle || metadata.journal) as
+        string | undefined,
+      publicationDate: (metadata.publicationDate || metadata.date) as
+        string | undefined,
+      publisher: metadata.publisher as string | undefined,
+      volume: metadata.volume as string | undefined,
+      issue: metadata.issue as string | undefined,
+      pages: metadata.pages as string | undefined,
+      issn: metadata.issn as string | undefined,
+      isbn: metadata.isbn as string | undefined,
+      arxivId: metadata.arxivId as string | undefined,
+      pmid: metadata.pmid as string | undefined,
+      pmcid: metadata.pmcid as string | undefined,
       url:
-        metadata.url ||
-        metadata.openAccessPdfUrl ||
+        (metadata.url as string | undefined) ||
+        (metadata.openAccessPdfUrl as string | undefined) ||
         (metadata.doi ? `https://doi.org/${metadata.doi}` : undefined),
-      openAccessPdfUrl: metadata.openAccessPdfUrl || metadata.pdfUrl,
-      abstract: metadata.abstract || metadata.abstractNote,
-      citationCount: metadata.citationCount,
+      openAccessPdfUrl: (metadata.openAccessPdfUrl || metadata.pdfUrl) as
+        string | undefined,
+      abstract: (metadata.abstract || metadata.abstractNote) as
+        string | undefined,
+      citationCount: metadata.citationCount as number | undefined,
       keywords: combinedTags,
       tags: combinedTags,
-      type: metadata.type || metadata.itemType || 'journal-article',
-      itemType: metadata.itemType || metadata.type || 'journalArticle',
-      extraFields: metadata.extraFields,
-      provenance: metadata.provenance,
+      type:
+        (metadata.type as string | undefined) ||
+        (metadata.itemType as string | undefined) ||
+        'journal-article',
+      itemType:
+        (metadata.itemType as string | undefined) ||
+        (metadata.type as string | undefined) ||
+        'journalArticle',
+      extraFields: metadata.extraFields as Record<string, unknown> | undefined,
+      provenance: metadata.provenance as Record<string, unknown> | undefined,
     };
   }
 
@@ -441,9 +517,10 @@ export class CitationService {
             queryType: (resolved.queryType || 'unknown').toLowerCase(),
           };
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.debug(
-          `MetadataPort resolution failed for "${input}": ${err?.message || err}`,
+          `MetadataPort resolution failed for "${input}": ${message}`,
         );
       }
     }
@@ -487,9 +564,10 @@ export class CitationService {
                 queryType: 'doi',
               };
             }
-          } catch (err: any) {
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
             this.logger.debug(
-              `DOI Content Negotiation failed for "${cleanDoiCandidate}": ${err?.message || err}`,
+              `DOI Content Negotiation failed for "${cleanDoiCandidate}": ${message}`,
             );
           }
         }
@@ -519,9 +597,10 @@ export class CitationService {
           queryType: 'title',
         };
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       this.logger.debug(
-        `CrossRef search failed for query "${input}": ${err?.message || err}`,
+        `CrossRef search failed for query "${input}": ${message}`,
       );
     }
 
@@ -606,15 +685,24 @@ export class CitationService {
       itemType: item.itemType || 'journalArticle',
       authors:
         item.contributors
-          ?.filter((c) => c.creatorType === 'author')
+          ?.filter((c) => (c.creatorType || 'author') === 'author')
           .map(
             (c) =>
               c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
           ) || [],
-      creators: item.contributors?.map((c) => ({
+      contributors: item.contributors?.map((c) => ({
+        creatorType: c.creatorType || 'author',
         firstName: c.firstName || '',
         lastName: c.lastName || '',
-        name: c.fullName,
+        fullName: c.fullName || undefined,
+        name: c.fullName || undefined,
+      })),
+      creators: item.contributors?.map((c) => ({
+        creatorType: c.creatorType || 'author',
+        firstName: c.firstName || '',
+        lastName: c.lastName || '',
+        fullName: c.fullName || undefined,
+        name: c.fullName || undefined,
       })),
       publicationTitle: item.publicationTitle || undefined,
       journal: item.publicationTitle || undefined,
@@ -623,9 +711,55 @@ export class CitationService {
       issue: item.issue || undefined,
       pages: item.pages || undefined,
       year: item.year || undefined,
+      publicationDate:
+        typeof item.publicationDate === 'string'
+          ? item.publicationDate
+          : undefined,
       doi: item.doi || undefined,
+      isbn: typeof item.isbn === 'string' ? item.isbn : undefined,
+      issn: typeof item.issn === 'string' ? item.issn : undefined,
+      pmid: typeof item.pmid === 'string' ? item.pmid : undefined,
+      pmcid: typeof item.pmcid === 'string' ? item.pmcid : undefined,
+      arxivId: typeof item.arxivId === 'string' ? item.arxivId : undefined,
       url: item.url || undefined,
       citationKey: item.citationKey || undefined,
+      place: typeof item.place === 'string' ? item.place : undefined,
+      edition:
+        typeof item.edition === 'string' || typeof item.edition === 'number'
+          ? String(item.edition)
+          : undefined,
+      series: typeof item.series === 'string' ? item.series : undefined,
+      bookTitle:
+        typeof item.bookTitle === 'string' ? item.bookTitle : undefined,
+      proceedingsTitle:
+        typeof item.proceedingsTitle === 'string'
+          ? item.proceedingsTitle
+          : undefined,
+      conferenceName:
+        typeof item.conferenceName === 'string'
+          ? item.conferenceName
+          : undefined,
+      thesisType:
+        typeof item.thesisType === 'string' ? item.thesisType : undefined,
+      reportType:
+        typeof item.reportType === 'string' ? item.reportType : undefined,
+      versionNumber:
+        typeof item.versionNumber === 'string' ? item.versionNumber : undefined,
+      accessedAt:
+        item.accessedAt instanceof Date || typeof item.accessedAt === 'string'
+          ? item.accessedAt
+          : undefined,
+      abstract: typeof item.abstract === 'string' ? item.abstract : undefined,
+      extra: typeof item.extra === 'string' ? item.extra : undefined,
+      metadata: item.metadata,
+      updatedAt:
+        item.updatedAt instanceof Date || typeof item.updatedAt === 'string'
+          ? item.updatedAt
+          : undefined,
+      version:
+        typeof item.version === 'number' || typeof item.version === 'string'
+          ? item.version
+          : undefined,
     };
 
     return this.formatItem(citationInput, styleId, index);
@@ -671,9 +805,10 @@ export class CitationService {
             });
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `CslEngineService formatBatch error: ${err?.message || err}. Falling back to individual formatting.`,
+          `CslEngineService formatBatch error: ${message}. Falling back to individual formatting.`,
         );
       }
     }
@@ -720,16 +855,25 @@ export class CitationService {
           itemType: item.itemType || 'journalArticle',
           authors:
             item.contributors
-              ?.filter((c) => c.creatorType === 'author')
+              ?.filter((c) => (c.creatorType || 'author') === 'author')
               .map(
                 (c) =>
                   c.fullName ||
                   `${c.firstName || ''} ${c.lastName || ''}`.trim(),
               ) || [],
-          creators: item.contributors?.map((c) => ({
+          contributors: item.contributors?.map((c) => ({
+            creatorType: c.creatorType || 'author',
             firstName: c.firstName || '',
             lastName: c.lastName || '',
-            name: c.fullName,
+            fullName: c.fullName || undefined,
+            name: c.fullName || undefined,
+          })),
+          creators: item.contributors?.map((c) => ({
+            creatorType: c.creatorType || 'author',
+            firstName: c.firstName || '',
+            lastName: c.lastName || '',
+            fullName: c.fullName || undefined,
+            name: c.fullName || undefined,
           })),
           publicationTitle: item.publicationTitle || undefined,
           journal: item.publicationTitle || undefined,
@@ -738,9 +882,59 @@ export class CitationService {
           issue: item.issue || undefined,
           pages: item.pages || undefined,
           year: item.year || undefined,
+          publicationDate:
+            typeof item.publicationDate === 'string'
+              ? item.publicationDate
+              : undefined,
           doi: item.doi || undefined,
+          isbn: typeof item.isbn === 'string' ? item.isbn : undefined,
+          issn: typeof item.issn === 'string' ? item.issn : undefined,
+          pmid: typeof item.pmid === 'string' ? item.pmid : undefined,
+          pmcid: typeof item.pmcid === 'string' ? item.pmcid : undefined,
+          arxivId: typeof item.arxivId === 'string' ? item.arxivId : undefined,
           url: item.url || undefined,
           citationKey: item.citationKey || undefined,
+          place: typeof item.place === 'string' ? item.place : undefined,
+          edition:
+            typeof item.edition === 'string' || typeof item.edition === 'number'
+              ? String(item.edition)
+              : undefined,
+          series: typeof item.series === 'string' ? item.series : undefined,
+          bookTitle:
+            typeof item.bookTitle === 'string' ? item.bookTitle : undefined,
+          proceedingsTitle:
+            typeof item.proceedingsTitle === 'string'
+              ? item.proceedingsTitle
+              : undefined,
+          conferenceName:
+            typeof item.conferenceName === 'string'
+              ? item.conferenceName
+              : undefined,
+          thesisType:
+            typeof item.thesisType === 'string' ? item.thesisType : undefined,
+          reportType:
+            typeof item.reportType === 'string' ? item.reportType : undefined,
+          versionNumber:
+            typeof item.versionNumber === 'string'
+              ? item.versionNumber
+              : undefined,
+          accessedAt:
+            item.accessedAt instanceof Date ||
+            typeof item.accessedAt === 'string'
+              ? item.accessedAt
+              : undefined,
+          abstract:
+            typeof item.abstract === 'string' ? item.abstract : undefined,
+          extra: typeof item.extra === 'string' ? item.extra : undefined,
+          metadata: item.metadata,
+          updatedAt:
+            item.updatedAt instanceof Date || typeof item.updatedAt === 'string'
+              ? item.updatedAt
+              : undefined,
+          version:
+            typeof item.version === 'number' || typeof item.version === 'string'
+              ? item.version
+              : undefined,
         };
         formatted = this.formatItem(citationInput, styleId, index + 1);
       }
@@ -791,7 +985,30 @@ export class CitationService {
     };
   }
 
-  private mapCrossRefMessage(message: any): ReferenceData {
+  private mapCrossRefMessage(
+    message:
+      | {
+          title?: string | string[];
+          author?: Array<{ given?: string; family?: string; name?: string }>;
+          'published-print'?: { 'date-parts'?: (number | string)[][] };
+          'published-online'?: { 'date-parts'?: (number | string)[][] };
+          issued?: { 'date-parts'?: (number | string)[][] };
+          DOI?: string;
+          'container-title'?: string | string[];
+          publisher?: string;
+          volume?: string;
+          issue?: string;
+          page?: string;
+          ISSN?: string | string[];
+          ISBN?: string | string[];
+          URL?: string;
+          abstract?: string;
+          type?: string;
+          score?: number;
+        }
+      | null
+      | undefined,
+  ): ReferenceData {
     const title = Array.isArray(message?.title)
       ? message.title[0] || 'Untitled'
       : message?.title || 'Untitled';

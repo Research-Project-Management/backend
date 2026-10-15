@@ -10,7 +10,7 @@ import * as path from 'path';
 import {
   IOutputFileFinder,
   DiscoveredOutputFile,
-} from '../../ports/artifacts.port';
+} from '@/modules/manuscripts/clsi/core/ports/artifacts.port';
 
 export class OverleafOutputFileFinder implements IOutputFileFinder {
   private static readonly IGNORED_NAMES = new Set([

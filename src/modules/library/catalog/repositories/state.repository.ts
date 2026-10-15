@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, ReadStatus } from '@prisma/client';
-import { StateEntity, UpsertStateData } from '../types/state.types';
+import {
+  StateEntity,
+  UpsertStateData,
+} from '@/modules/library/catalog/types/state.types';
 
 const STATE_SELECT = {
   userId: true,
@@ -117,42 +120,5 @@ export class StateRepository {
         itemId,
       },
     });
-  }
-
-  async findItemWithAccess(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<{ id: string; userId: string; projectId: string | null } | null> {
-    const item = await this.prisma.item.findFirst({
-      where: {
-        id: itemId,
-        deletedAt: null,
-      },
-      select: { id: true, userId: true, projectId: true },
-    });
-    if (!item) return null;
-    if (
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal'
-    ) {
-      if (item.projectId !== projectId) return null;
-    }
-    if (item.userId === userId) return item;
-    if (item.projectId) {
-      const member = await this.prisma.projectMember.findUnique({
-        where: {
-          projectId_userId: {
-            projectId: item.projectId,
-            userId,
-          },
-        },
-        select: { role: true },
-      });
-      if (member) return item;
-    }
-    return null;
   }
 }

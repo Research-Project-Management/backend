@@ -4,10 +4,10 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IHistoryRepositoryPort } from '../ports/history-repository.port';
-import { VersionLabel } from '../domain/entities/version-label.entity';
-import { VersionNotFoundException } from '../domain/exceptions/version-not-found.exception';
-import { DuplicateLabelException } from '../domain/exceptions/duplicate-label.exception';
+import { IHistoryRepositoryPort } from '@/modules/manuscripts/project-history/core/ports/history-repository.port';
+import { VersionLabel } from '@/modules/manuscripts/project-history/core/domain/entities/version-label.entity';
+import { VersionNotFoundException } from '@/modules/manuscripts/project-history/core/domain/exceptions/version-not-found.exception';
+import { DuplicateLabelException } from '@/modules/manuscripts/project-history/core/domain/exceptions/duplicate-label.exception';
 
 export interface LabelVersionInput {
   projectId: string;

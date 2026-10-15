@@ -9,6 +9,7 @@ import {
   STATE_MINIMAL_SELECT,
   CHILD_WORK_ITEM_SELECT,
 } from './types/work-item.types';
+import { buildWorkItemIdOrIdentifierWhere } from '@/modules/work-item/common/types/shared.types';
 import { deriveProjectIdentifierPrefix } from './utils/work-item.util';
 import {
   formatEntityAttachments,
@@ -83,6 +84,71 @@ export class CoreRepository {
     return project?.id ?? null;
   }
 
+  private async hydrateWorkItemAttachments(
+    records: WorkItemWithRelations[],
+  ): Promise<void> {
+    if (
+      !this.prismaService.entityAttachment?.findMany ||
+      records.length === 0
+    ) {
+      return;
+    }
+    try {
+      const itemIds = records.map((r) => r.id);
+      const attachments = await this.prismaService.entityAttachment.findMany({
+        where: {
+          entityType: EntityType.work_item,
+          entityId: itemIds.length === 1 ? itemIds[0] : { in: itemIds },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (!attachments || attachments.length === 0) return;
+
+      const attachmentMap = new Map<string, RawAttachmentRecord[]>();
+      for (const att of attachments) {
+        const key = att.entityId || records[0].id;
+        const list = attachmentMap.get(key) || [];
+        list.push(att);
+        attachmentMap.set(key, list);
+      }
+      for (const r of records) {
+        const itemAtts = attachmentMap.get(r.id);
+        if (itemAtts && itemAtts.length > 0) {
+          r.attachments = formatEntityAttachments(itemAtts);
+        }
+      }
+    } catch {
+      // Graceful fallback if table is unavailable in mock tests
+    }
+  }
+
+  private normalizeStateConnect(
+    rawData: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const { columnId, ...restData } = rawData as {
+      columnId?: string;
+      [key: string]: unknown;
+    };
+    const normalized: Record<string, unknown> = { ...restData };
+    const hasRelationConnect = Boolean(
+      (normalized.project as { connect?: unknown } | undefined)?.connect ||
+      (normalized.author as { connect?: unknown } | undefined)?.connect ||
+      (normalized.assignee as { connect?: unknown } | undefined)?.connect ||
+      (normalized.parentWorkItem as { connect?: unknown } | undefined)
+        ?.connect ||
+      (normalized.state as { connect?: unknown } | undefined)?.connect,
+    );
+
+    if (columnId && hasRelationConnect) {
+      if (!normalized.state) {
+        normalized.state = { connect: { id: columnId } };
+      }
+    } else if (columnId) {
+      normalized.columnId = columnId;
+    }
+    return normalized;
+  }
+
   // ── Queries ─────────────────────────────────────────────────────────────────
 
   async findProjectWorkItems(
@@ -106,35 +172,7 @@ export class CoreRepository {
       ...(skip ? { skip } : {}),
     });
 
-    if (this.prismaService.entityAttachment?.findMany && records.length > 0) {
-      try {
-        const itemIds = records.map((r) => r.id);
-        const attachments = await this.prismaService.entityAttachment.findMany({
-          where: {
-            entityType: EntityType.work_item,
-            entityId: { in: itemIds },
-          },
-          orderBy: { createdAt: 'asc' },
-        });
-        const attachmentMap = new Map<string, RawAttachmentRecord[]>();
-        for (const att of attachments) {
-          const list = attachmentMap.get(att.entityId) || [];
-          list.push(att);
-          attachmentMap.set(att.entityId, list);
-        }
-        for (const r of records) {
-          const itemAtts = attachmentMap.get(r.id);
-          if (itemAtts && itemAtts.length > 0) {
-            (
-              r as WorkItemWithRelations & { attachments?: WorkItemAttachments }
-            ).attachments = formatEntityAttachments(itemAtts);
-          }
-        }
-      } catch {
-        // Graceful fallback if table is unavailable in mock tests
-      }
-    }
-
+    await this.hydrateWorkItemAttachments(records);
     return records;
   }
 
@@ -189,39 +227,14 @@ export class CoreRepository {
   async findWorkItemById(
     workItemId: string,
   ): Promise<WorkItemWithRelations | null> {
-    const item = !isUuid(workItemId)
-      ? await this.prismaService.workItem.findFirst({
-          where: { identifier: workItemId, deletedAt: null },
-          include: BASE_WORK_ITEM_INCLUDE,
-        })
-      : await this.prismaService.workItem.findFirst({
-          where: { id: workItemId, deletedAt: null },
-          include: BASE_WORK_ITEM_INCLUDE,
-        });
+    const item = await this.prismaService.workItem.findFirst({
+      where: buildWorkItemIdOrIdentifierWhere(workItemId),
+      include: BASE_WORK_ITEM_INCLUDE,
+    });
 
     if (!item) return null;
 
-    if (this.prismaService.entityAttachment?.findMany) {
-      try {
-        const records = await this.prismaService.entityAttachment.findMany({
-          where: {
-            entityType: EntityType.work_item,
-            entityId: item.id,
-          },
-          orderBy: { createdAt: 'asc' },
-        });
-        if (records && records.length > 0) {
-          (
-            item as WorkItemWithRelations & {
-              attachments?: WorkItemAttachments;
-            }
-          ).attachments = formatEntityAttachments(records);
-        }
-      } catch {
-        // Graceful fallback
-      }
-    }
-
+    await this.hydrateWorkItemAttachments([item]);
     return item;
   }
 
@@ -255,27 +268,7 @@ export class CoreRepository {
   async createWorkItem(
     data: Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput,
   ): Promise<WorkItemWithRelations> {
-    const { columnId, ...restData } = data as (
-      Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput
-    ) & { columnId?: string };
-    const createData = { ...restData };
-    const hasRelationConnect = Boolean(
-      (createData as Prisma.WorkItemCreateInput).project?.connect ||
-      (createData as Prisma.WorkItemCreateInput).author?.connect ||
-      (createData as Prisma.WorkItemCreateInput).assignee?.connect ||
-      (createData as Prisma.WorkItemCreateInput).parentWorkItem?.connect ||
-      (createData as Prisma.WorkItemCreateInput).state?.connect,
-    );
-
-    if (columnId && hasRelationConnect) {
-      if (!(createData as Prisma.WorkItemCreateInput).state) {
-        (createData as Prisma.WorkItemCreateInput).state = {
-          connect: { id: columnId },
-        };
-      }
-    } else if (columnId) {
-      (createData as Prisma.WorkItemUncheckedCreateInput).columnId = columnId;
-    }
+    const createData = this.normalizeStateConnect(data);
 
     return this.executeTx<WorkItemWithRelations>(async (tx) => {
       const created = await tx.workItem.create({
@@ -309,27 +302,7 @@ export class CoreRepository {
     data: Prisma.WorkItemUpdateInput | Prisma.WorkItemUncheckedUpdateInput,
   ): Promise<WorkItemWithRelations> {
     const rawData = data as Record<string, unknown>;
-    const { columnId, ...restData } = rawData as {
-      columnId?: string;
-      labels?: string[];
-      [key: string]: unknown;
-    };
-    const updateData = { ...restData };
-    const hasRelationConnect = Boolean(
-      (updateData as Prisma.WorkItemUpdateInput).assignee?.connect ||
-      (updateData as Prisma.WorkItemUpdateInput).parentWorkItem?.connect ||
-      (updateData as Prisma.WorkItemUpdateInput).state?.connect,
-    );
-
-    if (columnId && hasRelationConnect) {
-      if (!(updateData as Prisma.WorkItemUpdateInput).state) {
-        (updateData as Prisma.WorkItemUpdateInput).state = {
-          connect: { id: columnId },
-        };
-      }
-    } else if (columnId) {
-      (updateData as Prisma.WorkItemUncheckedUpdateInput).columnId = columnId;
-    }
+    const updateData = this.normalizeStateConnect(rawData);
 
     return this.executeTx<WorkItemWithRelations>(async (tx) => {
       const updated = await tx.workItem.update({

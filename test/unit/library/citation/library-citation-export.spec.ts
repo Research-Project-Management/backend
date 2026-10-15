@@ -198,7 +198,7 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
       );
     });
 
-    it('should scope database query to user and user project memberships when projectId is absent', async () => {
+    it('should scope database query to user when projectId is absent', async () => {
       await exportsService.exportByCitationKeys(mockUserId, [
         'vaswani2017attention',
       ]);
@@ -208,16 +208,7 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
           AND: expect.arrayContaining([
             expect.objectContaining({
               deletedAt: null,
-              OR: [
-                { userId: mockUserId },
-                {
-                  project: {
-                    members: {
-                      some: { userId: mockUserId },
-                    },
-                  },
-                },
-              ],
+              userId: mockUserId,
             }),
           ]),
         }),

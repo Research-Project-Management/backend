@@ -3,12 +3,12 @@
  * Use case resolving forward & reverse SyncTeX queries for a project
  */
 
-import { IWorkspaceManager } from '../ports/workspace.port';
+import { IWorkspaceManager } from '@/modules/manuscripts/clsi/core/ports/workspace.port';
 import {
   ISyncTexProcessor,
   SyncPoint,
   ReverseSyncPoint,
-} from '../ports/artifacts.port';
+} from '@/modules/manuscripts/clsi/core/ports/artifacts.port';
 
 export interface ForwardSyncRequest {
   projectId?: string;

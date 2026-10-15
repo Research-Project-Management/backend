@@ -21,7 +21,7 @@ import type {
   ChildWorkItemMinimal,
   StateMinimal,
   ParentWorkItemMinimal,
-} from '../types/work-item.types';
+} from '@/modules/work-item/core/types/work-item.types';
 
 export type { WorkItemResponse };
 

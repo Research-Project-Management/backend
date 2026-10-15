@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
-import { CatalogModule } from '../catalog/catalog.module';
+import { CatalogModule } from '@/modules/library/catalog/catalog.module';
 import { CitationFacade, CITATION_FACADE } from './citation.facade';
 
 // Presentation
@@ -14,20 +14,14 @@ import { CslEngineService } from './services/csl-engine.service';
 import { CslRepositoryService } from './services/csl-repository.service';
 import { ExportsService } from './services/exports.service';
 import { PdfBakerService } from './services/pdf-baker.service';
-
-import { FormatCitationUseCase } from './core/use-cases/format-citation.use-case';
-
-// Repositories
 import { ExportsRepository } from './repositories/exports.repository';
 
-// Utils & Adapters
-import { CslStyleRegistry } from './utils/csl-style-registry';
-import { CslCitationEngineAdapter } from './utils/csl-citation-engine.adapter';
-import { InProcessCatalogGatewayAdapter } from './utils/in-process-catalog-gateway.adapter';
-import { HttpCatalogGatewayAdapter } from './utils/http-catalog-gateway.adapter';
+// Utils & Gateways
+import { CslStyleRegistry } from './domain/csl-style-registry';
+import { InProcessCatalogGatewayAdapter } from './gateways/in-process-catalog-gateway.adapter';
+import { HttpCatalogGatewayAdapter } from './gateways/http-catalog-gateway.adapter';
 
 // Ports/Types
-import { CITATION_ENGINE_PORT } from './core/ports/citation-engine.port';
 import { CATALOG_GATEWAY_PORT } from './types/citation.types';
 
 /**
@@ -58,12 +52,6 @@ import { CATALOG_GATEWAY_PORT } from './types/citation.types';
     ExportsService,
     ExportsRepository,
     PdfBakerService,
-    CslCitationEngineAdapter,
-    {
-      provide: CITATION_ENGINE_PORT,
-      useClass: CslCitationEngineAdapter,
-    },
-    FormatCitationUseCase,
     InProcessCatalogGatewayAdapter,
     HttpCatalogGatewayAdapter,
     {
@@ -83,8 +71,6 @@ import { CATALOG_GATEWAY_PORT } from './types/citation.types';
     CslRepositoryService,
     CitationService,
     ExportsService,
-    CITATION_ENGINE_PORT,
-    FormatCitationUseCase,
   ],
 })
 export class CitationModule {}

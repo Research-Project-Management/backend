@@ -12,7 +12,7 @@ import { Type } from 'class-transformer';
 import {
   SavedSearchConditionGroup,
   SavedSearchScopeOptions,
-} from '../types/saved-search.types';
+} from '@/modules/library/catalog/types/saved-search.types';
 
 export class CreateSavedSearchDto {
   @IsString()

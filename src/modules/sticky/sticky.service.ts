@@ -6,7 +6,8 @@ import {
   Optional,
   Logger,
 } from '@nestjs/common';
-import { StickyRepository } from './sticky.repository';
+import { Prisma } from '@prisma/client';
+import { StickyRepository, StickyWithUser } from './sticky.repository';
 import { CreateStickyDto, UpdateStickyDto } from './dto/sticky.dto';
 import { RedisCacheService } from '@/core';
 import { STICKY_REDIS_KEYS } from './constants/redis-keys.constant';
@@ -39,6 +40,12 @@ export class StickyService {
   }
 
   private formatSticky<T extends { positionX: number; positionY: number }>(
+    stickyRecord: T,
+  ): T & { position: { x: number; y: number } };
+  private formatSticky<T extends { positionX: number; positionY: number }>(
+    stickyRecord: null | undefined,
+  ): null;
+  private formatSticky<T extends { positionX: number; positionY: number }>(
     stickyRecord: T | null | undefined,
   ): (T & { position: { x: number; y: number } }) | null {
     if (!stickyRecord) return null;
@@ -67,10 +74,15 @@ export class StickyService {
 
   private async getStickiesWithCache(
     cacheKey: string,
-    fetcher: () => Promise<any[]>,
+    fetcher: () => Promise<StickyWithUser[]>,
   ) {
+    type FormattedSticky = StickyWithUser & {
+      position: { x: number; y: number };
+    };
     if (this.cache) {
-      const cached = await this.cache.get<any>(cacheKey);
+      const cached = await this.cache.get<{ stickies: FormattedSticky[] }>(
+        cacheKey,
+      );
       if (cached) return cached;
     }
 
@@ -156,7 +168,7 @@ export class StickyService {
       throw new ForbiddenException('You can only update your own sticky notes');
     }
 
-    const updateData: any = {};
+    const updateData: Prisma.StickyUpdateInput = {};
     if (dto.title !== undefined) updateData.title = dto.title.trim();
     if (dto.content !== undefined) {
       updateData.content = sanitizeStickyHtml(dto.content);

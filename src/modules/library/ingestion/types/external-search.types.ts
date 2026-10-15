@@ -1,9 +1,9 @@
 /**
  * Canonical types and port interfaces for External Academic Search and Multi-Provider Benchmarking.
- * 
+ *
  * Adheres to Clean Architecture:
  * - Domain contracts remain decoupled from specific search engine vendors.
- * - Allows side-by-side comparison between self-hosted (SearXNG) and commercial/public providers (Tavily, EuropePMC).
+ * - Allows side-by-side comparison between self-hosted (SearXNG) and open academic providers (EuropePMC).
  */
 
 export const EXTERNAL_SEARCH_PROVIDERS = Symbol('EXTERNAL_SEARCH_PROVIDERS');
@@ -43,14 +43,17 @@ export interface ExternalSearchResult {
 export interface IExternalSearchProvider {
   readonly providerName: string;
   isAvailable(): Promise<boolean>;
-  search(query: string, options?: ExternalSearchOptions): Promise<ExternalSearchResult>;
+  search(
+    query: string,
+    options?: ExternalSearchOptions,
+  ): Promise<ExternalSearchResult>;
 }
 
 export interface ProviderComparisonMetrics {
   latencyMs: number;
   hitsCount: number;
   doiResolutionRate: number; // Tỉ lệ bóc được DOI hợp lệ (0.0 -> 1.0)
-  pdfDetectionRate: number;  // Tỉ lệ phát hiện được link PDF trực tiếp (0.0 -> 1.0)
+  pdfDetectionRate: number; // Tỉ lệ phát hiện được link PDF trực tiếp (0.0 -> 1.0)
   averageConfidence: number; // Điểm tin cậy trung bình của các hits
 }
 

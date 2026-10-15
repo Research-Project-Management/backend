@@ -16,20 +16,29 @@ describe('ReviewBundleFlushScheduler', () => {
     const findMany = jest.fn(async () => [{ userId: 'u1' }, { userId: 'u2' }]);
     const mkPrisma = (locked: boolean): any => ({
       manuscriptNotification: { findMany },
-      $transaction: (fn: any) =>
-        fn({ $queryRaw: async () => [{ locked }] }),
+      $transaction: (fn: any) => fn({ $queryRaw: async () => [{ locked }] }),
     });
     const bundling: any = {
       flushDue: jest.fn(async (u: string) => (u === 'u1' ? [{}, {}] : [])),
     };
-    expect(await new ReviewBundleFlushScheduler(mkPrisma(false), bundling).sweep()).toBe(0);
+    expect(
+      await new ReviewBundleFlushScheduler(mkPrisma(false), bundling).sweep(),
+    ).toBe(0);
     expect(bundling.flushDue).not.toHaveBeenCalled();
-    expect(await new ReviewBundleFlushScheduler(mkPrisma(true), bundling).sweep()).toBe(2);
+    expect(
+      await new ReviewBundleFlushScheduler(mkPrisma(true), bundling).sweep(),
+    ).toBe(2);
     expect(bundling.flushDue).toHaveBeenCalledTimes(2);
   });
 });
 
-const mk = (id: string, type: any, minsAgo: number, projectId = 'p1', isRead = false) =>
+const mk = (
+  id: string,
+  type: any,
+  minsAgo: number,
+  projectId = 'p1',
+  isRead = false,
+) =>
   new NotificationEntity({
     id,
     userId: 'u1',
@@ -63,14 +72,22 @@ describe('review bundle domain', () => {
   });
 
   it('builds digest counts and summary', () => {
-    const d = buildDigest('u1', [mk('1', 'mention', 1), mk('2', 'comment_reply', 1)].map(toBundledItem), 10, 'p1');
+    const d = buildDigest(
+      'u1',
+      [mk('1', 'mention', 1), mk('2', 'comment_reply', 1)].map(toBundledItem),
+      10,
+      'p1',
+    );
     expect(d.mentionCount).toBe(1);
     expect(d.replyCount).toBe(1);
     expect(d.summary).toBe('1 mention, 1 reply from 1 collaborator');
   });
 
   it('normalizes settings', () => {
-    expect(normalizeSettings({ enabled: false, windowMinutes: 0 })).toEqual({ enabled: false, windowMinutes: 10 });
+    expect(normalizeSettings({ enabled: false, windowMinutes: 0 })).toEqual({
+      enabled: false,
+      windowMinutes: 10,
+    });
   });
 });
 

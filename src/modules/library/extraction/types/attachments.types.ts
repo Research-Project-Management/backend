@@ -1,6 +1,9 @@
-import { BaseDomainException } from '../../shared-kernel/core/errors/domain.exception';
+import { BaseDomainException } from '@/modules/library/shared-kernel/core/errors/domain.exception';
+import type { AttachmentExtractionStatus as PrismaExtractionStatus } from '@prisma/client';
+import type { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
+
 export const ATTACHMENT_REPOSITORY_PORT = Symbol('ATTACHMENT_REPOSITORY_PORT');
-export type IAttachmentRepositoryPort = any;
+export type IAttachmentRepositoryPort = AttachmentsRepository;
 
 export type AttachmentKind = 'stored_file' | 'linked_resource' | 'snapshot';
 
@@ -18,15 +21,14 @@ export type AttachmentType =
   | 'other'
   | 'preview';
 
-export type AttachmentExtractionStatus =
-  'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export type AttachmentExtractionStatus = PrismaExtractionStatus;
 
 export interface AttachmentRevisionEntity {
   id: string;
   attachmentId: string;
   revisionNumber: number;
   fileId?: string | null;
-  fileHash: string;
+  fileHash?: string | null;
   sizeBytes: number | bigint;
   url: string;
   comment?: string | null;
@@ -58,14 +60,16 @@ export interface CreateAttachmentInput {
   userId?: string;
   projectId?: string;
   itemId?: string;
+  title?: string;
   filename: string;
-  url: string;
+  url?: string;
   mimeType?: string;
   size?: number | bigint;
   fileHash?: string;
   fileId?: string;
   linkMode?: LinkMode;
   attachmentType?: AttachmentType;
+  isPrimary?: boolean;
 }
 
 export interface ReplaceAttachmentFileInput {

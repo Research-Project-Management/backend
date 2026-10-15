@@ -11,7 +11,7 @@ export interface StorageOutboxEvent {
   id: string;
   type: string;
   timestamp: string;
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
 }
 
 /**
@@ -91,7 +91,7 @@ export class StorageEventOutboxService {
 
   public async dispatch(
     type: string,
-    payload: Record<string, any>,
+    payload: Record<string, unknown>,
   ): Promise<StorageOutboxEvent> {
     const eventRecord: StorageOutboxEvent = {
       id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -127,9 +127,9 @@ export class StorageEventOutboxService {
           'data',
           serialized,
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.warn(
-          `Failed to publish event ${type} to Redis: ${err?.message}`,
+          `Failed to publish event ${type} to Redis: ${(err as Error)?.message}`,
         );
       }
     }

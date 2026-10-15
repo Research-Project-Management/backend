@@ -5,7 +5,7 @@ import { Prisma, LibraryChange, Tombstone } from '@prisma/client';
 import {
   AppendChangeEntry,
   RecordTombstoneEntry,
-} from '../../shared-kernel/ports/unit-of-work.port';
+} from '@/modules/library/shared-kernel/ports/unit-of-work.port';
 
 @Injectable()
 export class ChangeLogRepository {
@@ -85,7 +85,7 @@ export class ChangeLogRepository {
         entityId: entry.entityId,
         action: entry.action,
         version: entry.version,
-        data: entry.data ?? null,
+        data: (entry.data as Prisma.InputJsonValue) ?? Prisma.JsonNull,
       },
     });
   }
@@ -144,7 +144,7 @@ export class ChangeLogRepository {
 
     return this.prisma.libraryChange.findMany({
       where: {
-        ...(projectId ? { projectId } : { userId }),
+        ...(projectId ? { projectId } : { userId, projectId: null }),
         seq: {
           gt: seqBigInt,
         },
@@ -170,7 +170,7 @@ export class ChangeLogRepository {
 
     return this.prisma.tombstone.findMany({
       where: {
-        ...(projectId ? { projectId } : { userId }),
+        ...(projectId ? { projectId } : { userId, projectId: null }),
         ...(seqBigInt !== undefined
           ? {
               seq: {
@@ -205,7 +205,7 @@ export class ChangeLogRepository {
       seqFromSync = seq?.currentSequence ?? BigInt(0);
     }
 
-    const scopeWhere = projectId ? { projectId } : { userId };
+    const scopeWhere = projectId ? { projectId } : { userId, projectId: null };
     const [latestChange, latestTombstone] = await Promise.all([
       this.prisma.libraryChange.findFirst({
         where: scopeWhere,

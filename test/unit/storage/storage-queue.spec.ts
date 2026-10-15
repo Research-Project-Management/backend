@@ -306,15 +306,20 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
 
       expect(mockNodeRepo.update).toHaveBeenCalledTimes(1);
       expect(node.metadata?.datasetPreview).toBeDefined();
-      expect(node.metadata?.datasetPreview.columns).toEqual([
+      const preview = node.metadata?.datasetPreview as {
+        columns: string[];
+        totalSampledRows: number;
+        sampleRows: string[][];
+      };
+      expect(preview.columns).toEqual([
         'experiment_id',
         'temperature',
         'pressure',
         'accuracy',
       ]);
-      expect(node.metadata?.datasetPreview.totalSampledRows).toBe(4);
-      expect(node.metadata?.datasetPreview.sampleRows.length).toBe(3);
-      expect(node.metadata?.datasetPreview.sampleRows[0]).toEqual([
+      expect(preview.totalSampledRows).toBe(4);
+      expect(preview.sampleRows.length).toBe(3);
+      expect(preview.sampleRows[0]).toEqual([
         'EXP-001',
         '298.15',
         '101.3',

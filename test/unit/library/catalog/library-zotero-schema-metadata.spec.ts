@@ -1,6 +1,6 @@
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
-import { ItemTransformer } from '@/modules/library/catalog/utils/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 
 describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', () => {
   let typesService: TypesService;

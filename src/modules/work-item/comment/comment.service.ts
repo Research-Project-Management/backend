@@ -233,11 +233,4 @@ export class CommentService {
 
     return { comment };
   }
-
-  getComments = this.getWorkItemComments.bind(this);
-  createComment = this.createWorkItemComment.bind(this);
-  updateComment = this.updateWorkItemComment.bind(this);
-  deleteComment = this.deleteWorkItemComment.bind(this);
-  addReply = this.addWorkItemReply.bind(this);
-  reactComment = this.reactToWorkItemComment.bind(this);
 }

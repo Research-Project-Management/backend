@@ -24,7 +24,7 @@ import {
   CreatorCreditInput,
   CreatorType,
   ItemMetadata as CanonicalItemMetadata,
-} from '../../shared-kernel';
+} from '@/modules/library/shared-kernel';
 
 export type { CreatorCreditInput, CreatorType };
 export type CreatorInput = CreatorCreditInput;
@@ -102,7 +102,9 @@ export type ProviderName =
   | 'OpenLibrary'
   | 'OpenAlex'
   | 'Unpaywall'
-  | 'CORE';
+  | 'CORE'
+  | 'DBLP'
+  | 'SemanticScholar';
 
 export interface ProviderCapability {
   queryTypes: QueryType[];

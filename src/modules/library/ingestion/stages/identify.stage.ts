@@ -6,32 +6,98 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import zlib from 'zlib';
-import { SubmissionPayload } from '../types/submission.types';
-import { MetadataCandidate } from '../types/metadata-candidate.types';
-import { DoiParser } from '../parsers/doi.parser';
-import { BibtexParser } from '../parsers/bibtex.parser';
-import { RisParser } from '../parsers/ris.parser';
-import { NormalizationPolicy } from '../policies/normalization.policy';
+import { promisify } from 'util';
+import { randomUUID } from 'crypto';
+
+const gunzipAsync = promisify(zlib.gunzip);
+import { SubmissionPayload } from '@/modules/library/ingestion/types/submission.types';
+import {
+  MetadataCandidate,
+  FieldEvidence,
+} from '@/modules/library/ingestion/types/metadata-candidate.types';
+import {
+  DoiParser,
+  BibtexParser,
+  RisParser,
+  CslParser,
+  QueryClassifier,
+  ParsedBibtexEntry,
+} from '@/modules/library/ingestion/parsers';
+import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
-import { QueryClassifier } from '../parsers/query.classifier';
 import {
   normalizeAcademicTitleCase,
+  inferItemTypeFromPdfSignals,
+} from '@/modules/library/shared-kernel/domain/academic-text.domain';
+import {
   normalizeArxivId,
   normalizePmid,
   normalizeIsbn,
-  inferItemTypeFromPdfSignals,
-  mapCslTypeToZoteroItemType,
   deriveDoiFromPublisherUrl,
-} from '../../shared-kernel/utils/bibliographic.utils';
-import { UrlMetadataScraperService } from '../services/url-metadata-scraper.service';
+} from '@/modules/library/shared-kernel/domain/identifier.domain';
+import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import {
   EXTRACTION_GATEWAY_PORT,
   IExtractionGatewayPort,
-} from '../types/extraction-gateway.types';
-import { randomUUID } from 'crypto';
+} from '@/modules/library/ingestion/types/extraction-gateway.types';
+import {
+  IWorkflowStage,
+  IdentifyStageInput,
+} from '@/modules/library/ingestion/types/workflow-stage.types';
+
+interface ExtractedPdfMetadata {
+  title?: string;
+  authors?: Array<
+    | string
+    | {
+        fullName?: string;
+        name?: string;
+        firstName?: string;
+        lastName?: string;
+      }
+  >;
+  creators?: Array<
+    | string
+    | {
+        fullName?: string;
+        name?: string;
+        firstName?: string;
+        lastName?: string;
+      }
+  >;
+  doi?: string;
+  arxivId?: string;
+  isbn?: string;
+  year?: number;
+  publicationDate?: string;
+  publisher?: string;
+  publicationTitle?: string;
+  journal?: string;
+  pages?: string;
+  tags?: string[];
+  keywords?: string[];
+  referenceCount?: number;
+  citationCount?: number;
+  notes?: Array<string | { content?: string }>;
+  extraFields?: Record<string, unknown>;
+  numberOfPages?: number;
+  isSelfSufficient?: boolean;
+  qualityScore?: number;
+  engineUsed?: string;
+  conferenceName?: string;
+  bookTitle?: string;
+  itemType?: string;
+  rawText?: string;
+  creationDate?: string;
+  [key: string]: unknown;
+}
 
 @Injectable()
-export class IdentifyStage {
+export class IdentifyStage implements IWorkflowStage<
+  IdentifyStageInput | string,
+  MetadataCandidate[]
+> {
+  readonly stageName = 'IDENTIFY' as const;
   private readonly logger = new Logger(IdentifyStage.name);
 
   constructor(
@@ -46,791 +112,733 @@ export class IdentifyStage {
     @Inject(EXTRACTION_GATEWAY_PORT)
     private readonly extractionGateway?: IExtractionGatewayPort,
     @Optional() private readonly urlScraper?: UrlMetadataScraperService,
+    @Optional() private readonly cslParser: CslParser = new CslParser(),
   ) {}
 
   /**
-   * Executes identification and initial format translation.
+   * Executes identification and initial format translation into candidate envelopes.
    */
   async execute(
-    runId: string,
-    payload: SubmissionPayload,
-    scopeId?: string,
+    runIdOrInput: string | IdentifyStageInput,
+    payloadArg?: SubmissionPayload,
+    scopeIdArg?: string,
   ): Promise<MetadataCandidate[]> {
+    const _runId =
+      typeof runIdOrInput === 'string' ? runIdOrInput : runIdOrInput.runId;
+    const payload =
+      typeof runIdOrInput === 'string' ? payloadArg! : runIdOrInput.payload;
+    const scopeId =
+      typeof runIdOrInput === 'string' ? scopeIdArg : runIdOrInput.scopeId;
     const candidates: MetadataCandidate[] = [];
 
     switch (payload.kind) {
       case 'IDENTIFIER': {
-        if (payload.identifierType === 'DOI') {
-          const cleanDoi = this.doiParser.normalize(payload.value);
-          const normalized = this.normalizer.normalize({ doi: cleanDoi });
-          candidates.push({
-            candidateId: randomUUID(),
-            sourceKind: 'IDENTIFIER',
-            sourceName: 'DirectIdentifier',
-            sourceRecordId: cleanDoi,
-            retrievedAt: new Date().toISOString(),
-            schemaVersion: '1.0.0',
-            fields: {
-              doi: {
-                path: 'doi',
-                value: payload.value,
-                normalizedValue: cleanDoi,
-                confidence: 1.0,
-                sourceProvider: 'UserIdentifier',
-                retrievedAt: new Date().toISOString(),
-              },
-            },
-            normalizedMetadata: normalized,
-            confidenceScore: 1.0,
-          });
-        } else if (payload.identifierType === 'ARXIV') {
-          const cleanArxiv =
-            normalizeArxivId(payload.value) ||
-            payload.value.replace(/^arxiv:\s*/i, '').trim();
-          const normalized = this.normalizer.normalize({ arxivId: cleanArxiv });
-          candidates.push({
-            candidateId: randomUUID(),
-            sourceKind: 'IDENTIFIER',
-            sourceName: 'DirectIdentifier',
-            sourceRecordId: cleanArxiv,
-            retrievedAt: new Date().toISOString(),
-            schemaVersion: '1.0.0',
-            fields: {
-              arxivId: {
-                path: 'arxivId',
-                value: payload.value,
-                normalizedValue: cleanArxiv,
-                confidence: 1.0,
-                sourceProvider: 'UserIdentifier',
-                retrievedAt: new Date().toISOString(),
-              },
-            },
-            normalizedMetadata: normalized,
-            confidenceScore: 1.0,
-          });
-        } else if (payload.identifierType === 'PMID') {
-          const cleanPmid =
-            normalizePmid(payload.value) ||
-            payload.value.replace(/^pmid:\s*/i, '').trim();
-          const normalized = this.normalizer.normalize({ pmid: cleanPmid });
-          candidates.push({
-            candidateId: randomUUID(),
-            sourceKind: 'IDENTIFIER',
-            sourceName: 'DirectIdentifier',
-            sourceRecordId: cleanPmid,
-            retrievedAt: new Date().toISOString(),
-            schemaVersion: '1.0.0',
-            fields: {
-              pmid: {
-                path: 'pmid',
-                value: payload.value,
-                normalizedValue: cleanPmid,
-                confidence: 1.0,
-                sourceProvider: 'UserIdentifier',
-                retrievedAt: new Date().toISOString(),
-              },
-            },
-            normalizedMetadata: normalized,
-            confidenceScore: 1.0,
-          });
-        } else if (payload.identifierType === 'ISBN') {
-          const cleanIsbn =
-            normalizeIsbn(payload.value) ||
-            payload.value
-              .replace(/[-\s]/g, '')
-              .replace(/^isbn:?\s*/i, '')
-              .trim();
-          const normalized = this.normalizer.normalize({ isbn: cleanIsbn });
-          candidates.push({
-            candidateId: randomUUID(),
-            sourceKind: 'IDENTIFIER',
-            sourceName: 'DirectIdentifier',
-            sourceRecordId: cleanIsbn,
-            retrievedAt: new Date().toISOString(),
-            schemaVersion: '1.0.0',
-            fields: {
-              isbn: {
-                path: 'isbn',
-                value: payload.value,
-                normalizedValue: cleanIsbn,
-                confidence: 1.0,
-                sourceProvider: 'UserIdentifier',
-                retrievedAt: new Date().toISOString(),
-              },
-            },
-            normalizedMetadata: normalized,
-            confidenceScore: 1.0,
-          });
-        }
+        const candidate = this.buildIdentifierCandidate(
+          payload.identifierType,
+          payload.value,
+        );
+        if (candidate) candidates.push(candidate);
         break;
       }
 
       case 'RECORD': {
-        let recordContent = payload.content || '';
-        if (
-          payload.isOffloaded &&
-          payload.fileId &&
-          typeof this.storagePort?.readOwnedFile === 'function'
-        ) {
-          try {
-            const file = await this.storagePort.readOwnedFile({
-              fileId: payload.fileId,
-            });
-            if (file?.buffer) {
-              const decompressed = zlib.gunzipSync(file.buffer);
-              recordContent = decompressed.toString('utf-8');
-            }
-          } catch (err: any) {
-            this.logger.error(
-              `[ClaimCheck] Failed to hydrate offloaded record payload ${payload.fileId}: ${err?.message}`,
-            );
-            throw new BadRequestException(
-              `Failed to hydrate offloaded record content: ${err?.message}`,
-            );
-          }
-        }
+        const recordContent = await this.resolveRecordContent(payload);
+        const format = (payload.format || '').toUpperCase();
 
-        if (payload.format === 'BIBTEX') {
+        if (format === 'BIBTEX') {
           const parsedList = this.bibtexParser.parse(recordContent);
           for (const item of parsedList) {
-            const rawMetadata = {
-              title: item.title,
-              itemType: item.itemType,
-              authors: item.authors,
-              editors: item.editors,
-              year: item.year,
-              publicationTitle: item.journal,
-              journal: item.journal,
-              publisher: item.publisher,
-              place: item.place,
-              volume: item.volume,
-              issue: item.issue,
-              pages: item.pages,
-              series: item.series,
-              edition: item.edition,
-              arxivId: item.arxivId,
-              doi: item.doi,
-              isbn: item.isbn,
-              issn: item.issn,
-              url: item.url,
-              abstract: item.abstract,
-              citationKey: item.citationKey,
-              tags: item.keywords,
-              keywords: item.keywords,
-              notes: item.notes?.map((noteContent) => ({
-                content: noteContent,
-                source: 'bibtex',
-              })),
-              language: item.language,
-              rights: item.rights,
-              fileUrl: item.fileUrl,
-              extra: item.extra,
-              seeAlso: item.seeAlso,
-              relations: item.relations,
-            };
-            const normalized = this.normalizer.normalize(rawMetadata);
-            candidates.push({
-              candidateId: randomUUID(),
-              sourceKind: 'RECORD',
-              sourceName: 'BibTeX',
-              sourceRecordId: item.citationKey || item.doi,
-              retrievedAt: new Date().toISOString(),
-              schemaVersion: '1.0.0',
-              fields: this.buildEvidenceFields(
-                rawMetadata,
-                normalized,
-                'BibTeX',
-              ),
-              normalizedMetadata: normalized,
-              confidenceScore: 0.95,
-            });
+            candidates.push(
+              this.createCandidate({
+                sourceKind: 'RECORD',
+                sourceName: 'BibTeX',
+                sourceRecordId: item.citationKey || item.doi,
+                rawMetadata: this.mapBibtexToRaw(item),
+                confidenceScore: 0.95,
+              }),
+            );
           }
-        } else if (payload.format === 'RIS') {
+        } else if (format === 'RIS') {
           const parsedList = this.risParser.parse(recordContent);
           for (const item of parsedList) {
-            const normalized = this.normalizer.normalize(item);
-            candidates.push({
-              candidateId: randomUUID(),
-              sourceKind: 'RECORD',
-              sourceName: 'RIS',
-              sourceRecordId: item.doi || item.citationKey,
-              retrievedAt: new Date().toISOString(),
-              schemaVersion: '1.0.0',
-              fields: this.buildEvidenceFields(item, normalized, 'RIS'),
-              normalizedMetadata: normalized,
-              confidenceScore: 0.95,
-            });
+            candidates.push(
+              this.createCandidate({
+                sourceKind: 'RECORD',
+                sourceName: 'RIS',
+                sourceRecordId: item.doi || item.citationKey,
+                rawMetadata: item,
+                confidenceScore: 0.95,
+              }),
+            );
           }
         } else if (
-          payload.format === 'CSL_JSON' ||
-          (payload.format as string) === 'JSON' ||
+          format === 'CSL_JSON' ||
+          format === 'JSON' ||
           (payload.format as string) === 'csl_json'
         ) {
-          let items: any[] = [];
-          try {
-            const parsed =
-              typeof recordContent === 'string'
-                ? JSON.parse(recordContent)
-                : recordContent;
-            items = Array.isArray(parsed) ? parsed : [parsed];
-          } catch {
-            items = [];
-          }
-
-          for (const csl of items) {
-            if (!csl || typeof csl !== 'object') continue;
-
-            const authors = (csl.author || [])
-              .map((a: any) => {
-                if (a.literal) return a.literal.trim();
-                if (a.given && a.family) return `${a.given} ${a.family}`.trim();
-                return (a.family || a.given || '').trim();
-              })
-              .filter(Boolean);
-
-            const editors = (csl.editor || [])
-              .map((e: any) => {
-                if (e.literal) return e.literal.trim();
-                if (e.given && e.family) return `${e.given} ${e.family}`.trim();
-                return (e.family || e.given || '').trim();
-              })
-              .filter(Boolean);
-
-            const creators = [
-              ...(csl.author || []).map((a: any) => ({
-                name:
-                  a.literal ||
-                  (a.given && a.family
-                    ? `${a.given} ${a.family}`
-                    : a.family || a.given || ''),
-                firstName: a.given || undefined,
-                lastName: a.family || undefined,
-                creatorType: 'author',
-              })),
-              ...(csl.editor || []).map((e: any) => ({
-                name:
-                  e.literal ||
-                  (e.given && e.family
-                    ? `${e.given} ${e.family}`
-                    : e.family || e.given || ''),
-                firstName: e.given || undefined,
-                lastName: e.family || undefined,
-                creatorType: 'editor',
-              })),
-            ];
-
-            const year =
-              csl.issued?.['date-parts']?.[0]?.[0] != null
-                ? Number(csl.issued['date-parts'][0][0])
-                : undefined;
-
-            let keywords: string[] | undefined;
-            const rawKeywords = csl.keyword || csl.keywords || csl.subject;
-            if (Array.isArray(rawKeywords)) {
-              keywords = rawKeywords
-                .map((k: any) => String(k).trim())
-                .filter(Boolean);
-            } else if (typeof rawKeywords === 'string' && rawKeywords.trim()) {
-              keywords = rawKeywords
-                .split(/[,;\n]/)
-                .map((k: string) => k.trim())
-                .filter(Boolean);
-            }
-
-            const numPages =
-              csl['number-of-pages'] != null
-                ? String(csl['number-of-pages'])
-                : undefined;
-
-            const mapCslType = (cslType: string): string =>
-              mapCslTypeToZoteroItemType(cslType);
-
-            const rawMetadata = {
-              title: csl.title || 'Untitled Document',
-              itemType: mapCslType(csl.type),
-              authors: authors.length > 0 ? authors : undefined,
-              editors: editors.length > 0 ? editors : undefined,
-              creators: creators.length > 0 ? creators : undefined,
-              year,
-              publicationTitle: csl['container-title'] || undefined,
-              journal: csl['container-title'] || undefined,
-              publisher: csl.publisher || undefined,
-              place: csl['publisher-place'] || undefined,
-              volume: csl.volume ? String(csl.volume) : undefined,
-              issue: csl.issue ? String(csl.issue) : undefined,
-              pages: csl.page || undefined,
-              series: csl['collection-title'] || undefined,
-              edition: csl.edition ? String(csl.edition).trim() : undefined,
-              doi: csl.DOI || csl.doi || undefined,
-              isbn: csl.ISBN || csl.isbn || undefined,
-              issn: csl.ISSN || csl.issn || undefined,
-              url: csl.URL || csl.url || undefined,
-              abstract: csl.abstract || undefined,
-              citationKey: csl.id || csl['citation-key'] || undefined,
-              tags: keywords,
-              keywords,
-              language: csl.language ? String(csl.language).trim() : undefined,
-              rights: csl.rights ? String(csl.rights).trim() : undefined,
-              extraFields: numPages
-                ? {
-                    numberOfPages: Number(numPages) || numPages,
-                    numPages: Number(numPages) || numPages,
-                  }
-                : undefined,
-            };
-
-            const normalized = this.normalizer.normalize(rawMetadata);
-            candidates.push({
-              candidateId: randomUUID(),
-              sourceKind: 'RECORD',
-              sourceName: 'CSL_JSON',
-              sourceRecordId: rawMetadata.citationKey || rawMetadata.doi,
-              retrievedAt: new Date().toISOString(),
-              schemaVersion: '1.0.0',
-              fields: this.buildEvidenceFields(
-                rawMetadata,
-                normalized,
-                'CSL_JSON',
-              ),
-              normalizedMetadata: normalized,
-              confidenceScore: 0.95,
-            });
+          const parsedList = this.cslParser.parse(recordContent);
+          for (const item of parsedList) {
+            candidates.push(
+              this.createCandidate({
+                sourceKind: 'RECORD',
+                sourceName: 'CSL_JSON',
+                sourceRecordId: item.citationKey || item.doi,
+                rawMetadata: item,
+                confidenceScore: 0.95,
+              }),
+            );
           }
         } else if (
-          payload.format === 'ENDNOTE_XML' ||
-          payload.format === 'MODS' ||
-          payload.format === 'REFER'
+          format === 'ENDNOTE_XML' ||
+          format === 'MODS' ||
+          format === 'REFER'
         ) {
           const parsedList = await this.risParser.parseAsync(recordContent);
           for (const item of parsedList) {
-            const normalized = this.normalizer.normalize(item);
-            candidates.push({
-              candidateId: randomUUID(),
-              sourceKind: 'RECORD',
-              sourceName: payload.format,
-              sourceRecordId: item.doi || item.citationKey,
-              retrievedAt: new Date().toISOString(),
-              schemaVersion: '1.0.0',
-              fields: this.buildEvidenceFields(
-                item,
-                normalized,
-                payload.format,
-              ),
-              normalizedMetadata: normalized,
-              confidenceScore: 0.9,
-            });
+            candidates.push(
+              this.createCandidate({
+                sourceKind: 'RECORD',
+                sourceName: payload.format,
+                sourceRecordId: item.doi || item.citationKey,
+                rawMetadata: item,
+                confidenceScore: 0.9,
+              }),
+            );
           }
         }
         break;
       }
 
       case 'URL': {
-        const classified = QueryClassifier.classify(payload.url);
-        let extractedRaw: Record<string, any> = { url: payload.url };
-
-        if (classified.type === 'DOI') {
-          extractedRaw.doi = classified.clean;
-        } else if (classified.type === 'ARXIV') {
-          extractedRaw.arxivId = classified.clean;
-        } else if (classified.type === 'PMID') {
-          extractedRaw.pmid = classified.clean;
-        } else if (classified.type === 'ISBN') {
-          extractedRaw.isbn = classified.clean;
-        }
-        if (!extractedRaw.doi && !extractedRaw.arxivId && !extractedRaw.pmid) {
-          const urlDoi = deriveDoiFromPublisherUrl(payload.url);
-          if (urlDoi) extractedRaw.doi = urlDoi;
-        }
-
-        if (this.urlScraper) {
-          try {
-            const scraped = await this.urlScraper.scrape(payload.url, {
-              scopeId,
-              preferredFilename: payload.filename,
-            });
-
-            extractedRaw = {
-              ...extractedRaw,
-              url: payload.url,
-              title: scraped.title || extractedRaw.title,
-              authors: scraped.authors || extractedRaw.authors,
-              creators: scraped.creators || extractedRaw.creators,
-              doi: extractedRaw.doi || scraped.doi,
-              arxivId: extractedRaw.arxivId || scraped.arxivId,
-              pmid: extractedRaw.pmid || scraped.pmid,
-              isbn: scraped.isbn || extractedRaw.isbn,
-              issn: scraped.issn || extractedRaw.issn,
-              year: scraped.year || extractedRaw.year,
-              publicationDate:
-                scraped.publicationDate || extractedRaw.publicationDate,
-              publicationTitle:
-                scraped.publicationTitle || extractedRaw.publicationTitle,
-              journal: scraped.journal || extractedRaw.journal,
-              publisher: scraped.publisher || extractedRaw.publisher,
-              abstract: scraped.abstract || extractedRaw.abstract,
-              keywords: scraped.keywords || extractedRaw.keywords,
-              itemType: scraped.itemType || extractedRaw.itemType,
-              volume: scraped.volume || extractedRaw.volume,
-              issue: scraped.issue || extractedRaw.issue,
-              pages: scraped.pages || extractedRaw.pages,
-              language: scraped.language || extractedRaw.language,
-              place: scraped.publisherPlace || extractedRaw.place,
-              conferenceName:
-                scraped.conferenceName || extractedRaw.conferenceName,
-              bookTitle: scraped.bookTitle || extractedRaw.bookTitle,
-              institution: scraped.institution || extractedRaw.institution,
-              fileId: scraped.fileId,
-              filename: scraped.filename || payload.filename,
-              fileUrl:
-                scraped.pdfUrl || (scraped.isPdf ? payload.url : undefined),
-              isBlocked: scraped.isBlocked,
-              wafKind: scraped.wafKind,
-              promptUploadPdf: scraped.promptUploadPdf,
-              ladderStepReached: scraped.ladderStepReached,
-            };
-          } catch (scrapeErr: any) {
-            this.logger.warn(
-              `UrlMetadataScraper error for "${payload.url}": ${scrapeErr?.message}`,
-            );
-          }
-        }
-
-        const normalized = this.normalizer.normalize(extractedRaw);
-        if (extractedRaw.fileId) normalized.fileId = extractedRaw.fileId;
-        if (extractedRaw.filename) normalized.filename = extractedRaw.filename;
-        if (extractedRaw.fileUrl) normalized.fileUrl = extractedRaw.fileUrl;
-
-        if (extractedRaw.isBlocked) {
-          normalized.extraFields = {
-            ...(normalized.extraFields || {}),
-            isBlocked: true,
-            wafKind: extractedRaw.wafKind,
-            promptUploadPdf: true,
-            ladderStepReached: extractedRaw.ladderStepReached,
-          };
-        }
-
-        const hasIdentifier = Boolean(
-          normalized.doi || normalized.arxivId || normalized.pmid,
-        );
-        const hasTitle = Boolean(
-          normalized.title && normalized.title !== 'Untitled Document',
-        );
-
-        const confidenceScore = extractedRaw.isBlocked
-          ? hasIdentifier
-            ? 0.6
-            : 0.2
-          : hasIdentifier
-            ? 0.95
-            : hasTitle
-              ? 0.88
-              : 0.7;
-
-        candidates.push({
-          candidateId: randomUUID(),
-          sourceKind: 'URL',
-          sourceName: 'UrlCapture',
-          sourceRecordId: payload.url,
-          retrievedAt: new Date().toISOString(),
-          schemaVersion: '1.0.0',
-          fields: this.buildEvidenceFields(
-            extractedRaw,
-            normalized,
-            'UrlCapture',
-          ),
-          normalizedMetadata: normalized,
-          confidenceScore,
-        });
+        const candidate = await this.resolveUrlCandidate(payload, scopeId);
+        if (candidate) candidates.push(candidate);
         break;
       }
 
       case 'FILE': {
-        let extractedMetadata: any = {};
-        let fileBuffer: Buffer | undefined;
-
-        const rawFilenameDoiMatch = payload.filename?.match(
-          /10\.\d{4,9}[/_@][-._;()/:A-Za-z0-9]+/,
-        )?.[0];
-        const filenameDoi = rawFilenameDoiMatch
-          ? rawFilenameDoiMatch
-              .replace(/^(10\.\d{4,9})[_@]/, '$1/')
-              .replace(/[.,;:)\]]+$/, '')
-          : undefined;
-
-        const filenameArxivId = payload.filename?.match(
-          /(?:arxiv[:_.-]*)?([0-2]\d{3}\.\d{4,5}(?:v\d+)?)/i,
-        )?.[1];
-
-        if (
-          this.storagePort?.readOwnedFile &&
-          this.extractionGateway?.extractDocumentFromBuffer &&
-          payload.fileId
-        ) {
-          try {
-            const fileRecord = await this.storagePort.readOwnedFile({
-              fileId: payload.fileId,
-              projectId: scopeId && scopeId !== 'user' ? scopeId : undefined,
-            });
-            if (fileRecord?.buffer) {
-              fileBuffer = fileRecord.buffer;
-
-              const extractedDocument =
-                await this.extractionGateway.extractDocumentFromBuffer(
-                  fileRecord.buffer,
-                  {
-                    headerOnly: true,
-                    maxPages: 3,
-                  },
-                );
-              extractedMetadata =
-                extractedDocument?.metadata || extractedDocument || {};
-
-              if (
-                Object.keys(extractedMetadata).length === 0 &&
-                this.extractionGateway.extractMetadataFromBuffer
-              ) {
-                extractedMetadata =
-                  (await this.extractionGateway.extractMetadataFromBuffer(
-                    fileRecord.buffer,
-                  )) || {};
-              }
-            }
-          } catch (caughtError: unknown) {
-            const errorMessage =
-              caughtError instanceof Error
-                ? caughtError.message
-                : String(caughtError);
-            this.logger.warn(
-              `PDF metadata extraction failed for file ${payload.fileId}: ${errorMessage}`,
-            );
-            try {
-              extractedMetadata =
-                fileBuffer && this.extractionGateway?.extractMetadataFromBuffer
-                  ? (await this.extractionGateway.extractMetadataFromBuffer(
-                      fileBuffer,
-                    )) || {}
-                  : {};
-            } catch {
-              extractedMetadata = {};
-            }
-          }
-        }
-
-        const {
-          rawText: _rawText,
-          creationDate: _creationDate,
-          ...extractedItemMetadata
-        } = extractedMetadata;
-
-        let resolvedTitle: string | undefined;
-        if (
-          extractedMetadata.title &&
-          typeof extractedMetadata.title === 'string'
-        ) {
-          let t = extractedMetadata.title.trim();
-          const isBannerOrGarbage =
-            /noname\s+manuscript/i.test(t) ||
-            /\(will\s+be\s+inserted\s+by\s+the\s+editor\)/i.test(t) ||
-            /proceedings\s+of\s+the/i.test(t) ||
-            /submitted\s+(to|\d)/i.test(t) ||
-            /published\s+\d/i.test(t) ||
-            /^journal\s+of\s+/i.test(t) ||
-            /\.(eps|pdf|png|jpe?g|svg)$/i.test(t) ||
-            /^(untitled|document|microsoft word)/i.test(t) ||
-            /^[A-Z]\s+[A-Z]\s+[A-Z]\s+[A-Z]/i.test(t);
-          if (t.length > 3 && !isBannerOrGarbage) {
-            t = t.replace(/[\s∗*†‡§#]+$/, '').trim();
-            const firstLine = t.split(/\r?\n/)[0]?.trim();
-            if (
-              firstLine &&
-              firstLine.length > 5 &&
-              firstLine.length < t.length
-            ) {
-              t = firstLine;
-            }
-            const candidateAuthors = [
-              ...(Array.isArray(extractedMetadata.authors)
-                ? extractedMetadata.authors
-                : []),
-              ...(Array.isArray(extractedMetadata.creators)
-                ? extractedMetadata.creators
-                : []),
-            ];
-            for (const author of candidateAuthors) {
-              const authorStr =
-                typeof author === 'string'
-                  ? author
-                  : (
-                      author?.fullName ||
-                      author?.name ||
-                      `${author?.firstName || ''} ${author?.lastName || ''}`
-                    ).trim();
-              if (authorStr && authorStr.length > 3) {
-                const escaped = authorStr.replace(
-                  /[.*+?^${}()|[\]\\]/g,
-                  '\\$&',
-                );
-                t = t
-                  .replace(new RegExp(`\\s+${escaped}[\\s∗*†‡§#]*$`, 'i'), '')
-                  .trim();
-              }
-            }
-            resolvedTitle = normalizeAcademicTitleCase(t);
-          }
-        }
-
-        if (!resolvedTitle && payload.filename) {
-          const cleanBase = payload.filename
-            .replace(/\.[a-zA-Z0-9]+$/, '')
-            .replace(/[-_]+/g, ' ')
-            .trim();
-          const isArxivPattern =
-            /^\d{4}\s*\d{4,5}(v\d+)?$/i.test(cleanBase) ||
-            /^arxiv/i.test(cleanBase);
-          if (cleanBase.length > 2 && !isArxivPattern) {
-            resolvedTitle = normalizeAcademicTitleCase(cleanBase);
-          }
-        }
-
-        if (!resolvedTitle) {
-          resolvedTitle = 'Uploaded Document';
-        }
-
-        const hasAuthoritativeId = Boolean(
-          extractedMetadata.doi ||
-          filenameDoi ||
-          extractedMetadata.arxivId ||
-          filenameArxivId ||
-          extractedMetadata.isbn,
-        );
-
-        let inferredItemType: string | undefined;
-        let inferredItemTypeConfidence = 0.75;
-
-        if (!hasAuthoritativeId) {
-          const inferred = inferItemTypeFromPdfSignals({
-            title: resolvedTitle,
-            notes: extractedMetadata.notes,
-            journal: extractedMetadata.journal,
-            conferenceName: extractedMetadata.conferenceName,
-            bookTitle: extractedMetadata.bookTitle,
-            isbn: extractedMetadata.isbn,
-            publisher: extractedMetadata.publisher,
-            filename: payload.filename,
-          });
-
-          if (inferred) {
-            inferredItemType = inferred.itemType;
-            inferredItemTypeConfidence = 0.75 * inferred.confidence;
-            this.logger.debug(
-              `[IdentifyStage] PDF itemType inferred as "${inferred.itemType}" ` +
-                `(confidence=${inferred.confidence.toFixed(2)}, reason=${inferred.reason}) ` +
-                `for file "${payload.filename}"`,
-            );
-          }
-        }
-
-        const rawFileMetadata = {
-          ...extractedItemMetadata,
-          doi: extractedMetadata.doi || filenameDoi,
-          isbn: extractedMetadata.isbn,
-          arxivId: extractedMetadata.arxivId || filenameArxivId,
-          title: resolvedTitle,
-          itemType: inferredItemType ?? extractedMetadata.itemType,
-          authors: extractedMetadata.authors?.length
-            ? extractedMetadata.authors
-            : undefined,
-          creators: extractedMetadata.creators?.length
-            ? extractedMetadata.creators
-            : undefined,
-          year: extractedMetadata.year || undefined,
-          publicationDate:
-            extractedMetadata.publicationDate ||
-            (extractedMetadata.year
-              ? String(extractedMetadata.year)
-              : undefined),
-          abstract: extractedMetadata.abstract || undefined,
-          publisher: extractedMetadata.publisher,
-          publicationTitle:
-            extractedMetadata.publicationTitle || extractedMetadata.journal,
-          journal: extractedMetadata.journal,
-          pages: extractedMetadata.pages || undefined,
-          tags: extractedMetadata.tags || extractedMetadata.keywords,
-          fileId: payload.fileId,
-          filename: payload.filename,
-          referenceCount: extractedMetadata.referenceCount,
-          citationCount: extractedMetadata.citationCount,
-          notes: Array.isArray(extractedMetadata.notes)
-            ? extractedMetadata.notes.map((n: any) => ({
-                content: typeof n === 'string' ? n : n.content,
-                source: 'pdf_extractor',
-              }))
-            : undefined,
-          extraFields: {
-            ...(extractedMetadata.extraFields || {}),
-            ...(extractedMetadata.numberOfPages
-              ? {
-                  numberOfPages: extractedMetadata.numberOfPages,
-                  numPages: extractedMetadata.numberOfPages,
-                }
-              : {}),
-            ...(extractedMetadata.isSelfSufficient !== undefined
-              ? {
-                  isSelfSufficient: extractedMetadata.isSelfSufficient,
-                  qualityScore: extractedMetadata.qualityScore,
-                  engineUsed: extractedMetadata.engineUsed,
-                }
-              : {}),
-          },
-          isSelfSufficient: extractedMetadata.isSelfSufficient,
-          qualityScore: extractedMetadata.qualityScore,
-          engineUsed: extractedMetadata.engineUsed,
-        };
-        const normalized = this.normalizer.normalize(rawFileMetadata);
-
-        const isSelfSufficient = extractedMetadata.isSelfSufficient === true;
-        const candidateSourceName = isSelfSufficient
-          ? 'TrustedPaper'
-          : 'StagedPdf';
-        const candidateConfidence = isSelfSufficient
-          ? extractedMetadata.qualityScore || 0.95
-          : extractedMetadata.doi
-            ? 0.95
-            : extractedMetadata.arxivId
-              ? 0.92
-              : extractedMetadata.isbn
-                ? 0.9
-                : inferredItemTypeConfidence;
-
-        candidates.push({
-          candidateId: randomUUID(),
-          sourceKind: 'FILE',
-          sourceName: candidateSourceName,
-          sourceRecordId: payload.fileId,
-          retrievedAt: new Date().toISOString(),
-          schemaVersion: '1.0.0',
-          fields: this.buildEvidenceFields(
-            rawFileMetadata,
-            normalized,
-            candidateSourceName,
-          ),
-          normalizedMetadata: normalized,
-          confidenceScore: candidateConfidence,
-        });
+        const candidate = await this.resolveFileCandidate(payload, scopeId);
+        if (candidate) candidates.push(candidate);
         break;
       }
     }
 
-    return Promise.resolve(candidates);
+    return candidates;
+  }
+
+  // ── Helper Resolvers ───────────────────────────────────────────────────────
+
+  private buildIdentifierCandidate(
+    type: string,
+    rawValue: string,
+  ): MetadataCandidate | null {
+    let fieldKey: 'doi' | 'arxivId' | 'pmid' | 'isbn';
+    let cleanValue = rawValue;
+
+    if (type === 'DOI') {
+      fieldKey = 'doi';
+      cleanValue = this.doiParser.normalize(rawValue);
+    } else if (type === 'ARXIV') {
+      fieldKey = 'arxivId';
+      cleanValue =
+        normalizeArxivId(rawValue) ||
+        rawValue.replace(/^arxiv:\s*/i, '').trim();
+    } else if (type === 'PMID') {
+      fieldKey = 'pmid';
+      cleanValue =
+        normalizePmid(rawValue) || rawValue.replace(/^pmid:\s*/i, '').trim();
+    } else if (type === 'ISBN') {
+      fieldKey = 'isbn';
+      cleanValue =
+        normalizeIsbn(rawValue) ||
+        rawValue
+          .replace(/[-\s]/g, '')
+          .replace(/^isbn:?\s*/i, '')
+          .trim();
+    } else {
+      return null;
+    }
+
+    const rawMetadata = { [fieldKey]: rawValue };
+    const normalizedMetadata = this.normalizer.normalize({
+      [fieldKey]: cleanValue,
+    });
+
+    return this.createCandidate({
+      sourceKind: 'IDENTIFIER',
+      sourceName: 'DirectIdentifier',
+      sourceRecordId: cleanValue,
+      rawMetadata,
+      normalizedMetadata,
+      confidenceScore: 1.0,
+      fieldOverrides: {
+        [fieldKey]: {
+          path: fieldKey,
+          value: rawValue,
+          normalizedValue: cleanValue,
+          confidence: 1.0,
+          sourceProvider: 'UserIdentifier',
+          retrievedAt: new Date().toISOString(),
+        },
+      },
+    });
+  }
+
+  private async resolveRecordContent(
+    payload: SubmissionPayload & { kind: 'RECORD' },
+  ): Promise<string> {
+    let content = payload.content || '';
+    if (
+      payload.isOffloaded &&
+      payload.fileId &&
+      typeof this.storagePort?.readOwnedFile === 'function'
+    ) {
+      try {
+        const file = await this.storagePort.readOwnedFile({
+          fileId: payload.fileId,
+        });
+        if (file?.buffer) {
+          const decompressed = await gunzipAsync(file.buffer);
+          content = decompressed.toString('utf-8');
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `[ClaimCheck] Failed to hydrate offloaded record payload ${payload.fileId}: ${message}`,
+        );
+        throw new BadRequestException(
+          `Failed to hydrate offloaded record content: ${message}`,
+        );
+      }
+    }
+    return content;
+  }
+
+  private async resolveUrlCandidate(
+    payload: SubmissionPayload & { kind: 'URL' },
+    scopeId?: string,
+  ): Promise<MetadataCandidate> {
+    const classified = QueryClassifier.classify(payload.url);
+    let extractedRaw: Record<string, unknown> = { url: payload.url };
+
+    if (classified.type === 'DOI') extractedRaw.doi = classified.clean;
+    else if (classified.type === 'ARXIV')
+      extractedRaw.arxivId = classified.clean;
+    else if (classified.type === 'PMID') extractedRaw.pmid = classified.clean;
+    else if (classified.type === 'ISBN') extractedRaw.isbn = classified.clean;
+
+    if (!extractedRaw.doi && !extractedRaw.arxivId && !extractedRaw.pmid) {
+      const urlDoi = deriveDoiFromPublisherUrl(payload.url);
+      if (urlDoi) extractedRaw.doi = urlDoi;
+    }
+
+    const hasDirectIdentifier = Boolean(
+      extractedRaw.doi || extractedRaw.arxivId || extractedRaw.pmid,
+    );
+
+    // Zotero-style: Only scrape HTML if the URL lacks an embedded identifier
+    if (!hasDirectIdentifier && this.urlScraper) {
+      try {
+        const scraped = await this.urlScraper.scrape(payload.url, {
+          scopeId,
+          preferredFilename: payload.filename,
+        });
+
+        extractedRaw = {
+          ...extractedRaw,
+          ...scraped,
+          url: payload.url,
+          filename: scraped.filename || payload.filename,
+          fileUrl: scraped.pdfUrl || (scraped.isPdf ? payload.url : undefined),
+        };
+      } catch (scrapeErr: unknown) {
+        const message =
+          scrapeErr instanceof Error ? scrapeErr.message : String(scrapeErr);
+        this.logger.warn(
+          `UrlMetadataScraper error for "${payload.url}": ${message}`,
+        );
+      }
+    }
+
+    const normalized = this.normalizer.normalize(extractedRaw);
+    if (typeof extractedRaw.fileId === 'string')
+      normalized.fileId = extractedRaw.fileId;
+    if (typeof extractedRaw.filename === 'string')
+      normalized.filename = extractedRaw.filename;
+    if (typeof extractedRaw.fileUrl === 'string')
+      normalized.fileUrl = extractedRaw.fileUrl;
+    if (
+      !normalized.fileUrl &&
+      typeof payload.url === 'string' &&
+      /\.pdf(?:$|\?)/i.test(payload.url)
+    ) {
+      normalized.fileUrl = payload.url;
+    }
+
+    const hasIdentifier = Boolean(
+      normalized.doi || normalized.arxivId || normalized.pmid,
+    );
+    const hasTitle = Boolean(
+      normalized.title && normalized.title !== 'Untitled Document',
+    );
+
+    if (extractedRaw.isBlocked && !hasIdentifier) {
+      normalized.extraFields = {
+        ...(normalized.extraFields || {}),
+        isBlocked: true,
+        wafKind: extractedRaw.wafKind,
+        promptUploadPdf: true,
+        ladderStepReached: extractedRaw.ladderStepReached,
+      };
+    }
+
+    const confidenceScore = hasIdentifier
+      ? 1.0
+      : extractedRaw.isBlocked
+        ? 0.2
+        : hasTitle
+          ? 0.88
+          : 0.7;
+
+    const sourceKind = hasIdentifier ? 'IDENTIFIER' : 'URL';
+    const sourceName = hasIdentifier ? 'DirectIdentifier' : 'UrlCapture';
+    const sourceRecordId = hasIdentifier
+      ? normalized.doi || normalized.arxivId || normalized.pmid || payload.url
+      : payload.url;
+
+    return this.createCandidate({
+      sourceKind,
+      sourceName,
+      sourceRecordId,
+      rawMetadata: extractedRaw,
+      normalizedMetadata: normalized,
+      confidenceScore,
+    });
+  }
+
+  private async resolveFileCandidate(
+    payload: SubmissionPayload & { kind: 'FILE' },
+    scopeId?: string,
+  ): Promise<MetadataCandidate> {
+    let extractedMetadata: ExtractedPdfMetadata = {};
+    let fileBuffer: Buffer | undefined;
+
+    const rawFilenameDoi = payload.filename?.match(
+      /10\.\d{4,9}[/_@][-._;()/:A-Za-z0-9]+/,
+    )?.[0];
+    const filenameDoi = rawFilenameDoi
+      ? rawFilenameDoi
+          .replace(/^(10\.\d{4,9})[_@]/, '$1/')
+          .replace(/[.,;:)\]]+$/, '')
+      : undefined;
+
+    const filenameArxivId = payload.filename?.match(
+      /(?:arxiv[:_.-]*)?([0-2]\d{3}\.\d{4,5}(?:v\d+)?)/i,
+    )?.[1];
+
+    if (
+      this.storagePort?.readOwnedFile &&
+      this.extractionGateway?.extractDocumentFromBuffer &&
+      payload.fileId
+    ) {
+      try {
+        const fileRecord = await this.storagePort.readOwnedFile({
+          fileId: payload.fileId,
+          projectId: scopeId && scopeId !== 'user' ? scopeId : undefined,
+        });
+        if (fileRecord?.buffer) {
+          fileBuffer = fileRecord.buffer;
+
+          if (this.extractionGateway?.extractTrustedMetadata) {
+            try {
+              const trusted =
+                await this.extractionGateway.extractTrustedMetadata<{
+                  metadata?: Record<string, unknown>;
+                  isSelfSufficient?: boolean;
+                  quality?: { totalScore?: number };
+                  provenance?: { engineUsed?: string };
+                }>(fileRecord.buffer, payload.filename);
+              if (trusted?.metadata) {
+                extractedMetadata = {
+                  ...trusted.metadata,
+                  isSelfSufficient: trusted.isSelfSufficient,
+                  qualityScore: trusted.quality?.totalScore,
+                  engineUsed: trusted.provenance?.engineUsed,
+                };
+              }
+            } catch {
+              // Fall through to extractDocumentFromBuffer
+            }
+          }
+
+          if (
+            Object.keys(extractedMetadata).length === 0 &&
+            this.extractionGateway?.extractDocumentFromBuffer
+          ) {
+            const extractedDoc =
+              await this.extractionGateway.extractDocumentFromBuffer<{
+                metadata?: Record<string, unknown>;
+              }>(fileRecord.buffer, { headerOnly: true, maxPages: 3 });
+            extractedMetadata =
+              extractedDoc?.metadata ||
+              (extractedDoc as Record<string, unknown>) ||
+              {};
+          }
+
+          if (
+            Object.keys(extractedMetadata).length === 0 &&
+            this.extractionGateway.extractMetadataFromBuffer
+          ) {
+            extractedMetadata =
+              (await this.extractionGateway.extractMetadataFromBuffer<
+                Record<string, unknown>
+              >(fileRecord.buffer)) || {};
+          }
+        }
+      } catch (caughtError: unknown) {
+        this.logger.warn(
+          `PDF metadata extraction failed for file ${payload.fileId}: ${caughtError instanceof Error ? caughtError.message : String(caughtError)}`,
+        );
+        try {
+          extractedMetadata =
+            fileBuffer && this.extractionGateway?.extractMetadataFromBuffer
+              ? (await this.extractionGateway.extractMetadataFromBuffer(
+                  fileBuffer,
+                )) || {}
+              : {};
+        } catch {
+          extractedMetadata = {};
+        }
+      }
+    }
+
+    const {
+      rawText: _rt,
+      creationDate: _cd,
+      ...extractedItemMeta
+    } = extractedMetadata;
+
+    const resolvedTitle = this.cleanPdfTitle(
+      extractedMetadata.title,
+      payload.filename,
+      extractedMetadata.authors,
+      extractedMetadata.creators,
+    );
+
+    const hasAuthoritativeId = Boolean(
+      extractedMetadata.doi ||
+      filenameDoi ||
+      extractedMetadata.arxivId ||
+      filenameArxivId ||
+      extractedMetadata.isbn,
+    );
+
+    let inferredItemType: string | undefined;
+    let inferredConfidence = 0.75;
+
+    if (!hasAuthoritativeId) {
+      const inferred = inferItemTypeFromPdfSignals({
+        title: resolvedTitle,
+        notes: extractedMetadata.notes,
+        journal: extractedMetadata.journal,
+        conferenceName: extractedMetadata.conferenceName,
+        bookTitle: extractedMetadata.bookTitle,
+        isbn: extractedMetadata.isbn,
+        publisher: extractedMetadata.publisher,
+        filename: payload.filename,
+      });
+
+      if (inferred) {
+        inferredItemType = inferred.itemType;
+        inferredConfidence = 0.75 * inferred.confidence;
+      }
+    }
+
+    const rawFileMetadata = {
+      ...extractedItemMeta,
+      doi: extractedMetadata.doi || filenameDoi,
+      isbn: extractedMetadata.isbn,
+      arxivId: extractedMetadata.arxivId || filenameArxivId,
+      title: resolvedTitle,
+      itemType: inferredItemType ?? extractedMetadata.itemType,
+      authors: extractedMetadata.authors?.length
+        ? extractedMetadata.authors
+        : undefined,
+      creators: extractedMetadata.creators?.length
+        ? extractedMetadata.creators
+        : undefined,
+      year: extractedMetadata.year || undefined,
+      publicationDate:
+        extractedMetadata.publicationDate ||
+        (extractedMetadata.year ? String(extractedMetadata.year) : undefined),
+      abstract: extractedMetadata.abstract || undefined,
+      publisher: extractedMetadata.publisher,
+      publicationTitle:
+        extractedMetadata.publicationTitle || extractedMetadata.journal,
+      journal: extractedMetadata.journal,
+      pages: extractedMetadata.pages || undefined,
+      tags: extractedMetadata.tags || extractedMetadata.keywords,
+      fileId: payload.fileId,
+      filename: payload.filename,
+      referenceCount: extractedMetadata.referenceCount,
+      citationCount: extractedMetadata.citationCount,
+      notes: Array.isArray(extractedMetadata.notes)
+        ? extractedMetadata.notes.map((n) => ({
+            content: typeof n === 'string' ? n : n.content || '',
+            source: 'pdf_extractor',
+          }))
+        : undefined,
+      extraFields: {
+        ...(extractedMetadata.extraFields || {}),
+        ...(extractedMetadata.numberOfPages
+          ? {
+              numberOfPages: extractedMetadata.numberOfPages,
+              numPages: extractedMetadata.numberOfPages,
+            }
+          : {}),
+        ...(extractedMetadata.isSelfSufficient !== undefined
+          ? {
+              isSelfSufficient: extractedMetadata.isSelfSufficient,
+              qualityScore: extractedMetadata.qualityScore,
+              engineUsed: extractedMetadata.engineUsed,
+            }
+          : {}),
+      },
+      isSelfSufficient: extractedMetadata.isSelfSufficient,
+      qualityScore: extractedMetadata.qualityScore,
+      engineUsed: extractedMetadata.engineUsed,
+    };
+
+    const isSelfSufficient = extractedMetadata.isSelfSufficient === true;
+    const candidateSourceName = isSelfSufficient ? 'TrustedPaper' : 'StagedPdf';
+
+    const candidateConfidence = isSelfSufficient
+      ? extractedMetadata.qualityScore || 0.95
+      : extractedMetadata.doi
+        ? 0.95
+        : extractedMetadata.arxivId
+          ? 0.92
+          : extractedMetadata.isbn
+            ? 0.9
+            : inferredConfidence;
+
+    return this.createCandidate({
+      sourceKind: 'FILE',
+      sourceName: candidateSourceName,
+      sourceRecordId: payload.fileId,
+      rawMetadata: rawFileMetadata,
+      confidenceScore: candidateConfidence,
+    });
+  }
+
+  private cleanPdfTitle(
+    rawTitle?: unknown,
+    filename?: string,
+    authors?: unknown[],
+    creators?: unknown[],
+  ): string {
+    if (typeof rawTitle === 'string') {
+      let t = rawTitle.trim();
+      const isBannerOrGarbage =
+        /noname\s+manuscript/i.test(t) ||
+        /\(will\s+be\s+inserted\s+by\s+the\s+editor\)/i.test(t) ||
+        /proceedings\s+of\s+the/i.test(t) ||
+        /submitted\s+(to|\d)/i.test(t) ||
+        /published\s+\d/i.test(t) ||
+        /^journal\s+of\s+/i.test(t) ||
+        /\.(eps|pdf|png|jpe?g|svg)$/i.test(t) ||
+        /^(untitled|document|microsoft word)/i.test(t) ||
+        /^[A-Z]\s+[A-Z]\s+[A-Z]\s+[A-Z]/i.test(t);
+
+      if (t.length > 3 && !isBannerOrGarbage) {
+        t = t.replace(/[\s∗*†‡§#]+$/, '').trim();
+        const firstLine = t.split(/\r?\n/)[0]?.trim();
+        if (firstLine && firstLine.length > 5 && firstLine.length < t.length) {
+          t = firstLine;
+        }
+
+        const candidateAuthors = [
+          ...(Array.isArray(authors) ? authors : []),
+          ...(Array.isArray(creators) ? creators : []),
+        ];
+        for (const author of candidateAuthors) {
+          const authorObj =
+            typeof author === 'object' && author !== null
+              ? (author as {
+                  fullName?: string;
+                  name?: string;
+                  firstName?: string;
+                  lastName?: string;
+                })
+              : null;
+          const authorStr =
+            typeof author === 'string'
+              ? author
+              : (
+                  authorObj?.fullName ||
+                  authorObj?.name ||
+                  `${authorObj?.firstName || ''} ${authorObj?.lastName || ''}`
+                ).trim();
+          if (authorStr && authorStr.length > 3) {
+            const escaped = authorStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            t = t
+              .replace(new RegExp(`\\s+${escaped}[\\s∗*†‡§#]*$`, 'i'), '')
+              .trim();
+          }
+        }
+        return normalizeAcademicTitleCase(t);
+      }
+    }
+
+    if (filename) {
+      const cleanBase = filename
+        .replace(/\.[a-zA-Z0-9]+$/, '')
+        .replace(/[-_]+/g, ' ')
+        .trim();
+      const isArxivPattern =
+        /^\d{4}\s*\d{4,5}(v\d+)?$/i.test(cleanBase) ||
+        /^arxiv/i.test(cleanBase);
+      if (cleanBase.length > 2 && !isArxivPattern) {
+        return normalizeAcademicTitleCase(cleanBase);
+      }
+    }
+
+    return 'Uploaded Document';
+  }
+
+  private mapBibtexToRaw(
+    item: ParsedBibtexEntry | Record<string, unknown>,
+  ): Record<string, unknown> {
+    const extraFields: Record<string, unknown> = {
+      ...(typeof item.extraFields === 'object' && item.extraFields !== null
+        ? (item.extraFields as Record<string, unknown>)
+        : {}),
+      ...(item.university ? { university: item.university } : {}),
+      ...(item.institution ? { institution: item.institution } : {}),
+      ...(item.thesisType ? { thesisType: item.thesisType } : {}),
+      ...(item.reportNumber ? { reportNumber: item.reportNumber } : {}),
+      ...(item.reportType ? { reportType: item.reportType } : {}),
+      ...(item.bookTitle ? { bookTitle: item.bookTitle } : {}),
+      ...(item.proceedingsTitle
+        ? { proceedingsTitle: item.proceedingsTitle }
+        : {}),
+      ...(item.conferenceName ? { conferenceName: item.conferenceName } : {}),
+      ...(item.eventPlace ? { eventPlace: item.eventPlace } : {}),
+      ...(item.numPages
+        ? {
+            numPages: Number(item.numPages) || item.numPages,
+            numberOfPages: Number(item.numPages) || item.numPages,
+          }
+        : {}),
+      ...(item.numberOfVolumes
+        ? { numberOfVolumes: item.numberOfVolumes }
+        : {}),
+      ...(item.seriesNumber ? { seriesNumber: item.seriesNumber } : {}),
+      ...(item.chapter ? { chapter: item.chapter } : {}),
+    };
+
+    return {
+      title: item.title,
+      shortTitle: item.shortTitle,
+      itemType: item.itemType,
+      authors: item.authors,
+      editors: item.editors,
+      creators: item.creators,
+      year: item.year,
+      publicationDate: item.publicationDate,
+      publicationTitle: item.journal || item.proceedingsTitle || item.bookTitle,
+      journal: item.journal,
+      journalAbbr: item.journalAbbr,
+      publisher: item.publisher || item.university || item.institution,
+      university: item.university,
+      institution: item.institution,
+      thesisType: item.thesisType,
+      reportNumber: item.reportNumber,
+      reportType: item.reportType,
+      bookTitle: item.bookTitle,
+      proceedingsTitle: item.proceedingsTitle,
+      conferenceName: item.conferenceName,
+      eventPlace: item.eventPlace,
+      place: item.place,
+      volume: item.volume,
+      issue: item.issue,
+      pages: item.pages,
+      numPages: item.numPages,
+      numberOfPages: item.numPages
+        ? Number(item.numPages) || undefined
+        : undefined,
+      numberOfVolumes: item.numberOfVolumes,
+      series: item.series,
+      seriesNumber: item.seriesNumber,
+      chapter: item.chapter,
+      edition: item.edition,
+      arxivId: item.arxivId,
+      doi: item.doi,
+      pmid: item.pmid,
+      pmcid: item.pmcid,
+      isbn: item.isbn,
+      issn: item.issn,
+      url: item.url,
+      accessedAt: item.accessedAt,
+      abstract: item.abstract,
+      citationKey: item.citationKey,
+      tags: item.keywords,
+      keywords: item.keywords,
+      notes: Array.isArray(item.notes)
+        ? (item.notes as string[]).map((n: string) => ({
+            content: n,
+            source: 'bibtex',
+          }))
+        : undefined,
+      language: item.language,
+      rights: item.rights,
+      fileUrl: item.fileUrl,
+      extra: item.extra,
+      extraFields:
+        Object.keys(extraFields).length > 0 ? extraFields : undefined,
+      seeAlso: item.seeAlso,
+      relations: item.relations,
+    };
+  }
+
+  private createCandidate(params: {
+    sourceKind: MetadataCandidate['sourceKind'];
+    sourceName: string;
+    sourceRecordId?: string;
+    rawMetadata: Record<string, unknown>;
+    normalizedMetadata?: Record<string, unknown>;
+    confidenceScore: number;
+    fieldOverrides?: Record<string, FieldEvidence>;
+  }): MetadataCandidate {
+    const normalized =
+      params.normalizedMetadata ??
+      this.normalizer.normalize(params.rawMetadata);
+
+    return {
+      candidateId: randomUUID(),
+      sourceKind: params.sourceKind,
+      sourceName: params.sourceName,
+      sourceRecordId: params.sourceRecordId,
+      retrievedAt: new Date().toISOString(),
+      schemaVersion: '1.0.0',
+      fields: {
+        ...this.buildEvidenceFields(
+          params.rawMetadata,
+          normalized,
+          params.sourceName,
+        ),
+        ...(params.fieldOverrides || {}),
+      },
+      normalizedMetadata: normalized,
+      confidenceScore: params.confidenceScore,
+    };
   }
 
   private buildEvidenceFields(
-    rawMetadata: Record<string, any>,
-    normalizedMetadata: Record<string, any>,
+    rawMetadata: Record<string, unknown>,
+    normalizedMetadata: Record<string, unknown>,
     sourceName: string,
-  ): Record<string, any> {
-    const fields: Record<string, any> = {};
+  ): Record<string, FieldEvidence> {
+    const fields: Record<string, FieldEvidence> = {};
     for (const fieldName of Object.keys(normalizedMetadata)) {
       if (
         normalizedMetadata[fieldName] !== undefined &&

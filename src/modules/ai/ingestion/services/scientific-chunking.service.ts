@@ -23,15 +23,32 @@ export interface ChunkingOptions {
   year?: number;
 }
 
+const SECTION_PREFIX = '(?:(?:\\d+(?:\\.\\d+)*|[IVXLC]+)\\.?\\s*)?';
+
 const SCIENTIFIC_SECTION_PATTERNS = [
-  /^(abstract|summary)/i,
-  /^(1\.?\s*)?(introduction|background)/i,
-  /^(2\.?\s*)?(related\s*work|literature\s*review|prior\s*art)/i,
-  /^(3\.?\s*)?(methodology|method|methods|proposed\s*approach|system\s*design|architecture|model)/i,
-  /^(4\.?\s*)?(experiments|experimental\s*setup|evaluation|results|findings)/i,
-  /^(5\.?\s*)?(discussion|analysis)/i,
-  /^(6\.?\s*)?(conclusion|concluding\s*remarks|future\s*work)/i,
-  /^(references|bibliography)/i,
+  /^(abstract|summary)\b/i,
+  new RegExp(`^${SECTION_PREFIX}(introduction|background)\\b`, 'i'),
+  new RegExp(
+    `^${SECTION_PREFIX}(related\\s*work|literature\\s*review|prior\\s*art)\\b`,
+    'i',
+  ),
+  new RegExp(
+    `^${SECTION_PREFIX}(methodology|method|methods|proposed\\s*approach|system\\s*design|architecture|model(?:\\s*architecture)?)\\b`,
+    'i',
+  ),
+  new RegExp(
+    `^${SECTION_PREFIX}(experiments|experimental\\s*setup|experimental\\s*evaluation|evaluation|results(?:\\s*and\\s*discussion)?|findings)\\b`,
+    'i',
+  ),
+  new RegExp(
+    `^${SECTION_PREFIX}(discussion|analysis|ablation\\s*study)\\b`,
+    'i',
+  ),
+  new RegExp(
+    `^${SECTION_PREFIX}(conclusion|conclusions|concluding\\s*remarks|future\\s*work)\\b`,
+    'i',
+  ),
+  new RegExp(`^${SECTION_PREFIX}(references|bibliography)\\b`, 'i'),
 ];
 
 @Injectable()
@@ -194,7 +211,9 @@ export class ScientificChunkingService {
     if (line.length < 3 || line.length > 80) return null;
     for (const pattern of SCIENTIFIC_SECTION_PATTERNS) {
       if (pattern.test(line)) {
-        return line.replace(/^[\d.]+\s*/, '').trim();
+        return line
+          .replace(/^(?:(?:\d+(?:\.\d+)*|[IVXLC]+)\.?\s+)/i, '')
+          .trim();
       }
     }
     return null;

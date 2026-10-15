@@ -40,7 +40,7 @@ export class CreateNotificationDto {
 
   @IsObject()
   @IsOptional()
-  messageOpts?: Record<string, any>;
+  messageOpts?: Record<string, unknown>;
 
   @IsString()
   @IsOptional()

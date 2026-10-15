@@ -7,7 +7,10 @@ import {
   IsObject,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { CitationItemInput, CitationStyleId } from '../types/citation.types';
+import {
+  CitationItemInput,
+  CitationStyleId,
+} from '@/modules/library/citation/types/citation.types';
 
 export class FormatCitationDto {
   @ApiProperty({ description: 'Item metadata to format citation from' })

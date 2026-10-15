@@ -13,6 +13,7 @@ export default tseslint.config(
       'uploads/**',
       'prisma/migrations/**',
       '*.tsbuildinfo',
+      'scripts/**',
     ],
   },
   eslint.configs.recommended,

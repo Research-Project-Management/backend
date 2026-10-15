@@ -6,3 +6,5 @@ export * from './web-snapshot.service';
 export * from './attachments.service';
 export * from './annotations.service';
 export * from './pdf-annotation-importer.service';
+export * from './scientific-chunking.service';
+export * from './reference-matcher.service';

@@ -4,19 +4,19 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IStructureRepository } from '../ports/structure-repository.port';
-import { ITreePublisher } from '../ports/tree-publisher.port';
+import { IStructureRepository } from '@/modules/manuscripts/structure/core/ports/structure-repository.port';
+import { ITreePublisher } from '@/modules/manuscripts/structure/core/ports/tree-publisher.port';
 import {
   ManuscriptNodeEntity,
   ManuscriptNodeType,
-} from '../domain/manuscript-node.entity';
-import { NodePathVo } from '../domain/node-path.vo';
+} from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
+import { NodePathVo } from '@/modules/manuscripts/structure/core/domain/node-path.vo';
 import {
   DuplicateNodePathError,
   NodeNotFoundError,
   MaxProjectFilesExceededError,
-} from '../domain/structure-errors';
-import { CreateNodeDto } from '../../dto/node.dto';
+} from '@/modules/manuscripts/structure/core/domain/structure-errors';
+import { CreateNodeDto } from '@/modules/manuscripts/structure/dto/node.dto';
 
 @Injectable()
 export class CreateNodeUseCase {
@@ -48,6 +48,9 @@ export class CreateNodeUseCase {
       );
       if (!parentNode) {
         throw new NodeNotFoundError(dto.parentId);
+      }
+      if (!parentNode.isFolder()) {
+        throw new Error('Parent node must be a FOLDER');
       }
       computedPath = NodePathVo.join(parentNode.path, dto.name);
     } else if (dto.path) {
@@ -115,11 +118,16 @@ export class CreateNodeUseCase {
     let parentNode: ManuscriptNodeEntity | null = null;
 
     for (const segment of segments) {
+      NodePathVo.validateFilename(segment);
       currentPath = NodePathVo.join(currentPath, segment);
       let found = await this.structureRepository.findByPath(
         projectId,
         currentPath,
       );
+
+      if (found && !found.isFolder()) {
+        throw new DuplicateNodePathError(currentPath);
+      }
 
       if (!found) {
         found = await this.structureRepository.createNode({

@@ -1,25 +1,16 @@
 /**
  * track-changes/track-changes.module.ts
- * NestJS Module for Manuscripts Review Mode: Track Changes & Comments (Hexagonal Architecture).
+ * NestJS Module for Manuscripts Review Mode: Track Changes & Comments (Adaptive Modular Monolith).
  */
 
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
-import { DocstoreModule } from '../docstore/docstore.module';
+import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { RealtimeModule } from '@/modules/realtime/realtime.module';
 
 import { TrackChangesController } from './track-changes.controller';
 import { TrackChangesService } from './track-changes.service';
-
-// Use Cases
-import { RecordChangeUseCase } from './core/use-cases/record-change.use-case';
-import { AcceptChangeUseCase } from './core/use-cases/accept-change.use-case';
-import { RejectChangeUseCase } from './core/use-cases/reject-change.use-case';
-import { BatchResolveChangesUseCase } from './core/use-cases/batch-resolve-changes.use-case';
-import { CreateCommentThreadUseCase } from './core/use-cases/create-comment-thread.use-case';
-import { AddCommentReplyUseCase } from './core/use-cases/add-comment-reply.use-case';
-import { ResolveCommentThreadUseCase } from './core/use-cases/resolve-comment-thread.use-case';
-import { GetDocReviewsUseCase } from './core/use-cases/get-doc-reviews.use-case';
+import { TrackChangesRepository } from './track-changes.repository';
 
 // Ports
 import { ITrackChangesRepositoryPort } from './core/ports/track-changes-repository.port';
@@ -27,58 +18,40 @@ import { IDocstorePatcherPort } from './core/ports/docstore-patcher.port';
 import { IRealtimeNotifierPort } from './core/ports/realtime-notifier.port';
 
 // Adapters
-import { PrismaTrackChangesRepository } from './core/adapters/database/prisma-track-changes.repository';
 import { DocstorePatcherAdapter } from './core/adapters/external/docstore-patcher.adapter';
 import { RealtimeNotifierAdapter } from './core/adapters/external/realtime-notifier.adapter';
 
 @Module({
-  imports: [PrismaModule, DocstoreModule, RealtimeModule],
+  imports: [PrismaModule, forwardRef(() => DocstoreModule), RealtimeModule],
   controllers: [TrackChangesController],
   providers: [
     TrackChangesService,
-
-    // Use Cases
-    RecordChangeUseCase,
-    AcceptChangeUseCase,
-    RejectChangeUseCase,
-    BatchResolveChangesUseCase,
-    CreateCommentThreadUseCase,
-    AddCommentReplyUseCase,
-    ResolveCommentThreadUseCase,
-    GetDocReviewsUseCase,
+    TrackChangesRepository,
 
     // Driven Adapters
-    PrismaTrackChangesRepository,
     DocstorePatcherAdapter,
     RealtimeNotifierAdapter,
 
     // Ports SPI Bindings
     {
       provide: ITrackChangesRepositoryPort,
-      useClass: PrismaTrackChangesRepository,
+      useExisting: TrackChangesRepository,
     },
     {
       provide: IDocstorePatcherPort,
-      useClass: DocstorePatcherAdapter,
+      useExisting: DocstorePatcherAdapter,
     },
     {
       provide: IRealtimeNotifierPort,
-      useClass: RealtimeNotifierAdapter,
+      useExisting: RealtimeNotifierAdapter,
     },
   ],
   exports: [
     TrackChangesService,
+    TrackChangesRepository,
     ITrackChangesRepositoryPort,
     IDocstorePatcherPort,
     IRealtimeNotifierPort,
-    RecordChangeUseCase,
-    AcceptChangeUseCase,
-    RejectChangeUseCase,
-    BatchResolveChangesUseCase,
-    CreateCommentThreadUseCase,
-    AddCommentReplyUseCase,
-    ResolveCommentThreadUseCase,
-    GetDocReviewsUseCase,
   ],
 })
 export class TrackChangesModule {}

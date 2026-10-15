@@ -1,0 +1,642 @@
+/**
+ * modules/manuscripts/clsi/services/clsi.service.ts
+ * Deep module orchestrating CLSI compile operations, caching, SyncTeX coordinate
+ * resolution, and academic word counts.
+ */
+
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { FastifyReply } from 'fastify';
+import * as crypto from 'crypto';
+import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
+import { RedisCacheService } from '@/core';
+import {
+  CompileManuscriptDto,
+  ClsiWordCountDto,
+  ClsiCompilerEngine,
+} from '../dto/clsi.dto';
+import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
+import {
+  SyncPoint,
+  ReverseSyncPoint,
+  WordCountStats,
+} from '../core/ports/artifacts.port';
+import { OverleafIncrementalWorkspace } from '../repositories/incremental-workspace.repository';
+import { LocalProcessRunner } from '../core/adapters/runners/local-process.runner';
+import { DockerSandboxRunner } from '../core/adapters/runners/docker-sandbox.runner';
+import { LatexmkEngine } from '../core/adapters/engines/latexmk.engine';
+import { TectonicEngine } from '../core/adapters/engines/tectonic.engine';
+import { OverleafLogParser } from '../domain/overleaf-log.parser';
+import { SyncTexProcessor } from '../domain/synctex.parser';
+import { TexWordCounter } from '../domain/tex-word.counter';
+import { PlannedFileSet } from '../domain/compile-fileset.planner';
+import {
+  CompilePipeline,
+  CompilePipelineResult,
+} from './compile-pipeline.service';
+import { CompileFairQueue } from '../core/pipeline/compile-fair-queue';
+import {
+  DiskUsageCleaner,
+  DiskUsageOptions,
+} from '../core/adapters/workspace/disk-usage.cleaner';
+import { ClsiHealthCheck } from '../core/adapters/engines/health-check';
+import { ClsiMetrics } from '../core/adapters/telemetry/clsi.metrics';
+import {
+  createZipStreamFromDisk,
+  ZipDiskEntry,
+} from '../core/adapters/artifacts/zip-stream.adapter';
+import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { RemoteClsiClientAdapter } from './remote-clsi.client';
+import { ClsiWorkspacePlannerService } from './workspace-planner.service';
+
+export type ClsiCompileResult = CompilePipelineResult;
+
+@Injectable()
+export class ClsiService {
+  private readonly logger = new Logger(ClsiService.name);
+  private readonly workspace: OverleafIncrementalWorkspace;
+  private readonly pipeline: CompilePipeline;
+  private readonly logParser: OverleafLogParser;
+  private readonly synctexParser: SyncTexProcessor;
+  private readonly wordCounter: TexWordCounter;
+  private readonly fairQueue = new CompileFairQueue();
+  private readonly inFlightBuilds = new Map<
+    string,
+    Promise<ClsiCompileResult>
+  >();
+  private readonly diskUsageCleaner: DiskUsageCleaner;
+  private readonly healthCheck: ClsiHealthCheck;
+  private readonly metrics: ClsiMetrics = ClsiMetrics.getInstance();
+  private readonly remoteClient: RemoteClsiClientAdapter;
+  private readonly workspacePlanner: ClsiWorkspacePlannerService;
+
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() remoteClient?: RemoteClsiClientAdapter,
+    @Optional() workspacePlanner?: ClsiWorkspacePlannerService,
+    @Optional() workspace?: OverleafIncrementalWorkspace,
+    @Optional() latexmkEngine?: LatexmkEngine,
+    @Optional() tectonicEngine?: TectonicEngine,
+    @Optional() logParser?: OverleafLogParser,
+    @Optional() synctexProcessor?: SyncTexProcessor,
+    @Optional() wordCounter?: TexWordCounter,
+    @Optional() diskUsageCleaner?: DiskUsageCleaner,
+    @Optional() healthCheck?: ClsiHealthCheck,
+    @Optional() pipeline?: CompilePipeline,
+  ) {
+    const scratchDir =
+      this.configService.get<string>('CLSI_SCRATCH_DIR') ||
+      this.configService.get<string>('SCRATCH_DIR') ||
+      path.join(os.tmpdir(), 'clsi-scratch');
+    const useDocker =
+      this.configService.get<string>('USE_DOCKER_SANDBOX') === 'true';
+    const dockerImage =
+      this.configService.get<string>('DOCKER_IMAGE') ||
+      'sharelatex/clsi:latest';
+    const latexmkBin =
+      this.configService.get<string>('LATEXMK_BIN') || 'latexmk';
+    const tectonicBin =
+      this.configService.get<string>('TECTONIC_BIN') || 'tectonic';
+
+    this.remoteClient =
+      remoteClient ??
+      new RemoteClsiClientAdapter(this.configService, this.cache);
+    this.workspacePlanner =
+      workspacePlanner ??
+      new ClsiWorkspacePlannerService(
+        undefined,
+        undefined,
+        undefined,
+        this.realtimeService,
+      );
+
+    // Pure in-process domain logic
+    this.logParser = logParser ?? new OverleafLogParser();
+    this.synctexParser = synctexProcessor ?? new SyncTexProcessor();
+    this.wordCounter = wordCounter ?? new TexWordCounter();
+
+    // Workspace & Real Sandbox/Engine seams
+    this.workspace = workspace ?? new OverleafIncrementalWorkspace(scratchDir);
+
+    const needsRunner = !latexmkEngine || !tectonicEngine || !healthCheck;
+    const runner = needsRunner
+      ? useDocker
+        ? new DockerSandboxRunner(dockerImage)
+        : new LocalProcessRunner()
+      : undefined;
+
+    const resolvedLatexmkEngine =
+      latexmkEngine ?? new LatexmkEngine(runner!, latexmkBin, 'pdflatex');
+    const resolvedTectonicEngine =
+      tectonicEngine ?? new TectonicEngine(runner!, tectonicBin);
+
+    this.diskUsageCleaner =
+      diskUsageCleaner ?? new DiskUsageCleaner(scratchDir);
+    this.healthCheck = healthCheck ?? new ClsiHealthCheck(runner!, scratchDir);
+
+    this.pipeline =
+      pipeline ??
+      new CompilePipeline(
+        this.workspace,
+        resolvedLatexmkEngine,
+        resolvedTectonicEngine,
+        this.logParser,
+      );
+  }
+
+  private hashSource(source: string): string {
+    return crypto
+      .createHash('sha256')
+      .update(source || '')
+      .digest('hex');
+  }
+
+  public async compile(
+    dto: CompileManuscriptDto,
+    _userId?: string,
+  ): Promise<ClsiCompileResult> {
+    if (dto.compile) {
+      if (dto.compile.rootResourcePath && !dto.main_file) {
+        dto.main_file = dto.compile.rootResourcePath;
+      }
+      if (dto.compile.options?.compiler && !dto.engine) {
+        const rawCompiler =
+          dto.compile.options.compiler.toLowerCase() as ClsiCompilerEngine;
+        if (Object.values(ClsiCompilerEngine).includes(rawCompiler)) {
+          dto.engine = rawCompiler;
+        }
+      }
+      if (dto.compile.options?.draft !== undefined && dto.draft === undefined) {
+        dto.draft = dto.compile.options.draft;
+      }
+      if (dto.compile.options?.timeout && !dto.timeout_ms) {
+        dto.timeout_ms = dto.compile.options.timeout * 1000;
+      }
+      if (dto.compile.resources) {
+        dto.files = dto.files || {};
+        for (const res of dto.compile.resources) {
+          if (res.content !== undefined) {
+            dto.files[res.path] = res.content;
+          }
+        }
+      }
+    }
+
+    const requestedEngine = dto.engine;
+    const texLiveVersion = dto.tex_live_version || dto.texLiveVersion || '2024';
+    const projectId = await this.workspacePlanner.resolveProjectId(dto);
+
+    if (this.realtimeService && projectId) {
+      try {
+        await this.realtimeService.flushProjectBeforeCompile(projectId);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Pre-compile flush barrier encountered an error for project ${projectId}: ${msg}`,
+        );
+      }
+    }
+
+    const plan = await this.workspacePlanner.planFiles(projectId, dto);
+    const cacheKey = `flux:clsi:compile:${this.hashSource(
+      [
+        projectId,
+        plan.fingerprint,
+        plan.mainFile,
+        requestedEngine || 'auto',
+        texLiveVersion,
+        dto.draft ?? false,
+        dto.syntax_only ?? dto.syntaxOnly ?? false,
+        dto.stop_on_first_error ?? false,
+      ].join('|'),
+    )}`;
+    const cacheable = !!(dto.use_cache && plan.hasMainContent);
+
+    if (cacheable && this.cache) {
+      const cached = await this.cache.get<ClsiCompileResult>(cacheKey);
+      if (cached && cached.success) {
+        this.metrics.record({
+          engine: requestedEngine || 'pdflatex',
+          durationMs: 5,
+          success: true,
+          isCached: true,
+          isTimeout: false,
+          pdfSizeBytes: cached.pdf
+            ? Buffer.from(cached.pdf, 'base64').length
+            : 0,
+        });
+        return cached;
+      }
+    }
+
+    if (cacheable) {
+      const inFlight = this.inFlightBuilds.get(cacheKey);
+      if (inFlight) return inFlight;
+    }
+
+    const build = this.runCompile(
+      projectId,
+      plan,
+      dto,
+      requestedEngine,
+      cacheKey,
+      _userId,
+    );
+    if (!cacheable) return build;
+
+    const tracked = build.finally(() => {
+      if (this.inFlightBuilds.get(cacheKey) === tracked) {
+        this.inFlightBuilds.delete(cacheKey);
+      }
+    });
+    this.inFlightBuilds.set(cacheKey, tracked);
+    return tracked;
+  }
+
+  private async runCompile(
+    projectId: string,
+    plan: PlannedFileSet,
+    dto: CompileManuscriptDto,
+    engine: string | undefined,
+    cacheKey: string,
+    _userId?: string,
+  ): Promise<ClsiCompileResult> {
+    const texLiveVersion = dto.tex_live_version || dto.texLiveVersion || '2024';
+    const mainFile = plan.mainFile;
+    const mergedFiles = await this.workspacePlanner.hydrateFiles(
+      projectId,
+      plan,
+    );
+    const rawMain = mergedFiles[mainFile] ?? dto.source ?? '';
+    const source = Buffer.isBuffer(rawMain)
+      ? rawMain.toString('utf8')
+      : rawMain;
+
+    const remoteResult = await this.remoteClient.tryRemoteClsiCompile(
+      projectId,
+      mainFile,
+      source,
+      mergedFiles,
+      dto,
+      engine,
+      cacheKey,
+    );
+    if (remoteResult) {
+      return remoteResult;
+    }
+
+    if (dto.force_clean || dto.forceClean) {
+      await this.workspace.cleanScratch(projectId);
+    }
+
+    const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
+    const metricEngine = engine || 'pdflatex';
+    return await this.fairQueue.schedule(
+      projectId,
+      _userId,
+      this.realtimeService,
+      async (signal, onLogChunk) => {
+        const pipelineResult: CompilePipelineResult =
+          await this.pipeline.execute({
+            projectId,
+            mainFile,
+            engine,
+            texLiveVersion,
+            draft: dto.draft,
+            syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
+            stopOnFirstError: dto.stop_on_first_error,
+            timeoutMs: effectiveTimeoutMs,
+            source,
+            files: mergedFiles,
+            signal,
+            onLogChunk,
+          });
+
+        this.metrics.record({
+          engine: metricEngine,
+          durationMs: pipelineResult.durationMs,
+          success: pipelineResult.success,
+          isCached: false,
+          isTimeout: pipelineResult.durationMs >= effectiveTimeoutMs,
+          pdfSizeBytes: pipelineResult.pdf
+            ? Buffer.from(pipelineResult.pdf, 'base64').length
+            : 0,
+        });
+
+        if (
+          pipelineResult.success &&
+          this.cache &&
+          pipelineResult.pdf &&
+          pipelineResult.pdf.length <= 2 * 1024 * 1024
+        ) {
+          await this.cache.set(cacheKey, pipelineResult, 300);
+        }
+
+        this.realtimeService?.broadcastCompileProgress(projectId, {
+          status: pipelineResult.success ? 'success' : 'failed',
+          logs: pipelineResult.logs ? [pipelineResult.logs] : [],
+        });
+
+        if (pipelineResult.success) {
+          await this.workspacePlanner.recordCompileSnapshotIfEligible(
+            projectId,
+            mergedFiles,
+            metricEngine,
+            _userId,
+          );
+        }
+
+        return pipelineResult;
+      },
+    );
+  }
+
+  public cancelCompile(projectId: string): boolean {
+    return this.fairQueue.cancel(projectId);
+  }
+
+  private async loadSynctexContent(
+    projectId: string,
+    inlineSynctexBase64?: string,
+  ): Promise<string | null> {
+    if (inlineSynctexBase64) {
+      const buffer = Buffer.from(inlineSynctexBase64, 'base64');
+      return await this.synctexParser.decompress(buffer);
+    }
+
+    const gzBuffer = await this.workspace.readAuxFile(
+      projectId,
+      'output.synctex.gz',
+    );
+    if (gzBuffer) {
+      return await this.synctexParser.decompress(gzBuffer);
+    }
+
+    const plainBuffer = await this.workspace.readAuxFile(
+      projectId,
+      'output.synctex',
+    );
+    if (plainBuffer) {
+      return plainBuffer.toString('utf8');
+    }
+
+    return null;
+  }
+
+  public async forwardSync(dto: ForwardSyncDto): Promise<{
+    success: boolean;
+    result?: SyncPoint;
+    error?: string;
+  }> {
+    const remoteRes = await this.remoteClient.tryRemoteForwardSync(dto);
+    if (remoteRes) return remoteRes;
+
+    const projectId = await this.workspacePlanner.resolveProjectId({
+      projectId: dto.projectId,
+      project_id: dto.project_id,
+      pageId: dto.pageId,
+      page_id: dto.page_id,
+    });
+
+    const synctexContent = await this.loadSynctexContent(
+      projectId,
+      dto.synctex,
+    );
+    if (!synctexContent) {
+      return {
+        success: false,
+        error:
+          'SyncTeX data not available. Compile the manuscript first to generate SyncTeX mapping.',
+      };
+    }
+
+    const point = this.synctexParser.forwardLookup(
+      synctexContent,
+      dto.file || 'main.tex',
+      dto.line,
+      dto.column,
+    );
+
+    if (!point) {
+      return {
+        success: false,
+        error: `No PDF coordinate match found for ${dto.file || 'main.tex'}:${dto.line}`,
+      };
+    }
+
+    return { success: true, result: point };
+  }
+
+  public async reverseSync(dto: ReverseSyncDto): Promise<{
+    success: boolean;
+    result?: ReverseSyncPoint;
+    error?: string;
+  }> {
+    const remoteRes = await this.remoteClient.tryRemoteReverseSync(dto);
+    if (remoteRes) return remoteRes;
+
+    const projectId = await this.workspacePlanner.resolveProjectId({
+      projectId: dto.projectId,
+      project_id: dto.project_id,
+      pageId: dto.pageId,
+      page_id: dto.page_id,
+    });
+
+    const synctexContent = await this.loadSynctexContent(
+      projectId,
+      dto.synctex,
+    );
+    if (!synctexContent) {
+      return {
+        success: false,
+        error:
+          'SyncTeX data not available. Compile the manuscript first to generate SyncTeX mapping.',
+      };
+    }
+
+    const point = this.synctexParser.reverseLookup(
+      synctexContent,
+      dto.page,
+      dto.x,
+      dto.y,
+    );
+
+    if (!point) {
+      return {
+        success: false,
+        error: `No source line match found at Page ${dto.page} (${dto.x}, ${dto.y})`,
+      };
+    }
+
+    return { success: true, result: point };
+  }
+
+  public getWordCount(dto: ClsiWordCountDto): {
+    success: boolean;
+    stats?: WordCountStats;
+    error?: string;
+  } {
+    if (!dto.source || !dto.source.trim()) {
+      return {
+        success: true,
+        stats: {
+          wordsInText: 0,
+          wordsInHeaders: 0,
+          wordsInCaptions: 0,
+          headers: 0,
+          floats: 0,
+          mathInlines: 0,
+          mathDisplayed: 0,
+          totalWords: 0,
+          charactersWithSpaces: 0,
+          charactersNoSpaces: 0,
+          rawOutput: 'Empty document (0 words)',
+        },
+      };
+    }
+
+    const stats = this.wordCounter.count(dto.source);
+    return {
+      success: true,
+      stats,
+    };
+  }
+
+  public async listAuxFiles(projectId: string) {
+    const files = await this.workspace.listAuxFiles(projectId);
+    return { files };
+  }
+
+  public async downloadAuxFile(
+    projectId: string,
+    filename: string,
+    res: FastifyReply,
+  ) {
+    const buffer = await this.workspace.readAuxFile(projectId, filename);
+    if (!buffer) {
+      throw new NotFoundException(`Artifact file ${filename} not found`);
+    }
+
+    const ext = path.extname(filename).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.log': 'text/plain; charset=utf-8',
+      '.aux': 'text/plain; charset=utf-8',
+      '.bbl': 'text/plain; charset=utf-8',
+      '.blg': 'text/plain; charset=utf-8',
+      '.toc': 'text/plain; charset=utf-8',
+      '.lof': 'text/plain; charset=utf-8',
+      '.lot': 'text/plain; charset=utf-8',
+      '.fls': 'text/plain; charset=utf-8',
+      '.fdb_latexmk': 'text/plain; charset=utf-8',
+      '.synctex.gz': 'application/gzip',
+      '.synctex': 'text/plain; charset=utf-8',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.svg': 'image/svg+xml',
+    };
+    const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+    res.header(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(filename)}"`,
+    );
+    res.header('Content-Type', contentType);
+    return res.send(buffer);
+  }
+
+  public async readAuxFileBuffer(
+    projectId: string,
+    filename: string,
+  ): Promise<Buffer | null> {
+    return await this.workspace.readAuxFile(projectId, filename);
+  }
+
+  public async getHealthReport() {
+    return this.healthCheck.checkHealth();
+  }
+
+  public getMetricsSummary() {
+    return this.metrics.getSummary();
+  }
+
+  public getPrometheusMetrics(): string {
+    return this.metrics.toPrometheus();
+  }
+
+  public async cleanStaleScratch(options?: DiskUsageOptions) {
+    return this.diskUsageCleaner.cleanStaleProjects(options);
+  }
+
+  public async enforceScratchQuota(options?: DiskUsageOptions) {
+    return this.diskUsageCleaner.enforceDiskQuota(options);
+  }
+
+  public async cleanProjectScratch(
+    projectId: string,
+  ): Promise<{ success: boolean; projectId: string }> {
+    await this.workspace.cleanScratch(projectId);
+    return { success: true, projectId };
+  }
+
+  public async downloadAllArtifactsZip(
+    projectId: string,
+    res: FastifyReply,
+  ): Promise<void> {
+    const scratchDir = this.workspace.getScratchDir(projectId);
+    const diskEntries: ZipDiskEntry[] = [];
+
+    const walk = async (currentDir: string, relDir: string) => {
+      try {
+        const dirEntries = await fs.readdir(currentDir, {
+          withFileTypes: true,
+        });
+        for (const entry of dirEntries) {
+          if (
+            entry.name === '.project-lock' ||
+            entry.name === '.clsi-manifest.json' ||
+            entry.name === '.latexmkrc'
+          ) {
+            continue;
+          }
+          const fullPath = path.join(currentDir, entry.name);
+          const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
+          if (entry.isDirectory()) {
+            await walk(fullPath, relPath);
+          } else if (entry.isFile()) {
+            const stat = await fs.stat(fullPath);
+            diskEntries.push({ fullPath, relPath, date: stat.mtime });
+          }
+        }
+      } catch {
+        // Ignored
+      }
+    };
+
+    await walk(scratchDir, '');
+
+    if (diskEntries.length === 0) {
+      throw new NotFoundException(
+        `No output artifacts found for project ${projectId}`,
+      );
+    }
+
+    const zipStream = createZipStreamFromDisk(diskEntries);
+    res.header(
+      'Content-Disposition',
+      `attachment; filename="project-${encodeURIComponent(projectId)}-artifacts.zip"`,
+    );
+    res.header('Content-Type', 'application/zip');
+    return res.send(zipStream);
+  }
+}

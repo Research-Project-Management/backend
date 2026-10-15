@@ -32,9 +32,8 @@ import { AuditModule } from '../audit/audit.module';
         return {
           secret,
           signOptions: {
-            expiresIn:
-              ((configService.get<string>('JWT_EXPIRES_IN') ||
-                '7d') as `${number}${'s' | 'm' | 'h' | 'd'}` | number),
+            expiresIn: (configService.get<string>('JWT_EXPIRES_IN') || '7d') as
+              `${number}${'s' | 'm' | 'h' | 'd'}` | number,
           },
         };
       },

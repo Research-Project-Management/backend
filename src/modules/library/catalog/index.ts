@@ -35,24 +35,15 @@ export * from './services/state.service';
 export * from './services/zotero-schema-validator.service';
 
 // Repositories
-export * from './repositories/command.repository';
+export { CommandRepository } from './repositories/command.repository';
 export * from './repositories/query.repository';
 export * from './repositories/collections.repository';
 export * from './repositories/tags.repository';
 export * from './repositories/notes.repository';
 export * from './repositories/saved-searches.repository';
 export * from './repositories/state.repository';
-export * from './repositories/prisma-item-repository.adapter';
 
-// Clean Architecture CQRS Use Cases
-export * from './core/use-cases/create-item.use-case';
-export * from './core/use-cases/update-item.use-case';
-export * from './core/use-cases/delete-item.use-case';
-export * from './core/use-cases/get-item.use-case';
-export * from './core/use-cases/list-items.use-case';
-export * from './core/use-cases/restore-item.use-case';
-
-// Types & Utils
+// Types
 export * from './types/items.types';
 export * from './types/items.constants';
 export * from './types/collections.types';
@@ -60,24 +51,6 @@ export * from './types/tags.types';
 export * from './types/notes.types';
 export * from './types/saved-search.types';
 export * from './types/state.types';
-export * from './utils/tree.engine';
-export * from './utils/condition-evaluator.engine';
-export * from './utils/items.mapper';
-export * from './utils/item.transformer';
-export * from './utils/notes.utils';
-export * from './utils/collections.utils';
-export * from './utils/state.utils';
 
-// Domain Models, Aggregates & Ports
-export * from './core/domain/item.aggregate';
-export * from './core/domain/collection.aggregate';
-export * from './core/domain/tag.aggregate';
-export {
-  NoteEntity as NoteDomainEntity,
-  NoteAggregate,
-} from './core/domain/note.entity';
-export * from './core/domain/citation-key.vo';
-export * from './core/domain/doi.vo';
-export * from './core/domain/item-domain.event';
-export * from './core/domain/item-domain.exception';
-export * from './core/ports/item-repository.port';
+// Domain Logic & Utilities
+export * from './domain';

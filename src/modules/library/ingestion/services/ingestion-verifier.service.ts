@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ItemMetadata } from '../types/metadata.types';
+import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import {
   titleSimilarity,
   TITLE_MATCH_THRESHOLD,
   parseCreatorString,
-} from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 export interface PdfFingerprint {
   doi?: string;
@@ -17,11 +17,7 @@ export interface PdfFingerprint {
 }
 
 export type IngestionVerificationStatus =
-  | 'COMPLETE'
-  | 'PARTIAL'
-  | 'NEEDS_REVIEW'
-  | 'BLOCKED'
-  | 'FAILED';
+  'COMPLETE' | 'PARTIAL' | 'NEEDS_REVIEW' | 'BLOCKED' | 'FAILED';
 
 export interface VerificationFieldProvenance {
   source: string;
@@ -37,6 +33,7 @@ export interface VerificationResult {
   missingFields: string[];
   fieldProvenance: Record<string, VerificationFieldProvenance>;
   warnings: string[];
+  isDisambiguationMismatch?: boolean;
 }
 
 const BOT_CHALLENGE_TITLE_RE =
@@ -70,7 +67,8 @@ export class IngestionVerifierService {
   ): PdfFingerprint {
     let firstAuthorSurname: string | undefined;
     if (metadata.authors && metadata.authors.length > 0) {
-      firstAuthorSurname = parseCreatorString(metadata.authors[0]).lastName ?? undefined;
+      firstAuthorSurname =
+        parseCreatorString(metadata.authors[0]).lastName ?? undefined;
     } else if (metadata.creators && metadata.creators.length > 0) {
       firstAuthorSurname = metadata.creators[0].lastName ?? undefined;
     }
@@ -145,6 +143,7 @@ export class IngestionVerifierService {
 
     // ── 2. Title Verification (+0.30) ───────────────────────────────────────
     let titleVerified = false;
+    let isDisambiguationMismatch = false;
     if (candidate.title && fingerprint.title) {
       const sim = titleSimilarity(candidate.title, fingerprint.title);
       if (sim >= TITLE_MATCH_THRESHOLD) {
@@ -157,9 +156,21 @@ export class IngestionVerifierService {
         matchedSignals.push(`title_dice_partial (${(sim * 100).toFixed(0)}%)`);
         warnings.push('title_similarity_below_authoritative_threshold');
       } else {
-        warnings.push(
-          `title_similarity_mismatch (${(sim * 100).toFixed(0)}%)`,
-        );
+        warnings.push(`title_similarity_mismatch (${(sim * 100).toFixed(0)}%)`);
+
+        // Check for Page-1 Citation Disambiguation Trap:
+        // When local PDF fingerprint has a credible title (length >= 10, not generic 'Document' or 'Untitled')
+        // AND similarity is critically low (< 0.40) while candidate brought an external identifier
+        const isCrediblePdfTitle =
+          fingerprint.title.trim().length >= 10 &&
+          !/^(untitled|document|uploaded document|manuscript)$/i.test(
+            fingerprint.title.trim(),
+          );
+
+        if (isCrediblePdfTitle && sim < 0.4) {
+          isDisambiguationMismatch = true;
+          warnings.push('cited_paper_doi_mismatch');
+        }
       }
     } else if (candidate.title && pageText.length > 50) {
       const sim = titleSimilarity(candidate.title, pageText.slice(0, 1000));
@@ -182,9 +193,7 @@ export class IngestionVerifierService {
     }
 
     if (candidateAuthorSurname) {
-      const cleanCandidateSurname = candidateAuthorSurname
-        .toLowerCase()
-        .trim();
+      const cleanCandidateSurname = candidateAuthorSurname.toLowerCase().trim();
       if (
         fingerprint.firstAuthorSurname &&
         fingerprint.firstAuthorSurname === cleanCandidateSurname
@@ -252,17 +261,9 @@ export class IngestionVerifierService {
     if (candidate.doi)
       assignProv('doi', idMatched ? 1.0 : 0.7, idMatched || isVerified);
     if (candidate.arxivId)
-      assignProv(
-        'arxivId',
-        idMatched ? 1.0 : 0.7,
-        idMatched || isVerified,
-      );
+      assignProv('arxivId', idMatched ? 1.0 : 0.7, idMatched || isVerified);
     if (candidate.year)
-      assignProv(
-        'year',
-        yearVerified ? 0.95 : 0.6,
-        yearVerified || isVerified,
-      );
+      assignProv('year', yearVerified ? 0.95 : 0.6, yearVerified || isVerified);
     if (candidate.journal || candidate.publicationTitle)
       assignProv('journal', isVerified ? 0.9 : 0.6, isVerified);
     if (candidate.abstract)
@@ -273,8 +274,7 @@ export class IngestionVerifierService {
     if (!candidate.title) missingFields.push('title');
     if (!candidate.authors || candidate.authors.length === 0)
       missingFields.push('authors');
-    if (!candidate.doi && !candidate.arxivId)
-      missingFields.push('identifier');
+    if (!candidate.doi && !candidate.arxivId) missingFields.push('identifier');
     if (!candidate.year) missingFields.push('year');
     if (!candidate.journal && !candidate.publicationTitle)
       missingFields.push('journal/venue');
@@ -303,6 +303,7 @@ export class IngestionVerifierService {
       missingFields,
       fieldProvenance,
       warnings,
+      isDisambiguationMismatch,
     };
   }
 
@@ -361,7 +362,11 @@ export class IngestionVerifierService {
       missingFields.push('year');
     }
 
-    if (metadata.journal || metadata.publicationTitle || metadata.conferenceName) {
+    if (
+      metadata.journal ||
+      metadata.publicationTitle ||
+      metadata.conferenceName
+    ) {
       assignProv('journal', 0.8, true);
     } else {
       missingFields.push('journal/venue');
@@ -414,7 +419,9 @@ export class IngestionVerifierService {
     }
 
     if (htmlContent) {
-      const pageTitleMatch = htmlContent.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const pageTitleMatch = htmlContent.match(
+        /<title[^>]*>([\s\S]*?)<\/title>/i,
+      );
       const title = pageTitleMatch ? pageTitleMatch[1].trim() : '';
 
       if (title && BOT_CHALLENGE_TITLE_RE.test(title)) {

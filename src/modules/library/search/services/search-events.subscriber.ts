@@ -1,1 +1,1 @@
-export * from '../subscribers/search-events.subscriber';
+export * from '@/modules/library/search/subscribers/search-events.subscriber';

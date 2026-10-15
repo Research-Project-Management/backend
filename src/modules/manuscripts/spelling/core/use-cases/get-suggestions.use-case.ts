@@ -3,8 +3,8 @@
  * Inbound Use Case: Retrieves spelling suggestions for a single queried word.
  */
 
-import { ISpellEnginePort } from '../ports/spell-engine.port';
-import { LanguageCodeVo } from '../domain/value-objects/language-code.vo';
+import { ISpellEnginePort } from '@/modules/manuscripts/spelling/core/ports/spell-engine.port';
+import { LanguageCodeVo } from '@/modules/manuscripts/spelling/core/domain/value-objects/language-code.vo';
 
 export interface GetSuggestionsQuery {
   word: string;

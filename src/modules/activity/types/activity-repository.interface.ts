@@ -41,6 +41,32 @@ export type ActivityEventWithActor = Omit<
   actor: ActivityActor | null;
 };
 
+export type WorkItemWithProject = {
+  id: string;
+  title: string;
+  projectId: string;
+  columnId: string;
+  completed: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  project: {
+    id: string;
+    name: string;
+    states: unknown;
+  } | null;
+};
+
+export type WorkItemCommentWithAuthor = {
+  id: string;
+  content: string;
+  workItemId: string;
+  createdAt: Date;
+  updatedAt: Date;
+  authorId: string;
+  author: ActivityActor | null;
+  [key: string]: unknown;
+};
+
 export interface IActivityRepository {
   create(event: DomainActivityEvent): Promise<ActivityEvent>;
   findProjectFeed(
@@ -93,11 +119,14 @@ export interface IActivityRepository {
       updatedAt: Date;
     }>;
   }>;
-  findWorkItemWithProject(workItemId: string): Promise<any>;
+
+  findWorkItemWithProject(
+    workItemId: string,
+  ): Promise<WorkItemWithProject | null>;
   findWorkItemComments(
     workItemId: string,
     sort?: 'asc' | 'desc',
-  ): Promise<any[]>;
+  ): Promise<WorkItemCommentWithAuthor[]>;
   findWorkItemActivityEvents(
     workItemId: string,
     sort?: 'asc' | 'desc',

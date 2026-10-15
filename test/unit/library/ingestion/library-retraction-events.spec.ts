@@ -1,4 +1,4 @@
-import { RetractionItemEventsSubscriber } from '@/modules/library/ingestion/utils/retraction-item-events.subscriber';
+import { RetractionItemEventsSubscriber } from '@/modules/library/ingestion/subscribers/retraction-item-events.subscriber';
 
 describe('RetractionItemEventsSubscriber', () => {
   const makeSubscriber = () => {

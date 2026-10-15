@@ -7,32 +7,35 @@ import {
   Inject,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { NotesRepository } from '../repositories/notes.repository';
+import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import {
   CreateNoteData,
   UpdateNoteData,
   ExtractLiteratureNoteResult,
-} from '../types/notes.types';
+} from '@/modules/library/catalog/types/notes.types';
 import {
   formatLiteratureNoteMarkdown,
   FormatNoteOptions,
-  buildTipTapDocFromText,
   sanitizeNoteTitle,
   sanitizeNoteContent,
-} from '../utils/notes.utils';
-import { TransactionService, TransactionHelpers } from '../../shared-kernel';
-import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
+} from '@/modules/library/catalog/domain/notes.domain';
+import { buildTipTapDocFromText } from '@/modules/library/shared-kernel/domain/tiptap.domain';
+import {
+  TransactionService,
+  TransactionHelpers,
+} from '@/modules/library/shared-kernel';
+import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
 import type {
   UpsertSyncNoteCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../../shared-kernel/core/types/entity-commands.types';
+} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
 import {
   ITEM_EXISTENCE_PORT,
   ITEM_READ_PORT,
   IItemExistencePort,
   IItemReadPort,
-} from '../types/items.types';
+} from '@/modules/library/catalog/types/items.types';
 
 @Injectable()
 export class NotesService {
@@ -69,7 +72,7 @@ export class NotesService {
       }
     }
     return this.libraryTx.executeInTransaction(
-      async (tx: any, helpers: any) => {
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const sanitizedData: CreateNoteData = {
           ...data,
           title: sanitizeNoteTitle(data.title),
@@ -113,14 +116,23 @@ export class NotesService {
     let data: UpdateNoteData;
     let effectiveProjectId = projectId;
 
-    if (typeof expectedVersionOrData === 'number') {
+    if (
+      typeof expectedVersionOrData === 'number' ||
+      (expectedVersionOrData === undefined &&
+        dataOrProjectId !== undefined &&
+        typeof dataOrProjectId === 'object')
+    ) {
       expectedVersion = expectedVersionOrData;
-      data = dataOrProjectId as UpdateNoteData;
+      data = (dataOrProjectId as UpdateNoteData) || {};
     } else {
-      data = expectedVersionOrData as UpdateNoteData;
+      data = (expectedVersionOrData as UpdateNoteData) || {};
       effectiveProjectId =
         typeof dataOrProjectId === 'string' ? dataOrProjectId : projectId;
       expectedVersion = data?.expectedVersion;
+    }
+
+    if (expectedVersion === undefined && data?.expectedVersion !== undefined) {
+      expectedVersion = data.expectedVersion;
     }
 
     return this.libraryTx.executeInTransaction(
@@ -140,11 +152,11 @@ export class NotesService {
           expectedVersion,
           sanitizedData,
           tx,
-          projectId,
+          effectiveProjectId,
         );
 
         const noteProjectId =
-          projectId ||
+          effectiveProjectId ||
           ('projectId' in updated && typeof updated.projectId === 'string'
             ? updated.projectId
             : undefined);
@@ -177,12 +189,25 @@ export class NotesService {
     projectId?: string,
   ): Promise<boolean> {
     return this.libraryTx.executeInTransaction(
-      async (tx: any, helpers: any) => {
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const existing = await this.repo.findById(userId, id, tx, projectId);
+        if (
+          existing &&
+          expectedVersion !== undefined &&
+          existing.version !== expectedVersion
+        ) {
+          await this.repo.softDelete(
+            userId,
+            id,
+            expectedVersion,
+            tx,
+            projectId,
+          );
+        }
         const deleted = await this.repo.softDelete(
           userId,
           id,
-          expectedVersion,
+          undefined,
           tx,
           projectId,
         );

@@ -5,20 +5,21 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { Prisma, TagType } from '@prisma/client';
-import { TagsRepository } from '../repositories/tags.repository';
-import { TransactionService } from '../../shared-kernel';
+import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repository';
+import { TransactionService } from '@/modules/library/shared-kernel';
 import {
   normalizeTags,
   cleanSingleTag,
-} from '../../shared-kernel/utils/tag.utils';
+} from '@/modules/library/shared-kernel/domain/tag.domain';
+import { resolveOrCreateTags } from '@/modules/library/catalog/domain/command-payload.builder';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '../../shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
 import {
   UserId,
   TagId,
   ItemId,
   ProjectId,
-} from '../../shared-kernel/core/types/branded.types';
+} from '@/modules/library/shared-kernel/core/types/branded.types';
 
 @Injectable()
 export class TagsService {
@@ -278,10 +279,16 @@ export class TagsService {
     projectId?: ProjectId | string,
   ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const tagWhere: any =
-        projectId && projectId !== 'user'
-          ? { id: tagId, OR: [{ userId }, { projectId }] }
-          : { id: tagId, userId };
+      const effectiveProjectId =
+        projectId &&
+        projectId !== 'user' &&
+        projectId !== 'me' &&
+        projectId !== 'personal'
+          ? projectId
+          : undefined;
+      const tagWhere: Prisma.TagWhereInput = effectiveProjectId
+        ? { id: tagId, projectId: effectiveProjectId }
+        : { id: tagId, userId, projectId: null };
       const tag = await tx.tag.findFirst({
         where: tagWhere,
         select: { id: true },
@@ -290,10 +297,9 @@ export class TagsService {
         throw new NotFoundException(`Tag ${tagId} not found in library`);
       }
 
-      const itemWhere: any =
-        projectId && projectId !== 'user'
-          ? { id: itemId, OR: [{ userId }, { projectId }], deletedAt: null }
-          : { id: itemId, userId, deletedAt: null };
+      const itemWhere: Prisma.ItemWhereInput = effectiveProjectId
+        ? { id: itemId, projectId: effectiveProjectId, deletedAt: null }
+        : { id: itemId, userId, projectId: null, deletedAt: null };
       const item = await tx.item.findFirst({
         where: itemWhere,
         select: { id: true },
@@ -304,13 +310,6 @@ export class TagsService {
 
       await this.repo.assignToItem(tagId, itemId, tx);
 
-      const effectiveProjectId =
-        projectId &&
-        projectId !== 'user' &&
-        projectId !== 'me' &&
-        projectId !== 'personal'
-          ? projectId
-          : undefined;
       const eventScope = { userId, projectId: effectiveProjectId };
 
       await helpers.appendChange(eventScope, {
@@ -346,10 +345,16 @@ export class TagsService {
     projectId?: ProjectId | string,
   ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const tagWhere: any =
-        projectId && projectId !== 'user'
-          ? { id: tagId, OR: [{ userId }, { projectId }] }
-          : { id: tagId, userId };
+      const effectiveProjectId =
+        projectId &&
+        projectId !== 'user' &&
+        projectId !== 'me' &&
+        projectId !== 'personal'
+          ? projectId
+          : undefined;
+      const tagWhere: Prisma.TagWhereInput = effectiveProjectId
+        ? { id: tagId, projectId: effectiveProjectId }
+        : { id: tagId, userId, projectId: null };
       const tag = await tx.tag.findFirst({
         where: tagWhere,
         select: { id: true },
@@ -358,10 +363,9 @@ export class TagsService {
         throw new NotFoundException(`Tag ${tagId} not found in library`);
       }
 
-      const itemWhere: any =
-        projectId && projectId !== 'user'
-          ? { id: itemId, OR: [{ userId }, { projectId }], deletedAt: null }
-          : { id: itemId, userId, deletedAt: null };
+      const itemWhere: Prisma.ItemWhereInput = effectiveProjectId
+        ? { id: itemId, projectId: effectiveProjectId, deletedAt: null }
+        : { id: itemId, userId, projectId: null, deletedAt: null };
       const item = await tx.item.findFirst({
         where: itemWhere,
         select: { id: true },
@@ -372,13 +376,6 @@ export class TagsService {
 
       await this.repo.removeFromItem(tagId, itemId, tx);
 
-      const effectiveProjectId =
-        projectId &&
-        projectId !== 'user' &&
-        projectId !== 'me' &&
-        projectId !== 'personal'
-          ? projectId
-          : undefined;
       const eventScope = { userId, projectId: effectiveProjectId };
 
       await helpers.recordTombstone(eventScope, {
@@ -412,54 +409,24 @@ export class TagsService {
   ): Promise<void> {
     if (tagNames.length === 0) return;
 
-    const dedupedTags = normalizeTags(tagNames);
-    if (dedupedTags.length === 0) return;
-
-    const existingTags = await tx.tag.findMany({
-      where: {
-        userId,
-        name: { in: dedupedTags, mode: 'insensitive' },
-      },
-      select: { id: true, name: true },
-    });
-
-    const existingNameSet = new Set(
-      existingTags.map((t) => t.name.toLowerCase()),
+    const resolvedTags = await resolveOrCreateTags(
+      tx,
+      userId,
+      tagNames,
+      defaultTagType,
     );
-
-    const missingNames = dedupedTags.filter(
-      (n) => !existingNameSet.has(n.toLowerCase()),
-    );
-    if (missingNames.length > 0) {
-      await tx.tag.createMany({
-        data: missingNames.map((name) => ({
-          userId,
-          name,
-          type: defaultTagType,
-        })),
-        skipDuplicates: true,
-      });
-    }
-
-    const allTags =
-      missingNames.length > 0
-        ? await tx.tag.findMany({
-            where: {
-              userId,
-              name: { in: dedupedTags, mode: 'insensitive' },
-            },
-            select: { id: true },
-          })
-        : existingTags;
+    if (resolvedTags.length === 0) return;
 
     await tx.itemTag.createMany({
-      data: allTags.map((tag) => ({ tagId: tag.id, itemId })),
+      data: resolvedTags.map((tag) => ({
+        tagId: tag.id,
+        itemId,
+        type: tag.type,
+      })),
       skipDuplicates: true,
     });
 
-    if (missingNames.length > 0) {
-      await this.invalidateTagsCache(userId);
-    }
+    await this.invalidateTagsCache(userId);
   }
 
   async mergeTagsToItem(

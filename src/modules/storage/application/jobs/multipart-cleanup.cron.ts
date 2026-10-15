@@ -30,9 +30,9 @@ export class MultipartCleanupJob {
         session.markAborted();
         await this.sessionRepo.update(session);
         abortedCount++;
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.warn(
-          `Failed to abort expired multipart session ${session.id}: ${err.message}`,
+          `Failed to abort expired multipart session ${session.id}: ${(err as Error)?.message}`,
         );
       }
     }

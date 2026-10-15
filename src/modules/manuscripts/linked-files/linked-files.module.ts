@@ -5,22 +5,18 @@
 
 import { Module, forwardRef } from '@nestjs/common';
 import { CacheModule } from '@/core';
-import { StructureModule } from '../structure/structure.module';
-import { DocstoreModule } from '../docstore/docstore.module';
-import { FilestoreModule } from '../filestore/filestore.module';
-import { CitationsModule } from '../citations/citations.module';
+import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
+import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
+import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
+import { CitationsModule } from '@/modules/manuscripts/citations/citations.module';
 import { RealtimeModule } from '@/modules/realtime/realtime.module';
 
 import { LinkedFilesController } from './linked-files.controller';
 import { LinkedFilesService } from './linked-files.service';
+import { LinkedFilesRepository } from './linked-files.repository';
 
-import { CreateLinkedFileUseCase } from './core/use-cases/create-linked-file.use-case';
-import { RefreshLinkedFileUseCase } from './core/use-cases/refresh-linked-file.use-case';
-import { ListLinkedFilesUseCase } from './core/use-cases/list-linked-files.use-case';
-import { DeleteLinkedFileUseCase } from './core/use-cases/delete-linked-file.use-case';
-
+// Ports
 import { ILinkedFilesRepositoryPort } from './core/ports/linked-files-repository.port';
-import { RedisLinkedFilesRepository } from './core/adapters/persistence/redis-linked-files.repository';
 
 @Module({
   imports: [
@@ -33,24 +29,17 @@ import { RedisLinkedFilesRepository } from './core/adapters/persistence/redis-li
   ],
   controllers: [LinkedFilesController],
   providers: [
-    LinkedFilesService,
-    CreateLinkedFileUseCase,
-    RefreshLinkedFileUseCase,
-    ListLinkedFilesUseCase,
-    DeleteLinkedFileUseCase,
-    RedisLinkedFilesRepository,
+    LinkedFilesRepository,
     {
       provide: ILinkedFilesRepositoryPort,
-      useClass: RedisLinkedFilesRepository,
+      useExisting: LinkedFilesRepository,
     },
+    LinkedFilesService,
   ],
   exports: [
     LinkedFilesService,
+    LinkedFilesRepository,
     ILinkedFilesRepositoryPort,
-    CreateLinkedFileUseCase,
-    RefreshLinkedFileUseCase,
-    ListLinkedFilesUseCase,
-    DeleteLinkedFileUseCase,
   ],
 })
 export class LinkedFilesModule {}

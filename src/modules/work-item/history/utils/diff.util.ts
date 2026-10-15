@@ -24,6 +24,8 @@ export function summarizeDiff(
 
     case 'state':
     case 'status':
+    case 'columnid':
+    case 'stateid':
       return `Changed state from "${oldVal}" to "${newVal}"`;
 
     case 'priority':
@@ -31,6 +33,7 @@ export function summarizeDiff(
 
     case 'assignee':
     case 'assignees':
+    case 'assigneeid':
       return `Updated assignees: from ${oldVal} to ${newVal}`;
 
     case 'label':
@@ -40,6 +43,19 @@ export function summarizeDiff(
     case 'due_date':
     case 'duedate':
       return `Changed due date to ${newVal} (was ${oldVal})`;
+
+    case 'start_date':
+    case 'startdate':
+      return `Changed start date to ${newVal} (was ${oldVal})`;
+
+    case 'parent':
+    case 'parentid':
+    case 'parentworkitemid':
+      return `Changed parent to ${newVal} (was ${oldVal})`;
+
+    case 'time_spent':
+    case 'timespent':
+      return `Updated time spent to ${newVal}h (was ${oldVal}h)`;
 
     case 'story_points':
     case 'storypoints':

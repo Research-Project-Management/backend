@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { OcrPageResult } from '../types/ocr.types';
+import { OcrPageResult } from '@/modules/library/extraction/types/ocr.types';
 
 @Injectable()
 export class OcrSandwichPdfService {
@@ -58,7 +58,7 @@ export class OcrSandwichPdfService {
             const sanitized = this.sanitizeForPdf(word.text);
             if (!sanitized) continue;
 
-            const boxWidth = Math.max(
+            const _boxWidth = Math.max(
               1,
               (word.bbox.x1 - word.bbox.x0) * scaleX,
             );
@@ -119,9 +119,10 @@ export class OcrSandwichPdfService {
         `Generated Searchable Sandwich PDF for ${ocrPages.length} scanned pages in ${Date.now() - startTime}ms (size: ${(resultBuffer.length / 1024).toFixed(1)} KB)`,
       );
       return resultBuffer;
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
-        `Failed to generate searchable Sandwich PDF: ${error?.message || error}. Falling back to original PDF buffer.`,
+        `Failed to generate searchable Sandwich PDF: ${message}. Falling back to original PDF buffer.`,
       );
       return originalPdfBuffer;
     }

@@ -11,9 +11,15 @@ export class LabelRepository {
     projectId: string,
     type?: string,
   ): Promise<LabelWithChildren[]> {
+    const normalizedType = type?.trim().toLowerCase();
     return this.prisma.workItemLabel.findMany({
       where: {
         projectId,
+        ...(normalizedType === 'root' || normalizedType === 'parent'
+          ? { parentId: null }
+          : normalizedType === 'sub' || normalizedType === 'child'
+            ? { parentId: { not: null } }
+            : {}),
       },
       include: {
         children: {
@@ -29,10 +35,16 @@ export class LabelRepository {
     type?: string,
     projectId?: string | null,
   ): Promise<Label[]> {
+    const normalizedType = type?.trim().toLowerCase();
     return this.prisma.workItemLabel.findMany({
       where: {
         createdById: userId,
         ...(projectId !== undefined && { projectId }),
+        ...(normalizedType === 'root' || normalizedType === 'parent'
+          ? { parentId: null }
+          : normalizedType === 'sub' || normalizedType === 'child'
+            ? { parentId: { not: null } }
+            : {}),
       },
       include: {
         children: {
@@ -115,15 +127,6 @@ export class LabelRepository {
     });
   }
 
-  async createBatch(
-    items: Prisma.WorkItemLabelUncheckedCreateInput[],
-  ): Promise<Label[]> {
-    if (items.length === 0) return [];
-    return this.prisma.$transaction(
-      items.map((data) => this.prisma.workItemLabel.create({ data })),
-    );
-  }
-
   async update(
     labelId: string,
     data: Prisma.WorkItemLabelUncheckedUpdateInput,
@@ -148,18 +151,6 @@ export class LabelRepository {
           data: { sortOrder: item.sortOrder },
         }),
       ),
-    );
-  }
-
-  async detachFromWorkItems(
-    projectId: string,
-    labelId: string,
-    labelName?: string,
-  ): Promise<number> {
-    return this.detachMultipleFromWorkItems(
-      projectId,
-      [labelId],
-      labelName ? [labelName] : [],
     );
   }
 
@@ -201,40 +192,5 @@ export class LabelRepository {
     } catch {
       return 0;
     }
-  }
-
-  async createMany(
-    data: Prisma.WorkItemLabelUncheckedCreateInput[],
-  ): Promise<{ count: number }> {
-    return this.prisma.workItemLabel.createMany({
-      data,
-      skipDuplicates: true,
-    });
-  }
-
-  // Legacy method preservation
-  async findLabelById(labelId: string): Promise<Label | null> {
-    return this.findById(labelId);
-  }
-
-  async createLabel(
-    data:
-      | Prisma.WorkItemLabelCreateInput
-      | Prisma.WorkItemLabelUncheckedCreateInput,
-  ): Promise<Label> {
-    return this.create(data as Prisma.WorkItemLabelUncheckedCreateInput);
-  }
-
-  async updateLabel(
-    labelId: string,
-    data:
-      | Prisma.WorkItemLabelUpdateInput
-      | Prisma.WorkItemLabelUncheckedUpdateInput,
-  ): Promise<Label> {
-    return this.update(labelId, data);
-  }
-
-  async deleteLabel(labelId: string): Promise<Label> {
-    return this.delete(labelId);
   }
 }

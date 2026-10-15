@@ -8,6 +8,14 @@ export type RelationType =
   | 'starts_after'
   | 'finishes_before'
   | 'finishes_after'
+  | 'start_to_finish'
+  | 'finish_to_start'
+  | 'start_to_start'
+  | 'finish_to_finish'
+  | 'FINISH_TO_START'
+  | 'START_TO_START'
+  | 'FINISH_TO_FINISH'
+  | 'START_TO_FINISH'
   | 'implements';
 
 /** Human-readable label for each relation type */
@@ -21,6 +29,14 @@ export const RELATION_TYPE_LABELS: Record<RelationType, string> = {
   starts_after: 'Starts after',
   finishes_before: 'Finishes before',
   finishes_after: 'Finishes after',
+  start_to_finish: 'Start to finish',
+  finish_to_start: 'Finish to start',
+  start_to_start: 'Start to start',
+  finish_to_finish: 'Finish to finish',
+  FINISH_TO_START: 'Finish to start',
+  START_TO_START: 'Start to start',
+  FINISH_TO_FINISH: 'Finish to finish',
+  START_TO_FINISH: 'Start to finish',
   implements: 'Implements',
 };
 
@@ -32,6 +48,14 @@ export const TIMELINE_RELATION_TYPES: RelationType[] = [
   'starts_after',
   'finishes_before',
   'finishes_after',
+  'start_to_finish',
+  'finish_to_start',
+  'start_to_start',
+  'finish_to_finish',
+  'FINISH_TO_START',
+  'START_TO_START',
+  'FINISH_TO_FINISH',
+  'START_TO_FINISH',
 ];
 
 export interface WorkItemRelationItem {

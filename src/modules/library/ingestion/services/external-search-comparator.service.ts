@@ -5,9 +5,9 @@ import {
   ExternalSearchResult,
   ProviderComparisonMetrics,
   SearchComparisonReport,
-} from '../types/external-search.types';
-import { SearxngSearchProvider } from '../providers/searxng.provider';
-import { EuropePmcSearchProvider } from '../providers/europe-pmc-search.provider';
+} from '@/modules/library/ingestion/types/external-search.types';
+import { SearxngSearchProvider } from '@/modules/library/ingestion/providers/searxng.provider';
+import { EuropePmcSearchProvider } from '@/modules/library/ingestion/providers/europe-pmc-search.provider';
 
 @Injectable()
 export class ExternalSearchComparatorService {
@@ -18,10 +18,7 @@ export class ExternalSearchComparatorService {
     private readonly searxngProvider: SearxngSearchProvider,
     private readonly europePmcProvider: EuropePmcSearchProvider,
   ) {
-    this.providers = [
-      this.searxngProvider,
-      this.europePmcProvider,
-    ];
+    this.providers = [this.searxngProvider, this.europePmcProvider];
   }
 
   /**
@@ -80,7 +77,9 @@ export class ExternalSearchComparatorService {
     // Determine recommendation
     let recommendedSource = 'searxng';
     if (resultsMap.searxng?.hits?.length === 0) {
-      recommendedSource = resultsMap.europepmc?.hits?.length ? 'europepmc' : 'searxng';
+      recommendedSource = resultsMap.europepmc?.hits?.length
+        ? 'europepmc'
+        : 'searxng';
     }
 
     return {
@@ -136,7 +135,10 @@ export class ExternalSearchComparatorService {
 
     const doiCount = res.hits.filter((h) => Boolean(h.doi)).length;
     const pdfCount = res.hits.filter((h) => Boolean(h.pdfUrl)).length;
-    const totalScore = res.hits.reduce((acc, h) => acc + (h.confidenceScore || 0), 0);
+    const totalScore = res.hits.reduce(
+      (acc, h) => acc + (h.confidenceScore || 0),
+      0,
+    );
 
     return {
       latencyMs: res.latencyMs,

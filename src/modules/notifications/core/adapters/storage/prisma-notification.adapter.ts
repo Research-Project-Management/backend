@@ -26,7 +26,7 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
         userId: notification.userId,
         key: notification.key,
         templateKey: notification.templateKey,
-        type: notification.type as ManuscriptNotificationType,
+        type: notification.type,
         projectId: notification.projectId,
         docId: notification.docId,
         actorId: notification.actorId,
@@ -221,7 +221,7 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
         record.messageOpts &&
         typeof record.messageOpts === 'object' &&
         !Array.isArray(record.messageOpts)
-          ? (record.messageOpts as Record<string, unknown>)
+          ? record.messageOpts
           : undefined,
       isRead: record.isRead,
       expiresAt: record.expiresAt ? new Date(record.expiresAt) : null,

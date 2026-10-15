@@ -2,7 +2,7 @@ import {
   SCHEMA_V42_DATA,
   BASE_FIELD_MAPPINGS,
   REVERSE_BASE_FIELD_MAPPINGS,
-} from '../../shared-kernel/types/schema.constants';
+} from '@/modules/library/shared-kernel/types/schema.constants';
 
 export const ITEM_COLUMN_METADATA_FIELDS = new Set([
   'title',
@@ -66,7 +66,7 @@ export {
   REVERSE_FIELD_ALIASES,
   BASE_FIELD_MAPPINGS,
   REVERSE_BASE_FIELD_MAPPINGS,
-} from '../../shared-kernel/types/schema.constants';
+} from '@/modules/library/shared-kernel/types/schema.constants';
 
 export function resolveBaseColumnForField(
   itemType: string,

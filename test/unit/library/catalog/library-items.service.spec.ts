@@ -7,10 +7,10 @@ import { TransactionService } from '@/modules/library/shared-kernel';
 import { PrismaService } from '@/core';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
-import { ItemTransformer } from '@/modules/library/catalog/utils/item.transformer';
-import { sanitizeItemTitle } from '@/modules/library/shared-kernel/utils/bibliographic.utils';
+import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { sanitizeItemTitle } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
-import { ItemsMapper } from '@/modules/library/catalog/utils/items.mapper';
+import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import {
   resolveExtraPlainText,
   extractNonColumnExtraFields,

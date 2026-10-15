@@ -1,9 +1,9 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { CoreRepository } from '../core.repository';
+import { CoreRepository } from '@/modules/work-item/core/core.repository';
 import { IdHandler } from './id.handler';
-import type { WorkItemWithRelations } from '../types/work-item.types';
+import type { WorkItemWithRelations } from '@/modules/work-item/core/types/work-item.types';
 
 @Injectable()
 export class CloneHandler {
@@ -22,13 +22,17 @@ export class CloneHandler {
     const isSameProject = targetProjectId === sourceWorkItem.projectId;
 
     let targetColumnId = sourceWorkItem.columnId;
+    let isCompleted = sourceWorkItem.completed;
+
     if (!isSameProject) {
-      const sourceState = this.repository?.findStateWithGroup
-        ? await this.repository.findStateWithGroup(sourceWorkItem.columnId)
-        : await this.prisma?.workItemState.findUnique({
-            where: { id: sourceWorkItem.columnId },
-            select: { group: true, name: true },
-          });
+      const sourceState =
+        sourceWorkItem.state ??
+        (this.repository?.findStateWithGroup
+          ? await this.repository.findStateWithGroup(sourceWorkItem.columnId)
+          : await this.prisma?.workItemState.findUnique({
+              where: { id: sourceWorkItem.columnId },
+              select: { group: true, name: true },
+            }));
 
       const targetStates =
         (this.repository?.findProjectStates
@@ -52,24 +56,14 @@ export class CloneHandler {
 
       if (matchedState) {
         targetColumnId = matchedState.id;
+        isCompleted = matchedState.group === 'completed';
+      } else if (sourceState) {
+        isCompleted = sourceState.group === 'completed';
       }
     }
 
     const { identifier, sequenceNumber } =
       await this.idHandler.nextIdentifier(targetProjectId);
-
-    let isCompleted = sourceWorkItem.completed;
-    if (!isSameProject && targetColumnId) {
-      const stateObj = this.repository?.findStateWithGroup
-        ? await this.repository.findStateWithGroup(targetColumnId)
-        : await this.prisma?.workItemState.findUnique({
-            where: { id: targetColumnId },
-            select: { group: true },
-          });
-      if (stateObj) {
-        isCompleted = stateObj.group === 'completed';
-      }
-    }
 
     const cloneData: Prisma.WorkItemUncheckedCreateInput = {
       title: `${sourceWorkItem.title} (Copy)`,

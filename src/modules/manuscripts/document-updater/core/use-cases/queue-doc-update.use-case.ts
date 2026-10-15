@@ -4,15 +4,15 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { IInFlightStorePort } from '../ports/in-flight-store.port';
-import { IDocstoreWriterPort } from '../ports/docstore-writer.port';
-import { IUpdaterLockPort } from '../ports/updater-lock.port';
-import { IDebounceTimerPort } from '../ports/debounce-timer.port';
-import { InFlightDoc } from '../domain/entities/in-flight-doc.entity';
-import { UpdateOpVo } from '../domain/value-objects/update-op.vo';
-import { DocumentVersionVo } from '../domain/value-objects/document-version.vo';
-import { DocumentLockedException } from '../domain/exceptions/document-locked.exception';
-import { InFlightNotFoundException } from '../domain/exceptions/in-flight-not-found.exception';
+import { IInFlightStorePort } from '@/modules/manuscripts/document-updater/core/ports/in-flight-store.port';
+import { IDocstoreWriterPort } from '@/modules/manuscripts/document-updater/core/ports/docstore-writer.port';
+import { IUpdaterLockPort } from '@/modules/manuscripts/document-updater/core/ports/updater-lock.port';
+import { IDebounceTimerPort } from '@/modules/manuscripts/document-updater/core/ports/debounce-timer.port';
+import { InFlightDoc } from '@/modules/manuscripts/document-updater/core/domain/entities/in-flight-doc.entity';
+import { UpdateOpVo } from '@/modules/manuscripts/document-updater/core/domain/value-objects/update-op.vo';
+import { DocumentVersionVo } from '@/modules/manuscripts/document-updater/core/domain/value-objects/document-version.vo';
+import { DocumentLockedException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/document-locked.exception';
+import { InFlightNotFoundException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/in-flight-not-found.exception';
 import { FlushSingleDocUseCase } from './flush-single-doc.use-case';
 
 export interface QueueDocUpdateInput {

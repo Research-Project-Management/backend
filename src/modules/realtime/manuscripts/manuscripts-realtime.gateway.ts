@@ -37,6 +37,8 @@ import {
   ProjectChatHistoryDto,
 } from './dto/client-event.dto';
 import { YjsDocManagerAdapter } from './core/adapters/crdt/yjs-doc-manager.adapter';
+import { RedisCacheService } from '@/core';
+import { IProjectAccessVerifierPort } from './core/ports/project-access-verifier.port';
 
 export interface ProjectChatMessage {
   id: string;
@@ -66,6 +68,7 @@ export class ManuscriptRealtimeGateway
 
   private readonly logger = new Logger(ManuscriptRealtimeGateway.name);
   private readonly projectChatStore = new Map<string, ProjectChatMessage[]>();
+  private static readonly MAX_CHAT_HISTORY = 200;
 
   constructor(
     private readonly joinProjectUseCase: JoinProjectUseCase,
@@ -78,7 +81,21 @@ export class ManuscriptRealtimeGateway
     @Optional() private readonly yjsDocManager?: YjsDocManagerAdapter,
     @Optional() private readonly jwtService?: JwtService,
     @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly redisCache?: RedisCacheService,
+    @Optional() private readonly accessVerifier?: IProjectAccessVerifierPort,
   ) {}
+
+  private getErrorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  private isRedisReady(): boolean {
+    return !!(
+      this.redisCache &&
+      this.redisCache.isReady() &&
+      this.redisCache.getClient()
+    );
+  }
 
   public afterInit(server: Server): void {
     this.broadcasterAdapter.setServer(server);
@@ -87,31 +104,43 @@ export class ManuscriptRealtimeGateway
 
   public async handleConnection(client: Socket): Promise<void> {
     const token = this.extractToken(client);
-    let userId =
-      (client.handshake.auth?.userId as string) ||
-      (client.handshake.query?.userId as string);
-    let userName =
-      (client.handshake.auth?.name as string) ||
-      (client.handshake.query?.name as string);
+    const configuredSecret =
+      this.configService?.get<string>('JWT_SECRET') || process.env.JWT_SECRET;
+    let userId: string | undefined;
+    let userName: string | undefined;
+    let tokenRejected = false;
 
     if (token && this.jwtService) {
       try {
-        const secret =
-          this.configService?.get<string>('JWT_SECRET') ||
-          process.env.JWT_SECRET ||
-          'secret';
+        const secret = configuredSecret || 'secret';
         const payload = await this.jwtService.verifyAsync(token, { secret });
-        userId = payload.sub || payload.id || userId;
-        userName = payload.name || payload.email || userName;
-      } catch (err) {
+        userId = payload.sub || payload.id;
+        userName = payload.name || payload.email;
+      } catch {
+        tokenRejected = true;
         this.logger.debug(
-          `Socket ${client.id} provided invalid token, falling back to handshake auth.`,
+          `Socket ${client.id} provided invalid JWT token; ignoring unverified handshake userId.`,
         );
       }
     }
 
+    // Only accept handshake userId when no forged token was rejected and no production JWT_SECRET is enforced
+    if (!userId && !tokenRejected) {
+      const handshakeUserId =
+        (client.handshake.auth?.userId as string) ||
+        (client.handshake.query?.userId as string);
+      if (handshakeUserId && (!configuredSecret || !this.jwtService)) {
+        userId = handshakeUserId;
+      }
+    }
+
+    if (!userName) {
+      userName =
+        (client.handshake.auth?.name as string) ||
+        (client.handshake.query?.name as string);
+    }
+
     if (!userId) {
-      // In dev or test mode, generate an anonymous collaborator ID if not specified
       userId = `anon-${client.id.substring(0, 8)}`;
     }
 
@@ -122,6 +151,7 @@ export class ManuscriptRealtimeGateway
       avatar: client.handshake.auth?.avatar,
       projectId: null,
       activeDocId: null,
+      authenticated: !tokenRejected && !userId.startsWith('anon-'),
     };
 
     this.logger.debug(`Socket connected: ${client.id} (user: ${userId})`);
@@ -195,11 +225,12 @@ export class ManuscriptRealtimeGateway
         projectPresence: result.projectPresence.map((p) => p.toJSON()),
         access: result.access,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = this.getErrorMessage(err);
       this.logger.warn(
-        `Join project error for socket ${client.id}: ${err?.message}`,
+        `Join project error for socket ${client.id}: ${message}`,
       );
-      return { success: false, error: err?.message };
+      return { success: false, error: message };
     }
   }
 
@@ -216,8 +247,8 @@ export class ManuscriptRealtimeGateway
       client.leave(`project:${dto.projectId}`);
       client.data.projectId = null;
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      return { success: false, error: this.getErrorMessage(err) };
     }
   }
 
@@ -280,8 +311,8 @@ export class ManuscriptRealtimeGateway
         success: true,
         docPresence: result.docPresence.map((p) => p.toJSON()),
       };
-    } catch (err: any) {
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      return { success: false, error: this.getErrorMessage(err) };
     }
   }
 
@@ -312,9 +343,52 @@ export class ManuscriptRealtimeGateway
       }
 
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      return { success: false, error: this.getErrorMessage(err) };
     }
+  }
+
+  /**
+   * Verifies that the client socket is authorized and joined to the target project/doc room.
+   * If the socket is not yet in the room, verifies project access via `accessVerifier` and joins it.
+   */
+  private async ensureDocRoomAccess(
+    client: Socket,
+    projectId: string,
+    docId: string,
+    requireWrite = true,
+  ): Promise<boolean> {
+    const docRoom = `doc:${projectId}:${docId}`;
+    const projectRoom = `project:${projectId}`;
+
+    if (
+      client.rooms?.has(docRoom) ||
+      client.rooms?.has(projectRoom) ||
+      (client.data?.projectId === projectId &&
+        client.data?.activeDocId === docId)
+    ) {
+      return true;
+    }
+
+    if (this.accessVerifier) {
+      const userId = client.data?.userId || '';
+      const access = await this.accessVerifier.verifyProjectAccess(
+        userId,
+        projectId,
+      );
+      const allowed = requireWrite ? access.canWrite : access.canRead;
+      if (!allowed) {
+        return false;
+      }
+      client.data = client.data || {};
+      client.data.projectId = projectId;
+      client.data.activeDocId = docId;
+      client.join?.(projectRoom);
+      client.join?.(docRoom);
+      return true;
+    }
+
+    return false;
   }
 
   @SubscribeMessage('doc:update')
@@ -323,10 +397,29 @@ export class ManuscriptRealtimeGateway
     @MessageBody() dto: SendUpdateDto,
   ) {
     try {
+      const projectId = dto.projectId || client.data?.projectId;
+      const docId = dto.docId || client.data?.activeDocId;
+      if (!projectId || !docId) {
+        return { success: false, error: 'Missing projectId or docId' };
+      }
+
+      const authorized = await this.ensureDocRoomAccess(
+        client,
+        projectId,
+        docId,
+        true,
+      );
+      if (!authorized) {
+        return {
+          success: false,
+          error: 'Socket has not joined the target document room',
+        };
+      }
+
       const userId = client.data?.userId || 'unknown';
       const result = await this.sendDocUpdateUseCase.execute({
-        projectId: dto.projectId,
-        docId: dto.docId,
+        projectId,
+        docId,
         socketId: client.id,
         userId,
         clientRev: dto.clientRev,
@@ -342,8 +435,8 @@ export class ManuscriptRealtimeGateway
         version: result.version,
         inFlightSeq: result.inFlightSeq,
       };
-    } catch (err: any) {
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      return { success: false, error: this.getErrorMessage(err) };
     }
   }
 
@@ -367,9 +460,10 @@ export class ManuscriptRealtimeGateway
       });
 
       return { success: true, presence: presence ? presence.toJSON() : null };
-    } catch (err: any) {
-      this.logger.debug(`Ignored ephemeral cursor error: ${err?.message}`);
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      const message = this.getErrorMessage(err);
+      this.logger.debug(`Ignored ephemeral cursor error: ${message}`);
+      return { success: false, error: message };
     }
   }
 
@@ -383,10 +477,24 @@ export class ManuscriptRealtimeGateway
     try {
       const projectId = dto.projectId || client.data?.projectId;
       const docId = dto.docId || client.data?.activeDocId;
-      const data = dto.data !== undefined ? dto.data : dto;
+      const data = (dto.data !== undefined ? dto.data : dto) as
+        Uint8Array | Buffer | number[] | string;
 
       if (!projectId || !docId) {
         return { success: false, error: 'Missing projectId or docId' };
+      }
+
+      const authorized = await this.ensureDocRoomAccess(
+        client,
+        projectId,
+        docId,
+        false,
+      );
+      if (!authorized) {
+        return {
+          success: false,
+          error: 'Socket has not joined the target document room',
+        };
       }
 
       const res = await this.yjsDocManager.handleSyncMessage(
@@ -408,9 +516,10 @@ export class ManuscriptRealtimeGateway
         success: true,
         data: res.reply || undefined,
       };
-    } catch (err: any) {
-      this.logger.warn(`doc:sync error: ${err?.message}`);
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      const message = this.getErrorMessage(err);
+      this.logger.warn(`doc:sync error: ${message}`);
+      return { success: false, error: message };
     }
   }
 
@@ -424,7 +533,25 @@ export class ManuscriptRealtimeGateway
     try {
       const projectId = dto.projectId || client.data?.projectId;
       const docId = dto.docId || client.data?.activeDocId;
-      const data = dto.data !== undefined ? dto.data : dto;
+      const data = (dto.data !== undefined ? dto.data : dto) as
+        Uint8Array | Buffer | number[] | string;
+
+      if (!projectId || !docId) {
+        return { success: false, error: 'Missing projectId or docId' };
+      }
+
+      const authorized = await this.ensureDocRoomAccess(
+        client,
+        projectId,
+        docId,
+        false,
+      );
+      if (!authorized) {
+        return {
+          success: false,
+          error: 'Socket has not joined the target document room',
+        };
+      }
 
       const reply = await this.yjsDocManager.handleSyncStep1(
         projectId,
@@ -432,8 +559,8 @@ export class ManuscriptRealtimeGateway
         data,
       );
       return { success: true, data: reply };
-    } catch (err: any) {
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      return { success: false, error: this.getErrorMessage(err) };
     }
   }
 
@@ -447,7 +574,25 @@ export class ManuscriptRealtimeGateway
     try {
       const projectId = dto.projectId || client.data?.projectId;
       const docId = dto.docId || client.data?.activeDocId;
-      const data = dto.data !== undefined ? dto.data : dto;
+      const data = (dto.data !== undefined ? dto.data : dto) as
+        Uint8Array | Buffer | number[] | string;
+
+      if (!projectId || !docId) {
+        return { success: false, error: 'Missing projectId or docId' };
+      }
+
+      const authorized = await this.ensureDocRoomAccess(
+        client,
+        projectId,
+        docId,
+        true,
+      );
+      if (!authorized) {
+        return {
+          success: false,
+          error: 'Socket has not joined the target document room',
+        };
+      }
 
       await this.yjsDocManager.handleSyncStep2(
         projectId,
@@ -456,8 +601,8 @@ export class ManuscriptRealtimeGateway
         client.id,
       );
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      return { success: false, error: this.getErrorMessage(err) };
     }
   }
 
@@ -471,7 +616,25 @@ export class ManuscriptRealtimeGateway
     try {
       const projectId = dto.projectId || client.data?.projectId;
       const docId = dto.docId || client.data?.activeDocId;
-      const data = dto.data !== undefined ? dto.data : dto;
+      const data = (dto.data !== undefined ? dto.data : dto) as
+        Uint8Array | Buffer | number[] | string;
+
+      if (!projectId || !docId) {
+        return { success: false, error: 'Missing projectId or docId' };
+      }
+
+      const authorized = await this.ensureDocRoomAccess(
+        client,
+        projectId,
+        docId,
+        true,
+      );
+      if (!authorized) {
+        return {
+          success: false,
+          error: 'Socket has not joined the target document room',
+        };
+      }
 
       const broadcastBuf = await this.yjsDocManager.handleSyncUpdate(
         projectId,
@@ -487,8 +650,8 @@ export class ManuscriptRealtimeGateway
       });
 
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      return { success: false, error: this.getErrorMessage(err) };
     }
   }
 
@@ -517,10 +680,27 @@ export class ManuscriptRealtimeGateway
 
       const history = this.projectChatStore.get(projectId) || [];
       history.push(msg);
-      if (history.length > 200) {
+      if (history.length > ManuscriptRealtimeGateway.MAX_CHAT_HISTORY) {
         history.shift();
       }
       this.projectChatStore.set(projectId, history);
+
+      if (this.isRedisReady()) {
+        try {
+          const redisClient = this.redisCache!.getClient()!;
+          const chatKey = `manuscript:chat:${projectId}`;
+          await redisClient.rpush(chatKey, JSON.stringify(msg));
+          await redisClient.ltrim(
+            chatKey,
+            -ManuscriptRealtimeGateway.MAX_CHAT_HISTORY,
+            -1,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `Redis chat persistence failed for project ${projectId}: ${err}`,
+          );
+        }
+      }
 
       this.broadcasterAdapter.broadcastToProject(
         projectId,
@@ -529,8 +709,8 @@ export class ManuscriptRealtimeGateway
       );
 
       return { success: true, message: msg };
-    } catch (err: any) {
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      return { success: false, error: this.getErrorMessage(err) };
     }
   }
 
@@ -545,10 +725,38 @@ export class ManuscriptRealtimeGateway
         return { success: false, error: 'Missing projectId' };
       }
 
+      if (this.isRedisReady()) {
+        try {
+          const redisClient = this.redisCache!.getClient()!;
+          const chatKey = `manuscript:chat:${projectId}`;
+          const rawMessages = await redisClient.lrange(
+            chatKey,
+            -ManuscriptRealtimeGateway.MAX_CHAT_HISTORY,
+            -1,
+          );
+          if (rawMessages && rawMessages.length > 0) {
+            const parsed: ProjectChatMessage[] = [];
+            for (const raw of rawMessages) {
+              try {
+                parsed.push(JSON.parse(raw) as ProjectChatMessage);
+              } catch {
+                // skip malformed entry
+              }
+            }
+            this.projectChatStore.set(projectId, parsed);
+            return { success: true, messages: parsed };
+          }
+        } catch (err) {
+          this.logger.warn(
+            `Redis chat history fetch failed for project ${projectId}: ${err}`,
+          );
+        }
+      }
+
       const messages = this.projectChatStore.get(projectId) || [];
       return { success: true, messages };
-    } catch (err: any) {
-      return { success: false, error: err?.message };
+    } catch (err: unknown) {
+      return { success: false, error: this.getErrorMessage(err) };
     }
   }
 

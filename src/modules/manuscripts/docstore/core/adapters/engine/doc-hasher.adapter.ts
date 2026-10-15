@@ -1,18 +1,25 @@
 /**
  * modules/manuscripts/docstore/core/adapters/engine/doc-hasher.adapter.ts
- * Adapter for SHA-256 and MD5 cryptographic fingerprinting.
+ * Backward-compatible adapter delegating to pure domain functions in domain/doc-hasher.
  */
 
-import * as crypto from 'crypto';
-import { IDocHasher } from '../../ports/doc-hasher.port';
+import { IDocHasher } from '@/modules/manuscripts/docstore/core/ports/doc-hasher.port';
+import {
+  computeDocSha256,
+  computeContentMd5,
+} from '@/modules/manuscripts/docstore/domain/doc-hasher';
 
 export class DocHasherAdapter implements IDocHasher {
   public computeHash(lines: string[]): string {
-    const raw = lines.join('\n');
-    return crypto.createHash('sha256').update(raw, 'utf8').digest('hex');
+    return computeDocSha256(lines);
   }
 
   public computeMd5(content: string | Buffer): string {
-    return crypto.createHash('md5').update(content).digest('hex');
+    return computeContentMd5(content);
   }
 }
+
+export {
+  computeDocSha256,
+  computeContentMd5,
+} from '@/modules/manuscripts/docstore/domain/doc-hasher';

@@ -28,10 +28,11 @@ import {
   CreateAttachmentDto,
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
-} from '../dto/attachments.dto';
+  CaptureSnapshotDto,
+} from '@/modules/library/extraction/dto/attachments.dto';
 // Services
-import { AttachmentsService } from '../services/attachments.service';
-import { WebSnapshotService } from '../services/web-snapshot.service';
+import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
+import { WebSnapshotService } from '@/modules/library/extraction/services/web-snapshot.service';
 
 /**
  * Shared Base Adapter for Library Attachments orchestration.
@@ -183,15 +184,20 @@ export abstract class BaseAttachmentController {
   protected async executeCaptureWebSnapshot(
     userId: string,
     itemId: string,
-    body: { url: string; title?: string },
+    body?: CaptureSnapshotDto,
+    projectId?: string,
   ) {
     if (!this.webSnapshotService) {
       throw new NotFoundException(
         'Web snapshot capability is disabled or unconfigured',
       );
     }
-    return this.webSnapshotService.captureAndAttach(body.url, itemId, userId, {
-      title: body.title,
+    const targetUrl =
+      body?.url?.trim() ||
+      (await this.attachmentsService.resolveItemUrl(itemId, userId, projectId));
+    return this.webSnapshotService.captureAndAttach(targetUrl, itemId, userId, {
+      title: body?.title,
+      projectId,
     });
   }
 
@@ -393,11 +399,16 @@ export class AttachmentController extends BaseAttachmentController {
   async captureWebSnapshot(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    @Body() body: { url: string; title?: string },
+    @Body() body: CaptureSnapshotDto,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    return this.executeCaptureWebSnapshot(userId, itemId, body);
+    return this.executeCaptureWebSnapshot(
+      userId,
+      itemId,
+      body,
+      paramProjectId || queryProjectId,
+    );
   }
 }
 
@@ -572,9 +583,10 @@ export class ProjectAttachmentController extends BaseAttachmentController {
   async captureWebSnapshot(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    @Body() body: { url: string; title?: string },
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
+    @Body() body: CaptureSnapshotDto,
   ) {
-    return this.executeCaptureWebSnapshot(userId, itemId, body);
+    return this.executeCaptureWebSnapshot(userId, itemId, body, projectId);
   }
 }
 

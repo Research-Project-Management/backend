@@ -445,14 +445,20 @@ export class InvitationService {
     }
 
     const settings =
-      project.settings && typeof project.settings === 'object' && !Array.isArray(project.settings)
+      project.settings &&
+      typeof project.settings === 'object' &&
+      !Array.isArray(project.settings)
         ? (project.settings as Record<string, unknown>)
         : {};
     const linkSharing = (
       settings.linkSharing && typeof settings.linkSharing === 'object'
         ? settings.linkSharing
         : null
-    ) as { enabled?: boolean; editToken?: string; readOnlyToken?: string } | null;
+    ) as {
+      enabled?: boolean;
+      editToken?: string;
+      readOnlyToken?: string;
+    } | null;
 
     if (linkSharing && typeof linkSharing === 'object') {
       return {
@@ -485,11 +491,14 @@ export class InvitationService {
     }
 
     const currentSettings =
-      project.settings && typeof project.settings === 'object' && !Array.isArray(project.settings)
+      project.settings &&
+      typeof project.settings === 'object' &&
+      !Array.isArray(project.settings)
         ? (project.settings as Record<string, unknown>)
         : {};
     const currentLinkSharing = (
-      currentSettings.linkSharing && typeof currentSettings.linkSharing === 'object'
+      currentSettings.linkSharing &&
+      typeof currentSettings.linkSharing === 'object'
         ? currentSettings.linkSharing
         : {}
     ) as { enabled?: boolean; editToken?: string; readOnlyToken?: string };

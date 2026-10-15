@@ -33,6 +33,17 @@ export interface CreateProjectTemplateProps {
   defaultRootDoc?: string;
 }
 
+export interface TemplateSummaryProps {
+  id: string;
+  title: string;
+  category: string;
+  description: string;
+  author: string;
+  thumbnailUrl: string | null;
+  fileCount: number;
+  defaultRootDoc: string;
+}
+
 export class ProjectTemplate {
   public readonly id: string;
   public readonly title: string;
@@ -54,7 +65,7 @@ export class ProjectTemplate {
     this.defaultRootDoc = props.defaultRootDoc || 'main.tex';
   }
 
-  public toJSON(): Record<string, any> {
+  public toJSON(): TemplateSummaryProps {
     return {
       id: this.id,
       title: this.title,

@@ -2,20 +2,22 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   Optional,
   Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RedisCacheService } from '@/core';
-import { Prisma } from '@prisma/client';
+import { Prisma, WorkItemRelationType } from '@prisma/client';
 import { RelationRepository } from './relation.repository';
 import { AddRelationDto } from './dto/relation.dto';
 import {
   RelationType,
   WorkItemRelationItem,
   EnrichedRelationItem,
+  TIMELINE_RELATION_TYPES,
 } from './types/relation.types';
-import { WORK_ITEM_REDIS_KEYS } from '../common/constants/redis-keys.constant';
+import { invalidateWorkItemCache } from '@/modules/work-item/common/constants/redis-keys.constant';
 import * as crypto from 'crypto';
 
 export const INVERSE_RELATION_MAP: Record<RelationType, RelationType> = {
@@ -28,8 +30,39 @@ export const INVERSE_RELATION_MAP: Record<RelationType, RelationType> = {
   starts_after: 'starts_before',
   finishes_before: 'finishes_after',
   finishes_after: 'finishes_before',
+  start_to_finish: 'start_to_finish',
+  finish_to_start: 'blocked_by',
+  start_to_start: 'starts_after',
+  finish_to_finish: 'finishes_after',
+  FINISH_TO_START: 'blocked_by',
+  START_TO_START: 'starts_after',
+  FINISH_TO_FINISH: 'finishes_after',
+  START_TO_FINISH: 'START_TO_FINISH',
   implements: 'implements',
 };
+
+const BLOCKING_FORWARD_TYPES = new Set<string>([
+  'blocks',
+  'finish_to_start',
+  'FINISH_TO_START',
+  'start_to_start',
+  'START_TO_START',
+  'finish_to_finish',
+  'FINISH_TO_FINISH',
+  'start_to_finish',
+  'START_TO_FINISH',
+  'starts_before',
+  'finishes_before',
+]);
+
+const BLOCKING_INVERSE_TYPES = new Set<string>([
+  'blocked_by',
+  'starts_after',
+  'finishes_after',
+]);
+
+const DUPLICATE_FORWARD_TYPES = new Set<string>(['duplicate_of']);
+const DUPLICATE_INVERSE_TYPES = new Set<string>(['duplicated_by']);
 
 @Injectable()
 export class RelationService {
@@ -41,23 +74,8 @@ export class RelationService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateWorkItemCache(
-    projectId: string,
-    workItemId?: string,
-  ) {
-    if (!this.cache) return;
-    const deletions: Promise<void>[] = [
-      this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
-      this.cache.del(`flux:proj:overview:${projectId}`),
-    ];
-    if (workItemId) {
-      deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)));
-    }
-    await Promise.all(deletions).catch((err) => {
-      this.logger.warn(
-        `Failed to invalidate work item cache: ${(err as Error).message}`,
-      );
-    });
+  private async invalidateCache(projectId: string, workItemId?: string) {
+    await invalidateWorkItemCache(this.cache, { projectId, workItemId });
   }
 
   async getWorkItemRelations(
@@ -132,7 +150,6 @@ export class RelationService {
         relationCategory,
       );
     } else if (this.relationRepository?.prisma) {
-      // Fallback for mock environments or if projectId is not provided
       return this.fallbackHasDirectedPath(
         startId,
         goalId,
@@ -141,7 +158,6 @@ export class RelationService {
       );
     }
 
-    // Build adjacency list: sourceId -> Set<targetId>
     const adj = new Map<string, Set<string>>();
     for (const edge of edges) {
       if (!edge.sourceId || !edge.targetId || edge.sourceId === edge.targetId) {
@@ -187,6 +203,7 @@ export class RelationService {
   ): Promise<boolean> {
     const visited = new Set<string>([startId]);
     const queue: { id: string; depth: number }[] = [{ id: startId, depth: 0 }];
+    const isBlocks = relationCategory === 'blocks';
 
     while (queue.length > 0) {
       const { id: currentId, depth } = queue.shift()!;
@@ -194,65 +211,42 @@ export class RelationService {
 
       const nextNodeIds = new Set<string>();
 
-      if (relationCategory === 'blocks') {
-        const outgoingRelations =
-          await this.relationRepository.prisma.workItemRelation.findMany({
-            where: {
-              OR: [
-                { sourceId: currentId, type: 'blocks' },
-                { targetId: currentId, type: 'blocked_by' },
-              ],
-            },
-            select: { sourceId: true, targetId: true, type: true },
-          });
+      const outgoingRelations =
+        (await this.relationRepository.prisma.workItemRelation.findMany({
+          where: isBlocks
+            ? {
+                OR: [
+                  { sourceId: currentId, type: 'blocks' },
+                  { targetId: currentId, type: 'blocked_by' },
+                ],
+              }
+            : {
+                sourceId: currentId,
+                type: 'duplicate_of',
+              },
+          select: isBlocks
+            ? { sourceId: true, targetId: true, type: true }
+            : { targetId: true },
+        })) as Array<{ sourceId?: string; targetId?: string; type?: string }>;
 
-        for (const rel of outgoingRelations) {
-          const nextId = rel.type === 'blocks' ? rel.targetId : rel.sourceId;
-          if (nextId && nextId !== currentId) {
-            nextNodeIds.add(nextId);
-          }
+      for (const rel of outgoingRelations) {
+        const nextId =
+          isBlocks && rel.type === 'blocked_by' ? rel.sourceId : rel.targetId;
+        if (nextId && nextId !== currentId) {
+          nextNodeIds.add(nextId);
         }
+      }
 
-        const currentItem =
-          await this.relationRepository.prisma.workItem.findUnique({
-            where: { id: currentId },
-            select: { relations: true },
-          });
+      const currentItem =
+        await this.relationRepository.prisma.workItem.findUnique({
+          where: { id: currentId },
+          select: { relations: true },
+        });
 
-        if (currentItem && Array.isArray(currentItem.relations)) {
-          for (const r of currentItem.relations as unknown as WorkItemRelationItem[]) {
-            if (r.type === 'blocks' && r.targetWorkItemId) {
-              nextNodeIds.add(r.targetWorkItemId);
-            }
-          }
-        }
-      } else if (relationCategory === 'duplicate_of') {
-        const outgoingRelations =
-          await this.relationRepository.prisma.workItemRelation.findMany({
-            where: {
-              sourceId: currentId,
-              type: 'duplicate_of',
-            },
-            select: { targetId: true },
-          });
-
-        for (const rel of outgoingRelations) {
-          if (rel.targetId && rel.targetId !== currentId) {
-            nextNodeIds.add(rel.targetId);
-          }
-        }
-
-        const currentItem =
-          await this.relationRepository.prisma.workItem.findUnique({
-            where: { id: currentId },
-            select: { relations: true },
-          });
-
-        if (currentItem && Array.isArray(currentItem.relations)) {
-          for (const r of currentItem.relations as unknown as WorkItemRelationItem[]) {
-            if (r.type === 'duplicate_of' && r.targetWorkItemId) {
-              nextNodeIds.add(r.targetWorkItemId);
-            }
+      if (currentItem && Array.isArray(currentItem.relations)) {
+        for (const r of currentItem.relations as unknown as WorkItemRelationItem[]) {
+          if (r.type === relationCategory && r.targetWorkItemId) {
+            nextNodeIds.add(r.targetWorkItemId);
           }
         }
       }
@@ -298,8 +292,23 @@ export class RelationService {
       );
     }
 
-    // DAG Cycle Detection (Single-query graph BFS)
-    if (addRelationDto.type === 'blocks') {
+    const existingSourceRelations: WorkItemRelationItem[] = Array.isArray(
+      sourceItem.relations,
+    )
+      ? (sourceItem.relations as unknown as WorkItemRelationItem[])
+      : [];
+
+    const isDuplicateRelation = existingSourceRelations.some(
+      (r) =>
+        r.targetWorkItemId === targetItem.id && r.type === addRelationDto.type,
+    );
+    if (isDuplicateRelation) {
+      throw new ConflictException(
+        `Relation of type "${addRelationDto.type}" already exists between these work items`,
+      );
+    }
+
+    if (BLOCKING_FORWARD_TYPES.has(addRelationDto.type)) {
       const wouldCycle = await this.hasDirectedPath(
         targetItem.id,
         sourceItem.id,
@@ -311,7 +320,7 @@ export class RelationService {
           'Circular dependency detected: Work items cannot block each other directly or transitively.',
         );
       }
-    } else if (addRelationDto.type === 'blocked_by') {
+    } else if (BLOCKING_INVERSE_TYPES.has(addRelationDto.type)) {
       const wouldCycle = await this.hasDirectedPath(
         sourceItem.id,
         targetItem.id,
@@ -323,10 +332,22 @@ export class RelationService {
           'Circular dependency detected: Work item cannot be blocked by a work item that it already blocks directly or transitively.',
         );
       }
-    } else if (addRelationDto.type === 'duplicate_of') {
+    } else if (DUPLICATE_FORWARD_TYPES.has(addRelationDto.type)) {
       const wouldCycle = await this.hasDirectedPath(
         targetItem.id,
         sourceItem.id,
+        'duplicate_of',
+        sourceItem.projectId,
+      );
+      if (wouldCycle) {
+        throw new BadRequestException(
+          'Circular dependency detected: Work items cannot be duplicates of each other directly or transitively.',
+        );
+      }
+    } else if (DUPLICATE_INVERSE_TYPES.has(addRelationDto.type)) {
+      const wouldCycle = await this.hasDirectedPath(
+        sourceItem.id,
+        targetItem.id,
         'duplicate_of',
         sourceItem.projectId,
       );
@@ -341,11 +362,10 @@ export class RelationService {
       INVERSE_RELATION_MAP[addRelationDto.type] || 'relates_to';
     const now = new Date().toISOString();
 
-    const sourceRelations: WorkItemRelationItem[] = (
-      Array.isArray(sourceItem.relations)
-        ? (sourceItem.relations as unknown as WorkItemRelationItem[])
-        : []
-    ).filter((relation) => relation.targetWorkItemId !== targetItem.id);
+    const sourceRelations: WorkItemRelationItem[] =
+      existingSourceRelations.filter(
+        (relation) => relation.targetWorkItemId !== targetItem.id,
+      );
 
     sourceRelations.push({
       id: crypto.randomUUID(),
@@ -367,7 +387,17 @@ export class RelationService {
       createdAt: now,
     });
 
-    // Execute updates in an atomic interactive transaction
+    const dbRelationType: WorkItemRelationType = BLOCKING_FORWARD_TYPES.has(
+      addRelationDto.type,
+    )
+      ? WorkItemRelationType.blocks
+      : BLOCKING_INVERSE_TYPES.has(addRelationDto.type)
+        ? WorkItemRelationType.blocked_by
+        : DUPLICATE_FORWARD_TYPES.has(addRelationDto.type) ||
+            DUPLICATE_INVERSE_TYPES.has(addRelationDto.type)
+          ? WorkItemRelationType.duplicate_of
+          : WorkItemRelationType.relates_to;
+
     await this.relationRepository.prisma.$transaction(async (tx) => {
       await tx.workItem.update({
         where: { id: sourceItem.id },
@@ -388,20 +418,20 @@ export class RelationService {
           sourceId_targetId_type: {
             sourceId: sourceItem.id,
             targetId: targetItem.id,
-            type: addRelationDto.type,
+            type: dbRelationType,
           },
         },
         create: {
           sourceId: sourceItem.id,
           targetId: targetItem.id,
-          type: addRelationDto.type,
+          type: dbRelationType,
         },
         update: {},
       });
     });
 
-    await this.invalidateWorkItemCache(sourceItem.projectId, sourceItem.id);
-    await this.invalidateWorkItemCache(targetItem.projectId, targetItem.id);
+    await this.invalidateCache(sourceItem.projectId, sourceItem.id);
+    await this.invalidateCache(targetItem.projectId, targetItem.id);
 
     if (this.eventEmitter) {
       const relationPayload = {
@@ -483,9 +513,9 @@ export class RelationService {
       });
     });
 
-    await this.invalidateWorkItemCache(sourceItem.projectId, sourceItem.id);
+    await this.invalidateCache(sourceItem.projectId, sourceItem.id);
     if (targetItem) {
-      await this.invalidateWorkItemCache(targetItem.projectId, targetItem.id);
+      await this.invalidateCache(targetItem.projectId, targetItem.id);
     }
 
     if (this.eventEmitter) {
@@ -508,12 +538,6 @@ export class RelationService {
 
   /**
    * Returns all timeline-dependency relations for a WorkItem that violate date constraints.
-   * A violation occurs when the dates of the two work items conflict with the relation type:
-   *   - blocks/blocked_by: source dueDate > target startDate
-   *   - starts_before: source startDate >= target startDate
-   *   - starts_after:  source startDate <= target startDate
-   *   - finishes_before: source dueDate >= target dueDate
-   *   - finishes_after:  source dueDate <= target dueDate
    */
   async getViolatedRelations(workItemId: string): Promise<{
     violations: Array<{
@@ -534,17 +558,8 @@ export class RelationService {
 
     if (rawRelations.length === 0) return { violations: [] };
 
-    const TIMELINE_TYPES: RelationType[] = [
-      'blocks',
-      'blocked_by',
-      'starts_before',
-      'starts_after',
-      'finishes_before',
-      'finishes_after',
-    ];
-
     const timelineRelations = rawRelations.filter((relation) =>
-      TIMELINE_TYPES.includes(relation.type),
+      TIMELINE_RELATION_TYPES.includes(relation.type),
     );
     if (timelineRelations.length === 0) return { violations: [] };
 
@@ -571,34 +586,106 @@ export class RelationService {
       if (target) {
         switch (relation.type) {
           case 'blocks':
-          case 'blocked_by':
-            if (sourceDue && targetStart && sourceDue > targetStart) {
+          case 'finish_to_start':
+          case 'FINISH_TO_START':
+            if (
+              sourceDue &&
+              targetStart &&
+              sourceDue.getTime() > targetStart.getTime()
+            ) {
               isViolated = true;
               reason = `Due date (${sourceDue.toDateString()}) overlaps target start (${targetStart.toDateString()})`;
             }
             break;
+          case 'blocked_by':
+            if (
+              sourceStart &&
+              targetDue &&
+              targetDue.getTime() > sourceStart.getTime()
+            ) {
+              isViolated = true;
+              reason = `Blocker due date (${targetDue.toDateString()}) overlaps start (${sourceStart.toDateString()})`;
+            } else if (
+              !sourceStart &&
+              sourceDue &&
+              targetStart &&
+              sourceDue.getTime() > targetStart.getTime()
+            ) {
+              isViolated = true;
+              reason = `Due date (${sourceDue.toDateString()}) overlaps target start (${targetStart.toDateString()})`;
+            }
+            break;
+          case 'start_to_start':
+          case 'START_TO_START':
+            if (
+              sourceStart &&
+              targetStart &&
+              sourceStart.getTime() > targetStart.getTime()
+            ) {
+              isViolated = true;
+              reason = `Predecessor start (${sourceStart.toDateString()}) exceeds successor start (${targetStart.toDateString()})`;
+            }
+            break;
           case 'starts_before':
-            if (sourceStart && targetStart && sourceStart >= targetStart) {
+            if (
+              sourceStart &&
+              targetStart &&
+              sourceStart.getTime() >= targetStart.getTime()
+            ) {
               isViolated = true;
               reason = `Must start before target (${targetStart.toDateString()}) but starts on ${sourceStart.toDateString()}`;
             }
             break;
           case 'starts_after':
-            if (sourceStart && targetStart && sourceStart <= targetStart) {
+            if (
+              sourceStart &&
+              targetStart &&
+              sourceStart.getTime() <= targetStart.getTime()
+            ) {
               isViolated = true;
               reason = `Must start after target (${targetStart.toDateString()}) but starts on ${sourceStart.toDateString()}`;
             }
             break;
+          case 'finish_to_finish':
+          case 'FINISH_TO_FINISH':
+            if (
+              sourceDue &&
+              targetDue &&
+              sourceDue.getTime() > targetDue.getTime()
+            ) {
+              isViolated = true;
+              reason = `Predecessor due date (${sourceDue.toDateString()}) exceeds successor due date (${targetDue.toDateString()})`;
+            }
+            break;
           case 'finishes_before':
-            if (sourceDue && targetDue && sourceDue >= targetDue) {
+            if (
+              sourceDue &&
+              targetDue &&
+              sourceDue.getTime() >= targetDue.getTime()
+            ) {
               isViolated = true;
               reason = `Must finish before target (${targetDue.toDateString()}) but finishes on ${sourceDue.toDateString()}`;
             }
             break;
           case 'finishes_after':
-            if (sourceDue && targetDue && sourceDue <= targetDue) {
+            if (
+              sourceDue &&
+              targetDue &&
+              sourceDue.getTime() <= targetDue.getTime()
+            ) {
               isViolated = true;
               reason = `Must finish after target (${targetDue.toDateString()}) but finishes on ${sourceDue.toDateString()}`;
+            }
+            break;
+          case 'start_to_finish':
+          case 'START_TO_FINISH':
+            if (
+              sourceStart &&
+              targetDue &&
+              sourceStart.getTime() > targetDue.getTime()
+            ) {
+              isViolated = true;
+              reason = `Predecessor start (${sourceStart.toDateString()}) exceeds successor due date (${targetDue.toDateString()})`;
             }
             break;
         }

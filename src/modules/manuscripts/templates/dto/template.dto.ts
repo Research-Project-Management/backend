@@ -25,6 +25,10 @@ export class QueryTemplatesDto {
   tag?: string;
 
   @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(1)
@@ -36,6 +40,12 @@ export class QueryTemplatesDto {
   @IsNumber()
   @Min(0)
   offset?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  skip?: number;
 }
 
 export class SearchTemplatesDto {

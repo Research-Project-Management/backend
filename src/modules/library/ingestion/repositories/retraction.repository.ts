@@ -6,7 +6,7 @@ import {
   RetractionDetails,
   RetractionNature,
   RetractionStats,
-} from '../types/retraction.types';
+} from '@/modules/library/ingestion/types/retraction.types';
 
 const isValidId = (val?: unknown): val is string =>
   typeof val === 'string' &&
@@ -53,10 +53,15 @@ export class RetractionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   private getScopeWhere(userId: string, projectId?: string) {
-    if (projectId && projectId !== 'user') {
+    if (
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
+    ) {
       return { projectId, deletedAt: null };
     }
-    return { userId, deletedAt: null };
+    return { userId, projectId: null, deletedAt: null };
   }
 
   async findItemById(userId: string, itemId: string, projectId?: string) {
@@ -294,11 +299,11 @@ export class RetractionRepository {
     return this.prisma.retraction.count();
   }
 
-  async upsertRetractionRecord(args: any) {
+  async upsertRetractionRecord(args: Prisma.RetractionUpsertArgs) {
     return this.prisma.retraction.upsert(args);
   }
 
-  async upsertRetraction(args: any) {
+  async upsertRetraction(args: Prisma.RetractionUpsertArgs) {
     return this.prisma.retraction.upsert(args);
   }
 
@@ -320,33 +325,37 @@ export class RetractionRepository {
     });
   }
 
-  async findRetractionRecord(where: any) {
-    let filter = where;
+  async findRetractionRecord(
+    where: Prisma.RetractionWhereInput | { where: Prisma.RetractionWhereInput },
+  ) {
+    let filter: unknown = where;
     while (
       filter &&
       typeof filter === 'object' &&
       'where' in filter &&
-      filter.where
+      (filter as { where?: unknown }).where
     ) {
       filter = filter.where;
     }
     return this.prisma.retraction.findFirst({
-      where: filter,
+      where: filter as Prisma.RetractionWhereInput,
     });
   }
 
-  async findRetraction(where: any) {
-    let filter = where;
+  async findRetraction(
+    where: Prisma.RetractionWhereInput | { where: Prisma.RetractionWhereInput },
+  ) {
+    let filter: unknown = where;
     while (
       filter &&
       typeof filter === 'object' &&
       'where' in filter &&
-      filter.where
+      (filter as { where?: unknown }).where
     ) {
       filter = filter.where;
     }
     return this.prisma.retraction.findFirst({
-      where: filter,
+      where: filter as Prisma.RetractionWhereInput,
     });
   }
 
@@ -357,7 +366,7 @@ export class RetractionRepository {
     sourceBreakdown: Record<string, number>;
     lastCheckedAt?: Date;
   }> {
-    const [totalRecords, retractedCount, cleanCount, sources] =
+    const [totalRecords, retractedCount, cleanCount, sources, latest] =
       await Promise.all([
         this.prisma.retraction.count(),
         this.prisma.retraction.count({ where: { isRetracted: true } }),
@@ -366,17 +375,16 @@ export class RetractionRepository {
           by: ['source'],
           _count: true,
         }),
+        this.prisma.retraction.findFirst({
+          orderBy: { checkedAt: 'desc' },
+          select: { checkedAt: true },
+        }),
       ]);
 
     const sourceBreakdown: Record<string, number> = {};
     for (const s of sources) {
       sourceBreakdown[s.source] = s._count;
     }
-
-    const latest = await this.prisma.retraction.findFirst({
-      orderBy: { checkedAt: 'desc' },
-      select: { checkedAt: true },
-    });
 
     return {
       totalRecords,

@@ -8,7 +8,7 @@ import {
   ISandboxRunner,
   ProcessExecutionOptions,
   ProcessExecutionResult,
-} from '../../ports/runner.port';
+} from '@/modules/manuscripts/clsi/core/ports/runner.port';
 import { Watchdog, killProcessGroup } from './watchdog';
 
 export class LocalProcessRunner implements ISandboxRunner {

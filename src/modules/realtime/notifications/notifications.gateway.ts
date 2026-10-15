@@ -58,9 +58,10 @@ export class NotificationGateway
           'secret';
         const payload = await this.jwtService.verifyAsync(token, { secret });
         userId = payload.sub || payload.id || userId;
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         this.logger.debug(
-          `Socket ${client.id} notification handshake token invalid: ${err.message}`,
+          `Socket ${client.id} notification handshake token invalid: ${message}`,
         );
       }
     }
@@ -89,7 +90,7 @@ export class NotificationGateway
   /**
    * Broadcast a notification event directly to a specific user.
    */
-  public sendToUser(userId: string, event: string, payload: any): void {
+  public sendToUser(userId: string, event: string, payload: unknown): void {
     if (this.server) {
       this.server.to(`user:${userId}`).emit(event, payload);
     }
@@ -98,7 +99,7 @@ export class NotificationGateway
   /**
    * Broadcast a system-wide announcement to all connected users.
    */
-  public broadcastSystem(event: string, payload: any): void {
+  public broadcastSystem(event: string, payload: unknown): void {
     if (this.server) {
       this.server.emit(event, payload);
     }

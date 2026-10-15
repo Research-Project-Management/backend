@@ -1,4 +1,4 @@
-export { AcademicRegexCatalog } from '../../shared-kernel/utils/academic-regex.catalog';
+export { AcademicRegexCatalog } from '@/modules/library/shared-kernel/domain/academic-regex.catalog';
 export * from './layout-heuristic.extractor';
 export * from './mextract.extractor';
 export * from './xmp.parser';

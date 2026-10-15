@@ -1,0 +1,120 @@
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Optional,
+  Inject,
+} from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
+import {
+  IOutboxRegistry,
+  OUTBOX_REGISTRY_PORT,
+} from '@/modules/library/shared-kernel';
+import { OutboxEvent } from '@prisma/client';
+import {
+  INTEGRATION_EVENT_TOPICS,
+  BaseIntegrationEvent,
+  ItemDeletedIntegrationPayload,
+} from '@/modules/library/shared-kernel/events/integration-events';
+import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
+import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
+
+/**
+ * ItemLifecycleSubscriber in Extraction Bounded Context.
+ * Listens to Catalog item deletion events to clean up or soft-delete content attachments and annotations.
+ */
+@Injectable()
+export class ItemLifecycleSubscriber implements OnModuleInit {
+  private readonly logger = new Logger(ItemLifecycleSubscriber.name);
+
+  constructor(
+    private readonly attachmentsRepository: AttachmentsRepository,
+    @Optional()
+    private readonly annotationsRepository?: AnnotationsRepository,
+    @Optional()
+    @Inject(OUTBOX_REGISTRY_PORT)
+    private readonly outboxWorker?: IOutboxRegistry,
+  ) {}
+
+  onModuleInit() {
+    if (this.outboxWorker) {
+      this.outboxWorker.registerHandler(
+        INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_DELETED,
+        {
+          handle: async (event: OutboxEvent) => {
+            await this.handleItemDeleted(
+              event.payload as unknown as BaseIntegrationEvent<ItemDeletedIntegrationPayload>,
+            );
+          },
+        },
+      );
+      this.outboxWorker.registerHandler('library.item.purged', {
+        handle: async (event: OutboxEvent) => {
+          await this.handleItemPurged(event.payload);
+        },
+      });
+    }
+  }
+
+  @OnEvent('library.item.purged', { async: true })
+  async handleItemPurged(
+    event: { id?: string; payload?: { id?: string } } | unknown,
+  ): Promise<void> {
+    const payload = event as
+      { id?: string; payload?: { id?: string } } | null | undefined;
+    const itemId = payload?.id || payload?.payload?.id;
+    if (!itemId) return;
+
+    this.logger.log(
+      `[ExtractionSubscriber] Purging attachments and annotations for purged item ${itemId}`,
+    );
+
+    try {
+      if (this.annotationsRepository) {
+        await this.annotationsRepository.deleteManyByItemId(itemId);
+      }
+      if (this.attachmentsRepository?.deleteManyByItemId) {
+        await this.attachmentsRepository.deleteManyByItemId(itemId);
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `[ExtractionSubscriber] Cascade purge error for item ${itemId}: ${errorMessage}`,
+      );
+    }
+  }
+
+  @OnEvent(INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_DELETED, { async: true })
+  async handleItemDeleted(
+    event: BaseIntegrationEvent<ItemDeletedIntegrationPayload>,
+  ): Promise<void> {
+    const itemId = event?.payload?.itemId;
+    if (!itemId) return;
+
+    this.logger.log(
+      `[ExtractionSubscriber] Cascading soft-delete to attachments and annotations for deleted item ${itemId}`,
+    );
+
+    try {
+      const attachments = await this.attachmentsRepository.findMany({
+        itemId,
+        deletedAt: null,
+      });
+      const attachmentIds = (attachments || []).map(
+        (attachment: { id: string }) => attachment.id,
+      );
+
+      if (attachmentIds.length > 0 && this.annotationsRepository) {
+        await this.annotationsRepository.softDeleteByAttachmentIds(
+          attachmentIds,
+        );
+      }
+      await this.attachmentsRepository.softDeleteByItemId(itemId);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `[ExtractionSubscriber] Cascade cleanup error for item ${itemId}: ${errorMessage}`,
+      );
+    }
+  }
+}

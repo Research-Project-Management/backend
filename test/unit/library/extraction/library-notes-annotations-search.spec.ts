@@ -1,14 +1,15 @@
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { PrismaService } from '@/core';
-import { formatLiteratureNoteMarkdown } from '@/modules/library/catalog/utils/notes.utils';
+import { formatLiteratureNoteMarkdown } from '@/modules/library/catalog/domain/notes.domain';
 import {
   prepareNotesToCreate,
-  buildTipTapDocFromText,
   prepareAttachmentsToCreate,
   buildCommandCreateInput,
-} from '@/modules/library/catalog/utils/command-payload.builder';
-import { ItemsMapper } from '@/modules/library/catalog/utils/items.mapper';
+  buildTipTapDocFromText,
+} from '@/modules/library/catalog/domain/command-payload.builder';
+
+import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 
 describe('Library Notes, Annotations & Deep Search Parity', () => {
   describe('1. SearchRepository - Zotero Parity Deep Full-Text Query Builder', () => {

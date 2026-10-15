@@ -7,7 +7,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ITreePublisher,
   TreeMutationPayload,
-} from '../../ports/tree-publisher.port';
+} from '@/modules/manuscripts/structure/core/ports/tree-publisher.port';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 
 @Injectable()

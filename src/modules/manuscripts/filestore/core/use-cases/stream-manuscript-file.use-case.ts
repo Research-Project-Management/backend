@@ -5,11 +5,11 @@
 
 import { Injectable } from '@nestjs/common';
 import { Readable } from 'node:stream';
-import { ManuscriptFile } from '../domain/entities/manuscript-file.entity';
-import { ByteRange } from '../domain/value-objects/byte-range.vo';
-import { FileNotFoundException } from '../domain/exceptions/file-not-found.exception';
-import { IBinaryStoragePort } from '../ports/binary-storage.port';
-import { IManuscriptFileRepository } from '../ports/manuscript-file-repository.port';
+import { ManuscriptFile } from '@/modules/manuscripts/filestore/core/domain/entities/manuscript-file.entity';
+import { ByteRange } from '@/modules/manuscripts/filestore/core/domain/value-objects/byte-range.vo';
+import { FileNotFoundException } from '@/modules/manuscripts/filestore/core/domain/exceptions/file-not-found.exception';
+import { IBinaryStoragePort } from '@/modules/manuscripts/filestore/core/ports/binary-storage.port';
+import { IManuscriptFileRepository } from '@/modules/manuscripts/filestore/core/ports/manuscript-file-repository.port';
 
 export interface StreamManuscriptFileInput {
   projectId: string;

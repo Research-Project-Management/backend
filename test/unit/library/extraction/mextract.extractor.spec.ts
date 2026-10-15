@@ -17,7 +17,8 @@ describe('MeXtract Academic SLM Extractor (Tier 4)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env = { ...originalEnv };
-    delete process.env.FLUX_AI_URL;
+    delete process.env.MEXTRACT_API_URL;
+    delete process.env.MEXTRACT_URL;
   });
 
   afterAll(() => {
@@ -104,9 +105,9 @@ describe('MeXtract Academic SLM Extractor (Tier 4)', () => {
     });
   });
 
-  describe('3. Remote SLM Microservice Integration (FLUX_AI_URL)', () => {
-    it('calls FLUX_AI_URL and normalizes structured JSON output when endpoint is healthy', async () => {
-      process.env.FLUX_AI_URL = 'http://127.0.0.1:8000';
+  describe('3. Remote SLM Microservice Integration (MEXTRACT_API_URL)', () => {
+    it('calls MEXTRACT_API_URL and normalizes structured JSON output when endpoint is healthy', async () => {
+      process.env.MEXTRACT_API_URL = 'http://127.0.0.1:8000';
 
       const mockAiResponse = {
         title: 'Deep Residual Learning for Image Recognition',
@@ -150,8 +151,8 @@ describe('MeXtract Academic SLM Extractor (Tier 4)', () => {
       globalFetchSpy.mockRestore();
     });
 
-    it('gracefully falls back to in-process parser if FLUX_AI_URL fetch fails or times out', async () => {
-      process.env.FLUX_AI_URL = 'http://127.0.0.1:8000';
+    it('gracefully falls back to in-process parser if MEXTRACT_API_URL fetch fails or times out', async () => {
+      process.env.MEXTRACT_API_URL = 'http://127.0.0.1:8000';
 
       const globalFetchSpy = jest
         .spyOn(global, 'fetch')
@@ -177,6 +178,37 @@ describe('MeXtract Academic SLM Extractor (Tier 4)', () => {
       ]);
 
       globalFetchSpy.mockRestore();
+    });
+  });
+
+  describe('3b. Local ONNX SLM (@xenova/transformers)', () => {
+    it('returns MEXTRACT_ONNX_SLM when ONNX pipeline outputs structured metadata', async () => {
+      const spy = jest
+        .spyOn(MeXtractExtractor as any, 'tryOnnxExtraction')
+        .mockResolvedValueOnce({
+          metadata: {
+            title: 'Attention Is All You Need',
+            authors: ['Ashish Vaswani', 'Noam Shazeer'],
+            year: 2017,
+            doi: '10.48550/arXiv.1706.03762',
+          },
+          rawOutput: { test: true },
+        });
+
+      const result = await MeXtractExtractor.extract(
+        'Attention Is All You Need, Ashish Vaswani, Noam Shazeer, 2017...',
+      );
+
+      expect(result).not.toBeNull();
+      expect(result?.engine).toBe('MEXTRACT_ONNX_SLM');
+      expect(result?.confidence).toBe(0.95);
+      expect(result?.metadata.title).toBe('Attention Is All You Need');
+      expect(result?.metadata.authors).toEqual([
+        'Ashish Vaswani',
+        'Noam Shazeer',
+      ]);
+
+      spy.mockRestore();
     });
   });
 

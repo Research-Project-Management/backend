@@ -28,9 +28,10 @@ import {
   PullGithubDto,
   ImportGithubRepoDto,
 } from './dto/github-sync.dto';
-import { IManuscriptAggregatorPort } from '@/modules/manuscripts/export-import/core/ports/manuscript-aggregator.port';
-import { IManuscriptHydratorPort } from '@/modules/manuscripts/export-import/core/ports/manuscript-hydrator.port';
-import { ArchiveEntryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/archive-entry.vo';
+import {
+  ExportImportService,
+  ArchiveEntryVo,
+} from '@/modules/manuscripts/export-import';
 
 export interface ProviderStatusSummary {
   provider: IntegrationProviderType;
@@ -52,6 +53,9 @@ export class IntegrationsService {
     IntegrationProviderType,
     IIntegrationProvider
   >();
+  private readonly exportImportService: ExportImportService;
+  private readonly docstoreService?: DocstoreService;
+  private readonly structureService?: StructureService;
 
   constructor(
     private readonly repo: IntegrationsRepository,
@@ -59,11 +63,35 @@ export class IntegrationsService {
     private readonly mendeleyProvider: MendeleyProvider,
     private readonly githubProvider: GithubProvider,
     private readonly filestoreService: FilestoreService,
-    private readonly aggregator: IManuscriptAggregatorPort,
-    private readonly hydrator: IManuscriptHydratorPort,
-    @Optional() private readonly docstoreService?: DocstoreService,
-    @Optional() private readonly structureService?: StructureService,
+    exportImportServiceOrAggregator: ExportImportService | any,
+    @Optional() hydratorOrDocstore?: any,
+    @Optional() docstoreOrStructure?: any,
+    @Optional() structureService?: StructureService,
   ) {
+    if (
+      exportImportServiceOrAggregator &&
+      typeof exportImportServiceOrAggregator.hydrateProjectEntries ===
+        'function' &&
+      typeof exportImportServiceOrAggregator.collectProjectEntries ===
+        'function'
+    ) {
+      this.exportImportService = exportImportServiceOrAggregator;
+      this.docstoreService = hydratorOrDocstore;
+      this.structureService = docstoreOrStructure;
+    } else if (exportImportServiceOrAggregator && hydratorOrDocstore) {
+      this.exportImportService = {
+        collectProjectEntries: (...args: any[]) =>
+          exportImportServiceOrAggregator.collectProjectEntries(...args),
+        hydrateProjectEntries: (...args: any[]) =>
+          hydratorOrDocstore.hydrateProjectEntries(...args),
+      } as any;
+      this.docstoreService = docstoreOrStructure;
+      this.structureService = structureService;
+    } else {
+      this.exportImportService = exportImportServiceOrAggregator;
+      this.docstoreService = hydratorOrDocstore;
+      this.structureService = docstoreOrStructure;
+    }
     this.providers.set(this.zoteroProvider.provider, this.zoteroProvider);
     this.providers.set(this.mendeleyProvider.provider, this.mendeleyProvider);
     this.providers.set(this.githubProvider.provider, this.githubProvider);
@@ -239,8 +267,9 @@ export class IntegrationsService {
         decryptedToken,
         conn.providerUserId,
       );
-    } catch (err: any) {
-      if (err?.message?.includes('401') || err?.message?.includes('403')) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('401') || errMsg.includes('403')) {
         await this.repo.markAuthFailed(userId, provider);
       }
       throw err;
@@ -275,16 +304,8 @@ export class IntegrationsService {
     );
 
     const targetBibFile = dto.targetBibFile || 'references.bib';
-    const bibBuffer = Buffer.from(bibtexContent, 'utf-8');
 
-    await this.filestoreService.uploadFileFromBuffer(
-      dto.projectId,
-      targetBibFile,
-      bibBuffer,
-      'application/x-bibtex',
-    );
-
-    // Also sync document into Docstore & Structure tree for instant editor availability
+    // Sync .bib document cleanly as a text DOC in Docstore & Structure tree (no duplicate binary Filestore blob)
     if (this.docstoreService && this.structureService) {
       try {
         const existingNode = await this.structureService.getNodeByPath(
@@ -292,16 +313,25 @@ export class IntegrationsService {
           targetBibFile,
         );
         if (existingNode && existingNode.docId) {
+          const currentDoc = await this.docstoreService
+            .getDoc(dto.projectId, existingNode.docId)
+            .catch(() => null);
           const lines = bibtexContent.split(/\r?\n/);
           await this.docstoreService.updateDoc(
             dto.projectId,
             existingNode.docId,
             {
               lines,
-              version: 1,
+              version: (currentDoc?.version ?? 0) + 1,
             },
           );
         } else {
+          if (existingNode) {
+            await this.structureService.deleteNode(
+              dto.projectId,
+              existingNode.id,
+            );
+          }
           const doc = await this.docstoreService.createDoc(dto.projectId, {
             path: targetBibFile,
             text: bibtexContent,
@@ -312,9 +342,11 @@ export class IntegrationsService {
             docId: doc._id,
           });
         }
-      } catch (docErr: any) {
+      } catch (docErr: unknown) {
+        const errMsg =
+          docErr instanceof Error ? docErr.message : String(docErr);
         this.logger.warn(
-          `Could not sync docstore node for ${targetBibFile}: ${docErr.message}`,
+          `Could not sync docstore node for ${targetBibFile}: ${errMsg}`,
         );
       }
     }
@@ -437,7 +469,7 @@ export class IntegrationsService {
     const branch = dto.branch || link.targetBibFile || 'main';
 
     // 1. Gather all project entries (text documents and binary assets)
-    const entries = await this.aggregator.collectProjectEntries(
+    const entries = await this.exportImportService.collectProjectEntries(
       dto.projectId,
       false,
     );
@@ -507,7 +539,7 @@ export class IntegrationsService {
     );
 
     // 3. Hydrate project entries via domain port
-    const summary = await this.hydrator.hydrateProjectEntries(
+    const summary = await this.exportImportService.hydrateProjectEntries(
       dto.projectId,
       archiveEntries,
       userId,
@@ -549,7 +581,7 @@ export class IntegrationsService {
     );
 
     // 3. Hydrate project entries
-    const summary = await this.hydrator.hydrateProjectEntries(
+    const summary = await this.exportImportService.hydrateProjectEntries(
       dto.projectId,
       archiveEntries,
       userId,

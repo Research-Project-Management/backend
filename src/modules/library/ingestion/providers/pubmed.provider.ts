@@ -7,23 +7,23 @@ import {
   ProviderName,
   ProviderResult,
   QueryType,
-} from '../types/metadata.types';
+} from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeDoi,
   normalizePmcid,
   normalizePmid,
   cleanBibliographicText,
   cleanAbstractText,
-} from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/metadata-executor.service';
+} from '@/modules/library/ingestion/domain/metadata.domain';
+import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,
-} from '../../shared-kernel/core/constants/academic-client.constants';
+} from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
 import {
   normalizePageRange,
   parseCreatorString,
-} from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 @Injectable()
 export class PubMedProvider implements MetadataProvider {
@@ -69,9 +69,10 @@ export class PubMedProvider implements MetadataProvider {
     try {
       const cslResult = await this.resolveViaCtxp(targetId, isPmc, signal);
       if (cslResult) return cslResult;
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       this.logger.debug(
-        `NCBI ctxp resolution failed for ${targetId}: ${err?.message}. Falling back to E-utilities.`,
+        `NCBI ctxp resolution failed for ${targetId}: ${msg}. Falling back to E-utilities.`,
       );
     }
 
@@ -107,9 +108,9 @@ export class PubMedProvider implements MetadataProvider {
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('text/html')) return null;
 
-    let data: any;
+    let data: Record<string, unknown> | null = null;
     try {
-      data = await response.json();
+      data = (await response.json()) as Record<string, unknown>;
     } catch {
       return null;
     }
@@ -183,7 +184,7 @@ export class PubMedProvider implements MetadataProvider {
   }
 
   private transformCslPayload(
-    data: Record<string, any>,
+    data: Record<string, unknown>,
     id: string,
     isPmc: boolean = false,
   ): ProviderResult {
@@ -203,7 +204,9 @@ export class PubMedProvider implements MetadataProvider {
 
     if (Array.isArray(data.author)) {
       for (let i = 0; i < data.author.length; i++) {
-        const a = data.author[i];
+        const a = data.author[i] as
+          | { family?: string; given?: string; literal?: string; name?: string }
+          | undefined;
         if (a && typeof a === 'object') {
           const family = typeof a.family === 'string' ? a.family.trim() : '';
           const given = typeof a.given === 'string' ? a.given.trim() : '';
@@ -243,9 +246,14 @@ export class PubMedProvider implements MetadataProvider {
 
     let year: number | null = null;
     let publicationDate: string | undefined;
-    const dateParts = [data.issued, data['epub-date']]
-      .map((d) => d?.['date-parts']?.[0])
-      .find((parts) => Array.isArray(parts) && !!parts[0]);
+    const dateParts = [
+      (data.issued as { 'date-parts'?: unknown[][] } | undefined)?.[
+        'date-parts'
+      ]?.[0],
+      (data['epub-date'] as { 'date-parts'?: unknown[][] } | undefined)?.[
+        'date-parts'
+      ]?.[0],
+    ].find((parts) => Array.isArray(parts) && Boolean(parts[0]));
     if (dateParts && dateParts[0]) {
       year = Number(dateParts[0]);
       const y = String(dateParts[0]).padStart(4, '0');
@@ -278,6 +286,25 @@ export class PubMedProvider implements MetadataProvider {
     const journalAbbr =
       typeof data['container-title-short'] === 'string'
         ? data['container-title-short']
+        : undefined;
+    const shortTitle =
+      typeof data['title-short'] === 'string' && data['title-short'].trim()
+        ? data['title-short'].trim()
+        : typeof data.shortTitle === 'string' && data.shortTitle.trim()
+          ? data.shortTitle.trim()
+          : undefined;
+    const language =
+      typeof data.language === 'string' && data.language.trim()
+        ? data.language.trim()
+        : undefined;
+    const publisher =
+      typeof data.publisher === 'string' && data.publisher.trim()
+        ? data.publisher.trim()
+        : undefined;
+    const place =
+      typeof data['publisher-place'] === 'string' &&
+      data['publisher-place'].trim()
+        ? data['publisher-place'].trim()
         : undefined;
     const volume =
       typeof data.volume === 'string' || typeof data.volume === 'number'
@@ -315,6 +342,7 @@ export class PubMedProvider implements MetadataProvider {
       provider: this.id,
       metadata: {
         title,
+        shortTitle,
         authors,
         creators,
         year,
@@ -326,6 +354,9 @@ export class PubMedProvider implements MetadataProvider {
         journal,
         publicationTitle: journal,
         journalAbbr,
+        publisher,
+        place,
+        language,
         volume,
         issue,
         pages,

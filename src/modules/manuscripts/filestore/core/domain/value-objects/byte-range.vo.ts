@@ -3,7 +3,7 @@
  * Value Object encapsulating RFC 7233 HTTP Byte Range validation and calculations.
  */
 
-import { InvalidByteRangeException } from '../exceptions/invalid-byte-range.exception';
+import { InvalidByteRangeException } from '@/modules/manuscripts/filestore/core/domain/exceptions/invalid-byte-range.exception';
 
 export class ByteRange {
   public readonly start: number;

@@ -6,17 +6,11 @@
 export * from './track-changes.module';
 export * from './track-changes.service';
 export * from './track-changes.controller';
+export * from './track-changes.repository';
 export * from './dto/track-changes.dto';
 
 // Domain
-export * from './core/domain/entities/track-change.entity';
-export * from './core/domain/entities/comment-thread.entity';
-export * from './core/domain/entities/comment-reply.entity';
-export * from './core/domain/value-objects/text-range.vo';
-export * from './core/domain/value-objects/change-metadata.vo';
-export * from './core/domain/exceptions/change-not-found.exception';
-export * from './core/domain/exceptions/thread-not-found.exception';
-export * from './core/domain/exceptions/resolved-thread.exception';
+export * from './domain';
 
 // Ports
 export * from './core/ports/track-changes-repository.port';

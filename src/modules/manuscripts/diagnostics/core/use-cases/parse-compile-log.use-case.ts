@@ -3,9 +3,9 @@
  * Inbound Use Case: Parses raw compiler logs into an enriched DiagnosticReport entity.
  */
 
-import { ILatexLogParserPort } from '../ports/latex-log-parser.port';
-import { DiagnosticReport } from '../domain/entities/diagnostic-report.entity';
-import { InvalidLogFormatException } from '../domain/exceptions/invalid-log-format.exception';
+import { ILatexLogParserPort } from '@/modules/manuscripts/diagnostics/core/ports/latex-log-parser.port';
+import { DiagnosticReport } from '@/modules/manuscripts/diagnostics/core/domain/entities/diagnostic-report.entity';
+import { InvalidLogFormatException } from '@/modules/manuscripts/diagnostics/core/domain/exceptions/invalid-log-format.exception';
 
 export interface ParseCompileLogCommand {
   logText: string;

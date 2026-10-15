@@ -2,12 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   RetractionDetails,
   RetractionLookupResult,
-} from '../types/retraction.types';
-import { RetractionDatabaseService } from '../services/retraction-database.service';
+} from '@/modules/library/ingestion/types/retraction.types';
+import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,
-} from '../../shared-kernel/core/constants/academic-client.constants';
+} from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
+import {
+  normalizeDoi,
+  normalizePmid,
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 @Injectable()
 export class RetractionScannerProvider {
@@ -36,8 +40,10 @@ export class RetractionScannerProvider {
     doi?: string | null,
     pmid?: string | null,
   ): Promise<RetractionLookupResult> {
-    const cleanDoiVal = doi?.trim().toLowerCase();
-    const cleanPmidVal = pmid?.trim();
+    const cleanDoiVal = doi
+      ? normalizeDoi(doi) || doi.trim().toLowerCase()
+      : undefined;
+    const cleanPmidVal = pmid ? normalizePmid(pmid) || pmid.trim() : undefined;
 
     if (!cleanDoiVal && !cleanPmidVal) {
       return { status: 'unknown' };
@@ -70,9 +76,10 @@ export class RetractionScannerProvider {
           }
           return { status: 'clean' };
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         this.logger.debug(
-          `Online retraction scan for ${cleanDoiVal || cleanPmidVal} skipped/failed: ${err?.message}`,
+          `Online retraction scan for ${cleanDoiVal || cleanPmidVal} skipped/failed: ${msg}`,
         );
       }
     }
@@ -113,7 +120,11 @@ export class RetractionScannerProvider {
         });
 
         if (oaRes.ok) {
-          const oaData: any = await oaRes.json();
+          const oaData = (await oaRes.json()) as {
+            is_retracted?: boolean;
+            doi?: string;
+            publication_date?: string;
+          } | null;
           if (oaData?.is_retracted === true) {
             return {
               retraction: {
@@ -121,7 +132,9 @@ export class RetractionScannerProvider {
                 reason:
                   'Retracted according to Retraction Watch & OpenAlex global registry',
                 noticeUrl: oaData.doi
-                  ? (oaData.doi.startsWith('http') ? oaData.doi : `https://doi.org/${oaData.doi}`)
+                  ? oaData.doi.startsWith('http')
+                    ? oaData.doi
+                    : `https://doi.org/${oaData.doi}`
                   : undefined,
                 date: oaData.publication_date || undefined,
                 source: 'openalex',
@@ -131,9 +144,10 @@ export class RetractionScannerProvider {
           }
         }
       }
-    } catch (oaErr: any) {
+    } catch (oaErr: unknown) {
+      const msg = oaErr instanceof Error ? oaErr.message : String(oaErr);
       this.logger.debug(
-        `[RetractionScanner] OpenAlex check skipped/failed: ${oaErr?.message}`,
+        `[RetractionScanner] OpenAlex check skipped/failed: ${msg}`,
       );
     }
 
@@ -150,7 +164,20 @@ export class RetractionScannerProvider {
         });
 
         if (crRes.ok) {
-          const crData: any = await crRes.json();
+          const crData = (await crRes.json()) as {
+            message?: {
+              'update-to'?: Array<{
+                type?: string;
+                doi?: string;
+                label?: string;
+                updated?: { 'date-time'?: string };
+              }>;
+              assertion?: Array<{
+                name?: string;
+                value?: string;
+              }>;
+            };
+          } | null;
           const message = crData?.message;
 
           const updateTo = message?.['update-to'];
@@ -158,9 +185,15 @@ export class RetractionScannerProvider {
             for (const update of updateTo) {
               const updateType = (update.type || '').toLowerCase();
               const updateNoticeUrl = update.doi
-                ? (update.doi.startsWith('http') ? update.doi : `https://doi.org/${update.doi}`)
+                ? update.doi.startsWith('http')
+                  ? update.doi
+                  : `https://doi.org/${update.doi}`
                 : undefined;
-              if (updateType === 'retraction') {
+              if (
+                updateType === 'retraction' ||
+                updateType === 'withdrawal' ||
+                updateType === 'removal'
+              ) {
                 return {
                   retraction: {
                     nature: 'retraction',
@@ -174,6 +207,7 @@ export class RetractionScannerProvider {
               }
               if (
                 updateType === 'expression_of_concern' ||
+                updateType === 'expression-of-concern' ||
                 updateType === 'concern'
               ) {
                 return {
@@ -182,6 +216,23 @@ export class RetractionScannerProvider {
                     reason:
                       update.label || 'Publisher issued expression of concern',
                     noticeUrl: updateNoticeUrl,
+                    date: update.updated?.['date-time'] || undefined,
+                    source: 'crossref',
+                  },
+                  isVerifiedClean: false,
+                };
+              }
+              if (
+                updateType === 'correction' ||
+                updateType === 'erratum' ||
+                updateType === 'corrigendum'
+              ) {
+                return {
+                  retraction: {
+                    nature: 'correction',
+                    reason: update.label || 'Publisher issued correction',
+                    noticeUrl: updateNoticeUrl,
+                    date: update.updated?.['date-time'] || undefined,
                     source: 'crossref',
                   },
                   isVerifiedClean: false,
@@ -209,9 +260,10 @@ export class RetractionScannerProvider {
 
           return { retraction: null, isVerifiedClean: true };
         }
-      } catch (crErr: any) {
+      } catch (crErr: unknown) {
+        const msg = crErr instanceof Error ? crErr.message : String(crErr);
         this.logger.debug(
-          `[RetractionScanner] Crossref check failed for DOI "${doi}": ${crErr?.message}`,
+          `[RetractionScanner] Crossref check failed for DOI "${doi}": ${msg}`,
         );
       }
     }

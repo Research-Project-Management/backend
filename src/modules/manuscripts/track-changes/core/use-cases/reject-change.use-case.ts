@@ -4,11 +4,11 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ITrackChangesRepositoryPort } from '../ports/track-changes-repository.port';
-import { IDocstorePatcherPort } from '../ports/docstore-patcher.port';
-import { IRealtimeNotifierPort } from '../ports/realtime-notifier.port';
-import { TrackChange } from '../domain/entities/track-change.entity';
-import { ChangeNotFoundException } from '../domain/exceptions/change-not-found.exception';
+import { ITrackChangesRepositoryPort } from '@/modules/manuscripts/track-changes/core/ports/track-changes-repository.port';
+import { IDocstorePatcherPort } from '@/modules/manuscripts/track-changes/core/ports/docstore-patcher.port';
+import { IRealtimeNotifierPort } from '@/modules/manuscripts/track-changes/core/ports/realtime-notifier.port';
+import { TrackChange } from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
+import { ChangeNotFoundException } from '@/modules/manuscripts/track-changes/core/domain/exceptions/change-not-found.exception';
 
 export interface RejectChangeInput {
   projectId: string;

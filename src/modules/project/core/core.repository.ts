@@ -73,7 +73,7 @@ export function mapProjectWithMembers<
           })) as ProjectMemberWithUser[],
         }
       : {}),
-  } as ProjectWithMembers;
+  };
 }
 
 export interface CreateProjectInput {
@@ -867,10 +867,10 @@ export class CoreRepository {
             data: {
               projectId: newProject.id,
               path: doc.path,
-              lines: (doc.lines ?? []) as Prisma.InputJsonValue,
+              lines: doc.lines ?? [],
               rev: 0,
               version: 1,
-              ranges: (doc.ranges ?? {}) as Prisma.InputJsonValue,
+              ranges: doc.ranges ?? {},
               hash: doc.hash,
               sizeBytes: doc.sizeBytes,
             },
@@ -906,7 +906,9 @@ export class CoreRepository {
           ? nodeIdMap.get(node.parentId) || null
           : null;
         const newDocId = node.docId ? docIdMap.get(node.docId) || null : null;
-        const newFileId = node.fileId ? fileIdMap.get(node.fileId) || null : null;
+        const newFileId = node.fileId
+          ? fileIdMap.get(node.fileId) || null
+          : null;
 
         const newNode = await tx.manuscriptNode.create({
           data: {

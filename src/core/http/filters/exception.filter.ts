@@ -126,7 +126,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     const requestId =
-      (request?.id as string) ||
+      request?.id ||
       (request?.headers?.['x-request-id'] as string) ||
       undefined;
 

@@ -3,10 +3,16 @@ import { IRealtimeNotifierPort } from '../../ports/realtime-notifier.port';
 import { NotificationEntity } from '../../domain/entities/notification.entity';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
 
+export interface DispatchedNotificationPayload {
+  unreadCount?: number;
+  notification?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 export interface DispatchedNotificationEvent {
   userId: string;
   type: 'notification:new' | 'notification:count';
-  payload: any;
+  payload: DispatchedNotificationPayload;
   timestamp: Date;
 }
 
@@ -38,9 +44,10 @@ export class EventRealtimeNotifierAdapter implements IRealtimeNotifierPort {
       if (this.realtimeService) {
         this.realtimeService.notifyUser(userId, 'notification:new', payload);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.debug(
-        `Could not push realtime websocket alert to user:${userId}: ${err?.message}`,
+        `Could not push realtime websocket alert to user:${userId}: ${errMsg}`,
       );
     }
   }
@@ -62,9 +69,10 @@ export class EventRealtimeNotifierAdapter implements IRealtimeNotifierPort {
       if (this.realtimeService) {
         this.realtimeService.notifyUser(userId, 'notification:count', payload);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.debug(
-        `Could not broadcast unread count to user:${userId}: ${err?.message}`,
+        `Could not broadcast unread count to user:${userId}: ${errMsg}`,
       );
     }
   }

@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { Readable } from 'stream';
 import { spawnSync } from 'child_process';
 import { GitCliAdapter } from '@/modules/manuscripts/git-bridge/core/adapters/git-cli.adapter';
 import { GitSyncUseCase } from '@/modules/manuscripts/git-bridge/core/use-cases/git-sync.use-case';
@@ -22,8 +23,12 @@ describe('git-bridge domain', () => {
   it('token roundtrip + basic auth', () => {
     const { token, id, hash } = generateToken(PID);
     expect(parseToken(token)).toEqual({ userId: PID, tokenId: id });
-    expect(tokenMatches(token, { id, hash, label: '', createdAt: '' })).toBe(true);
-    expect(tokenMatches(token + 'x', { id, hash, label: '', createdAt: '' })).toBe(false);
+    expect(tokenMatches(token, { id, hash, label: '', createdAt: '' })).toBe(
+      true,
+    );
+    expect(
+      tokenMatches(token + 'x', { id, hash, label: '', createdAt: '' }),
+    ).toBe(false);
     const header = 'Basic ' + Buffer.from(`me:${token}`).toString('base64');
     expect(parseBasicAuth(header)?.password).toBe(token);
   });
@@ -62,13 +67,24 @@ describe('git-bridge sync with real git', () => {
 
   it('materializes project, accepts a real push and applies it back', async () => {
     // In-memory project model behind the real service APIs used by GitSyncUseCase.
-    const docs = new Map<string, { id: string; lines: string[]; version: number; deleted: boolean }>();
+    const docs = new Map<
+      string,
+      { id: string; lines: string[]; version: number; deleted: boolean }
+    >();
     const files = new Map<string, { id: string; content: Buffer }>();
     const nodes: any[] = [];
     let seq = 0;
     const addNode = (n: any) => nodes.push({ id: `n${++seq}`, ...n });
-    docs.set('d1', { id: 'd1', lines: ['\\documentclass{article}', 'Hello'], version: 1, deleted: false });
-    files.set('f1', { id: 'f1', content: Buffer.from([137, 80, 78, 71, 0, 1]) });
+    docs.set('d1', {
+      id: 'd1',
+      lines: ['\\documentclass{article}', 'Hello'],
+      version: 1,
+      deleted: false,
+    });
+    files.set('f1', {
+      id: 'f1',
+      content: Buffer.from([137, 80, 78, 71, 0, 1]),
+    });
     addNode({ type: 'DOC', path: '/main.tex', docId: 'd1' });
     addNode({ type: 'FILE', path: '/fig.png', fileId: 'f1' });
 
@@ -89,31 +105,43 @@ describe('git-bridge sync with real git', () => {
         docs.get(id)!.deleted = !!dto.deleted;
       }),
     };
-    const { Readable } = require('stream');
     const filestore: any = {
-      openReadStream: async (_p: string, id: string) => ({ stream: Readable.from([files.get(id)!.content]) }),
-      deleteFile: jest.fn(async () => undefined),
-      uploadFileFromBuffer: jest.fn(async (_p: string, _n: string, b: Buffer) => {
-        const id = `f${++seq}`;
-        files.set(id, { id, content: b });
-        return { id };
+      openReadStream: async (_p: string, id: string) => ({
+        stream: Readable.from([files.get(id)!.content]),
       }),
+      deleteFile: jest.fn(async () => undefined),
+      uploadFileFromBuffer: jest.fn(
+        async (_p: string, _n: string, b: Buffer) => {
+          const id = `f${++seq}`;
+          files.set(id, { id, content: b });
+          return { id };
+        },
+      ),
     };
     const structure: any = {
       getAllNodes: async () => nodes,
-      getNodeByPath: async (_p: string, p: string) => nodes.find((n) => n.path === p) ?? null,
+      getNodeByPath: async (_p: string, p: string) =>
+        nodes.find((n) => n.path === p) ?? null,
       deleteNode: jest.fn(async (_p: string, id: string) => {
         const i = nodes.findIndex((n) => n.id === id);
         if (i >= 0) nodes.splice(i, 1);
       }),
       mkdirp: jest.fn(async (_p: string, dir: string) => {
         let n = nodes.find((x) => x.path === dir);
-        if (!n) addNode({ type: 'FOLDER', path: dir }), (n = nodes[nodes.length - 1]);
+        if (!n) {
+          addNode({ type: 'FOLDER', path: dir });
+          n = nodes[nodes.length - 1];
+        }
         return n;
       }),
       createNode: jest.fn(async (_p: string, dto: any) => {
         const parent = nodes.find((x) => x.id === dto.parentId);
-        addNode({ type: dto.type, path: `${parent ? parent.path : ''}/${dto.name}`, docId: dto.docId, fileId: dto.fileId });
+        addNode({
+          type: dto.type,
+          path: `${parent ? parent.path : ''}/${dto.name}`,
+          docId: dto.docId,
+          fileId: dto.fileId,
+        });
       }),
     };
 
@@ -130,14 +158,35 @@ describe('git-bridge sync with real git', () => {
       const r = spawnSync('git', args, {
         cwd,
         encoding: 'utf8',
-        env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' },
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 't',
+          GIT_AUTHOR_EMAIL: 't@t',
+          GIT_COMMITTER_NAME: 't',
+          GIT_COMMITTER_EMAIL: 't@t',
+        },
       });
       if (r.status !== 0) throw new Error(r.stderr);
       return r.stdout;
     };
-    g(['clone', '-c', 'core.autocrlf=false', '--quiet', git.bareDir(PID), clone], root);
-    expect(await fs.readFile(path.join(clone, 'main.tex'), 'utf8')).toBe('\\documentclass{article}\nHello');
-    await fs.writeFile(path.join(clone, 'main.tex'), '\\documentclass{article}\nHello git');
+    g(
+      [
+        'clone',
+        '-c',
+        'core.autocrlf=false',
+        '--quiet',
+        git.bareDir(PID),
+        clone,
+      ],
+      root,
+    );
+    expect(await fs.readFile(path.join(clone, 'main.tex'), 'utf8')).toBe(
+      '\\documentclass{article}\nHello',
+    );
+    await fs.writeFile(
+      path.join(clone, 'main.tex'),
+      '\\documentclass{article}\nHello git',
+    );
     await fs.mkdir(path.join(clone, 'chapters'));
     await fs.writeFile(path.join(clone, 'chapters', 'intro.tex'), 'Intro');
     await fs.rm(path.join(clone, 'fig.png'));
@@ -151,9 +200,14 @@ describe('git-bridge sync with real git', () => {
     expect(applied.updated).toEqual(['/main.tex']);
     expect(applied.created).toEqual(['/chapters/intro.tex']);
     expect(applied.deleted).toEqual(['/fig.png']);
-    expect(docs.get('d1')!.lines).toEqual(['\\documentclass{article}', 'Hello git']);
+    expect(docs.get('d1')!.lines).toEqual([
+      '\\documentclass{article}',
+      'Hello git',
+    ]);
     expect(filestore.deleteFile).toHaveBeenCalledWith(PID, 'f1', false); // soft delete
-    expect(nodes.some((n) => n.path === '/chapters/intro.tex' && n.docId)).toBe(true);
+    expect(nodes.some((n) => n.path === '/chapters/intro.tex' && n.docId)).toBe(
+      true,
+    );
 
     // Project now equals pushed tree -> materialize must not create a new commit.
     expect(await sync.materialize(PID)).toBe(tip2);

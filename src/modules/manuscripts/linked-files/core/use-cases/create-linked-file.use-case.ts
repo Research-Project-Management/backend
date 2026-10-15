@@ -5,18 +5,18 @@
 
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { ILinkedFilesRepositoryPort } from '../ports/linked-files-repository.port';
+import { ILinkedFilesRepositoryPort } from '@/modules/manuscripts/linked-files/core/ports/linked-files-repository.port';
 import {
   LinkedFileEntity,
   LinkedFileProvider,
-} from '../domain/entities/linked-file.entity';
-import { CreateLinkedFileDto } from '../../dto/linked-file.dto';
+} from '@/modules/manuscripts/linked-files/core/domain/entities/linked-file.entity';
+import { CreateLinkedFileDto } from '@/modules/manuscripts/linked-files/dto/linked-file.dto';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { CitationsService } from '@/modules/manuscripts/citations/citations.service';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
-import { assertSafeExternalUrl } from '../domain/ssrf-guard';
+import { assertSafeExternalUrl } from '@/modules/manuscripts/linked-files/core/domain/ssrf-guard';
 
 const TEXT_EXTENSIONS = new Set([
   'tex',
@@ -107,10 +107,12 @@ export class CreateLinkedFileUseCase {
           });
           nodeId = node.id;
         }
-      } catch (err: any) {
-        this.logger.error(`Failed to link URL ${dto.url}: ${err?.message}`);
+      } catch (err: unknown) {
+        this.logger.error(
+          `Failed to link URL ${dto.url}: ${(err as Error)?.message}`,
+        );
         throw new BadRequestException(
-          `Failed to link external URL: ${err?.message}`,
+          `Failed to link external URL: ${(err as Error)?.message}`,
         );
       }
     } else if (dto.provider === 'zotero' || dto.provider === 'mendeley') {
@@ -139,12 +141,12 @@ export class CreateLinkedFileUseCase {
           nodeId = existingNode.id;
           docId = existingNode.docId;
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.error(
-          `Failed to link library collection ${dto.collectionId}: ${err?.message}`,
+          `Failed to link library collection ${dto.collectionId}: ${(err as Error)?.message}`,
         );
         throw new BadRequestException(
-          `Failed to link reference collection: ${err?.message}`,
+          `Failed to link reference collection: ${(err as Error)?.message}`,
         );
       }
     }

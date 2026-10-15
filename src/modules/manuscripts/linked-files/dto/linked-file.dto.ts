@@ -12,7 +12,7 @@ import {
   IsBoolean,
   IsUUID,
 } from 'class-validator';
-import { LinkedFileProvider } from '../core/domain/entities/linked-file.entity';
+import { LinkedFileProvider } from '@/modules/manuscripts/linked-files/core/domain/entities/linked-file.entity';
 
 export class CreateLinkedFileDto {
   @ApiProperty({
@@ -67,6 +67,9 @@ export class LinkedFileResponseDto {
 
   @ApiProperty({ enum: ['url', 'zotero', 'mendeley'] })
   provider!: string;
+
+  @ApiPropertyOptional({ enum: ['URL', 'ZOTERO', 'MENDELEY'] })
+  providerType?: string;
 
   @ApiPropertyOptional()
   url?: string | null;

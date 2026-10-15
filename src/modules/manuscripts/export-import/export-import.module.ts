@@ -1,34 +1,28 @@
 /**
- * export-import/export-import.module.ts
- * NestJS Module configuring Ports, Adapters, Use Cases and Controllers for Project Archiving & Templates.
+ * modules/manuscripts/export-import/export-import.module.ts
+ * NestJS Module configuring ExportImportService, Controller, and Repositories.
+ * Pure domain modules (document-transpiler, archive-validator) run in-process without DI ceremony.
  */
 
 import { Module } from '@nestjs/common';
-import { StructureModule } from '../structure/structure.module';
-import { DocstoreModule } from '../docstore/docstore.module';
-import { FilestoreModule } from '../filestore/filestore.module';
-import { ClsiModule } from '../clsi/clsi.module';
+import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
+import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
+import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
+import { ClsiModule } from '@/modules/manuscripts/clsi/clsi.module';
 
 // Ports
 import { IZipEnginePort } from './core/ports/zip-engine.port';
 import { IManuscriptAggregatorPort } from './core/ports/manuscript-aggregator.port';
 import { IManuscriptHydratorPort } from './core/ports/manuscript-hydrator.port';
 import { ITemplateCatalogPort } from './core/ports/template-catalog.port';
-import { IDocumentTranspilerPort } from './core/ports/document-transpiler.port';
 
-// Adapters
+// Repositories & Engines
 import { PkzipEngineAdapter } from './core/adapters/engine/pkzip-engine.adapter';
-import { ManuscriptAggregatorAdapter } from './core/adapters/external/manuscript-aggregator.adapter';
-import { ManuscriptHydratorAdapter } from './core/adapters/external/manuscript-hydrator.adapter';
-import { EmbeddedTemplateCatalogAdapter } from './core/adapters/storage/embedded-template-catalog.adapter';
-import { DocumentTranspilerAdapter } from './core/adapters/transpiler/document-transpiler.adapter';
-
-// Use Cases
-import { ExportProjectZipUseCase } from './core/use-cases/export-project-zip.use-case';
-import { ImportProjectZipUseCase } from './core/use-cases/import-project-zip.use-case';
-import { ListTemplatesUseCase } from './core/use-cases/list-templates.use-case';
-import { ScaffoldTemplateUseCase } from './core/use-cases/scaffold-template.use-case';
-import { ConvertDocumentUseCase } from './core/use-cases/convert-document.use-case';
+import {
+  ManuscriptAggregatorAdapter,
+  ManuscriptHydratorAdapter,
+  EmbeddedTemplateCatalogAdapter,
+} from './repositories/manuscript-aggregator.repository';
 
 // Service & Controller
 import { ExportImportService } from './export-import.service';
@@ -38,38 +32,45 @@ import { ExportImportController } from './export-import.controller';
   imports: [StructureModule, DocstoreModule, FilestoreModule, ClsiModule],
   controllers: [ExportImportController],
   providers: [
-    // Adapters bound to Ports
+    PkzipEngineAdapter,
+    ManuscriptAggregatorAdapter,
+    ManuscriptHydratorAdapter,
+    EmbeddedTemplateCatalogAdapter,
     {
       provide: IZipEnginePort,
-      useClass: PkzipEngineAdapter,
+      useExisting: PkzipEngineAdapter,
     },
     {
       provide: IManuscriptAggregatorPort,
-      useClass: ManuscriptAggregatorAdapter,
+      useExisting: ManuscriptAggregatorAdapter,
     },
     {
       provide: IManuscriptHydratorPort,
-      useClass: ManuscriptHydratorAdapter,
+      useExisting: ManuscriptHydratorAdapter,
     },
     {
       provide: ITemplateCatalogPort,
-      useClass: EmbeddedTemplateCatalogAdapter,
+      useExisting: EmbeddedTemplateCatalogAdapter,
     },
     {
-      provide: IDocumentTranspilerPort,
-      useClass: DocumentTranspilerAdapter,
+      provide: ExportImportService,
+      useFactory: (
+        aggregator: IManuscriptAggregatorPort,
+        zipEngine: IZipEnginePort,
+        hydrator: IManuscriptHydratorPort,
+        catalog: ITemplateCatalogPort,
+      ) => new ExportImportService(aggregator, zipEngine, hydrator, catalog),
+      inject: [
+        IManuscriptAggregatorPort,
+        IZipEnginePort,
+        IManuscriptHydratorPort,
+        ITemplateCatalogPort,
+      ],
     },
-    // Use Cases
-    ExportProjectZipUseCase,
-    ImportProjectZipUseCase,
-    ListTemplatesUseCase,
-    ScaffoldTemplateUseCase,
-    ConvertDocumentUseCase,
-    // Facade Service
-    ExportImportService,
   ],
   exports: [
     ExportImportService,
+    ManuscriptAggregatorAdapter,
     IZipEnginePort,
     IManuscriptAggregatorPort,
     IManuscriptHydratorPort,

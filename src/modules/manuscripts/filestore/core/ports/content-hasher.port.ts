@@ -4,8 +4,8 @@
  */
 
 import { Readable } from 'node:stream';
-import { ContentHash } from '../domain/value-objects/content-hash.vo';
-import { StorageKey } from '../domain/value-objects/storage-key.vo';
+import { ContentHash } from '@/modules/manuscripts/filestore/core/domain/value-objects/content-hash.vo';
+import { StorageKey } from '@/modules/manuscripts/filestore/core/domain/value-objects/storage-key.vo';
 
 export interface StreamHashResult {
   contentHash: ContentHash;

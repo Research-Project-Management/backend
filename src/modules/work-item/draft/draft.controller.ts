@@ -62,22 +62,12 @@ export class DraftController {
   }
 
   @Put(':id')
+  @Patch(':id')
   @ApiOperation({
     summary: 'Update draft content (Auto-save debounce endpoint)',
   })
   @ApiParam({ name: 'id', description: 'Draft UUID' })
   async updateDraft(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-    @Body() updateDraftDto: UpdateDraftDto,
-  ) {
-    return this.draftService.updateDraft(id, updateDraftDto, userId);
-  }
-
-  @Patch(':id')
-  @ApiOperation({ summary: 'Patch draft content (Partial auto-save)' })
-  @ApiParam({ name: 'id', description: 'Draft UUID' })
-  async patchDraft(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Body() updateDraftDto: UpdateDraftDto,

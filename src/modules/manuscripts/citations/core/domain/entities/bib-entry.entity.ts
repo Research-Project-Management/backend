@@ -3,9 +3,9 @@
  * Aggregate Entity representing an individual BibTeX bibliography entry.
  */
 
-import { CitationKeyVo } from '../value-objects/citation-key.vo';
-import { AuthorListVo } from '../value-objects/author-list.vo';
-import { toBibtexValue } from '../bibtex-value';
+import { CitationKeyVo } from '@/modules/manuscripts/citations/core/domain/value-objects/citation-key.vo';
+import { AuthorListVo } from '@/modules/manuscripts/citations/core/domain/value-objects/author-list.vo';
+import { toBibtexValue } from '@/modules/manuscripts/citations/core/domain/bibtex-value';
 
 /**
  * How field values should be treated when serializing:
@@ -115,15 +115,18 @@ export class BibEntry {
       fieldsObj[k] = v;
     }
 
+    const authorsDisplay = this.authors.toDisplayString();
     return {
       id: this.id,
       key: this.key.value,
       entryType: this.entryType,
+      type: this.entryType,
       title: this.title,
       year: this.year,
       journal: this.journal,
       doi: this.doi,
-      authorsDisplay: this.authors.toDisplayString(),
+      author: authorsDisplay,
+      authorsDisplay,
       authors: this.authors.toFullNameList(),
       displayLabel: this.getDisplayLabel(),
       fields: fieldsObj,

@@ -7,7 +7,7 @@ import {
   TransactionService,
 } from '@/modules/library/sync';
 import { SearchEventsSubscriber as CatalogEventsSubscriber } from '@/modules/library/search/services/search-events.subscriber';
-import { ItemLifecycleSubscriber } from '@/modules/library/extraction/utils/item-lifecycle.subscriber';
+import { ItemLifecycleSubscriber } from '@/modules/library/extraction/subscribers/item-lifecycle.subscriber';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { EventEmitter2 } from '@nestjs/event-emitter';

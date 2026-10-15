@@ -2,12 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   ITemplateRepositoryPort,
   TEMPLATE_REPOSITORY_PORT,
-} from '../ports/template-repository.port';
+} from '@/modules/manuscripts/templates/core/ports/template-repository.port';
 import {
   IProjectInstantiatorPort,
   PROJECT_INSTANTIATOR_PORT,
   InstantiatedProjectResult,
-} from '../ports/project-instantiator.port';
+} from '@/modules/manuscripts/templates/core/ports/project-instantiator.port';
 import { GetTemplateByIdUseCase } from './get-template-by-id.use-case';
 
 export interface InstantiateTemplateCommand {

@@ -7,30 +7,30 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { TransactionHelpers } from '../../shared-kernel';
+import type { TransactionHelpers } from '@/modules/library/shared-kernel';
 import type {
   UpsertSyncCollectionCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../../shared-kernel/core/types/entity-commands.types';
-import { CollectionsRepository } from '../repositories/collections.repository';
+} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
+import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';
 import {
   CreateCollectionDto,
   UpdateCollectionDto,
   AssignItemsToCollectionDto,
-} from '../dto/collections.dto';
+} from '@/modules/library/catalog/dto/collections.dto';
 import {
   CollectionDeleteStrategy,
   CollectionTreeNode,
-} from '../types/collections.types';
+} from '@/modules/library/catalog/types/collections.types';
 import {
   normalizeParentId,
   sanitizeCollectionName,
   sanitizeCollectionDescription,
-} from '../utils/collections.utils';
-import { TreeEngine } from '../utils/tree.engine';
+} from '@/modules/library/catalog/domain/collections.domain';
+import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '../../shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
 
 @Injectable()
 export class CollectionsService {
@@ -43,6 +43,20 @@ export class CollectionsService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
+  private normalizeProjectScopeId(
+    projectId?: string | null,
+  ): string | undefined {
+    if (
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
+    ) {
+      return projectId;
+    }
+    return undefined;
+  }
+
   private async invalidateCollectionsCache(
     userId: string,
     projectId?: string,
@@ -51,23 +65,32 @@ export class CollectionsService {
       await this.cache.delPattern(
         LIBRARY_REDIS_KEYS.collectionsPattern(userId),
       );
-      if (projectId) {
+      const effectiveProjectId = this.normalizeProjectScopeId(projectId);
+      if (effectiveProjectId) {
         await this.cache.delPattern(
-          LIBRARY_REDIS_KEYS.collectionsPattern(projectId),
+          LIBRARY_REDIS_KEYS.collectionsPattern(effectiveProjectId),
         );
       }
     }
   }
 
   async getCollections(userId: string, projectId?: string) {
+    const effectiveProjectId = this.normalizeProjectScopeId(projectId);
     const fetchCollections = async () => {
-      const rawCollections = await this.repo.findAll(userId, projectId);
-      const collections = rawCollections.map((c: any) => ({
-        ...c,
-        itemCount: c.itemCount ?? c._count?.collectionItems ?? 0,
-        itemsCount: c.itemsCount ?? c._count?.collectionItems ?? 0,
-        paperCount: c.paperCount ?? c._count?.collectionItems ?? 0,
-      }));
+      const rawCollections = await this.repo.findAll(
+        userId,
+        effectiveProjectId,
+      );
+      const collections = rawCollections.map((c) => {
+        const cRecord = c as Record<string, unknown>;
+        const count = c._count?.collectionItems ?? 0;
+        return {
+          ...c,
+          itemCount: (cRecord.itemCount as number | undefined) ?? count,
+          itemsCount: (cRecord.itemsCount as number | undefined) ?? count,
+          paperCount: (cRecord.paperCount as number | undefined) ?? count,
+        };
+      });
       return {
         collections,
         total: collections.length,
@@ -75,7 +98,7 @@ export class CollectionsService {
     };
 
     if (this.cache) {
-      const scopeId = projectId || userId;
+      const scopeId = effectiveProjectId || userId;
       return this.cache.wrap(
         LIBRARY_REDIS_KEYS.collections(scopeId),
         fetchCollections,
@@ -85,7 +108,7 @@ export class CollectionsService {
     return fetchCollections();
   }
 
-  async findAll(userId: string, projectId?: string): Promise<any[]> {
+  async findAll(userId: string, projectId?: string) {
     const res = await this.getCollections(userId, projectId);
     return res.collections;
   }
@@ -94,13 +117,14 @@ export class CollectionsService {
     userId: string,
     projectId?: string,
   ): Promise<{ tree: CollectionTreeNode[] }> {
+    const effectiveProjectId = this.normalizeProjectScopeId(projectId);
     const fetchTree = async () => {
-      const collections = await this.repo.findAll(userId, projectId);
+      const collections = await this.repo.findAll(userId, effectiveProjectId);
       return { tree: this.tree.buildTree(collections) };
     };
 
     if (this.cache) {
-      const scopeId = projectId || userId;
+      const scopeId = effectiveProjectId || userId;
       return this.cache.wrap(
         LIBRARY_REDIS_KEYS.collectionTree(scopeId),
         fetchTree,
@@ -143,7 +167,14 @@ export class CollectionsService {
     dto: CreateCollectionDto,
     projectId?: string,
   ) {
-    const effectiveProjectId = projectId || dto.projectId || null;
+    const rawProjectId = projectId || dto.projectId || null;
+    const effectiveProjectId =
+      rawProjectId &&
+      rawProjectId !== 'user' &&
+      rawProjectId !== 'me' &&
+      rawProjectId !== 'personal'
+        ? rawProjectId
+        : null;
 
     const rawParentId = normalizeParentId(
       dto.parentId !== undefined ? dto.parentId : dto.parent,
@@ -310,7 +341,10 @@ export class CollectionsService {
       collectionId === 'unfiled' ? null : collectionId;
 
     const scopeWhere =
-      projectId && projectId !== 'user'
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
         ? { projectId }
         : { userId, projectId: null };
     const ownedItemIds = await this.repo.findOwnedItemIds(itemIds, scopeWhere);
@@ -370,7 +404,10 @@ export class CollectionsService {
     }
 
     const scopeWhere =
-      projectId && projectId !== 'user'
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
         ? { projectId }
         : { userId, projectId: null };
 
@@ -406,7 +443,12 @@ export class CollectionsService {
     }
 
     const scopeWhere =
-      projectId && projectId !== 'user' ? { projectId } : { userId };
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
+        ? { projectId }
+        : { userId, projectId: null };
 
     const itemExists = await this.repo.verifyItemInScope(itemId, scopeWhere);
     if (!itemExists) {

@@ -48,12 +48,34 @@ export class SyncLibraryDto {
   collectionId!: string;
 
   @ApiPropertyOptional({
+    description: 'External reference provider (e.g. zotero, mendeley)',
+  })
+  @IsString()
+  @IsOptional()
+  provider?: string;
+
+  @ApiPropertyOptional({
+    description: 'Collection display name',
+  })
+  @IsString()
+  @IsOptional()
+  collectionName?: string;
+
+  @ApiPropertyOptional({
     description: 'Target .bib filename to sync into',
     default: 'references.bib',
   })
   @IsString()
   @IsOptional()
   targetFilename?: string;
+
+  @ApiPropertyOptional({
+    description: 'Target .bib filename alias (frontend SDK targetBibFile)',
+    default: 'references.bib',
+  })
+  @IsString()
+  @IsOptional()
+  targetBibFile?: string;
 }
 
 export class ParseRawBibtexDto {
@@ -74,6 +96,9 @@ export class BibEntryDto {
   entryType!: string;
 
   @ApiPropertyOptional()
+  type?: string;
+
+  @ApiPropertyOptional()
   title?: string;
 
   @ApiPropertyOptional()
@@ -84,6 +109,9 @@ export class BibEntryDto {
 
   @ApiPropertyOptional()
   doi?: string;
+
+  @ApiPropertyOptional()
+  author?: string;
 
   @ApiProperty()
   authorsDisplay!: string;
@@ -105,6 +133,9 @@ export class CitationValidationDto {
   @ApiProperty()
   valid!: boolean;
 
+  @ApiPropertyOptional()
+  isValid?: boolean;
+
   @ApiProperty()
   totalFiles!: number;
 
@@ -116,6 +147,9 @@ export class CitationValidationDto {
 
   @ApiProperty({ type: [String] })
   warnings!: string[];
+
+  @ApiPropertyOptional()
+  missingFieldWarnings?: Array<{ key: string; missingFields: string[] }>;
 }
 
 export class SyncLibraryResultDto {

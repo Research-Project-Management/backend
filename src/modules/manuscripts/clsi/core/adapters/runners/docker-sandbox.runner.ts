@@ -8,7 +8,7 @@ import {
   ISandboxRunner,
   ProcessExecutionOptions,
   ProcessExecutionResult,
-} from '../../ports/runner.port';
+} from '@/modules/manuscripts/clsi/core/ports/runner.port';
 import { LocalProcessRunner } from './local-process.runner';
 
 export class DockerSandboxRunner implements ISandboxRunner {

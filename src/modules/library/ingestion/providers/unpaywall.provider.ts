@@ -7,13 +7,13 @@ import {
   ProviderName,
   ProviderResult,
   QueryType,
-} from '../types/metadata.types';
-import { normalizeDoi } from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/metadata-executor.service';
+} from '@/modules/library/ingestion/types/metadata.types';
+import { normalizeDoi } from '@/modules/library/ingestion/domain/metadata.domain';
+import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,
-} from '../../shared-kernel/core/constants/academic-client.constants';
+} from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
 
 @Injectable()
 export class UnpaywallProvider implements MetadataProvider {

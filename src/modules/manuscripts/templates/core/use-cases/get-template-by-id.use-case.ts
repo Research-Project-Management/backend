@@ -2,9 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   ITemplateRepositoryPort,
   TEMPLATE_REPOSITORY_PORT,
-} from '../ports/template-repository.port';
-import { ManuscriptTemplateEntity } from '../domain/entities/manuscript-template.entity';
-import { TemplateNotFoundException } from '../domain/exceptions/template-not-found.exception';
+} from '@/modules/manuscripts/templates/core/ports/template-repository.port';
+import { ManuscriptTemplateEntity } from '@/modules/manuscripts/templates/core/domain/entities/manuscript-template.entity';
+import { TemplateNotFoundException } from '@/modules/manuscripts/templates/core/domain/exceptions/template-not-found.exception';
 
 @Injectable()
 export class GetTemplateByIdUseCase {

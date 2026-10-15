@@ -8,9 +8,12 @@ import {
 } from '@nestjs/common';
 import { Prisma, RelationType } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { VersionMismatchException } from '../../shared-kernel/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
-import { CreateItemData, UpdateItemData } from '../types/items.types';
+import {
+  CreateItemData,
+  UpdateItemData,
+} from '@/modules/library/catalog/types/items.types';
 import { isUUID } from 'class-validator';
 
 import {
@@ -27,7 +30,7 @@ import {
   buildCommandCreateInput,
   buildCommandUpdateInput,
   calculateIdentifierChanges,
-} from '../utils/command-payload.builder';
+} from '@/modules/library/catalog/domain/command-payload.builder';
 
 export {
   isUuid,
@@ -164,57 +167,45 @@ export class CommandRepository {
       }
     }
 
-    const { updateData, cleanIds, rawTags } = buildCommandUpdateInput(
+    const { updateData, rawTags } = buildCommandUpdateInput(
       userId,
       existing,
       data,
       { skipVersionIncrement: expectedVersion !== undefined },
     );
 
+    const itemRelationsInclude = {
+      collectionItems: {
+        include: { collection: true },
+      },
+      itemTags: {
+        include: { tag: true },
+      },
+      contributors: {
+        orderBy: { orderIndex: 'asc' as const },
+      },
+      attachments: {
+        include: { revisions: true },
+      },
+      notesList: {
+        where: { deletedAt: null },
+      },
+    };
+
+    const hasTagSync = Boolean(rawTags && Array.isArray(rawTags));
+
     const updated = await client.item.update({
       where: { id },
       data: updateData,
-      include: {
-        collectionItems: {
-          include: { collection: true },
-        },
-        itemTags: {
-          include: { tag: true },
-        },
-        contributors: {
-          orderBy: { orderIndex: 'asc' },
-        },
-        attachments: {
-          include: { revisions: true },
-        },
-        notesList: {
-          where: { deletedAt: null },
-        },
-      },
+      ...(hasTagSync ? {} : { include: itemRelationsInclude }),
     });
 
-    if (rawTags && Array.isArray(rawTags)) {
+    if (hasTagSync && rawTags) {
       await syncTagsForCatalogItem(client, userId, updated.id, rawTags);
 
       const reloaded = await client.item.findUnique({
         where: { id: updated.id },
-        include: {
-          collectionItems: {
-            include: { collection: true },
-          },
-          itemTags: {
-            include: { tag: true },
-          },
-          contributors: {
-            orderBy: { orderIndex: 'asc' },
-          },
-          attachments: {
-            include: { revisions: true },
-          },
-          notesList: {
-            where: { deletedAt: null },
-          },
-        },
+        include: itemRelationsInclude,
       });
       return reloaded || updated;
     }
@@ -462,7 +453,13 @@ export class CommandRepository {
 
   async putRelation(
     itemId: string,
-    relation: any,
+    relation: {
+      targetItemId?: string;
+      targetId?: string;
+      relationType?: string;
+      description?: string;
+      [key: string]: unknown;
+    },
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const targetItemId = relation.targetItemId || relation.targetId;
@@ -515,10 +512,16 @@ export class CommandRepository {
         sourceItemId: itemId,
         targetItemId,
         relationType,
-        description: relation.description || relation.note || '',
+        description:
+          relation.description ||
+          (typeof relation.note === 'string' ? relation.note : '') ||
+          '',
       },
       update: {
-        description: relation.description || relation.note || '',
+        description:
+          relation.description ||
+          (typeof relation.note === 'string' ? relation.note : '') ||
+          '',
       },
     });
   }
@@ -574,11 +577,33 @@ export class CommandRepository {
     userId: string,
     id: string,
     isMyPublication: boolean,
-    tx?: Prisma.TransactionClient,
+    txOrOptions?:
+      | Prisma.TransactionClient
+      | {
+          contributorId?: string | null;
+          isPublic?: boolean;
+          openAccessLicense?: string | null;
+          includeAttachments?: boolean;
+          includeNotes?: boolean;
+          authorshipConfirmed?: boolean;
+        },
+    maybeTx?: Prisma.TransactionClient,
   ) {
     if (!isUuid(id) || !isUuid(userId)) {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
+
+    const isTxClient = (val: unknown): val is Prisma.TransactionClient =>
+      Boolean(
+        val &&
+        typeof val === 'object' &&
+        ('item' in val || '$executeRaw' in val || 'userPublication' in val),
+      );
+
+    const tx = isTxClient(txOrOptions) ? txOrOptions : maybeTx;
+    const options =
+      txOrOptions && !isTxClient(txOrOptions) ? txOrOptions : undefined;
+
     const client = this.getClient(tx);
     const existing = await client.item.findFirst({
       where: { id, userId, deletedAt: null },
@@ -597,10 +622,62 @@ export class CommandRepository {
     metadataObj.isMyPublication = isMyPublication;
     if (isMyPublication) {
       metadataObj.publicationConfirmedAt = new Date().toISOString();
+      if (options?.openAccessLicense !== undefined) {
+        metadataObj.openAccessLicense = options.openAccessLicense;
+      }
+      if (options?.isPublic !== undefined) {
+        metadataObj.isPublicPublication = options.isPublic;
+      }
+      if (options?.contributorId !== undefined) {
+        metadataObj.publicationContributorId = options.contributorId;
+      }
+      if (options?.includeAttachments !== undefined) {
+        metadataObj.includeAttachmentsInMyPublications =
+          options.includeAttachments;
+      }
+      if (options?.includeNotes !== undefined) {
+        metadataObj.includeNotesInMyPublications = options.includeNotes;
+      }
+      if (options?.authorshipConfirmed !== undefined) {
+        metadataObj.authorshipConfirmed = options.authorshipConfirmed;
+      }
+
+      const createPayload: {
+        userId: string;
+        itemId: string;
+        contributorId?: string | null;
+        isPublic?: boolean;
+        openAccessLicense?: string | null;
+      } = {
+        userId,
+        itemId: id,
+        ...(options?.contributorId !== undefined && {
+          contributorId: options.contributorId,
+        }),
+        ...(options?.isPublic !== undefined && { isPublic: options.isPublic }),
+        ...(options?.openAccessLicense !== undefined && {
+          openAccessLicense: options.openAccessLicense,
+        }),
+      };
+
+      const updatePayload: {
+        contributorId?: string | null;
+        isPublic?: boolean;
+        openAccessLicense?: string | null;
+      } = {
+        ...(options?.contributorId !== undefined && {
+          contributorId: options.contributorId,
+        }),
+        ...(options?.isPublic !== undefined && { isPublic: options.isPublic }),
+        ...(options?.openAccessLicense !== undefined && {
+          openAccessLicense: options.openAccessLicense,
+        }),
+      };
+
       await client.userPublication.upsert({
         where: { userId_itemId: { userId, itemId: id } },
-        create: { userId, itemId: id },
-        update: {},
+        create: createPayload,
+        update: updatePayload,
       });
     } else {
       await client.userPublication.deleteMany({

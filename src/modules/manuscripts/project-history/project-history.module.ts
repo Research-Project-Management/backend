@@ -1,26 +1,18 @@
 /**
  * project-history/project-history.module.ts
- * NestJS Module for Manuscripts Project History, Snapshots, Diff & Labels (Hexagonal Architecture).
+ * NestJS Module for Manuscripts Project History, Snapshots, Diff & Labels (Adaptive Modular Monolith).
  */
 
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
-import { StructureModule } from '../structure/structure.module';
-import { DocstoreModule } from '../docstore/docstore.module';
-import { FilestoreModule } from '../filestore/filestore.module';
-import { DocumentUpdaterModule } from '../document-updater/document-updater.module';
+import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
+import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
+import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
+import { DocumentUpdaterModule } from '@/modules/manuscripts/document-updater/document-updater.module';
 
 import { ProjectHistoryController } from './project-history.controller';
 import { ProjectHistoryService } from './project-history.service';
-
-// Use Cases
-import { CreateSnapshotUseCase } from './core/use-cases/create-snapshot.use-case';
-import { GetVersionListUseCase } from './core/use-cases/get-version-list.use-case';
-import { GetSnapshotByVersionUseCase } from './core/use-cases/get-snapshot-by-version.use-case';
-import { CompareVersionsDiffUseCase } from './core/use-cases/compare-versions-diff.use-case';
-import { LabelVersionUseCase } from './core/use-cases/label-version.use-case';
-import { DeleteLabelUseCase } from './core/use-cases/delete-label.use-case';
-import { RestoreVersionUseCase } from './core/use-cases/restore-version.use-case';
+import { ProjectHistoryRepository } from './project-history.repository';
 
 // Ports
 import { IHistoryRepositoryPort } from './core/ports/history-repository.port';
@@ -29,7 +21,6 @@ import { IProjectCollectorPort } from './core/ports/project-collector.port';
 import { IProjectRestorerPort } from './core/ports/project-restorer.port';
 
 // Adapters
-import { PrismaHistoryRepository } from './core/adapters/database/prisma-history.repository';
 import { MyersDiffEngineAdapter } from './core/adapters/engine/myers-diff-engine.adapter';
 import { ManuscriptCollectorAdapter } from './core/adapters/external/manuscript-collector.adapter';
 import { ManuscriptRestorerAdapter } from './core/adapters/external/manuscript-restorer.adapter';
@@ -45,18 +36,9 @@ import { ManuscriptRestorerAdapter } from './core/adapters/external/manuscript-r
   controllers: [ProjectHistoryController],
   providers: [
     ProjectHistoryService,
-
-    // Use Cases
-    CreateSnapshotUseCase,
-    GetVersionListUseCase,
-    GetSnapshotByVersionUseCase,
-    CompareVersionsDiffUseCase,
-    LabelVersionUseCase,
-    DeleteLabelUseCase,
-    RestoreVersionUseCase,
+    ProjectHistoryRepository,
 
     // Driven Adapters
-    PrismaHistoryRepository,
     MyersDiffEngineAdapter,
     ManuscriptCollectorAdapter,
     ManuscriptRestorerAdapter,
@@ -64,34 +46,28 @@ import { ManuscriptRestorerAdapter } from './core/adapters/external/manuscript-r
     // Ports SPI bindings
     {
       provide: IHistoryRepositoryPort,
-      useClass: PrismaHistoryRepository,
+      useExisting: ProjectHistoryRepository,
     },
     {
       provide: IDiffEnginePort,
-      useClass: MyersDiffEngineAdapter,
+      useExisting: MyersDiffEngineAdapter,
     },
     {
       provide: IProjectCollectorPort,
-      useClass: ManuscriptCollectorAdapter,
+      useExisting: ManuscriptCollectorAdapter,
     },
     {
       provide: IProjectRestorerPort,
-      useClass: ManuscriptRestorerAdapter,
+      useExisting: ManuscriptRestorerAdapter,
     },
   ],
   exports: [
     ProjectHistoryService,
+    ProjectHistoryRepository,
     IHistoryRepositoryPort,
     IDiffEnginePort,
     IProjectCollectorPort,
     IProjectRestorerPort,
-    CreateSnapshotUseCase,
-    GetVersionListUseCase,
-    GetSnapshotByVersionUseCase,
-    CompareVersionsDiffUseCase,
-    LabelVersionUseCase,
-    DeleteLabelUseCase,
-    RestoreVersionUseCase,
   ],
 })
 export class ProjectHistoryModule {}

@@ -7,7 +7,10 @@ import {
   Matches,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { StateGroup, STATE_GROUPS } from '../types/state.types';
+import {
+  StateGroup,
+  STATE_GROUPS,
+} from '@/modules/work-item/state/types/state.types';
 
 export class UpdateStateDto {
   @ApiPropertyOptional({

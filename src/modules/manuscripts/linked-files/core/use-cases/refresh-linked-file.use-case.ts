@@ -9,15 +9,15 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { ILinkedFilesRepositoryPort } from '../ports/linked-files-repository.port';
-import { LinkedFileEntity } from '../domain/entities/linked-file.entity';
+import { ILinkedFilesRepositoryPort } from '@/modules/manuscripts/linked-files/core/ports/linked-files-repository.port';
+import { LinkedFileEntity } from '@/modules/manuscripts/linked-files/core/domain/entities/linked-file.entity';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { CitationsService } from '@/modules/manuscripts/citations/citations.service';
 import { RealtimeService } from '@/modules/realtime/realtime.service';
-import { LineArrayEngine } from '@/modules/manuscripts/docstore/core/adapters/engine/line-array.engine';
-import { assertSafeExternalUrl } from '../domain/ssrf-guard';
+import { LineArrayEngine } from '@/modules/manuscripts/docstore/domain';
+import { assertSafeExternalUrl } from '@/modules/manuscripts/linked-files/core/domain/ssrf-guard';
 
 @Injectable()
 export class RefreshLinkedFileUseCase {
@@ -103,6 +103,15 @@ export class RefreshLinkedFileUseCase {
             mimeType,
           );
           linkedFile.fileId = newFile.id;
+          if (linkedFile.nodeId) {
+            await this.structureService.updateNodeFileId(
+              projectId,
+              linkedFile.nodeId,
+              newFile.id,
+              buffer.length,
+              newFile.hash?.getValue() ?? null,
+            );
+          }
         }
       } else if (
         (linkedFile.provider === 'zotero' ||
@@ -146,13 +155,14 @@ export class RefreshLinkedFileUseCase {
       });
 
       return linkedFile;
-    } catch (err: any) {
-      linkedFile.markFailed(err?.message || 'Refresh failed');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      linkedFile.markFailed(errorMessage || 'Refresh failed');
       await this.repository.save(linkedFile);
       this.logger.warn(
-        `Failed to refresh linked file ${linkedFile.id}: ${err?.message}`,
+        `Failed to refresh linked file ${linkedFile.id}: ${errorMessage}`,
       );
-      throw new BadRequestException(`Refresh failed: ${err?.message}`);
+      throw new BadRequestException(`Refresh failed: ${errorMessage}`);
     }
   }
 }

@@ -3,8 +3,8 @@
  * Outbound SPI Port for resolving academic identifiers (DOI, arXiv) to structured BibTeX.
  */
 
-import { AcademicIdentifierVo } from '../domain/value-objects/academic-identifier.vo';
-import { BibEntry } from '../domain/entities/bib-entry.entity';
+import { AcademicIdentifierVo } from '@/modules/manuscripts/citations/core/domain/value-objects/academic-identifier.vo';
+import { BibEntry } from '@/modules/manuscripts/citations/core/domain/entities/bib-entry.entity';
 
 export const IDENTIFIER_RESOLVER_PORT = Symbol('IDENTIFIER_RESOLVER_PORT');
 

@@ -6,9 +6,9 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Readable } from 'node:stream';
-import { IManuscriptAggregatorPort } from '../ports/manuscript-aggregator.port';
-import { IZipEnginePort } from '../ports/zip-engine.port';
-import { ArchiveManifest } from '../domain/entities/archive-manifest.entity';
+import { IManuscriptAggregatorPort } from '@/modules/manuscripts/export-import/core/ports/manuscript-aggregator.port';
+import { IZipEnginePort } from '@/modules/manuscripts/export-import/core/ports/zip-engine.port';
+import { ArchiveManifest } from '@/modules/manuscripts/export-import/core/domain/entities/archive-manifest.entity';
 
 export interface ExportProjectZipInput {
   projectId: string;

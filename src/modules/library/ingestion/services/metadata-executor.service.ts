@@ -1,11 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   MetadataProvider,
   MetadataRequest,
   ProviderExecutionResult,
   ProviderExecutionStatus,
   ProviderName,
-} from '../types/metadata.types';
+} from '@/modules/library/ingestion/types/metadata.types';
+import { DomainRateLimiterService } from './domain-rate-limiter.service';
 
 function toAbortError(reason: unknown, fallbackMessage: string): Error {
   if (reason instanceof Error) return reason;
@@ -19,7 +20,7 @@ export class Semaphore {
   private current = 0;
   private queue: Array<{
     resolve: (release: () => void) => void;
-    reject: (err: any) => void;
+    reject: (err: unknown) => void;
     signal?: AbortSignal;
     onAbort?: () => void;
   }> = [];
@@ -46,7 +47,7 @@ export class Semaphore {
     return new Promise<() => void>((resolve, reject) => {
       const waiter: {
         resolve: (release: () => void) => void;
-        reject: (err: any) => void;
+        reject: (err: unknown) => void;
         signal?: AbortSignal;
         onAbort?: () => void;
       } = {
@@ -230,6 +231,10 @@ export class ExecutorService {
     ProviderCircuitBreaker
   >();
 
+  constructor(
+    @Optional() private readonly rateLimiter?: DomainRateLimiterService,
+  ) {}
+
   public getCircuitBreaker(providerName: ProviderName): ProviderCircuitBreaker {
     let cb = this.circuitBreakers.get(providerName);
     if (!cb) {
@@ -328,6 +333,9 @@ export class ExecutorService {
         }
 
         try {
+          if (this.rateLimiter) {
+            await this.rateLimiter.acquire(provider.id, controller.signal);
+          }
           const result = await provider.resolve(request, controller.signal);
 
           if (result) {
@@ -345,20 +353,45 @@ export class ExecutorService {
               durationMs: Date.now() - startTime,
             };
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const errRecord =
+            err && typeof err === 'object'
+              ? (err as Record<string, unknown>)
+              : null;
+          const errMessage =
+            err instanceof Error
+              ? err.message
+              : typeof errRecord?.message === 'string'
+                ? errRecord.message
+                : String(err);
+
           const isTimeout =
             timedOut ||
-            err?.isTimeout ||
-            err?.name === 'AbortError' ||
-            err?.name === 'TimeoutError' ||
-            /timeout/i.test(err?.message || '');
+            Boolean(errRecord?.isTimeout) ||
+            errRecord?.name === 'AbortError' ||
+            errRecord?.name === 'TimeoutError' ||
+            /timeout/i.test(errMessage);
 
           const statusCode =
-            err?.statusCode || err?.status || err?.response?.status;
+            typeof errRecord?.statusCode === 'number'
+              ? errRecord.statusCode
+              : typeof errRecord?.status === 'number'
+                ? errRecord.status
+                : typeof (
+                      errRecord?.response as { status?: number } | undefined
+                    )?.status === 'number'
+                  ? (errRecord?.response as { status?: number }).status
+                  : undefined;
           const rawRetryAfter = this.parseRetryAfter(
-            err?.headers?.['retry-after'],
+            (
+              errRecord?.headers as
+                Record<string, string | undefined> | undefined
+            )?.['retry-after'],
           );
-          const retryAfterMs = err?.retryAfterMs ?? rawRetryAfter;
+          const retryAfterMs =
+            typeof errRecord?.retryAfterMs === 'number'
+              ? errRecord.retryAfterMs
+              : rawRetryAfter;
 
           const status = this.classifyError(err, isTimeout, statusCode);
 
@@ -395,7 +428,7 @@ export class ExecutorService {
             execResult = {
               provider: provider.id,
               status,
-              error: err?.message || String(err),
+              error: errMessage,
               statusCode,
               retryAfterMs,
               durationMs: Date.now() - startTime,
@@ -407,7 +440,7 @@ export class ExecutorService {
             callerSignal.removeEventListener('abort', onCallerAbort);
           }
         }
-      } catch (queueErr: any) {
+      } catch (queueErr: unknown) {
         if (callerSignal?.aborted) {
           return {
             provider: provider.id,
@@ -419,7 +452,8 @@ export class ExecutorService {
         return {
           provider: provider.id,
           status: 'unavailable',
-          error: queueErr?.message || String(queueErr),
+          error:
+            queueErr instanceof Error ? queueErr.message : String(queueErr),
           durationMs: Date.now() - startTime,
         };
       } finally {
@@ -482,24 +516,33 @@ export class ExecutorService {
   }
 
   private classifyError(
-    err: any,
+    err: unknown,
     isTimeout: boolean,
     statusCode?: number,
   ): ProviderExecutionStatus {
     if (isTimeout) return 'timeout';
 
+    const errObj =
+      err && typeof err === 'object' ? (err as Record<string, unknown>) : null;
+    const errMessage =
+      err instanceof Error
+        ? err.message
+        : typeof errObj?.message === 'string'
+          ? errObj.message
+          : '';
+
     if (statusCode === 404) return 'not_found';
-    if (statusCode === 429 || /rate\s*limit/i.test(err?.message || ''))
+    if (statusCode === 429 || /rate\s*limit/i.test(errMessage))
       return 'rate_limited';
     if (statusCode === 401 || statusCode === 403) return 'configuration_error';
     if (statusCode && statusCode >= 500 && statusCode < 600) {
       return 'unavailable';
     }
-    if (err?.isParseError || err instanceof SyntaxError)
+    if (Boolean(errObj?.isParseError) || err instanceof SyntaxError)
       return 'invalid_payload';
     if (
       /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|fetch failed|network error/i.test(
-        err?.message || '',
+        errMessage,
       )
     ) {
       return 'unavailable';

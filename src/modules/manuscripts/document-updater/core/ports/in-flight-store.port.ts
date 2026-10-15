@@ -3,7 +3,7 @@
  * Outbound Port (SPI) for storing active in-flight document buffers in fast memory or Redis.
  */
 
-import { InFlightDoc } from '../domain/entities/in-flight-doc.entity';
+import { InFlightDoc } from '@/modules/manuscripts/document-updater/core/domain/entities/in-flight-doc.entity';
 
 export abstract class IInFlightStorePort {
   /**

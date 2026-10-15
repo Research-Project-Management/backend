@@ -3,7 +3,7 @@ import { CitationService } from '@/modules/library/citation/services/citation.se
 import {
   CslStyleRegistry,
   SUPPORTED_CITATION_STYLES,
-} from '@/modules/library/citation/utils/csl-style-registry';
+} from '@/modules/library/citation/domain/csl-style-registry';
 import { CitationItemInput } from '@/modules/library/citation/types/citation.types';
 
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';

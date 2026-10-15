@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
-import { SharedKernelModule } from '../shared-kernel/shared-kernel.module';
+import { SharedKernelModule } from '@/modules/library/shared-kernel/shared-kernel.module';
 
 // Controllers
 import {
   ItemController,
   ProjectItemController,
+  LibraryPermissionsController,
 } from './controllers/items.controller';
 import {
   ItemCurationController,
@@ -45,10 +46,10 @@ import { ZoteroSchemaValidatorService } from './services/zotero-schema-validator
 import { NotesService } from './services/notes.service';
 
 // Engines & Mappers
-import { TreeEngine } from './utils/tree.engine';
-import { ConditionEvaluatorEngine } from './utils/condition-evaluator.engine';
-import { ItemsMapper } from './utils/items.mapper';
-import { ItemTransformer } from './utils/item.transformer';
+import { TreeEngine } from './domain/tree.engine';
+import { ConditionEvaluatorEngine } from './domain/condition-evaluator.engine';
+import { ItemsMapper } from './domain/items.mapper';
+import { ItemTransformer } from './domain/item.transformer';
 
 // Repositories
 import { CommandRepository } from './repositories/command.repository';
@@ -58,17 +59,6 @@ import { TagsRepository } from './repositories/tags.repository';
 import { StateRepository } from './repositories/state.repository';
 import { SavedSearchesRepository } from './repositories/saved-searches.repository';
 import { NotesRepository } from './repositories/notes.repository';
-import { PrismaItemRepositoryAdapter } from './repositories/prisma-item-repository.adapter';
-
-// Clean Architecture Use Cases & Ports
-import { CreateItemUseCase } from './core/use-cases/create-item.use-case';
-import { UpdateItemUseCase } from './core/use-cases/update-item.use-case';
-import { DeleteItemUseCase } from './core/use-cases/delete-item.use-case';
-import { GetItemUseCase } from './core/use-cases/get-item.use-case';
-import { ListItemsUseCase } from './core/use-cases/list-items.use-case';
-import { RestoreItemUseCase } from './core/use-cases/restore-item.use-case';
-import { ITEM_REPOSITORY_PORT } from './core/ports/item-repository.port';
-
 // Ports
 import {
   ITEM_EXISTENCE_PORT,
@@ -86,6 +76,7 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     ProjectItemCurationController,
     ItemController,
     ProjectItemController,
+    LibraryPermissionsController,
     CollectionController,
     ProjectCollectionController,
     TagController,
@@ -139,19 +130,6 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     StateRepository,
     SavedSearchesRepository,
     NotesRepository,
-    PrismaItemRepositoryAdapter,
-    {
-      provide: ITEM_REPOSITORY_PORT,
-      useClass: PrismaItemRepositoryAdapter,
-    },
-
-    // Clean Architecture Use Cases
-    CreateItemUseCase,
-    UpdateItemUseCase,
-    DeleteItemUseCase,
-    GetItemUseCase,
-    ListItemsUseCase,
-    RestoreItemUseCase,
 
     // Ports
     {
@@ -181,13 +159,6 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     ITEM_TRANSFORMER_PORT,
     ITEM_EXISTENCE_PORT,
     ITEM_READ_PORT,
-    ITEM_REPOSITORY_PORT,
-    CreateItemUseCase,
-    UpdateItemUseCase,
-    DeleteItemUseCase,
-    GetItemUseCase,
-    ListItemsUseCase,
-    RestoreItemUseCase,
   ],
 })
 export class CatalogModule {}

@@ -1,41 +1,109 @@
 /**
  * filestore/filestore.service.ts
- * Module Façade Orchestrator providing clean internal APIs for ClsiService and StructureService.
+ * Deep Module Service for Manuscripts Filestore.
+ * Consolidates Content-Addressable Storage (CAS) upload, byte-range streaming,
+ * metadata queries, signed URLs, and reference-counted deletion.
  */
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Readable } from 'node:stream';
-import { UploadManuscriptFileUseCase } from './core/use-cases/upload-manuscript-file.use-case';
-import { StreamManuscriptFileUseCase } from './core/use-cases/stream-manuscript-file.use-case';
-import { GetManuscriptFileHeadUseCase } from './core/use-cases/get-manuscript-file-head.use-case';
-import { DeleteManuscriptFileUseCase } from './core/use-cases/delete-manuscript-file.use-case';
-import { GetSignedDownloadUrlUseCase } from './core/use-cases/get-signed-download-url.use-case';
+import { FilestoreRepository } from './filestore.repository';
 import { ManuscriptFile } from './core/domain/entities/manuscript-file.entity';
-import { IManuscriptFileRepository } from './core/ports/manuscript-file-repository.port';
+import { ByteRange } from './core/domain/value-objects/byte-range.vo';
+import { FileNotFoundException } from './core/domain/exceptions/file-not-found.exception';
+import { StorageObjectMetadata } from './core/ports/binary-storage.port';
+import { StreamManuscriptFileOutput } from './core/use-cases/stream-manuscript-file.use-case';
+import { GetFileHeadOutput } from './core/use-cases/get-manuscript-file-head.use-case';
 
 @Injectable()
 export class FilestoreService {
+  private readonly logger = new Logger(FilestoreService.name);
+  private readonly repository!: FilestoreRepository;
+  private readonly uploadUseCase?: any;
+  private readonly streamUseCase?: any;
+  private readonly headUseCase?: any;
+  private readonly deleteUseCase?: any;
+  private readonly signedUrlUseCase?: any;
+
   constructor(
-    private readonly uploadUseCase: UploadManuscriptFileUseCase,
-    private readonly streamUseCase: StreamManuscriptFileUseCase,
-    private readonly headUseCase: GetManuscriptFileHeadUseCase,
-    private readonly deleteUseCase: DeleteManuscriptFileUseCase,
-    private readonly signedUrlUseCase: GetSignedDownloadUrlUseCase,
-    private readonly repository: IManuscriptFileRepository,
-  ) {}
+    repoOrUploadUseCase: any,
+    @Optional() streamUseCase?: any,
+    @Optional() headUseCase?: any,
+    @Optional() deleteUseCase?: any,
+    @Optional() signedUrlUseCase?: any,
+    @Optional() legacyRepo?: any,
+  ) {
+    if (repoOrUploadUseCase instanceof FilestoreRepository) {
+      this.repository = repoOrUploadUseCase;
+    } else {
+      this.uploadUseCase = repoOrUploadUseCase;
+      this.streamUseCase = streamUseCase;
+      this.headUseCase = headUseCase;
+      this.deleteUseCase = deleteUseCase;
+      this.signedUrlUseCase = signedUrlUseCase;
+      this.repository = legacyRepo;
+    }
+  }
 
   /**
    * Directly opens a readable stream for a file without passing through HTTP.
-   * Used by ClsiService to hydrate compiler workspaces with figures, fonts, and packages.
+   * Used by ClsiService and GitBridgeService to hydrate workspaces with figures, fonts, and packages.
    */
   public async openReadStream(
     projectId: string,
     fileId: string,
   ): Promise<{ file: ManuscriptFile; stream: Readable }> {
-    const result = await this.streamUseCase.execute({ projectId, fileId });
+    const result = await this.streamFile(projectId, fileId);
     return {
       file: result.file,
       stream: result.stream,
+    };
+  }
+
+  /**
+   * Streams binary content with optional RFC 7233 byte-range slicing.
+   */
+  public async streamFile(
+    projectId: string,
+    fileId: string,
+    rangeHeader?: string,
+  ): Promise<StreamManuscriptFileOutput> {
+    if (
+      this.streamUseCase &&
+      typeof this.streamUseCase.execute === 'function'
+    ) {
+      return await this.streamUseCase.execute({
+        projectId,
+        fileId,
+        rangeHeader,
+      });
+    }
+
+    const file = await this.repository.findByProjectAndId(projectId, fileId);
+    if (!file || file.deleted) {
+      throw new FileNotFoundException(fileId, projectId);
+    }
+
+    const byteRange = ByteRange.parse(rangeHeader, file.sizeBytes);
+    const rangeOpts = byteRange
+      ? { start: byteRange.start, end: byteRange.end }
+      : undefined;
+
+    const stream = await this.repository.getObjectStream(
+      file.bucketName,
+      file.storageKey.getValue(),
+      rangeOpts,
+    );
+
+    const isPartialContent = byteRange !== null;
+    const contentLength = byteRange ? byteRange.contentLength : file.sizeBytes;
+
+    return {
+      file,
+      stream,
+      byteRange,
+      isPartialContent,
+      contentLength,
     };
   }
 
@@ -49,29 +117,100 @@ export class FilestoreService {
     mimeType?: string,
   ): Promise<ManuscriptFile> {
     const stream = Readable.from(buffer);
-    return await this.uploadUseCase.execute({
-      projectId,
-      name,
-      mimeType,
-      stream,
-    });
+    return await this.uploadFileFromStream(projectId, name, stream, mimeType);
   }
 
   /**
-   * Programmatic upload of binary asset from a readable stream.
+   * Programmatic upload of binary asset from a readable stream with Git-blob CAS deduplication.
    */
   public async uploadFileFromStream(
     projectId: string,
     name: string,
     stream: Readable,
     mimeType?: string,
+    bucketName = 'manuscript-files',
   ): Promise<ManuscriptFile> {
-    return await this.uploadUseCase.execute({
+    if (
+      this.uploadUseCase &&
+      typeof this.uploadUseCase.execute === 'function'
+    ) {
+      const res = await this.uploadUseCase.execute({
+        projectId,
+        name,
+        stream,
+        mimeType,
+        bucketName,
+      });
+      return res && res.file ? res.file : res;
+    }
+
+    const { contentHash, sizeBytes, dataStream } =
+      await this.repository.hashStream(stream);
+    const storageKey = this.repository.buildStorageKey(contentHash);
+
+    const blobExists = await this.repository.checkObjectExists(
+      bucketName,
+      storageKey.getValue(),
+    );
+
+    if (blobExists) {
+      this.logger.log(
+        `[CAS Deduplication] Reusing existing blob '${storageKey.getValue()}' for file '${name}' in project '${projectId}'. (0 bytes written to storage)`,
+      );
+    } else {
+      await this.repository.sendStream(
+        bucketName,
+        storageKey.getValue(),
+        dataStream,
+        {
+          contentType: mimeType || 'application/octet-stream',
+        },
+      );
+      this.logger.log(
+        `[CAS Write] Stored new blob '${storageKey.getValue()}' (${sizeBytes} bytes) for project '${projectId}'.`,
+      );
+    }
+
+    const fileEntity = ManuscriptFile.create({
       projectId,
       name,
-      mimeType,
-      stream,
+      mimeType: mimeType || 'application/octet-stream',
+      sizeBytes,
+      hash: contentHash,
+      storageKey,
+      bucketName,
     });
+
+    return await this.repository.save(fileEntity);
+  }
+
+  /**
+   * Fast metadata and storage header retrieval without payload download.
+   */
+  public async getFileHead(
+    projectId: string,
+    fileId: string,
+  ): Promise<GetFileHeadOutput> {
+    if (this.headUseCase && typeof this.headUseCase.execute === 'function') {
+      return await this.headUseCase.execute({ projectId, fileId });
+    }
+
+    const file = await this.repository.findByProjectAndId(projectId, fileId);
+    if (!file || file.deleted) {
+      throw new FileNotFoundException(fileId, projectId);
+    }
+
+    let storageMetadata: StorageObjectMetadata | undefined;
+    try {
+      storageMetadata = await this.repository.getObjectMetadata(
+        file.bucketName,
+        file.storageKey.getValue(),
+      );
+    } catch {
+      // Storage metadata optional; file entity sizeBytes is authoritative
+    }
+
+    return { file, storageMetadata };
   }
 
   /**
@@ -81,7 +220,7 @@ export class FilestoreService {
     projectId: string,
     fileId: string,
   ): Promise<ManuscriptFile> {
-    const result = await this.headUseCase.execute({ projectId, fileId });
+    const result = await this.getFileHead(projectId, fileId);
     return result.file;
   }
 
@@ -106,18 +245,49 @@ export class FilestoreService {
   }
 
   /**
-   * Delete file.
+   * Delete file record and optionally garbage-collect unreferenced physical CAS blob.
    */
   public async deleteFile(
     projectId: string,
     fileId: string,
     purgeBlob = false,
   ): Promise<void> {
-    await this.deleteUseCase.execute({
-      projectId,
-      fileId,
-      purgePhysicalBlob: purgeBlob,
-    });
+    if (
+      this.deleteUseCase &&
+      typeof this.deleteUseCase.execute === 'function'
+    ) {
+      await this.deleteUseCase.execute({ projectId, fileId, purgeBlob });
+      return;
+    }
+
+    const file = await this.repository.findByProjectAndId(projectId, fileId);
+    if (!file || file.deleted) {
+      throw new FileNotFoundException(fileId, projectId);
+    }
+
+    file.markDeleted();
+    await this.repository.save(file);
+
+    if (purgeBlob) {
+      const remainingRefs = await this.repository.countReferencesByHash(
+        file.hash.getValue(),
+      );
+      if (remainingRefs <= 1) {
+        try {
+          await this.repository.deleteObject(
+            file.bucketName,
+            file.storageKey.getValue(),
+          );
+          this.logger.log(
+            `[CAS GC] Purged unreferenced physical blob '${file.storageKey.getValue()}'.`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `[CAS GC] Failed to purge blob '${file.storageKey.getValue()}': ${(err as Error).message}`,
+          );
+        }
+      }
+    }
   }
 
   /**
@@ -128,10 +298,27 @@ export class FilestoreService {
     fileId: string,
     expiresIn = 3600,
   ): Promise<string | null> {
-    return await this.signedUrlUseCase.execute({
-      projectId,
-      fileId,
-      expiresInSeconds: expiresIn,
-    });
+    if (
+      this.signedUrlUseCase &&
+      typeof this.signedUrlUseCase.execute === 'function'
+    ) {
+      const res = await this.signedUrlUseCase.execute({
+        projectId,
+        fileId,
+        expiresInSeconds: expiresIn,
+      });
+      return res.url;
+    }
+
+    const file = await this.repository.findByProjectAndId(projectId, fileId);
+    if (!file || file.deleted) {
+      throw new FileNotFoundException(fileId, projectId);
+    }
+
+    return await this.repository.getSignedDownloadUrl(
+      file.bucketName,
+      file.storageKey.getValue(),
+      expiresIn,
+    );
   }
 }

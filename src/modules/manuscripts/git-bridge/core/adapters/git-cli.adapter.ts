@@ -12,19 +12,21 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { Readable } from 'stream';
-import { GIT_DEFAULT_BRANCH, GitService } from '../domain/git-bridge.domain';
+import {
+  GIT_DEFAULT_BRANCH,
+  GitService,
+} from '@/modules/manuscripts/git-bridge/core/domain/git-bridge.domain';
+import {
+  GitRunResult,
+  IGitCliPort,
+} from '@/modules/manuscripts/git-bridge/core/ports/git-cli.port';
 
-export interface GitRunResult {
-  code: number;
-  stdout: Buffer;
-  stderr: string;
-}
-
+export type { GitRunResult };
 export const EMPTY_TREE_SHA1 = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 const MAIN_REF = `refs/heads/${GIT_DEFAULT_BRANCH}`;
 
 @Injectable()
-export class GitCliAdapter {
+export class GitCliAdapter implements IGitCliPort {
   private readonly logger = new Logger(GitCliAdapter.name);
   readonly root =
     process.env.GIT_BRIDGE_ROOT || path.join(os.tmpdir(), 'flux-git-bridge');
@@ -182,9 +184,12 @@ export class GitCliAdapter {
 
     const env = this.snapshotEnv(projectId);
     const parent = await this.resolveRef(projectId);
-    await this.runOk(parent ? ['read-tree', parent] : ['read-tree', '--empty'], {
-      env,
-    });
+    await this.runOk(
+      parent ? ['read-tree', parent] : ['read-tree', '--empty'],
+      {
+        env,
+      },
+    );
     await this.runOk(['add', '-A', '--', '.'], { env, cwd: work });
     const tree = (await this.runOk(['write-tree'], { env }))
       .toString('utf8')
@@ -209,7 +214,12 @@ export class GitCliAdapter {
 
   async advertiseRefs(projectId: string, service: GitService): Promise<Buffer> {
     return this.runOk(
-      [service.replace(/^git-/, ''), '--stateless-rpc', '--advertise-refs', this.bareDir(projectId)],
+      [
+        service.replace(/^git-/, ''),
+        '--stateless-rpc',
+        '--advertise-refs',
+        this.bareDir(projectId),
+      ],
       { env: this.baseEnv() },
     );
   }
@@ -223,7 +233,11 @@ export class GitCliAdapter {
     return new Promise((resolve, reject) => {
       const child = spawn(
         this.gitBin,
-        [service.replace(/^git-/, ''), '--stateless-rpc', this.bareDir(projectId)],
+        [
+          service.replace(/^git-/, ''),
+          '--stateless-rpc',
+          this.bareDir(projectId),
+        ],
         { env: this.baseEnv(), windowsHide: true },
       );
       const out: Buffer[] = [];
@@ -256,13 +270,24 @@ export class GitCliAdapter {
   ): Promise<string> {
     return (
       await this.runOk(
-        ['diff', '--name-status', '-z', '--no-renames', from || EMPTY_TREE_SHA1, to],
+        [
+          'diff',
+          '--name-status',
+          '-z',
+          '--no-renames',
+          from || EMPTY_TREE_SHA1,
+          to,
+        ],
         { env: this.baseEnv({ GIT_DIR: this.bareDir(projectId) }) },
       )
     ).toString('utf8');
   }
 
-  async readBlob(projectId: string, commit: string, repoPath: string): Promise<Buffer> {
+  async readBlob(
+    projectId: string,
+    commit: string,
+    repoPath: string,
+  ): Promise<Buffer> {
     return this.runOk(['cat-file', 'blob', `${commit}:${repoPath}`], {
       env: this.baseEnv({ GIT_DIR: this.bareDir(projectId) }),
     });

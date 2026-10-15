@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
+import { AuthenticatedRequest } from '@/core';
 import { NotificationsService } from './notifications.service';
 import { ReviewNotificationBundlingUseCase } from './core/use-cases/review-notification-bundling.use-case';
 import {
@@ -38,8 +39,10 @@ export class NotificationsController {
     private readonly bundling: ReviewNotificationBundlingUseCase,
   ) {}
 
-  private extractUserId(req: any): string {
-    return req?.user?.id || req?.headers?.['x-user-id'] || 'anonymous-user';
+  private extractUserId(req?: AuthenticatedRequest): string {
+    const rawHeader = req?.headers?.['x-user-id'];
+    const headerUserId = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+    return req?.user?.id || headerUserId || 'anonymous-user';
   }
 
   @Get('bundles')
@@ -106,7 +109,7 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Get current user notifications inbox' })
   @ApiResponse({ status: 200, description: 'List of user notifications' })
   async getNotifications(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Query() query: QueryNotificationsDto,
   ) {
     const userId = this.extractUserId(req);
@@ -125,7 +128,7 @@ export class NotificationsController {
   @Get('unread-count')
   @ApiOperation({ summary: 'Get unread notification count for badge counter' })
   @ApiResponse({ status: 200, description: 'Unread count' })
-  async getUnreadCount(@Req() req: any) {
+  async getUnreadCount(@Req() req: AuthenticatedRequest) {
     const userId = this.extractUserId(req);
     const count = await this.notificationsService.getUnreadCount(userId);
     return { count };
@@ -137,7 +140,7 @@ export class NotificationsController {
   @ApiResponse({ status: 201, description: 'Notification created' })
   async createNotification(
     @Body() dto: CreateNotificationDto,
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     const userId = dto.userId || this.extractUserId(req);
     const notification = await this.notificationsService.createNotification({
@@ -171,7 +174,7 @@ export class NotificationsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark a notification as read' })
   @ApiResponse({ status: 200, description: 'Notification marked as read' })
-  async markAsRead(@Param('id') id: string, @Req() req: any) {
+  async markAsRead(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     const userId = this.extractUserId(req);
     const success = await this.notificationsService.markAsRead(id, userId);
     return { success };
@@ -184,7 +187,7 @@ export class NotificationsController {
     status: 200,
     description: 'Number of notifications marked as read',
   })
-  async markAllAsRead(@Req() req: any) {
+  async markAllAsRead(@Req() req: AuthenticatedRequest) {
     const userId = this.extractUserId(req);
     const count = await this.notificationsService.markAllAsRead(userId);
     return { count };
@@ -194,7 +197,10 @@ export class NotificationsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a notification by ID' })
   @ApiResponse({ status: 200, description: 'Notification deleted' })
-  async deleteNotification(@Param('id') id: string, @Req() req: any) {
+  async deleteNotification(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const userId = this.extractUserId(req);
     const success = await this.notificationsService.deleteById(id, userId);
     return { success };
@@ -204,7 +210,10 @@ export class NotificationsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete notifications by unique key' })
   @ApiResponse({ status: 200, description: 'Count of deleted notifications' })
-  async deleteByKey(@Param('key') key: string, @Req() req: any) {
+  async deleteByKey(
+    @Param('key') key: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const userId = this.extractUserId(req);
     const count = await this.notificationsService.deleteByKey(key, userId);
     return { count };
@@ -236,12 +245,15 @@ export class OverleafNotificationsParityController {
 
   @Post('user/:user_id')
   @HttpCode(HttpStatus.OK)
-  async addNotification(@Param('user_id') userId: string, @Body() body: any) {
+  async addNotification(
+    @Param('user_id') userId: string,
+    @Body() body: Partial<CreateNotificationDto> & { expires?: string | Date },
+  ) {
     await this.notificationsService.createNotification({
       userId,
       key: body.key,
-      templateKey: body.templateKey,
-      type: body.type,
+      templateKey: body.templateKey ?? 'notification',
+      type: body.type as NotificationTypeString | undefined,
       messageOpts: body.messageOpts,
       expiresAt: body.expires,
       forceCreate: body.forceCreate,

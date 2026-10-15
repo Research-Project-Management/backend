@@ -9,7 +9,7 @@ import { IRealtimeBroadcasterPort } from '../ports/realtime-broadcaster.port';
 export interface BroadcastProjectEventInput {
   projectId: string;
   event: string;
-  payload: any;
+  payload: unknown;
   excludeSocketId?: string;
 }
 

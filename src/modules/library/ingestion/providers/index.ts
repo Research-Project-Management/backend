@@ -8,3 +8,5 @@ export * from './url-capture.provider';
 export * from './retraction-scanner.provider';
 export * from './searxng.provider';
 export * from './europe-pmc-search.provider';
+export * from './dblp.provider';
+export * from './semantic-scholar.provider';

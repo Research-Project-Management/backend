@@ -10,9 +10,12 @@ import {
   Header,
 } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { CitationService } from '../services/citation.service';
-import { FormatCitationDto, FormatBatchCitationDto } from '../dto/citation.dto';
-import { normalizeCitationStyleId } from '../utils/citation.utils';
+import { CitationService } from '@/modules/library/citation/services/citation.service';
+import {
+  FormatCitationDto,
+  FormatBatchCitationDto,
+} from '@/modules/library/citation/dto/citation.dto';
+import { normalizeCitationStyleId } from '@/modules/library/citation/domain/citation.domain';
 import { ProjectRoleGuard } from '@/modules/project/access';
 
 @Controller([
@@ -81,7 +84,7 @@ export class CitationController {
 
   @Post('batch')
   formatBatch(@Body() dto: FormatBatchCitationDto) {
-    return this.citationService.formatBatch(
+    return this.citationService.formatBatchAsync(
       dto.items || [],
       dto.styleId || 'apa-7th',
     );

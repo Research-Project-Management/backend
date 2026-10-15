@@ -3,9 +3,9 @@
  * Outbound Port (SPI) for Myers Diff calculation and inline word-level diff highlight generation.
  */
 
-import { Snapshot } from '../domain/entities/snapshot.entity';
-import { FileDiffVo } from '../domain/value-objects/file-diff.vo';
-import { DiffHunkVo } from '../domain/value-objects/diff-hunk.vo';
+import { Snapshot } from '@/modules/manuscripts/project-history/core/domain/entities/snapshot.entity';
+import { FileDiffVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/file-diff.vo';
+import { DiffHunkVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/diff-hunk.vo';
 
 export interface TextDiffResult {
   hunks: DiffHunkVo[];

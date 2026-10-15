@@ -10,6 +10,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   NotFoundException,
   Param,
   Post,
@@ -31,8 +32,10 @@ import {
   AutoFixRequestDto,
   AutoFixResponseDto,
 } from './dto/diagnostics.dto';
-import { InvalidLogFormatException } from './core/domain/exceptions/invalid-log-format.exception';
-import { ExplanationNotFoundException } from './core/domain/exceptions/explanation-not-found.exception';
+import {
+  InvalidLogFormatException,
+  ExplanationNotFoundException,
+} from './domain';
 
 @ApiTags('Manuscripts Diagnostics')
 @ApiBearerAuth('JWT-auth')
@@ -47,6 +50,8 @@ import { ExplanationNotFoundException } from './core/domain/exceptions/explanati
 ])
 @UseGuards(JwtAuthGuard)
 export class DiagnosticsController {
+  private readonly logger = new Logger(DiagnosticsController.name);
+
   constructor(private readonly diagnosticsService: DiagnosticsService) {}
 
   @Post('parse-log')
@@ -64,19 +69,32 @@ export class DiagnosticsController {
         err instanceof InvalidLogFormatException ||
         (err instanceof Error && err.name === 'InvalidLogFormatException')
       ) {
-        throw new BadRequestException(
-          err instanceof Error ? err.message : 'Invalid log format',
-        );
+        const msg = err instanceof Error ? err.message : 'Invalid log format';
+        this.logger.warn(`Invalid compilation log format: ${msg}`);
+        throw new BadRequestException(msg);
       }
+      const msg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error(`Failed to parse compilation log: ${msg}`, stack);
       return {
         id: `report-${Date.now()}`,
-        isSuccess: true,
-        errorsCount: 0,
+        isSuccess: false,
+        errorsCount: 1,
         warningsCount: 0,
         badboxesCount: 0,
         infoCount: 0,
-        totalCount: 0,
-        items: [],
+        totalCount: 1,
+        items: [
+          {
+            id: `diag-parse-err-${Date.now()}`,
+            file: dto.defaultFile || 'main.tex',
+            line: 1,
+            column: null,
+            severity: 'error',
+            code: 'PARSE_ERROR',
+            message: `Log parser error: ${msg}`,
+          },
+        ],
       };
     }
   }

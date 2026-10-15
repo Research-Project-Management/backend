@@ -4,8 +4,8 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IHistoryRepositoryPort } from '../ports/history-repository.port';
-import { Snapshot } from '../domain/entities/snapshot.entity';
+import { IHistoryRepositoryPort } from '@/modules/manuscripts/project-history/core/ports/history-repository.port';
+import { Snapshot } from '@/modules/manuscripts/project-history/core/domain/entities/snapshot.entity';
 
 @Injectable()
 export class GetVersionListUseCase {

@@ -22,8 +22,6 @@ export interface CreateNoteData {
   createdById?: string;
 }
 
-export type { FormatNoteOptions } from '../utils/notes.utils';
-
 export interface UpdateNoteData {
   title?: string;
   contentJson?: Record<string, unknown> | null;

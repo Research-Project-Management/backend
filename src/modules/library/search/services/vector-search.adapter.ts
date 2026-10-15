@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   IVectorSearchEnginePort,
   SearchResult,
-} from '../types/search-engine.types';
+} from '@/modules/library/search/domain';
 
 /**
  * Vector / Semantic KNN Search Adapter — implements IVectorSearchEnginePort
@@ -23,8 +23,8 @@ export class VectorSearchAdapter implements IVectorSearchEnginePort {
   async semanticSearch(
     userId: string,
     queryText: string,
-    limit: number = 20,
-    projectId?: string,
+    _limit: number = 20,
+    _projectId?: string,
   ): Promise<SearchResult> {
     this.logger.debug(
       `[VectorSearch] semanticSearch called for user ${userId} query="${queryText}" (vector search engine not enabled)`,

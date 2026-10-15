@@ -1,6 +1,6 @@
 /**
  * filestore/filestore.controller.ts
- * Inbound Driving Adapter exposing Overleaf-compatible HTTP endpoints for binary assets.
+ * Inbound HTTP Controller exposing Overleaf-compatible endpoints for binary assets.
  */
 
 import {
@@ -19,17 +19,13 @@ import {
   HttpStatus,
   HttpCode,
   UseGuards,
+  Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { UploadManuscriptFileUseCase } from './core/use-cases/upload-manuscript-file.use-case';
-import { StreamManuscriptFileUseCase } from './core/use-cases/stream-manuscript-file.use-case';
-import { GetManuscriptFileHeadUseCase } from './core/use-cases/get-manuscript-file-head.use-case';
-import { DeleteManuscriptFileUseCase } from './core/use-cases/delete-manuscript-file.use-case';
-import { GetSignedDownloadUrlUseCase } from './core/use-cases/get-signed-download-url.use-case';
 import { ManuscriptFileResponseDto } from './dto/file-response.dto';
 import { FileNotFoundException } from './core/domain/exceptions/file-not-found.exception';
 import { InvalidByteRangeException } from './core/domain/exceptions/invalid-byte-range.exception';
@@ -45,14 +41,23 @@ import { FilestoreService } from './filestore.service';
 ])
 @UseGuards(JwtAuthGuard)
 export class FilestoreController {
+  private readonly filestoreService: FilestoreService;
+
   constructor(
-    private readonly uploadUseCase: UploadManuscriptFileUseCase,
-    private readonly streamUseCase: StreamManuscriptFileUseCase,
-    private readonly headUseCase: GetManuscriptFileHeadUseCase,
-    private readonly deleteUseCase: DeleteManuscriptFileUseCase,
-    private readonly signedUrlUseCase: GetSignedDownloadUrlUseCase,
-    private readonly filestoreService: FilestoreService,
-  ) {}
+    serviceOrUploadUseCase: any,
+    @Optional() streamUseCase?: any,
+    @Optional() headUseCase?: any,
+    @Optional() deleteUseCase?: any,
+    @Optional() signedUrlUseCase?: any,
+    @Optional() filestoreService?: any,
+  ) {
+    this.filestoreService =
+      filestoreService instanceof FilestoreService
+        ? filestoreService
+        : serviceOrUploadUseCase instanceof FilestoreService
+          ? serviceOrUploadUseCase
+          : (filestoreService ?? serviceOrUploadUseCase);
+  }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -65,7 +70,6 @@ export class FilestoreController {
     let mimeType = 'application/octet-stream';
     let dataStream: Readable;
 
-    // Check if multipart
     const multipartReq = req as FastifyRequest & {
       isMultipart?: () => boolean;
       file?: () => Promise<
@@ -86,7 +90,6 @@ export class FilestoreController {
       mimeType = part.mimetype || mimeType;
       dataStream = part.file;
     } else {
-      // Direct raw binary stream from request body
       dataStream = req.raw;
       const contentType = req.headers['content-type'];
       if (contentType) {
@@ -94,12 +97,12 @@ export class FilestoreController {
       }
     }
 
-    const savedFile = await this.uploadUseCase.execute({
+    const savedFile = await this.filestoreService.uploadFileFromStream(
       projectId,
-      name: filename,
+      filename,
+      dataStream,
       mimeType,
-      stream: dataStream,
-    });
+    );
 
     return ManuscriptFileResponseDto.fromEntity(savedFile);
   }
@@ -111,7 +114,10 @@ export class FilestoreController {
     @Res() res: FastifyReply,
   ): Promise<void> {
     try {
-      const { file } = await this.headUseCase.execute({ projectId, fileId });
+      const { file } = await this.filestoreService.getFileHead(
+        projectId,
+        fileId,
+      );
 
       res.header('Content-Length', file.sizeBytes.toString());
       res.header('Content-Type', file.mimeType);
@@ -166,7 +172,6 @@ export class FilestoreController {
       );
     }
     if (!file) {
-      // Try common LaTeX image extensions if omitted in \includegraphics{...}
       const extensions = ['.png', '.jpg', '.jpeg', '.pdf', '.svg', '.eps'];
       for (const ext of extensions) {
         file = await this.filestoreService.findByProjectAndName(
@@ -199,16 +204,15 @@ export class FilestoreController {
     @Res() res: FastifyReply,
   ): Promise<void> {
     try {
-      const result = await this.streamUseCase.execute({
+      const result = await this.filestoreService.streamFile(
         projectId,
         fileId,
         rangeHeader,
-      });
+      );
 
       const { file, stream, byteRange, isPartialContent, contentLength } =
         result;
 
-      // Defense in depth: Mobile Safari HTML execution defense (Overleaf Parity)
       const isMobileSafari =
         userAgent &&
         (userAgent.includes('iPhone') || userAgent.includes('iPad'));
@@ -223,7 +227,6 @@ export class FilestoreController {
         res.header('Content-Type', file.mimeType);
       }
 
-      // Headers for caching and downloading
       res.header('Cache-Control', 'private, max-age=3600, immutable');
       res.header('Accept-Ranges', 'bytes');
       res.header(
@@ -240,7 +243,6 @@ export class FilestoreController {
         res.header('Content-Length', contentLength.toString());
       }
 
-      // Zero-RAM backpressure pipeline stream out to socket
       await pipeline(stream, res.raw);
     } catch (err) {
       if (err instanceof FileNotFoundException) {
@@ -263,7 +265,7 @@ export class FilestoreController {
     @Param('fileId') fileId: string,
   ): Promise<void> {
     try {
-      await this.deleteUseCase.execute({ projectId, fileId });
+      await this.filestoreService.deleteFile(projectId, fileId);
     } catch (err) {
       if (err instanceof FileNotFoundException) {
         throw new NotFoundException(err.message);
@@ -280,11 +282,11 @@ export class FilestoreController {
   ): Promise<{ signedUrl: string | null }> {
     try {
       const ttl = expiresIn ? parseInt(expiresIn, 10) : 3600;
-      const signedUrl = await this.signedUrlUseCase.execute({
+      const signedUrl = await this.filestoreService.getSignedUrl(
         projectId,
         fileId,
-        expiresInSeconds: ttl,
-      });
+        ttl,
+      );
       return { signedUrl };
     } catch (err) {
       if (err instanceof FileNotFoundException) {

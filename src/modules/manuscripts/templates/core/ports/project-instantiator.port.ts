@@ -1,4 +1,4 @@
-import { ManuscriptTemplateEntity } from '../domain/entities/manuscript-template.entity';
+import { ManuscriptTemplateEntity } from '@/modules/manuscripts/templates/core/domain/entities/manuscript-template.entity';
 
 export interface InstantiateProjectInput {
   template: ManuscriptTemplateEntity;

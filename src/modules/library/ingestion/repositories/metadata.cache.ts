@@ -1,8 +1,11 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { RedisCacheService } from '@/core';
-import { QueryType, ResolvedMetadata } from '../types/metadata.types';
-import { METADATA_POLICY_VERSION } from '../policies/metadata.policy';
+import {
+  QueryType,
+  ResolvedMetadata,
+} from '@/modules/library/ingestion/types/metadata.types';
+import { METADATA_POLICY_VERSION } from '@/modules/library/ingestion/policies/metadata.policy';
 
 const NEGATIVE_SENTINEL = '__metadata_negative__';
 
@@ -97,8 +100,9 @@ export class MetadataCache {
       // Populate L1 cache for subsequent 0ms hits
       this.setL1(key, parsed, 86_400);
       return parsed;
-    } catch (err: any) {
-      this.logger.warn(`Cache GET failed for key "${key}": ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Cache GET failed for key "${key}": ${msg}`);
       return null;
     }
   }
@@ -122,8 +126,9 @@ export class MetadataCache {
     try {
       await this.redis.set(key, value, ttl);
       this.logger.debug(`L2 Redis SET (TTL=${ttl}s): ${key}`);
-    } catch (err: any) {
-      this.logger.warn(`L2 Cache SET failed for key "${key}": ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`L2 Cache SET failed for key "${key}": ${msg}`);
     }
   }
 
@@ -142,10 +147,9 @@ export class MetadataCache {
     try {
       await this.redis.set(key, NEGATIVE_SENTINEL, ttl);
       this.logger.debug(`L2 Redis Negative SET (TTL=${ttl}s): ${key}`);
-    } catch (err: any) {
-      this.logger.warn(
-        `L2 Negative SET failed for key "${key}": ${err.message}`,
-      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`L2 Negative SET failed for key "${key}": ${msg}`);
     }
   }
 

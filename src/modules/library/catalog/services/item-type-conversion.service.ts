@@ -1,19 +1,21 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { QueryRepository } from '../repositories/query.repository';
-import { CommandRepository } from '../repositories/command.repository';
+import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
+import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { TypesService } from './types.service';
-import { ItemTransformer } from '../utils/item.transformer';
-import { ItemsMapper } from '../utils/items.mapper';
+import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
+import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import {
   ItemDetail,
   TypeConversionPreview,
   ConvertTypeOptions,
-} from '../types/items.types';
+} from '@/modules/library/catalog/types/items.types';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
-} from '../types/items.constants';
+} from '@/modules/library/catalog/types/items.constants';
+
+import { ItemFieldDefinition } from '@/modules/library/shared-kernel/types/schema.types';
 
 /**
  * ItemTypeConversionService — Dedicated Domain Service for Item Type conversions.
@@ -33,7 +35,7 @@ export class ItemTypeConversionService {
    * Generates a deterministic preview of item-type conversion without modifying DB state.
    */
   previewTypeConversion(
-    rawItem: Record<string, any>,
+    rawItem: Record<string, unknown>,
     targetType: string,
     options: { retainUnmappedInExtra?: boolean } = {},
   ): TypeConversionPreview {
@@ -48,13 +50,18 @@ export class ItemTypeConversionService {
     itemId: string,
     targetType: string,
     options: ConvertTypeOptions = {},
+    projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
+    const projectId =
+      typeof projectIdOrTx === 'string' ? projectIdOrTx : undefined;
+    const effectiveTx = typeof projectIdOrTx === 'object' ? projectIdOrTx : tx;
+
     const rawExisting = await this.query.findById(
       userId,
       itemId,
-      undefined,
-      tx,
+      projectId,
+      effectiveTx,
     );
     if (!rawExisting) {
       throw new NotFoundException(`Item ${itemId} not found in user library`);
@@ -79,7 +86,8 @@ export class ItemTypeConversionService {
       itemId,
       options.expectedVersion,
       updatePayload,
-      tx,
+      effectiveTx,
+      projectId,
     );
 
     return {
@@ -92,14 +100,14 @@ export class ItemTypeConversionService {
 
 export function buildTypeConversionUpdatePayload(
   targetType: string,
-  existing: any,
+  existing: ItemDetail,
   preview: TypeConversionPreview,
-  targetFields: any[],
+  targetFields: ItemFieldDefinition[],
   transformer: ItemTransformer,
-): Record<string, any> {
+): Record<string, unknown> {
   const projected = preview.projectedItem;
-  const dynamicExtraFields: Record<string, any> = {
-    ...(projected.extraFields || {}),
+  const dynamicExtraFields: Record<string, unknown> = {
+    ...((projected.extraFields as Record<string, unknown> | undefined) || {}),
   };
 
   for (const field of targetFields) {
@@ -115,7 +123,7 @@ export function buildTypeConversionUpdatePayload(
     }
   }
 
-  const updatePayload: Record<string, any> = {
+  const updatePayload: Record<string, unknown> = {
     itemType: targetType,
     type: targetType,
     creators: projected.creators ?? existing.creators,

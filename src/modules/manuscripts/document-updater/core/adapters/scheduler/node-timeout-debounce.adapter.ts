@@ -4,7 +4,7 @@
  */
 
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { IDebounceTimerPort } from '../../ports/debounce-timer.port';
+import { IDebounceTimerPort } from '@/modules/manuscripts/document-updater/core/ports/debounce-timer.port';
 
 @Injectable()
 export class NodeTimeoutDebounceAdapter

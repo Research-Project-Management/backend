@@ -6,13 +6,14 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'crypto';
-import { MetadataRoutingPolicy } from '../policies/metadata.policy';
-import { SsrfGuardService } from '../../shared-kernel/core/services/ssrf-guard.service';
+import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
+import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
 
 import {
   UrlMetadataScraperService,
   ScrapedUrlResult,
-} from '../services/url-metadata-scraper.service';
+} from '@/modules/library/ingestion/services/url-metadata-scraper.service';
+import { parseCreatorString } from '@/modules/library/ingestion/domain/metadata.domain';
 
 // ─── Public Interfaces ────────────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ export interface CapturedItemMetadata {
     lastName: string;
     fullName?: string;
     creatorType?: string;
+    fieldMode?: number;
   }>;
   authors?: string[];
   year?: number;
@@ -44,6 +46,14 @@ export interface CapturedItemMetadata {
   seriesTitle?: string;
   seriesNumber?: string;
   seriesText?: string;
+  edition?: string;
+  conferenceName?: string;
+  proceedingsTitle?: string;
+  bookTitle?: string;
+  university?: string;
+  institution?: string;
+  thesisType?: string;
+  reportNumber?: string;
   issn?: string;
   isbn?: string;
   publicationDate?: string;
@@ -73,9 +83,9 @@ export interface CapturedItemMetadata {
     | (string & {});
   openAccessPdfUrl?: string;
   previewToken?: string;
-  extraFields?: Record<string, any>;
-  provenance?: any;
-  rawMetadata?: Record<string, any>;
+  extraFields?: Record<string, unknown>;
+  provenance?: unknown;
+  rawMetadata?: Record<string, unknown>;
 }
 
 export interface PreviewTokenVerificationResult {
@@ -151,10 +161,10 @@ export class UrlCaptureProvider {
         const guard = new SsrfGuardService();
         await guard.assertSafeUrl(canonicalUrl);
       }
-    } catch (err: any) {
-      throw new BadRequestException(
-        `SSRF violation: ${err?.message ?? 'Invalid or forbidden URL'}`,
-      );
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : 'Invalid or forbidden URL';
+      throw new BadRequestException(`SSRF violation: ${msg}`);
     }
 
     let scrapedResult: ScrapedUrlResult | null = null;
@@ -164,9 +174,10 @@ export class UrlCaptureProvider {
           scopeId: context?.scopeId,
           userId: context?.userId,
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         this.logger.debug(
-          `In-process urlScraper error for "${canonicalUrl}": ${err?.message}`,
+          `In-process urlScraper error for "${canonicalUrl}": ${msg}`,
         );
       }
     }
@@ -216,55 +227,77 @@ export class UrlCaptureProvider {
         const firstName = c.firstName?.trim() || undefined;
         const fullName =
           c.fullName?.trim() ||
-          (firstName ? `${lastName}, ${firstName}` : lastName);
-        authors.push(fullName);
+          (firstName ? `${firstName} ${lastName}` : lastName);
+        if ((c.creatorType || 'author') === 'author') {
+          authors.push(fullName);
+        }
         creators.push({
           firstName,
           lastName,
           fullName,
           creatorType: c.creatorType || 'author',
+          fieldMode: c.fieldMode ?? (firstName ? 0 : 1),
         });
       }
     } else if (Array.isArray(scraped.authors) && scraped.authors.length > 0) {
-      for (const a of scraped.authors) {
-        const cleanName = a.trim();
+      for (let i = 0; i < scraped.authors.length; i++) {
+        const cleanName = scraped.authors[i].trim();
         if (!cleanName) continue;
         authors.push(cleanName);
-        const parts = cleanName.split(/\s+/);
-        const lastName = parts.length > 1 ? parts[parts.length - 1] : cleanName;
-        const firstName =
-          parts.length > 1 ? parts.slice(0, -1).join(' ') : undefined;
+        const parsed = parseCreatorString(cleanName, i, 'author');
         creators.push({
-          firstName,
-          lastName,
-          fullName: cleanName,
+          firstName: parsed.firstName,
+          lastName: parsed.lastName || cleanName,
+          fullName: parsed.fullName,
           creatorType: 'author',
+          fieldMode: parsed.fieldMode,
         });
       }
     }
 
-    const itemType = scraped.arxivId
-      ? 'preprint'
-      : scraped.doi || scraped.journal || scraped.publicationTitle
-        ? 'journalArticle'
-        : 'webpage';
+    const itemType =
+      scraped.itemType ||
+      (scraped.arxivId
+        ? 'preprint'
+        : scraped.doi || scraped.journal || scraped.publicationTitle
+          ? 'journalArticle'
+          : 'webpage');
 
     return {
       title: scraped.title || 'Web Page',
+      shortTitle: scraped.shortTitle,
       url: fallbackUrl,
-      itemType: itemType,
+      itemType,
       authors: authors.length > 0 ? authors : undefined,
       creators: creators.length > 0 ? creators : undefined,
       doi: scraped.doi,
       arxivId: scraped.arxivId,
       pmid: scraped.pmid,
+      pmcid: scraped.pmcid,
       isbn: scraped.isbn,
       issn: scraped.issn,
       year: scraped.year,
       publicationDate: scraped.publicationDate,
-      publicationTitle: scraped.publicationTitle || scraped.journal,
+      publicationTitle:
+        scraped.publicationTitle ||
+        scraped.journal ||
+        scraped.proceedingsTitle ||
+        scraped.bookTitle,
       journal: scraped.journal,
+      journalAbbr: scraped.journalAbbr,
       publisher: scraped.publisher,
+      place: scraped.place || scraped.publisherPlace,
+      conferenceName: scraped.conferenceName,
+      proceedingsTitle: scraped.proceedingsTitle,
+      bookTitle: scraped.bookTitle,
+      series: scraped.series,
+      edition: scraped.edition,
+      university: scraped.university,
+      institution: scraped.institution,
+      thesisType: scraped.thesisType,
+      reportNumber: scraped.reportNumber,
+      language: scraped.language,
+      rights: scraped.rights,
       abstract: scraped.abstract,
       keywords: scraped.keywords,
       pdfUrl: scraped.pdfUrl,

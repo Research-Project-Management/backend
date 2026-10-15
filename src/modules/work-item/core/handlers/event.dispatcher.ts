@@ -1,8 +1,8 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { WorkItem } from '@prisma/client';
-import { UpdateWorkItemDto } from '../dto/update.dto';
-import { mapPriority } from '../utils/work-item.util';
+import { UpdateWorkItemDto } from '@/modules/work-item/core/dto/update.dto';
+import { mapPriority } from '@/modules/work-item/core/utils/work-item.util';
 
 @Injectable()
 export class EventDispatcher {
@@ -89,61 +89,6 @@ export class EventDispatcher {
     this.eventEmitter.emit('work-item.updated', {
       ...payload,
       verb: 'updated',
-    });
-  }
-
-  emitWorkItemArchived(params: {
-    workItemId: string;
-    identifier?: string | null;
-    projectId: string;
-    userId: string;
-  }) {
-    if (!this.eventEmitter) return;
-    this.eventEmitter.emit('work-item.archived', params);
-    this.eventEmitter.emit('work-item.updated', {
-      entityType: 'work_item',
-      entityId: params.workItemId,
-      verb: 'archived',
-      actorId: params.userId,
-      projectId: params.projectId,
-    });
-  }
-
-  emitWorkItemRestored(params: {
-    workItemId: string;
-    identifier?: string | null;
-    projectId: string;
-    userId: string;
-  }) {
-    if (!this.eventEmitter) return;
-    this.eventEmitter.emit('work-item.restored', params);
-    this.eventEmitter.emit('work-item.updated', {
-      entityType: 'work_item',
-      entityId: params.workItemId,
-      verb: 'restored',
-      actorId: params.userId,
-      projectId: params.projectId,
-    });
-  }
-
-  emitWorkItemAssigned(params: {
-    workItemId: string;
-    projectId: string;
-    actorId?: string;
-    previousAssigneeId?: string | null;
-    newAssigneeId?: string | null;
-  }) {
-    if (!this.eventEmitter) return;
-    this.eventEmitter.emit('work-item.assigned', {
-      entityType: 'work_item',
-      entityId: params.workItemId,
-      workItemId: params.workItemId,
-      verb: 'assigned',
-      field: 'assigneeId',
-      oldValue: params.previousAssigneeId || undefined,
-      newValue: params.newAssigneeId,
-      actorId: params.actorId || '',
-      projectId: params.projectId,
     });
   }
 

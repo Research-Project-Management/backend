@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IngestionRunAggregate } from '../types/ingestion-run.aggregate';
-import { IngestionStageName } from '../types/ingestion-domain.event';
-import { IngestionRepository } from '../repositories/ingestion.repository';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import { IngestionStageName } from '@/modules/library/ingestion/domain/ingestion-domain.event';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { IngestionStage, IngestionStatus, Prisma } from '@prisma/client';
 
 export interface ExecuteStepOptions<T> {
@@ -49,11 +49,15 @@ export class IngestionSagaSession {
         stageName === 'ENRICH_EXISTING'
           ? IngestionStage.ENRICH
           : IngestionStage[stageName];
-      await this.repo
-        .updateRunStage(this.scopeId, this.runId, dbStage)
-        .catch(() => {});
-    } catch {
-      // Ignored: Best effort status update
+      await this.repo.updateRunStage(this.scopeId, this.runId, dbStage);
+    } catch (stageUpdateErr: unknown) {
+      const msg =
+        stageUpdateErr instanceof Error
+          ? stageUpdateErr.message
+          : String(stageUpdateErr);
+      this.logger.debug(
+        `Best-effort stage status update skipped for run ${this.runId} (${stageName}): ${msg}`,
+      );
     }
 
     try {
@@ -70,9 +74,11 @@ export class IngestionSagaSession {
             ? options.outputSnapshot(result)
             : undefined,
         });
-      } catch (stageErr: any) {
+      } catch (stageErr: unknown) {
+        const msg =
+          stageErr instanceof Error ? stageErr.message : String(stageErr);
         this.logger.warn(
-          `Failed to persist stage ${stageName} for run ${this.runId}: ${stageErr?.message}`,
+          `Failed to persist stage ${stageName} for run ${this.runId}: ${msg}`,
         );
       }
 
@@ -84,9 +90,9 @@ export class IngestionSagaSession {
       }
 
       return result;
-    } catch (err: any) {
+    } catch (err: unknown) {
       const durationMs = Date.now() - startMs;
-      const errorMessage = err?.message || String(err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
       this.aggregate.failStep(stageName, errorMessage);
 
       try {
@@ -96,9 +102,11 @@ export class IngestionSagaSession {
           success: false,
           errorMessage,
         });
-      } catch (recordErr: any) {
+      } catch (recordErr: unknown) {
+        const recordMsg =
+          recordErr instanceof Error ? recordErr.message : String(recordErr);
         this.logger.warn(
-          `Failed to record failed stage ${stageName} for run ${this.runId}: ${recordErr?.message}`,
+          `Failed to record failed stage ${stageName} for run ${this.runId}: ${recordMsg}`,
         );
       }
 
@@ -131,9 +139,11 @@ export class IngestionSagaSession {
         );
         await comp.compensate();
         this.aggregate.recordCompensatedStep(comp.stageName);
-      } catch (compErr: any) {
+      } catch (compErr: unknown) {
+        const compMsg =
+          compErr instanceof Error ? compErr.message : String(compErr);
         this.logger.error(
-          `[SAGA_COMPENSATE_ERROR] Failed compensation for step ${comp.stageName} on run ${this.runId}: ${compErr?.message || compErr}`,
+          `[SAGA_COMPENSATE_ERROR] Failed compensation for step ${comp.stageName} on run ${this.runId}: ${compMsg}`,
         );
       }
     }
@@ -150,9 +160,11 @@ export class IngestionSagaSession {
           completedAt: new Date(),
         },
       );
-    } catch (statusErr: any) {
+    } catch (statusErr: unknown) {
+      const statusMsg =
+        statusErr instanceof Error ? statusErr.message : String(statusErr);
       this.logger.error(
-        `Failed to update run status after rollback: ${statusErr?.message}`,
+        `Failed to update run status after rollback: ${statusMsg}`,
       );
     }
   }

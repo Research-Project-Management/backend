@@ -2,4 +2,6 @@ export * from './full-text.provider';
 export * from './search.service';
 export * from './search-engine.adapter';
 export * from './vector-search.adapter';
-export * from './search-events.subscriber';
+
+// Backward-compatible re-export from new subscribers directory
+export * from '@/modules/library/search/subscribers/search-events.subscriber';

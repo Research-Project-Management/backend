@@ -32,8 +32,12 @@ import {
   SpellingReportDto,
   CustomDictionaryResponseDto,
 } from './dto/spelling.dto';
-import { UnsupportedLanguageException } from './core/domain/exceptions/unsupported-language.exception';
-import { InvalidWordException } from './core/domain/exceptions/invalid-word.exception';
+import { UnsupportedLanguageException, InvalidWordException } from './domain';
+
+interface RequestWithUser {
+  user?: { id?: string; sub?: string; userId?: string };
+  headers?: Record<string, string | string[] | undefined>;
+}
 
 @ApiTags('Manuscripts - Spelling & Dictionaries')
 @ApiBearerAuth('JWT-auth')
@@ -47,7 +51,7 @@ import { InvalidWordException } from './core/domain/exceptions/invalid-word.exce
 export class SpellingController {
   constructor(private readonly spellingService: SpellingService) {}
 
-  private handleError(error: any): never {
+  private handleError(error: unknown): never {
     if (
       error instanceof UnsupportedLanguageException ||
       error instanceof InvalidWordException
@@ -67,21 +71,21 @@ export class SpellingController {
   async checkSpelling(
     @Param('projectId') projectId: string,
     @Body() dto: CheckSpellingDto,
-    @Req() req: any,
+    @Req() req: RequestWithUser,
   ): Promise<SpellingReportDto> {
     try {
       const userId =
         req?.user?.id ||
         req?.user?.sub ||
         req?.user?.userId ||
-        req?.headers?.['x-user-id'] ||
+        (req?.headers?.['x-user-id'] as string | undefined) ||
         'user-default';
       return await this.spellingService.checkDocumentSpelling(
         projectId,
         userId,
         dto,
       );
-    } catch (err) {
+    } catch (err: unknown) {
       this.handleError(err);
     }
   }
@@ -138,7 +142,7 @@ export class SpellingController {
 export class SpellingUtilityController {
   constructor(private readonly spellingService: SpellingService) {}
 
-  private handleError(error: any): never {
+  private handleError(error: unknown): never {
     if (
       error instanceof UnsupportedLanguageException ||
       error instanceof InvalidWordException
@@ -156,7 +160,7 @@ export class SpellingUtilityController {
     try {
       const suggestions = this.spellingService.getSuggestions(query);
       return { word: query.word, suggestions };
-    } catch (err) {
+    } catch (err: unknown) {
       this.handleError(err);
     }
   }
@@ -167,12 +171,12 @@ export class SpellingUtilityController {
   })
   @ApiResponse({ status: 200, type: CustomDictionaryResponseDto })
   async listUserDictionary(
-    @Req() req: any,
+    @Req() req: RequestWithUser,
   ): Promise<CustomDictionaryResponseDto> {
     const userId =
       req?.user?.id ||
       req?.user?.sub ||
-      req?.headers?.['x-user-id'] ||
+      (req?.headers?.['x-user-id'] as string | undefined) ||
       'user-default';
     return this.spellingService.listUserWords(userId);
   }
@@ -182,16 +186,16 @@ export class SpellingUtilityController {
   @ApiOperation({
     summary: 'Add a custom word to the user personal dictionary',
   })
-  async learnUserWord(@Body() dto: LearnWordDto, @Req() req: any) {
+  async learnUserWord(@Body() dto: LearnWordDto, @Req() req: RequestWithUser) {
     try {
       const userId =
         req?.user?.id ||
         req?.user?.sub ||
-        req?.headers?.['x-user-id'] ||
+        (req?.headers?.['x-user-id'] as string | undefined) ||
         'user-default';
       await this.spellingService.learnUserWord(userId, dto.word);
       return { success: true, word: dto.word };
-    } catch (err) {
+    } catch (err: unknown) {
       this.handleError(err);
     }
   }
@@ -201,11 +205,14 @@ export class SpellingUtilityController {
   @ApiOperation({
     summary: 'Remove a custom word from the user personal dictionary',
   })
-  async unlearnUserWord(@Param('word') word: string, @Req() req: any) {
+  async unlearnUserWord(
+    @Param('word') word: string,
+    @Req() req: RequestWithUser,
+  ) {
     const userId =
       req?.user?.id ||
       req?.user?.sub ||
-      req?.headers?.['x-user-id'] ||
+      (req?.headers?.['x-user-id'] as string | undefined) ||
       'user-default';
     const removed = await this.spellingService.unlearnUserWord(userId, word);
     return { success: true, removed, word };

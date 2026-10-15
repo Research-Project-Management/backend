@@ -19,7 +19,7 @@ import {
   StorageObjectMetadata,
   StorageRangeOptions,
   StorageUploadOptions,
-} from '../../ports/binary-storage.port';
+} from '@/modules/manuscripts/filestore/core/ports/binary-storage.port';
 
 @Injectable()
 export class S3BinaryStorageAdapter extends IBinaryStoragePort {

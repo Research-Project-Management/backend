@@ -4,11 +4,11 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { IStructureRepository } from '../ports/structure-repository.port';
-import { IRootDocDetector } from '../ports/root-doc-detector.port';
-import { ITreePublisher } from '../ports/tree-publisher.port';
-import { ManuscriptNodeEntity } from '../domain/manuscript-node.entity';
-import { NodeNotFoundError } from '../domain/structure-errors';
+import { IStructureRepository } from '@/modules/manuscripts/structure/core/ports/structure-repository.port';
+import { IRootDocDetector } from '@/modules/manuscripts/structure/core/ports/root-doc-detector.port';
+import { ITreePublisher } from '@/modules/manuscripts/structure/core/ports/tree-publisher.port';
+import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
+import { NodeNotFoundError } from '@/modules/manuscripts/structure/core/domain/structure-errors';
 
 @Injectable()
 export class ResolveRootDocUseCase {

@@ -3,7 +3,7 @@
  * Port interface for heuristic detection of the main compilation entrypoint (main.tex).
  */
 
-import { ManuscriptNodeEntity } from '../domain/manuscript-node.entity';
+import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
 
 export abstract class IRootDocDetector {
   /**

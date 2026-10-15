@@ -7,10 +7,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Readable } from 'stream';
 import * as crypto from 'crypto';
-import { IDocRepository } from '../ports/doc-repository.port';
-import { IDocPersistor } from '../ports/doc-persistor.port';
+import { IDocRepository } from '@/modules/manuscripts/docstore/core/ports/doc-repository.port';
+import { IDocPersistor } from '@/modules/manuscripts/docstore/core/ports/doc-persistor.port';
 import { GetDocUseCase } from './get-doc.use-case';
-import { NullByteDetectedError, DocNotFoundError } from '../domain/doc-errors';
+import {
+  NullByteDetectedError,
+  DocNotFoundError,
+} from '@/modules/manuscripts/docstore/core/domain/doc-errors';
 
 @Injectable()
 export class ArchiveProjectUseCase {

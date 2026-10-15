@@ -11,25 +11,56 @@ import {
   IngestionSubmissionEnvelope,
   IngestionAcceptedResult,
   SubmissionPayload,
-} from '../types/submission.types';
+} from '@/modules/library/ingestion/types/submission.types';
 import {
   IngestionCommand,
   IngestionResult,
   IngestionPort,
   IngestionRunSnapshot,
-} from '../types/ingestion.types';
-import { IngestionRepository } from '../repositories/ingestion.repository';
+} from '@/modules/library/ingestion/types/ingestion.types';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { IngestionStatus, IngestionRun, Prisma } from '@prisma/client';
 import { PipelineService } from './pipeline.service';
 import { QueueService } from './queue.service';
 import { UrlCaptureService } from './url-capture.service';
+import { ConfirmCapturedUrlDto } from '@/modules/library/ingestion/dto/capture-url.dto';
+import { ItemDetail, UpdateItemData } from '@/modules/library/catalog';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
-} from '../types/catalog-gateway.types';
+} from '@/modules/library/ingestion/types/catalog-gateway.types';
 import { createHash, randomUUID } from 'crypto';
 import zlib from 'zlib';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import {
+  METADATA_PORT,
+  MetadataPort,
+  QueryType,
+} from '@/modules/library/ingestion/types/metadata.types';
+import {
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+  normalizeIsbn,
+} from '@/modules/library/shared-kernel/domain/identifier.domain';
+import { parseCreatorString } from '@/modules/library/shared-kernel/domain/author.domain';
+import {
+  harmonizeZoteroFields,
+  resolveCanonicalCreatorRole,
+} from '@/modules/library/shared-kernel/domain/zotero-field-harmonizer.domain';
+
+interface IngestionExecutionLog {
+  item?: { id?: string; title?: string };
+  items?: Array<{ itemId?: string; title?: string; status?: string }>;
+  currentTitle?: string;
+  total?: number;
+  processed?: number;
+  succeeded?: number;
+  duplicates?: number;
+  failed?: number;
+  percentage?: number;
+  [key: string]: unknown;
+}
 
 @Injectable()
 export class IngestionService implements IngestionPort {
@@ -46,6 +77,9 @@ export class IngestionService implements IngestionPort {
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
+    @Optional()
+    @Inject(METADATA_PORT)
+    private readonly metadataService?: MetadataPort,
   ) {}
 
   /**
@@ -130,9 +164,11 @@ export class IngestionService implements IngestionPort {
             `[ClaimCheck] Offloaded large ${envelope.payload.format} record payload (${rawBuffer.length}B -> ${compressed.length}B compressed) to storage fileId=${uploadResult.fileId}`,
           );
         }
-      } catch (offloadErr: any) {
+      } catch (offloadErr: unknown) {
+        const offloadMsg =
+          offloadErr instanceof Error ? offloadErr.message : String(offloadErr);
         this.logger.warn(
-          `[ClaimCheck] Failed to offload record payload to storage: ${offloadErr?.message}. Falling back to inline.`,
+          `[ClaimCheck] Failed to offload record payload to storage: ${offloadMsg}. Falling back to inline.`,
         );
       }
     }
@@ -154,12 +190,19 @@ export class IngestionService implements IngestionPort {
           contractVersion: envelope.contractVersion || '1.0.0',
         },
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errRecord =
+        err && typeof err === 'object'
+          ? (err as Record<string, unknown>)
+          : null;
+      const isP2002 =
+        errRecord?.code === 'P2002' ||
+        (err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002') ||
+        (err instanceof Error && err.message.includes('Unique constraint'));
+
       // If a concurrent request inserted with the exact same (userId, idempotencyKey), Prisma throws P2002
-      if (
-        idempotencyKey &&
-        (err?.code === 'P2002' || err?.message?.includes('Unique constraint'))
-      ) {
+      if (idempotencyKey && isP2002) {
         const raceRun = await this.repo.findRunByIdempotencyKey(
           { userId: envelope.userId, projectId: envelope.projectId },
           idempotencyKey,
@@ -221,13 +264,13 @@ export class IngestionService implements IngestionPort {
     return this.pipeline.executePipeline(runId, projectId, envelope);
   }
 
-  private parseExecutionLog(executionLog: unknown): Record<string, any> {
+  private parseExecutionLog(executionLog: unknown): IngestionExecutionLog {
     if (
       executionLog &&
       typeof executionLog === 'object' &&
       !Array.isArray(executionLog)
     ) {
-      return executionLog as Record<string, any>;
+      return executionLog as IngestionExecutionLog;
     }
     return {};
   }
@@ -248,9 +291,11 @@ export class IngestionService implements IngestionPort {
       (Array.isArray(log.items) && log.items.length > 0
         ? { id: log.items[0].itemId || run.itemId, title: log.items[0].title }
         : null);
-    const resolvedItem = run.item || logItem || null;
+    const runItem = run.item as
+      { id?: string; title?: string } | null | undefined;
+    const resolvedItem = runItem || logItem || null;
     const title =
-      run.item?.title ||
+      runItem?.title ||
       log.currentTitle ||
       (Array.isArray(log.items) && log.items[0]?.title) ||
       log.item?.title ||
@@ -321,16 +366,30 @@ export class IngestionService implements IngestionPort {
           ? 100
           : Math.min(Math.round((processed / total) * 100), 99);
 
+    const runItem = run.item as
+      { id?: string; title?: string } | null | undefined;
     const title =
-      run.item?.title ||
+      runItem?.title ||
       log.currentTitle ||
       (Array.isArray(log.items) && log.items[0]?.title) ||
       log.item?.title ||
       undefined;
 
-    const items =
+    const items: Array<{
+      title: string;
+      status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
+      itemId?: string;
+      error?: string;
+    }> =
       Array.isArray(log.items) && log.items.length > 0
-        ? log.items
+        ? log.items.map((it) => ({
+            title: it.title || 'Untitled Document',
+            status:
+              it.status === 'DUPLICATE' || it.status === 'FAILED'
+                ? it.status
+                : 'SUCCEEDED',
+            itemId: it.itemId,
+          }))
         : title
           ? [
               {
@@ -363,7 +422,11 @@ export class IngestionService implements IngestionPort {
     /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
     scopeId: string,
     runId: string,
-  ): Promise<any> {
+  ): Promise<{
+    runId: string;
+    status: IngestionStatus;
+    message: string;
+  }> {
     const run = await this.repo.findRunById(scopeId, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
@@ -427,13 +490,14 @@ export class IngestionService implements IngestionPort {
 
     try {
       await this.pipeline.executePipeline(runId, projectId, envelope);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.error(
-        `Ingestion pipeline failed for run ${runId}: ${err?.message || err}`,
+        `Ingestion pipeline failed for run ${runId}: ${errMsg}`,
       );
       await this.repo
         .updateRunStatus(projectId, runId, IngestionStatus.FAILED_FINAL, {
-          lastError: err?.message || 'Unknown failure',
+          lastError: errMsg,
         })
         .catch(() => {});
 
@@ -442,7 +506,7 @@ export class IngestionService implements IngestionPort {
         status: 'failed',
         attachmentIds: [],
         deduplicated: false,
-        errorMessage: err?.message || 'Pipeline execution failed',
+        errorMessage: errMsg || 'Pipeline execution failed',
       };
     }
 
@@ -479,28 +543,67 @@ export class IngestionService implements IngestionPort {
         payload = {
           kind: 'IDENTIFIER',
           identifierType: 'DOI',
-          value: command.doi,
+          value: command.doi || '',
+        };
+        break;
+      case 'arxiv':
+        payload = {
+          kind: 'IDENTIFIER',
+          identifierType: 'ARXIV',
+          value: ('arxivId' in command ? command.arxivId : '') || '',
+        };
+        break;
+      case 'pmid':
+        payload = {
+          kind: 'IDENTIFIER',
+          identifierType: 'PMID',
+          value: ('pmid' in command ? command.pmid : '') || '',
+        };
+        break;
+      case 'isbn':
+        payload = {
+          kind: 'IDENTIFIER',
+          identifierType: 'ISBN',
+          value: ('isbn' in command ? command.isbn : '') || '',
         };
         break;
       case 'url':
         payload = {
           kind: 'URL',
-          url: command.url,
-          previewToken: command.previewToken,
+          url: command.url || '',
+          previewToken:
+            'previewToken' in command ? command.previewToken : undefined,
         };
         break;
       case 'bibtex':
         payload = {
           kind: 'RECORD',
           format: 'BIBTEX',
-          content: command.content,
+          content: command.content || '',
+        };
+        break;
+      case 'ris':
+        payload = {
+          kind: 'RECORD',
+          format: 'RIS',
+          content: command.content || '',
         };
         break;
       case 'pdf':
         payload = {
           kind: 'FILE',
-          fileId: command.fileId,
+          fileId: command.fileId || '',
           filename: command.filename,
+        };
+        break;
+      case 'zotero':
+        payload = {
+          kind: 'CONNECTOR',
+          connectionId:
+            ('connectionId' in command ? command.connectionId : '') || '',
+          externalObjectId:
+            ('externalItemKey' in command ? command.externalItemKey : '') || '',
+          externalVersion: '1',
         };
         break;
       default:
@@ -521,7 +624,11 @@ export class IngestionService implements IngestionPort {
 
   // ── Backward Compatibility Convenience Methods ────────────────────────────
 
-  async ingestDoi(projectId: string, userId: string, dto: any) {
+  async ingestDoi(
+    projectId: string,
+    userId: string,
+    dto: { doi: string; collectionId?: string; idempotencyKey?: string },
+  ) {
     const res = await this.ingest({
       source: 'doi',
       projectId,
@@ -533,27 +640,56 @@ export class IngestionService implements IngestionPort {
     return res.item || { id: res.itemId, runId: res.runId };
   }
 
-  async ingestBibtex(projectId: string, userId: string, dto: any) {
+  async ingestBibtex(
+    projectId: string,
+    userId: string,
+    dto: {
+      bibtex?: string;
+      content?: string;
+      collectionId?: string;
+      idempotencyKey?: string;
+    },
+  ) {
     const res = await this.ingest({
       source: 'bibtex',
       projectId,
       userId,
-      content: dto.bibtex || dto.content,
+      content: dto.bibtex || dto.content || '',
       collectionId: dto.collectionId,
       idempotencyKey: dto.idempotencyKey,
     });
     return res.item || { id: res.itemId, runId: res.runId };
   }
 
-  async startRun(projectId: string, userId: string, dto: any) {
-    const res = await this.ingest({
-      source: dto.source || 'doi',
-      projectId,
-      userId,
-      doi: dto.doi || '',
-      content: dto.content || '',
-      idempotencyKey: dto.idempotencyKey,
-    });
+  async startRun(
+    projectId: string,
+    userId: string,
+    dto: {
+      source?: 'doi' | 'url' | 'bibtex' | 'pdf' | string;
+      doi?: string;
+      content?: string;
+      idempotencyKey?: string;
+    },
+  ) {
+    const source = (dto.source || (dto.content ? 'bibtex' : 'doi')) as
+      'doi' | 'bibtex';
+    const res = await this.ingest(
+      source === 'bibtex'
+        ? {
+            source: 'bibtex',
+            projectId,
+            userId,
+            content: dto.content || '',
+            idempotencyKey: dto.idempotencyKey,
+          }
+        : {
+            source: 'doi',
+            projectId,
+            userId,
+            doi: dto.doi || '',
+            idempotencyKey: dto.idempotencyKey,
+          },
+    );
     return { runId: res.runId, status: res.status };
   }
 
@@ -569,11 +705,308 @@ export class IngestionService implements IngestionPort {
     return this.urlCapture.captureUrl(url, contextOrProjectId);
   }
 
-  async confirmCapturedUrl(projectId: string, userId: string, dto: any) {
+  async confirmCapturedUrl(
+    projectId: string,
+    userId: string,
+    dto: ConfirmCapturedUrlDto,
+  ) {
     return this.urlCapture.confirmCapturedUrl(projectId, userId, dto);
   }
 
   async cleanupExpiredPreviews(retentionDays = 7): Promise<number> {
     return this.urlCapture.cleanupExpiredPreviews(retentionDays);
+  }
+
+  /**
+   * Re-resolves bibliographic metadata for an existing library item on demand.
+   * Queries Open Academic Mirrors (CrossRef, arXiv, PubMed, EuropePMC) and harmonizes fields.
+   */
+  async reResolveMetadata(
+    userId: string,
+    itemId: string,
+    options?: {
+      doi?: string;
+      arxivId?: string;
+      pmid?: string;
+      isbn?: string;
+      title?: string;
+      forceRefresh?: boolean;
+      aggressive?: boolean;
+      fields?: string[];
+      expectedVersion?: number;
+    },
+    projectId?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    itemId: string;
+    item: ItemDetail | null;
+    resolvedFrom?: {
+      query: string;
+      queryType: string;
+      canonicalId?: string;
+    };
+    updatedFields: string[];
+    warnings?: string[];
+  }> {
+    if (!this.catalogGateway) {
+      throw new BadRequestException(
+        'Catalog gateway is unavailable for metadata re-resolution',
+      );
+    }
+
+    const existingItem = await this.catalogGateway.getItem(
+      userId,
+      itemId,
+      projectId,
+    );
+    if (!existingItem) {
+      throw new NotFoundException(`Item "${itemId}" not found in library`);
+    }
+
+    // Determine query & queryType
+    let query: string | undefined;
+    let queryType: QueryType | undefined;
+
+    if (options?.doi) {
+      query = normalizeDoi(options.doi) || options.doi.trim();
+      queryType = 'DOI';
+    } else if (options?.arxivId) {
+      query = normalizeArxivId(options.arxivId) || options.arxivId.trim();
+      queryType = 'ARXIV';
+    } else if (options?.pmid) {
+      query = normalizePmid(options.pmid) || options.pmid.trim();
+      queryType = 'PMID';
+    } else if (options?.isbn) {
+      query = normalizeIsbn(options.isbn) || options.isbn.trim();
+      queryType = 'ISBN';
+    } else if (options?.title) {
+      query = options.title.trim();
+      queryType = 'TITLE';
+    } else if (existingItem.doi) {
+      query = normalizeDoi(existingItem.doi) || existingItem.doi;
+      queryType = 'DOI';
+    } else if (existingItem.extraFields?.arxivId || existingItem.arxivId) {
+      const rawArxiv = String(
+        existingItem.extraFields?.arxivId || existingItem.arxivId || '',
+      );
+      query = normalizeArxivId(rawArxiv) || rawArxiv;
+      queryType = 'ARXIV';
+    } else if (existingItem.extraFields?.pmid || existingItem.pmid) {
+      const rawPmid = String(
+        existingItem.extraFields?.pmid || existingItem.pmid || '',
+      );
+      query = normalizePmid(rawPmid) || rawPmid;
+      queryType = 'PMID';
+    } else if (existingItem.isbn) {
+      query = normalizeIsbn(existingItem.isbn) || existingItem.isbn;
+      queryType = 'ISBN';
+    } else if (
+      existingItem.title &&
+      existingItem.title.trim().length >= 10 &&
+      !/^(untitled|document|uploaded document|manuscript)$/i.test(
+        existingItem.title.trim(),
+      )
+    ) {
+      query = existingItem.title.trim();
+      queryType = 'TITLE';
+    }
+
+    if (!query) {
+      throw new BadRequestException(
+        'Cannot re-resolve metadata: item has no existing identifier or credible title. Please specify a DOI, arXiv ID, or title in request body.',
+      );
+    }
+
+    if (!this.metadataService) {
+      throw new BadRequestException(
+        'MetadataService is unavailable for metadata re-resolution',
+      );
+    }
+
+    const resolved = await this.metadataService.resolve({
+      query,
+      queryType,
+      forceRefresh: options?.forceRefresh ?? options?.aggressive ?? true,
+      scopeId: projectId || 'user',
+    });
+
+    if (!resolved || !resolved.metadata) {
+      return {
+        success: false,
+        message: `No authoritative bibliographic metadata found for query "${query}".`,
+        itemId,
+        item: existingItem,
+        updatedFields: [],
+      };
+    }
+
+    const effectiveItemType =
+      resolved.metadata.itemType ||
+      existingItem.itemType ||
+      ((existingItem as Record<string, unknown>).type as string | undefined) ||
+      'journalArticle';
+    const m = harmonizeZoteroFields(
+      {
+        ...resolved.metadata,
+        extraFields: { ...(resolved.metadata.extraFields || {}) },
+      },
+      { itemType: effectiveItemType, syncExtraFields: true },
+    ) as typeof resolved.metadata;
+
+    const updateData: Record<string, unknown> = {};
+    const updatedFields: string[] = [];
+    const allowedFieldSet =
+      Array.isArray(options?.fields) && options.fields.length > 0
+        ? new Set(options.fields)
+        : null;
+
+    const applyField = (fieldName: string, value: unknown) => {
+      if (allowedFieldSet && !allowedFieldSet.has(fieldName)) {
+        return;
+      }
+      if (value !== undefined && value !== null && value !== '') {
+        updateData[fieldName] = value;
+        if (!updatedFields.includes(fieldName)) {
+          updatedFields.push(fieldName);
+        }
+      }
+    };
+
+    if (m.title && m.title !== existingItem.title) {
+      applyField('title', m.title);
+    }
+
+    if (Array.isArray(m.creators) && m.creators.length > 0) {
+      const creators = m.creators.map((c, index) => ({
+        orderIndex: index,
+        creatorType: resolveCanonicalCreatorRole(c.creatorType, {
+          itemType: effectiveItemType,
+        }),
+        firstName: c.firstName || '',
+        lastName: c.lastName || '',
+        fullName:
+          c.fullName ||
+          c.name ||
+          [c.firstName, c.lastName].filter(Boolean).join(' '),
+        ...(c.fieldMode !== undefined ? { fieldMode: c.fieldMode } : {}),
+      }));
+      applyField('creators', creators);
+    } else if (m.authors && m.authors.length > 0) {
+      const creators = m.authors.map((authorStr: string, index: number) => {
+        const parsed = parseCreatorString(authorStr, index, 'author');
+        return {
+          orderIndex: index,
+          creatorType: 'author',
+          firstName: parsed.firstName || '',
+          lastName: parsed.lastName || '',
+          fullName: parsed.fullName || authorStr,
+          ...(parsed.fieldMode !== undefined
+            ? { fieldMode: parsed.fieldMode }
+            : {}),
+        };
+      });
+      applyField('creators', creators);
+    }
+
+    if (m.publicationDate) {
+      applyField('date', m.publicationDate);
+      applyField('publicationDate', m.publicationDate);
+    } else if (m.year) {
+      applyField('date', String(m.year));
+    }
+    if (m.year) {
+      applyField('year', m.year);
+    }
+
+    if (m.journal || m.publicationTitle) {
+      applyField('publicationTitle', m.journal || m.publicationTitle);
+    }
+
+    if (m.abstract || m.abstractNote) {
+      applyField('abstractNote', m.abstract || m.abstractNote);
+      applyField('abstract', m.abstract || m.abstractNote);
+    }
+
+    const handledKeys = new Set([
+      'title',
+      'creators',
+      'authors',
+      'editors',
+      'contributors',
+      'publicationDate',
+      'date',
+      'year',
+      'publicationTitle',
+      'journal',
+      'abstract',
+      'abstractNote',
+      'extraFields',
+      'notes',
+      'provenance',
+    ]);
+
+    const mRecord = m as Record<string, unknown>;
+    for (const [key, val] of Object.entries(mRecord)) {
+      if (handledKeys.has(key)) continue;
+      if (val === undefined || val === null || val === '') continue;
+      if (Array.isArray(val) && val.length === 0) continue;
+      applyField(key, val);
+    }
+
+    if (
+      m.extraFields &&
+      typeof m.extraFields === 'object' &&
+      Object.keys(m.extraFields).length > 0
+    ) {
+      const mergedExtraFields: Record<string, unknown> = {
+        ...(existingItem.extraFields || {}),
+      };
+      for (const [efKey, efVal] of Object.entries(m.extraFields)) {
+        if (efVal !== undefined && efVal !== null && efVal !== '') {
+          mergedExtraFields[efKey] = efVal;
+          applyField(efKey, efVal);
+        }
+      }
+      updateData.extraFields = mergedExtraFields;
+    }
+
+    if (updatedFields.length === 0) {
+      return {
+        success: true,
+        message:
+          'Item metadata is already up to date with authoritative registry.',
+        itemId,
+        item: existingItem,
+        resolvedFrom: {
+          query,
+          queryType: resolved.queryType,
+          canonicalId: resolved.canonicalId,
+        },
+        updatedFields: [],
+      };
+    }
+
+    const expectedVersion = options?.expectedVersion ?? existingItem.version;
+    const updated = await this.catalogGateway.updateItem(
+      userId,
+      itemId,
+      updateData,
+      expectedVersion,
+      projectId,
+    );
+
+    return {
+      success: true,
+      message: `Successfully re-resolved metadata from ${resolved.canonicalId || query}. Updated ${updatedFields.length} field(s): ${updatedFields.join(', ')}.`,
+      itemId,
+      item: updated || existingItem,
+      resolvedFrom: {
+        query,
+        queryType: resolved.queryType,
+        canonicalId: resolved.canonicalId,
+      },
+      updatedFields,
+    };
   }
 }

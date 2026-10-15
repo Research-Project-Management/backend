@@ -2,13 +2,24 @@ import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import {
   MetadataCandidate,
   FieldEvidence,
-} from '../types/metadata-candidate.types';
-import { METADATA_PORT, MetadataPort } from '../types/metadata.types';
-import { NormalizationPolicy } from '../policies/normalization.policy';
+} from '@/modules/library/ingestion/types/metadata-candidate.types';
+import {
+  METADATA_PORT,
+  MetadataPort,
+} from '@/modules/library/ingestion/types/metadata.types';
+import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { randomUUID } from 'crypto';
+import {
+  IWorkflowStage,
+  EnrichStageInput,
+} from '@/modules/library/ingestion/types/workflow-stage.types';
 
 @Injectable()
-export class EnrichStage {
+export class EnrichStage implements IWorkflowStage<
+  EnrichStageInput | string,
+  MetadataCandidate[]
+> {
+  readonly stageName = 'ENRICH' as const;
   private readonly logger = new Logger(EnrichStage.name);
 
   constructor(
@@ -26,9 +37,18 @@ export class EnrichStage {
    * into unrelated bibliographic data.
    */
   async execute(
-    scopeId: string,
-    candidates: MetadataCandidate[],
+    scopeIdOrInput: string | EnrichStageInput,
+    candidatesArg?: MetadataCandidate[],
   ): Promise<MetadataCandidate[]> {
+    const scopeId =
+      typeof scopeIdOrInput === 'string'
+        ? scopeIdOrInput
+        : scopeIdOrInput.scopeId;
+    const candidates =
+      typeof scopeIdOrInput === 'string'
+        ? candidatesArg || []
+        : scopeIdOrInput.candidates;
+
     if (!this.metadataService) {
       this.logger.debug(
         'MetadataService not available, skipping enrichment stage',
@@ -37,25 +57,35 @@ export class EnrichStage {
     }
 
     const enrichedCandidates = [...candidates];
-
-    const isLegacyMode =
-      process.env.INGESTION_PIPELINE_MODE === 'legacy' ||
-      process.env.DISABLE_ZERO_API_SHORT_CIRCUIT === 'true';
+    const seenQueries = new Set<string>();
 
     for (const candidate of candidates) {
-      const hasCoreVerifiedMetadata =
-        Boolean(candidate.normalizedMetadata?.title) &&
-        Boolean(candidate.normalizedMetadata?.doi || candidate.normalizedMetadata?.arxivId) &&
-        (candidate.confidenceScore ?? 0) >= 0.75;
+      const hasTitle = Boolean(
+        candidate.normalizedMetadata?.title &&
+        candidate.normalizedMetadata.title !== 'Untitled Document' &&
+        candidate.normalizedMetadata.title !== 'Uploaded Document',
+      );
+      const hasAuthors = Boolean(
+        candidate.normalizedMetadata?.authors &&
+        candidate.normalizedMetadata.authors.length > 0,
+      );
 
-      if (
-        !isLegacyMode &&
-        (candidate.sourceName === 'TrustedPaper' ||
-          candidate.normalizedMetadata?.extraFields?.isSelfSufficient === true ||
-          candidate.normalizedMetadata?.isSelfSufficient === true ||
-          (candidate.confidenceScore != null && candidate.confidenceScore >= 0.85) ||
-          hasCoreVerifiedMetadata)
-      ) {
+      // Only skip external enrichment if the candidate ALREADY has complete verified metadata
+      // (both title and authors, or marked self-sufficient by local trusted extraction).
+      // Bare identifiers without a title must always be resolved via authoritative doi.org/providers.
+      const isAlreadyComplete =
+        candidate.sourceName === 'TrustedPaper' ||
+        candidate.normalizedMetadata?.extraFields?.isSelfSufficient === true ||
+        candidate.normalizedMetadata?.isSelfSufficient === true ||
+        (hasTitle && hasAuthors && (candidate.confidenceScore ?? 0) >= 0.85) ||
+        (hasTitle &&
+          Boolean(
+            candidate.normalizedMetadata?.doi ||
+            candidate.normalizedMetadata?.arxivId,
+          ) &&
+          (candidate.confidenceScore ?? 0) >= 0.75);
+
+      if (isAlreadyComplete) {
         this.logger.debug(
           `[EnrichStage] Candidate ${candidate.candidateId} (source=${candidate.sourceName}, score=${candidate.confidenceScore}) has sufficient local/verified metadata. Skipping external API enrichment.`,
         );
@@ -85,6 +115,12 @@ export class EnrichStage {
         url;
 
       if (!query) continue;
+
+      const normalizedQueryKey = query.trim().toLowerCase();
+      if (seenQueries.has(normalizedQueryKey)) {
+        continue;
+      }
+      seenQueries.add(normalizedQueryKey);
 
       if (candidates.length > 1) {
         await new Promise((resolve) => setTimeout(resolve, 150));

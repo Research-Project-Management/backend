@@ -4,8 +4,8 @@ import {
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
-import { RetractionRepository } from '../repositories/retraction.repository';
-import { RetractionScannerProvider } from '../providers/retraction-scanner.provider';
+import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import { RetractionDatabaseService } from './retraction-database.service';
 
 export interface RetractionSyncOptions {
@@ -37,6 +37,7 @@ interface SyncCandidate {
 @Injectable()
 export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RetractionSyncService.name);
+  private initTimer: NodeJS.Timeout | null = null;
   private syncTimer: NodeJS.Timeout | null = null;
 
   constructor(
@@ -56,14 +57,15 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     );
 
     // Initial delay of 2 minutes after boot before first background scan
-    const initTimer = setTimeout(() => {
+    this.initTimer = setTimeout(() => {
+      this.initTimer = null;
       this.syncAllStaleItems().catch((err) => {
         this.logger.warn(
           `Initial background retraction sync error: ${err?.message}`,
         );
       });
     }, 120000);
-    initTimer.unref();
+    this.initTimer.unref();
 
     this.syncTimer = setInterval(() => {
       this.syncAllStaleItems().catch((err) => {
@@ -76,6 +78,10 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
+    if (this.initTimer) {
+      clearTimeout(this.initTimer);
+      this.initTimer = null;
+    }
     if (this.syncTimer) {
       clearInterval(this.syncTimer);
       this.syncTimer = null;
@@ -195,10 +201,11 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
             } else {
               skippedUnverified++;
             }
-          } catch (err: any) {
+          } catch (err: unknown) {
             failed++;
+            const msg = err instanceof Error ? err.message : String(err);
             this.logger.warn(
-              `Failed to sync retraction status for item ${item.id} (${item.doi || item.pmid || 'no identifier'}): ${err?.message || err}`,
+              `Failed to sync retraction status for item ${item.id} (${item.doi || item.pmid || 'no identifier'}): ${msg}`,
             );
           }
         }),

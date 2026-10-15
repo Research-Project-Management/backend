@@ -4,15 +4,12 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ITrackChangesRepositoryPort } from '../ports/track-changes-repository.port';
+import { ITrackChangesRepositoryPort } from '@/modules/manuscripts/track-changes/core/ports/track-changes-repository.port';
 import { AcceptChangeUseCase } from './accept-change.use-case';
 import { RejectChangeUseCase } from './reject-change.use-case';
 
 export type BatchAction =
-  | 'accept_all'
-  | 'reject_all'
-  | 'accept_selected'
-  | 'reject_selected';
+  'accept_all' | 'reject_all' | 'accept_selected' | 'reject_selected';
 
 export interface BatchResolveInput {
   projectId: string;
@@ -45,10 +42,20 @@ export class BatchResolveChangesUseCase {
       'pending',
     );
 
-    const targetChanges =
+    const filteredChanges =
       changeIds && changeIds.length > 0
         ? pendingChanges.filter((c) => changeIds.includes(c.id))
         : pendingChanges;
+
+    // Sort in descending document position order (bottom-to-top, right-to-left)
+    // so that line/column mutations from accepting deletes or rejecting inserts/deletes
+    // never shift the coordinates of changes earlier in the document.
+    const targetChanges = [...filteredChanges].sort((a, b) => {
+      if (b.range.startLine !== a.range.startLine) {
+        return b.range.startLine - a.range.startLine;
+      }
+      return b.range.startCol - a.range.startCol;
+    });
 
     if (action === 'accept_all' || action === 'accept_selected') {
       for (const change of targetChanges) {
@@ -60,9 +67,7 @@ export class BatchResolveChangesUseCase {
         });
       }
     } else {
-      // Reject in reverse order to preserve line indices
-      const reversed = [...targetChanges].reverse();
-      for (const change of reversed) {
+      for (const change of targetChanges) {
         await this.rejectChangeUseCase.execute({
           projectId,
           docId,

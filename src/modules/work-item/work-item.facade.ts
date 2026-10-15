@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { WorkItemPriority, EntityType } from '@prisma/client';
 import { CoreRepository as WorkItemRepository } from './core/core.repository';
 import {
@@ -55,9 +55,9 @@ export class WorkItemFacade {
     private readonly workItemRepository: WorkItemRepository,
     private readonly stateService: StateService,
     private readonly attachmentService: AttachmentService,
-    @Optional() private readonly assignmentService?: AssignmentService,
-    @Optional() private readonly relationService?: RelationService,
-    @Optional() private readonly historyService?: HistoryService,
+    private readonly assignmentService: AssignmentService,
+    private readonly relationService: RelationService,
+    private readonly historyService: HistoryService,
   ) {}
 
   private toSummary(workItem: WorkItemWithRelations): WorkItemSummary {
@@ -141,14 +141,12 @@ export class WorkItemFacade {
   async getWorkItemAssignees(workItemId: string, projectId?: string) {
     const item = await this.workItemRepository.findWorkItemById(workItemId);
     const resolvedProjectId = projectId || item?.projectId;
-    if (this.assignmentService && resolvedProjectId) {
-      const res = await this.assignmentService.getAssignees(
-        resolvedProjectId,
-        workItemId,
-      );
-      return res.assignees;
-    }
-    return item?.assignee ? [item.assignee] : [];
+    if (!resolvedProjectId) return [];
+    const res = await this.assignmentService.getAssignees(
+      resolvedProjectId,
+      workItemId,
+    );
+    return res.assignees;
   }
 
   async assignWorkItem(
@@ -157,35 +155,24 @@ export class WorkItemFacade {
     assigneeId: string | null | undefined,
     actorId?: string,
   ) {
-    if (this.assignmentService) {
-      return this.assignmentService.assignWorkItem(
-        projectId,
-        workItemId,
-        assigneeId,
-        actorId,
-      );
-    }
-    return this.workItemRepository.updateWorkItem(workItemId, {
-      assigneeId: assigneeId || null,
-    });
+    return this.assignmentService.assignWorkItem(
+      projectId,
+      workItemId,
+      assigneeId,
+      actorId,
+    );
   }
 
   // ── Relations (Dependencies) ────────────────────────────────────────────────
 
   async getWorkItemRelations(workItemId: string) {
-    if (this.relationService) {
-      return this.relationService.getWorkItemRelations(workItemId);
-    }
-    return { relations: [] };
+    return this.relationService.getWorkItemRelations(workItemId);
   }
 
   // ── History & Audit ─────────────────────────────────────────────────────────
 
   async getWorkItemActivity(workItemId: string, sort: 'asc' | 'desc' = 'desc') {
-    if (this.historyService) {
-      return this.historyService.getActivity(workItemId, sort);
-    }
-    return { workItemId, total: 0, activities: [] };
+    return this.historyService.getActivity(workItemId, sort);
   }
 
   // ── Attachments & Entity Links ──────────────────────────────────────────────
@@ -200,9 +187,3 @@ export class WorkItemFacade {
     );
   }
 }
-
-export {
-  DEFAULT_WORK_ITEM_STATES,
-  type WorkItemState,
-} from './state/types/state.types';
-export { WORK_ITEM_REDIS_KEYS } from './common/constants/redis-keys.constant';

@@ -7,29 +7,29 @@
 export interface RangeMetadata {
   ts?: string | Date;
   user_id?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface TrackChangeItem {
   id: string;
   metadata?: RangeMetadata;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface CommentItem {
   id: string;
   op?: {
     t?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
   metadata?: RangeMetadata;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface DocRanges {
   changes?: TrackChangeItem[];
   comments?: CommentItem[];
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export class DocRangeVo {

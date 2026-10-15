@@ -6,7 +6,7 @@ import {
   cleanAbstractText,
   normalizeAcademicTitleCase,
   isInstitutionName,
-} from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 export interface LayoutExtractedFields {
   title?: string;
@@ -35,22 +35,24 @@ interface PositionedTextLine {
 export class LayoutHeuristicExtractor {
   private static readonly logger = new Logger(LayoutHeuristicExtractor.name);
 
-  public static async extract(buffer: Buffer): Promise<LayoutExtractedFields> {
+  public static async extract(
+    buffer: Buffer,
+    pdfDocument?: Awaited<ReturnType<typeof getDocumentProxy>>,
+  ): Promise<LayoutExtractedFields> {
     if (!buffer || buffer.length === 0) return {};
 
     try {
-      const cloned = new Uint8Array(buffer.byteLength);
-      cloned.set(buffer);
-
-      const doc = await getDocumentProxy(cloned);
+      const doc =
+        pdfDocument ??
+        (await (async () => {
+          const cloned = new Uint8Array(buffer.byteLength);
+          cloned.set(buffer);
+          return getDocumentProxy(cloned);
+        })());
       if (!doc || doc.numPages === 0) return {};
 
       const page = await doc.getPage(1);
       const textContent = await page.getTextContent();
-      const viewport =
-        typeof page.getViewport === 'function'
-          ? page.getViewport({ scale: 1.0 })
-          : { width: 612, height: 792 };
 
       const rawItems = textContent.items as Array<{
         str?: string;
@@ -60,47 +62,91 @@ export class LayoutHeuristicExtractor {
 
       if (!rawItems || rawItems.length === 0) return {};
 
-      const lineMap = new Map<
-        number,
-        { text: string; fontSizes: number[]; y: number }
-      >();
       const Y_TOLERANCE = 4;
+      const COLUMN_SPLIT_X = 295;
+
+      // Detect if the page has a 2-column body layout (items on both left x < 250 and right x >= 305)
+      let leftBodyCount = 0;
+      let rightBodyCount = 0;
+      for (const item of rawItems) {
+        if (!item.str || !item.str.trim()) continue;
+        const transform = item.transform || [12, 0, 0, 12, 0, 0];
+        const fontSize = Math.abs(transform[0]) || Math.abs(transform[3]) || 12;
+        const x = Math.round(transform[4] || 0);
+        if (fontSize <= 11.5) {
+          if (x > 20 && x < 250) leftBodyCount++;
+          else if (x >= 305) rightBodyCount++;
+        }
+      }
+      const isTwoColumn = leftBodyCount >= 2 && rightBodyCount >= 2;
+
+      interface LineBucket {
+        fragments: Array<{ text: string; x: number }>;
+        fontSizes: number[];
+        y: number;
+        column: 0 | 1; // 0 = header or left column, 1 = right column
+      }
+
+      const lineBuckets: LineBucket[] = [];
 
       for (const item of rawItems) {
         if (!item.str || !item.str.trim()) continue;
         const text = item.str;
         const transform = item.transform || [12, 0, 0, 12, 0, 0];
         const fontSize = Math.abs(transform[0]) || Math.abs(transform[3]) || 12;
+        const x = Math.round(transform[4] || 0);
         const y = Math.round(transform[5] || 0);
+        const column: 0 | 1 =
+          isTwoColumn && fontSize <= 11.5 && x >= COLUMN_SPLIT_X ? 1 : 0;
 
-        let matchedY: number | null = null;
-        for (const existingY of lineMap.keys()) {
-          if (Math.abs(existingY - y) <= Y_TOLERANCE) {
-            matchedY = existingY;
+        let matchedBucket: LineBucket | null = null;
+        for (const bucket of lineBuckets) {
+          if (
+            bucket.column === column &&
+            Math.abs(bucket.y - y) <= Y_TOLERANCE
+          ) {
+            matchedBucket = bucket;
             break;
           }
         }
 
-        if (matchedY !== null) {
-          const line = lineMap.get(matchedY)!;
-          line.text += ' ' + text;
-          line.fontSizes.push(fontSize);
+        if (matchedBucket) {
+          matchedBucket.fragments.push({ text, x });
+          matchedBucket.fontSizes.push(fontSize);
         } else {
-          lineMap.set(y, {
-            text,
+          lineBuckets.push({
+            fragments: [{ text, x }],
             fontSizes: [fontSize],
             y,
+            column,
           });
         }
       }
 
-      const lines: PositionedTextLine[] = Array.from(lineMap.values())
-        .map((l) => ({
-          text: l.text.replace(/\s+/g, ' ').trim(),
-          fontSize: l.fontSizes.reduce((a, b) => a + b, 0) / l.fontSizes.length,
-          y: l.y,
-        }))
+      const toPositionedLine = (
+        b: LineBucket,
+      ): PositionedTextLine & { column: 0 | 1 } => {
+        const sortedFragments = [...b.fragments].sort((a, c) => a.x - c.x);
+        return {
+          text: sortedFragments
+            .map((f) => f.text)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim(),
+          fontSize: b.fontSizes.reduce((a, c) => a + c, 0) / b.fontSizes.length,
+          y: b.y,
+          column: b.column,
+        };
+      };
+
+      const allLines = lineBuckets.map(toPositionedLine);
+      const col0Lines = allLines
+        .filter((l) => l.column === 0)
         .sort((a, b) => b.y - a.y);
+      const col1Lines = allLines
+        .filter((l) => l.column === 1)
+        .sort((a, b) => b.y - a.y);
+      const lines: PositionedTextLine[] = [...col0Lines, ...col1Lines];
 
       if (lines.length === 0) return {};
 
@@ -109,7 +155,9 @@ export class LayoutHeuristicExtractor {
           /^(arxiv\s*:\s*[a-z0-9\-./]+|proceedings of|ieee|volume|vol\.|accepted|submitted|published|journal of|springer|elsevier|nature|biorxiv)/i.test(
             l.text,
           ) ||
-          /^(\d{1,2}\s+[a-z]{3,9}\s+\d{4}|\d{4}\s*[-/]\s*\d{1,2})/i.test(l.text) ||
+          /^(\d{1,2}\s+[a-z]{3,9}\s+\d{4}|\d{4}\s*[-/]\s*\d{1,2})/i.test(
+            l.text,
+          ) ||
           l.text.length < 3;
         return !isNoiseHeader;
       });

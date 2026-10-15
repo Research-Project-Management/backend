@@ -7,7 +7,7 @@ import {
   ProviderName,
   ProviderResult,
   QueryType,
-} from '../types/metadata.types';
+} from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeArxivId,
   normalizeDoi,
@@ -16,9 +16,10 @@ import {
   cleanCommentText,
   decodeHtmlEntities,
   normalizeTags,
-} from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/metadata-executor.service';
-import { getAcademicUserAgent } from '../../shared-kernel/core/constants/academic-client.constants';
+  parseCreatorString,
+} from '@/modules/library/ingestion/domain/metadata.domain';
+import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
+import { getAcademicUserAgent } from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
 
 @Injectable()
 export class ArxivProvider implements MetadataProvider {
@@ -197,6 +198,8 @@ export class ArxivProvider implements MetadataProvider {
     }
 
     const canonicalArxivId = cleanId.replace(/v\d+$/i, '');
+    const versionMatch = cleanId.match(/v(\d+)$/i);
+    const versionNumber = versionMatch ? `v${versionMatch[1]}` : undefined;
 
     const extraLines = [
       `arXiv: ${canonicalArxivId}${primaryCategory ? ` [${primaryCategory}]` : ''}`,
@@ -209,11 +212,9 @@ export class ArxivProvider implements MetadataProvider {
 
     const rawVersion = createHash('md5').update(xml).digest('hex');
 
-    const creators = authors.map((authorName, authorIndex) => ({
-      orderIndex: authorIndex,
-      creatorType: 'author',
-      fullName: authorName,
-    }));
+    const creators = authors.map((authorName, authorIndex) =>
+      parseCreatorString(authorName, authorIndex, 'author'),
+    );
 
     return {
       provider: this.id,
@@ -228,6 +229,7 @@ export class ArxivProvider implements MetadataProvider {
         date: publicationDate,
         publisher: 'arXiv',
         genre: 'Preprint',
+        versionNumber,
         abstract,
         archive: 'arXiv',
         repository: 'arXiv',
@@ -245,11 +247,14 @@ export class ArxivProvider implements MetadataProvider {
         itemType: 'preprint',
         url: canonicalUrl,
         openAccessPdfUrl: pdfUrl,
+        ...(journal ? { publicationTitle: journal, journal } : {}),
         extraFields: {
           repository: 'arXiv',
           archiveId: cleanId,
+          ...(versionNumber ? { versionNumber } : {}),
           ...(primaryCategory ? { primaryCategory } : {}),
           ...(rights ? { rights } : {}),
+          ...(journal ? { journalRef: journal } : {}),
         },
         provenance: {
           originProvider: this.id,

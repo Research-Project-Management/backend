@@ -67,6 +67,14 @@ export class MoveNodeDto {
   destParentId?: string | null;
 
   @ApiPropertyOptional({
+    description:
+      'Target destination parent folder UUID (alias for destParentId)',
+  })
+  @IsUUID()
+  @IsOptional()
+  parentId?: string | null;
+
+  @ApiPropertyOptional({
     description: 'Target destination virtual path (e.g. /archive/intro.tex)',
   })
   @IsString()

@@ -21,7 +21,7 @@
  *   ⑩ dataset         — ImageNet (ILSVRC) dataset paper
  */
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { inferItemTypeFromPdfSignals } from '@/modules/library/shared-kernel/utils/bibliographic.utils';
+import { inferItemTypeFromPdfSignals } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 

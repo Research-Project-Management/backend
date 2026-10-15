@@ -11,7 +11,7 @@ import {
   NATURE_CSL,
   CHICAGO_CSL,
   MLA_CSL,
-} from '../utils/official-styles.data';
+} from '@/modules/library/citation/data/official-styles.data';
 
 export interface CslStyleMetadata {
   id: string;
@@ -402,9 +402,10 @@ export class CslRepositoryService implements OnModuleInit {
           return xml;
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.debug(
-        `Zotero style fetch for "${normalized}" failed: ${err?.message || err}. Trying GitHub raw...`,
+        `Zotero style fetch for "${normalized}" failed: ${errMsg}. Trying GitHub raw...`,
       );
     }
 
@@ -426,9 +427,10 @@ export class CslRepositoryService implements OnModuleInit {
           return xml;
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `GitHub CSL fetch for "${normalized}" failed: ${err?.message || err}`,
+        `GitHub CSL fetch for "${normalized}" failed: ${errMsg}`,
       );
     }
 
@@ -533,8 +535,9 @@ export class CslRepositoryService implements OnModuleInit {
         if (this.remoteStylesIndex && this.remoteStylesIndex.length > 0) {
           return this.remoteStylesIndex;
         }
-      } catch (e: any) {
-        this.logger.debug(`On-demand CSL refresh error: ${e?.message}`);
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        this.logger.debug(`On-demand CSL refresh error: ${errMsg}`);
       }
     }
 
@@ -605,9 +608,10 @@ export class CslRepositoryService implements OnModuleInit {
       }
 
       return parsed.length;
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `Could not refresh remote CSL catalog: ${err?.message || err}. Using offline fallback.`,
+        `Could not refresh remote CSL catalog: ${errMsg}. Using offline fallback.`,
       );
       return POPULAR_ACADEMIC_STYLES.length;
     } finally {

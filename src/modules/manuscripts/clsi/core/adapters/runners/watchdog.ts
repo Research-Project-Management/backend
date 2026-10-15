@@ -1,30 +1,22 @@
-/**
- * modules/manuscripts/clsi/core/adapters/runners/watchdog.ts
- * Manages timeouts and guarantees termination with graceful SIGTERM followed by SIGKILL
- */
-
 import { ChildProcess, spawn } from 'child_process';
 
 export function killProcessGroup(pid: number, force = false): void {
   if (process.platform === 'win32') {
     try {
-      // Windows console applications (latexmk, pdflatex) require /F to terminate the tree
       const args = ['/F', '/T', '/PID', pid.toString()];
       spawn('taskkill', args, { stdio: 'ignore' });
     } catch {
-      // Process might already be dead
+      // ignore
     }
   } else {
     try {
-      // Target the process group using negative PID
       process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM');
     } catch (e: any) {
-      if (e.code === 'ESRCH') return;
-      // Fallback to single process if process group kill fails
+      if (e?.code === 'ESRCH') return;
       try {
         process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
       } catch {
-        // Process might already be dead
+        // ignore
       }
     }
   }
@@ -42,7 +34,7 @@ export class Watchdog {
     private readonly gracePeriodMs: number = 2000,
   ) {}
 
-  public arm(signal?: AbortSignal): void {
+  arm(signal?: AbortSignal): void {
     if (signal) {
       if (signal.aborted) {
         this.terminate('ABORTED_IMMEDIATELY');
@@ -58,7 +50,7 @@ export class Watchdog {
     }, this.timeoutMs);
   }
 
-  public disarm(): void {
+  disarm(): void {
     if (this.timeoutTimer) {
       clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;
@@ -69,15 +61,15 @@ export class Watchdog {
     }
   }
 
-  public isAborted(): boolean {
+  isAborted(): boolean {
     return this.aborted;
   }
 
-  public getAbortReason(): string | undefined {
+  getAbortReason(): string | undefined {
     return this.abortReason;
   }
 
-  public terminate(reason: string): void {
+  terminate(reason: string): void {
     if (this.aborted) return;
     this.aborted = true;
     this.abortReason = reason;

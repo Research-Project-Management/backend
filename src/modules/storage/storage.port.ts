@@ -1,4 +1,5 @@
 import { STORAGE_PORT } from './storage.tokens';
+import { FileScope } from './domain/value-objects/file-scope.vo';
 
 export interface ReadOwnedFileInput {
   fileId: string;
@@ -88,7 +89,7 @@ export interface IStoragePort {
     contentHash?: string;
     projectId?: string | null;
     parentId?: string | null;
-    scope?: any;
+    scope?: FileScope | string;
   }): Promise<{
     uploadUrl: string;
     storageKey: string;
@@ -109,7 +110,7 @@ export interface IStoragePort {
     mimeType?: string;
     projectId?: string | null;
     parentId?: string | null;
-    scope?: any;
+    scope?: FileScope | string;
     contentHash?: string;
   }): Promise<{
     fileId: string;
@@ -126,7 +127,7 @@ export interface IStoragePort {
     totalSize: number;
     projectId?: string | null;
     parentId?: string | null;
-    scope?: any;
+    scope?: FileScope | string;
     expectedHash?: string;
   }): Promise<{
     sessionId: string;

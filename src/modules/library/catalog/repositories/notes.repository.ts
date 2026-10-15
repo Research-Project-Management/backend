@@ -1,10 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { Prisma } from '@prisma/client';
+import { Prisma, Annotation } from '@prisma/client';
 import { isUUID } from 'class-validator';
-import { VersionMismatchException } from '../../shared-kernel/core/errors/version-mismatch.exception';
-import { normalizeTags } from '../../shared-kernel/utils/tag.utils';
-import { CreateNoteData, UpdateNoteData } from '../types/notes.types';
+import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+import {
+  CreateNoteData,
+  UpdateNoteData,
+} from '@/modules/library/catalog/types/notes.types';
 
 export type { CreateNoteData, UpdateNoteData };
 
@@ -109,7 +112,13 @@ export class NotesRepository {
   ) {
     const client = this.getClient(tx);
     const scopeWhere =
-      projectId && projectId !== 'user' ? { projectId } : { userId };
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal' &&
+      isUuid(projectId)
+        ? { projectId }
+        : { userId, projectId: null };
     const existing = await client.note.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
@@ -118,12 +127,67 @@ export class NotesRepository {
       throw new NotFoundException(`Note ${id} not found`);
     }
 
-    if (expectedVersion !== undefined && existing.version !== expectedVersion) {
+    const effectiveExpectedVersion = expectedVersion ?? data?.expectedVersion;
+
+    if (
+      effectiveExpectedVersion !== undefined &&
+      existing.version !== effectiveExpectedVersion
+    ) {
       throw new VersionMismatchException({
         aggregateType: 'Note',
         entityId: id,
         currentVersion: existing.version,
-        providedVersion: expectedVersion,
+        providedVersion: effectiveExpectedVersion,
+      });
+    }
+
+    if (
+      effectiveExpectedVersion !== undefined &&
+      typeof client.note.updateMany === 'function'
+    ) {
+      const affected = await client.note.updateMany({
+        where: {
+          id,
+          ...scopeWhere,
+          deletedAt: null,
+          version: effectiveExpectedVersion,
+        },
+        data: {
+          version: { increment: 1 },
+        },
+      });
+
+      if (affected.count === 0) {
+        const fresh =
+          typeof client.note.findUnique === 'function'
+            ? await client.note.findUnique({
+                where: { id },
+                select: { version: true },
+              })
+            : null;
+        throw new VersionMismatchException({
+          aggregateType: 'Note',
+          entityId: id,
+          currentVersion: fresh?.version ?? existing.version,
+          providedVersion: effectiveExpectedVersion,
+        });
+      }
+
+      return client.note.update({
+        where: { id },
+        data: {
+          title: data.title ?? existing.title,
+          contentJson:
+            data.contentJson !== undefined
+              ? data.contentJson !== null
+                ? (data.contentJson as Prisma.InputJsonValue)
+                : Prisma.DbNull
+              : undefined,
+          contentMd:
+            data.contentMd !== undefined ? data.contentMd : existing.contentMd,
+          tags:
+            data.tags !== undefined ? normalizeTags(data.tags) : existing.tags,
+        },
       });
     }
 
@@ -155,7 +219,13 @@ export class NotesRepository {
   ): Promise<boolean> {
     const client = this.getClient(tx);
     const scopeWhere =
-      projectId && projectId !== 'user' ? { projectId } : { userId };
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal' &&
+      isUuid(projectId)
+        ? { projectId }
+        : { userId, projectId: null };
     if (expectedVersion !== undefined) {
       const existing = await client.note.findFirst({
         where: { id, ...scopeWhere, deletedAt: null },
@@ -228,7 +298,7 @@ export class NotesRepository {
     });
   }
 
-  async findItemAnnotations(itemId: string): Promise<any[]> {
+  async findItemAnnotations(itemId: string): Promise<Annotation[]> {
     const attachments = await this.prisma.attachment.findMany({
       where: { itemId },
       select: { id: true },

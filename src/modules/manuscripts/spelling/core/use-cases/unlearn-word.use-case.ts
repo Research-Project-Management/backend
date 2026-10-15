@@ -3,8 +3,8 @@
  * Inbound Use Case: Removes a word from the Project or User custom dictionary.
  */
 
-import { ICustomDictionaryRepositoryPort } from '../ports/custom-dictionary-repository.port';
-import { DictionaryScopeVo } from '../domain/value-objects/dictionary-scope.vo';
+import { ICustomDictionaryRepositoryPort } from '@/modules/manuscripts/spelling/core/ports/custom-dictionary-repository.port';
+import { DictionaryScopeVo } from '@/modules/manuscripts/spelling/core/domain/value-objects/dictionary-scope.vo';
 
 export interface UnlearnWordCommand {
   word: string;

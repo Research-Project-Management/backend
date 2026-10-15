@@ -6,14 +6,12 @@ import {
   IsArray,
   IsUUID,
   IsObject,
-  ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 import {
   SubmissionKind,
   IdentifierType,
   RecordFormat,
-} from '../types/submission.types';
+} from '@/modules/library/ingestion/types/submission.types';
 
 export class IdentifierPayloadDto {
   @IsIn(['IDENTIFIER'])
@@ -171,6 +169,10 @@ export class IngestionSubmissionDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
+
+  @IsOptional()
+  @IsUUID()
+  collectionId?: string;
 
   @IsOptional()
   @IsArray()

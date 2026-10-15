@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { ProjectTemplate, Prisma, Project, WorkItemPriority } from '@prisma/client';
+import {
+  ProjectTemplate,
+  Prisma,
+  Project,
+  WorkItemPriority,
+} from '@prisma/client';
 import {
   CreateProjectTemplateDto,
   InitialStateDto,

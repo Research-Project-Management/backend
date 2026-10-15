@@ -2,12 +2,18 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   MetadataCandidate,
   ReconciliationDecision,
-} from '../types/metadata-candidate.types';
-import { ReconciliationPolicy } from '../policies/reconciliation.policy';
-import { IngestionVerifierService } from '../services/ingestion-verifier.service';
+} from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
+import { IngestionVerifierService } from '@/modules/library/ingestion/services/ingestion-verifier.service';
+import { IWorkflowStage } from '@/modules/library/ingestion/types/workflow-stage.types';
+import { titleSimilarity } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 @Injectable()
-export class ReconcileStage {
+export class ReconcileStage implements IWorkflowStage<
+  MetadataCandidate[],
+  ReconciliationDecision
+> {
+  readonly stageName = 'RECONCILE' as const;
   private readonly logger = new Logger(ReconcileStage.name);
 
   constructor(
@@ -19,7 +25,9 @@ export class ReconcileStage {
    * Executes deterministic reconciliation over candidates and performs
    * verification scoring against the PDF fingerprint or local heuristics.
    */
-  async execute(candidates: MetadataCandidate[]): Promise<ReconciliationDecision> {
+  async execute(
+    candidates: MetadataCandidate[],
+  ): Promise<ReconciliationDecision> {
     // Ensure all candidates have fields populated from normalizedMetadata if empty
     for (const cand of candidates) {
       if (!cand.fields || Object.keys(cand.fields).length === 0) {
@@ -39,23 +47,88 @@ export class ReconcileStage {
       }
     }
 
-    const decision = this.reconciler.reconcile(candidates);
-    if (!this.verifier) {
-      return decision;
-    }
-
-    const proposed = decision.proposedItem;
-    const fileCandidate = candidates.find(
+    let activeCandidates = [...candidates];
+    const fileCandidate = activeCandidates.find(
       (c) =>
         c.sourceKind === 'FILE' ||
         c.sourceName === 'TrustedPaper' ||
         c.sourceName === 'StagedPdf',
     );
-    const urlCandidate = candidates.find((c) => c.sourceKind === 'URL');
-    const externalCandidates = candidates.filter(
-      (c) =>
-        c.sourceKind === 'PROVIDER' ||
-        c.sourceName === 'EnrichedProvider',
+
+    // Page-1 Citation Disambiguation Pre-filtering:
+    // If we have an authentic local PDF extraction with a credible title,
+    // verify that external enriched candidates do not belong to a cited paper.
+    let citationTrapRejectedDoi: string | undefined;
+    if (fileCandidate && fileCandidate.normalizedMetadata?.title) {
+      const fileTitle = fileCandidate.normalizedMetadata.title;
+      const isCrediblePdfTitle =
+        fileTitle.trim().length >= 10 &&
+        !/^(untitled|document|uploaded document|manuscript)$/i.test(
+          fileTitle.trim(),
+        );
+
+      if (isCrediblePdfTitle) {
+        const remaining: MetadataCandidate[] = [];
+        for (const cand of activeCandidates) {
+          if (
+            (cand.sourceKind === 'PROVIDER' ||
+              cand.sourceName === 'EnrichedProvider') &&
+            cand.normalizedMetadata?.title
+          ) {
+            const sim = titleSimilarity(
+              cand.normalizedMetadata.title,
+              fileTitle,
+            );
+            if (sim < 0.4) {
+              citationTrapRejectedDoi =
+                cand.normalizedMetadata.doi ||
+                fileCandidate.normalizedMetadata?.doi;
+              this.logger.warn(
+                `[ReconcileStage] Page-1 Citation Disambiguation Mismatch: Discarding external candidate ${cand.candidateId} (title="${cand.normalizedMetadata.title}") which conflicts with local PDF title "${fileTitle}" (similarity=${(sim * 100).toFixed(0)}%).`,
+              );
+              continue; // Drop the cited paper candidate!
+            }
+          }
+          remaining.push(cand);
+        }
+        activeCandidates = remaining;
+
+        if (citationTrapRejectedDoi) {
+          if (fileCandidate.normalizedMetadata) {
+            delete fileCandidate.normalizedMetadata.doi;
+            fileCandidate.normalizedMetadata.extraFields = {
+              ...(fileCandidate.normalizedMetadata.extraFields || {}),
+              disambiguationWarning:
+                'Page-1 cited paper DOI mismatch discarded. Preserved original PDF layout metadata.',
+              rejectedCitedDoi: citationTrapRejectedDoi,
+            };
+          }
+          if (fileCandidate.fields?.doi) {
+            delete fileCandidate.fields.doi;
+          }
+        }
+      }
+    }
+
+    const decision = this.reconciler.reconcile(activeCandidates);
+    if (!this.verifier) {
+      return decision;
+    }
+
+    const proposed = decision.proposedItem;
+    if (citationTrapRejectedDoi) {
+      delete proposed.doi;
+      proposed.extraFields = {
+        ...(proposed.extraFields || {}),
+        disambiguationWarning:
+          'Page-1 cited paper DOI mismatch discarded. Preserved original PDF layout metadata.',
+        rejectedCitedDoi: citationTrapRejectedDoi,
+      };
+    }
+
+    const urlCandidate = activeCandidates.find((c) => c.sourceKind === 'URL');
+    const externalCandidates = activeCandidates.filter(
+      (c) => c.sourceKind === 'PROVIDER' || c.sourceName === 'EnrichedProvider',
     );
 
     // 1. Check if input was blocked by WAF/Bot challenge
@@ -100,7 +173,7 @@ export class ReconcileStage {
         verificationScore: verifyResult.verificationScore,
         isVerified: verifyResult.isVerified,
         fieldProvenance: {
-          ...((proposed.extraFields?.fieldProvenance as Record<string, any>) || {}),
+          ...(proposed.extraFields?.fieldProvenance || {}),
           ...verifyResult.fieldProvenance,
         },
         matchedSignals: verifyResult.matchedSignals,
@@ -139,7 +212,7 @@ export class ReconcileStage {
         verificationScore: verifyResult.verificationScore,
         isVerified: verifyResult.isVerified,
         fieldProvenance: {
-          ...((proposed.extraFields?.fieldProvenance as Record<string, any>) || {}),
+          ...(proposed.extraFields?.fieldProvenance || {}),
           ...verifyResult.fieldProvenance,
         },
         matchedSignals: verifyResult.matchedSignals,
@@ -164,7 +237,7 @@ export class ReconcileStage {
       verificationScore: verifyResult.verificationScore,
       isVerified: verifyResult.isVerified,
       fieldProvenance: {
-        ...((proposed.extraFields?.fieldProvenance as Record<string, any>) || {}),
+        ...(proposed.extraFields?.fieldProvenance || {}),
         ...verifyResult.fieldProvenance,
       },
       matchedSignals: verifyResult.matchedSignals,

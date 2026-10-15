@@ -38,7 +38,9 @@ export function diffLines(a: string[], b: string[]): DiffOp[] {
     endA--;
     endB--;
   }
-  const head: DiffOp[] = a.slice(0, start).map((line) => ({ type: 'equal', line }));
+  const head: DiffOp[] = a
+    .slice(0, start)
+    .map((line) => ({ type: 'equal', line }));
   const tail: DiffOp[] = a.slice(endA).map((line) => ({ type: 'equal', line }));
   const midA = a.slice(start, endA);
   const midB = b.slice(start, endB);

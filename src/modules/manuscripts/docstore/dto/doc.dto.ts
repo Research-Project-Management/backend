@@ -13,7 +13,7 @@ import {
   IsBoolean,
   IsDateString,
 } from 'class-validator';
-import { DocRanges } from '../core/domain/doc-range.vo';
+import { DocRanges } from '@/modules/manuscripts/docstore/core/domain/doc-range.vo';
 
 export class CreateDocDto {
   @ApiProperty({
@@ -75,6 +75,13 @@ export class UpdateDocDto {
   @IsOptional()
   @IsNumber()
   expectedRev?: number;
+
+  @ApiPropertyOptional({
+    description: 'Expected revision number alias (frontend SDK rev)',
+  })
+  @IsOptional()
+  @IsNumber()
+  rev?: number;
 }
 
 export class PatchDocDto {
@@ -88,6 +95,11 @@ export class PatchDocDto {
   @IsString()
   name?: string;
 
+  @ApiPropertyOptional({ description: 'Renamed path of the document (alias)' })
+  @IsOptional()
+  @IsString()
+  path?: string;
+
   @ApiPropertyOptional({ description: 'Timestamp of deletion' })
   @IsOptional()
   @IsDateString()
@@ -100,6 +112,9 @@ export class DocResponseDto {
 
   @ApiPropertyOptional({ description: 'Alias for _id' })
   id?: string;
+
+  @ApiPropertyOptional({ description: 'Owning project identifier' })
+  projectId?: string;
 
   @ApiProperty({ description: 'Relative file path' })
   path!: string;

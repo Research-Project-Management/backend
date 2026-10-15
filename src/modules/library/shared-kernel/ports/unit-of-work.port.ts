@@ -7,7 +7,7 @@ export interface AppendChangeEntry {
   entityId: string;
   action: 'create' | 'update' | 'delete' | string;
   version: number;
-  data?: any;
+  data?: unknown;
 }
 
 export interface RecordTombstoneEntry {
@@ -29,7 +29,7 @@ export interface TransactionHelpers {
     scope: { userId: string; projectId?: string | null } | string,
     aggregateId: string,
     eventType: string,
-    payload: any,
+    payload: unknown,
   ): Promise<OutboxEvent>;
 }
 

@@ -2,7 +2,7 @@ import { Injectable, NestMiddleware, ConflictException } from '@nestjs/common';
 
 const idempotencyStore = new Map<
   string,
-  { status: 'processing' | 'completed'; response?: any; timestamp: number }
+  { status: 'processing' | 'completed'; response?: unknown; timestamp: number }
 >();
 
 // Clean up keys older than 10 minutes periodically
@@ -16,6 +16,18 @@ const cleanupTimer = setInterval(() => {
 }, 300000);
 cleanupTimer.unref?.();
 
+interface IdempotentRequest {
+  headers?: Record<string, string | string[] | undefined>;
+  method?: string;
+  path?: string;
+  user?: { id?: string };
+}
+
+interface IdempotentResponse {
+  status(code: number): IdempotentResponse;
+  json(body: unknown): unknown;
+}
+
 /**
  * Idempotency Middleware for Distributed Systems.
  * Ensures mutating operations (POST, PUT, PATCH, DELETE) with X-Idempotency-Key
@@ -23,7 +35,11 @@ cleanupTimer.unref?.();
  */
 @Injectable()
 export class IdempotencyMiddleware implements NestMiddleware {
-  use(req: any, res: any, next: (error?: any) => void) {
+  use(
+    req: IdempotentRequest,
+    res: IdempotentResponse,
+    next: (error?: unknown) => void,
+  ) {
     const idempotencyKey = req.headers?.['x-idempotency-key'] as
       string | undefined;
 
@@ -51,7 +67,7 @@ export class IdempotencyMiddleware implements NestMiddleware {
 
     // Intercept response json to cache completed output
     const originalJson = res.json.bind(res);
-    res.json = (body: any) => {
+    res.json = (body: unknown) => {
       idempotencyStore.set(key, {
         status: 'completed',
         response: body,

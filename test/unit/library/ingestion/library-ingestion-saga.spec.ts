@@ -1,5 +1,5 @@
-import { IngestionRunAggregate } from '@/modules/library/ingestion/types/ingestion-run.aggregate';
-import { IngestionStatusVo } from '@/modules/library/ingestion/types/ingestion-status.vo';
+import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import { IngestionStatusVo } from '@/modules/library/ingestion/domain/ingestion-status.vo';
 import {
   IngestionSagaOrchestrator,
   IngestionSagaSession,

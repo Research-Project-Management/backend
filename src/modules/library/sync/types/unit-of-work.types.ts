@@ -4,4 +4,4 @@ export {
   type TransactionHelpers,
   type AppendChangeEntry,
   type RecordTombstoneEntry,
-} from '../../shared-kernel/ports/unit-of-work.port';
+} from '@/modules/library/shared-kernel/ports/unit-of-work.port';

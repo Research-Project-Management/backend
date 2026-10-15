@@ -5,14 +5,14 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IHistoryRepositoryPort } from '../ports/history-repository.port';
+import { IHistoryRepositoryPort } from '@/modules/manuscripts/project-history/core/ports/history-repository.port';
 import {
   IProjectRestorerPort,
   RestoreResult,
-} from '../ports/project-restorer.port';
+} from '@/modules/manuscripts/project-history/core/ports/project-restorer.port';
 import { CreateSnapshotUseCase } from './create-snapshot.use-case';
-import { Snapshot } from '../domain/entities/snapshot.entity';
-import { VersionNotFoundException } from '../domain/exceptions/version-not-found.exception';
+import { Snapshot } from '@/modules/manuscripts/project-history/core/domain/entities/snapshot.entity';
+import { VersionNotFoundException } from '@/modules/manuscripts/project-history/core/domain/exceptions/version-not-found.exception';
 
 export interface RestoreVersionInput {
   projectId: string;

@@ -76,7 +76,8 @@ export class CoreController {
 
   @Get('trash')
   @ApiOperation({
-    summary: 'List trashed projects (always empty as projects are deleted permanently)',
+    summary:
+      'List trashed projects (always empty as projects are deleted permanently)',
   })
   async getTrashedProjects(@CurrentUser('id') _userId: string) {
     return { projects: [] };

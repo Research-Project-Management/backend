@@ -29,7 +29,7 @@ export class ArchiveManifest {
     this.hasCompiledPdf = props.hasCompiledPdf ?? false;
   }
 
-  public toJSON(): Record<string, any> {
+  public toJSON(): Record<string, unknown> {
     return {
       projectId: this.projectId,
       projectName: this.projectName,

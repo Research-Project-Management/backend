@@ -5,10 +5,10 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Readable } from 'node:stream';
-import { ManuscriptFile } from '../domain/entities/manuscript-file.entity';
-import { IBinaryStoragePort } from '../ports/binary-storage.port';
-import { IManuscriptFileRepository } from '../ports/manuscript-file-repository.port';
-import { IContentHasherPort } from '../ports/content-hasher.port';
+import { ManuscriptFile } from '@/modules/manuscripts/filestore/core/domain/entities/manuscript-file.entity';
+import { IBinaryStoragePort } from '@/modules/manuscripts/filestore/core/ports/binary-storage.port';
+import { IManuscriptFileRepository } from '@/modules/manuscripts/filestore/core/ports/manuscript-file-repository.port';
+import { IContentHasherPort } from '@/modules/manuscripts/filestore/core/ports/content-hasher.port';
 
 export interface UploadManuscriptFileInput {
   projectId: string;

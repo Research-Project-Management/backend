@@ -47,7 +47,9 @@ export class OutboxMetrics {
     );
   }
 
-  redactSensitiveData(payload: Record<string, any>): Record<string, any> {
+  redactSensitiveData(
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
     if (!payload || typeof payload !== 'object') return payload;
 
     const sanitized = { ...payload };
@@ -67,7 +69,9 @@ export class OutboxMetrics {
         typeof sanitized[key] === 'object' &&
         sanitized[key] !== null
       ) {
-        sanitized[key] = this.redactSensitiveData(sanitized[key]);
+        sanitized[key] = this.redactSensitiveData(
+          sanitized[key] as Record<string, unknown>,
+        );
       }
     }
 

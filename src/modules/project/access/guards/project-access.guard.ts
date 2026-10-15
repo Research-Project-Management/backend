@@ -276,18 +276,23 @@ export class ProjectAccessGuard implements CanActivate {
           ? request.params.id
           : undefined) ||
         (typeof request.body?.workItemId === 'string'
-          ? (request.body.workItemId as string)
+          ? request.body.workItemId
           : undefined) ||
         (typeof request.body?.id === 'string' &&
         (request.url?.includes('/work-item') ||
           request.url?.includes('/work_item'))
-          ? (request.body.id as string)
+          ? request.body.id
           : undefined);
 
       if (singleWorkItemId) {
         const where = isUUID(singleWorkItemId)
           ? { id: singleWorkItemId }
-          : { identifier: { equals: singleWorkItemId, mode: 'insensitive' as const } };
+          : {
+              identifier: {
+                equals: singleWorkItemId,
+                mode: 'insensitive' as const,
+              },
+            };
         const workItem = await this.prisma.workItem
           .findFirst({
             where,

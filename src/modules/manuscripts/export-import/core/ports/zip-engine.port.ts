@@ -4,7 +4,7 @@
  */
 
 import { Readable } from 'node:stream';
-import { ArchiveEntryVo } from '../domain/value-objects/archive-entry.vo';
+import { ArchiveEntryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/archive-entry.vo';
 
 export interface RawZipEntryInput {
   path: string;

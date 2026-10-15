@@ -3,19 +3,20 @@ import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   EXTRACTION_GATEWAY_PORT,
   IExtractionGatewayPort,
-} from '../types/extraction-gateway.types';
+} from '@/modules/library/ingestion/types/extraction-gateway.types';
 import {
   WEB_FETCH_PORT,
   IWebFetchPort,
-} from '../types/web-fetch.types';
-import { SsrfGuardService } from '../../shared-kernel/core/services/ssrf-guard.service';
-import { MetadataRoutingPolicy } from '../policies/metadata.policy';
+} from '@/modules/library/ingestion/types/web-fetch.types';
+import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
+import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
 import {
   cleanBibliographicText,
   cleanAbstractText,
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
+  normalizePmcid,
   normalizeIsbn,
   normalizeIssn,
   extractYearFromDate,
@@ -24,7 +25,7 @@ import {
   splitAuthorString,
   isBotChallengePage,
   deriveDoiFromPublisherUrl,
-} from '../../shared-kernel/utils/bibliographic.utils';
+} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 /** Canonical actor identifier for automated system-level ingestion downloads */
 export const SYSTEM_INGESTION_USER_ID = 'system';
@@ -36,22 +37,26 @@ export interface ScrapedUrlResult {
   filename?: string;
   fileId?: string;
   title?: string;
+  shortTitle?: string;
   authors?: string[];
   creators?: Array<{
     firstName?: string;
     lastName: string;
     fullName?: string;
     creatorType?: string;
+    fieldMode?: number;
   }>;
   doi?: string;
   arxivId?: string;
   pmid?: string;
+  pmcid?: string;
   isbn?: string;
   issn?: string;
   year?: number;
   publicationDate?: string;
   publicationTitle?: string;
   journal?: string;
+  journalAbbr?: string;
   publisher?: string;
   abstract?: string;
   keywords?: string[];
@@ -66,12 +71,19 @@ export interface ScrapedUrlResult {
   language?: string;
   /** Place of publication (maps to Zotero `place`) */
   publisherPlace?: string;
+  place?: string;
   /** Conference / proceedings name (citation_conference_title) */
   conferenceName?: string;
+  proceedingsTitle?: string;
   /** Containing book title for chapters (citation_inbook_title) */
   bookTitle?: string;
+  series?: string;
+  edition?: string;
+  rights?: string;
   /** Degree-granting / report-issuing institution */
   institution?: string;
+  university?: string;
+  thesisType?: string;
   /** Report / technical report number */
   reportNumber?: string;
   /**
@@ -96,6 +108,13 @@ type MetaEntry = { key: string; value: string; alias: boolean };
 type FallbackMeta = {
   title?: string;
   authors?: string[];
+  creators?: Array<{
+    firstName?: string;
+    lastName: string;
+    fullName?: string;
+    creatorType?: string;
+    fieldMode?: number;
+  }>;
   date?: string;
   publicationTitle?: string;
   publisher?: string;
@@ -245,54 +264,26 @@ export class UrlMetadataScraperService {
     startUrl: string,
   ): Promise<{ response: Response; finalUrl: string }> {
     const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-    let currentUrl = startUrl;
-
-    for (let hop = 0; ; hop++) {
-      const res = await fetch(currentUrl, {
+    return SsrfGuardService.executeSafeRedirectFetch(
+      startUrl,
+      {
         headers: FETCH_HEADERS,
         signal,
-        redirect: 'manual',
-      });
-
-      const status = res.status;
-      const location =
-        typeof status === 'number' && status >= 300 && status < 400
-          ? res.headers?.get?.('location')
-          : null;
-      if (!location) {
-        return { response: res, finalUrl: currentUrl };
-      }
-
-      try {
-        await res.body?.cancel();
-      } catch {
-        /* ignore */
-      }
-
-      if (hop >= MAX_REDIRECTS) {
-        throw new Error(`Too many redirects (>${MAX_REDIRECTS})`);
-      }
-
-      let nextUrl: string;
-      try {
-        nextUrl = new URL(location, currentUrl).toString();
-      } catch {
-        throw new UnsafeRedirectError(`Invalid redirect target "${location}"`);
-      }
-      if (!/^https?:$/i.test(new URL(nextUrl).protocol)) {
-        throw new UnsafeRedirectError(
-          `Redirect to non-HTTP scheme rejected: "${nextUrl}"`,
-        );
-      }
-      try {
-        await this.assertSafeUrl(nextUrl);
-      } catch (err: any) {
-        throw new UnsafeRedirectError(
-          `Redirect target "${nextUrl}" rejected: ${err?.message}`,
-        );
-      }
-      currentUrl = nextUrl;
-    }
+      },
+      {
+        maxRedirects: MAX_REDIRECTS,
+        validateUrl: async (nextUrl) => {
+          try {
+            await this.assertSafeUrl(nextUrl);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            throw new UnsafeRedirectError(
+              `Redirect target "${nextUrl}" rejected: ${msg}`,
+            );
+          }
+        },
+      },
+    );
   }
 
   async scrape(
@@ -348,6 +339,9 @@ export class UrlMetadataScraperService {
           filename: slugHint.filename,
           title: m.title || slugHint.title,
           authors: m.authors,
+          creators: m.authors?.map((a, idx) =>
+            this.toCreator(a, idx, 'author'),
+          ),
           doi: m.doi || urlDoi || undefined,
           pmid: m.pmid,
           year: m.year,
@@ -380,14 +374,15 @@ export class UrlMetadataScraperService {
           urlDoi,
         );
       }
+
+      return fallbackResult();
     }
 
     try {
       await this.assertSafeUrl(canonicalUrl);
-    } catch (ssrfErr: any) {
-      this.logger.warn(
-        `SSRF rejection for URL "${canonicalUrl}": ${ssrfErr?.message}`,
-      );
+    } catch (ssrfErr: unknown) {
+      const msg = ssrfErr instanceof Error ? ssrfErr.message : String(ssrfErr);
+      this.logger.warn(`SSRF rejection for URL "${canonicalUrl}": ${msg}`);
       return fallbackResult();
     }
 
@@ -397,15 +392,15 @@ export class UrlMetadataScraperService {
       const fetched = await this.fetchWithSafeRedirects(canonicalUrl);
       response = fetched.response;
       finalUrl = fetched.finalUrl;
-    } catch (fetchErr: any) {
+    } catch (fetchErr: unknown) {
       if (fetchErr instanceof UnsafeRedirectError) {
         this.logger.warn(
           `SSRF rejection on redirect for URL "${canonicalUrl}": ${fetchErr.message}`,
         );
       } else {
-        this.logger.warn(
-          `Failed to fetch URL "${canonicalUrl}": ${fetchErr?.message}`,
-        );
+        const msg =
+          fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        this.logger.warn(`Failed to fetch URL "${canonicalUrl}": ${msg}`);
       }
       return fallbackResult();
     }
@@ -437,9 +432,13 @@ export class UrlMetadataScraperService {
           options,
         );
         if (pdfProcessed) return pdfProcessed;
-      } catch (pdfProcessErr: any) {
+      } catch (pdfProcessErr: unknown) {
+        const msg =
+          pdfProcessErr instanceof Error
+            ? pdfProcessErr.message
+            : String(pdfProcessErr);
         this.logger.warn(
-          `Error downloading/processing PDF from "${canonicalUrl}": ${pdfProcessErr?.message}`,
+          `Error downloading/processing PDF from "${canonicalUrl}": ${msg}`,
         );
       }
     }
@@ -453,10 +452,9 @@ export class UrlMetadataScraperService {
         slugHint,
         urlDoi,
       );
-    } catch (htmlErr: any) {
-      this.logger.warn(
-        `Error parsing HTML from "${canonicalUrl}": ${htmlErr?.message}`,
-      );
+    } catch (htmlErr: unknown) {
+      const msg = htmlErr instanceof Error ? htmlErr.message : String(htmlErr);
+      this.logger.warn(`Error parsing HTML from "${canonicalUrl}": ${msg}`);
       return fallbackResult();
     }
   }
@@ -480,8 +478,7 @@ export class UrlMetadataScraperService {
 
     if (!isPdfMagic) return null;
 
-    const effectiveFilename =
-      options?.preferredFilename || slugHint.filename;
+    const effectiveFilename = options?.preferredFilename || slugHint.filename;
     let fileId: string | undefined;
 
     if (this.storagePort) {
@@ -501,25 +498,25 @@ export class UrlMetadataScraperService {
         this.logger.log(
           `Stored downloaded PDF for "${canonicalUrl}" with fileId: ${fileId}`,
         );
-      } catch (storageErr: any) {
-        this.logger.warn(
-          `Failed to persist downloaded PDF to storage: ${storageErr?.message}`,
-        );
+      } catch (storageErr: unknown) {
+        const msg =
+          storageErr instanceof Error ? storageErr.message : String(storageErr);
+        this.logger.warn(`Failed to persist downloaded PDF to storage: ${msg}`);
       }
     }
 
-    let pdfExtracted: any = {};
+    let pdfExtracted: Record<string, unknown> = {};
     if (this.extractionGateway?.extractDocumentFromBuffer) {
       try {
-        const doc =
-          await this.extractionGateway.extractDocumentFromBuffer(buffer, {
-            headerOnly: true,
-          });
+        const doc = await this.extractionGateway.extractDocumentFromBuffer<{
+          metadata?: Record<string, unknown>;
+        }>(buffer, {
+          headerOnly: true,
+        });
         pdfExtracted = doc?.metadata || {};
-      } catch (pdfErr: any) {
-        this.logger.warn(
-          `ExtractionGateway pdf extraction failed: ${pdfErr?.message}`,
-        );
+      } catch (pdfErr: unknown) {
+        const msg = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
+        this.logger.warn(`ExtractionGateway pdf extraction failed: ${msg}`);
       }
     }
 
@@ -542,10 +539,25 @@ export class UrlMetadataScraperService {
       binaryArxiv = normalizeArxivId(arxivMatch[1]);
     }
 
-    const resolvedDoi = pdfExtracted.doi || binaryDoi;
-    const resolvedArxiv = pdfExtracted.arxivId || binaryArxiv;
+    let urlArxiv: string | undefined;
+    const arxivUrlMatch = canonicalUrl.match(
+      /(?:arxiv\.org\/(?:abs|pdf|html)\/|arxiv:)([\d.]+v?\d*)/i,
+    );
+    if (arxivUrlMatch) {
+      urlArxiv = normalizeArxivId(arxivUrlMatch[1]);
+    }
+
+    const resolvedDoi =
+      (typeof pdfExtracted.doi === 'string' ? pdfExtracted.doi : undefined) ||
+      binaryDoi;
+    const resolvedArxiv =
+      (typeof pdfExtracted.arxivId === 'string'
+        ? pdfExtracted.arxivId
+        : undefined) ||
+      binaryArxiv ||
+      urlArxiv;
     const resolvedTitle =
-      pdfExtracted.title &&
+      typeof pdfExtracted.title === 'string' &&
       pdfExtracted.title !== 'Untitled Document' &&
       pdfExtracted.title.length > 5
         ? pdfExtracted.title
@@ -558,18 +570,45 @@ export class UrlMetadataScraperService {
       filename: effectiveFilename,
       fileId,
       title: resolvedTitle,
-      authors: pdfExtracted.authors,
-      creators: pdfExtracted.creators,
+      authors: Array.isArray(pdfExtracted.authors)
+        ? (pdfExtracted.authors as string[])
+        : undefined,
+      creators: Array.isArray(pdfExtracted.creators)
+        ? (pdfExtracted.creators as ScrapedUrlResult['creators'])
+        : undefined,
       doi: resolvedDoi,
       arxivId: resolvedArxiv,
-      year: pdfExtracted.year,
-      publicationDate: pdfExtracted.publicationDate,
+      year:
+        typeof pdfExtracted.year === 'number'
+          ? pdfExtracted.year
+          : typeof pdfExtracted.year === 'string'
+            ? parseInt(pdfExtracted.year, 10) || undefined
+            : undefined,
+      publicationDate:
+        typeof pdfExtracted.publicationDate === 'string'
+          ? pdfExtracted.publicationDate
+          : undefined,
       publicationTitle:
-        pdfExtracted.journal || pdfExtracted.conferenceName,
-      journal: pdfExtracted.journal,
-      publisher: pdfExtracted.publisher,
-      abstract: pdfExtracted.abstract,
-      keywords: pdfExtracted.keywords,
+        typeof pdfExtracted.journal === 'string'
+          ? pdfExtracted.journal
+          : typeof pdfExtracted.conferenceName === 'string'
+            ? pdfExtracted.conferenceName
+            : undefined,
+      journal:
+        typeof pdfExtracted.journal === 'string'
+          ? pdfExtracted.journal
+          : undefined,
+      publisher:
+        typeof pdfExtracted.publisher === 'string'
+          ? pdfExtracted.publisher
+          : undefined,
+      abstract:
+        typeof pdfExtracted.abstract === 'string'
+          ? pdfExtracted.abstract
+          : undefined,
+      keywords: Array.isArray(pdfExtracted.keywords)
+        ? (pdfExtracted.keywords as string[])
+        : undefined,
       confidence:
         resolvedDoi || resolvedArxiv ? 0.95 : resolvedTitle ? 0.85 : 0.7,
     };
@@ -608,17 +647,20 @@ export class UrlMetadataScraperService {
       isPdf: false,
       filename: slugHint.filename,
       title: resolvedTitle,
+      shortTitle: parsedHtml.shortTitle,
       authors: parsedHtml.authors,
       creators: parsedHtml.creators,
       doi: resolvedDoi,
       arxivId: parsedHtml.arxivId,
       pmid: parsedHtml.pmid,
+      pmcid: parsedHtml.pmcid,
       isbn: parsedHtml.isbn,
       issn: parsedHtml.issn,
       year: parsedHtml.year,
       publicationDate: parsedHtml.publicationDate,
       publicationTitle: parsedHtml.publicationTitle,
       journal: parsedHtml.journal,
+      journalAbbr: parsedHtml.journalAbbr,
       publisher: parsedHtml.publisher,
       abstract: parsedHtml.abstract,
       keywords: parsedHtml.keywords,
@@ -628,9 +670,16 @@ export class UrlMetadataScraperService {
       pages: parsedHtml.pages,
       language: parsedHtml.language,
       publisherPlace: parsedHtml.publisherPlace,
+      place: parsedHtml.place,
       conferenceName: parsedHtml.conferenceName,
+      proceedingsTitle: parsedHtml.proceedingsTitle,
       bookTitle: parsedHtml.bookTitle,
+      series: parsedHtml.series,
+      edition: parsedHtml.edition,
+      rights: parsedHtml.rights,
       institution: parsedHtml.institution,
+      university: parsedHtml.university,
+      thesisType: parsedHtml.thesisType,
       reportNumber: parsedHtml.reportNumber,
       itemType: parsedHtml.itemType,
       confidence:
@@ -683,6 +732,10 @@ export class UrlMetadataScraperService {
 
     if (rawTitle) {
       result.title = cleanBibliographicText(rawTitle) || rawTitle;
+      const shortMatch = result.title.match(/^([^:?]+?)\s*[:?]\s+\S/);
+      if (shortMatch && shortMatch[1].trim().length >= 3) {
+        result.shortTitle = shortMatch[1].trim();
+      }
     }
 
     let rawAuthors = all('citation_author');
@@ -691,8 +744,10 @@ export class UrlMetadataScraperService {
     if (rawAuthors.length === 0) {
       rawAuthors = all('dc.creator', 'dcterms.creator');
     }
+    let usedJsonLdAuthors = false;
     if (rawAuthors.length === 0 && jsonLd.authors?.length) {
       rawAuthors = jsonLd.authors;
+      usedJsonLdAuthors = true;
     }
     if (rawAuthors.length === 0 && coins.authors?.length) {
       rawAuthors = coins.authors;
@@ -704,8 +759,12 @@ export class UrlMetadataScraperService {
     if (authors.length > 0) {
       result.authors = authors;
     }
+    const authorCreators =
+      usedJsonLdAuthors && jsonLd.creators?.length
+        ? jsonLd.creators
+        : authors.map((a, idx) => this.toCreator(a, idx, 'author'));
     const creators = [
-      ...authors.map((a, idx) => this.toCreator(a, idx, 'author')),
+      ...authorCreators,
       ...editors.map((e, idx) => this.toCreator(e, idx, 'editor')),
     ];
     if (creators.length > 0) {
@@ -759,6 +818,17 @@ export class UrlMetadataScraperService {
     const rawPmid = first('citation_pmid');
     if (rawPmid) {
       result.pmid = normalizePmid(rawPmid);
+    }
+
+    for (const cand of [
+      first('citation_pmcid', 'prism.pmcid'),
+      ...all('dc.identifier', 'dcterms.identifier', 'eprints.id_number'),
+    ]) {
+      const pmc = cand ? normalizePmcid(cand) : undefined;
+      if (pmc) {
+        result.pmcid = pmc;
+        break;
+      }
     }
 
     for (const cand of [
@@ -828,6 +898,15 @@ export class UrlMetadataScraperService {
         'dc.source',
       ),
     );
+    const journalAbbr = this.cleanText(
+      first(
+        'citation_journal_abbrev',
+        'citation_journal_abbreviation',
+        'prism.alternateTitle',
+      ),
+    );
+    if (journalAbbr) result.journalAbbr = journalAbbr;
+
     const conferenceName = this.cleanText(
       first(
         'citation_conference_title',
@@ -842,7 +921,26 @@ export class UrlMetadataScraperService {
         'eprints.book_title',
       ),
     );
-    const seriesTitle = this.cleanText(first('citation_series_title'));
+    const seriesTitle = this.cleanText(
+      first('citation_series_title', 'eprints.series'),
+    );
+    if (seriesTitle) result.series = seriesTitle;
+
+    const edition = this.cleanText(
+      first('citation_edition', 'prism.edition', 'eprints.edition'),
+    );
+    if (edition) result.edition = edition;
+
+    const rights = this.cleanText(
+      first(
+        'dc.rights',
+        'dcterms.rights',
+        'dcterms.license',
+        'prism.copyright',
+      ),
+    );
+    if (rights) result.rights = rights;
+
     const fallbackVenue = this.cleanText(
       jsonLd.publicationTitle || coins.publicationTitle,
     );
@@ -875,14 +973,27 @@ export class UrlMetadataScraperService {
       first(
         'citation_publisher_place',
         'citation_publication_place',
+        'citation_place',
         'eprints.place_of_pub',
       ),
     );
-    if (place) result.publisherPlace = place;
+    if (place) {
+      result.publisherPlace = place;
+      result.place = place;
+    }
 
     const thesisInstitution = this.cleanText(
       first('citation_dissertation_institution'),
     );
+    const thesisType = this.cleanText(
+      first(
+        'citation_dissertation_name',
+        'citation_thesis_type',
+        'eprints.thesis_type',
+      ),
+    );
+    if (thesisType) result.thesisType = thesisType;
+
     const reportInstitution = this.cleanText(
       first('citation_technical_report_institution'),
     );
@@ -890,6 +1001,7 @@ export class UrlMetadataScraperService {
     const institution =
       thesisInstitution || reportInstitution || eprintsInstitution;
     if (institution) result.institution = institution;
+    if (thesisInstitution) result.university = thesisInstitution;
     const reportNumber = first(
       'citation_technical_report_number',
       'eprints.number_report',
@@ -931,8 +1043,11 @@ export class UrlMetadataScraperService {
     if (language) result.language = language;
 
     const eprintsType = (first('eprints.type') || '').toLowerCase();
-    if (thesisInstitution || eprintsType === 'thesis') {
+    if (thesisInstitution || thesisType || eprintsType === 'thesis') {
       result.itemType = 'thesis';
+      if (!result.university && result.institution) {
+        result.university = result.institution;
+      }
     } else if (
       reportInstitution ||
       reportNumber ||
@@ -941,6 +1056,7 @@ export class UrlMetadataScraperService {
       result.itemType = 'report';
     } else if (conferenceName || eprintsType === 'conference_item') {
       result.itemType = 'conferencePaper';
+      result.proceedingsTitle = journalTitle || conferenceName || venue;
     } else if (bookTitle || eprintsType === 'book_section') {
       result.itemType = 'bookSection';
     } else if (journalTitle || eprintsType === 'article') {
@@ -1040,6 +1156,7 @@ export class UrlMetadataScraperService {
     lastName: string;
     fullName?: string;
     creatorType?: string;
+    fieldMode?: number;
   } {
     const parsed = parseCreatorString(name, idx);
     return {
@@ -1047,6 +1164,7 @@ export class UrlMetadataScraperService {
       lastName: parsed.lastName,
       fullName: parsed.fullName,
       creatorType,
+      ...(parsed.fieldMode === 1 ? { fieldMode: 1 } : {}),
     };
   }
 
@@ -1140,7 +1258,7 @@ export class UrlMetadataScraperService {
 
   private extractJsonLdMetadata(html: string): FallbackMeta {
     const out: FallbackMeta = {};
-    const nodes: any[] = [];
+    const nodes: Array<Record<string, unknown>> = [];
     const scriptRe =
       /<script\b[^>]*type\s*=\s*["']?application\/ld\+json["']?[^>]*>([\s\S]*?)<\/script>/gi;
     let m: RegExpExecArray | null;
@@ -1158,12 +1276,18 @@ export class UrlMetadataScraperService {
     }
     if (nodes.length === 0) return out;
 
-    const typesOf = (n: any): string[] =>
-      (Array.isArray(n?.['@type']) ? n['@type'] : [n?.['@type']])
-        .filter((t: any) => typeof t === 'string')
+    const typesOf = (n: unknown): string[] => {
+      const nObj =
+        typeof n === 'object' && n !== null
+          ? (n as Record<string, unknown>)
+          : null;
+      const typeVal = nObj?.['@type'];
+      return (Array.isArray(typeVal) ? typeVal : [typeVal])
+        .filter((t: unknown): t is string => typeof t === 'string')
         .map((t: string) => t.replace(/^.*[/#:]/, ''));
+    };
 
-    let node: any;
+    let node: Record<string, unknown> | undefined;
     let nodeType: string | undefined;
     for (const t of JSONLD_TYPES) {
       node = nodes.find((n) => typesOf(n).includes(t));
@@ -1174,38 +1298,76 @@ export class UrlMetadataScraperService {
     }
     if (!node || !nodeType) return out;
 
-    const str = (v: any): string | undefined => {
+    const str = (v: unknown): string | undefined => {
       if (v === undefined || v === null) return undefined;
       if (typeof v === 'string' || typeof v === 'number') {
         const s = decodeHtmlEntities(String(v)).trim();
         return s || undefined;
       }
       if (Array.isArray(v)) return str(v[0]);
-      if (typeof v === 'object') return str(v.name ?? v['@value'] ?? v.value);
+      if (typeof v === 'object' && v !== null) {
+        const vObj = v as Record<string, unknown>;
+        return str(vObj.name ?? vObj['@value'] ?? vObj.value);
+      }
       return undefined;
     };
-    const arr = (v: any): any[] =>
+    const arr = (v: unknown): unknown[] =>
       v === undefined || v === null ? [] : Array.isArray(v) ? v : [v];
 
     out.itemType = JSONLD_TYPE_TO_ITEM_TYPE[nodeType];
     out.title = str(node.headline) || str(node.name);
 
     const authors: string[] = [];
+    const creators: NonNullable<FallbackMeta['creators']> = [];
     for (const a of arr(node.author ?? node.creator)) {
       if (typeof a === 'string') {
         const s = str(a);
-        if (s) authors.push(s);
+        if (s) {
+          authors.push(s);
+          creators.push(this.toCreator(s, creators.length, 'author'));
+        }
       } else if (a && typeof a === 'object') {
-        const given = str(a.givenName);
-        const family = str(a.familyName);
+        const aObj = a as Record<string, unknown>;
+        const aTypes = typesOf(aObj).map((t) => t.toLowerCase());
+        const isOrg = aTypes.some(
+          (t) =>
+            t.includes('organization') ||
+            t.includes('corporation') ||
+            t.includes('consortium') ||
+            t.includes('college') ||
+            t.includes('university'),
+        );
+        const given = str(aObj.givenName);
+        const family = str(aObj.familyName);
         const name =
           given || family
             ? [given, family].filter(Boolean).join(' ')
-            : str(a.name);
-        if (name) authors.push(name);
+            : str(aObj.name);
+        if (name) {
+          authors.push(name);
+          if (isOrg && !given && !family) {
+            creators.push({
+              firstName: '',
+              lastName: name,
+              fullName: name,
+              creatorType: 'author',
+              fieldMode: 1,
+            });
+          } else if (given || family) {
+            creators.push({
+              firstName: given || '',
+              lastName: family || name,
+              fullName: name,
+              creatorType: 'author',
+            });
+          } else {
+            creators.push(this.toCreator(name, creators.length, 'author'));
+          }
+        }
       }
     }
     if (authors.length) out.authors = authors;
+    if (creators.length) out.creators = creators;
 
     out.date = str(node.datePublished) || str(node.dateCreated);
     out.abstract = str(node.description) || str(node.abstract);
@@ -1234,17 +1396,21 @@ export class UrlMetadataScraperService {
         out.publicationTitle = out.publicationTitle || str(container);
         break;
       }
+      const cObj =
+        typeof container === 'object' && container !== null
+          ? (container as Record<string, unknown>)
+          : {};
       const ctypes = typesOf(container);
       if (ctypes.includes('PublicationIssue')) {
-        out.issue = out.issue || str(container.issueNumber);
+        out.issue = out.issue || str(cObj.issueNumber);
       } else if (ctypes.includes('PublicationVolume')) {
-        out.volume = out.volume || str(container.volumeNumber);
+        out.volume = out.volume || str(cObj.volumeNumber);
       } else {
-        out.publicationTitle = out.publicationTitle || str(container.name);
+        out.publicationTitle = out.publicationTitle || str(cObj.name);
       }
-      out.issn = out.issn || str(container.issn);
-      out.isbn = out.isbn || str(container.isbn);
-      container = arr(container.isPartOf)[0];
+      out.issn = out.issn || str(cObj.issn);
+      out.isbn = out.isbn || str(cObj.isbn);
+      container = arr(cObj.isPartOf)[0];
     }
 
     out.publisher = str(node.publisher);
@@ -1253,8 +1419,9 @@ export class UrlMetadataScraperService {
     for (const id of arr(node.identifier)) {
       if (typeof id === 'string') idCandidates.push(id);
       else if (id && typeof id === 'object') {
-        const prop = String(id.propertyID || '').toLowerCase();
-        const val = str(id.value ?? id['@id']);
+        const idObj = id as Record<string, unknown>;
+        const prop = String(idObj.propertyID || '').toLowerCase();
+        const val = str(idObj.value ?? idObj['@id']);
         if (val && (!prop || prop === 'doi' || /10\.\d{4,9}\//.test(val))) {
           idCandidates.push(val);
         }
@@ -1275,18 +1442,23 @@ export class UrlMetadataScraperService {
     return out;
   }
 
-  private flattenJsonLd(value: any, acc: any[], depth: number): void {
+  private flattenJsonLd(
+    value: unknown,
+    acc: Array<Record<string, unknown>>,
+    depth: number,
+  ): void {
     if (depth > 6 || value === null || typeof value !== 'object') return;
     if (Array.isArray(value)) {
       for (const v of value) this.flattenJsonLd(v, acc, depth + 1);
       return;
     }
-    if (value['@type']) acc.push(value);
-    if (Array.isArray(value['@graph'])) {
-      this.flattenJsonLd(value['@graph'], acc, depth + 1);
+    const valObj = value as Record<string, unknown>;
+    if (valObj['@type']) acc.push(valObj);
+    if (Array.isArray(valObj['@graph'])) {
+      this.flattenJsonLd(valObj['@graph'], acc, depth + 1);
     }
-    if (value.mainEntity && typeof value.mainEntity === 'object') {
-      this.flattenJsonLd(value.mainEntity, acc, depth + 1);
+    if (valObj.mainEntity && typeof valObj.mainEntity === 'object') {
+      this.flattenJsonLd(valObj.mainEntity, acc, depth + 1);
     }
   }
 

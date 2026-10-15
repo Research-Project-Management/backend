@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
-import { TrustedExtractionService } from '../services/trusted-extraction.service';
+import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
 
 export interface BenchmarkPayloadDto {
   base64Pdf?: string;

@@ -4,7 +4,7 @@
  * Enforces valid LaTeX citation key characters (alphanumeric, underscore, colon, hyphen).
  */
 
-import { InvalidBibtexException } from '../exceptions/invalid-bibtex.exception';
+import { InvalidBibtexException } from '@/modules/manuscripts/citations/core/domain/exceptions/invalid-bibtex.exception';
 
 export class CitationKeyVo {
   private static readonly VALID_KEY_REGEX = /^[a-zA-Z0-9_:.\\-]+$/;

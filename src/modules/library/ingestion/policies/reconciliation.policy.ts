@@ -3,10 +3,10 @@ import {
   FieldEvidence,
   ReconciliationDecision,
   MetadataConflictDetail,
-} from '../types/metadata-candidate.types';
-import { ItemMetadata } from '../types/metadata.types';
-import { normalizeAcademicTags } from '../../shared-kernel/utils/tag.utils';
-import { BASE_FIELD_MAPPINGS } from '../../shared-kernel/types/schema.constants';
+} from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
+import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+import { BASE_FIELD_MAPPINGS } from '@/modules/library/shared-kernel/types/schema.constants';
 
 export class ReconciliationPolicy {
   /**
@@ -89,7 +89,7 @@ export class ReconciliationPolicy {
     const selectedFields: Record<string, FieldEvidence> = {};
     const rejectedFields: Record<string, FieldEvidence[]> = {};
     const conflicts: MetadataConflictDetail[] = [];
-    const proposedItem: Record<string, any> = {};
+    const proposedItem: Record<string, unknown> = {};
 
     for (const [field, evidences] of fieldMap.entries()) {
       if (evidences.length === 1) {
@@ -146,14 +146,17 @@ export class ReconciliationPolicy {
                 typeof n === 'string'
                   ? n.trim()
                   : n && typeof n === 'object'
-                    ? String(n.content || '').trim()
+                    ? String((n as { content?: unknown }).content || '').trim()
                     : '';
               if (text && !seen.has(text)) {
                 seen.add(text);
                 mergedNotes.push(
                   typeof n === 'string'
                     ? { content: text }
-                    : { content: text, source: n.source },
+                    : {
+                        content: text,
+                        source: (n as { source?: string }).source,
+                      },
                 );
               }
             }
@@ -169,7 +172,7 @@ export class ReconciliationPolicy {
       }
 
       if (field === 'extraFields') {
-        const mergedExtra: Record<string, any> = {};
+        const mergedExtra: Record<string, unknown> = {};
         for (const ev of evidences) {
           if (ev.normalizedValue && typeof ev.normalizedValue === 'object') {
             Object.assign(mergedExtra, ev.normalizedValue);
@@ -206,7 +209,8 @@ export class ReconciliationPolicy {
           authoritative &&
           Array.isArray(authoritative.normalizedValue) &&
           Array.isArray(currentBest.normalizedValue) &&
-          authoritative.normalizedValue.length > currentBest.normalizedValue.length
+          authoritative.normalizedValue.length >
+            currentBest.normalizedValue.length
             ? authoritative
             : currentBest;
 
@@ -257,7 +261,8 @@ export class ReconciliationPolicy {
     }
 
     // Harmonize venue and publisher per Zotero itemType schema (DRY baseField mappings)
-    const baseMap = BASE_FIELD_MAPPINGS[proposedItem.itemType];
+    const itemType = String(proposedItem.itemType || 'journalArticle');
+    const baseMap = BASE_FIELD_MAPPINGS[itemType];
     if (baseMap) {
       const venueField = baseMap.publicationTitle;
       if (venueField && venueField !== 'publicationTitle') {
@@ -289,15 +294,23 @@ export class ReconciliationPolicy {
       Array.isArray(proposedItem.creators) &&
       proposedItem.creators.length > 0
     ) {
-      if (!proposedItem.authors || proposedItem.authors.length === 0) {
-        const authorCreators = proposedItem.creators.filter(
-          (c: any) => c.creatorType === 'author' || !c.creatorType,
+      const creatorsList = proposedItem.creators as Array<{
+        creatorType?: string;
+        fullName?: string;
+        name?: string;
+        firstName?: string;
+        lastName?: string;
+      }>;
+      const authorsList = proposedItem.authors as unknown[] | undefined;
+      if (!authorsList || authorsList.length === 0) {
+        const authorCreators = creatorsList.filter(
+          (c) => c.creatorType === 'author' || !c.creatorType,
         );
         const effectiveList =
-          authorCreators.length > 0 ? authorCreators : proposedItem.creators;
+          authorCreators.length > 0 ? authorCreators : creatorsList;
         proposedItem.authors = effectiveList
           .map(
-            (c: any) =>
+            (c) =>
               c.fullName ||
               c.name ||
               `${c.firstName || ''} ${c.lastName || ''}`.trim(),
@@ -308,7 +321,10 @@ export class ReconciliationPolicy {
       Array.isArray(proposedItem.authors) &&
       proposedItem.authors.length > 0
     ) {
-      if (!proposedItem.creators || proposedItem.creators.length === 0) {
+      if (
+        !Array.isArray(proposedItem.creators) ||
+        proposedItem.creators.length === 0
+      ) {
         proposedItem.creators = proposedItem.authors.map(
           (authorName: string, idx: number) => ({
             orderIndex: idx,
@@ -324,7 +340,7 @@ export class ReconciliationPolicy {
       selectedFields,
       rejectedFields,
       conflicts,
-      proposedItem: proposedItem as ItemMetadata,
+      proposedItem: proposedItem,
       decidedAt: new Date().toISOString(),
       policyVersion: '1.1.0',
     };

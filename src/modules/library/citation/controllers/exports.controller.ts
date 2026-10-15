@@ -8,8 +8,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ExportsService } from '../services/exports.service';
-import { ExportLibraryDto, ExportFormatType } from '../dto/exports.dto';
+import { ExportsService } from '@/modules/library/citation/services/exports.service';
+import {
+  ExportLibraryDto,
+  ExportFormatType,
+} from '@/modules/library/citation/dto/exports.dto';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @Controller([
@@ -59,11 +62,15 @@ export class ExportsController {
   ) {
     const effectiveProjectId =
       routeProjectId || body.projectId || queryProjectId;
-    return this.exportsService.exportBibliography(
+    const result = await this.exportsService.exportBibliography(
       userId,
       body.keys || [],
       effectiveProjectId,
     );
+    return {
+      ...result,
+      bibtex: result.content,
+    };
   }
 
   @Get()

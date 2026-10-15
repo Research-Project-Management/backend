@@ -7,29 +7,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as zlib from 'node:zlib';
 import { Readable } from 'node:stream';
-import { promisify } from 'node:util';
-import { IZipEnginePort, RawZipEntryInput } from '../../ports/zip-engine.port';
-
-const deflateRawAsync = promisify(zlib.deflateRaw);
-import { ArchiveEntryVo } from '../../domain/value-objects/archive-entry.vo';
-import { InvalidZipArchiveException } from '../../domain/exceptions/invalid-zip-archive.exception';
-import { ArchiveSizeExceededException } from '../../domain/exceptions/archive-size-exceeded.exception';
+import {
+  IZipEnginePort,
+  RawZipEntryInput,
+} from '@/modules/manuscripts/export-import/core/ports/zip-engine.port';
+import { ArchiveEntryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/archive-entry.vo';
+import { InvalidZipArchiveException } from '@/modules/manuscripts/export-import/core/domain/exceptions/invalid-zip-archive.exception';
+import { ArchiveSizeExceededException } from '@/modules/manuscripts/export-import/core/domain/exceptions/archive-size-exceeded.exception';
+import {
+  buildPkZipBuffer,
+  createPkZipStream,
+} from '@/modules/manuscripts/shared/zip/pkzip-builder.util';
 
 export const MAX_UNCOMPRESSED_PROJECT_BYTES = 500 * 1024 * 1024; // 500 MB (Overleaf Zip Bomb Guard)
 export const MAX_PROJECT_ENTRY_COUNT = 10000; // 10k files max
-
-function toDosDateTime(d: Date = new Date()): { time: number; date: number } {
-  const year = Math.max(1980, d.getFullYear());
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
-  const hours = d.getHours();
-  const minutes = d.getMinutes();
-  const seconds = Math.floor(d.getSeconds() / 2);
-
-  const dosTime = (hours << 11) | (minutes << 5) | seconds;
-  const dosDate = ((year - 1980) << 9) | (month << 5) | day;
-  return { time: dosTime, date: dosDate };
-}
 
 @Injectable()
 export class PkzipEngineAdapter extends IZipEnginePort {
@@ -39,86 +30,7 @@ export class PkzipEngineAdapter extends IZipEnginePort {
    * Encodes a list of files into a compliant PKZIP 2.0 binary buffer.
    */
   public buildZip(entries: RawZipEntryInput[]): Buffer {
-    const localChunks: Buffer[] = [];
-    const cdChunks: Buffer[] = [];
-    let offset = 0;
-
-    for (const entry of entries) {
-      const cleanPath = entry.path.replace(/\\/g, '/').replace(/^\/+/, '');
-      if (!cleanPath) continue;
-
-      const nameBuf = Buffer.from(cleanPath, 'utf8');
-      const rawData = Buffer.isBuffer(entry.data)
-        ? entry.data
-        : Buffer.from(entry.data || '', 'utf8');
-
-      const isEmpty = rawData.length === 0;
-      const compressionMethod = isEmpty ? 0 : 8; // 0 = Store, 8 = Deflate
-      const compressedData = isEmpty
-        ? Buffer.alloc(0)
-        : zlib.deflateRawSync(rawData, { level: 6 });
-
-      const crc = zlib.crc32(rawData);
-      const { time: dosTime, date: dosDate } = toDosDateTime(entry.date);
-
-      // Local File Header (30 bytes)
-      const localHeader = Buffer.alloc(30);
-      localHeader.writeUInt32LE(0x04034b50, 0); // Local header signature
-      localHeader.writeUInt16LE(20, 4); // Version needed to extract (2.0)
-      localHeader.writeUInt16LE(0x0800, 6); // General purpose bit flag (UTF-8)
-      localHeader.writeUInt16LE(compressionMethod, 8);
-      localHeader.writeUInt16LE(dosTime, 10);
-      localHeader.writeUInt16LE(dosDate, 12);
-      localHeader.writeUInt32LE(crc, 14);
-      localHeader.writeUInt32LE(compressedData.length, 18);
-      localHeader.writeUInt32LE(rawData.length, 22);
-      localHeader.writeUInt16LE(nameBuf.length, 26);
-      localHeader.writeUInt16LE(0, 28); // Extra field length
-
-      const localEntry = Buffer.concat([localHeader, nameBuf, compressedData]);
-      localChunks.push(localEntry);
-
-      // Central Directory Header (46 bytes)
-      const cdHeader = Buffer.alloc(46);
-      cdHeader.writeUInt32LE(0x02014b50, 0); // Central directory file header signature
-      cdHeader.writeUInt16LE(0x0314, 4); // Version made by (UNIX 2.0)
-      cdHeader.writeUInt16LE(20, 6); // Version needed to extract (2.0)
-      cdHeader.writeUInt16LE(0x0800, 8); // General purpose bit flag (UTF-8)
-      cdHeader.writeUInt16LE(compressionMethod, 10);
-      cdHeader.writeUInt16LE(dosTime, 12);
-      cdHeader.writeUInt16LE(dosDate, 14);
-      cdHeader.writeUInt32LE(crc, 16);
-      cdHeader.writeUInt32LE(compressedData.length, 20);
-      cdHeader.writeUInt32LE(rawData.length, 24);
-      cdHeader.writeUInt16LE(nameBuf.length, 28);
-      cdHeader.writeUInt16LE(0, 30); // Extra field length
-      cdHeader.writeUInt16LE(0, 32); // File comment length
-      cdHeader.writeUInt16LE(0, 34); // Disk number start
-      cdHeader.writeUInt16LE(0, 36); // Internal file attributes
-      cdHeader.writeUInt32LE((0o100644 << 16) >>> 0, 38); // External file attributes (regular file)
-      cdHeader.writeUInt32LE(offset, 42); // Relative offset of local header
-
-      cdChunks.push(Buffer.concat([cdHeader, nameBuf]));
-      offset += localEntry.length;
-    }
-
-    const cdStart = offset;
-    const cdBuf = Buffer.concat(cdChunks);
-    const cdSize = cdBuf.length;
-    const totalEntries = localChunks.length;
-
-    // End of Central Directory (22 bytes)
-    const eocd = Buffer.alloc(22);
-    eocd.writeUInt32LE(0x06054b50, 0); // End of central directory signature
-    eocd.writeUInt16LE(0, 4); // Number of this disk
-    eocd.writeUInt16LE(0, 6); // Disk where central directory starts
-    eocd.writeUInt16LE(totalEntries, 8); // Number of central directory records on this disk
-    eocd.writeUInt16LE(totalEntries, 10); // Total number of central directory records
-    eocd.writeUInt32LE(cdSize, 12); // Size of central directory
-    eocd.writeUInt32LE(cdStart, 16); // Offset of start of central directory
-    eocd.writeUInt16LE(0, 20); // Comment length
-
-    return Buffer.concat([...localChunks, cdBuf, eocd]);
+    return buildPkZipBuffer(entries);
   }
 
   /**
@@ -126,107 +38,7 @@ export class PkzipEngineAdapter extends IZipEnginePort {
    * Lazily awaits getData() if provided, streaming payload chunk-by-chunk to reduce memory.
    */
   public createZipStream(entries: RawZipEntryInput[]): Readable {
-    return Readable.from(
-      (async function* () {
-        const cdChunks: Buffer[] = [];
-        let offset = 0;
-
-        for (const entry of entries) {
-          const cleanPath = entry.path.replace(/\\/g, '/').replace(/^\/+/, '');
-          if (!cleanPath) continue;
-
-          const nameBuf = Buffer.from(cleanPath, 'utf8');
-          let rawData: Buffer;
-          if (entry.getData) {
-            const resolved = await entry.getData();
-            rawData = Buffer.isBuffer(resolved)
-              ? resolved
-              : Buffer.from(resolved, 'utf8');
-          } else if (entry.data !== undefined) {
-            rawData = Buffer.isBuffer(entry.data)
-              ? entry.data
-              : Buffer.from(entry.data, 'utf8');
-          } else {
-            rawData = Buffer.alloc(0);
-          }
-
-          const isEmpty = rawData.length === 0;
-          const compressionMethod = isEmpty ? 0 : 8; // 0 = Store, 8 = Deflate
-          const compressedData: Buffer = isEmpty
-            ? Buffer.alloc(0)
-            : ((await deflateRawAsync(rawData, { level: 6 })) as Buffer);
-
-          const crc = zlib.crc32(rawData);
-          const { time: dosTime, date: dosDate } = toDosDateTime(entry.date);
-
-          // Local File Header (30 bytes)
-          const localHeader = Buffer.alloc(30);
-          localHeader.writeUInt32LE(0x04034b50, 0); // Local header signature
-          localHeader.writeUInt16LE(20, 4); // Version needed to extract (2.0)
-          localHeader.writeUInt16LE(0x0800, 6); // General purpose bit flag (UTF-8)
-          localHeader.writeUInt16LE(compressionMethod, 8);
-          localHeader.writeUInt16LE(dosTime, 10);
-          localHeader.writeUInt16LE(dosDate, 12);
-          localHeader.writeUInt32LE(crc, 14);
-          localHeader.writeUInt32LE(compressedData.length, 18);
-          localHeader.writeUInt32LE(rawData.length, 22);
-          localHeader.writeUInt16LE(nameBuf.length, 26);
-          localHeader.writeUInt16LE(0, 28); // Extra field length
-
-          const localRecordLength =
-            localHeader.length + nameBuf.length + compressedData.length;
-
-          // Central Directory Header (46 bytes)
-          const cdHeader = Buffer.alloc(46);
-          cdHeader.writeUInt32LE(0x02014b50, 0); // Central directory signature
-          cdHeader.writeUInt16LE(0x0314, 4); // Version made by (UNIX 2.0)
-          cdHeader.writeUInt16LE(20, 6); // Version needed to extract (2.0)
-          cdHeader.writeUInt16LE(0x0800, 8); // UTF-8
-          cdHeader.writeUInt16LE(compressionMethod, 10);
-          cdHeader.writeUInt16LE(dosTime, 12);
-          cdHeader.writeUInt16LE(dosDate, 14);
-          cdHeader.writeUInt32LE(crc, 16);
-          cdHeader.writeUInt32LE(compressedData.length, 20);
-          cdHeader.writeUInt32LE(rawData.length, 24);
-          cdHeader.writeUInt16LE(nameBuf.length, 28);
-          cdHeader.writeUInt16LE(0, 30);
-          cdHeader.writeUInt16LE(0, 32);
-          cdHeader.writeUInt16LE(0, 34);
-          cdHeader.writeUInt16LE(0, 36);
-          cdHeader.writeUInt32LE((0o100644 << 16) >>> 0, 38);
-          cdHeader.writeUInt32LE(offset, 42);
-
-          cdChunks.push(Buffer.concat([cdHeader, nameBuf]));
-          offset += localRecordLength;
-
-          yield localHeader;
-          yield nameBuf;
-          if (compressedData.length > 0) {
-            yield compressedData;
-          }
-        }
-
-        const cdStart = offset;
-        let cdSize = 0;
-        for (const cd of cdChunks) {
-          cdSize += cd.length;
-          yield cd;
-        }
-
-        // End of Central Directory (22 bytes)
-        const eocd = Buffer.alloc(22);
-        eocd.writeUInt32LE(0x06054b50, 0);
-        eocd.writeUInt16LE(0, 4);
-        eocd.writeUInt16LE(0, 6);
-        eocd.writeUInt16LE(cdChunks.length, 8);
-        eocd.writeUInt16LE(cdChunks.length, 10);
-        eocd.writeUInt32LE(cdSize, 12);
-        eocd.writeUInt32LE(cdStart, 16);
-        eocd.writeUInt16LE(0, 20);
-
-        yield eocd;
-      })(),
-    );
+    return createPkZipStream(entries);
   }
 
   /**
@@ -349,9 +161,13 @@ export class PkzipEngineAdapter extends IZipEnginePort {
           // Deflated
           try {
             uncompressedData = zlib.inflateRawSync(compressedSlice);
-          } catch (inflateErr: any) {
+          } catch (inflateErr: unknown) {
+            const inflateMsg =
+              inflateErr instanceof Error
+                ? inflateErr.message
+                : String(inflateErr);
             this.logger.warn(
-              `Failed to inflate entry '${fileName}': ${inflateErr.message}`,
+              `Failed to inflate entry '${fileName}': ${inflateMsg}`,
             );
             throw new InvalidZipArchiveException(
               `Failed to decompress entry '${fileName}'.`,

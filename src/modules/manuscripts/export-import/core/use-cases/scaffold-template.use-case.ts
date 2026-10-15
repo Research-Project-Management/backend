@@ -4,11 +4,11 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { ITemplateCatalogPort } from '../ports/template-catalog.port';
-import { IManuscriptHydratorPort } from '../ports/manuscript-hydrator.port';
-import { ImportSummaryVo } from '../domain/value-objects/import-summary.vo';
-import { ArchiveEntryVo } from '../domain/value-objects/archive-entry.vo';
-import { TemplateNotFoundException } from '../domain/exceptions/template-not-found.exception';
+import { ITemplateCatalogPort } from '@/modules/manuscripts/export-import/core/ports/template-catalog.port';
+import { IManuscriptHydratorPort } from '@/modules/manuscripts/export-import/core/ports/manuscript-hydrator.port';
+import { ImportSummaryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/import-summary.vo';
+import { ArchiveEntryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/archive-entry.vo';
+import { TemplateNotFoundException } from '@/modules/manuscripts/export-import/core/domain/exceptions/template-not-found.exception';
 
 export interface ScaffoldTemplateInput {
   projectId: string;

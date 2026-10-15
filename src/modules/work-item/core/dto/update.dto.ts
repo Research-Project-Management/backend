@@ -8,7 +8,7 @@ import {
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { WorkItemPriority } from '@prisma/client';
-import type { WorkItemAttachments } from '../types/work-item.types';
+import type { WorkItemAttachments } from '@/modules/work-item/core/types/work-item.types';
 
 export class UpdateWorkItemDto {
   @ApiPropertyOptional({ description: 'Title of the work item' })

@@ -27,12 +27,14 @@ export const DEFAULT_BUNDLING_SETTINGS: ReviewBundlingSettings = {
   windowMinutes: 10,
 };
 
-export function normalizeSettings(raw: any): ReviewBundlingSettings {
-  const minutes = Number(raw?.windowMinutes);
+export function normalizeSettings(raw: unknown): ReviewBundlingSettings {
+  const record =
+    raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+  const minutes = Number(record?.windowMinutes);
   return {
     enabled:
-      typeof raw?.enabled === 'boolean'
-        ? raw.enabled
+      typeof record?.enabled === 'boolean'
+        ? record.enabled
         : DEFAULT_BUNDLING_SETTINGS.enabled,
     windowMinutes:
       Number.isFinite(minutes) && minutes >= 1 && minutes <= 1440
@@ -112,7 +114,7 @@ export function toBundledType(n: NotificationEntity): BundledEventType {
 export function toBundledItem(n: NotificationEntity): BundledItem {
   const o = n.messageOpts || {};
   const optStr = (key: string): string | undefined =>
-    typeof o[key] === 'string' ? (o[key] as string) : undefined;
+    typeof o[key] === 'string' ? o[key] : undefined;
 
   return {
     id: n.id,
@@ -130,9 +132,10 @@ export function toBundledItem(n: NotificationEntity): BundledItem {
       optStr('changeId') ||
       optStr('commentId') ||
       undefined,
-    contentSnippet: String(
-      o.snippet ?? o.content ?? o.message ?? '',
-    ).slice(0, 280),
+    contentSnippet: String(o.snippet ?? o.content ?? o.message ?? '').slice(
+      0,
+      280,
+    ),
     line: typeof o.line === 'number' ? o.line : undefined,
     timestamp: n.createdAt.toISOString(),
   };
@@ -203,10 +206,16 @@ export function buildDigest(
     authors.set(it.authorId, a);
   }
   const parts: string[] = [];
-  if (counts.mention) parts.push(`${counts.mention} mention${counts.mention > 1 ? 's' : ''}`);
-  if (counts.comment) parts.push(`${counts.comment} comment${counts.comment > 1 ? 's' : ''}`);
-  if (counts.reply) parts.push(`${counts.reply} repl${counts.reply > 1 ? 'ies' : 'y'}`);
-  if (counts.suggestion) parts.push(`${counts.suggestion} suggestion${counts.suggestion > 1 ? 's' : ''}`);
+  if (counts.mention)
+    parts.push(`${counts.mention} mention${counts.mention > 1 ? 's' : ''}`);
+  if (counts.comment)
+    parts.push(`${counts.comment} comment${counts.comment > 1 ? 's' : ''}`);
+  if (counts.reply)
+    parts.push(`${counts.reply} repl${counts.reply > 1 ? 'ies' : 'y'}`);
+  if (counts.suggestion)
+    parts.push(
+      `${counts.suggestion} suggestion${counts.suggestion > 1 ? 's' : ''}`,
+    );
   return {
     id: `digest-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     recipientId,

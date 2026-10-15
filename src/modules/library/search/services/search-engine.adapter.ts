@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ISearchEnginePort, SearchResult } from '../types/search-engine.types';
-import { SearchQueryVo } from '../types/search-query.vo';
+import {
+  ISearchEnginePort,
+  SearchResult,
+  SearchQueryVo,
+} from '@/modules/library/search/domain';
 import { SearchService } from './search.service';
 
 /**

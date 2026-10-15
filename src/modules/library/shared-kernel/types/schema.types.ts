@@ -2,7 +2,7 @@
  * Core Item-Type Schema & Registry Types for Flux Library.
  * Defines the canonical bibliographic item-type registry owned by the Library domain.
  */
-export * from '../core/types/branded.types';
+export * from '@/modules/library/shared-kernel/core/types/branded.types';
 
 /**
  * All 38 authoritative Zotero/CSL Item Types.
@@ -120,9 +120,9 @@ export interface CreatorHarmonizationChange {
 export interface SchemaValidationResult {
   valid: boolean;
   itemType: string;
-  sanitizedItem: Record<string, any>;
+  sanitizedItem: Record<string, unknown>;
   warnings: string[];
-  demotedToExtra: Record<string, any>;
+  demotedToExtra: Record<string, unknown>;
   creatorChanges: CreatorHarmonizationChange[];
 }
 

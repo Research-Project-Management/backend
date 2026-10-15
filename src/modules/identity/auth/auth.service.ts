@@ -15,6 +15,7 @@ import {
   AuthProvider,
   AuditOutcome,
   AuditSeverity,
+  RefreshToken,
 } from '@prisma/client';
 
 import { AuthRepository } from './auth.repository';
@@ -157,14 +158,13 @@ export class AuthService {
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
         secret: accessTokenSecret,
-        expiresIn: ((this.configService.get<string>('JWT_EXPIRES_IN') ||
-          '1h') as `${number}${'s' | 'm' | 'h' | 'd'}` | number),
+        expiresIn: (this.configService.get<string>('JWT_EXPIRES_IN') ||
+          '1h') as `${number}${'s' | 'm' | 'h' | 'd'}` | number,
       }),
       this.jwtService.signAsync(payload, {
         secret: refreshTokenSecret,
-        expiresIn: ((this.configService.get<string>(
-          'JWT_REFRESH_EXPIRES_IN',
-        ) || '30d') as `${number}${'s' | 'm' | 'h' | 'd'}` | number),
+        expiresIn: (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
+          '30d') as `${number}${'s' | 'm' | 'h' | 'd'}` | number,
       }),
     ]);
 
@@ -1168,9 +1168,9 @@ export class AuthService {
 
   // ─── Active Session Management (User Story 3) ──────────────────────────────
 
-  private formatSession(session: any): SessionSummary {
-    const { token: _token, tokenHash: _tokenHash, ...safeSession } = session;
-    return safeSession as SessionSummary;
+  private formatSession(session: RefreshToken): SessionSummary {
+    const { tokenHash: _tokenHash, ...safeSession } = session;
+    return safeSession;
   }
 
   async getActiveSessions(userId: string): Promise<SessionSummary[]> {

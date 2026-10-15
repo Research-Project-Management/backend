@@ -1,4 +1,4 @@
-import { File as PrismaFile } from '@prisma/client';
+import { File as PrismaFile, Prisma } from '@prisma/client';
 import { StorageNode } from '../../../domain/entities/storage-node.entity';
 import { FileScope } from '../../../domain/value-objects/file-scope.vo';
 
@@ -15,7 +15,7 @@ export class StorageNodeMapper {
       blobId: record.blobId,
       scope: (record.linkedToType as FileScope) || FileScope.Personal,
       starred: record.starred,
-      metadata: (record.metaData as Record<string, any>) || {},
+      metadata: (record.metaData as Record<string, unknown>) || {},
       authorId: record.authorId,
       trashedAt: record.trashedAt,
       createdAt: record.createdAt,
@@ -32,7 +32,7 @@ export class StorageNodeMapper {
       url: `/api/files/${encodeURIComponent(node.id)}/content`,
       isFolder: node.isFolder,
       starred: node.starred,
-      metaData: node.metadata,
+      metaData: node.metadata as Prisma.InputJsonValue,
       parentId: node.parentId,
       linkedToType: node.scope,
       linkedToId: node.projectId,

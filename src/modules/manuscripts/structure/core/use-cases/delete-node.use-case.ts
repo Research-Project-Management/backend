@@ -4,13 +4,13 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { IStructureRepository } from '../ports/structure-repository.port';
-import { ITreePublisher } from '../ports/tree-publisher.port';
-import { ManuscriptNodeEntity } from '../domain/manuscript-node.entity';
+import { IStructureRepository } from '@/modules/manuscripts/structure/core/ports/structure-repository.port';
+import { ITreePublisher } from '@/modules/manuscripts/structure/core/ports/tree-publisher.port';
+import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
 import {
   NodeNotFoundError,
   CannotDeleteRootFolderError,
-} from '../domain/structure-errors';
+} from '@/modules/manuscripts/structure/core/domain/structure-errors';
 
 @Injectable()
 export class DeleteNodeUseCase {

@@ -1,3 +1,5 @@
+import type { Prisma } from '@prisma/client';
+
 // ── Creator & Contributor Types ──────────────────────────────────────────────
 export type CreatorType =
   | 'author'
@@ -49,6 +51,8 @@ export interface CreatorCreditInput {
   lastName?: string | null;
   creatorType?: CreatorType;
   orderIndex?: number;
+  fieldMode?: number;
+  shortName?: string | null;
 }
 
 export type CreatorInput = CreatorCreditInput;
@@ -173,6 +177,9 @@ export interface ItemMetadata {
   keywords?: string[];
   tags?: string[];
   identifiers?: ItemIdentifier[];
+  type?: string | null;
+  metadata?: Prisma.JsonValue | Record<string, unknown> | null;
+  [key: string]: unknown;
 }
 
 export interface CreateItemInput {
@@ -320,6 +327,7 @@ export interface TypeConversionPreview {
   preservedFields: string[];
   mappedFields: FieldMappingChange[];
   droppedFields: DroppedField[];
+  newAvailableFields: string[];
   creatorChanges: CreatorRoleChange[];
   projectedItem: Record<string, unknown>;
   unmappedRetained: Record<string, unknown>;
@@ -474,8 +482,8 @@ export interface CreateItemData extends AcademicTypeSpecificFields {
   }>;
   collectionId?: string | null;
   collectionIds?: string[] | null;
-  uploadedById: string;
-  contributors?: CreatorCredit[];
+  uploadedById?: string;
+  contributors?: CreatorCreditInput[];
   creators?: CreatorCreditInput[];
   extraFields?: Record<string, unknown>;
   identifier?: string;
@@ -653,6 +661,7 @@ export type SyncItemSummary = ItemSummary;
 export interface ItemDetail extends ItemMetadata {
   id: string;
   userId?: string;
+  projectId?: string | null;
   version: number;
   createdAt: Date;
   updatedAt: Date;
@@ -672,6 +681,8 @@ export interface QualityAuditCandidateItem {
 export interface DuplicateCandidateItem {
   id: string;
   title: string;
+  itemType?: string | null;
+  type?: string | null;
   doi: string | null;
   arxivId?: string | null;
   isbn: string | null;
@@ -679,7 +690,7 @@ export interface DuplicateCandidateItem {
   pmid: string | null;
   citationKey: string | null;
   year: number | null;
-  metadata?: Record<string, any> | null;
+  metadata?: Record<string, unknown> | null;
   contributors: Array<{
     fullName: string;
     firstName: string | null;
@@ -723,7 +734,7 @@ export interface IItemReadPort {
     userId: string,
     limit?: number,
     projectId?: string,
-  ): Promise<any[]>;
+  ): Promise<QualityAuditCandidateItem[]>;
   findDuplicateCandidateItems(
     userId: string,
     limit?: number,

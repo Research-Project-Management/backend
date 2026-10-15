@@ -3,22 +3,31 @@ import {
   Logger,
   Optional,
   Inject,
-  NotFoundException,
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
-import { IngestionRepository } from '../repositories/ingestion.repository';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { Prisma } from '@prisma/client';
-import { UrlCaptureProvider } from '../providers/url-capture.provider';
+import {
+  UrlCaptureProvider,
+  CapturedItemMetadata,
+} from '@/modules/library/ingestion/providers/url-capture.provider';
+import { ConfirmCapturedUrlDto } from '@/modules/library/ingestion/dto/capture-url.dto';
+import { ItemDetail } from '@/modules/library/catalog';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
-} from '../types/catalog-gateway.types';
+} from '@/modules/library/ingestion/types/catalog-gateway.types';
 import {
   EXTRACTION_GATEWAY_PORT,
   IExtractionGatewayPort,
-} from '../types/extraction-gateway.types';
-import { TransactionService } from '../../shared-kernel';
+} from '@/modules/library/ingestion/types/extraction-gateway.types';
+import {
+  TransactionService,
+  CreateItemData,
+  harmonizeZoteroFields,
+  resolveCanonicalCreatorRole,
+} from '@/modules/library/shared-kernel';
 import { createHash } from 'crypto';
 
 @Injectable()
@@ -49,7 +58,16 @@ export class UrlCaptureService {
           projectId?: string;
           userId?: string;
         },
-  ): Promise<any> {
+  ): Promise<
+    | CapturedItemMetadata
+    | {
+        title: string;
+        url: string;
+        scopeId: string;
+        itemType: string;
+        previewToken?: string;
+      }
+  > {
     const scopeId =
       typeof contextOrScopeId === 'string'
         ? contextOrScopeId
@@ -60,7 +78,15 @@ export class UrlCaptureService {
         : undefined;
     const effectiveScopeId = scopeId || userId || 'unassigned';
 
-    let result: any;
+    let result:
+      | CapturedItemMetadata
+      | {
+          title: string;
+          url: string;
+          scopeId: string;
+          itemType: string;
+          previewToken?: string;
+        };
     if (this.urlCaptureProvider?.captureFromUrl) {
       result = await this.urlCaptureProvider.captureFromUrl(url, {
         scopeId: effectiveScopeId,
@@ -86,7 +112,7 @@ export class UrlCaptureService {
     await this.repo.createCapturePreview({
       sourceUrl: result.url || url,
       userId: userId || effectiveScopeId,
-      canonicalMetadata: metaWithoutToken,
+      canonicalMetadata: metaWithoutToken as unknown as Prisma.InputJsonValue,
       metadataDigest,
       tokenHash,
       expiresAt: new Date(Date.now() + 15 * 60 * 1000),
@@ -102,8 +128,8 @@ export class UrlCaptureService {
   async confirmCapturedUrl(
     scopeId: string,
     userId: string,
-    dto: any,
-  ): Promise<any> {
+    dto: ConfirmCapturedUrlDto,
+  ): Promise<ItemDetail> {
     const targetUserId = userId || scopeId;
     const projectId = scopeId && scopeId !== targetUserId ? scopeId : undefined;
     if (!dto?.previewToken) {
@@ -158,55 +184,165 @@ export class UrlCaptureService {
       }
     }
 
-    const canonical = (preview.canonicalMetadata as Record<string, any>) || {};
-    const title = dto.title || canonical.title || 'Untitled';
-    const itemType = dto.itemType || canonical.itemType || 'webpage';
+    const canonical =
+      (preview.canonicalMetadata as Record<string, unknown>) || {};
+    const itemType = (canonical.itemType as string | undefined) || 'webpage';
 
-    let authors = dto.authors || canonical.authors;
-    if (!authors && canonical.creators && Array.isArray(canonical.creators)) {
-      authors = canonical.creators.map((c: any) => {
+    let authors = canonical.authors as string[] | undefined;
+    const normalizedCreators = Array.isArray(canonical.creators)
+      ? (
+          canonical.creators as Array<{
+            creatorType?: string;
+            lastName?: string;
+            firstName?: string;
+            fullName?: string;
+            name?: string;
+            fieldMode?: number;
+          }>
+        ).map((c) => ({
+          ...c,
+          creatorType: resolveCanonicalCreatorRole(c.creatorType, { itemType }),
+        }))
+      : undefined;
+
+    if (!authors && normalizedCreators && normalizedCreators.length > 0) {
+      authors = normalizedCreators.map((c) => {
         if (c.lastName && c.firstName) return `${c.lastName}, ${c.firstName}`;
         return c.fullName || c.lastName || c.firstName || 'Unknown';
       });
     }
 
-    const itemData: any = {
+    const canonicalExtraFields =
+      canonical.extraFields &&
+      typeof canonical.extraFields === 'object' &&
+      !Array.isArray(canonical.extraFields)
+        ? { ...(canonical.extraFields as Record<string, unknown>) }
+        : {};
+
+    const reservedPreviewKeys = new Set([
+      'previewToken',
+      'scopeId',
+      'userId',
+      'projectId',
+      'collectionId',
+      'uploadedById',
+      'extraFields',
+    ]);
+    const passthroughFields: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(canonical)) {
+      if (reservedPreviewKeys.has(k)) continue;
+      if (v !== undefined && v !== null && v !== '') {
+        passthroughFields[k] = v;
+      }
+    }
+
+    const harmonized = harmonizeZoteroFields<Record<string, unknown>>(
+      {
+        ...canonicalExtraFields,
+        ...passthroughFields,
+        ...(dto.title ? { title: dto.title } : {}),
+        ...(dto.abstract ? { abstract: dto.abstract } : {}),
+        ...(dto.doi ? { doi: dto.doi } : {}),
+        ...(dto.year ? { year: dto.year } : {}),
+        ...(dto.publicationTitle
+          ? { publicationTitle: dto.publicationTitle }
+          : {}),
+        itemType,
+        extraFields: canonicalExtraFields,
+      },
+      { itemType, syncExtraFields: true },
+    );
+
+    const syncedExtraFields =
+      harmonized.extraFields &&
+      typeof harmonized.extraFields === 'object' &&
+      !Array.isArray(harmonized.extraFields)
+        ? (harmonized.extraFields as Record<string, unknown>)
+        : canonicalExtraFields;
+
+    const title =
+      dto.title ||
+      (harmonized.title as string | undefined) ||
+      (canonical.title as string | undefined) ||
+      'Untitled';
+
+    const itemData: CreateItemData = {
+      ...syncedExtraFields,
+      ...passthroughFields,
+      ...harmonized,
       title,
       itemType,
       authors,
-      creators: dto.creators || canonical.creators,
-      contributors:
-        dto.contributors || canonical.contributors || canonical.creators,
-      abstract: dto.abstract || canonical.abstract,
-      doi: dto.doi || canonical.doi,
-      url: canonical.url || preview.sourceUrl,
-      year: dto.year || canonical.year,
-      publicationTitle: dto.publicationTitle || canonical.publicationTitle,
-      journal: dto.journal || canonical.journal,
-      publisher: dto.publisher || canonical.publisher,
-      volume: dto.volume || canonical.volume,
-      issue: dto.issue || canonical.issue,
-      pages: dto.pages || canonical.pages,
-      issn: dto.issn || canonical.issn,
-      isbn: dto.isbn || canonical.isbn,
-      language: dto.language || canonical.language,
-      rights: dto.rights || canonical.rights,
-      license: dto.license || canonical.license,
-      extra: dto.extra || canonical.extra,
-      citationKey: dto.citationKey || canonical.citationKey,
-      libraryCatalog: dto.libraryCatalog || canonical.libraryCatalog,
-      callNumber: dto.callNumber || canonical.callNumber,
-      archive: dto.archive || canonical.archive,
-      collectionId: dto.collectionId,
-      labels: dto.tags || canonical.keywords || [],
-      keywords: dto.tags || canonical.keywords || [],
+      creators: normalizedCreators,
+      contributors: (canonical.contributors ||
+        normalizedCreators) as CreateItemData['contributors'],
+      abstract:
+        dto.abstract ||
+        (harmonized.abstract as string | undefined) ||
+        (canonical.abstract as string | undefined),
+      doi:
+        dto.doi ||
+        (harmonized.doi as string | undefined) ||
+        (canonical.doi as string | undefined),
+      url:
+        (harmonized.url as string | undefined) ||
+        (canonical.url as string | undefined) ||
+        preview.sourceUrl,
+      year:
+        dto.year ||
+        (harmonized.year as number | undefined) ||
+        (canonical.year as number | undefined),
+      publicationTitle:
+        dto.publicationTitle ||
+        (harmonized.publicationTitle as string | undefined) ||
+        (canonical.publicationTitle as string | undefined),
+      journal:
+        (harmonized.journal as string | undefined) ??
+        (canonical.journal as string | undefined),
+      publisher:
+        (harmonized.publisher as string | undefined) ??
+        (canonical.publisher as string | undefined),
+      volume:
+        (harmonized.volume as string | undefined) ??
+        (canonical.volume as string | undefined),
+      issue:
+        (harmonized.issue as string | undefined) ??
+        (canonical.issue as string | undefined),
+      pages:
+        (harmonized.pages as string | undefined) ??
+        (canonical.pages as string | undefined),
+      issn:
+        (harmonized.issn as string | undefined) ??
+        (canonical.issn as string | undefined),
+      isbn:
+        (harmonized.isbn as string | undefined) ??
+        (canonical.isbn as string | undefined),
+      language: canonical.language as string | undefined,
+      rights:
+        (harmonized.rights as string | undefined) ??
+        (canonical.rights as string | undefined),
+      license: harmonized.license ?? canonical.license,
+      extra: canonical.extra as string | undefined,
+      extraFields:
+        Object.keys(syncedExtraFields).length > 0
+          ? syncedExtraFields
+          : undefined,
+      citationKey:
+        (harmonized.citationKey as string | undefined) ??
+        (canonical.citationKey as string | undefined),
+      libraryCatalog: canonical.libraryCatalog,
+      callNumber: canonical.callNumber as string | undefined,
+      archive: canonical.archive as string | undefined,
+      collectionId: undefined,
+      labels: canonical.keywords || canonical.tags || [],
+      keywords: canonical.keywords || canonical.tags || [],
       uploadedById: targetUserId,
     };
 
-    let createdItem: any = null;
+    let createdItem: ItemDetail | null = null;
     if (this.txService?.executeInTransaction) {
       createdItem = await this.txService.executeInTransaction(
-        async (tx: Prisma.TransactionClient, helpers: any) => {
+        async (tx: Prisma.TransactionClient, _helpers: unknown) => {
           const claimedCount = await this.repo.claimCapturePreview(
             tokenHash,
             tx,
@@ -262,9 +398,10 @@ export class UrlCaptureService {
     ) {
       void this.extractionGateway
         .captureWebSnapshot(itemData.url, createdItem.id, targetUserId)
-        .catch((err: any) => {
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
           this.logger.warn(
-            `Background snapshot capture failed for confirmed URL item ${createdItem.id}: ${err?.message}`,
+            `Background snapshot capture failed for confirmed URL item ${createdItem.id}: ${msg}`,
           );
         });
     }

@@ -1,4 +1,4 @@
-import { cleanAbstractText } from '@/modules/library/shared-kernel/utils/bibliographic.utils';
+import { cleanAbstractText } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
 
 describe('cleanAbstractText - Comprehensive Academic Abstract Normalization', () => {
   describe('1. LaTeX and Mathematical Formula Preservation', () => {

@@ -34,9 +34,12 @@ import {
   CommentReplyResponseDto,
   DocReviewsResponseDto,
 } from './dto/track-changes.dto';
-import { ChangeNotFoundException } from './core/domain/exceptions/change-not-found.exception';
-import { ThreadNotFoundException } from './core/domain/exceptions/thread-not-found.exception';
-import { ResolvedThreadException } from './core/domain/exceptions/resolved-thread.exception';
+import {
+  ChangeNotFoundException,
+  ThreadNotFoundException,
+  ResolvedThreadException,
+} from './domain';
+import { AuthenticatedRequest } from '@/core';
 
 @ApiTags('Manuscripts - Review Mode (Track Changes & Comments)')
 @ApiBearerAuth('JWT-auth')
@@ -50,7 +53,7 @@ import { ResolvedThreadException } from './core/domain/exceptions/resolved-threa
 export class TrackChangesController {
   constructor(private readonly trackChangesService: TrackChangesService) {}
 
-  private handleError(error: any): never {
+  private handleError(error: unknown): never {
     if (
       error instanceof ChangeNotFoundException ||
       error instanceof ThreadNotFoundException
@@ -88,7 +91,7 @@ export class TrackChangesController {
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
     @Body() dto: RecordChangeDto,
-    @Req() req?: any,
+    @Req() req?: AuthenticatedRequest,
   ): Promise<TrackChangeResponseDto> {
     try {
       const userId = req?.user?.id || req?.user?.sub || null;
@@ -112,7 +115,7 @@ export class TrackChangesController {
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
     @Param('changeId') changeId: string,
-    @Req() req?: any,
+    @Req() req?: AuthenticatedRequest,
   ): Promise<TrackChangeResponseDto> {
     try {
       const userId = req?.user?.id || req?.user?.sub || null;
@@ -136,7 +139,7 @@ export class TrackChangesController {
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
     @Param('changeId') changeId: string,
-    @Req() req?: any,
+    @Req() req?: AuthenticatedRequest,
   ): Promise<TrackChangeResponseDto> {
     try {
       const userId = req?.user?.id || req?.user?.sub || null;
@@ -160,7 +163,7 @@ export class TrackChangesController {
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
     @Body() dto: BatchResolveDto,
-    @Req() req?: any,
+    @Req() req?: AuthenticatedRequest,
   ) {
     try {
       const userId = req?.user?.id || req?.user?.sub || null;
@@ -185,7 +188,7 @@ export class TrackChangesController {
     @Param('projectId') projectId: string,
     @Param('docId') docId: string,
     @Body() dto: CreateCommentThreadDto,
-    @Req() req?: any,
+    @Req() req?: AuthenticatedRequest,
   ): Promise<CommentThreadResponseDto> {
     try {
       const userId = req?.user?.id || req?.user?.sub || null;
@@ -208,7 +211,7 @@ export class TrackChangesController {
     @Param('docId') docId: string,
     @Param('threadId') threadId: string,
     @Body() dto: AddCommentReplyDto,
-    @Req() req?: any,
+    @Req() req?: AuthenticatedRequest,
   ): Promise<CommentReplyResponseDto> {
     try {
       const userId = req?.user?.id || req?.user?.sub || null;
@@ -232,7 +235,7 @@ export class TrackChangesController {
     @Param('docId') docId: string,
     @Param('threadId') threadId: string,
     @Body() dto: ResolveThreadDto,
-    @Req() req?: any,
+    @Req() req?: AuthenticatedRequest,
   ): Promise<CommentThreadResponseDto> {
     try {
       const userId = req?.user?.id || req?.user?.sub || null;

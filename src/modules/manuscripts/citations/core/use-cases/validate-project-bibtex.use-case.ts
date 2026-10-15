@@ -3,14 +3,16 @@
  * Inbound Use Case: Scans project bibliography files for duplicate keys, missing metadata, and syntax issues.
  */
 
-import { ICitationsAggregatorPort } from '../ports/citations-aggregator.port';
+import { ICitationsAggregatorPort } from '@/modules/manuscripts/citations/core/ports/citations-aggregator.port';
 
 export interface ValidateProjectBibtexResult {
   valid: boolean;
+  isValid: boolean;
   totalFiles: number;
   totalEntries: number;
   duplicateKeys: string[];
   warnings: string[];
+  missingFieldWarnings: Array<{ key: string; missingFields: string[] }>;
 }
 
 export class ValidateProjectBibtexUseCase {
@@ -23,6 +25,10 @@ export class ValidateProjectBibtexUseCase {
 
     const allKeysMap = new Map<string, string[]>(); // key -> [file1, file2, ...]
     const warnings: string[] = [];
+    const missingFieldWarnings: Array<{
+      key: string;
+      missingFields: string[];
+    }> = [];
     let totalEntries = 0;
 
     for (const file of bibFiles) {
@@ -34,17 +40,24 @@ export class ValidateProjectBibtexUseCase {
         existing.push(file.path);
         allKeysMap.set(k, existing);
 
+        const missingFields: string[] = [];
         // Check for missing basic metadata fields
         if (!entry.title) {
           warnings.push(`Entry '${k}' in ${file.path} is missing a title.`);
+          missingFields.push('title');
         }
         if (!entry.authors.authors.length) {
           warnings.push(`Entry '${k}' in ${file.path} is missing an author.`);
+          missingFields.push('author');
         }
         if (!entry.year) {
           warnings.push(
             `Entry '${k}' in ${file.path} is missing a publication year.`,
           );
+          missingFields.push('year');
+        }
+        if (missingFields.length > 0) {
+          missingFieldWarnings.push({ key: k, missingFields });
         }
       }
     }
@@ -64,10 +77,12 @@ export class ValidateProjectBibtexUseCase {
 
     return {
       valid: isValid,
+      isValid,
       totalFiles: bibFiles.length,
       totalEntries,
       duplicateKeys,
       warnings,
+      missingFieldWarnings,
     };
   }
 }

@@ -98,7 +98,13 @@ describe('ExternalSearchComparatorService', () => {
         query: 'neural networks',
         latencyMs: 150,
         isAvailable: true,
-        hits: [{ title: 'Neural Networks 101', url: 'https://arxiv.org/abs/2001.00001', confidenceScore: 0.9 }],
+        hits: [
+          {
+            title: 'Neural Networks 101',
+            url: 'https://arxiv.org/abs/2001.00001',
+            confidenceScore: 0.9,
+          },
+        ],
       };
       mockSearxng.search.mockResolvedValue(searxngHits);
 
@@ -121,7 +127,14 @@ describe('ExternalSearchComparatorService', () => {
         query: 'rare disease gene',
         latencyMs: 200,
         isAvailable: true,
-        hits: [{ title: 'Gene Study', url: 'https://doi.org/10.1000/182', doi: '10.1000/182', confidenceScore: 0.9 }],
+        hits: [
+          {
+            title: 'Gene Study',
+            url: 'https://doi.org/10.1000/182',
+            doi: '10.1000/182',
+            confidenceScore: 0.9,
+          },
+        ],
       };
       mockEuropePmc.search.mockResolvedValue(europePmcHits);
 

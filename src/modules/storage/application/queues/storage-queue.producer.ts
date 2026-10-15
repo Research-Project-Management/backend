@@ -50,9 +50,9 @@ export class StorageQueueProducer {
       this.logger.log(
         `Enqueued background processing job for file ${data.fileId}`,
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.warn(
-        `Failed to enqueue storage processing job for ${data.fileId}: ${err?.message}`,
+        `Failed to enqueue storage processing job for ${data.fileId}: ${(err as Error)?.message}`,
       );
     }
   }

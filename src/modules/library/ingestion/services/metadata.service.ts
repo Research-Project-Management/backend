@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { IngestionRepository } from '../repositories/ingestion.repository';
+import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   METADATA_PROVIDERS,
   MetadataPort,
@@ -12,23 +12,23 @@ import {
   ProviderName,
   ProviderResult,
   ResolvedMetadata,
-} from '../types/metadata.types';
-import { QueryClassifier } from '../parsers/query.classifier';
+  Provenance,
+} from '@/modules/library/ingestion/types/metadata.types';
+import { QueryClassifier } from '@/modules/library/ingestion/parsers/query.classifier';
 import {
   formatCanonicalId,
   normalizeArxivId,
   normalizeDoi,
-  normalizePmid,
-} from '../utils/metadata.utils';
+} from '@/modules/library/ingestion/domain/metadata.domain';
 import {
   MetadataRoutingPolicy,
   METADATA_POLICY_VERSION,
-} from '../policies/metadata.policy';
-import { MetadataCache } from '../repositories/metadata.cache';
+} from '@/modules/library/ingestion/policies/metadata.policy';
+import { MetadataCache } from '@/modules/library/ingestion/repositories/metadata.cache';
 import { ReconciliationService } from './metadata-reconciliation.service';
 import { ExecutorService } from './metadata-executor.service';
-import { validateMetadata } from '../utils/metadata.validator';
-import { SsrfGuardService } from '../../shared-kernel/core/services/ssrf-guard.service';
+import { validateMetadata } from '@/modules/library/ingestion/domain/metadata.validator';
+import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
 
 @Injectable()
 export class MetadataService implements MetadataPort {
@@ -289,7 +289,8 @@ export class MetadataService implements MetadataPort {
         confidenceScore: primaryCandidate.confidenceScore,
         isOpenAccess: Boolean(
           reconciled.metadata.openAccessPdfUrl ||
-          reconciled.metadata.provenance?.isOpenAccess,
+          (reconciled.metadata.provenance as Provenance | undefined)
+            ?.isOpenAccess,
         ),
         openAccessPdfUrl: reconciled.metadata.openAccessPdfUrl,
       },
