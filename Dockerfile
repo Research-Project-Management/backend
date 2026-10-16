@@ -80,8 +80,8 @@ USER nestjs
 EXPOSE 3000
 
 # Container Healthcheck (Terminus liveness probe)
-HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -sf http://localhost:3000/health/liveness || exit 1
+HEALTHCHECK --interval=20s --timeout=5s --start-period=45s --retries=3 \
+  CMD curl -sf "http://localhost:${PORT:-3000}/health/liveness" || curl -sf "http://localhost:3000/health/liveness" || exit 1
 
 ENTRYPOINT ["dumb-init", "--", "./docker-entrypoint.sh"]
 CMD ["node", "dist/main.js"]
