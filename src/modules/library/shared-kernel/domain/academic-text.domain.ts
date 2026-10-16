@@ -1368,7 +1368,7 @@ export function normalizeAcademicTitleCase(title?: string | null): string {
     withoutMath === withoutMath.toUpperCase();
 
   if (!isAllUpper) {
-    return trimmed;
+    return collapseFragmentedSmallCapsTokens(trimmed);
   }
 
   const words = trimmed.split(/\s+/).filter(Boolean);
@@ -1438,7 +1438,7 @@ export function normalizeAcademicTitleCase(title?: string | null): string {
     formattedWords.push(formatWord(w, isFirstOrLast, prevEndsWithColon));
   }
 
-  return formattedWords.join(' ');
+  return collapseFragmentedSmallCapsTokens(formattedWords.join(' '));
 }
 
 /**
@@ -1463,9 +1463,12 @@ export function sanitizeItemTitle(title?: string | null): string {
   // eslint-disable-next-line no-control-regex
   cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
 
-  // Normalize OCR / publisher spaced hyphens (e.g. "Large - Scale" -> "Large-Scale")
+  // Collapse small-caps / drop-cap fragmented words (e.g. "V Ery D Eep C Onvolutional" -> "Very Deep Convolutional")
+  cleaned = collapseFragmentedSmallCapsTokens(cleaned);
+
+  // Normalize OCR / publisher spaced hyphens (e.g. "Large - Scale" or "Large -Scale" -> "Large-Scale")
   // Requires at least 2 letters on both sides so legitimate subtitles like "Part A - Methods" are preserved.
-  cleaned = cleaned.replace(/(\b\p{L}{2,})\s+-\s+(\p{L}{2,}\b)/gu, '$1-$2');
+  cleaned = cleaned.replace(/(\b\p{L}{2,})\s*-\s*(\p{L}{2,}\b)/gu, '$1-$2');
 
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
   // normalizeAcademicTitleCase is a no-op unless the title is entirely uppercase.
@@ -1474,6 +1477,46 @@ export function sanitizeItemTitle(title?: string | null): string {
     cleaned = cleaned.substring(0, 1000).trim();
   }
   return cleaned;
+}
+
+/**
+ * Collapses words whose initial small-caps / drop-cap glyph was emitted as an
+ * isolated capital token by PDF layout engines (e.g. ICLR/NIPS/CVPR LaTeX `\scshape`):
+ *   "V Ery D Eep C Onvolutional N Etworks for L Arge -S Cale I Mage R Ecognition"
+ *   -> "Very Deep Convolutional Networks for Large-Scale Image Recognition"
+ *   "A Dam : A M Ethod for S Tochastic O Ptimization"
+ *   -> "Adam: A Method for Stochastic Optimization"
+ *
+ * Only activates when the title contains at least 3 isolated single-capital + word pairs,
+ * preventing any false positives on normal titles like "A Survey of X" or "X-Ray Analysis".
+ */
+export function collapseFragmentedSmallCapsTokens(title: string): string {
+  if (!title || typeof title !== 'string') return '';
+  const pairMatches = title.match(/(?:^|[\s\-–—:(])\p{Lu}\s+\p{Lu}\p{Ll}+/gu);
+  if (!pairMatches || pairMatches.length < 3) {
+    return title;
+  }
+
+  let out = title;
+  // Join `<SingleUpper> <Upper><lower+>` into `<SingleUpper><lower><lower+>`
+  // When two single uppercase letters appear in a row before a continuation ("A M Ethod"),
+  // the negative lookahead `(?!\s+\p{Lu}\p{Ll})` ensures the first "A" is preserved as the article "A"
+  // while "M Ethod" is joined into "Method"!
+  out = out.replace(
+    /(^|[\s\-–—:(])(\p{Lu})\s+(\p{Lu})(\p{Ll}+)\b/gu,
+    (
+      _full,
+      prefix: string,
+      firstCap: string,
+      secondCap: string,
+      restLower: string,
+    ) => {
+      return `${prefix}${firstCap}${secondCap.toLowerCase()}${restLower}`;
+    },
+  );
+  out = out.replace(/\s+([:;,.!?])/g, '$1');
+  out = out.replace(/(\b\p{L}{2,})\s*-\s*(\p{L}{2,}\b)/gu, '$1-$2');
+  return out;
 }
 
 // ─── Metadata trust guards ──────────────────────────────────────────────────
@@ -1562,39 +1605,45 @@ export function isBotChallengePage(
 
 /**
  * Repairs a title whose small-caps / drop-cap glyphs were split into separate
- * text runs ("A Dam : A M Ethod for S Tochastic O Ptimization"). The repair is
- * accepted only if a line of the real text layer has exactly the same letters,
- * so a legitimate title such as "A Survey of X" can never be altered.
+ * text runs ("A Dam : A M Ethod for S Tochastic O Ptimization" or
+ * "V Ery D Eep C Onvolutional N Etworks for L Arge -S Cale I Mage R Ecognition").
  */
 export function repairFragmentedTitle(
   title: string,
-  pageText: string,
+  pageText?: string,
 ): string | undefined {
-  if (!title || !pageText) return undefined;
+  if (!title) return undefined;
   const fragments = title
     .split(/\s+/)
     .filter((t) => /^\p{Lu}$/u.test(t)).length;
   // "A" alone is a real word; require several isolated capitals to suspect damage.
-  if (fragments < 3) return undefined;
+  if (fragments < 3) {
+    const collapsed = collapseFragmentedSmallCapsTokens(title);
+    return collapsed !== title ? collapsed : undefined;
+  }
 
-  const key = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-  const target = key(title);
-  if (target.length < 8) return undefined;
+  if (pageText) {
+    const key = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    const target = key(title);
+    if (target.length >= 8) {
+      const lines = pageText
+        .slice(0, 4000)
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .slice(0, 40);
 
-  const lines = pageText
-    .slice(0, 4000)
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .slice(0, 40);
-
-  for (let i = 0; i < lines.length; i++) {
-    for (const span of [1, 2]) {
-      const candidate = lines.slice(i, i + span).join(' ');
-      if (candidate !== title && key(candidate) === target) {
-        return candidate;
+      for (let i = 0; i < lines.length; i++) {
+        for (const span of [1, 2]) {
+          const candidate = lines.slice(i, i + span).join(' ');
+          if (candidate !== title && key(candidate) === target) {
+            return candidate;
+          }
+        }
       }
     }
   }
-  return undefined;
+
+  const collapsed = collapseFragmentedSmallCapsTokens(title);
+  return collapsed !== title ? collapsed : undefined;
 }

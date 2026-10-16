@@ -22,6 +22,8 @@
 
 import { DocumentUpdaterService } from '@/modules/manuscripts/document-updater/document-updater.service';
 import { DocumentUpdaterController } from '@/modules/manuscripts/document-updater/document-updater.controller';
+import { DocumentUpdaterRepository } from '@/modules/manuscripts/document-updater/document-updater.repository';
+import { DocNotFoundError } from '@/modules/manuscripts/docstore/domain';
 import { QueueDocUpdateUseCase } from '@/modules/manuscripts/document-updater/core/use-cases/queue-doc-update.use-case';
 import { FlushProjectDocsUseCase } from '@/modules/manuscripts/document-updater/core/use-cases/flush-project-docs.use-case';
 import { FlushSingleDocUseCase } from '@/modules/manuscripts/document-updater/core/use-cases/flush-single-doc.use-case';
@@ -176,14 +178,48 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
       flushSingleDocUseCase,
     );
 
-    service = new DocumentUpdaterService(
-      queueUpdateUseCase,
-      flushProjectUseCase,
-      flushSingleDocUseCase,
-      getInFlightDocUseCase,
-      evictDocBufferUseCase,
-      inFlightStore,
+    const mockDocstore = {
+      getDoc: jest
+        .fn()
+        .mockImplementation(async (projId: string, dId: string) => {
+          const item = docstoreWriter.docs.get(`${projId}:${dId}`);
+          if (!item) {
+            throw new DocNotFoundError(dId);
+          }
+          return {
+            _id: dId,
+            lines: item.lines,
+            rev: item.rev,
+            version: item.version,
+          };
+        }),
+      updateDoc: jest
+        .fn()
+        .mockImplementation(async (projId: string, dId: string, opts: any) => {
+          const item = docstoreWriter.docs.get(`${projId}:${dId}`);
+          const nextRev = (item?.rev ?? 0) + 1;
+          docstoreWriter.docs.set(`${projId}:${dId}`, {
+            lines: opts.lines,
+            rev: nextRev,
+            version: nextRev,
+          });
+          return {
+            doc: {
+              _id: dId,
+              lines: opts.lines,
+              rev: nextRev,
+              version: nextRev,
+              hash: 'hash',
+            },
+          };
+        }),
+    };
+
+    const updaterRepo = new DocumentUpdaterRepository(
+      undefined,
+      mockDocstore as any,
     );
+    service = new DocumentUpdaterService(updaterRepo);
     service.onModuleInit();
 
     controller = new DocumentUpdaterController(service);

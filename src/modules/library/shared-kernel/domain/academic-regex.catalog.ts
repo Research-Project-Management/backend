@@ -5,6 +5,7 @@ import {
   cleanAbstractText,
   normalizeAcademicTitleCase,
 } from './bibliographic.domain';
+import { normalizeAcademicTags } from './tag.domain';
 
 export interface ExtractedRegexFields {
   doi?: string;
@@ -82,9 +83,9 @@ export class AcademicRegexCatalog {
   public static readonly ABSTRACT_BOUNDARY_PATTERN =
     /(?:^|\n)\s*(?:Abstract|ABSTRACT|Summary)[—:\-\s.]*\s*([\s\S]{30,3500}?)(?=(?:\n\s*(?:Index\s+Terms|Key\s*words|Keywords|1\.?\s+Introduction|I\.?\s+INTRODUCTION|Background))|$)/i;
 
-  /** Keywords / Index Terms */
+  /** Keywords / Index Terms (anchored to line start so mid-sentence "keywords" in prose is not matched) */
   public static readonly KEYWORDS_PATTERN =
-    /(?:Index\s+Terms|Keywords|Key\s*words)[—:\-\s]+([^\n\r]+)/i;
+    /(?:^|\n)\s*(?:Index\s+Terms|Keywords|Key\s*words)\s*[—:\-–]+\s*([^\n\r]+)/i;
 
   /**
    * Sanitizes candidate DOI by removing trailing punctuation and decoding URL encodings.
@@ -359,11 +360,12 @@ export class AcademicRegexCatalog {
     const keywordsMatch = boundedText.match(this.KEYWORDS_PATTERN);
     if (keywordsMatch && keywordsMatch[1]) {
       const rawTokens = keywordsMatch[1]
-        .split(/[,;•]/)
+        .split(/[,;•|]/)
         .map((k) => k.trim())
-        .filter((k) => k.length > 1 && !/^\d+$/.test(k));
-      if (rawTokens.length > 0) {
-        result.keywords = rawTokens;
+        .filter((k) => k.length > 1 && k.split(/\s+/).length <= 7);
+      const normalized = normalizeAcademicTags(rawTokens);
+      if (normalized.length > 0) {
+        result.keywords = normalized;
       }
     }
 

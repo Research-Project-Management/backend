@@ -31,7 +31,7 @@ import * as path from 'path';
 import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
 import { ManuscriptProjectBootstrapService } from '../services/manuscript-project-bootstrap.service';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LiveCollaborationPort } from '../core/ports/live-collaboration.port';
 
 export interface PageDocRanges {
@@ -59,7 +59,7 @@ export class PagesDocController {
     private readonly docstoreService: DocstoreService,
     private readonly prisma: PrismaService,
     private readonly projectBootstrapService: ManuscriptProjectBootstrapService,
-    @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
@@ -329,19 +329,19 @@ export class PagesDocController {
       : String(updatedLines);
 
     // Broadcast real-time content notification to collaborating peers
-    if (this.realtimeService && record.projectId) {
+    if (this.eventEmitter && record.projectId) {
       try {
-        this.realtimeService.broadcastEvent(
-          record.projectId,
-          'doc:content-updated',
-          {
+        this.eventEmitter.emit('manuscripts.project.event', {
+          projectId: record.projectId,
+          event: 'doc:content-updated',
+          payload: {
             docId: pageId,
             version: result.doc.version,
             rev: result.doc.rev,
             content,
             updatedAt: new Date().toISOString(),
           },
-        );
+        });
       } catch {
         // Non-blocking real-time broadcast error ignored
       }
@@ -947,9 +947,12 @@ export class PagesDocController {
         });
       }
 
-      this.realtimeService?.broadcastFileTreeChange(doc.projectId, {
-        action: 'create',
-        node: existingNode,
+      this.eventEmitter?.emit('manuscripts.file-tree.change', {
+        projectId: doc.projectId,
+        change: {
+          action: 'create',
+          node: existingNode,
+        },
       });
 
       const lines = doc.lines || [];
@@ -993,9 +996,12 @@ export class PagesDocController {
         });
       }
 
-      this.realtimeService?.broadcastFileTreeChange(file.projectId, {
-        action: 'create',
-        node: existingNode,
+      this.eventEmitter?.emit('manuscripts.file-tree.change', {
+        projectId: file.projectId,
+        change: {
+          action: 'create',
+          node: existingNode,
+        },
       });
 
       return {
@@ -1084,10 +1090,13 @@ export class PagesDocController {
         },
       });
 
-      if (this.realtimeService) {
-        this.realtimeService.broadcastFileTreeChange(source.projectId, {
-          action: 'create',
-          node: { id: newDoc.id, path: newTitle, docId: newDoc.id },
+      if (this.eventEmitter) {
+        this.eventEmitter.emit('manuscripts.file-tree.change', {
+          projectId: source.projectId,
+          change: {
+            action: 'create',
+            node: { id: newDoc.id, path: newTitle, docId: newDoc.id },
+          },
         });
       }
     }

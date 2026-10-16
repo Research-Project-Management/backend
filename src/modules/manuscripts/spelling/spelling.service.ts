@@ -4,13 +4,7 @@
  * Executes directly via SpellingRepository and pure domain AcademicSpellEngine.
  */
 
-import {
-  Injectable,
-  Logger,
-  Optional,
-  Inject,
-  forwardRef,
-} from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { CheckSpellingUseCase } from './core/use-cases/check-spelling.use-case';
 import { GetSuggestionsUseCase } from './core/use-cases/get-suggestions.use-case';
 import { LearnWordUseCase } from './core/use-cases/learn-word.use-case';
@@ -43,7 +37,6 @@ export class SpellingService {
     @Optional()
     private readonly listCustomWordsUseCase?: ListCustomWordsUseCase,
     @Optional()
-    @Inject(forwardRef(() => DocstoreService))
     private readonly docstoreService?: DocstoreService,
     @Optional() private readonly repository?: SpellingRepository,
   ) {}

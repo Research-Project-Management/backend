@@ -2,8 +2,6 @@ import {
   Injectable,
   Logger,
   Optional,
-  forwardRef,
-  Inject,
   InternalServerErrorException,
 } from '@nestjs/common';
 import {
@@ -22,10 +20,8 @@ export class ManuscriptInstantiatorAdapter implements IProjectInstantiatorPort {
   constructor(
     private readonly prisma: PrismaService,
     @Optional()
-    @Inject(forwardRef(() => StructureService))
     private readonly structureService?: StructureService,
     @Optional()
-    @Inject(forwardRef(() => DocstoreService))
     private readonly docstoreService?: DocstoreService,
   ) {}
 

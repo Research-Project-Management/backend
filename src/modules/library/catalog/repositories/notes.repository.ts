@@ -4,6 +4,7 @@ import { Prisma, Annotation } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
 import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+import { buildTipTapDocFromText } from '@/modules/library/shared-kernel/domain/tiptap.domain';
 import {
   CreateNoteData,
   UpdateNoteData,
@@ -84,6 +85,7 @@ export class NotesRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
+    const contentMd = data.contentMd ?? '';
     return client.note.create({
       data: {
         userId,
@@ -93,8 +95,8 @@ export class NotesRepository {
         contentJson:
           data.contentJson !== undefined && data.contentJson !== null
             ? (data.contentJson as Prisma.InputJsonValue)
-            : Prisma.DbNull,
-        contentMd: data.contentMd ?? '',
+            : (buildTipTapDocFromText(contentMd) as Prisma.InputJsonValue),
+        contentMd,
         tags: data.tags ? normalizeTags(data.tags) : [],
         createdById: data.createdById || userId,
         version: 1,
@@ -182,7 +184,11 @@ export class NotesRepository {
               ? data.contentJson !== null
                 ? (data.contentJson as Prisma.InputJsonValue)
                 : Prisma.DbNull
-              : undefined,
+              : data.contentMd !== undefined
+                ? (buildTipTapDocFromText(
+                    data.contentMd,
+                  ) as Prisma.InputJsonValue)
+                : undefined,
           contentMd:
             data.contentMd !== undefined ? data.contentMd : existing.contentMd,
           tags:
@@ -200,7 +206,11 @@ export class NotesRepository {
             ? data.contentJson !== null
               ? (data.contentJson as Prisma.InputJsonValue)
               : Prisma.DbNull
-            : undefined,
+            : data.contentMd !== undefined
+              ? (buildTipTapDocFromText(
+                  data.contentMd,
+                ) as Prisma.InputJsonValue)
+              : undefined,
         contentMd:
           data.contentMd !== undefined ? data.contentMd : existing.contentMd,
         tags:

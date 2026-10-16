@@ -9,13 +9,7 @@
  * - BibTeX AST parsing & formatting
  */
 
-import {
-  Injectable,
-  Logger,
-  Optional,
-  Inject,
-  forwardRef,
-} from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
@@ -57,10 +51,8 @@ export class CitationsRepository
 
   constructor(
     @Optional()
-    @Inject(forwardRef(() => StructureService))
     private readonly structureService?: StructureService,
     @Optional()
-    @Inject(forwardRef(() => DocstoreService))
     private readonly docstoreService?: DocstoreService,
     @Optional()
     private readonly prisma?: PrismaService,

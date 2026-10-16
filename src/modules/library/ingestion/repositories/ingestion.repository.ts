@@ -509,7 +509,25 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase> {
     const client = this.getClient(tx);
-    const { userId, projectId } = parseRunScope(scope, data.assignedToId);
+    let fallbackUserId = data.assignedToId || data.assignedToUserId;
+    if (
+      !fallbackUserId &&
+      (!scope ||
+        scope === 'user' ||
+        scope === 'me' ||
+        (typeof scope === 'object' && !scope.userId))
+    ) {
+      const existingRun = await client.ingestionRun
+        .findUnique({
+          where: { id: ingestionRunId },
+          select: { userId: true },
+        })
+        .catch(() => null);
+      if (existingRun?.userId) {
+        fallbackUserId = existingRun.userId;
+      }
+    }
+    const { userId, projectId } = parseRunScope(scope, fallbackUserId);
     const reviewCase: IngestionReviewCase = {
       id: randomUUID(),
       userId: userId !== 'system' ? userId : null,

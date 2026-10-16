@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { mapCslTypeToZoteroItemType } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
 
 export interface ParsedCslEntry {
   title: string;
@@ -182,6 +183,26 @@ export class CslParser {
         (csl['archive_location'] as string)?.trim() || undefined;
       const libraryCatalog = (csl.source as string)?.trim() || undefined;
       const note = (csl.note as string)?.trim() || undefined;
+      const annote = (csl.annote as string)?.trim() || undefined;
+      const parsedNotes: string[] = [];
+      if (annote) parsedNotes.push(annote);
+      if (Array.isArray(csl.notes)) {
+        for (const n of csl.notes) {
+          const text =
+            typeof n === 'string'
+              ? n.trim()
+              : n && typeof n === 'object'
+                ? String(
+                    (n as { content?: unknown; note?: unknown }).content ??
+                      (n as { note?: unknown }).note ??
+                      '',
+                  ).trim()
+                : '';
+          if (text && !parsedNotes.includes(text)) {
+            parsedNotes.push(text);
+          }
+        }
+      }
 
       let pmid =
         ((csl.PMID || csl.pmid) as string | number | undefined) != null
@@ -194,6 +215,7 @@ export class CslParser {
           (csl.arxivId || csl.arXiv || csl.eprint) as string | undefined
         )?.trim() || undefined;
 
+      let cleanedExtraNote = note;
       if (note) {
         if (!pmid) {
           const m = note.match(/\bPMID\s*:\s*(\d{4,10})\b/i);
@@ -209,6 +231,19 @@ export class CslParser {
           const m = note.match(/\barXiv\s*:\s*([^\s,;]+)/i);
           if (m) arxivId = m[1];
         }
+        // Strip standalone identifier lines that were promoted to canonical fields
+        const remainingLines = note
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(
+            (l) =>
+              Boolean(l) &&
+              !/^(?:PMID\s*:\s*\d{4,10}|PMCID\s*:\s*PMC\d+|arXiv\s*:\s*[^\s,;]+(?:\s*\[[^\]]+\])?)$/i.test(
+                l,
+              ),
+          );
+        cleanedExtraNote =
+          remainingLines.length > 0 ? remainingLines.join('\n') : undefined;
       }
 
       const university = itemType === 'thesis' ? publisher : undefined;
@@ -317,9 +352,10 @@ export class CslParser {
         citationKey: ((csl.id || csl['citation-key']) as string) || undefined,
         tags: keywords,
         keywords,
+        notes: parsedNotes.length > 0 ? parsedNotes : undefined,
         language: csl.language ? String(csl.language).trim() : undefined,
         rights: csl.rights ? String(csl.rights).trim() : undefined,
-        extra: note,
+        extra: cleanedExtraNote,
         extraFields:
           Object.keys(extraFields).length > 0 ? extraFields : undefined,
       });
@@ -420,14 +456,17 @@ export class CslParser {
 
   private extractKeywords(raw: unknown): string[] | undefined {
     if (Array.isArray(raw)) {
-      const list = raw.map((k) => String(k).trim()).filter(Boolean);
+      const list = normalizeAcademicTags(
+        raw.map((k) =>
+          typeof k === 'string' || typeof k === 'object'
+            ? (k as string)
+            : String(k),
+        ),
+      );
       return list.length > 0 ? list : undefined;
     }
     if (typeof raw === 'string' && raw.trim()) {
-      const list = raw
-        .split(/[,;\n]/)
-        .map((k) => k.trim())
-        .filter(Boolean);
+      const list = normalizeAcademicTags([raw]);
       return list.length > 0 ? list : undefined;
     }
     return undefined;

@@ -4,11 +4,11 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { IRealtimeNotifierPort } from '@/modules/manuscripts/track-changes/core/ports/realtime-notifier.port';
 import { TrackChange } from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
 import { CommentThread } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-thread.entity';
 import { CommentReply } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-reply.entity';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
 import { PrismaService } from '@/core';
 
@@ -17,7 +17,7 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
   private readonly logger = new Logger(RealtimeNotifierAdapter.name);
 
   constructor(
-    @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly notificationsService?: NotificationsService,
     @Optional() private readonly prisma?: PrismaService,
   ) {
@@ -101,13 +101,21 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     return { collaboratorMap, projectName, actorName };
   }
 
+  private emitEvent(projectId: string, eventName: string, data: unknown): void {
+    if (!this.eventEmitter) return;
+    this.eventEmitter.emit('manuscripts.track-changes.event', {
+      projectId,
+      eventName,
+      data,
+    });
+  }
+
   public notifyChangeRecorded(
     projectId: string,
     docId: string,
     change: TrackChange,
   ): void {
-    if (!this.realtimeService) return;
-    this.realtimeService.broadcastEvent(projectId, 'track-changes:recorded', {
+    this.emitEvent(projectId, 'track-changes:recorded', {
       docId,
       change: change.toJSON(),
     });
@@ -118,8 +126,7 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     docId: string,
     change: TrackChange,
   ): void {
-    if (!this.realtimeService) return;
-    this.realtimeService.broadcastEvent(projectId, 'track-changes:resolved', {
+    this.emitEvent(projectId, 'track-changes:resolved', {
       docId,
       change: change.toJSON(),
     });
@@ -130,12 +137,10 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     docId: string,
     thread: CommentThread,
   ): void {
-    if (this.realtimeService) {
-      this.realtimeService.broadcastEvent(projectId, 'comment:created', {
-        docId,
-        thread: thread.toJSON(),
-      });
-    }
+    this.emitEvent(projectId, 'comment:created', {
+      docId,
+      thread: thread.toJSON(),
+    });
 
     if (
       this.notificationsService &&
@@ -172,13 +177,11 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     reply: CommentReply,
     threadOwnerId?: string | null,
   ): void {
-    if (this.realtimeService) {
-      this.realtimeService.broadcastEvent(projectId, 'comment:replied', {
-        docId,
-        threadId,
-        reply: reply.toJSON(),
-      });
-    }
+    this.emitEvent(projectId, 'comment:replied', {
+      docId,
+      threadId,
+      reply: reply.toJSON(),
+    });
 
     if (this.notificationsService) {
       this.getCollaboratorContext(projectId, reply.createdById)
@@ -231,12 +234,10 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     docId: string,
     thread: CommentThread,
   ): void {
-    if (this.realtimeService) {
-      this.realtimeService.broadcastEvent(projectId, 'comment:resolved', {
-        docId,
-        thread: thread.toJSON(),
-      });
-    }
+    this.emitEvent(projectId, 'comment:resolved', {
+      docId,
+      thread: thread.toJSON(),
+    });
 
     if (this.notificationsService) {
       this.getCollaboratorContext(projectId, thread.resolvedById)

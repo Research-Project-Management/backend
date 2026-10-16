@@ -41,23 +41,7 @@ import { FilestoreService } from './filestore.service';
 ])
 @UseGuards(JwtAuthGuard)
 export class FilestoreController {
-  private readonly filestoreService: FilestoreService;
-
-  constructor(
-    serviceOrUploadUseCase: any,
-    @Optional() streamUseCase?: any,
-    @Optional() headUseCase?: any,
-    @Optional() deleteUseCase?: any,
-    @Optional() signedUrlUseCase?: any,
-    @Optional() filestoreService?: any,
-  ) {
-    this.filestoreService =
-      filestoreService instanceof FilestoreService
-        ? filestoreService
-        : serviceOrUploadUseCase instanceof FilestoreService
-          ? serviceOrUploadUseCase
-          : (filestoreService ?? serviceOrUploadUseCase);
-  }
+  constructor(private readonly filestoreService: FilestoreService) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)

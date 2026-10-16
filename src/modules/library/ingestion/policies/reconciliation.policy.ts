@@ -137,25 +137,51 @@ export class ReconciliationPolicy {
       }
 
       if (field === 'notes') {
-        const mergedNotes: Array<{ content: string; source?: string }> = [];
+        const mergedNotes: Array<{
+          content: string;
+          title?: string;
+          source?: string;
+          tags?: string[];
+        }> = [];
         const seen = new Set<string>();
         for (const ev of evidences) {
           if (Array.isArray(ev.normalizedValue)) {
             for (const n of ev.normalizedValue) {
+              const noteObj =
+                n && typeof n === 'object'
+                  ? (n as Record<string, unknown>)
+                  : null;
               const text =
                 typeof n === 'string'
                   ? n.trim()
-                  : n && typeof n === 'object'
-                    ? String((n as { content?: unknown }).content || '').trim()
+                  : noteObj
+                    ? String(
+                        noteObj.content ??
+                          noteObj.contentMd ??
+                          noteObj.note ??
+                          '',
+                      ).trim()
                     : '';
-              if (text && !seen.has(text)) {
-                seen.add(text);
+              const dedupeKey = text.toLowerCase();
+              if (text && !seen.has(dedupeKey)) {
+                seen.add(dedupeKey);
                 mergedNotes.push(
                   typeof n === 'string'
                     ? { content: text }
                     : {
                         content: text,
-                        source: (n as { source?: string }).source,
+                        ...(typeof noteObj?.title === 'string' &&
+                        noteObj.title.trim()
+                          ? { title: noteObj.title.trim() }
+                          : {}),
+                        ...(typeof noteObj?.source === 'string' &&
+                        noteObj.source.trim()
+                          ? { source: noteObj.source.trim() }
+                          : {}),
+                        ...(Array.isArray(noteObj?.tags) &&
+                        noteObj.tags.length > 0
+                          ? { tags: noteObj.tags as string[] }
+                          : {}),
                       },
                 );
               }

@@ -3,7 +3,7 @@
  * NestJS Module for Manuscript Project File Tree & Hierarchy Subsystem (Adaptive Modular Monolith).
  */
 
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
 import { StructureController } from './structure.controller';
@@ -16,7 +16,7 @@ import { ITreePublisher } from './core/ports/tree-publisher.port';
 import { InMemoryTreePublisher } from './core/adapters/event/in-memory-tree.publisher';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => FilestoreModule)],
+  imports: [PrismaModule, FilestoreModule],
   controllers: [StructureController],
   providers: [
     StructureService,

@@ -1,6 +1,9 @@
 import { Prisma, LinkMode, AttachmentType, TagType } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+import {
+  normalizeTags,
+  cleanSingleTag,
+} from '@/modules/library/shared-kernel/domain/tag.domain';
 import { buildTipTapDocFromText } from '@/modules/library/shared-kernel/domain/tiptap.domain';
 export { buildTipTapDocFromText };
 import { TagInput } from '@/modules/library/catalog/types/tags.types';
@@ -181,6 +184,7 @@ const INTERNAL_EXTRA_IGNORED_FIELDS = new Set([
   'comments',
   'notes',
   'provenance',
+  'fieldProvenance',
   'tags',
   'keywords',
   'creators',
@@ -188,38 +192,24 @@ const INTERNAL_EXTRA_IGNORED_FIELDS = new Set([
   'repository',
   'archiveId',
   'primaryCategory',
+  'categories',
+  'journalRef',
   'openAccessPdfUrl',
   'confidenceScore',
   'originProvider',
+  'source',
+  'warnings',
+  'disambiguationWarning',
+  'rejectedCitedDoi',
+  'wafKind',
+  'promptUploadPdf',
 ]);
 
 export function packExtraPayload(
   rawExtra: string | null | undefined,
-  extraFields: Record<string, unknown> | null | undefined,
+  _extraFields?: Record<string, unknown> | null,
 ): string {
   const { cleanExtra } = unpackExtraFromDb(rawExtra);
-  const fields = { ...(extraFields || {}) };
-  delete fields._rawExtra;
-
-  const cleanedFields: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(fields)) {
-    if (
-      v !== undefined &&
-      v !== null &&
-      v !== '' &&
-      !ITEM_COLUMN_METADATA_FIELDS.has(k) &&
-      !INTERNAL_EXTRA_IGNORED_FIELDS.has(k)
-    ) {
-      cleanedFields[k] = v;
-    }
-  }
-
-  if (Object.keys(cleanedFields).length > 0) {
-    return JSON.stringify({
-      ...cleanedFields,
-      ...(cleanExtra ? { _rawExtra: cleanExtra } : {}),
-    });
-  }
   return cleanExtra;
 }
 
@@ -283,6 +273,7 @@ const IGNORED_SYSTEM_KEYS = new Set([
   'updatedAt',
   'deletedAt',
   'version',
+  '_version',
   'expectedVersion',
   'isDeleted',
   'silent',
@@ -293,6 +284,7 @@ const IGNORED_SYSTEM_KEYS = new Set([
   'tags',
   'labels',
   'itemTags',
+  'zoteroTags',
   'keywords',
   'keywordsList',
   'attachments',
@@ -314,6 +306,18 @@ const IGNORED_SYSTEM_KEYS = new Set([
   'fileUrl',
   'size',
   'mimeType',
+  'hasFile',
+  'attachmentCount',
+  'noteCount',
+  'firstAuthor',
+  'outgoingRel',
+  'incomingRel',
+  'relations',
+  'seeAlso',
+  'identifiers',
+  'ingestionRuns',
+  'itemMetadata',
+  'publications',
   'crossrefEnriched',
   'ragDocId',
   'ragIndexedAt',
@@ -322,12 +326,18 @@ const IGNORED_SYSTEM_KEYS = new Set([
   'ragError',
   'ragStatus',
   'isRetracted',
+  'retraction',
+  'retractionStatus',
+  'retractionDate',
   'retractionNature',
+  'retractionReasons',
+  'retractionNoticeDoi',
   'retractionDetails',
   'retractionCheckedAt',
   'isMyPublication',
   'publicationConfirmedAt',
   'ingestionStatus',
+  'extractionStatus',
   'verificationScore',
   'isVerified',
   'matchedSignals',
@@ -336,6 +346,23 @@ const IGNORED_SYSTEM_KEYS = new Set([
   'qualityScore',
   'engineUsed',
   'provenance',
+  'fieldProvenance',
+  'sourceProvider',
+  'source',
+  'sources',
+  'confidenceScore',
+  'originProvider',
+  'canonicalId',
+  'canonicalUrl',
+  'resolvedAt',
+  'warnings',
+  'disambiguationWarning',
+  'rejectedCitedDoi',
+  'wafKind',
+  'promptUploadPdf',
+  'dismissedDuplicateIds',
+  'mergedCitationKeys',
+  'mergedFromIds',
 ]);
 
 export function extractNonColumnExtraFields(
@@ -662,18 +689,26 @@ function buildTagTypeMap(
       if (!tagName) continue;
       const typeVal =
         'type' in rt ? (rt as { type?: unknown }).type : undefined;
+      let resolvedType: TagType | undefined;
       if (
         typeVal === 1 ||
         typeVal === 'automatic' ||
         typeVal === TagType.automatic
       ) {
-        tagTypeMap.set(tagName.toLowerCase(), TagType.automatic);
+        resolvedType = TagType.automatic;
       } else if (
         typeVal === 0 ||
         typeVal === 'manual' ||
         typeVal === TagType.manual
       ) {
-        tagTypeMap.set(tagName.toLowerCase(), TagType.manual);
+        resolvedType = TagType.manual;
+      }
+      if (resolvedType) {
+        tagTypeMap.set(tagName.toLowerCase(), resolvedType);
+        const normalized = cleanSingleTag(tagName);
+        if (normalized) {
+          tagTypeMap.set(normalized.toLowerCase(), resolvedType);
+        }
       }
     }
   }

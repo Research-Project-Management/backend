@@ -15,35 +15,45 @@ import { StorageObjectMetadata } from './core/ports/binary-storage.port';
 import { StreamManuscriptFileOutput } from './core/use-cases/stream-manuscript-file.use-case';
 import { GetFileHeadOutput } from './core/use-cases/get-manuscript-file-head.use-case';
 
+export interface IFilestoreServiceRepository {
+  findByProjectAndId(
+    projectId: string,
+    id: string,
+  ): Promise<ManuscriptFile | null>;
+  findByProjectAndName(
+    projectId: string,
+    name: string,
+  ): Promise<ManuscriptFile | null>;
+  listByProject(
+    projectId: string,
+    includeDeleted?: boolean,
+  ): Promise<ManuscriptFile[]>;
+  save(file: ManuscriptFile): Promise<ManuscriptFile>;
+  countReferencesByHash(hash: string): Promise<number>;
+  hashStream(stream: Readable): Promise<any>;
+  buildStorageKey(hash: any, prefix?: string): any;
+  checkObjectExists(bucket: string, key: string): Promise<boolean>;
+  sendStream(
+    bucket: string,
+    key: string,
+    stream: Readable,
+    options?: any,
+  ): Promise<void>;
+  getObjectStream(bucket: string, key: string, range?: any): Promise<Readable>;
+  getObjectMetadata?(bucket: string, key: string): Promise<any>;
+  deleteObject(bucket: string, key: string): Promise<void>;
+  getSignedDownloadUrl(
+    bucket: string,
+    key: string,
+    expiresInSeconds: number,
+  ): Promise<string | null>;
+}
+
 @Injectable()
 export class FilestoreService {
   private readonly logger = new Logger(FilestoreService.name);
-  private readonly repository!: FilestoreRepository;
-  private readonly uploadUseCase?: any;
-  private readonly streamUseCase?: any;
-  private readonly headUseCase?: any;
-  private readonly deleteUseCase?: any;
-  private readonly signedUrlUseCase?: any;
 
-  constructor(
-    repoOrUploadUseCase: any,
-    @Optional() streamUseCase?: any,
-    @Optional() headUseCase?: any,
-    @Optional() deleteUseCase?: any,
-    @Optional() signedUrlUseCase?: any,
-    @Optional() legacyRepo?: any,
-  ) {
-    if (repoOrUploadUseCase instanceof FilestoreRepository) {
-      this.repository = repoOrUploadUseCase;
-    } else {
-      this.uploadUseCase = repoOrUploadUseCase;
-      this.streamUseCase = streamUseCase;
-      this.headUseCase = headUseCase;
-      this.deleteUseCase = deleteUseCase;
-      this.signedUrlUseCase = signedUrlUseCase;
-      this.repository = legacyRepo;
-    }
-  }
+  constructor(private readonly repository: FilestoreRepository) {}
 
   /**
    * Directly opens a readable stream for a file without passing through HTTP.
@@ -68,17 +78,6 @@ export class FilestoreService {
     fileId: string,
     rangeHeader?: string,
   ): Promise<StreamManuscriptFileOutput> {
-    if (
-      this.streamUseCase &&
-      typeof this.streamUseCase.execute === 'function'
-    ) {
-      return await this.streamUseCase.execute({
-        projectId,
-        fileId,
-        rangeHeader,
-      });
-    }
-
     const file = await this.repository.findByProjectAndId(projectId, fileId);
     if (!file || file.deleted) {
       throw new FileNotFoundException(fileId, projectId);
@@ -130,20 +129,6 @@ export class FilestoreService {
     mimeType?: string,
     bucketName = 'manuscript-files',
   ): Promise<ManuscriptFile> {
-    if (
-      this.uploadUseCase &&
-      typeof this.uploadUseCase.execute === 'function'
-    ) {
-      const res = await this.uploadUseCase.execute({
-        projectId,
-        name,
-        stream,
-        mimeType,
-        bucketName,
-      });
-      return res && res.file ? res.file : res;
-    }
-
     const { contentHash, sizeBytes, dataStream } =
       await this.repository.hashStream(stream);
     const storageKey = this.repository.buildStorageKey(contentHash);
@@ -191,10 +176,6 @@ export class FilestoreService {
     projectId: string,
     fileId: string,
   ): Promise<GetFileHeadOutput> {
-    if (this.headUseCase && typeof this.headUseCase.execute === 'function') {
-      return await this.headUseCase.execute({ projectId, fileId });
-    }
-
     const file = await this.repository.findByProjectAndId(projectId, fileId);
     if (!file || file.deleted) {
       throw new FileNotFoundException(fileId, projectId);
@@ -202,7 +183,7 @@ export class FilestoreService {
 
     let storageMetadata: StorageObjectMetadata | undefined;
     try {
-      storageMetadata = await this.repository.getObjectMetadata(
+      storageMetadata = await this.repository.getObjectMetadata?.(
         file.bucketName,
         file.storageKey.getValue(),
       );
@@ -252,14 +233,6 @@ export class FilestoreService {
     fileId: string,
     purgeBlob = false,
   ): Promise<void> {
-    if (
-      this.deleteUseCase &&
-      typeof this.deleteUseCase.execute === 'function'
-    ) {
-      await this.deleteUseCase.execute({ projectId, fileId, purgeBlob });
-      return;
-    }
-
     const file = await this.repository.findByProjectAndId(projectId, fileId);
     if (!file || file.deleted) {
       throw new FileNotFoundException(fileId, projectId);
@@ -298,18 +271,6 @@ export class FilestoreService {
     fileId: string,
     expiresIn = 3600,
   ): Promise<string | null> {
-    if (
-      this.signedUrlUseCase &&
-      typeof this.signedUrlUseCase.execute === 'function'
-    ) {
-      const res = await this.signedUrlUseCase.execute({
-        projectId,
-        fileId,
-        expiresInSeconds: expiresIn,
-      });
-      return res.url;
-    }
-
     const file = await this.repository.findByProjectAndId(projectId, fileId);
     if (!file || file.deleted) {
       throw new FileNotFoundException(fileId, projectId);

@@ -221,4 +221,76 @@ describe('Library Academic Tag Sanitizer & Normalizer', () => {
       ]);
     });
   });
+
+  describe('8. AcademicRegexCatalog Keywords Boundary & ASJC Noise Filtering', () => {
+    it('should not extract mid-sentence "keywords" in prose as tags, and should extract line-anchored Keywords', async () => {
+      const { AcademicRegexCatalog } =
+        await import('@/modules/library/shared-kernel/domain/academic-regex.catalog');
+
+      const proseWithMidSentenceKeywords =
+        'Abstract: In this paper we study how search keywords in large database systems affect query latency.\n' +
+        'Keywords: Deep Learning, Convolutional Neural Networks, cs.CV, Multidisciplinary, General Medicine';
+
+      const scanned = AcademicRegexCatalog.scan(proseWithMidSentenceKeywords);
+      expect(scanned.keywords).toEqual([
+        'Deep Learning',
+        'Convolutional Neural Networks',
+        'Computer Science - Computer Vision and Pattern Recognition',
+      ]);
+    });
+  });
+
+  describe('9. CslParser & NormalizationPolicy Note / Extra Separation', () => {
+    it('should strip promoted PMID/PMCID/arXiv lines from CSL note and preserve annote as notes', async () => {
+      const { CslParser } =
+        await import('@/modules/library/ingestion/parsers/csl.parser');
+      const parser = new CslParser();
+      const parsed = parser.parse([
+        {
+          type: 'article-journal',
+          title: 'Very Deep Convolutional Networks',
+          note: 'PMID: 12345678\narXiv: 1409.1556 [cs.CV]\nOriginal Date: 2014',
+          annote:
+            '<p>First paragraph of Zotero note.</p><p>Second paragraph with <strong>bold</strong> text.</p>',
+          keyword: 'cs.CV; deep learning; null; multidisciplinary',
+        },
+      ]);
+
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].pmid).toBe('12345678');
+      expect(parsed[0].arxivId).toBe('1409.1556');
+      expect(parsed[0].extra).toBe('Original Date: 2014');
+      expect(parsed[0].notes).toEqual([
+        '<p>First paragraph of Zotero note.</p><p>Second paragraph with <strong>bold</strong> text.</p>',
+      ]);
+      expect(parsed[0].tags).toEqual([
+        'Computer Science - Computer Vision and Pattern Recognition',
+        'Deep Learning',
+      ]);
+    });
+
+    it('should preserve multi-paragraph structure and convert HTML to Markdown in NormalizationPolicy.normalize', async () => {
+      const { NormalizationPolicy } =
+        await import('@/modules/library/ingestion/policies/normalization.policy');
+      const policy = new NormalizationPolicy();
+      const normalized = policy.normalize({
+        title: 'Test Note Formatting',
+        notes: [
+          '<p>First paragraph of Zotero note.</p><p>Second paragraph with <strong>bold</strong> text.</p>',
+          { content: 'Comment: 14 pages, 6 figures', source: 'arXiv' },
+          { content: 'Comment: 14 pages, 6 figures', source: 'arXiv' },
+        ],
+      });
+
+      expect(normalized.notes).toHaveLength(2);
+      expect(normalized.notes?.[0]).toEqual({
+        content:
+          'First paragraph of Zotero note.\n\nSecond paragraph with **bold** text.',
+      });
+      expect(normalized.notes?.[1]).toEqual({
+        content: 'Comment: 14 pages, 6 figures',
+        source: 'arXiv',
+      });
+    });
+  });
 });

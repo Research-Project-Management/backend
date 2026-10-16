@@ -10,8 +10,6 @@ import {
   Injectable,
   Logger,
   Optional,
-  Inject,
-  forwardRef,
   InternalServerErrorException,
 } from '@nestjs/common';
 import { PrismaService } from '@/core';
@@ -54,10 +52,8 @@ export class TemplatesRepository
     @Optional()
     private readonly memoryFallback: InMemoryTemplateAdapter = new InMemoryTemplateAdapter(),
     @Optional()
-    @Inject(forwardRef(() => StructureService))
     private readonly structureService?: StructureService,
     @Optional()
-    @Inject(forwardRef(() => DocstoreService))
     private readonly docstoreService?: DocstoreService,
   ) {}
 

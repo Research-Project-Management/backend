@@ -16,62 +16,13 @@ import {
   CreateTemplateDto,
 } from './dto/template.dto';
 
-interface LegacyUseCaseLike {
-  execute: (...args: any[]) => Promise<any>;
-}
-
 @Injectable()
 export class TemplatesService {
   private readonly logger = new Logger(TemplatesService.name);
-  private readonly repository?: TemplatesRepository;
-  private readonly listUseCase?: LegacyUseCaseLike;
-  private readonly getByIdUseCase?: LegacyUseCaseLike;
-  private readonly searchUseCase?: LegacyUseCaseLike;
-  private readonly instantiateUseCase?: LegacyUseCaseLike;
-  private readonly createCustomUseCase?: LegacyUseCaseLike;
 
-  constructor(
-    repoOrListUseCase: TemplatesRepository | LegacyUseCaseLike,
-    @Optional() getByIdUseCase?: LegacyUseCaseLike,
-    @Optional() searchUseCase?: LegacyUseCaseLike,
-    @Optional() instantiateUseCase?: LegacyUseCaseLike,
-    @Optional() createCustomUseCase?: LegacyUseCaseLike,
-  ) {
-    if (
-      repoOrListUseCase &&
-      'execute' in repoOrListUseCase &&
-      typeof repoOrListUseCase.execute === 'function'
-    ) {
-      this.listUseCase = repoOrListUseCase;
-      this.getByIdUseCase = getByIdUseCase;
-      this.searchUseCase = searchUseCase;
-      this.instantiateUseCase = instantiateUseCase;
-      this.createCustomUseCase = createCustomUseCase;
-    } else {
-      this.repository = repoOrListUseCase as TemplatesRepository;
-    }
-  }
+  constructor(private readonly repository: TemplatesRepository) {}
 
   async listTemplates(dto?: QueryTemplatesDto) {
-    if (this.listUseCase) {
-      if (dto?.search && this.searchUseCase) {
-        return this.searchTemplates({
-          q: dto.search,
-          category: dto.category,
-          limit: dto.limit,
-          offset: dto.offset ?? dto.skip,
-        });
-      }
-      const result = await this.listUseCase.execute(dto);
-      const list = Array.isArray(result) ? result : result?.templates || [];
-      return {
-        templates: list.map((t: any) =>
-          typeof t.toPlainObject === 'function' ? t.toPlainObject() : t,
-        ),
-        total: result?.total ?? list.length,
-      };
-    }
-
     if (dto?.search) {
       return this.searchTemplates({
         q: dto.search,
@@ -81,7 +32,7 @@ export class TemplatesService {
       });
     }
 
-    const result = await this.repository!.findAll({
+    const result = await this.repository.findAll({
       category: dto?.category,
       isOfficial: dto?.isOfficial,
       tag: dto?.tag,
@@ -102,13 +53,9 @@ export class TemplatesService {
       throw new TemplateNotFoundException('empty-id');
     }
 
-    if (this.getByIdUseCase) {
-      return await this.getByIdUseCase.execute(idOrVersionId);
-    }
-
-    let template = await this.repository!.findById(idOrVersionId);
+    let template = await this.repository.findById(idOrVersionId);
     if (!template) {
-      template = await this.repository!.findByVersionId(idOrVersionId);
+      template = await this.repository.findByVersionId(idOrVersionId);
     }
 
     if (!template) {
@@ -126,23 +73,7 @@ export class TemplatesService {
   }
 
   async searchTemplates(dto: SearchTemplatesDto) {
-    if (this.searchUseCase) {
-      const result = await this.searchUseCase.execute({
-        query: dto.q,
-        category: dto.category,
-        limit: dto.limit,
-        offset: dto.offset,
-      });
-      const list = Array.isArray(result) ? result : result?.templates || [];
-      return {
-        templates: list.map((t: any) =>
-          typeof t.toPlainObject === 'function' ? t.toPlainObject() : t,
-        ),
-        total: result?.total ?? list.length,
-      };
-    }
-
-    const result = await this.repository!.search({
+    const result = await this.repository.search({
       query: dto.q,
       category: dto.category,
       limit: dto.limit,
@@ -160,25 +91,17 @@ export class TemplatesService {
       dto.templateId || dto.template_id || dto.templateVersionId || dto.id;
     const projectName = dto.projectName || dto.name;
 
-    if (this.instantiateUseCase) {
-      return await this.instantiateUseCase.execute({
-        templateIdOrVersionId: templateId,
-        projectName: projectName || 'Untitled',
-        userId,
-      });
-    }
-
     const template = await this.getTemplateEntity(templateId);
     const resolvedName = projectName || template.name;
 
-    const result = await this.repository!.instantiate({
+    const result = await this.repository.instantiate({
       template,
       projectName: resolvedName,
       userId,
     });
 
     // Increment download count in background without blocking project return
-    this.repository!.incrementDownloadCount(template.id).catch(() => {
+    this.repository.incrementDownloadCount(template.id).catch(() => {
       // ignore telemetry failure
     });
 
@@ -186,13 +109,6 @@ export class TemplatesService {
   }
 
   async createCustomTemplate(dto: CreateTemplateDto) {
-    if (this.createCustomUseCase) {
-      const created = await this.createCustomUseCase.execute(dto);
-      return typeof created.toPlainObject === 'function'
-        ? created.toPlainObject()
-        : created;
-    }
-
     if (!dto.name || !dto.name.trim()) {
       throw new InvalidTemplateException(
         'Template name is required and cannot be empty',
@@ -222,7 +138,7 @@ export class TemplatesService {
       isOfficial: false,
     });
 
-    const saved = await this.repository!.save(template);
+    const saved = await this.repository.save(template);
     return saved.toPlainObject();
   }
 }

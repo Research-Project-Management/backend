@@ -3,10 +3,9 @@
  * NestJS Module for Manuscripts Review Mode: Track Changes & Comments (Adaptive Modular Monolith).
  */
 
-import { forwardRef, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
-import { RealtimeModule } from '@/modules/realtime/realtime.module';
 
 import { TrackChangesController } from './track-changes.controller';
 import { TrackChangesService } from './track-changes.service';
@@ -22,7 +21,7 @@ import { DocstorePatcherAdapter } from './core/adapters/external/docstore-patche
 import { RealtimeNotifierAdapter } from './core/adapters/external/realtime-notifier.adapter';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => DocstoreModule), RealtimeModule],
+  imports: [PrismaModule, DocstoreModule],
   controllers: [TrackChangesController],
   providers: [
     TrackChangesService,

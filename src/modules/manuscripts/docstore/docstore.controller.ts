@@ -32,7 +32,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { DocstoreService } from './docstore.service';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateDocDto, UpdateDocDto, PatchDocDto } from './dto/doc.dto';
 import {
   DocNotFoundError,
@@ -56,7 +56,7 @@ import {
 export class DocstoreController {
   constructor(
     private readonly docstoreService: DocstoreService,
-    @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
   private handleError(error: unknown): never {
@@ -203,12 +203,12 @@ export class DocstoreController {
         docId,
         dto,
       );
-      if (this.realtimeService) {
+      if (this.eventEmitter) {
         try {
-          this.realtimeService.broadcastEvent(
+          this.eventEmitter.emit('manuscripts.project.event', {
             projectId,
-            'doc:content-updated',
-            {
+            event: 'doc:content-updated',
+            payload: {
               docId,
               rev: result.rev,
               lines: dto.lines,
@@ -217,7 +217,7 @@ export class DocstoreController {
                 : undefined,
               updatedAt: new Date().toISOString(),
             },
-          );
+          });
         } catch {
           // ignore non-blocking error
         }

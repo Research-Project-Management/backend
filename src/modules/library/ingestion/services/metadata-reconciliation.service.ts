@@ -405,11 +405,26 @@ export class ReconciliationService {
         const values = fieldVariants.flatMap((variant) =>
           Array.isArray(variant.val) ? variant.val : [],
         );
-        const unique = Array.from(
-          new Map(
-            values.map((value) => [JSON.stringify(value), value]),
-          ).values(),
-        );
+        const seen = new Set<string>();
+        const unique: unknown[] = [];
+        for (const value of values) {
+          const text =
+            typeof value === 'string'
+              ? value.trim()
+              : value && typeof value === 'object'
+                ? String(
+                    (value as Record<string, unknown>).content ??
+                      (value as Record<string, unknown>).contentMd ??
+                      (value as Record<string, unknown>).note ??
+                      '',
+                  ).trim()
+                : '';
+          const key = text ? text.toLowerCase() : JSON.stringify(value);
+          if (key && !seen.has(key)) {
+            seen.add(key);
+            unique.push(value);
+          }
+        }
         resolved.notes = unique as ItemMetadata['notes'];
         assertions.push({
           field,

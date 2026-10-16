@@ -5,6 +5,7 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import {
   BroadcastProjectEventUseCase,
   IRoomManagerPort,
@@ -140,5 +141,45 @@ export class RealtimeService {
     docId: string,
   ): Promise<UserPresenceVo[]> {
     return await this.roomManager.getDocSessions(projectId, docId);
+  }
+
+  /**
+   * Decoupled Event Listener: Manuscripts Track Changes & Comments
+   * Broadcasts review mode mutations to project rooms without domain-level module coupling.
+   */
+  @OnEvent('manuscripts.track-changes.event')
+  public handleTrackChangesEvent(payload: {
+    projectId: string;
+    eventName: string;
+    data: unknown;
+  }): void {
+    if (!payload?.projectId || !payload?.eventName) return;
+    this.broadcastEvent(payload.projectId, payload.eventName, payload.data);
+  }
+
+  /**
+   * Decoupled Event Listener: Manuscripts File Tree Changes
+   * Broadcasts file mutations (linked files, nodes) to project rooms.
+   */
+  @OnEvent('manuscripts.file-tree.change')
+  public handleFileTreeChangeEvent(payload: {
+    projectId: string;
+    change: { action: string; node: unknown };
+  }): void {
+    if (!payload?.projectId || !payload?.change) return;
+    this.broadcastFileTreeChange(payload.projectId, payload.change);
+  }
+
+  /**
+   * Decoupled Event Listener: Manuscripts Generic Project Event
+   */
+  @OnEvent('manuscripts.project.event')
+  public handleProjectEvent(payload: {
+    projectId: string;
+    event: string;
+    payload: unknown;
+  }): void {
+    if (!payload?.projectId || !payload?.event) return;
+    this.broadcastEvent(payload.projectId, payload.event, payload.payload);
   }
 }

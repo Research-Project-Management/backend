@@ -14,7 +14,7 @@ import { ModuleRef } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { DocstoreService } from '../docstore.service';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LiveCollaborationPort } from '../core/ports/live-collaboration.port';
 import { buildSearchRegex, replaceInText } from '../core/domain/text-replace';
 
@@ -48,7 +48,7 @@ export class ManuscriptSearchReplaceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly docstoreService: DocstoreService,
-    @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
@@ -266,17 +266,17 @@ export class ManuscriptSearchReplaceService {
         totalOccurrencesReplaced += count;
         affectedFileIds.push(doc.id);
 
-        if (this.realtimeService) {
+        if (this.eventEmitter) {
           try {
-            this.realtimeService.broadcastEvent(
+            this.eventEmitter.emit('manuscripts.project.event', {
               projectId,
-              'doc:content-updated',
-              {
+              event: 'doc:content-updated',
+              payload: {
                 docId: doc.id,
                 version: result.doc?.version,
                 content: newContent,
               },
-            );
+            });
           } catch {
             // non-blocking
           }

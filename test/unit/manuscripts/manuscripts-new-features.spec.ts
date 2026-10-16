@@ -218,18 +218,24 @@ describe('Manuscripts 4 Major Backend Capabilities (Overleaf Parity)', () => {
         mockRealtimeService,
       );
 
-      const listUseCase = new ListLinkedFilesUseCase(repo);
-      const deleteUseCase = new DeleteLinkedFileUseCase(
-        repo,
-        mockStructureService,
-      );
+      const mockEventEmitter = {
+        emit: jest.fn((event: string, payload: any) => {
+          if (event === 'manuscripts.file-tree.change') {
+            mockRealtimeService.broadcastFileTreeChange(
+              payload.projectId,
+              payload.change,
+            );
+          }
+        }),
+      };
 
       service = new LinkedFilesService(
-        createUseCase,
-        refreshUseCase,
-        listUseCase,
-        deleteUseCase,
         repo,
+        mockStructureService,
+        mockDocstoreService,
+        mockFilestoreService,
+        mockCitationsService,
+        mockEventEmitter as any,
       );
     });
 

@@ -34,7 +34,7 @@ import {
   applySuggestionToLines,
   applyBatchSuggestionsToLines,
 } from '../domain/text-suggestion-mutator';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LiveCollaborationPort } from '../core/ports/live-collaboration.port';
 
 export interface CreateSuggestionBody {
@@ -66,9 +66,26 @@ export class PagesReviewController {
     private readonly prisma: PrismaService,
     private readonly userResolver: ManuscriptUserResolverService,
     @Optional() private readonly textMutator?: ManuscriptTextMutatorService,
-    @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
+
+  private broadcastEvent(
+    projectId: string | null | undefined,
+    event: string,
+    payload: unknown,
+  ): void {
+    if (!projectId || !this.eventEmitter) return;
+    try {
+      this.eventEmitter.emit('manuscripts.project.event', {
+        projectId,
+        event,
+        payload,
+      });
+    } catch {
+      // Non-blocking real-time broadcast error ignored
+    }
+  }
 
   private getLiveCollaboration(): LiveCollaborationPort | null {
     if (this.liveCollab !== undefined) return this.liveCollab;
@@ -275,9 +292,9 @@ export class PagesReviewController {
       updatedAt: thread.updatedAt.toISOString(),
     };
 
-    if (this.realtimeService && projectId) {
+    if (this.eventEmitter && projectId) {
       try {
-        this.realtimeService.broadcastEvent(projectId, 'comment:created', {
+        this.broadcastEvent(projectId, 'comment:created', {
           docId: targetDocId,
           comment: commentPayload,
         });
@@ -356,16 +373,12 @@ export class PagesReviewController {
         updatedAt: updated.updatedAt.toISOString(),
       };
 
-      if (this.realtimeService && updated.projectId) {
+      if (this.eventEmitter && updated.projectId) {
         try {
-          this.realtimeService.broadcastEvent(
-            updated.projectId,
-            'comment:updated',
-            {
-              docId: updated.docId,
-              comment: commentPayload,
-            },
-          );
+          this.broadcastEvent(updated.projectId, 'comment:updated', {
+            docId: updated.docId,
+            comment: commentPayload,
+          });
         } catch {
           // ignore non-blocking error
         }
@@ -396,16 +409,12 @@ export class PagesReviewController {
         .delete({ where: { id: commentId } })
         .catch(() => null);
 
-      if (this.realtimeService && existing?.projectId) {
+      if (this.eventEmitter && existing?.projectId) {
         try {
-          this.realtimeService.broadcastEvent(
-            existing.projectId,
-            'comment:deleted',
-            {
-              docId: existing.docId,
-              commentId,
-            },
-          );
+          this.broadcastEvent(existing.projectId, 'comment:deleted', {
+            docId: existing.docId,
+            commentId,
+          });
         } catch {
           // ignore non-blocking error
         }
@@ -492,27 +501,19 @@ export class PagesReviewController {
         updatedAt: thread.updatedAt.toISOString(),
       };
 
-      if (this.realtimeService && thread.projectId) {
+      if (this.eventEmitter && thread.projectId) {
         try {
-          this.realtimeService.broadcastEvent(
-            thread.projectId,
-            'comment:replied',
-            {
-              docId: thread.docId,
-              threadId: thread.id,
-              commentId: thread.id,
-              comment: commentPayload,
-            },
-          );
-          this.realtimeService.broadcastEvent(
-            thread.projectId,
-            'comment:reply-added',
-            {
-              docId: thread.docId,
-              commentId: thread.id,
-              comment: commentPayload,
-            },
-          );
+          this.broadcastEvent(thread.projectId, 'comment:replied', {
+            docId: thread.docId,
+            threadId: thread.id,
+            commentId: thread.id,
+            comment: commentPayload,
+          });
+          this.broadcastEvent(thread.projectId, 'comment:reply-added', {
+            docId: thread.docId,
+            commentId: thread.id,
+            comment: commentPayload,
+          });
         } catch {
           // ignore non-blocking error
         }
@@ -556,9 +557,9 @@ export class PagesReviewController {
         .delete({ where: { id: replyId } })
         .catch(() => null);
 
-      if (this.realtimeService && existingReply?.thread?.projectId) {
+      if (this.eventEmitter && existingReply?.thread?.projectId) {
         try {
-          this.realtimeService.broadcastEvent(
+          this.broadcastEvent(
             existingReply.thread.projectId,
             'comment:reply-deleted',
             {
@@ -689,18 +690,14 @@ export class PagesReviewController {
         updatedAt: thread.updatedAt.toISOString(),
       };
 
-      if (this.realtimeService && thread.projectId) {
+      if (this.eventEmitter && thread.projectId) {
         try {
-          this.realtimeService.broadcastEvent(
-            thread.projectId,
-            'comment:resolved',
-            {
-              docId: thread.docId,
-              commentId: thread.id,
-              resolved: isResolved,
-              comment: commentPayload,
-            },
-          );
+          this.broadcastEvent(thread.projectId, 'comment:resolved', {
+            docId: thread.docId,
+            commentId: thread.id,
+            resolved: isResolved,
+            comment: commentPayload,
+          });
         } catch {
           // ignore non-blocking error
         }
@@ -872,24 +869,16 @@ export class PagesReviewController {
       updatedAt: record.updatedAt.toISOString(),
     };
 
-    if (this.realtimeService && projectId) {
+    if (this.eventEmitter && projectId) {
       try {
-        this.realtimeService.broadcastEvent(
-          projectId,
-          'track-changes:recorded',
-          {
-            docId: targetDocId,
-            suggestion: suggestionPayload,
-          },
-        );
-        this.realtimeService.broadcastEvent(
-          projectId,
-          'track-changes:created',
-          {
-            docId: targetDocId,
-            suggestion: suggestionPayload,
-          },
-        );
+        this.broadcastEvent(projectId, 'track-changes:recorded', {
+          docId: targetDocId,
+          suggestion: suggestionPayload,
+        });
+        this.broadcastEvent(projectId, 'track-changes:created', {
+          docId: targetDocId,
+          suggestion: suggestionPayload,
+        });
       } catch {
         // ignore non-blocking error
       }
@@ -952,16 +941,12 @@ export class PagesReviewController {
                 await this.syncLiveDoc(doc.projectId, record.docId, lines);
               }
 
-              if (this.realtimeService && doc.projectId) {
-                this.realtimeService.broadcastEvent(
-                  doc.projectId,
-                  'track-changes:resolved',
-                  {
-                    docId: record.docId,
-                    change: record,
-                    action: 'accepted',
-                  },
-                );
+              if (this.eventEmitter && doc.projectId) {
+                this.broadcastEvent(doc.projectId, 'track-changes:resolved', {
+                  docId: record.docId,
+                  change: record,
+                  action: 'accepted',
+                });
               }
             }
           } catch (patchErr) {
@@ -999,21 +984,17 @@ export class PagesReviewController {
           data: { status: 'rejected', resolvedAt: new Date() },
         });
 
-        if (this.realtimeService && record && record.docId) {
+        if (this.eventEmitter && record && record.docId) {
           const doc = await this.prisma.manuscriptDoc.findUnique({
             where: { id: record.docId },
             select: { projectId: true },
           });
           if (doc?.projectId) {
-            this.realtimeService.broadcastEvent(
-              doc.projectId,
-              'track-changes:resolved',
-              {
-                docId: record.docId,
-                change: record,
-                action: 'rejected',
-              },
-            );
+            this.broadcastEvent(doc.projectId, 'track-changes:resolved', {
+              docId: record.docId,
+              change: record,
+              action: 'rejected',
+            });
           }
         }
 
@@ -1091,17 +1072,13 @@ export class PagesReviewController {
           });
           acceptedCount = res.count;
 
-          if (this.realtimeService && acceptedCount > 0 && doc?.projectId) {
-            this.realtimeService.broadcastEvent(
-              doc.projectId,
-              'track-changes:resolved',
-              {
-                docId: pageId,
-                bulk: true,
-                action: 'accept-all',
-                count: acceptedCount,
-              },
-            );
+          if (this.eventEmitter && acceptedCount > 0 && doc?.projectId) {
+            this.broadcastEvent(doc.projectId, 'track-changes:resolved', {
+              docId: pageId,
+              bulk: true,
+              action: 'accept-all',
+              count: acceptedCount,
+            });
           }
         }
       } catch {
@@ -1144,22 +1121,18 @@ export class PagesReviewController {
         });
         rejectedCount = res.count;
 
-        if (this.realtimeService && rejectedCount > 0) {
+        if (this.eventEmitter && rejectedCount > 0) {
           const doc = await this.prisma.manuscriptDoc.findUnique({
             where: { id: pageId },
             select: { projectId: true },
           });
           if (doc?.projectId) {
-            this.realtimeService.broadcastEvent(
-              doc.projectId,
-              'track-changes:resolved',
-              {
-                docId: pageId,
-                bulk: true,
-                action: 'reject-all',
-                count: rejectedCount,
-              },
-            );
+            this.broadcastEvent(doc.projectId, 'track-changes:resolved', {
+              docId: pageId,
+              bulk: true,
+              action: 'reject-all',
+              count: rejectedCount,
+            });
           }
         }
       } catch {

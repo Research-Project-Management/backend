@@ -127,6 +127,54 @@ class InMemoryManuscriptFileRepository implements IManuscriptFileRepository {
   }
 }
 
+class TestFilestoreRepository implements IFilestoreServiceRepository {
+  constructor(
+    private readonly repo: InMemoryManuscriptFileRepository,
+    private readonly storage: IBinaryStoragePort,
+    private readonly hasher: IContentHasherPort,
+  ) {}
+
+  findByProjectAndId(projectId: string, id: string) {
+    return this.repo.findByProjectAndId(projectId, id);
+  }
+  findByProjectAndName(projectId: string, name: string) {
+    return this.repo.findByProjectAndName(projectId, name);
+  }
+  listByProject(projectId: string, includeDeleted?: boolean) {
+    return this.repo.listByProject(projectId, includeDeleted);
+  }
+  save(file: ManuscriptFile) {
+    return this.repo.save(file);
+  }
+  countReferencesByHash(hash: string) {
+    return this.repo.countReferencesByHash(hash);
+  }
+  hashStream(stream: Readable) {
+    return this.hasher.hashStream(stream);
+  }
+  buildStorageKey(hash: any, prefix?: string) {
+    return StorageKey.fromHash(hash, prefix);
+  }
+  checkObjectExists(bucket: string, key: string) {
+    return this.storage.checkObjectExists(bucket, key);
+  }
+  sendStream(bucket: string, key: string, stream: Readable, options?: any) {
+    return this.storage.sendStream(bucket, key, stream, options);
+  }
+  getObjectStream(bucket: string, key: string, range?: any) {
+    return this.storage.getObjectStream(bucket, key, range);
+  }
+  getObjectMetadata(bucket: string, key: string) {
+    return this.storage.getObjectMetadata(bucket, key);
+  }
+  deleteObject(bucket: string, key: string) {
+    return this.storage.deleteObject(bucket, key);
+  }
+  getSignedDownloadUrl(bucket: string, key: string, expiresInSeconds: number) {
+    return this.storage.getSignedDownloadUrl(bucket, key, expiresInSeconds);
+  }
+}
+
 describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
   const PROJECT_ID = 'b7d5a570-3d7c-482a-9e53-488b0a996df1';
   const BUCKET = 'manuscript-files';
@@ -175,23 +223,14 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       inMemoryRepo,
     );
 
-    filestoreService = new FilestoreService(
-      uploadUseCase,
-      streamUseCase,
-      headUseCase,
-      deleteUseCase,
-      signedUrlUseCase,
+    const testRepo = new TestFilestoreRepository(
       inMemoryRepo,
+      localStorage,
+      hasher,
     );
 
-    filestoreController = new FilestoreController(
-      uploadUseCase,
-      streamUseCase,
-      headUseCase,
-      deleteUseCase,
-      signedUrlUseCase,
-      filestoreService,
-    );
+    filestoreService = new FilestoreService(testRepo as any);
+    filestoreController = new FilestoreController(filestoreService);
   });
 
   // =========================================================================

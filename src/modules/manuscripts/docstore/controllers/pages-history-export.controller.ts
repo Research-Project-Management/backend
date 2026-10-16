@@ -28,7 +28,7 @@ import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
 import { PageExportTranspilerService } from '../services/page-export-transpiler.service';
 import { ManuscriptUserResolverService } from '../services/manuscript-user-resolver.service';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LiveCollaborationPort } from '../core/ports/live-collaboration.port';
 import { computeLineDiff } from '../core/domain/line-diff';
 
@@ -49,7 +49,7 @@ export class PagesHistoryExportController {
     private readonly prisma: PrismaService,
     private readonly pageExportTranspiler: PageExportTranspilerService,
     private readonly userResolver: ManuscriptUserResolverService,
-    @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
@@ -714,11 +714,15 @@ export class PagesHistoryExportController {
     const live = this.getLiveCollaboration();
     const flushedLive = live ? await live.flushDocs(projectId, docIds) : [];
 
-    if (this.realtimeService) {
-      this.realtimeService.broadcastEvent(projectId, 'compiler:sync', {
-        rootPageId,
-        dirtyFileIds: docIds,
-        timestamp: Date.now(),
+    if (this.eventEmitter) {
+      this.eventEmitter.emit('manuscripts.project.event', {
+        projectId,
+        event: 'compiler:sync',
+        payload: {
+          rootPageId,
+          dirtyFileIds: docIds,
+          timestamp: Date.now(),
+        },
       });
     }
     return {

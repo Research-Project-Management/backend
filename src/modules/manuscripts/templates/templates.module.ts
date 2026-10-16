@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
@@ -18,11 +18,7 @@ import { InMemoryTemplateAdapter } from './core/adapters/storage/in-memory-templ
 import { ManuscriptInstantiatorAdapter } from './core/adapters/external/manuscript-instantiator.adapter';
 
 @Module({
-  imports: [
-    PrismaModule,
-    forwardRef(() => StructureModule),
-    forwardRef(() => DocstoreModule),
-  ],
+  imports: [PrismaModule, StructureModule, DocstoreModule],
   controllers: [TemplatesController, OverleafTemplatesParityController],
   providers: [
     InMemoryTemplateAdapter,

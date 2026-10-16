@@ -11,6 +11,7 @@ import {
 } from '@/modules/library/shared-kernel/types/bibliographic.types';
 import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
 import { cleanAbstractText } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
 import { OcrProvider } from './ocr.provider';
 import {
   OcrPageResult,
@@ -205,9 +206,12 @@ export class PdfProvider {
             }
           }
           if (typeof informationRecord.Keywords === 'string') {
-            const keywordList = informationRecord.Keywords.split(/[,;]/)
-              .map((keywordItem: string) => keywordItem.trim())
-              .filter(Boolean);
+            const rawTokens = informationRecord.Keywords.split(/[,;•|]/)
+              .map((k: string) => k.trim())
+              .filter(
+                (k: string) => k.length > 1 && k.split(/\s+/).length <= 7,
+              );
+            const keywordList = normalizeAcademicTags(rawTokens);
             if (keywordList.length > 0) {
               unpdfExtractedMetadata.keywords = keywordList;
             }
@@ -723,13 +727,17 @@ export class PdfProvider {
     }
 
     const keywordsMatch = scannedText.match(
-      /(?:Index Terms|Keywords)[—:\-\s]+([^\n.]+)/i,
+      /(?:^|\n)\s*(?:Index\s+Terms|Keywords|Key\s*words)\s*[—:\-–]+\s*([^\n.]+)/i,
     );
     if (keywordsMatch?.[1]) {
-      metadata.keywords = keywordsMatch[1]
-        .split(/[,;]/)
-        .map((keyword) => keyword.trim())
-        .filter(Boolean);
+      const rawTokens = keywordsMatch[1]
+        .split(/[,;•|]/)
+        .map((k) => k.trim())
+        .filter((k) => k.length > 1 && k.split(/\s+/).length <= 7);
+      const normalized = normalizeAcademicTags(rawTokens);
+      if (normalized.length > 0) {
+        metadata.keywords = normalized;
+      }
     }
 
     const lines = scannedText

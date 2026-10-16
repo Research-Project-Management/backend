@@ -12,8 +12,10 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 import { LinkedFilesRepository } from './linked-files.repository';
+import { ILinkedFilesRepositoryPort } from './core/ports/linked-files-repository.port';
 import {
   CreateLinkedFileDto,
   LinkedFileResponseDto,
@@ -24,12 +26,7 @@ import { StructureService } from '@/modules/manuscripts/structure/structure.serv
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { CitationsService } from '@/modules/manuscripts/citations/citations.service';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
 import { LineArrayEngine } from '@/modules/manuscripts/docstore/domain';
-import { CreateLinkedFileUseCase } from './core/use-cases/create-linked-file.use-case';
-import { RefreshLinkedFileUseCase } from './core/use-cases/refresh-linked-file.use-case';
-import { ListLinkedFilesUseCase } from './core/use-cases/list-linked-files.use-case';
-import { DeleteLinkedFileUseCase } from './core/use-cases/delete-linked-file.use-case';
 
 const TEXT_EXTENSIONS = new Set([
   'tex',
@@ -53,45 +50,23 @@ export class LinkedFilesService {
   private readonly logger = new Logger(LinkedFilesService.name);
   private readonly MAX_DOWNLOAD_SIZE_BYTES = 50 * 1024 * 1024; // 50MB limit
 
-  private readonly repository?: LinkedFilesRepository;
-  private readonly structureService?: StructureService;
-  private readonly docstoreService?: DocstoreService;
-  private readonly filestoreService?: FilestoreService;
-  private readonly citationsService?: CitationsService;
-  private readonly realtimeService?: RealtimeService;
-
-  private readonly legacyCreateUseCase?: CreateLinkedFileUseCase;
-  private readonly legacyRefreshUseCase?: RefreshLinkedFileUseCase;
-  private readonly legacyListUseCase?: ListLinkedFilesUseCase;
-  private readonly legacyDeleteUseCase?: DeleteLinkedFileUseCase;
-
   constructor(
-    repoOrCreateUseCase: LinkedFilesRepository | CreateLinkedFileUseCase,
-    @Optional()
-    structureOrRefreshUseCase?: StructureService | RefreshLinkedFileUseCase,
-    @Optional()
-    docstoreOrListUseCase?: DocstoreService | ListLinkedFilesUseCase,
-    @Optional()
-    filestoreOrDeleteUseCase?: FilestoreService | DeleteLinkedFileUseCase,
-    @Optional() citationsOrRepo?: CitationsService | LinkedFilesRepository,
-    @Optional() realtimeService?: RealtimeService,
-  ) {
-    if (repoOrCreateUseCase instanceof LinkedFilesRepository) {
-      this.repository = repoOrCreateUseCase;
-      this.structureService = structureOrRefreshUseCase as StructureService;
-      this.docstoreService = docstoreOrListUseCase as DocstoreService;
-      this.filestoreService = filestoreOrDeleteUseCase as FilestoreService;
-      this.citationsService = citationsOrRepo as CitationsService;
-      this.realtimeService = realtimeService;
-    } else {
-      this.legacyCreateUseCase = repoOrCreateUseCase;
-      this.legacyRefreshUseCase =
-        structureOrRefreshUseCase as RefreshLinkedFileUseCase;
-      this.legacyListUseCase = docstoreOrListUseCase as ListLinkedFilesUseCase;
-      this.legacyDeleteUseCase =
-        filestoreOrDeleteUseCase as DeleteLinkedFileUseCase;
-      this.repository = citationsOrRepo as LinkedFilesRepository;
-    }
+    private readonly repository: LinkedFilesRepository,
+    @Optional() private readonly structureService?: StructureService,
+    @Optional() private readonly docstoreService?: DocstoreService,
+    @Optional() private readonly filestoreService?: FilestoreService,
+    @Optional() private readonly citationsService?: CitationsService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+  ) {}
+
+  private broadcastFileTreeChange(
+    projectId: string,
+    change: { action: string; node: unknown },
+  ): void {
+    this.eventEmitter?.emit('manuscripts.file-tree.change', {
+      projectId,
+      change,
+    });
   }
 
   public async create(
@@ -99,15 +74,6 @@ export class LinkedFilesService {
     dto: CreateLinkedFileDto,
     userId?: string,
   ): Promise<LinkedFileResponseDto> {
-    if (this.legacyCreateUseCase) {
-      const entity = await this.legacyCreateUseCase.execute(
-        projectId,
-        dto,
-        userId,
-      );
-      return this.mapToDto(entity);
-    }
-
     const filename = dto.name.trim();
     if (!filename) {
       throw new BadRequestException('Linked file name is required');
@@ -222,9 +188,9 @@ export class LinkedFilesService {
       updatedAt: new Date(),
     });
 
-    await this.repository!.save(entity);
+    await this.repository.save(entity);
 
-    this.realtimeService?.broadcastFileTreeChange(projectId, {
+    this.broadcastFileTreeChange(projectId, {
       action: 'linked-file-created',
       node: { id: nodeId, name: filename, linkedFileId },
     });
@@ -237,21 +203,12 @@ export class LinkedFilesService {
     fileIdOrLinkedFileId: string,
     userId?: string,
   ): Promise<LinkedFileResponseDto> {
-    if (this.legacyRefreshUseCase) {
-      const entity = await this.legacyRefreshUseCase.execute(
-        projectId,
-        fileIdOrLinkedFileId,
-        userId,
-      );
-      return this.mapToDto(entity);
-    }
-
-    let linkedFile = await this.repository!.findById(
+    let linkedFile = await this.repository.findById(
       projectId,
       fileIdOrLinkedFileId,
     );
     if (!linkedFile) {
-      linkedFile = await this.repository!.findByNodeId(
+      linkedFile = await this.repository.findByNodeId(
         projectId,
         fileIdOrLinkedFileId,
       );
@@ -280,13 +237,13 @@ export class LinkedFilesService {
             version: nextVersion,
           });
 
-          this.realtimeService?.broadcastEvent(
+          this.eventEmitter?.emit('manuscripts.project.event', {
             projectId,
-            'doc:content-updated',
-            {
+            event: 'doc:content-updated',
+            payload: {
               docId: linkedFile.docId,
             },
-          );
+          });
         } else if (linkedFile.fileId) {
           const newFile = await this.filestoreService!.uploadFileFromBuffer(
             projectId,
@@ -320,13 +277,13 @@ export class LinkedFilesService {
         );
 
         if (linkedFile.docId) {
-          this.realtimeService?.broadcastEvent(
+          this.eventEmitter?.emit('manuscripts.track-changes.event', {
             projectId,
-            'doc:content-updated',
-            {
+            eventName: 'doc:content-updated',
+            data: {
               docId: linkedFile.docId,
             },
-          );
+          });
         }
       }
 
@@ -335,9 +292,9 @@ export class LinkedFilesService {
         linkedFile.docId ?? undefined,
         linkedFile.fileId ?? undefined,
       );
-      await this.repository!.save(linkedFile);
+      await this.repository.save(linkedFile);
 
-      this.realtimeService?.broadcastFileTreeChange(projectId, {
+      this.broadcastFileTreeChange(projectId, {
         action: 'linked-file-refreshed',
         node: {
           id: linkedFile.nodeId,
@@ -350,7 +307,7 @@ export class LinkedFilesService {
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       linkedFile.markFailed(errorMessage || 'Refresh failed');
-      await this.repository!.save(linkedFile);
+      await this.repository.save(linkedFile);
       this.logger.warn(
         `Failed to refresh linked file ${linkedFile.id}: ${errorMessage}`,
       );
@@ -359,12 +316,7 @@ export class LinkedFilesService {
   }
 
   public async list(projectId: string): Promise<LinkedFileResponseDto[]> {
-    if (this.legacyListUseCase) {
-      const entities = await this.legacyListUseCase.execute(projectId);
-      return entities.map((e) => this.mapToDto(e));
-    }
-
-    const entities = await this.repository!.findByProject(projectId);
+    const entities = await this.repository.findByProject(projectId);
     return entities.map((e) => this.mapToDto(e));
   }
 
@@ -373,24 +325,23 @@ export class LinkedFilesService {
     id: string,
     deleteNode = false,
   ): Promise<void> {
-    if (this.legacyDeleteUseCase) {
-      await this.legacyDeleteUseCase.execute(projectId, id, deleteNode);
-      return;
-    }
-
-    const linkedFile = await this.repository!.findById(projectId, id);
+    const linkedFile = await this.repository.findById(projectId, id);
     if (!linkedFile) {
       throw new NotFoundException(`Linked file "${id}" not found`);
     }
 
     if (deleteNode && linkedFile.nodeId) {
-      await this.structureService!.deleteNode(
-        projectId,
-        linkedFile.nodeId,
-      ).catch(() => {});
+      await this.structureService
+        ?.deleteNode(projectId, linkedFile.nodeId)
+        .catch(() => {});
     }
 
-    await this.repository!.delete(projectId, id);
+    await this.repository.delete(projectId, id);
+
+    this.broadcastFileTreeChange(projectId, {
+      action: 'linked-file-deleted',
+      node: { id: linkedFile.nodeId, linkedFileId: id },
+    });
   }
 
   /**

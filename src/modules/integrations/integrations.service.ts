@@ -63,7 +63,7 @@ export class IntegrationsService {
     private readonly mendeleyProvider: MendeleyProvider,
     private readonly githubProvider: GithubProvider,
     private readonly filestoreService: FilestoreService,
-    exportImportServiceOrAggregator: ExportImportService | any,
+    exportImportServiceOrAggregator: ExportImportService,
     @Optional() hydratorOrDocstore?: any,
     @Optional() docstoreOrStructure?: any,
     @Optional() structureService?: StructureService,
@@ -80,10 +80,17 @@ export class IntegrationsService {
       this.structureService = docstoreOrStructure;
     } else if (exportImportServiceOrAggregator && hydratorOrDocstore) {
       this.exportImportService = {
-        collectProjectEntries: (...args: any[]) =>
-          exportImportServiceOrAggregator.collectProjectEntries(...args),
-        hydrateProjectEntries: (...args: any[]) =>
-          hydratorOrDocstore.hydrateProjectEntries(...args),
+        collectProjectEntries: (projectId: string, files?: string[]) =>
+          (exportImportServiceOrAggregator as any).collectProjectEntries(
+            projectId,
+            files,
+          ),
+        hydrateProjectEntries: (
+          projectId: string,
+          entries: any[],
+          userId?: string,
+        ) =>
+          hydratorOrDocstore.hydrateProjectEntries(projectId, entries, userId),
       } as any;
       this.docstoreService = docstoreOrStructure;
       this.structureService = structureService;

@@ -5,7 +5,7 @@
  * Flush-Before-Compile project batch flush, in-flight state queries, and eviction.
  */
 
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { mapSettledWithConcurrency } from '@/core';
 import { DocumentUpdaterRepository } from './document-updater.repository';
 import { InFlightDoc } from './core/domain/entities/in-flight-doc.entity';
@@ -14,44 +14,17 @@ import { DocumentVersionVo } from './core/domain/value-objects/document-version.
 import { DocumentLockedException } from './core/domain/exceptions/document-locked.exception';
 import { DocUpdaterConflictException } from './core/domain/exceptions/doc-updater-conflict.exception';
 import { InFlightNotFoundException } from './core/domain/exceptions/in-flight-not-found.exception';
-import {
-  QueueDocUpdateOutput,
-  QueueDocUpdateUseCase,
-} from './core/use-cases/queue-doc-update.use-case';
-import {
-  FlushProjectDocsOutput,
-  FlushProjectDocsUseCase,
-} from './core/use-cases/flush-project-docs.use-case';
-import {
-  FlushSingleDocOutput,
-  FlushSingleDocUseCase,
-} from './core/use-cases/flush-single-doc.use-case';
-import { GetInFlightDocUseCase } from './core/use-cases/get-in-flight-doc.use-case';
-import { EvictDocBufferUseCase } from './core/use-cases/evict-doc-buffer.use-case';
-import { IInFlightStorePort } from './core/ports/in-flight-store.port';
+import { QueueDocUpdateOutput } from './core/use-cases/queue-doc-update.use-case';
+import { FlushProjectDocsOutput } from './core/use-cases/flush-project-docs.use-case';
+import { FlushSingleDocOutput } from './core/use-cases/flush-single-doc.use-case';
 import { QueueUpdateDto } from './dto/queue-update.dto';
 import { InFlightDocStateDto } from './dto/in-flight-doc-state.dto';
 
 @Injectable()
 export class DocumentUpdaterService implements OnModuleInit {
   private readonly logger = new Logger(DocumentUpdaterService.name);
-  private readonly repository?: DocumentUpdaterRepository;
-  private readonly legacyQueueUpdateUseCase?: QueueDocUpdateUseCase;
 
-  constructor(
-    repoOrQueueUseCase: DocumentUpdaterRepository | QueueDocUpdateUseCase,
-    @Optional() private readonly flushProjectUseCase?: FlushProjectDocsUseCase,
-    @Optional() private readonly flushSingleDocUseCase?: FlushSingleDocUseCase,
-    @Optional() private readonly getInFlightDocUseCase?: GetInFlightDocUseCase,
-    @Optional() private readonly evictDocBufferUseCase?: EvictDocBufferUseCase,
-    @Optional() private readonly inFlightStore?: IInFlightStorePort,
-  ) {
-    if (repoOrQueueUseCase instanceof DocumentUpdaterRepository) {
-      this.repository = repoOrQueueUseCase;
-    } else {
-      this.legacyQueueUpdateUseCase = repoOrQueueUseCase;
-    }
-  }
+  constructor(private readonly repository: DocumentUpdaterRepository) {}
 
   public onModuleInit(): void {
     // Lifecycle initialization
@@ -65,19 +38,7 @@ export class DocumentUpdaterService implements OnModuleInit {
     docId: string,
     dto: QueueUpdateDto,
   ): Promise<QueueDocUpdateOutput> {
-    if (this.legacyQueueUpdateUseCase) {
-      return await this.legacyQueueUpdateUseCase.execute({
-        projectId,
-        docId,
-        lines: dto.lines,
-        splice: dto.splice,
-        debounceMs: dto.debounceMs,
-        userId: dto.userId,
-        clientRev: dto.clientRev,
-      });
-    }
-
-    const repo = this.repository!;
+    const repo = this.repository;
     const debounceMs = dto.debounceMs ?? 1500;
 
     const isProjectLocked = await repo.isLocked(`project:${projectId}`);
@@ -145,20 +106,16 @@ export class DocumentUpdaterService implements OnModuleInit {
     projectId: string,
     force = false,
   ): Promise<FlushProjectDocsOutput> {
-    if (this.flushProjectUseCase) {
-      return await this.flushProjectUseCase.execute({ projectId, force });
-    }
-
     const startTime = Date.now();
     const lockKey = `project:${projectId}`;
 
     const maxWaitMs = 1500;
     const intervalMs = 100;
     const lockWaitStart = Date.now();
-    let acquired = await this.repository!.acquireLock(lockKey, 30000);
+    let acquired = await this.repository.acquireLock(lockKey, 30000);
     while (!acquired && Date.now() - lockWaitStart < maxWaitMs) {
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
-      acquired = await this.repository!.acquireLock(lockKey, 30000);
+      acquired = await this.repository.acquireLock(lockKey, 30000);
     }
 
     if (!acquired) {
@@ -168,14 +125,14 @@ export class DocumentUpdaterService implements OnModuleInit {
       );
     }
 
-    this.repository!.cancelAllProjectDebounces(projectId);
+    this.repository.cancelAllProjectDebounces(projectId);
 
     const flushedDocIds: string[] = [];
     const skippedDocIds: string[] = [];
     const errors: Array<{ docId: string; error: string }> = [];
 
     try {
-      const dirtyDocIds = await this.repository!.getDirtyDocIds(projectId);
+      const dirtyDocIds = await this.repository.getDirtyDocIds(projectId);
 
       this.logger.log(
         `[DocUpdater] Flushing project '${projectId}': Found ${dirtyDocIds.length} dirty document(s).`,
@@ -221,7 +178,7 @@ export class DocumentUpdaterService implements OnModuleInit {
         durationMs,
       };
     } finally {
-      await this.repository!.releaseLock(lockKey);
+      await this.repository.releaseLock(lockKey);
     }
   }
 
@@ -233,17 +190,9 @@ export class DocumentUpdaterService implements OnModuleInit {
     docId: string,
     force = false,
   ): Promise<FlushSingleDocOutput> {
-    if (this.flushSingleDocUseCase) {
-      return await this.flushSingleDocUseCase.execute({
-        projectId,
-        docId,
-        force,
-      });
-    }
-
     const lockKey = `doc:${docId}`;
 
-    const acquired = await this.repository!.acquireLock(lockKey, 10000);
+    const acquired = await this.repository.acquireLock(lockKey, 10000);
     if (!acquired) {
       throw new DocumentLockedException(
         docId,
@@ -252,7 +201,7 @@ export class DocumentUpdaterService implements OnModuleInit {
     }
 
     try {
-      const doc = await this.repository!.get(projectId, docId);
+      const doc = await this.repository.get(projectId, docId);
       if (!doc) {
         return {
           docId,
@@ -272,10 +221,10 @@ export class DocumentUpdaterService implements OnModuleInit {
       }
 
       doc.markFlushing();
-      await this.repository!.save(doc);
+      await this.repository.save(doc);
 
       try {
-        const commitResult = await this.repository!.commitDocUpdate(
+        const commitResult = await this.repository.commitDocUpdate(
           projectId,
           docId,
           doc.lines,
@@ -283,8 +232,8 @@ export class DocumentUpdaterService implements OnModuleInit {
         );
 
         doc.markFlushed(commitResult.newRev);
-        await this.repository!.save(doc);
-        this.repository!.cancelDebounce(projectId, docId);
+        await this.repository.save(doc);
+        this.repository.cancelDebounce(projectId, docId);
 
         this.logger.log(
           `[DocUpdater] Successfully flushed doc '${docId}' in project '${projectId}' to rev ${commitResult.newRev}.`,
@@ -298,7 +247,7 @@ export class DocumentUpdaterService implements OnModuleInit {
         };
       } catch (err) {
         doc.markFlushFailed();
-        await this.repository!.save(doc);
+        await this.repository.save(doc);
 
         if (err instanceof DocUpdaterConflictException) {
           this.logger.warn(
@@ -308,7 +257,7 @@ export class DocumentUpdaterService implements OnModuleInit {
         throw err;
       }
     } finally {
-      await this.repository!.releaseLock(lockKey);
+      await this.repository.releaseLock(lockKey);
     }
   }
 
@@ -319,20 +268,12 @@ export class DocumentUpdaterService implements OnModuleInit {
     projectId: string,
     docId: string,
   ): Promise<InFlightDocStateDto> {
-    if (this.getInFlightDocUseCase) {
-      const res = await this.getInFlightDocUseCase.execute({
-        projectId,
-        docId,
-      });
-      return InFlightDocStateDto.fromEntity(res.doc, res.isBuffered);
-    }
-
-    const activeDoc = await this.repository!.get(projectId, docId);
+    const activeDoc = await this.repository.get(projectId, docId);
     if (activeDoc) {
       return InFlightDocStateDto.fromEntity(activeDoc, true);
     }
 
-    const baseDoc = await this.repository!.fetchBaseDoc(projectId, docId);
+    const baseDoc = await this.repository.fetchBaseDoc(projectId, docId);
     if (!baseDoc) {
       throw new InFlightNotFoundException(docId, projectId);
     }
@@ -351,19 +292,14 @@ export class DocumentUpdaterService implements OnModuleInit {
    * Flushes and releases memory/Redis buffer when users disconnect.
    */
   public async evictDoc(projectId: string, docId: string): Promise<void> {
-    if (this.evictDocBufferUseCase) {
-      await this.evictDocBufferUseCase.execute({ projectId, docId });
-      return;
-    }
+    this.repository.cancelDebounce(projectId, docId);
 
-    this.repository!.cancelDebounce(projectId, docId);
-
-    const doc = await this.repository!.get(projectId, docId);
+    const doc = await this.repository.get(projectId, docId);
     if (doc && doc.isDirty) {
       await this.flushDoc(projectId, docId, true);
     }
 
-    await this.repository!.delete(projectId, docId);
+    await this.repository.delete(projectId, docId);
     this.logger.log(
       `[DocUpdater] Evicted document buffer for '${docId}' in project '${projectId}'.`,
     );
@@ -373,9 +309,6 @@ export class DocumentUpdaterService implements OnModuleInit {
    * Query all dirty document IDs for a given project.
    */
   public async getDirtyDocIds(projectId: string): Promise<string[]> {
-    if (this.inFlightStore) {
-      return await this.inFlightStore.getDirtyDocIds(projectId);
-    }
-    return await this.repository!.getDirtyDocIds(projectId);
+    return await this.repository.getDirtyDocIds(projectId);
   }
 }

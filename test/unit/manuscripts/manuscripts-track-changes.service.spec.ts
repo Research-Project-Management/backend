@@ -329,14 +329,10 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
     getDocReviewsUseCase = new GetDocReviewsUseCase(repo);
 
     service = new TrackChangesService(
-      recordChangeUseCase,
-      acceptChangeUseCase,
-      rejectChangeUseCase,
-      batchResolveUseCase,
-      createThreadUseCase,
-      addReplyUseCase,
-      resolveThreadUseCase,
-      getDocReviewsUseCase,
+      repo,
+      mockDocstore as any,
+      patcherAdapter,
+      notifier as any,
     );
 
     controller = new TrackChangesController(service);

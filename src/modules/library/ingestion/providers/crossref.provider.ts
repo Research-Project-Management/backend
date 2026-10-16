@@ -23,6 +23,7 @@ import {
   CSL_TYPE_TO_ITEM_TYPE,
   normalizePageRange,
 } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
 
 @Injectable()
 export class CrossRefProvider implements MetadataProvider {
@@ -349,14 +350,15 @@ export class CrossRefProvider implements MetadataProvider {
         (CSL_TYPE_TO_ITEM_TYPE[typeStr] ?? 'document')
       : 'journalArticle';
 
-    const keywords: string[] = [];
+    const rawKeywords: string[] = [];
     if (Array.isArray(message.subject)) {
       for (const subj of message.subject) {
         if (typeof subj === 'string' && subj.trim()) {
-          keywords.push(subj.trim());
+          rawKeywords.push(subj.trim());
         }
       }
     }
+    const keywords = normalizeAcademicTags(rawKeywords);
 
     const shortContainer = message['short-container-title'];
     const rawJournalAbbr = Array.isArray(shortContainer)

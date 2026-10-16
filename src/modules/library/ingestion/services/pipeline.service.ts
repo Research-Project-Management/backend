@@ -424,7 +424,7 @@ export class PipelineService {
 
     // PROBABLE fuzzy match → Non-blocking duplicate suspect review record
     if (matchResult.matchType === 'PROBABLE' && matchResult.targetItemId) {
-      await this.repo.createReviewCase(scopeId, runId, {
+      await this.repo.createReviewCase(resolvedScope, runId, {
         targetItemId: matchResult.targetItemId,
         reason: `Probable match with existing item "${matchResult.targetItemTitle}"`,
         evidence: {
@@ -435,6 +435,7 @@ export class PipelineService {
         options: {
           proposedMetadata: decision.proposedItem,
         } as unknown as Prisma.InputJsonValue,
+        assignedToId: resolvedScope.userId,
       });
     }
 
@@ -490,6 +491,7 @@ export class PipelineService {
         resolvedScope.projectId,
         createdItem.id,
         decision.proposedItem?.notes,
+        createdItem,
       );
     }
 
@@ -636,6 +638,7 @@ export class PipelineService {
               resolvedScope.projectId,
               created.id,
               itemDecision.proposedItem?.notes,
+              created,
             );
           } else {
             failed++;
@@ -941,6 +944,7 @@ export class PipelineService {
     projectId: string | undefined,
     itemId: string,
     notes?: unknown[],
+    createdItem?: Record<string, unknown> | null,
   ): Promise<void> {
     if (
       !Array.isArray(notes) ||
@@ -950,6 +954,21 @@ export class PipelineService {
       return;
     }
 
+    // If CommitStage already persisted notes via buildCommandCreateInput (notesList / notes / noteCount),
+    // skip creating duplicate note rows.
+    const existingNotes = Array.isArray(createdItem?.notes)
+      ? createdItem.notes
+      : Array.isArray(createdItem?.notesList)
+        ? createdItem.notesList
+        : [];
+    if (
+      existingNotes.length > 0 ||
+      (typeof createdItem?.noteCount === 'number' && createdItem.noteCount > 0)
+    ) {
+      return;
+    }
+
+    const seenContents = new Set<string>();
     for (const noteItem of notes) {
       const rawContent =
         typeof noteItem === 'object' && noteItem !== null
@@ -966,12 +985,14 @@ export class PipelineService {
             ? rawContent
             : '';
 
-      if (!noteContent.trim()) continue;
+      const trimmed = noteContent.trim();
+      if (!trimmed || seenContents.has(trimmed.toLowerCase())) continue;
+      seenContents.add(trimmed.toLowerCase());
 
       try {
         await this.catalogGateway.createNote(userId, {
           itemId,
-          contentMd: noteContent.trim(),
+          contentMd: trimmed,
           title: noteSource || 'Imported Note',
           projectId,
           createdById: userId,

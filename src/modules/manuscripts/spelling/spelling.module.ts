@@ -3,7 +3,7 @@
  * NestJS Module for Manuscripts Spelling subsystem (Adaptive Modular Monolith).
  */
 
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 
@@ -24,7 +24,7 @@ import { RegexLatexTokenizerAdapter } from './core/adapters/tokenizer/regex-late
 import { AcademicSpellEngineAdapter } from './core/adapters/engine/academic-spell-engine.adapter';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => DocstoreModule)],
+  imports: [PrismaModule, DocstoreModule],
   controllers: [SpellingController, SpellingUtilityController],
   providers: [
     SpellingService,

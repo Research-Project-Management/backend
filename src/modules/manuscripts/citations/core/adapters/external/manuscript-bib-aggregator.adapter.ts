@@ -5,7 +5,7 @@
  * and handles appending newly resolved BibTeX entries to the project.
  */
 
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { ICitationsAggregatorPort } from '@/modules/manuscripts/citations/core/ports/citations-aggregator.port';
 import {
   IBibtexParserPort,
@@ -22,9 +22,7 @@ export class ManuscriptBibAggregatorAdapter implements ICitationsAggregatorPort 
   private readonly logger = new Logger(ManuscriptBibAggregatorAdapter.name);
 
   constructor(
-    @Inject(forwardRef(() => StructureService))
     private readonly structureService: StructureService,
-    @Inject(forwardRef(() => DocstoreService))
     private readonly docstoreService: DocstoreService,
     @Inject(BIBTEX_PARSER_PORT)
     private readonly bibParser: IBibtexParserPort,

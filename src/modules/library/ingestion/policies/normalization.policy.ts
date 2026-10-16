@@ -390,25 +390,116 @@ export class NormalizationPolicy {
 
     // 11. Notes & Comments (Zotero notes / annote)
     if (Array.isArray(raw.notes) && raw.notes.length > 0) {
-      const cleanNotes: Array<{ content: string; source?: string }> = [];
+      const cleanNotes: Array<{
+        content: string;
+        title?: string;
+        source?: string;
+        tags?: string[];
+      }> = [];
+      const seenNotes = new Set<string>();
       for (const n of raw.notes) {
+        const noteObj =
+          typeof n === 'object' && n !== null
+            ? (n as Record<string, unknown>)
+            : null;
         const rawContent =
-          typeof n === 'string' ? n : (n as { content?: string })?.content;
-        if (typeof rawContent !== 'string') continue;
-        const clean = cleanCommentText(rawContent);
-        if (!clean) continue;
-        const noteItem: { content: string; source?: string } = {
-          content: rawContent.trim().toLowerCase().startsWith('comment:')
-            ? `Comment: ${clean}`
-            : clean,
-        };
+          typeof n === 'string'
+            ? n
+            : (noteObj?.content ?? noteObj?.contentMd ?? noteObj?.note);
+        if (typeof rawContent !== 'string' || !rawContent.trim()) continue;
+
+        const trimmedRaw = rawContent.trim();
+        const isCommentNote =
+          trimmedRaw.toLowerCase().startsWith('comment:') ||
+          String(noteObj?.source || '').toLowerCase() === 'arxiv';
+
+        let cleanContent: string | undefined;
         if (
-          n &&
-          typeof n === 'object' &&
-          'source' in n &&
-          (n as { source?: string }).source
+          !isCommentNote &&
+          (/<\/?[a-z][\s\S]*>/i.test(trimmedRaw) || trimmedRaw.includes('\n'))
         ) {
-          noteItem.source = String((n as { source?: string }).source).trim();
+          // Preserve multi-paragraph / Markdown / HTML structure for Zotero notes
+          const md = trimmedRaw
+            .replace(/\r\n/g, '\n')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(
+              /<h1[^>]*>([\s\S]*?)<\/h1>/gi,
+              (_, c) => `# ${c.trim()}\n\n`,
+            )
+            .replace(
+              /<h2[^>]*>([\s\S]*?)<\/h2>/gi,
+              (_, c) => `## ${c.trim()}\n\n`,
+            )
+            .replace(
+              /<h3[^>]*>([\s\S]*?)<\/h3>/gi,
+              (_, c) => `### ${c.trim()}\n\n`,
+            )
+            .replace(
+              /<h[4-6][^>]*>([\s\S]*?)<\/h[4-6]>/gi,
+              (_, c) => `#### ${c.trim()}\n\n`,
+            )
+            .replace(
+              /<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi,
+              (_, c) => `> ${c.trim()}\n\n`,
+            )
+            .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, c) => `- ${c.trim()}\n`)
+            .replace(/<\/?(ul|ol)[^>]*>/gi, '\n')
+            .replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, c) => `${c.trim()}\n\n`)
+            .replace(/<\/div>/gi, '\n')
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**')
+            .replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*')
+            .replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
+            .replace(
+              /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+              '[$2]($1)',
+            )
+            .replace(/<[^>]+>/g, '')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>')
+            .replace(/&quot;/gi, '"')
+            .replace(/&#39;|&apos;/gi, "'")
+            .replace(/&mdash;/gi, '—')
+            .replace(/&ndash;/gi, '–')
+            .split('\n')
+            .map((line) => line.trimEnd())
+            .join('\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+          cleanContent = cleanBannedString(md);
+        } else {
+          const clean = cleanCommentText(trimmedRaw);
+          if (clean) {
+            cleanContent = trimmedRaw.toLowerCase().startsWith('comment:')
+              ? `Comment: ${clean}`
+              : clean;
+          }
+        }
+
+        if (!cleanContent) continue;
+        const dedupeKey = cleanContent.toLowerCase();
+        if (seenNotes.has(dedupeKey)) continue;
+        seenNotes.add(dedupeKey);
+
+        const noteItem: {
+          content: string;
+          title?: string;
+          source?: string;
+          tags?: string[];
+        } = {
+          content: cleanContent,
+        };
+        if (typeof noteObj?.title === 'string' && noteObj.title.trim()) {
+          noteItem.title = noteObj.title.trim();
+        }
+        if (typeof noteObj?.source === 'string' && noteObj.source.trim()) {
+          noteItem.source = noteObj.source.trim();
+        }
+        if (Array.isArray(noteObj?.tags) && noteObj.tags.length > 0) {
+          noteItem.tags = normalizeTags(noteObj.tags as string[]);
         }
         cleanNotes.push(noteItem);
       }

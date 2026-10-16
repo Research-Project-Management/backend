@@ -6,7 +6,7 @@
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { TrackChangesRepository } from './track-changes.repository';
+import { ITrackChangesRepositoryPort } from './core/ports/track-changes-repository.port';
 import {
   LinePatcher,
   TrackChange,
@@ -19,18 +19,7 @@ import {
 } from './domain';
 import { DocstorePatcherAdapter } from './core/adapters/external/docstore-patcher.adapter';
 import { RealtimeNotifierAdapter } from './core/adapters/external/realtime-notifier.adapter';
-
-import { RecordChangeUseCase } from './core/use-cases/record-change.use-case';
-import { AcceptChangeUseCase } from './core/use-cases/accept-change.use-case';
-import { RejectChangeUseCase } from './core/use-cases/reject-change.use-case';
-import {
-  BatchResolveChangesUseCase,
-  BatchAction,
-} from './core/use-cases/batch-resolve-changes.use-case';
-import { CreateCommentThreadUseCase } from './core/use-cases/create-comment-thread.use-case';
-import { AddCommentReplyUseCase } from './core/use-cases/add-comment-reply.use-case';
-import { ResolveCommentThreadUseCase } from './core/use-cases/resolve-comment-thread.use-case';
-import { GetDocReviewsUseCase } from './core/use-cases/get-doc-reviews.use-case';
+import { BatchAction } from './core/use-cases/batch-resolve-changes.use-case';
 
 import {
   RecordChangeDto,
@@ -47,20 +36,8 @@ export class TrackChangesService {
   private readonly logger = new Logger(TrackChangesService.name);
 
   constructor(
-    @Optional() private readonly recordChangeUseCase?: RecordChangeUseCase,
-    @Optional() private readonly acceptChangeUseCase?: AcceptChangeUseCase,
-    @Optional() private readonly rejectChangeUseCase?: RejectChangeUseCase,
-    @Optional()
-    private readonly batchResolveChangesUseCase?: BatchResolveChangesUseCase,
-    @Optional()
-    private readonly createCommentThreadUseCase?: CreateCommentThreadUseCase,
-    @Optional()
-    private readonly addCommentReplyUseCase?: AddCommentReplyUseCase,
-    @Optional()
-    private readonly resolveCommentThreadUseCase?: ResolveCommentThreadUseCase,
-    @Optional() private readonly getDocReviewsUseCase?: GetDocReviewsUseCase,
+    private readonly repository: ITrackChangesRepositoryPort,
     @Optional() private readonly docstoreService?: DocstoreService,
-    @Optional() private readonly repository?: TrackChangesRepository,
     @Optional() private readonly docstorePatcher?: DocstorePatcherAdapter,
     @Optional() private readonly realtimeNotifier?: RealtimeNotifierAdapter,
   ) {}
@@ -99,29 +76,17 @@ export class TrackChangesService {
       endCol: dto.endCol ?? dto.toIndex ?? 0,
     };
 
-    if (this.repository) {
-      const change = TrackChange.create({
-        projectId: resolvedProjId,
-        docId,
-        type: dto.type,
-        text: dto.text,
-        range: TextRangeVo.create(range),
-        createdById: userId,
-      });
-      const saved = await this.repository.saveChange(change);
-      this.realtimeNotifier?.notifyChangeRecorded(resolvedProjId, docId, saved);
-      return this.toChangeDto(saved);
-    }
-
-    const change = await this.recordChangeUseCase!.execute({
+    const change = TrackChange.create({
       projectId: resolvedProjId,
       docId,
       type: dto.type,
       text: dto.text,
-      range,
-      userId,
+      range: TextRangeVo.create(range),
+      createdById: userId,
     });
-    return this.toChangeDto(change);
+    const saved = await this.repository.saveChange(change);
+    this.realtimeNotifier?.notifyChangeRecorded(resolvedProjId, docId, saved);
+    return this.toChangeDto(saved);
   }
 
   public async acceptChange(
@@ -131,24 +96,13 @@ export class TrackChangesService {
     userId?: string | null,
   ): Promise<TrackChangeResponseDto> {
     const resolvedProjId = await this.resolveProjectId(projectId, docId);
-
-    if (this.repository) {
-      const saved = await this.acceptChangeDirect(
-        resolvedProjId,
-        docId,
-        changeId,
-        userId,
-      );
-      return this.toChangeDto(saved);
-    }
-
-    const change = await this.acceptChangeUseCase!.execute({
-      projectId: resolvedProjId,
+    const saved = await this.acceptChangeDirect(
+      resolvedProjId,
       docId,
       changeId,
       userId,
-    });
-    return this.toChangeDto(change);
+    );
+    return this.toChangeDto(saved);
   }
 
   public async rejectChange(
@@ -158,24 +112,13 @@ export class TrackChangesService {
     userId?: string | null,
   ): Promise<TrackChangeResponseDto> {
     const resolvedProjId = await this.resolveProjectId(projectId, docId);
-
-    if (this.repository) {
-      const saved = await this.rejectChangeDirect(
-        resolvedProjId,
-        docId,
-        changeId,
-        userId,
-      );
-      return this.toChangeDto(saved);
-    }
-
-    const change = await this.rejectChangeUseCase!.execute({
-      projectId: resolvedProjId,
+    const saved = await this.rejectChangeDirect(
+      resolvedProjId,
       docId,
       changeId,
       userId,
-    });
-    return this.toChangeDto(change);
+    );
+    return this.toChangeDto(saved);
   }
 
   public async batchResolveChanges(
@@ -187,51 +130,31 @@ export class TrackChangesService {
   ): Promise<{ resolvedCount: number; action: BatchAction }> {
     const resolvedProjId = await this.resolveProjectId(projectId, docId);
 
-    if (this.repository) {
-      const pendingChanges = await this.repository.listChangesByDoc(
-        resolvedProjId,
-        docId,
-        'pending',
-      );
-      const filtered =
-        changeIds && changeIds.length > 0
-          ? pendingChanges.filter((c) => changeIds.includes(c.id))
-          : pendingChanges;
+    const pendingChanges = await this.repository.listChangesByDoc(
+      resolvedProjId,
+      docId,
+      'pending',
+    );
+    const filtered =
+      changeIds && changeIds.length > 0
+        ? pendingChanges.filter((c) => changeIds.includes(c.id))
+        : pendingChanges;
 
-      const sorted = LinePatcher.sortChangesBottomUp(filtered);
-      const isAccept = action === 'accept_all' || action === 'accept_selected';
+    const sorted = LinePatcher.sortChangesBottomUp(filtered);
+    const isAccept = action === 'accept_all' || action === 'accept_selected';
 
-      for (const change of sorted) {
-        if (isAccept) {
-          await this.acceptChangeDirect(
-            resolvedProjId,
-            docId,
-            change.id,
-            userId,
-          );
-        } else {
-          await this.rejectChangeDirect(
-            resolvedProjId,
-            docId,
-            change.id,
-            userId,
-          );
-        }
+    for (const change of sorted) {
+      if (isAccept) {
+        await this.acceptChangeDirect(resolvedProjId, docId, change.id, userId);
+      } else {
+        await this.rejectChangeDirect(resolvedProjId, docId, change.id, userId);
       }
-
-      return {
-        resolvedCount: sorted.length,
-        action,
-      };
     }
 
-    return await this.batchResolveChangesUseCase!.execute({
-      projectId: resolvedProjId,
-      docId,
+    return {
+      resolvedCount: sorted.length,
       action,
-      changeIds,
-      userId,
-    });
+    };
   }
 
   public async createCommentThread(
@@ -248,38 +171,26 @@ export class TrackChangesService {
       endCol: dto.endCol ?? dto.toIndex ?? 0,
     };
 
-    if (this.repository) {
-      const thread = CommentThread.create({
-        projectId: resolvedProjId,
-        docId,
-        quote: dto.quote,
-        range: TextRangeVo.create(range),
-        createdById: userId,
-      });
-
-      if (dto.content && dto.content.trim()) {
-        const initialReply = CommentReply.create({
-          threadId: thread.id,
-          content: dto.content.trim(),
-          createdById: userId,
-        });
-        thread.addReply(initialReply);
-      }
-
-      const saved = await this.repository.saveCommentThread(thread);
-      this.realtimeNotifier?.notifyCommentCreated(resolvedProjId, docId, saved);
-      return this.toThreadDto(saved);
-    }
-
-    const thread = await this.createCommentThreadUseCase!.execute({
+    const thread = CommentThread.create({
       projectId: resolvedProjId,
       docId,
       quote: dto.quote,
-      range,
-      content: dto.content,
-      userId,
+      range: TextRangeVo.create(range),
+      createdById: userId,
     });
-    return this.toThreadDto(thread);
+
+    if (dto.content && dto.content.trim()) {
+      const initialReply = CommentReply.create({
+        threadId: thread.id,
+        content: dto.content.trim(),
+        createdById: userId,
+      });
+      thread.addReply(initialReply);
+    }
+
+    const saved = await this.repository.saveCommentThread(thread);
+    this.realtimeNotifier?.notifyCommentCreated(resolvedProjId, docId, saved);
+    return this.toThreadDto(saved);
   }
 
   public async addCommentReply(
@@ -291,43 +202,32 @@ export class TrackChangesService {
   ): Promise<CommentReplyResponseDto> {
     const resolvedProjId = await this.resolveProjectId(projectId, docId);
 
-    if (this.repository) {
-      const thread = await this.repository.findThreadById(threadId);
-      if (
-        !thread ||
-        thread.projectId !== resolvedProjId ||
-        thread.docId !== docId
-      ) {
-        throw new ThreadNotFoundException(threadId);
-      }
-      if (thread.isResolved) {
-        throw new ResolvedThreadException(threadId);
-      }
-
-      const reply = CommentReply.create({
-        threadId,
-        content: dto.content,
-        createdById: userId,
-      });
-      const saved = await this.repository.addCommentReply(threadId, reply);
-      this.realtimeNotifier?.notifyCommentReplied(
-        resolvedProjId,
-        docId,
-        threadId,
-        saved,
-        thread.createdById,
-      );
-      return this.toReplyDto(saved);
+    const thread = await this.repository.findThreadById(threadId);
+    if (
+      !thread ||
+      thread.projectId !== resolvedProjId ||
+      thread.docId !== docId
+    ) {
+      throw new ThreadNotFoundException(threadId);
+    }
+    if (thread.isResolved) {
+      throw new ResolvedThreadException(threadId);
     }
 
-    const reply = await this.addCommentReplyUseCase!.execute({
-      projectId: resolvedProjId,
-      docId,
+    const reply = CommentReply.create({
       threadId,
       content: dto.content,
-      userId,
+      createdById: userId,
     });
-    return this.toReplyDto(reply);
+    const saved = await this.repository.addCommentReply(threadId, reply);
+    this.realtimeNotifier?.notifyCommentReplied(
+      resolvedProjId,
+      docId,
+      threadId,
+      saved,
+      thread.createdById,
+    );
+    return this.toReplyDto(saved);
   }
 
   public async resolveCommentThread(
@@ -339,39 +239,24 @@ export class TrackChangesService {
   ): Promise<CommentThreadResponseDto> {
     const resolvedProjId = await this.resolveProjectId(projectId, docId);
 
-    if (this.repository) {
-      const thread = await this.repository.findThreadById(threadId);
-      if (
-        !thread ||
-        thread.projectId !== resolvedProjId ||
-        thread.docId !== docId
-      ) {
-        throw new ThreadNotFoundException(threadId);
-      }
-
-      if (resolve) {
-        thread.resolve(userId);
-      } else {
-        thread.unresolve();
-      }
-
-      const saved = await this.repository.saveCommentThread(thread);
-      this.realtimeNotifier?.notifyCommentResolved(
-        resolvedProjId,
-        docId,
-        saved,
-      );
-      return this.toThreadDto(saved);
+    const thread = await this.repository.findThreadById(threadId);
+    if (
+      !thread ||
+      thread.projectId !== resolvedProjId ||
+      thread.docId !== docId
+    ) {
+      throw new ThreadNotFoundException(threadId);
     }
 
-    const thread = await this.resolveCommentThreadUseCase!.execute({
-      projectId: resolvedProjId,
-      docId,
-      threadId,
-      resolve,
-      userId,
-    });
-    return this.toThreadDto(thread);
+    if (resolve) {
+      thread.resolve(userId);
+    } else {
+      thread.unresolve();
+    }
+
+    const saved = await this.repository.saveCommentThread(thread);
+    this.realtimeNotifier?.notifyCommentResolved(resolvedProjId, docId, saved);
+    return this.toThreadDto(saved);
   }
 
   public async getDocReviews(
@@ -380,24 +265,13 @@ export class TrackChangesService {
   ): Promise<DocReviewsResponseDto> {
     const resolvedProjId = await this.resolveProjectId(projectId, docId);
 
-    if (this.repository) {
-      const [changes, threads] = await Promise.all([
-        this.repository.listChangesByDoc(resolvedProjId, docId),
-        this.repository.listThreadsByDoc(resolvedProjId, docId),
-      ]);
-      return {
-        changes: changes.map((c) => this.toChangeDto(c)),
-        threads: threads.map((t) => this.toThreadDto(t)),
-      };
-    }
-
-    const result = await this.getDocReviewsUseCase!.execute(
-      resolvedProjId,
-      docId,
-    );
+    const [changes, threads] = await Promise.all([
+      this.repository.listChangesByDoc(resolvedProjId, docId),
+      this.repository.listThreadsByDoc(resolvedProjId, docId),
+    ]);
     return {
-      changes: result.changes.map((c) => this.toChangeDto(c)),
-      threads: result.threads.map((t) => this.toThreadDto(t)),
+      changes: changes.map((c) => this.toChangeDto(c)),
+      threads: threads.map((t) => this.toThreadDto(t)),
     };
   }
 
@@ -407,7 +281,7 @@ export class TrackChangesService {
     changeId: string,
     userId?: string | null,
   ): Promise<TrackChange> {
-    const change = await this.repository!.findChangeById(changeId);
+    const change = await this.repository.findChangeById(changeId);
     if (!change || change.projectId !== projectId || change.docId !== docId) {
       throw new ChangeNotFoundException(changeId);
     }
@@ -430,7 +304,7 @@ export class TrackChangesService {
       }
     }
 
-    const saved = await this.repository!.saveChange(change);
+    const saved = await this.repository.saveChange(change);
     this.realtimeNotifier?.notifyChangeResolved(projectId, docId, saved);
     return saved;
   }
@@ -441,7 +315,7 @@ export class TrackChangesService {
     changeId: string,
     userId?: string | null,
   ): Promise<TrackChange> {
-    const change = await this.repository!.findChangeById(changeId);
+    const change = await this.repository.findChangeById(changeId);
     if (!change || change.projectId !== projectId || change.docId !== docId) {
       throw new ChangeNotFoundException(changeId);
     }
@@ -459,7 +333,7 @@ export class TrackChangesService {
       });
     }
 
-    const saved = await this.repository!.saveChange(change);
+    const saved = await this.repository.saveChange(change);
     this.realtimeNotifier?.notifyChangeResolved(projectId, docId, saved);
     return saved;
   }

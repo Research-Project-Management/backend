@@ -19,6 +19,7 @@ import {
   SearchTemplatesUseCase,
   InstantiateTemplateUseCase,
   CreateCustomTemplateUseCase,
+  TemplatesRepository,
   TemplatesService,
   TemplatesController,
   OverleafTemplatesParityController,
@@ -532,15 +533,8 @@ describe('Manuscripts Templates Subsystem', () => {
         instantiator,
         getByIdUseCase,
       );
-      const createCustomUseCase = new CreateCustomTemplateUseCase(memoryRepo);
-
-      service = new TemplatesService(
-        listUseCase,
-        getByIdUseCase,
-        searchUseCase,
-        instantiateUseCase,
-        createCustomUseCase,
-      );
+      const templatesRepo = new TemplatesRepository(mockPrisma, memoryRepo);
+      service = new TemplatesService(templatesRepo);
     });
 
     it('should list all templates and return plain objects', async () => {
@@ -614,15 +608,8 @@ describe('Manuscripts Templates Subsystem', () => {
         instantiator,
         getByIdUseCase,
       );
-      const createCustomUseCase = new CreateCustomTemplateUseCase(memoryRepo);
-
-      service = new TemplatesService(
-        listUseCase,
-        getByIdUseCase,
-        searchUseCase,
-        instantiateUseCase,
-        createCustomUseCase,
-      );
+      const templatesRepo = new TemplatesRepository(mockPrisma, memoryRepo);
+      service = new TemplatesService(templatesRepo);
 
       templatesController = new TemplatesController(service);
       overleafController = new OverleafTemplatesParityController(service);
