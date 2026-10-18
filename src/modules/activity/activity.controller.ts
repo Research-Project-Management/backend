@@ -4,7 +4,7 @@ import { ActivityService } from './activity.service';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { EntityType } from '@prisma/client';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Activity')
 @ApiBearerAuth('JWT-auth')
@@ -47,7 +47,7 @@ export class ActivityController {
     'api/projects/:projectId/activity/feed',
     'projects/:projectId/activity/feed',
   ])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get project specific activity feed' })
   async getProjectActivityFeed(

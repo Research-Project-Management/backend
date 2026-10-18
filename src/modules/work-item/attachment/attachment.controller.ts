@@ -29,7 +29,7 @@ import {
 } from './dto/attachment.dto';
 import { PresignAttachmentDto } from './dto/presign-attachment.dto';
 import { EntityType } from '@prisma/client';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item Attachments')
 @ApiBearerAuth('JWT-auth')
@@ -39,7 +39,7 @@ export class AttachmentController {
   constructor(private readonly attachmentService: AttachmentService) {}
 
   @Get('work-items/:workItemId/attachments')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get all attachments for a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
@@ -48,7 +48,7 @@ export class AttachmentController {
   }
 
   @Post('work-items/:workItemId/attachments')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Add an attachment to a work item' })
@@ -68,7 +68,7 @@ export class AttachmentController {
   }
 
   @Delete('work-items/:workItemId/attachments/:attachmentId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete an attachment from a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
@@ -86,7 +86,7 @@ export class AttachmentController {
   }
 
   @Post('work-items/:workItemId/attach/pages')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Attach a page to a work item' })
@@ -100,7 +100,7 @@ export class AttachmentController {
   }
 
   @Delete('work-items/:workItemId/attach/pages/:pageId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Detach a page from a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
@@ -114,7 +114,7 @@ export class AttachmentController {
   }
 
   @Post('work-items/:workItemId/attach/papers')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Attach a research paper to a work item' })
@@ -128,7 +128,7 @@ export class AttachmentController {
   }
 
   @Delete('work-items/:workItemId/attach/papers/:paperId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Detach a research paper from a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
@@ -142,7 +142,7 @@ export class AttachmentController {
   }
 
   @Post('work-items/:workItemId/attach/files')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Attach a file to a work item' })
@@ -156,7 +156,7 @@ export class AttachmentController {
   }
 
   @Delete('work-items/:workItemId/attach/files/:fileId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Detach a file from a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
@@ -170,7 +170,7 @@ export class AttachmentController {
   }
 
   @Post('work-items/:workItemId/attach/links')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Attach an external link to a work item' })
@@ -184,7 +184,7 @@ export class AttachmentController {
   }
 
   @Delete('work-items/:workItemId/attach/links/:linkIndex')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Detach an external link from a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })

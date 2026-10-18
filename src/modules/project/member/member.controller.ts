@@ -25,7 +25,7 @@ import { QueryProjectMembersDto } from './dto/query.dto';
 import { TransferOwnershipDto } from './dto/transfer.dto';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Project Members')
 @ApiBearerAuth('JWT-auth')
@@ -35,7 +35,7 @@ export class MemberController {
   constructor(private readonly memberService: MemberService) {}
 
   @Get(':projectId/members')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'List project members with filtering and pagination',
@@ -49,7 +49,7 @@ export class MemberController {
   }
 
   @Get(':projectId/members/:userId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get details of a specific project member' })
   @ApiResponse({ status: 200, description: 'Member details' })
@@ -62,7 +62,7 @@ export class MemberController {
 
   @Post(':projectId/members')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Add a member to the project' })
   @ApiResponse({
@@ -79,7 +79,7 @@ export class MemberController {
 
   @Post(':projectId/members/bulk')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Bulk-add members to the project with designated roles',
@@ -95,7 +95,7 @@ export class MemberController {
 
   @Put(':projectId/members/:userId')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Update project member role (Single-Owner protected)',
@@ -115,7 +115,7 @@ export class MemberController {
 
   @Delete(':projectId/members/:userId')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Remove a member from the project (Single-Owner protected)',
@@ -134,7 +134,7 @@ export class MemberController {
 
   @Post(':projectId/leave')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Leave project (Single-Owner protected)' })
   @ApiResponse({ status: 200, description: 'Left project successfully' })
@@ -147,7 +147,7 @@ export class MemberController {
 
   @Post(':projectId/transfer-ownership')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Transfer project ownership to another existing member',

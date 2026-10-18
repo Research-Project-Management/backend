@@ -52,6 +52,8 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
       listUploadedParts: jest.fn().mockResolvedValue([]),
+      applyLifecycleRules: jest.fn().mockResolvedValue(undefined),
+      getLifecycleRules: jest.fn().mockResolvedValue([]),
     };
 
     mockNodeRepo = {
@@ -66,6 +68,10 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       restoreSubtree: jest.fn(),
       findSubtreeNodes: jest.fn(),
       findExpiredTrash: jest.fn(),
+      isDescendant: jest.fn().mockResolvedValue(false),
+      getFolderPath: jest.fn().mockResolvedValue([]),
+      listSharedWithUser: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+      shareNode: jest.fn(),
     };
 
     mockBlobRepo = {
@@ -75,6 +81,8 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       update: jest.fn().mockImplementation(async (blob) => blob),
       delete: jest.fn(),
       findTombstonedBlobs: jest.fn(),
+      incrementRefCount: jest.fn(),
+      decrementRefCount: jest.fn(),
     };
 
     mockSessionRepo = {
@@ -229,7 +237,7 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
         sessionId: 'session-123',
         parts: [
           { partNumber: 1, eTag: 'etag-part-1' },
-          { partNumber: 2, etag: 'etag-part-2' }, // tests fallback to etag
+          { partNumber: 2, eTag: 'etag-part-2' },
         ],
       });
 

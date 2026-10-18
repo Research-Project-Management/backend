@@ -20,11 +20,6 @@ export interface WorkItemWithAssigneeInfo {
   } | null;
 }
 
-export interface CycleWorkItemMetricSource {
-  columnId?: string | null;
-  completed?: boolean;
-}
-
 /**
  * Aggregates work items into dimensional distributions (state column, priority level, assignee).
  */
@@ -73,37 +68,3 @@ export function aggregateProjectDistributions(
   };
 }
 
-/**
- * Calculates sprint cycle metrics including completion rate and progress distribution.
- */
-export function calculateCycleMetrics(
-  cycleId: string,
-  workItems: CycleWorkItemMetricSource[],
-) {
-  const totalWorkItems = workItems.length;
-  const completedWorkItems = workItems.filter((item) => item.completed).length;
-  const inProgressWorkItems = workItems.filter(
-    (item) =>
-      item.columnId === 'doing' ||
-      item.columnId === 'in_progress' ||
-      item.columnId === 'review' ||
-      item.columnId === 'in_review',
-  ).length;
-  const pendingWorkItems = Math.max(
-    0,
-    totalWorkItems - completedWorkItems - inProgressWorkItems,
-  );
-  const completionRate =
-    totalWorkItems > 0
-      ? Math.round((completedWorkItems / totalWorkItems) * 100)
-      : 0;
-
-  return {
-    cycleId,
-    totalWorkItems,
-    completedWorkItems,
-    inProgressWorkItems,
-    pendingWorkItems,
-    completionRate,
-  };
-}

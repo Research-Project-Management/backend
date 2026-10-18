@@ -1,12 +1,5 @@
 import type { AiMessageDto } from '../engine/types/engine.types';
 
-/** @deprecated Use AiMessageDto instead */
-export interface AiMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  [key: string]: unknown;
-}
-
 export interface ProjectSessionContext {
   projectId?: string;
   chatId?: string;

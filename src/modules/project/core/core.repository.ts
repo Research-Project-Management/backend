@@ -269,7 +269,7 @@ export class CoreRepository {
         startDate: data.startDate || null,
         targetDate: data.targetDate || null,
         templateId: data.templateId || null,
-        modules: data.modules || ['work_items', 'cycles', 'views', 'pages'],
+        modules: data.modules || ['overview', 'work-items', 'pages'],
         settings: (data.settings || {}) as Prisma.InputJsonValue,
         createdById: userId,
         members: {
@@ -639,7 +639,10 @@ export class CoreRepository {
 
   // ─── 2. Identifier Sequence Allocation ──────────────────────────────────
 
-  async allocateNextWorkItemSequence(
+  /**
+   * Allocate the next sequential WorkItem identifier (e.g. 'BIO-1', 'BIO-2').
+   */
+  async allocateWorkItemIdentifier(
     projectId: string,
   ): Promise<AllocatedIdentifier> {
     return this.prisma.$transaction(
@@ -717,15 +720,6 @@ export class CoreRepository {
       select: { settings: true },
     });
     return (proj?.settings as Record<string, unknown>) || null;
-  }
-
-  /**
-   * Allocate the next sequential WorkItem identifier (e.g. 'BIO-1', 'BIO-2').
-   */
-  async allocateWorkItemIdentifier(
-    projectId: string,
-  ): Promise<AllocatedIdentifier> {
-    return this.allocateNextWorkItemSequence(projectId);
   }
 
   /**

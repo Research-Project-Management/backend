@@ -1,7 +1,8 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { StorageQuota as PrismaQuota } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { StorageQuota } from '../types';
+import { cleanUuid } from '@/modules/storage/core';
+import { StorageQuota, DEFAULT_STORAGE_QUOTA_BYTES } from '../types';
 
 export interface IStorageQuotaRepository {
   findByScope(
@@ -49,15 +50,6 @@ export class StorageQuotaMapper {
   }
 }
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function cleanUuid(id?: string | null): string | null {
-  if (!id || typeof id !== 'string') return null;
-  const trimmed = id.trim();
-  return UUID_REGEX.test(trimmed) ? trimmed : null;
-}
-
 @Injectable()
 export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -103,7 +95,6 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     projectId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint> {
-    const DEFAULT_LIMIT = 5n * 1024n * 1024n * 1024n; // 5 GB
     const validUserId = cleanUuid(userId);
     const validProjectId = cleanUuid(projectId);
     const existing = await this.findByScope(validUserId, validProjectId);
@@ -119,7 +110,7 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
       return updated.usedBytes;
     }
 
-    if (bytes > DEFAULT_LIMIT) {
+    if (bytes > DEFAULT_STORAGE_QUOTA_BYTES) {
       throw new BadRequestException('Storage quota exceeded');
     }
 
@@ -128,7 +119,7 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
         userId: validUserId,
         projectId: validProjectId,
         usedBytes: bytes,
-        maxBytes: DEFAULT_LIMIT,
+        maxBytes: DEFAULT_STORAGE_QUOTA_BYTES,
       },
     });
     return created.usedBytes;
@@ -143,21 +134,6 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     const validProjectId = cleanUuid(projectId);
     const quota = await this.findByScope(validUserId, validProjectId);
     if (!quota) return 0n;
-
-    try {
-      const result = await this.prisma.$queryRaw<Array<{ used_bytes: bigint }>>`
-        UPDATE storage_quotas
-        SET used_bytes = GREATEST(0, used_bytes - ${bytes}),
-            updated_at = NOW()
-        WHERE id = ${quota.id}::uuid
-        RETURNING used_bytes;
-      `;
-      if (result && result.length > 0) {
-        return BigInt(result[0].used_bytes);
-      }
-    } catch {
-      // Fallback for unit test mocks that do not implement $queryRaw
-    }
 
     const decrementAmount = bytes <= quota.usedBytes ? bytes : quota.usedBytes;
     if (decrementAmount <= 0n) return quota.usedBytes;
@@ -174,7 +150,6 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     projectId: string | null | undefined,
     actualBytes: bigint,
   ): Promise<void> {
-    const DEFAULT_LIMIT = 5n * 1024n * 1024n * 1024n;
     const validUserId = cleanUuid(userId);
     const validProjectId = cleanUuid(projectId);
     const existing = await this.findByScope(validUserId, validProjectId);
@@ -190,7 +165,7 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
           userId: validUserId,
           projectId: validProjectId,
           usedBytes: actualBytes,
-          maxBytes: DEFAULT_LIMIT,
+          maxBytes: DEFAULT_STORAGE_QUOTA_BYTES,
         },
       });
     }

@@ -56,7 +56,9 @@ export class ZoteroProvider implements IIntegrationProvider {
   constructor(@Optional() private readonly redis?: RedisCacheService) {
     this.clientKey = process.env.ZOTERO_CLIENT_KEY || '';
     this.clientSecret = process.env.ZOTERO_CLIENT_SECRET || '';
-    this.isMockMode = !this.clientKey || !this.clientSecret;
+    this.isMockMode =
+      process.env.NODE_ENV !== 'production' &&
+      (!this.clientKey || !this.clientSecret);
 
     if (this.isMockMode) {
       this.logger.warn(
@@ -181,7 +183,7 @@ export class ZoteroProvider implements IIntegrationProvider {
     secret?: string;
     redirectUri: string;
   }): Promise<OAuthExchangeResult> {
-    if (this.isMockMode || params.codeOrToken.startsWith('mock_')) {
+    if (this.isMockMode) {
       const mockEntry = this.inMemoryStore.get(params.codeOrToken);
       this.inMemoryStore.delete(params.codeOrToken);
       return {
@@ -300,7 +302,7 @@ export class ZoteroProvider implements IIntegrationProvider {
     decryptedToken: string,
     providerUserId: string,
   ): Promise<RemoteCollectionItem[]> {
-    if (decryptedToken.includes('mock')) {
+    if (this.isMockMode) {
       return [
         { id: 'all', name: 'My Library (All Items)', itemCount: 65 },
         { id: 'COLL_1', name: 'My Publications', itemCount: 12 },
@@ -457,7 +459,7 @@ export class ZoteroProvider implements IIntegrationProvider {
     providerUserId: string,
     collectionId: string,
   ): Promise<string> {
-    if (decryptedToken.includes('mock')) {
+    if (this.isMockMode) {
       return `@article{vaswani2017attention,
   title={Attention is all you need},
   author={Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N and Kaiser, {\\L}ukasz and Polosukhin, Illia},

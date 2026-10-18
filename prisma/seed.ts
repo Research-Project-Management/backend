@@ -7,10 +7,14 @@ import Redis from 'ioredis';
 import { SCHEMA_V42_DATA } from '../src/modules/library/core/types/schema.constants';
 import { seedLibrary } from './seed-library';
 
+function requireDatabaseUrl(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  return url;
+}
+
 const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ||
-    'postgresql://postgres:Thanh26102006@localhost:5433/flux-db?schema=public',
+  connectionString: requireDatabaseUrl(),
 });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });

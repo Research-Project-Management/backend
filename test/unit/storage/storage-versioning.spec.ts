@@ -1,11 +1,7 @@
 import { VersionService } from '@/modules/storage/drive';
 import { StorageVersion } from '@/modules/storage/drive';
 import { StorageNode } from '@/modules/storage/drive';
-import {
-  BlobService,
-  StorageBlob,
-  BlobStatus,
-} from '@/modules/storage/core';
+import { BlobService, StorageBlob, BlobStatus } from '@/modules/storage/core';
 import { ContentHash } from '@/modules/storage/core';
 import { StorageKey } from '@/modules/storage/core';
 import { FileScope } from '@/modules/storage/drive';
@@ -72,6 +68,18 @@ describe('Storage File & Dataset Versioning Suite', () => {
       }),
       update: jest.fn().mockImplementation(async (b: StorageBlob) => {
         blobsInDb.set(b.id, b);
+        return b;
+      }),
+      incrementRefCount: jest.fn().mockImplementation(async (id: string) => {
+        const b = blobsInDb.get(id);
+        if (!b) throw new NotFoundException('Blob not found');
+        b.incrementRef();
+        return b;
+      }),
+      decrementRefCount: jest.fn().mockImplementation(async (id: string) => {
+        const b = blobsInDb.get(id);
+        if (!b) return null;
+        b.decrementRef();
         return b;
       }),
     };
@@ -351,11 +359,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
         }),
       ]);
 
-      const result = await versionService.downloadVersion(
-        fileId,
-        1,
-        'user-1',
-      );
+      const result = await versionService.downloadVersion(fileId, 1, 'user-1');
 
       expect(result.filename).toBe('quantum_sim_v1.py');
       expect(result.versionNumber).toBe(1);
@@ -409,11 +413,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
         }),
       ]);
 
-      const result = await versionService.revertVersion(
-        fileId,
-        1,
-        'user-1',
-      );
+      const result = await versionService.revertVersion(fileId, 1, 'user-1');
 
       expect(result.revertedToVersion).toBe(1);
       expect(result.newVersionNumber).toBe(3);

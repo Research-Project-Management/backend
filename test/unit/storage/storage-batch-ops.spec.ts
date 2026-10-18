@@ -1,8 +1,4 @@
-import {
-  BlobService,
-  ZipPackager,
-  crc32,
-} from '@/modules/storage/core';
+import { BlobService, ZipPackager, crc32 } from '@/modules/storage/core';
 import { DriveController, StorageNode } from '@/modules/storage/drive';
 import { StreamController, StreamService } from '@/modules/storage/transfer';
 import { Readable } from 'node:stream';
@@ -61,18 +57,27 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
       mockDriveService = {
         list: jest.fn(),
         move: jest.fn().mockResolvedValue(undefined),
-        batchMove: jest.fn().mockImplementation(async (ids: string[], targetFolderId: string | null) => {
-          for (const id of ids) {
-            await mockDriveService.move(id, targetFolderId);
-          }
-          return ids.length;
-        }),
+        batchMove: jest
+          .fn()
+          .mockImplementation(
+            async (ids: string[], targetFolderId: string | null) => {
+              for (const id of ids) {
+                await mockDriveService.move(id, targetFolderId);
+              }
+              return ids.length;
+            },
+          ),
       };
       mockTrashService = { softDelete: jest.fn(), batchSoftDelete: jest.fn() };
+
+      const mockAccessPolicy = {
+        assertCanAccess: jest.fn().mockResolvedValue(undefined),
+      } as any;
 
       driveController = new DriveController(
         mockDriveService,
         mockTrashService,
+        mockAccessPolicy,
       );
     });
 
@@ -138,9 +143,19 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
       };
 
       const blobService = new BlobService(mockDriver, mockBlobRepo);
+      const mockCache = {
+        getPresignedUrl: jest.fn().mockResolvedValue(null),
+        setPresignedUrl: jest.fn().mockResolvedValue(undefined),
+      } as any;
+      const mockAccessPolicy = {
+        assertCanAccess: jest.fn().mockResolvedValue(undefined),
+      } as any;
+
       streamService = new StreamService(
         blobService,
         mockNodeRepo,
+        mockCache,
+        mockAccessPolicy,
       );
 
       const headersSet = new Map<string, string>();
@@ -162,14 +177,13 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
         }),
       };
 
-      streamController = new StreamController(
-        streamService,
-        { emit: jest.fn() } as any,
-      );
+      streamController = new StreamController(streamService, {
+        emit: jest.fn(),
+      } as any);
     });
 
     it('should stream a single packaged ZIP archive containing selected files', async () => {
-      await streamController.bulkDownloadGet('file-csv', mockReply);
+      await streamController.bulkDownloadGet('file-csv', mockReply, 'user-1');
 
       expect(mockReply.status).toHaveBeenCalledWith(HttpStatus.OK);
       expect(mockReply.header).toHaveBeenCalledWith(

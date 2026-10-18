@@ -1,7 +1,8 @@
 import pg from 'pg';
 import Redis from 'ioredis';
 
-const DATABASE_URL = 'postgresql://postgres:Thanh26102006@127.0.0.1:5433/flux-db?schema=public';
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) throw new Error('DATABASE_URL is required');
 const REDIS_URL = 'redis://127.0.0.1:6379';
 
 async function standardizeDates() {
@@ -42,7 +43,7 @@ async function standardizeDates() {
     // ── IN PROGRESS (19-34): Only 4 major tasks have Date Range, rest only dueDate ──
     { seq: 19, startDelta: -6, daysDelta: 4 }, // Range: 28/09 - 08/10
     { seq: 20, startDelta: null, daysDelta: -3 }, // subtask completed
-    { seq: 21, startDelta: null, daysDelta: 0 },  // subtask completed
+    { seq: 21, startDelta: null, daysDelta: 0 }, // subtask completed
     { seq: 22, startDelta: null, daysDelta: 3 },
     { seq: 23, startDelta: -5, daysDelta: 5 }, // Range: 29/09 - 09/10
     { seq: 24, startDelta: null, daysDelta: -1 }, // subtask completed
@@ -71,18 +72,20 @@ async function standardizeDates() {
   ];
 
   for (const cfg of dateConfigs) {
-    const startDate = cfg.startDelta !== null
-      ? new Date(now.getTime() + cfg.startDelta * dayMs).toISOString()
-      : null;
-    const dueDate = cfg.daysDelta !== null
-      ? new Date(now.getTime() + cfg.daysDelta * dayMs).toISOString()
-      : null;
+    const startDate =
+      cfg.startDelta !== null
+        ? new Date(now.getTime() + cfg.startDelta * dayMs).toISOString()
+        : null;
+    const dueDate =
+      cfg.daysDelta !== null
+        ? new Date(now.getTime() + cfg.daysDelta * dayMs).toISOString()
+        : null;
 
     await pool.query(
       `UPDATE work_items 
        SET start_date = $1, due_date = $2, updated_at = NOW() 
        WHERE sequence_number = $3`,
-      [startDate, dueDate, cfg.seq]
+      [startDate, dueDate, cfg.seq],
     );
   }
 

@@ -17,18 +17,15 @@ import {
   STORAGE_JOB_MAINTENANCE_ORPHAN,
   StorageProcessingJobData,
 } from '../types';
-import {
-  STORAGE_NODE_REPOSITORY,
-} from '@/modules/storage/storage.tokens';
-import { IStorageNodeRepository } from '@/modules/storage/drive';
-import { BlobService } from '@/modules/storage/core';
+import { STORAGE_NODE_REPOSITORY } from '@/modules/storage/storage.tokens';
+import { IStorageNodeRepository, StorageNode } from '@/modules/storage/drive';
+import { BlobService, streamToBuffer } from '@/modules/storage/core';
 import {
   TrashRetentionJob,
   MultipartCleanupJob,
   OrphanBlobJob,
 } from './lifecycle.service';
 import { PdfThumbnailService } from '../services/pdf-thumbnail.service';
-import { StorageNode } from '@/modules/storage/drive';
 
 @Processor(STORAGE_PROCESSING_QUEUE, { concurrency: 3 })
 export class StorageQueueConsumer
@@ -58,8 +55,10 @@ export class StorageQueueConsumer
       this.worker?.on('error', (err) => {
         this.logger.warn(`Storage Worker connection notice: ${err.message}`);
       });
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      this.logger.debug(
+        `Storage worker listener initialization skipped: ${(err as Error)?.message}`,
+      );
     }
   }
 
@@ -155,11 +154,7 @@ export class StorageQueueConsumer
     node: StorageNode,
   ): Promise<void> {
     const { stream } = await this.blobService.getStream(data.s3Key);
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    const buffer = Buffer.concat(chunks);
+    const buffer = await streamToBuffer(stream);
 
     const image = sharp(buffer);
     const metadata = await image.metadata();
@@ -192,11 +187,7 @@ export class StorageQueueConsumer
     node: StorageNode,
   ): Promise<void> {
     const { stream } = await this.blobService.getStream(data.s3Key);
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    const buffer = Buffer.concat(chunks);
+    const buffer = await streamToBuffer(stream);
 
     try {
       const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });

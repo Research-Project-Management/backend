@@ -3,165 +3,164 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  UnauthorizedException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '@/core';
-import { isUUID } from 'class-validator';
 import {
   ROLES_KEY,
   MIN_ROLE_KEY,
   RoleInput,
 } from '../decorators/require-role.decorator';
 import { PERMISSIONS_KEY } from '../decorators/require-permission.decorator';
+import { NO_PROJECT_CONTEXT_KEY } from '../decorators/no-project-context.decorator';
+import { REQUIRE_OPERATOR_KEY } from '../decorators/require-operator.decorator';
 import { Role, RoleHierarchy } from '../enums/role.enum';
 import { Permission } from '../enums/permission.enum';
 import { AccessService } from '../access.service';
-import { MemberAccessContext } from '../types/access.type';
+import { ProjectResourceResolver } from '../resolvers/project-resource.resolver';
+import { AccessConfigService } from '../config/access.config';
 
 @Injectable()
 export class ProjectAccessGuard implements CanActivate {
   private readonly logger = new Logger(ProjectAccessGuard.name);
+  private readonly resourceResolver: ProjectResourceResolver;
 
   constructor(
     private readonly reflector: Reflector,
     private readonly prisma: PrismaService,
     private readonly accessService: AccessService,
-  ) {}
+    @Optional() resolver?: ProjectResourceResolver,
+    @Optional() private readonly accessConfigService?: AccessConfigService,
+  ) {
+    this.resourceResolver = resolver || new ProjectResourceResolver(prisma);
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    // 1. Extract metadata from route handler and class
-    const requiredRoles = this.reflector.getAllAndOverride<RoleInput[]>(
-      ROLES_KEY,
-      [context.getHandler(), context.getClass()],
-    );
-    const minRole = this.reflector.getAllAndOverride<Role>(MIN_ROLE_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    const requiredPermissions = this.reflector.getAllAndOverride<Permission[]>(
-      PERMISSIONS_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const handler = context.getHandler();
+    const targetClass = context.getClass();
 
-    // If no roles, minRole, or permissions are specified, allow access
-    if (
-      (!requiredRoles || requiredRoles.length === 0) &&
-      !minRole &&
-      (!requiredPermissions || requiredPermissions.length === 0)
-    ) {
+    // 1. Check for explicit NoProjectContext exemption
+    const isNoProjectContext = this.reflector.getAllAndOverride<boolean>(
+      NO_PROJECT_CONTEXT_KEY,
+      [handler, targetClass],
+    );
+    if (isNoProjectContext) {
       return true;
     }
 
-    // 3. Verify user authentication
+    // 2. Extract metadata from route handler and class
+    const requiredRoles = this.reflector.getAllAndOverride<RoleInput[]>(
+      ROLES_KEY,
+      [handler, targetClass],
+    );
+    const minRole = this.reflector.getAllAndOverride<Role>(MIN_ROLE_KEY, [
+      handler,
+      targetClass,
+    ]);
+    const requiredPermissions = this.reflector.getAllAndOverride<Permission[]>(
+      PERMISSIONS_KEY,
+      [handler, targetClass],
+    );
+    const isOperatorRequired = this.reflector.getAllAndOverride<boolean>(
+      REQUIRE_OPERATOR_KEY,
+      [handler, targetClass],
+    );
+
     const request = context.switchToHttp().getRequest();
     const user = request.user;
-    if (!user || (!user.sub && !user.id)) {
-      throw new ForbiddenException('User is not authenticated');
+    const userId = user?.sub || user?.id;
+
+    // 3. Verify user authentication
+    if (!user || !userId) {
+      throw new UnauthorizedException({
+        statusCode: 401,
+        code: 'AUTH_REQUIRED',
+        message: 'Authentication required',
+      });
     }
 
-    const userId = user.sub || user.id;
+    // 4. Operator check if required
+    if (isOperatorRequired) {
+      const isOp = this.accessConfigService?.isOperator(userId) ?? false;
+      if (!isOp) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'OPERATOR_REQUIRED',
+          message: 'Operator privileges required',
+        });
+      }
+      return true;
+    }
 
-    // 4. Resolve Project ID
-    let projectId = await this.resolveProjectId(request);
-    if (!projectId) {
-      // If client explicitly requested a project context but it couldn't be resolved, reject
-      const rawRequestedProject =
-        request.headers?.['x-project-id'] ||
-        request.query?.projectId ||
-        request.body?.projectId;
+    // 5. Handle undeclared routes (no role, minRole, or permission)
+    const hasAccessPolicy =
+      (requiredRoles && requiredRoles.length > 0) ||
+      !!minRole ||
+      (requiredPermissions && requiredPermissions.length > 0);
 
-      const hasExplicitProjectTarget =
-        rawRequestedProject &&
-        rawRequestedProject !== 'undefined' &&
-        rawRequestedProject !== 'null' &&
-        rawRequestedProject !== 'me' &&
-        rawRequestedProject !== 'user' &&
-        rawRequestedProject !== 'personal' &&
-        rawRequestedProject !== 'global' &&
-        rawRequestedProject !== 'default';
-
-      if (hasExplicitProjectTarget) {
-        throw new ForbiddenException(
-          'Project context is invalid or project not found',
+    if (!hasAccessPolicy) {
+      const mode = this.accessConfigService?.enforcementMode || 'report';
+      if (mode === 'enforce') {
+        this.logger.warn(
+          `Deny-by-default blocked access to undeclared route: ${request.method} ${request.url} by user ${userId}`,
+        );
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'ACCESS_UNDECLARED',
+          message: 'Access denied: Route has no declared access policy',
+        });
+      } else if (mode === 'report') {
+        this.logger.warn(
+          `Report-only: access to undeclared route permitted: ${request.method} ${request.url} by user ${userId}`,
         );
       }
+      return true;
+    }
 
-      // Check if the route is an explicit project route or has sub-resources requiring project context
+    // 6. Authoritatively resolve project ID from resources / params / hints
+    const resolvedResult =
+      await this.resourceResolver.resolveAuthoritativeProjectId(request);
+
+    if (!resolvedResult || !resolvedResult.projectId) {
+      // Check if dual-context library route in personal scope
       const url = request.url || request.raw?.url || '';
-      const rawParamProject = request.params?.projectId;
-      const isParamProjectPersonal =
-        !rawParamProject ||
-        rawParamProject === 'undefined' ||
-        rawParamProject === 'null' ||
-        rawParamProject === 'me' ||
-        rawParamProject === 'user' ||
-        rawParamProject === 'personal' ||
-        rawParamProject === 'global' ||
-        rawParamProject === 'default';
-
-      const isUrlPersonalProject =
-        url.includes('/projects/personal') ||
-        url.includes('/projects/user') ||
-        url.includes('/projects/me') ||
-        url.includes('/project/personal') ||
-        url.includes('/project/user') ||
-        url.includes('/project/me');
-
-      // Only dual-context library endpoints (which support both personal and project scopes)
-      // are permitted to proceed in personal scope when no projectId is provided.
       const isDualContextLibraryRoute =
         (url.includes('/library') ||
           url.includes('/attachments') ||
           url.includes('/files')) &&
-        (isParamProjectPersonal ||
-          isUrlPersonalProject ||
-          (!url.includes('/projects/') && !url.includes('/project/')));
+        !url.includes('/projects/') &&
+        !url.includes('/project/');
 
       if (isDualContextLibraryRoute) {
-        // Dual-context endpoint accessed in personal/user scope (e.g. personal library)
         return true;
       }
 
-      throw new ForbiddenException(
-        'Project context is required to enforce project permissions',
-      );
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'ACCESS_DENIED',
+        message: 'Project context is required to enforce project permissions',
+      });
     }
 
-    // 5. Fetch Member Access Context (Role + Overrides + Effective Permissions)
-    let accessContext = await this.accessService.getMemberAccessContext(
+    const projectId = resolvedResult.projectId;
+    request.resolvedProjectId = projectId;
+    request.projectId = projectId;
+
+    // 7. Verify project membership
+    const accessContext = await this.accessService.getMemberAccessContext(
       projectId,
       userId,
     );
 
-    if (!accessContext && isUUID(projectId)) {
-      // Check if projectId is actually a document ID from manuscript_docs
-      try {
-        const doc = await this.prisma.manuscriptDoc.findUnique({
-          where: { id: projectId },
-          select: { projectId: true },
-        });
-        if (doc?.projectId) {
-          projectId = doc.projectId;
-          if (request.params) {
-            request.params.projectId = doc.projectId;
-          }
-          accessContext = await this.accessService.getMemberAccessContext(
-            projectId,
-            userId,
-          );
-        }
-      } catch (err) {
-        this.logger.debug(
-          `Project doc fallback resolution failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-
     if (!accessContext) {
-      throw new ForbiddenException(
-        'Access denied: You are not a member of this project',
-      );
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'ACCESS_DENIED',
+        message: 'Access denied',
+      });
     }
 
     // Attach access context to request for downstream handlers and decorators
@@ -170,7 +169,7 @@ export class ProjectAccessGuard implements CanActivate {
     request.accessContext = accessContext;
     request.permissions = accessContext.effectivePermissions;
 
-    // 6. Verify against Required Roles (if configured)
+    // 8. Verify against Required Roles (if configured)
     if (requiredRoles && requiredRoles.length > 0) {
       const isRoleAllowed = requiredRoles.some((r) => {
         const normalized = String(r).toLowerCase();
@@ -192,24 +191,28 @@ export class ProjectAccessGuard implements CanActivate {
       });
 
       if (!isRoleAllowed) {
-        throw new ForbiddenException(
-          `Access denied: Required role (${requiredRoles.join(', ')}), current role (${accessContext.role})`,
-        );
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'ROLE_INSUFFICIENT',
+          message: 'Insufficient role for this action',
+        });
       }
     }
 
-    // 7. Verify against Minimum Role Hierarchy (if configured)
+    // 9. Verify against Minimum Role Hierarchy (if configured)
     if (minRole) {
       const currentLevel = RoleHierarchy[accessContext.role] || 0;
       const requiredLevel = RoleHierarchy[minRole] || 0;
       if (currentLevel < requiredLevel) {
-        throw new ForbiddenException(
-          `Access denied: Minimum role required is ${minRole}, current role is ${accessContext.role}`,
-        );
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'ROLE_INSUFFICIENT',
+          message: 'Insufficient role for this action',
+        });
       }
     }
 
-    // 8. Verify against Required Permissions (with Granular Overrides + Owner Bypass)
+    // 10. Verify against Required Permissions (with Granular Overrides + Owner Bypass)
     if (requiredPermissions && requiredPermissions.length > 0) {
       for (const permission of requiredPermissions) {
         const hasPerm = this.accessService.hasPermission(
@@ -219,219 +222,19 @@ export class ProjectAccessGuard implements CanActivate {
         );
 
         if (!hasPerm) {
-          throw new ForbiddenException(
-            `Access denied: Missing required permission '${permission}' for role '${accessContext.role}'`,
-          );
+          throw new ForbiddenException({
+            statusCode: 403,
+            code: 'ROLE_INSUFFICIENT',
+            message: 'Insufficient role for this action',
+          });
         }
       }
     }
 
     return true;
   }
-
-  /**
-   * Securely resolves projectId from route parameters, sub-resources, or headers.
-   * Cross-verifies with anti-BOLA/IDOR protection.
-   */
-  private async resolveProjectId(request: {
-    params?: Record<string, string>;
-    url?: string;
-    body?: Record<string, unknown>;
-    headers?: Record<string, string>;
-    query?: Record<string, string>;
-  }): Promise<string | undefined> {
-    let resolvedProjectId: string | undefined;
-
-    // 1. Explicit project route parameter (/projects/:projectId or /project/:id)
-    const explicitProjectId =
-      request.params?.projectId ||
-      (request.params?.id && request.url?.includes('/project')
-        ? request.params.id
-        : undefined);
-
-    if (explicitProjectId) {
-      if (isUUID(explicitProjectId)) {
-        resolvedProjectId = explicitProjectId;
-      } else {
-        const project = await this.prisma.project
-          .findFirst({
-            where: {
-              identifier: { equals: explicitProjectId, mode: 'insensitive' },
-              deletedAt: null,
-            },
-            select: { id: true },
-          })
-          .catch(() => null);
-        if (project?.id) resolvedProjectId = project.id;
-      }
-    }
-
-    // 2. Sub-resource lookup from URL parameters or request body
-    if (!resolvedProjectId) {
-      const singleWorkItemId =
-        request.params?.workItemId ||
-        (request.params?.id &&
-        (request.url?.includes('/work-item') ||
-          request.url?.includes('/work_item'))
-          ? request.params.id
-          : undefined) ||
-        (typeof request.body?.workItemId === 'string'
-          ? request.body.workItemId
-          : undefined) ||
-        (typeof request.body?.id === 'string' &&
-        (request.url?.includes('/work-item') ||
-          request.url?.includes('/work_item'))
-          ? request.body.id
-          : undefined);
-
-      if (singleWorkItemId) {
-        const where = isUUID(singleWorkItemId)
-          ? { id: singleWorkItemId }
-          : {
-              identifier: {
-                equals: singleWorkItemId,
-                mode: 'insensitive' as const,
-              },
-            };
-        const workItem = await this.prisma.workItem
-          .findFirst({
-            where,
-            select: { projectId: true },
-          })
-          .catch(() => null);
-        if (workItem?.projectId) resolvedProjectId = workItem.projectId;
-      }
-
-      if (!resolvedProjectId) {
-        const idsList = Array.isArray(request.body?.workItemIds)
-          ? (request.body.workItemIds as unknown[])
-          : Array.isArray(request.body?.ids)
-            ? (request.body.ids as unknown[])
-            : [];
-        const firstId = idsList.length > 0 ? String(idsList[0] || '') : '';
-        if (firstId) {
-          const where = isUUID(firstId)
-            ? { id: firstId }
-            : { identifier: { equals: firstId, mode: 'insensitive' as const } };
-          const workItem = await this.prisma.workItem
-            .findFirst({
-              where,
-              select: { projectId: true },
-            })
-            .catch(() => null);
-          if (workItem?.projectId) resolvedProjectId = workItem.projectId;
-        }
-      } else if (
-        request.params?.commentId &&
-        isUUID(request.params.commentId)
-      ) {
-        const comment = await this.prisma.workItemComment
-          .findUnique({
-            where: { id: request.params.commentId },
-            select: { workItem: { select: { projectId: true } } },
-          })
-          .catch(() => null);
-        if (comment?.workItem?.projectId) {
-          resolvedProjectId = comment.workItem.projectId;
-        }
-      } else if (request.params?.assetId && isUUID(request.params.assetId)) {
-        const file = await this.prisma.file
-          .findUnique({
-            where: { id: request.params.assetId },
-            select: { linkedToId: true },
-          })
-          .catch(() => null);
-        if (file?.linkedToId) resolvedProjectId = file.linkedToId;
-      } else if (
-        (request.params?.pageId ||
-          request.params?.nodeId ||
-          (typeof request.body?.pageId === 'string'
-            ? request.body.pageId
-            : undefined)) &&
-        isUUID(
-          request.params?.pageId ||
-            request.params?.nodeId ||
-            String(request.body?.pageId || ''),
-        )
-      ) {
-        const targetId =
-          request.params?.pageId ||
-          request.params?.nodeId ||
-          String(request.body?.pageId);
-        const doc = await this.prisma.manuscriptDoc
-          .findUnique({
-            where: { id: targetId },
-            select: { projectId: true },
-          })
-          .catch(() => null);
-        if (doc?.projectId) {
-          resolvedProjectId = doc.projectId;
-        } else {
-          const project = await this.prisma.project
-            .findUnique({
-              where: { id: targetId },
-              select: { id: true },
-            })
-            .catch(() => null);
-          if (project?.id) resolvedProjectId = project.id;
-        }
-      }
-    }
-
-    // 3. Client-supplied header, query, or body projectId
-    const rawHeaderProjectId =
-      request.headers?.['x-project-id'] ||
-      request.query?.projectId ||
-      (typeof request.body?.projectId === 'string'
-        ? request.body.projectId
-        : undefined);
-
-    let normalizedHeaderProjectId: string | undefined;
-    if (rawHeaderProjectId) {
-      if (isUUID(rawHeaderProjectId)) {
-        normalizedHeaderProjectId = rawHeaderProjectId;
-      } else {
-        const project = await this.prisma.project
-          .findFirst({
-            where: {
-              identifier: { equals: rawHeaderProjectId, mode: 'insensitive' },
-              deletedAt: null,
-            },
-            select: { id: true },
-          })
-          .catch(() => null);
-        if (project?.id) normalizedHeaderProjectId = project.id;
-      }
-    }
-
-    // 4. Anti-BOLA / IDOR cross-verification
-    if (resolvedProjectId && normalizedHeaderProjectId) {
-      if (
-        resolvedProjectId.toLowerCase() !==
-        normalizedHeaderProjectId.toLowerCase()
-      ) {
-        throw new ForbiddenException(
-          'Access denied: Resource does not belong to the specified project context (Cross-project violation)',
-        );
-      }
-    }
-
-    return resolvedProjectId || normalizedHeaderProjectId;
-  }
 }
 
-// ─── Backward Compatibility Aliases ──────────────────────────────────────────
-export const RoleGuard = ProjectAccessGuard;
-export type RoleGuard = ProjectAccessGuard;
-
-export const RolesGuard = ProjectAccessGuard;
-export type RolesGuard = ProjectAccessGuard;
-
+/** Backwards-compatibility alias for ProjectAccessGuard */
 export const ProjectRoleGuard = ProjectAccessGuard;
 export type ProjectRoleGuard = ProjectAccessGuard;
-
-export const PermissionGuard = ProjectAccessGuard;
-export type PermissionGuard = ProjectAccessGuard;
-
-export const PermissionsGuard = ProjectAccessGuard;
-export type PermissionsGuard = ProjectAccessGuard;

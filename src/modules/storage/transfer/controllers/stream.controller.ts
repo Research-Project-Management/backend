@@ -10,6 +10,7 @@ import {
   HttpStatus,
   NotFoundException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
@@ -20,7 +21,6 @@ import {
   FileDownloadedEvent,
 } from '@/modules/storage/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Optional } from '@nestjs/common';
 
 interface StreamRequest extends FastifyRequest {
   user?: { id?: string };
@@ -36,11 +36,71 @@ interface StreamRequest extends FastifyRequest {
 @ApiTags('Storage & Streaming')
 @Controller('api/v1/storage/files')
 export class StreamController {
+  private readonly logger = new Logger(StreamController.name);
+
   constructor(
     private readonly streamService: StreamService,
-    @Optional()
-    private readonly eventEmitter?: EventEmitter2,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  private sendNotModified(
+    res: FastifyReply,
+    etag: string | undefined,
+    varyHeader: string,
+  ) {
+    res.status(HttpStatus.NOT_MODIFIED);
+    if (etag) {
+      res.header('ETag', etag);
+    }
+    res.header('Cache-Control', 'private, no-cache, must-revalidate');
+    res.header('Vary', varyHeader);
+    return res.send();
+  }
+
+  private applyStreamSecurityHeaders(
+    res: FastifyReply,
+    options: {
+      contentType: string;
+      filename: string;
+      isDownloadEndpoint: boolean;
+      etag?: string;
+      varyHeader: string;
+      contentLength?: number;
+      contentRange?: string;
+    },
+  ): void {
+    const isDangerous = isDangerousInlineMime(options.contentType);
+    const dispositionType =
+      isDangerous || options.isDownloadEndpoint ? 'attachment' : 'inline';
+
+    res.header('Content-Type', options.contentType);
+    if (options.contentLength !== undefined) {
+      res.header('Content-Length', options.contentLength);
+    }
+    res.header('Accept-Ranges', 'bytes');
+    res.header('X-Content-Type-Options', 'nosniff');
+    res.header('X-Frame-Options', 'SAMEORIGIN');
+    if (options.etag) {
+      res.header('ETag', options.etag);
+    }
+    res.header('Cache-Control', 'private, no-cache, must-revalidate');
+    res.header('Vary', options.varyHeader);
+
+    if (isDangerous) {
+      res.header('Content-Security-Policy', "default-src 'none'; sandbox");
+    }
+
+    if (options.contentRange) {
+      res.header('Content-Range', options.contentRange);
+    }
+
+    // RFC 6266 Unicode-safe Content-Disposition
+    const encoded = encodeURIComponent(options.filename);
+    res.header(
+      'Content-Disposition',
+      `${dispositionType}; filename="${options.filename.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encoded}`,
+    );
+  }
 
   @Get([':fileId/content', ':fileId/download'])
   @Public() // Allow direct stream (authenticated via session/ticket or token in query)
@@ -69,56 +129,34 @@ export class StreamController {
 
       // RFC 7232 Conditional Request Evaluation (304 Not Modified)
       if (
-        (result.statusCode as number) === (HttpStatus.NOT_MODIFIED as number) ||
+        result.statusCode === Number(HttpStatus.NOT_MODIFIED) ||
         (result.etag &&
           ifNoneMatch &&
           ifNoneMatch === result.etag &&
           !rangeHeader)
       ) {
-        res.status(HttpStatus.NOT_MODIFIED);
-        if (result.etag) {
-          res.header('ETag', result.etag);
-        }
-        res.header('Cache-Control', 'private, no-cache, must-revalidate');
-        res.header('Vary', 'Authorization, Cookie, If-None-Match');
-        return res.send();
+        return this.sendNotModified(
+          res,
+          result.etag,
+          'Authorization, Cookie, If-None-Match',
+        );
       }
 
-      // Security hardening against Stored XSS
-      const isDangerous = isDangerousInlineMime(result.mimeType);
       const isDownloadEndpoint =
         req.url.includes('/download') ||
         streamReq.query?.download === 'true' ||
         streamReq.query?.download === '1';
-      const dispositionType =
-        isDangerous || isDownloadEndpoint ? 'attachment' : 'inline';
 
       res.status(result.statusCode);
-      res.header('Content-Type', result.mimeType);
-      res.header('Content-Length', result.contentLength);
-      res.header('Accept-Ranges', 'bytes');
-      res.header('X-Content-Type-Options', 'nosniff');
-      res.header('X-Frame-Options', 'SAMEORIGIN');
-      if (result.etag) {
-        res.header('ETag', result.etag);
-      }
-      res.header('Cache-Control', 'private, no-cache, must-revalidate');
-      res.header('Vary', 'Authorization, Cookie, If-None-Match');
-
-      if (isDangerous) {
-        res.header('Content-Security-Policy', "default-src 'none'; sandbox");
-      }
-
-      if (result.contentRange) {
-        res.header('Content-Range', result.contentRange);
-      }
-
-      // RFC 6266 Unicode-safe Content-Disposition
-      const encoded = encodeURIComponent(result.filename);
-      res.header(
-        'Content-Disposition',
-        `${dispositionType}; filename="${result.filename.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encoded}`,
-      );
+      this.applyStreamSecurityHeaders(res, {
+        contentType: result.mimeType,
+        filename: result.filename,
+        isDownloadEndpoint,
+        etag: result.etag,
+        varyHeader: 'Authorization, Cookie, If-None-Match',
+        contentLength: result.contentLength,
+        contentRange: result.contentRange,
+      });
 
       // Audit Logging: Emit event for tracking access to research files
       this.eventEmitter?.emit(
@@ -150,13 +188,13 @@ export class StreamController {
       return res
         .status(HttpStatus.INTERNAL_SERVER_ERROR)
         .send({ statusCode: 500, message });
-      }
     }
+  }
 
   @Get('r2/*')
   @Public()
   @ApiOperation({
-    summary: 'Stream R2 stored file by storage key (Editor compatibility)',
+    summary: 'Stream R2 stored file by storage key',
   })
   async streamR2File(@Req() req: FastifyRequest, @Res() res: FastifyReply) {
     const rawUrl = req.raw?.url || req.url || '';
@@ -207,52 +245,30 @@ export class StreamController {
         : undefined;
       const ifNoneMatch = req.headers?.['if-none-match'];
       if (r2Etag && ifNoneMatch && ifNoneMatch === r2Etag && !rangeHeader) {
-        res.status(HttpStatus.NOT_MODIFIED);
-        res.header('ETag', r2Etag);
-        res.header('Cache-Control', 'private, no-cache, must-revalidate');
-        res.header('Vary', 'If-None-Match');
-        return res.send();
+        return this.sendNotModified(res, r2Etag, 'If-None-Match');
       }
 
       const contentType = output.ContentType || 'application/octet-stream';
-      const isDangerous = isDangerousInlineMime(contentType);
-      const isDownloadEndpoint = req.url.includes('/download');
-      const dispositionType =
-        isDangerous || isDownloadEndpoint ? 'attachment' : 'inline';
-
-      res.header('Content-Type', contentType);
-      res.header('Accept-Ranges', 'bytes');
-      res.header('X-Content-Type-Options', 'nosniff');
-      res.header('X-Frame-Options', 'SAMEORIGIN');
-      if (r2Etag) {
-        res.header('ETag', r2Etag);
-      }
-      res.header('Cache-Control', 'private, no-cache, must-revalidate');
-      res.header('Vary', 'If-None-Match');
-
-      if (isDangerous) {
-        res.header('Content-Security-Policy', "default-src 'none'; sandbox");
-      }
-
       const basename = key.split('/').pop() || 'file';
-      const encoded = encodeURIComponent(basename);
-      res.header(
-        'Content-Disposition',
-        `${dispositionType}; filename="${basename.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encoded}`,
-      );
 
-      if (output.ContentLength !== undefined) {
-        res.header('Content-Length', output.ContentLength);
-      }
-      if (output.ContentRange) {
-        res.status(HttpStatus.PARTIAL_CONTENT);
-        res.header('Content-Range', output.ContentRange);
-      } else {
-        res.status(HttpStatus.OK);
-      }
+      res.status(
+        output.ContentRange ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK,
+      );
+      this.applyStreamSecurityHeaders(res, {
+        contentType,
+        filename: basename,
+        isDownloadEndpoint: req.url.includes('/download'),
+        etag: r2Etag,
+        varyHeader: 'If-None-Match',
+        contentLength: output.ContentLength,
+        contentRange: output.ContentRange,
+      });
 
       return res.send(output.Body);
-    } catch {
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Failed to stream R2 object ${key}: ${(err as Error)?.message}`,
+      );
       return res
         .status(HttpStatus.NOT_FOUND)
         .send({ statusCode: 404, message: 'File not found in storage' });

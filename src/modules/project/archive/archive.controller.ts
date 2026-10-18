@@ -9,7 +9,7 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { ArchiveService } from './archive.service';
 import { ProjectResponseDto } from '../core/dto/response.dto';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Project Archiving')
 @ApiBearerAuth('JWT-auth')
@@ -30,7 +30,7 @@ export class ArchiveController {
   }
 
   @Patch(':projectId/archive')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Archive a project (freezes data and hides from active lists)',
@@ -43,7 +43,7 @@ export class ArchiveController {
   }
 
   @Patch([':projectId/unarchive', ':projectId/restore-archive'])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Unarchive/restore a project to active status' })
   unarchiveProject(

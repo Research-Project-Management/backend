@@ -17,12 +17,14 @@ import { RedisCacheService } from '@/core';
 import { AI_REDIS_KEYS } from './constants/redis-keys.constant';
 import { PrismaService } from '@/core';
 import {
+  normalizeProjectId,
   sanitizeChatTitle,
   sanitizeChatMessageContent,
   validateAndSanitizeRole,
 } from '../utils/ai.util';
 import { Prisma } from '@prisma/client';
 import { FormattedChatSession, ChatWithMessages } from './types/chat.type';
+import { EngineService } from '../engine/engine.service';
 
 export type { FormattedChatSession };
 
@@ -64,6 +66,7 @@ export class ChatService {
     private readonly chatRepo: ChatRepository,
     private readonly prisma: PrismaService,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly engineService?: EngineService,
   ) {}
 
   private async invalidateChatCache(
@@ -88,19 +91,7 @@ export class ChatService {
   }
 
   private sanitizeProjectId(projectId?: string | null): string | null {
-    if (!projectId) return null;
-    const trimmed = projectId.trim();
-    if (
-      trimmed === 'me' ||
-      trimmed === 'user' ||
-      trimmed === 'personal' ||
-      trimmed === 'all' ||
-      trimmed === 'null' ||
-      trimmed === 'undefined'
-    ) {
-      return null;
-    }
-    return trimmed;
+    return normalizeProjectId(projectId) ?? null;
   }
 
   async getChats(
@@ -379,6 +370,7 @@ export class ChatService {
       throw new NotFoundException('Chat not found');
     }
     await this.chatRepo.deleteChat(chatId);
+    await this.engineService?.deleteDocumentsByChat(chatId, userId);
 
     await this.invalidateChatCache(chat.userId, chatId, chat.projectId);
 
@@ -394,6 +386,3 @@ export class ChatService {
   }
 }
 
-// Backward compatibility aliases
-export const ThreadService = ChatService;
-export type ThreadService = ChatService;

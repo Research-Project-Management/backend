@@ -7,10 +7,7 @@ import { ManuscriptsNotificationsModule } from './manuscripts/manuscripts-notifi
 import { ProjectsNotificationsModule } from './projects/projects-notifications.module';
 
 // Controllers
-import {
-  NotificationsController,
-  OverleafNotificationsParityController,
-} from './notifications.controller';
+import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 
 // Core Ports
@@ -42,7 +39,7 @@ import { ReviewBundleFlushScheduler } from './core/adapters/scheduling/review-bu
     ManuscriptsNotificationsModule,
     ProjectsNotificationsModule,
   ],
-  controllers: [NotificationsController, OverleafNotificationsParityController],
+  controllers: [NotificationsController],
   providers: [
     // Core Ports & Adapters
     {

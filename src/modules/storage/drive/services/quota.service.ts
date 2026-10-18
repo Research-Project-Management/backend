@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { STORAGE_QUOTA_REPOSITORY } from '@/modules/storage/storage.tokens';
 import { IStorageQuotaRepository } from '../repositories/prisma-quota.repository';
+import { DEFAULT_STORAGE_QUOTA_BYTES } from '../types';
 
 export interface QuotaCheckResult {
   usedBytes: number;
@@ -20,9 +21,8 @@ export class QuotaService {
     projectId?: string | null,
   ): Promise<QuotaCheckResult> {
     const quota = await this.quotaRepo.findByScope(userId, projectId);
-    const DEFAULT_LIMIT = 5n * 1024n * 1024n * 1024n; // 5 GB
     const usedBytes = quota ? quota.usedBytes : 0n;
-    const maxBytes = quota ? quota.maxBytes : DEFAULT_LIMIT;
+    const maxBytes = quota ? quota.maxBytes : DEFAULT_STORAGE_QUOTA_BYTES;
 
     return {
       usedBytes: Number(usedBytes),

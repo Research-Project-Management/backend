@@ -213,3 +213,24 @@ export function isDangerousInlineMime(mimeType?: string): boolean {
     lower.includes('ecmascript')
   );
 }
+
+export const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isValidUuid(id: string | null | undefined): id is string {
+  return Boolean(id && UUID_REGEX.test(id));
+}
+
+export function cleanUuid(id: string | null | undefined): string | null {
+  return isValidUuid(id) ? id : null;
+}
+
+export async function streamToBuffer(
+  stream: AsyncIterable<Buffer | Uint8Array | string>,
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}

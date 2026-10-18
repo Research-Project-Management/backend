@@ -26,7 +26,7 @@ import {
 } from './dto/state.dto';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item States')
 @ApiBearerAuth('JWT-auth')
@@ -36,7 +36,7 @@ export class StateController {
   constructor(private readonly stateService: StateService) {}
 
   @Get(['projects/:projectId/states', 'projects/:projectId/columns'])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'List all project work item states with lifecycle groups',
@@ -50,7 +50,7 @@ export class StateController {
   }
 
   @Get('projects/:projectId/states/counts')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get active work item counts by state in a project',
@@ -64,7 +64,7 @@ export class StateController {
   }
 
   @Get('projects/:projectId/states/:stateId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get details of a specific state' })
   @ApiResponse({ status: 200, description: 'State details' })
@@ -77,7 +77,7 @@ export class StateController {
 
   @Post(['projects/:projectId/states', 'projects/:projectId/columns'])
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary:
@@ -96,7 +96,7 @@ export class StateController {
     'projects/:projectId/states/reorder',
     'projects/:projectId/columns/reorder',
   ])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary:
@@ -115,7 +115,7 @@ export class StateController {
     'projects/:projectId/states/reset',
     'projects/:projectId/columns/reset',
   ])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Reset project states to the 5 default preset states (Admin only)',
@@ -132,7 +132,7 @@ export class StateController {
     'projects/:projectId/states/:stateId',
     'projects/:projectId/columns/:stateId',
   ])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Update state name, color, group, or default flag (Admin only)',
@@ -156,7 +156,7 @@ export class StateController {
     'projects/:projectId/states/:stateId',
     'projects/:projectId/columns/:stateId',
   ])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Delete a state with safe WorkItem migration rules',

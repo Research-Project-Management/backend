@@ -1,7 +1,6 @@
 import {
   Injectable,
   Inject,
-  Optional,
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
@@ -14,13 +13,16 @@ import {
 } from '@/modules/storage/storage.tokens';
 import {
   BlobService,
-  CompletedPart,
+  FileUploadedEvent,
+  StorageRedisCacheService,
 } from '@/modules/storage/core';
 import {
   IStorageNodeRepository,
   IStorageQuotaRepository,
   StorageNode,
+  DEFAULT_STORAGE_QUOTA_BYTES,
 } from '@/modules/storage/drive';
+import { getFileContentPath } from '@/modules/storage/storage.port';
 import type { IUploadSessionRepository } from '../repositories/prisma-session.repository';
 import {
   UploadSession,
@@ -30,10 +32,6 @@ import {
   CompleteMultipartInput,
   CompleteMultipartOutput,
 } from '../types';
-import {
-  FileUploadedEvent,
-  StorageRedisCacheService,
-} from '@/modules/storage/core';
 
 export type {
   MultipartActorContext,
@@ -68,8 +66,7 @@ export class MultipartService {
       input.userId,
       input.projectId ?? null,
     );
-    const DEFAULT_LIMIT = 5n * 1024n * 1024n * 1024n; // 5 GB
-    const maxBytes = quota ? quota.maxBytes : DEFAULT_LIMIT;
+    const maxBytes = quota ? quota.maxBytes : DEFAULT_STORAGE_QUOTA_BYTES;
     const usedBytes = quota ? quota.usedBytes : 0n;
     if (usedBytes + totalSizeBytes > maxBytes) {
       throw new BadRequestException('Storage quota exceeded');
@@ -140,14 +137,10 @@ export class MultipartService {
     throw new NotFoundException('Upload session not found');
   }
 
-  /**
-   * Phase 2: Presign Part Upload URL
-   */
-  async getPartUrl(
+  private async getValidActiveSession(
     sessionId: string,
-    partNumber: number,
     actor?: MultipartActorContext,
-  ): Promise<string> {
+  ): Promise<UploadSession> {
     const session = await this.sessionRepo.findById(sessionId);
     if (!session || session.isExpired()) {
       throw new NotFoundException('Upload session not found or expired');
@@ -163,6 +156,19 @@ export class MultipartService {
     if (session.status === UploadSessionStatus.ABORTED) {
       throw new BadRequestException('Upload session has been aborted');
     }
+
+    return session;
+  }
+
+  /**
+   * Phase 2: Presign Part Upload URL
+   */
+  async getPartUrl(
+    sessionId: string,
+    partNumber: number,
+    actor?: MultipartActorContext,
+  ): Promise<string> {
+    const session = await this.getValidActiveSession(sessionId, actor);
 
     if (
       !Number.isInteger(partNumber) ||
@@ -189,21 +195,10 @@ export class MultipartService {
    * Phase 3: Complete Multipart Upload and assemble object
    */
   async complete(input: CompleteMultipartInput) {
-    const session = await this.sessionRepo.findById(input.sessionId);
-    if (!session || session.isExpired()) {
-      throw new NotFoundException('Upload session not found or expired');
-    }
-
-    this.verifySessionAccess(session, input.actor);
-
-    if (session.status === UploadSessionStatus.COMPLETED) {
-      throw new BadRequestException(
-        'Upload session has already been completed',
-      );
-    }
-    if (session.status === UploadSessionStatus.ABORTED) {
-      throw new BadRequestException('Upload session has been aborted');
-    }
+    const session = await this.getValidActiveSession(
+      input.sessionId,
+      input.actor,
+    );
 
     if (
       !input.parts ||
@@ -216,8 +211,7 @@ export class MultipartService {
     // 1. Tell S3 to concatenate all uploaded parts
     const normalizedParts = input.parts.map((p) => ({
       partNumber: p.partNumber,
-      eTag: p.eTag || p.etag || '',
-      etag: p.etag || p.eTag || '',
+      eTag: p.eTag,
     }));
 
     await this.blobService.completeMultipartUpload(
@@ -290,7 +284,7 @@ export class MultipartService {
     return {
       fileId,
       blobId,
-      url: `/api/v1/storage/files/${encodeURIComponent(fileId)}/content`,
+      url: getFileContentPath(fileId),
       filename: session.filename,
       size: Number(session.totalSize),
     };
@@ -313,7 +307,10 @@ export class MultipartService {
       return;
     }
 
-    await this.blobService.abortMultipartUpload(session.s3Key, session.s3UploadId);
+    await this.blobService.abortMultipartUpload(
+      session.s3Key,
+      session.s3UploadId,
+    );
     session.markAborted();
     await this.sessionRepo.update(session);
   }

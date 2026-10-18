@@ -143,5 +143,3 @@ export class IdentityFacade implements IIdentityFacade {
   }
 }
 
-export const IdentityService = IdentityFacade;
-export type IdentityService = IdentityFacade;

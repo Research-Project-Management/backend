@@ -97,30 +97,5 @@ export class ProjectWorkItemDistributionDto {
   }>;
 }
 
-export class CycleAnalyticsDto {
-  @ApiProperty()
-  @IsString()
-  cycleId!: string;
-
-  @ApiProperty()
-  @IsNumber()
-  totalWorkItems!: number;
-
-  @ApiProperty()
-  @IsNumber()
-  completedWorkItems!: number;
-
-  @ApiProperty()
-  @IsNumber()
-  inProgressWorkItems!: number;
-
-  @ApiProperty()
-  @IsNumber()
-  pendingWorkItems!: number;
-
-  @ApiProperty()
-  @IsNumber()
-  completionRate!: number;
-}
-
 export { YourWorkSummaryDto } from '../your-work/dto/your-work.dto';
+

@@ -65,6 +65,8 @@ export interface OAuthUserProfile {
  * Manages user credentials, JWT lifecycle, Redis-backed OAuth state validation,
  * cryptographic token hashing, token family rotation, and breach reuse detection.
  */
+import { resolvePublicUrl } from '../../../core/utils/public-urls';
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -102,8 +104,6 @@ export class AuthService {
     user:
       | (User & {
           profile?: { name?: string | null; avatar?: string | null } | null;
-          name?: string | null;
-          avatar?: string | null;
         })
       | null
       | undefined,
@@ -113,8 +113,8 @@ export class AuthService {
     return {
       id: rest.id,
       email: rest.email,
-      name: profile?.name ?? user.name ?? 'User',
-      avatar: profile?.avatar ?? user.avatar ?? null,
+      name: profile?.name ?? 'User',
+      avatar: profile?.avatar ?? null,
       status: rest.status,
       isVerified: user.status === 'active',
       createdAt: rest.createdAt,
@@ -131,7 +131,6 @@ export class AuthService {
   private async signTokenPair(user: {
     id: string;
     email: string | null;
-    name?: string;
     status?: string;
     profile?: { name?: string; avatar?: string | null } | null;
   }): Promise<TokenPair> {
@@ -140,7 +139,7 @@ export class AuthService {
       sub: user.id,
       id: user.id,
       email: user.email,
-      name: user.name ?? user.profile?.name ?? 'User',
+      name: user.profile?.name ?? 'User',
       status: user.status || 'active',
       isVerified,
     };
@@ -178,7 +177,6 @@ export class AuthService {
     user: {
       id: string;
       email: string | null;
-      name?: string;
       status?: string;
       profile?: { name?: string; avatar?: string | null } | null;
     },
@@ -266,8 +264,10 @@ export class AuthService {
 
   async getGoogleAuthUrl(): Promise<string> {
     const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
-    const apiUrl =
-      this.configService.get<string>('API_URL') || 'http://localhost:3000';
+    const apiUrl = resolvePublicUrl(
+      'API_URL',
+      this.configService.get<string>('API_URL'),
+    );
     const redirectUri = `${apiUrl}/auth/google/callback`;
     const state = await this.createOAuthState();
 
@@ -289,8 +289,10 @@ export class AuthService {
     state?: string,
     error?: string,
   ): Promise<{ redirectUrl: string }> {
-    const clientUrl =
-      this.configService.get<string>('CLIENT_URL') || 'http://localhost:2915';
+    const clientUrl = resolvePublicUrl(
+      'CLIENT_URL',
+      this.configService.get<string>('CLIENT_URL'),
+    );
 
     if (error || !code) {
       return {
@@ -310,8 +312,10 @@ export class AuthService {
       const clientSecret = this.configService.get<string>(
         'GOOGLE_CLIENT_SECRET',
       );
-      const apiUrl =
-        this.configService.get<string>('API_URL') || 'http://localhost:3000';
+      const apiUrl = resolvePublicUrl(
+        'API_URL',
+        this.configService.get<string>('API_URL'),
+      );
       const redirectUri = `${apiUrl}/auth/google/callback`;
 
       const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -375,8 +379,10 @@ export class AuthService {
 
   async getGithubAuthUrl(): Promise<string> {
     const clientId = this.configService.get<string>('GITHUB_CLIENT_ID');
-    const apiUrl =
-      this.configService.get<string>('API_URL') || 'http://localhost:3000';
+    const apiUrl = resolvePublicUrl(
+      'API_URL',
+      this.configService.get<string>('API_URL'),
+    );
     const redirectUri = `${apiUrl}/auth/github/callback`;
     const state = await this.createOAuthState();
 
@@ -397,8 +403,10 @@ export class AuthService {
     state?: string,
     error?: string,
   ): Promise<{ redirectUrl: string }> {
-    const clientUrl =
-      this.configService.get<string>('CLIENT_URL') || 'http://localhost:2915';
+    const clientUrl = resolvePublicUrl(
+      'CLIENT_URL',
+      this.configService.get<string>('CLIENT_URL'),
+    );
 
     if (error || !code) {
       return {
@@ -418,8 +426,10 @@ export class AuthService {
       const clientSecret = this.configService.get<string>(
         'GITHUB_CLIENT_SECRET',
       );
-      const apiUrl =
-        this.configService.get<string>('API_URL') || 'http://localhost:3000';
+      const apiUrl = resolvePublicUrl(
+        'API_URL',
+        this.configService.get<string>('API_URL'),
+      );
       const redirectUri = `${apiUrl}/auth/github/callback`;
 
       const tokenRes = await fetch(
@@ -784,10 +794,6 @@ export class AuthService {
     };
   }
 
-  async register(dto: RegisterDto): Promise<AuthnResponseDto> {
-    return this.registerUser(dto);
-  }
-
   async login(dto: LoginDto): Promise<AuthnResponseDto> {
     const user = await this.authnRepo.findUserByEmail(dto.email);
 
@@ -813,6 +819,7 @@ export class AuthService {
         targetId: user.id,
         metadata: { email: dto.email, reason: 'password_mismatch' },
       });
+      throw new UnauthorizedException('Invalid email or password');
     }
 
     if (user.status === 'suspended') {
@@ -1082,7 +1089,7 @@ export class AuthService {
       const tokenHash = this.hashToken(refreshToken);
       const tokenRecord = await this.authnRepo.findRefreshToken(tokenHash);
       if (tokenRecord) {
-        await this.authnRepo.revokeRefreshToken(tokenHash);
+        await this.authnRepo.revokeToken(tokenRecord.id);
         await this.redis.del(IDENTITY_REDIS_KEYS.session(tokenRecord.id));
         await this.redis.set(
           IDENTITY_REDIS_KEYS.revoked(tokenRecord.userId),
@@ -1205,7 +1212,8 @@ export class AuthService {
   }
 
   async revokeAllSessions(userId: string): Promise<{ revokedCount: number }> {
-    const count = await this.authnRepo.revokeAllUserSessions(userId);
+    const res = await this.authnRepo.revokeAllUserTokens(userId);
+    const count = res.count;
     await this.redis.set(
       IDENTITY_REDIS_KEYS.revoked(userId),
       Date.now(),
@@ -1225,6 +1233,3 @@ export class AuthService {
     return { revokedCount: count };
   }
 }
-
-export const AuthnService = AuthService;
-export type AuthnService = AuthService;

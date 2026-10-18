@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { File as PrismaFile, Prisma } from '@prisma/client';
+import { isValidUuid } from '@/modules/storage/core';
 import { StorageNode, FileScope, ListDriveFilter } from '../types';
 
 export type { ListDriveFilter };
@@ -25,14 +26,14 @@ export interface IStorageNodeRepository {
   restoreSubtree(rootNodeId: string): Promise<number>;
   findSubtreeNodes(rootNodeId: string): Promise<StorageNode[]>;
   findExpiredTrash(daysOld: number, limit: number): Promise<StorageNode[]>;
-  isDescendant?(rootNodeId: string, candidateId: string): Promise<boolean>;
-  getFolderPath?(folderId: string): Promise<Array<{ id: string; name: string }>>;
-  listSharedWithUser?(
+  isDescendant(rootNodeId: string, candidateId: string): Promise<boolean>;
+  getFolderPath(folderId: string): Promise<Array<{ id: string; name: string }>>;
+  listSharedWithUser(
     userId: string,
     take: number,
     skip: number,
   ): Promise<{ items: SharedNodeItem[]; total: number }>;
-  shareNode?(
+  shareNode(
     fileId: string,
     targetUserId: string,
     permission: 'view' | 'edit',
@@ -45,8 +46,30 @@ export interface IStorageNodeRepository {
   }>;
 }
 
+const FILE_AUTHOR_SELECT = {
+  id: true,
+  email: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
+} as const;
+
+type PrismaFileWithAuthor = PrismaFile & {
+  author?: {
+    id: string;
+    email: string | null;
+    profile?: {
+      name: string | null;
+      avatar: string | null;
+    } | null;
+  } | null;
+};
+
 export class StorageNodeMapper {
-  public static toDomain(record: PrismaFile): StorageNode {
+  public static toDomain(record: PrismaFileWithAuthor): StorageNode {
     return new StorageNode({
       id: record.id,
       projectId: record.linkedToType === 'Project' ? record.linkedToId : null,
@@ -60,6 +83,14 @@ export class StorageNodeMapper {
       starred: record.starred,
       metadata: (record.metaData as Record<string, unknown>) || {},
       authorId: record.authorId,
+      author: record.author
+        ? {
+            id: record.author.id,
+            email: record.author.email,
+            name: record.author.profile?.name ?? null,
+            avatar: record.author.profile?.avatar ?? null,
+          }
+        : null,
       trashedAt: record.trashedAt,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
@@ -87,14 +118,6 @@ export class StorageNodeMapper {
   }
 }
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function isValidUuid(id?: string | null): boolean {
-  if (!id || typeof id !== 'string') return false;
-  return UUID_REGEX.test(id.trim());
-}
-
 @Injectable()
 export class PrismaStorageNodeRepository implements IStorageNodeRepository {
   private readonly logger = new Logger(PrismaStorageNodeRepository.name);
@@ -104,13 +127,17 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
   async findById(id: string): Promise<StorageNode | null> {
     const record = await this.prisma.file.findUnique({
       where: { id },
+      include: { author: { select: FILE_AUTHOR_SELECT } },
     });
     return record ? StorageNodeMapper.toDomain(record) : null;
   }
 
   async create(node: StorageNode): Promise<StorageNode> {
     const data = StorageNodeMapper.toPrismaCreate(node);
-    const created = await this.prisma.file.create({ data });
+    const created = await this.prisma.file.create({
+      data,
+      include: { author: { select: FILE_AUTHOR_SELECT } },
+    });
     return StorageNodeMapper.toDomain(created);
   }
 
@@ -129,6 +156,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
         trashedAt: data.trashedAt,
         updatedAt: data.updatedAt,
       },
+      include: { author: { select: FILE_AUTHOR_SELECT } },
     });
     return StorageNodeMapper.toDomain(updated);
   }
@@ -241,7 +269,12 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
             isFolder: false,
             OR: [
               { mimeType: { contains: t, mode: 'insensitive' } },
-              { filename: { endsWith: `.${t.replace(/^\./, '')}`, mode: 'insensitive' } },
+              {
+                filename: {
+                  endsWith: `.${t.replace(/^\./, '')}`,
+                  mode: 'insensitive',
+                },
+              },
             ],
           });
         }
@@ -250,7 +283,11 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
         Object.assign(where, typeConditions[0]);
       } else if (typeConditions.length > 1) {
         where.AND = [
-          ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+          ...(Array.isArray(where.AND)
+            ? where.AND
+            : where.AND
+              ? [where.AND]
+              : []),
           { OR: typeConditions },
         ];
       }
@@ -294,6 +331,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
         orderBy,
         take: filter.limit ?? 100,
         skip: filter.offset ?? 0,
+        include: { author: { select: FILE_AUTHOR_SELECT } },
       }),
       this.prisma.file.count({ where }),
     ]);
@@ -307,6 +345,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
   async findByBlobId(blobId: string): Promise<StorageNode[]> {
     const records = await this.prisma.file.findMany({
       where: { blobId },
+      include: { author: { select: FILE_AUTHOR_SELECT } },
     });
     return records.map((r) => StorageNodeMapper.toDomain(r));
   }
@@ -439,7 +478,11 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
           userId,
           file: { trashedAt: null },
         },
-        include: { file: true },
+        include: {
+          file: {
+            include: { author: { select: FILE_AUTHOR_SELECT } },
+          },
+        },
         orderBy: { createdAt: 'desc' },
         take,
         skip,
@@ -475,9 +518,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     createdAt: string;
   }> {
     const permission =
-      permissionType === 'edit'
-        ? ('edit' as const)
-        : ('view' as const);
+      permissionType === 'edit' ? ('edit' as const) : ('view' as const);
 
     const share = await this.prisma.fileShare.upsert({
       where: {

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Inject,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   STORAGE_NODE_REPOSITORY,
@@ -96,24 +91,8 @@ export class TrashService {
 
     if (node.isFolder) {
       // Cascading subtree purge for folder and all children
-      const subtree = this.nodeRepo.findSubtreeNodes
-        ? await this.nodeRepo.findSubtreeNodes(nodeId)
-        : [node];
-      const nodeById = new Map(subtree.map((n) => [n.id, n]));
-      const getDepth = (n: StorageNode): number => {
-        let d = 0;
-        let curr: StorageNode | undefined = n;
-        while (curr?.parentId && nodeById.has(curr.parentId) && d < 100) {
-          d++;
-          curr = nodeById.get(curr.parentId);
-        }
-        return d;
-      };
-      const sortedSubtree = [...subtree].sort((a, b) => {
-        if (!a.isFolder && b.isFolder) return -1;
-        if (a.isFolder && !b.isFolder) return 1;
-        return getDepth(b) - getDepth(a);
-      });
+      const subtree = await this.nodeRepo.findSubtreeNodes(nodeId);
+      const sortedSubtree = StorageNode.sortBottomUp(subtree);
 
       for (const subnode of sortedSubtree) {
         await this.releaseNodeBlobsAndQuota(subnode);
@@ -142,12 +121,19 @@ export class TrashService {
           if (!scopeKey) scopeKey = node.projectId ?? node.authorId;
           this.eventEmitter.emit(
             'file.trashed',
-            new FileTrashedEvent(node.id, node.authorId, new Date(), node.projectId),
+            new FileTrashedEvent(
+              node.id,
+              node.authorId,
+              new Date(),
+              node.projectId,
+            ),
           );
           count++;
         }
       } catch (err: unknown) {
-        this.logger.warn(`batchSoftDelete failed for node ${id}: ${(err as Error)?.message}`);
+        this.logger.warn(
+          `batchSoftDelete failed for node ${id}: ${(err as Error)?.message}`,
+        );
       }
     }
 
@@ -174,7 +160,9 @@ export class TrashService {
           count++;
         }
       } catch (err: unknown) {
-        this.logger.warn(`batchRestore failed for node ${id}: ${(err as Error)?.message}`);
+        this.logger.warn(
+          `batchRestore failed for node ${id}: ${(err as Error)?.message}`,
+        );
       }
     }
 
@@ -193,7 +181,9 @@ export class TrashService {
         await this.permanentDelete(id);
         count++;
       } catch (err: unknown) {
-        this.logger.warn(`batchPermanentDelete failed for node ${id}: ${(err as Error)?.message}`);
+        this.logger.warn(
+          `batchPermanentDelete failed for node ${id}: ${(err as Error)?.message}`,
+        );
       }
     }
     return count;

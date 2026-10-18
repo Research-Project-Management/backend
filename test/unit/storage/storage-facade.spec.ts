@@ -7,10 +7,7 @@ import { IStorageNodeRepository } from '@/modules/storage/drive';
 import { IStorageBlobRepository } from '@/modules/storage/core';
 import { IStorageQuotaRepository } from '@/modules/storage/drive';
 import { StorageRedisCacheService } from '@/modules/storage/core';
-import {
-  StorageBlob,
-  BlobStatus,
-} from '@/modules/storage/core';
+import { StorageBlob, BlobStatus } from '@/modules/storage/core';
 import { StorageNode } from '@/modules/storage/drive';
 import { ContentHash } from '@/modules/storage/core';
 import { StorageKey } from '@/modules/storage/core';
@@ -57,6 +54,8 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
       completeMultipartUpload: jest.fn(),
       abortMultipartUpload: jest.fn(),
       listUploadedParts: jest.fn(),
+      applyLifecycleRules: jest.fn().mockResolvedValue(undefined),
+      getLifecycleRules: jest.fn().mockResolvedValue([]),
     };
 
     mockNodeRepo = {
@@ -81,6 +80,10 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
       restoreSubtree: jest.fn(),
       findSubtreeNodes: jest.fn(),
       findExpiredTrash: jest.fn(),
+      isDescendant: jest.fn().mockResolvedValue(false),
+      getFolderPath: jest.fn().mockResolvedValue([]),
+      listSharedWithUser: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+      shareNode: jest.fn(),
     };
 
     mockBlobRepo = {
@@ -107,6 +110,18 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
         blobsInDb.delete(id);
       }),
       findTombstonedBlobs: jest.fn(),
+      incrementRefCount: jest.fn().mockImplementation(async (id: string) => {
+        const blob = blobsInDb.get(id);
+        if (!blob) throw new Error('Blob not found');
+        blob.incrementRef();
+        return blob;
+      }),
+      decrementRefCount: jest.fn().mockImplementation(async (id: string) => {
+        const blob = blobsInDb.get(id);
+        if (!blob) throw new Error('Blob not found');
+        blob.decrementRef();
+        return blob;
+      }),
     };
 
     mockQuotaRepo = {
@@ -156,7 +171,9 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
           .mockResolvedValue({ usedBytes: 0, maxBytes: 5e9, percentage: 0 }),
       } as any,
       {} as any,
-      new StreamService(blobService, mockNodeRepo, mockCache),
+      new StreamService(blobService, mockNodeRepo, mockCache, {
+        assertCanAccess: jest.fn().mockResolvedValue(undefined),
+      } as any),
       {} as any,
     );
   });

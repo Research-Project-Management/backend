@@ -27,7 +27,7 @@ import {
 } from './dto/response.dto';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 /**
  * Core Controller for Project Aggregate Root.
@@ -74,17 +74,8 @@ export class CoreController {
     return this.projectService.create(userId, dto);
   }
 
-  @Get('trash')
-  @ApiOperation({
-    summary:
-      'List trashed projects (always empty as projects are deleted permanently)',
-  })
-  async getTrashedProjects(@CurrentUser('id') _userId: string) {
-    return { projects: [] };
-  }
-
   @Get(':projectId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get project detail by ID' })
   @ApiResponse({
@@ -100,7 +91,7 @@ export class CoreController {
   }
 
   @Put(':projectId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Update project settings (Owner only)' })
   @ApiResponse({
@@ -117,7 +108,7 @@ export class CoreController {
   }
 
   @Delete(':projectId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Permanently delete a project (Owner only)' })
   @ApiResponse({
@@ -131,23 +122,8 @@ export class CoreController {
     return this.projectService.permanentDeleteProject(projectId, actorId);
   }
 
-  @Post(':projectId/restore')
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner')
-  @ApiOperation({ summary: 'Restore a soft-deleted project (Owner only)' })
-  @ApiResponse({
-    status: 200,
-    description: 'Project restored successfully',
-  })
-  async restoreProject(
-    @Param('projectId') projectId: string,
-    @CurrentUser('id') actorId: string,
-  ) {
-    return this.projectService.restore(projectId, actorId);
-  }
-
   @Post([':projectId/duplicate', ':projectId/clone'])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -161,10 +137,10 @@ export class CoreController {
   }
 
   @Delete(':projectId/permanent')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
-    summary: 'Permanently delete a soft-deleted project (irreversible)',
+    summary: 'Permanently delete a project (irreversible)',
   })
   async permanentDeleteProject(
     @Param('projectId') projectId: string,
@@ -173,5 +149,3 @@ export class CoreController {
     return this.projectService.permanentDeleteProject(projectId, userId);
   }
 }
-
-export { CoreController as ProjectController };

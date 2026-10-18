@@ -23,12 +23,12 @@ import { CurrentUser } from '@/modules/identity/auth';
 
 @ApiTags('AI - Chats')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/ai/chats', 'ai/chats'])
 @UseGuards(JwtAuthGuard)
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
-  @Get(['chats', 'ai/chats'])
+  @Get()
   @ApiOperation({ summary: 'Get all chat sessions for user' })
   async getChats(
     @CurrentUser('id') userId: string,
@@ -38,7 +38,7 @@ export class ChatController {
     return { chats };
   }
 
-  @Post(['chats', 'ai/chats'])
+  @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new AI chat session' })
   async createChat(
@@ -48,7 +48,7 @@ export class ChatController {
     return this.chatService.createChat(userId, dto);
   }
 
-  @Get(['chats/page/:pageId', 'ai/page-chats/:pageId', 'page-chats/:pageId'])
+  @Get('page/:pageId')
   @ApiOperation({
     summary: 'Get active AI chat session for a specific document page',
   })
@@ -59,7 +59,7 @@ export class ChatController {
     return this.chatService.getPageChat(pageId, userId);
   }
 
-  @Delete(['chats/page/:pageId', 'ai/page-chats/:pageId', 'page-chats/:pageId'])
+  @Delete('page/:pageId')
   @ApiOperation({
     summary: 'Clear AI chat session for a specific document page',
   })
@@ -70,13 +70,7 @@ export class ChatController {
     return this.chatService.clearPageChat(pageId, userId);
   }
 
-  @Delete([
-    'ai/memory/:scopeId',
-    'memory/:scopeId',
-    'ai/memory',
-    'memory',
-    'memory/clear',
-  ])
+  @Delete(['memory/:scopeId', 'memory'])
   @ApiOperation({ summary: 'Clear AI chat memory for user' })
   async clearMemory(
     @CurrentUser('id') userId: string,
@@ -85,7 +79,7 @@ export class ChatController {
     return this.chatService.clearMemory(userId, scopeId);
   }
 
-  @Get(['chats/:chatId', 'ai/chats/:chatId'])
+  @Get(':chatId')
   @ApiOperation({
     summary: 'Get details and message history of a chat session',
   })
@@ -96,7 +90,7 @@ export class ChatController {
     return this.chatService.getChat(chatId, userId);
   }
 
-  @Get(['chats/:chatId/messages', 'ai/chats/:chatId/messages'])
+  @Get(':chatId/messages')
   @ApiOperation({ summary: 'Get paginated messages of a chat session' })
   async getChatMessages(
     @Param('chatId') chatId: string,
@@ -114,8 +108,8 @@ export class ChatController {
     };
   }
 
-  @Post(['chats/:chatId/messages', 'ai/chats/:chatId/messages'])
-  @Patch(['chats/:chatId/messages', 'ai/chats/:chatId/messages'])
+  @Post(':chatId/messages')
+  @Patch(':chatId/messages')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Append messages to an existing chat session' })
   async appendMessages(
@@ -126,12 +120,7 @@ export class ChatController {
     return this.chatService.appendMessages(chatId, userId, dto);
   }
 
-  @Patch([
-    'chats/:chatId',
-    'ai/chats/:chatId',
-    'chats/:chatId/title',
-    'ai/chats/:chatId/title',
-  ])
+  @Patch([':chatId', ':chatId/title'])
   @ApiOperation({ summary: 'Rename an AI chat session' })
   async renameChat(
     @Param('chatId') chatId: string,
@@ -141,7 +130,7 @@ export class ChatController {
     return this.chatService.renameChat(chatId, userId, dto);
   }
 
-  @Delete(['chats/:chatId', 'ai/chats/:chatId'])
+  @Delete(':chatId')
   @ApiOperation({ summary: 'Delete an AI chat session' })
   async deleteChat(
     @Param('chatId') chatId: string,
@@ -151,6 +140,3 @@ export class ChatController {
   }
 }
 
-// Backward compatibility alias
-export const ThreadController = ChatController;
-export type ThreadController = ChatController;

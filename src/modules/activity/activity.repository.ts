@@ -152,7 +152,7 @@ export class ActivityRepository implements IActivityRepository {
     return items.map(mapActivityEvent);
   }
 
-  async findUserRecentEvents(
+  async findRecentByActor(
     actorId: string,
     limit = 50,
   ): Promise<ActivityEvent[]> {
@@ -162,13 +162,6 @@ export class ActivityRepository implements IActivityRepository {
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
-  }
-
-  async findRecentByActor(
-    actorId: string,
-    limit = 50,
-  ): Promise<ActivityEvent[]> {
-    return this.findUserRecentEvents(actorId, limit);
   }
 
   /**
@@ -212,60 +205,6 @@ export class ActivityRepository implements IActivityRepository {
     papers.forEach((p) => map.set(`paper:${p.id}`, p.title));
     pages.forEach((pg) => map.set(`page:${pg.id}`, pg.path || 'Manuscript'));
     return map;
-  }
-
-  async findUserRecentItems(userId: string, limit: number) {
-    if (!isUUID(userId)) {
-      return { workItems: [], papers: [], pages: [] };
-    }
-
-    const userProjects = await this.prisma.projectMember.findMany({
-      where: { userId },
-      select: { projectId: true },
-    });
-    const projectIds = userProjects.map((p) => p.projectId);
-
-    const [workItems, papers, pages] = await Promise.all([
-      this.prisma.workItem.findMany({
-        where: {
-          deletedAt: null,
-          OR: [{ authorId: userId }, { assigneeId: userId }],
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: limit,
-        select: { id: true, title: true, projectId: true, updatedAt: true },
-      }),
-      this.prisma.item.findMany({
-        where: {
-          userId,
-          deletedAt: null,
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: limit,
-        select: { id: true, title: true, updatedAt: true },
-      }),
-      projectIds.length
-        ? this.prisma.manuscriptDoc.findMany({
-            where: {
-              deleted: false,
-              projectId: { in: projectIds },
-            },
-            orderBy: { updatedAt: 'desc' },
-            take: limit,
-            select: { id: true, path: true, projectId: true, updatedAt: true },
-          })
-        : [],
-    ]);
-    return {
-      workItems,
-      papers,
-      pages: pages.map((p) => ({
-        id: p.id,
-        title: p.path,
-        projectId: p.projectId,
-        updatedAt: p.updatedAt,
-      })),
-    };
   }
 
   async findWorkItemWithProject(workItemId: string) {

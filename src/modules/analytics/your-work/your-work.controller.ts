@@ -50,14 +50,9 @@ export class YourWorkController {
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
     @Query('projectId') queryProjectId?: string,
-    @Query('forceEmpty') forceEmpty?: string,
   ): Promise<YourWorkSummaryDto> {
     const targetProjectId = projectId || queryProjectId;
-    const isForceEmpty = forceEmpty === 'true' || forceEmpty === '1';
-    return this.yourWorkService.getYourWork(
-      targetProjectId,
-      userId,
-      isForceEmpty,
-    );
+    return this.yourWorkService.getYourWork(targetProjectId, userId);
   }
 }
+

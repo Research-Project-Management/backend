@@ -18,6 +18,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import '@fastify/multipart';
 import { AiService } from './ai.service';
 import { AiQueryDto, GetDocumentsBulkDto } from './dto/ai.dto';
+import { normalizeProjectId } from './utils/ai.util';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { VerifiedEmailGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
@@ -167,31 +168,16 @@ export class AiController {
       throw new BadRequestException('File is required');
     }
 
-    const rawProjectId = fields.projectId || fields.project_id;
-    const isPersonalProject =
-      !rawProjectId ||
-      rawProjectId === 'me' ||
-      rawProjectId === 'user' ||
-      rawProjectId === 'all' ||
-      rawProjectId === 'null' ||
-      rawProjectId === 'undefined';
-    const projectId = isPersonalProject ? undefined : String(rawProjectId);
-
-    const rawScope = fields.scopeId;
-    const isPersonalScope =
-      !rawScope ||
-      rawScope === 'me' ||
-      rawScope === 'user' ||
-      rawScope === 'all';
-    const scopeId = isPersonalScope ? projectId || userId : String(rawScope);
+    const projectId = normalizeProjectId(fields.projectId || fields.project_id);
+    const scopeId = normalizeProjectId(fields.scopeId) || projectId || userId;
 
     const title = fields.title;
     const tags = fields.tags;
     const chatId = fields.chatId || fields.chat_id;
 
     return this.aiService.uploadDocument(userId, buffer, mimeType, filename, {
-      scopeId: String(scopeId),
-      projectId: projectId ? String(projectId) : undefined,
+      scopeId,
+      projectId,
       chatId: chatId ? String(chatId) : undefined,
       title: title ? String(title) : undefined,
       tags: tags ? String(tags) : undefined,

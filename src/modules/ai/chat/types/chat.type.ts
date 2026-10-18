@@ -61,16 +61,6 @@ export interface IChatRepository {
     userId: string,
     projectId?: string | null,
   ): Promise<{ count: number }>;
-  appendMessage(
-    chatId: string,
-    message: {
-      role: MessageRole;
-      content: string;
-      sources?: unknown;
-      widgets?: unknown;
-      selectionContext?: unknown;
-    },
-  ): Promise<AiMessage>;
   createMessages(
     chatId: string,
     messages: Array<{
@@ -85,5 +75,3 @@ export interface IChatRepository {
   updateChatTitle(chatId: string, title: string): Promise<ChatWithMessages>;
 }
 
-// Backward compatibility alias
-export type IAiRepository = IChatRepository;

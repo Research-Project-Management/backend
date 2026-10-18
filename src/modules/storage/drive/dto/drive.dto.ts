@@ -1,10 +1,4 @@
-import {
-  IsBoolean,
-  IsNotEmpty,
-  IsObject,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateFolderDto {
   @IsString()
@@ -22,24 +16,6 @@ export class CreateFolderDto {
   @IsString()
   @IsOptional()
   pageId?: string;
-}
-
-export class UpdateFileDto {
-  @IsString()
-  @IsOptional()
-  filename?: string;
-
-  @IsBoolean()
-  @IsOptional()
-  starred?: boolean;
-
-  @IsString()
-  @IsOptional()
-  parentId?: string;
-
-  @IsObject()
-  @IsOptional()
-  metaData?: Record<string, unknown>;
 }
 
 export class RenameFileDto {

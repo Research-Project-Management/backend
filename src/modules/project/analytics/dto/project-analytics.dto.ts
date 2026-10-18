@@ -73,16 +73,5 @@ export class ProjectPortfolioOverviewDto {
 
   @ApiProperty({ example: 6 })
   totalMembers!: number;
-
-  @ApiProperty({ example: 3 })
-  totalCycles!: number;
-
-  @ApiPropertyOptional({
-    example: { id: 'uuid', name: 'Sprint 1', progressPercentage: 70 },
-  })
-  activeCycle?: {
-    id: string;
-    name: string;
-    progressPercentage: number;
-  } | null;
 }
+

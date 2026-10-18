@@ -1,7 +1,6 @@
 import {
   Injectable,
   Inject,
-  Optional,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -19,15 +18,11 @@ import { StorageAccessPolicy } from './access.policy';
 import {
   StorageRedisCacheService,
   BlobService,
-  ContentHash,
-  StorageKey,
-  StorageBlob,
-  BlobStatus,
   FileUploadedEvent,
   validateMagicBytes,
   sanitizeFilename,
 } from '@/modules/storage/core';
-import { StorageVersion } from '../types';
+import { StorageNode, StorageVersion } from '../types';
 
 export interface FileVersionDto {
   id: string;
@@ -102,7 +97,10 @@ export class VersionService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  async listVersions(fileId: string, actorId: string): Promise<GetFileVersionsOutput> {
+  async listVersions(
+    fileId: string,
+    actorId: string,
+  ): Promise<GetFileVersionsOutput> {
     const node = await this.nodeRepo.findById(fileId);
     if (!node || node.isTrashed()) {
       throw new NotFoundException('File not found or has been trashed');
@@ -111,7 +109,9 @@ export class VersionService {
     await this.accessPolicy.assertCanAccess(actorId, fileId, 'read');
 
     const versions = await this.versionRepo.findByFileId(fileId);
-    const sorted = [...versions].sort((a, b) => b.versionNumber - a.versionNumber);
+    const sorted = [...versions].sort(
+      (a, b) => b.versionNumber - a.versionNumber,
+    );
     const maxVersion = sorted.length > 0 ? sorted[0].versionNumber : 1;
 
     const versionDtos: FileVersionDto[] = sorted.map((v) => ({
@@ -153,7 +153,9 @@ export class VersionService {
     };
   }
 
-  async uploadVersion(input: UploadNewVersionInput): Promise<UploadNewVersionOutput> {
+  async uploadVersion(
+    input: UploadNewVersionInput,
+  ): Promise<UploadNewVersionOutput> {
     const node = await this.nodeRepo.findById(input.fileId);
     if (!node || node.isTrashed()) {
       throw new NotFoundException('File not found or has been trashed');
@@ -162,7 +164,11 @@ export class VersionService {
       throw new BadRequestException('Cannot version a folder');
     }
 
-    await this.accessPolicy.assertCanAccess(input.userId, input.fileId, 'write');
+    await this.accessPolicy.assertCanAccess(
+      input.userId,
+      input.fileId,
+      'write',
+    );
 
     const cleanFilename = sanitizeFilename(input.filename);
     validateMagicBytes(input.buffer, input.mimeType, cleanFilename);
@@ -180,7 +186,9 @@ export class VersionService {
       sizeBytes,
     );
 
-    const latestVersion = await this.versionRepo.getLatestVersionNumber(node.id);
+    const latestVersion = await this.versionRepo.getLatestVersionNumber(
+      node.id,
+    );
     let nextVersionNumber = latestVersion + 1;
 
     if (latestVersion === 0 && node.blobId) {
@@ -244,6 +252,27 @@ export class VersionService {
     };
   }
 
+  private async resolveVersionBlob(
+    node: StorageNode,
+    versionNumber: number,
+  ): Promise<{ blobId: string; sizeBytes: bigint }> {
+    const version = await this.versionRepo.findByFileAndVersion(
+      node.id,
+      versionNumber,
+    );
+
+    if (version) {
+      return { blobId: version.blobId, sizeBytes: version.sizeBytes };
+    }
+    if (versionNumber === 1 && node.blobId) {
+      return { blobId: node.blobId, sizeBytes: node.size };
+    }
+
+    throw new NotFoundException(
+      `Version ${versionNumber} not found for file ${node.name}`,
+    );
+  }
+
   async downloadVersion(
     fileId: string,
     versionNumber: number,
@@ -256,26 +285,7 @@ export class VersionService {
 
     await this.accessPolicy.assertCanAccess(actorId, fileId, 'read');
 
-    let blobId: string | null = null;
-    const version = await this.versionRepo.findByFileAndVersion(
-      fileId,
-      versionNumber,
-    );
-
-    if (version) {
-      blobId = version.blobId;
-    } else if (versionNumber === 1 && node.blobId) {
-      blobId = node.blobId;
-    } else {
-      throw new NotFoundException(
-        `Version ${versionNumber} not found for file ${node.name}`,
-      );
-    }
-
-    if (!blobId) {
-      throw new NotFoundException('Physical data blob not found in storage');
-    }
-
+    const { blobId } = await this.resolveVersionBlob(node, versionNumber);
     const { blob, stream } = await this.blobService.openStream(blobId);
 
     const lastDotIndex = node.name.lastIndexOf('.');
@@ -305,29 +315,14 @@ export class VersionService {
 
     await this.accessPolicy.assertCanAccess(actorId, fileId, 'write');
 
-    const targetVersion = await this.versionRepo.findByFileAndVersion(
-      fileId,
-      targetVersionNumber,
-    );
-
-    let targetBlobId: string | null = null;
-    let targetSize = node.size;
-
-    if (targetVersion) {
-      targetBlobId = targetVersion.blobId;
-      targetSize = targetVersion.sizeBytes;
-    } else if (targetVersionNumber === 1 && node.blobId) {
-      targetBlobId = node.blobId;
-      targetSize = node.size;
-    } else {
-      throw new NotFoundException(
-        `Version ${targetVersionNumber} not found for file ${node.name}`,
-      );
-    }
+    const { blobId: targetBlobId, sizeBytes: targetSize } =
+      await this.resolveVersionBlob(node, targetVersionNumber);
 
     const blob = await this.blobService.incrementBlobRef(targetBlobId);
 
-    const latestVersion = await this.versionRepo.getLatestVersionNumber(node.id);
+    const latestVersion = await this.versionRepo.getLatestVersionNumber(
+      node.id,
+    );
     const newVersionNumber = latestVersion + 1;
 
     const newVersion = new StorageVersion({

@@ -20,7 +20,7 @@ import {
 import { invalidateWorkItemCache } from '@/modules/work-item/common/constants/redis-keys.constant';
 import * as crypto from 'crypto';
 
-export const INVERSE_RELATION_MAP: Record<RelationType, RelationType> = {
+export const INVERSE_RELATION_MAP: Record<string, RelationType> = {
   blocks: 'blocked_by',
   blocked_by: 'blocks',
   relates_to: 'relates_to',
@@ -34,23 +34,15 @@ export const INVERSE_RELATION_MAP: Record<RelationType, RelationType> = {
   finish_to_start: 'blocked_by',
   start_to_start: 'starts_after',
   finish_to_finish: 'finishes_after',
-  FINISH_TO_START: 'blocked_by',
-  START_TO_START: 'starts_after',
-  FINISH_TO_FINISH: 'finishes_after',
-  START_TO_FINISH: 'START_TO_FINISH',
   implements: 'implements',
 };
 
 const BLOCKING_FORWARD_TYPES = new Set<string>([
   'blocks',
   'finish_to_start',
-  'FINISH_TO_START',
   'start_to_start',
-  'START_TO_START',
   'finish_to_finish',
-  'FINISH_TO_FINISH',
   'start_to_finish',
-  'START_TO_FINISH',
   'starts_before',
   'finishes_before',
 ]);
@@ -78,6 +70,74 @@ export class RelationService {
     await invalidateWorkItemCache(this.cache, { projectId, workItemId });
   }
 
+  private extractRelations(workItem: {
+    relations?: unknown;
+    outgoingRelations?: Array<{
+      id: string;
+      sourceId: string;
+      targetId: string;
+      type: WorkItemRelationType | string;
+      createdAt: Date | string;
+    }>;
+    incomingRelations?: Array<{
+      id: string;
+      sourceId: string;
+      targetId: string;
+      type: WorkItemRelationType | string;
+      createdAt: Date | string;
+    }>;
+  }): WorkItemRelationItem[] {
+    const jsonRelations: WorkItemRelationItem[] = Array.isArray(
+      workItem.relations,
+    )
+      ? (workItem.relations as unknown as WorkItemRelationItem[])
+      : [];
+
+    const byTarget = new Map<string, WorkItemRelationItem>();
+    for (const rel of jsonRelations) {
+      if (rel?.targetWorkItemId) {
+        byTarget.set(rel.targetWorkItemId, rel);
+      }
+    }
+
+    if (Array.isArray(workItem.outgoingRelations)) {
+      for (const outRel of workItem.outgoingRelations) {
+        if (!byTarget.has(outRel.targetId)) {
+          byTarget.set(outRel.targetId, {
+            id: outRel.id,
+            targetWorkItemId: outRel.targetId,
+            type: String(outRel.type) as RelationType,
+            createdAt:
+              outRel.createdAt instanceof Date
+                ? outRel.createdAt.toISOString()
+                : String(outRel.createdAt),
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(workItem.incomingRelations)) {
+      for (const inRel of workItem.incomingRelations) {
+        if (!byTarget.has(inRel.sourceId)) {
+          const normalizedType = String(inRel.type).toLowerCase();
+          const inverseType =
+            INVERSE_RELATION_MAP[normalizedType] || 'relates_to';
+          byTarget.set(inRel.sourceId, {
+            id: inRel.id,
+            targetWorkItemId: inRel.sourceId,
+            type: inverseType,
+            createdAt:
+              inRel.createdAt instanceof Date
+                ? inRel.createdAt.toISOString()
+                : String(inRel.createdAt),
+          });
+        }
+      }
+    }
+
+    return Array.from(byTarget.values());
+  }
+
   async getWorkItemRelations(
     workItemId: string,
   ): Promise<{ relations: EnrichedRelationItem[] }> {
@@ -86,11 +146,7 @@ export class RelationService {
       throw new NotFoundException('WorkItem not found');
     }
 
-    const rawRelations: WorkItemRelationItem[] = Array.isArray(
-      workItem.relations,
-    )
-      ? (workItem.relations as unknown as WorkItemRelationItem[])
-      : [];
+    const rawRelations = this.extractRelations(workItem);
 
     if (rawRelations.length === 0) {
       return { relations: [] };
@@ -292,15 +348,15 @@ export class RelationService {
       );
     }
 
-    const existingSourceRelations: WorkItemRelationItem[] = Array.isArray(
-      sourceItem.relations,
-    )
-      ? (sourceItem.relations as unknown as WorkItemRelationItem[])
-      : [];
+    const existingSourceRelations = this.extractRelations(sourceItem);
+    const normalizedInputType = String(
+      addRelationDto.type,
+    ).toLowerCase() as RelationType;
 
     const isDuplicateRelation = existingSourceRelations.some(
       (r) =>
-        r.targetWorkItemId === targetItem.id && r.type === addRelationDto.type,
+        r.targetWorkItemId === targetItem.id &&
+        String(r.type).toLowerCase() === normalizedInputType,
     );
     if (isDuplicateRelation) {
       throw new ConflictException(
@@ -308,7 +364,7 @@ export class RelationService {
       );
     }
 
-    if (BLOCKING_FORWARD_TYPES.has(addRelationDto.type)) {
+    if (BLOCKING_FORWARD_TYPES.has(normalizedInputType)) {
       const wouldCycle = await this.hasDirectedPath(
         targetItem.id,
         sourceItem.id,
@@ -320,7 +376,7 @@ export class RelationService {
           'Circular dependency detected: Work items cannot block each other directly or transitively.',
         );
       }
-    } else if (BLOCKING_INVERSE_TYPES.has(addRelationDto.type)) {
+    } else if (BLOCKING_INVERSE_TYPES.has(normalizedInputType)) {
       const wouldCycle = await this.hasDirectedPath(
         sourceItem.id,
         targetItem.id,
@@ -332,7 +388,7 @@ export class RelationService {
           'Circular dependency detected: Work item cannot be blocked by a work item that it already blocks directly or transitively.',
         );
       }
-    } else if (DUPLICATE_FORWARD_TYPES.has(addRelationDto.type)) {
+    } else if (DUPLICATE_FORWARD_TYPES.has(normalizedInputType)) {
       const wouldCycle = await this.hasDirectedPath(
         targetItem.id,
         sourceItem.id,
@@ -344,7 +400,7 @@ export class RelationService {
           'Circular dependency detected: Work items cannot be duplicates of each other directly or transitively.',
         );
       }
-    } else if (DUPLICATE_INVERSE_TYPES.has(addRelationDto.type)) {
+    } else if (DUPLICATE_INVERSE_TYPES.has(normalizedInputType)) {
       const wouldCycle = await this.hasDirectedPath(
         sourceItem.id,
         targetItem.id,
@@ -359,7 +415,7 @@ export class RelationService {
     }
 
     const targetType =
-      INVERSE_RELATION_MAP[addRelationDto.type] || 'relates_to';
+      INVERSE_RELATION_MAP[normalizedInputType] || 'relates_to';
     const now = new Date().toISOString();
 
     const sourceRelations: WorkItemRelationItem[] =
@@ -374,10 +430,8 @@ export class RelationService {
       createdAt: now,
     });
 
-    const targetRelations: WorkItemRelationItem[] = (
-      Array.isArray(targetItem.relations)
-        ? (targetItem.relations as unknown as WorkItemRelationItem[])
-        : []
+    const targetRelations: WorkItemRelationItem[] = this.extractRelations(
+      targetItem,
     ).filter((relation) => relation.targetWorkItemId !== sourceItem.id);
 
     targetRelations.push({
@@ -388,13 +442,13 @@ export class RelationService {
     });
 
     const dbRelationType: WorkItemRelationType = BLOCKING_FORWARD_TYPES.has(
-      addRelationDto.type,
+      normalizedInputType,
     )
       ? WorkItemRelationType.blocks
-      : BLOCKING_INVERSE_TYPES.has(addRelationDto.type)
+      : BLOCKING_INVERSE_TYPES.has(normalizedInputType)
         ? WorkItemRelationType.blocked_by
-        : DUPLICATE_FORWARD_TYPES.has(addRelationDto.type) ||
-            DUPLICATE_INVERSE_TYPES.has(addRelationDto.type)
+        : DUPLICATE_FORWARD_TYPES.has(normalizedInputType) ||
+            DUPLICATE_INVERSE_TYPES.has(normalizedInputType)
           ? WorkItemRelationType.duplicate_of
           : WorkItemRelationType.relates_to;
 
@@ -552,9 +606,7 @@ export class RelationService {
     const item = await this.relationRepository.findWorkItem(workItemId);
     if (!item) throw new NotFoundException('WorkItem not found');
 
-    const rawRelations: WorkItemRelationItem[] = Array.isArray(item.relations)
-      ? (item.relations as unknown as WorkItemRelationItem[])
-      : [];
+    const rawRelations = this.extractRelations(item);
 
     if (rawRelations.length === 0) return { violations: [] };
 
@@ -584,10 +636,9 @@ export class RelationService {
       let reason = '';
 
       if (target) {
-        switch (relation.type) {
+        switch (String(relation.type).toLowerCase()) {
           case 'blocks':
           case 'finish_to_start':
-          case 'FINISH_TO_START':
             if (
               sourceDue &&
               targetStart &&
@@ -616,7 +667,6 @@ export class RelationService {
             }
             break;
           case 'start_to_start':
-          case 'START_TO_START':
             if (
               sourceStart &&
               targetStart &&
@@ -647,7 +697,6 @@ export class RelationService {
             }
             break;
           case 'finish_to_finish':
-          case 'FINISH_TO_FINISH':
             if (
               sourceDue &&
               targetDue &&
@@ -678,7 +727,6 @@ export class RelationService {
             }
             break;
           case 'start_to_finish':
-          case 'START_TO_FINISH':
             if (
               sourceStart &&
               targetDue &&

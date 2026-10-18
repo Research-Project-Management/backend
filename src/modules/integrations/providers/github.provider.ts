@@ -41,7 +41,9 @@ export class GithubProvider implements IIntegrationProvider {
       process.env.GITHUB_INTEGRATION_CLIENT_SECRET ||
       process.env.GITHUB_CLIENT_SECRET ||
       '';
-    this.isMockMode = !this.clientId || !this.clientSecret;
+    this.isMockMode =
+      process.env.NODE_ENV !== 'production' &&
+      (!this.clientId || !this.clientSecret);
 
     if (this.isMockMode) {
       this.logger.warn(
@@ -85,7 +87,7 @@ export class GithubProvider implements IIntegrationProvider {
     secret?: string;
     redirectUri: string;
   }): Promise<OAuthExchangeResult> {
-    if (this.isMockMode || params.codeOrToken.startsWith('mock_')) {
+    if (this.isMockMode) {
       return {
         accessToken: `github_mock_pat_${randomBytes(16).toString('hex')}`,
         providerUserId: 'github_user_441928',
@@ -217,7 +219,7 @@ export class GithubProvider implements IIntegrationProvider {
     decryptedToken: string,
     _providerUserId: string,
   ): Promise<RemoteCollectionItem[]> {
-    if (this.isMockMode || decryptedToken.startsWith('github_mock_')) {
+    if (this.isMockMode) {
       return [
         {
           id: 'octocat/research-manuscript',
@@ -276,7 +278,7 @@ export class GithubProvider implements IIntegrationProvider {
     _providerUserId: string,
     collectionId: string,
   ): Promise<string> {
-    if (this.isMockMode || decryptedToken.startsWith('github_mock_')) {
+    if (this.isMockMode) {
       return `@article{octocat2026flux,
   title = {Collaborative LaTeX Engineering with Flux and GitHub},
   author = {Octocat, Mona and Flux Team},
@@ -337,7 +339,7 @@ export class GithubProvider implements IIntegrationProvider {
     decryptedToken: string,
     repoFullName: string,
   ): Promise<string[]> {
-    if (this.isMockMode || decryptedToken.startsWith('github_mock_')) {
+    if (this.isMockMode) {
       return ['main', 'dev', 'paper-revisions'];
     }
 
@@ -369,7 +371,7 @@ export class GithubProvider implements IIntegrationProvider {
     isPrivate = true,
     description?: string,
   ): Promise<{ fullName: string; htmlUrl: string; defaultBranch: string }> {
-    if (this.isMockMode || decryptedToken.startsWith('github_mock_')) {
+    if (this.isMockMode) {
       return {
         fullName: `octocat/${name}`,
         htmlUrl: `https://github.com/octocat/${name}`,
@@ -422,7 +424,7 @@ export class GithubProvider implements IIntegrationProvider {
     const commitMessage =
       params.commitMessage || 'Update manuscript from Flux LaTeX Platform';
 
-    if (this.isMockMode || decryptedToken.startsWith('github_mock_')) {
+    if (this.isMockMode) {
       const mockSha = `commit_${randomBytes(10).toString('hex')}`;
       return {
         commitSha: mockSha,
@@ -642,7 +644,7 @@ export class GithubProvider implements IIntegrationProvider {
     const { decryptedToken, repoFullName } = params;
     const branch = params.branch || 'main';
 
-    if (this.isMockMode || decryptedToken.startsWith('github_mock_')) {
+    if (this.isMockMode) {
       return [
         {
           path: 'main.tex',

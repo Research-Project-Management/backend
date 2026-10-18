@@ -14,6 +14,11 @@ import {
 export type WorkItemWithProject = WorkItem & {
   /** JSON array of all assignee user IDs (multi-assignee). Prisma v6 field. */
   assigneeIds?: unknown;
+  assignees?: Array<{
+    userId: string;
+    isPrimary: boolean;
+    assignedAt?: Date;
+  }>;
   project?: {
     id: string;
     settings?: unknown;
@@ -50,6 +55,14 @@ export class AssignmentRepository {
         },
         assignee: {
           select: USER_MINIMAL_SELECT,
+        },
+        assignees: {
+          select: {
+            userId: true,
+            isPrimary: true,
+            assignedAt: true,
+          },
+          orderBy: [{ isPrimary: 'desc' }, { assignedAt: 'asc' }],
         },
       },
     });

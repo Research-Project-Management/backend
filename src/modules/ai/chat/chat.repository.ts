@@ -114,35 +114,6 @@ export class ChatRepository implements IChatRepository {
     });
   }
 
-  async appendMessage(
-    chatId: string,
-    message: {
-      role: MessageRole;
-      content: string;
-      sources?: unknown;
-      widgets?: unknown;
-      selectionContext?: unknown;
-    },
-  ): Promise<AiMessage> {
-    const created = await this.prisma.aiMessage.create({
-      data: {
-        chatId,
-        role: message.role,
-        content: message.content || '',
-        sources: (message.sources as Prisma.InputJsonValue) || [],
-        widgets: (message.widgets as Prisma.InputJsonValue) || [],
-        selectionContext: message.selectionContext as Prisma.InputJsonValue,
-      },
-    });
-
-    await this.prisma.aiChat.update({
-      where: { id: chatId },
-      data: { updatedAt: new Date() },
-    });
-
-    return created;
-  }
-
   async createMessages(
     chatId: string,
     messages: Array<{
@@ -213,6 +184,3 @@ export class ChatRepository implements IChatRepository {
   }
 }
 
-// Backward compatibility aliases
-export const ThreadRepository = ChatRepository;
-export type ThreadRepository = ChatRepository;

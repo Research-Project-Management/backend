@@ -93,6 +93,3 @@ export class MessageResponseDto {
   message!: string;
 }
 
-// Aliases
-export const AuthResponseDto = AuthnResponseDto;
-export type AuthResponseDto = AuthnResponseDto;

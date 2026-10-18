@@ -87,7 +87,7 @@ export interface IRefreshTokenRepository {
 
   revokeToken(id: string): Promise<void>;
   revokeFamily(familyId: string): Promise<number>;
-  revokeAllUserSessions(userId: string): Promise<number>;
+  revokeAllUserTokens(userId: string): Promise<{ count: number }>;
   findActiveSessionsByUser(userId: string): Promise<
     Array<{
       id: string;
@@ -101,3 +101,4 @@ export interface IRefreshTokenRepository {
     }>
   >;
 }
+

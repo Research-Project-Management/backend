@@ -20,12 +20,12 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { ArchiveService } from './archive.service';
 import { BulkArchiveDto } from './dto/bulk-archive.dto';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('work-items')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1', 'api'])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ArchiveController {
   constructor(private readonly archiveService: ArchiveService) {}
 

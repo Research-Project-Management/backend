@@ -47,15 +47,5 @@ export class AuditRepository {
       },
     });
   }
-
-  /**
-   * Backward-compatibility alias for previous caller.
-   */
-  async countRecentByIpAndType(
-    ipAddress: string,
-    action: string,
-    since: Date,
-  ): Promise<number> {
-    return this.countRecentByIpAndAction(ipAddress, action, since);
-  }
 }
+

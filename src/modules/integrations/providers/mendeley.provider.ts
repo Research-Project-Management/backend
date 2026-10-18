@@ -46,7 +46,9 @@ export class MendeleyProvider implements IIntegrationProvider {
   constructor() {
     this.clientId = process.env.MENDELEY_CLIENT_ID || '';
     this.clientSecret = process.env.MENDELEY_CLIENT_SECRET || '';
-    this.isMockMode = !this.clientId || !this.clientSecret;
+    this.isMockMode =
+      process.env.NODE_ENV !== 'production' &&
+      (!this.clientId || !this.clientSecret);
 
     if (this.isMockMode) {
       this.logger.warn(
@@ -89,7 +91,7 @@ export class MendeleyProvider implements IIntegrationProvider {
     secret?: string;
     redirectUri: string;
   }): Promise<OAuthExchangeResult> {
-    if (this.isMockMode || params.codeOrToken.startsWith('mock_')) {
+    if (this.isMockMode) {
       return {
         accessToken: `mendeley_mock_token_${randomBytes(16).toString('hex')}`,
         refreshToken: `mendeley_mock_refresh_${randomBytes(16).toString('hex')}`,
@@ -198,7 +200,7 @@ export class MendeleyProvider implements IIntegrationProvider {
     decryptedToken: string,
     providerUserId: string,
   ): Promise<RemoteCollectionItem[]> {
-    if (decryptedToken.includes('mock')) {
+    if (this.isMockMode) {
       return [
         { id: 'mendeley_f1', name: 'Thesis Literature Review', itemCount: 18 },
         {
@@ -251,7 +253,7 @@ export class MendeleyProvider implements IIntegrationProvider {
     providerUserId: string,
     collectionId: string,
   ): Promise<string> {
-    if (decryptedToken.includes('mock')) {
+    if (this.isMockMode) {
       return `@article{he2016deep,
   title={Deep residual learning for image recognition},
   author={He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},

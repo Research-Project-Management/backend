@@ -19,7 +19,7 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { RelationService } from './relation.service';
 import { AddRelationDto, RelationResponseDto } from './dto/relation.dto';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item Relations')
 @ApiBearerAuth('JWT-auth')
@@ -29,7 +29,7 @@ export class RelationController {
   constructor(private readonly relationService: RelationService) {}
 
   @Get('work-items/:workItemId/relations')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get all relations and blockers for a work item' })
   @ApiResponse({ status: 200, description: 'List of enriched relations' })
@@ -39,7 +39,7 @@ export class RelationController {
 
   @Post('work-items/:workItemId/relations')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Add a bidirectional relation to a work item' })
   @ApiResponse({
@@ -56,7 +56,7 @@ export class RelationController {
   }
 
   @Delete('work-items/:workItemId/relations/:targetWorkItemId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Remove a bidirectional relation from a work item' })
   @ApiResponse({
@@ -77,7 +77,7 @@ export class RelationController {
   }
 
   @Get('work-items/:workItemId/relations/violations')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get violated timeline-dependency relations for a work item',

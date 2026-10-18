@@ -8,10 +8,14 @@ import {
 } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
+function requireDatabaseUrl(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  return url;
+}
+
 const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ||
-    'postgresql://postgres:Thanh26102006@localhost:5433/flux-db?schema=public',
+  connectionString: requireDatabaseUrl(),
 });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });

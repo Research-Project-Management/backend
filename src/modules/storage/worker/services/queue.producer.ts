@@ -71,45 +71,38 @@ export class StorageQueueProducer {
       ): Promise<unknown>;
     };
 
+    const schedules = [
+      {
+        id: 'repeat-trash-retention',
+        pattern: '0 3 * * *',
+        name: STORAGE_JOB_MAINTENANCE_TRASH,
+      },
+      {
+        id: 'repeat-multipart-cleanup',
+        pattern: '0 */6 * * *',
+        name: STORAGE_JOB_MAINTENANCE_MULTIPART,
+      },
+      {
+        id: 'repeat-orphan-blob',
+        pattern: '0 4 * * *',
+        name: STORAGE_JOB_MAINTENANCE_ORPHAN,
+      },
+    ];
+
     try {
-      // 1. Trash retention: run daily at 03:00 UTC
-      await queueWithScheduler.upsertJobScheduler?.(
-        'repeat-trash-retention',
-        { pattern: '0 3 * * *' },
-        {
-          name: STORAGE_JOB_MAINTENANCE_TRASH,
-          opts: {
-            removeOnComplete: 100,
-            removeOnFail: 200,
+      for (const s of schedules) {
+        await queueWithScheduler.upsertJobScheduler?.(
+          s.id,
+          { pattern: s.pattern },
+          {
+            name: s.name,
+            opts: {
+              removeOnComplete: 100,
+              removeOnFail: 200,
+            },
           },
-        },
-      );
-
-      // 2. Multipart cleanup: run every 6 hours
-      await queueWithScheduler.upsertJobScheduler?.(
-        'repeat-multipart-cleanup',
-        { pattern: '0 */6 * * *' },
-        {
-          name: STORAGE_JOB_MAINTENANCE_MULTIPART,
-          opts: {
-            removeOnComplete: 100,
-            removeOnFail: 200,
-          },
-        },
-      );
-
-      // 3. Orphan blob GC: run daily at 04:00 UTC
-      await queueWithScheduler.upsertJobScheduler?.(
-        'repeat-orphan-blob',
-        { pattern: '0 4 * * *' },
-        {
-          name: STORAGE_JOB_MAINTENANCE_ORPHAN,
-          opts: {
-            removeOnComplete: 100,
-            removeOnFail: 200,
-          },
-        },
-      );
+        );
+      }
 
       this.logger.log(
         'Storage maintenance repeatable jobs registered in BullMQ (Trash Retention, Multipart Cleanup, Orphan Blob GC)',

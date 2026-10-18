@@ -63,25 +63,20 @@ export class AuthGuard implements CanActivate {
         throw new UnauthorizedException('Invalid internal service credentials');
       }
 
-      // Internal service calls MUST provide a signed delegation token in Authorization header
+      // Internal service calls MUST provide a signed delegation token in x-delegation-token or Authorization header
+      const delegationHeader = request.headers?.['x-delegation-token'];
       const authHeader = request.headers?.authorization;
       const token =
-        authHeader && authHeader.startsWith('Bearer ')
+        (typeof delegationHeader === 'string' && delegationHeader.trim()
+          ? delegationHeader.replace(/^Bearer\s+/i, '').trim()
+          : null) ||
+        (authHeader && authHeader.startsWith('Bearer ')
           ? authHeader.split(' ')[1]
-          : null;
+          : null);
 
       if (!token) {
-        const userId = request.headers?.['x-user-id'];
-        if (userId) {
-          request.user = {
-            id: userId,
-            sub: userId,
-            isInternalService: true,
-          };
-          return true;
-        }
         throw new UnauthorizedException(
-          'Internal service calls require a signed delegation token or x-user-id header',
+          'Internal service calls require a valid signed delegation token',
         );
       }
 

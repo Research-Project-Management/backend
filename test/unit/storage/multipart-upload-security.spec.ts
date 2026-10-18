@@ -5,10 +5,7 @@ import { IStorageBlobRepository } from '@/modules/storage/core';
 import { IUploadSessionRepository } from '@/modules/storage/transfer';
 import { IStorageQuotaRepository } from '@/modules/storage/drive';
 import { StorageRedisCacheService } from '@/modules/storage/core';
-import {
-  UploadSession,
-  UploadSessionStatus,
-} from '@/modules/storage/transfer';
+import { UploadSession, UploadSessionStatus } from '@/modules/storage/transfer';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
@@ -66,6 +63,8 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
       listUploadedParts: jest.fn().mockResolvedValue([]),
+      applyLifecycleRules: jest.fn().mockResolvedValue(undefined),
+      getLifecycleRules: jest.fn().mockResolvedValue([]),
     };
 
     mockNodeRepo = {
@@ -80,6 +79,10 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       restoreSubtree: jest.fn(),
       findSubtreeNodes: jest.fn(),
       findExpiredTrash: jest.fn(),
+      isDescendant: jest.fn().mockResolvedValue(false),
+      getFolderPath: jest.fn().mockResolvedValue([]),
+      listSharedWithUser: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+      shareNode: jest.fn(),
     };
 
     mockBlobRepo = {
@@ -89,6 +92,8 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       update: jest.fn().mockImplementation(async (blob) => blob),
       delete: jest.fn(),
       findTombstonedBlobs: jest.fn(),
+      incrementRefCount: jest.fn(),
+      decrementRefCount: jest.fn(),
     };
 
     mockSessionRepo = {

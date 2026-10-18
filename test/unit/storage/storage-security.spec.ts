@@ -11,7 +11,11 @@ import {
   LocalStorageDriver,
   FileDownloadedEvent,
 } from '@/modules/storage/core';
-import { StorageAccessPolicy, StorageNode, FileScope } from '@/modules/storage/drive';
+import {
+  StorageAccessPolicy,
+  StorageNode,
+  FileScope,
+} from '@/modules/storage/drive';
 import { StreamController } from '@/modules/storage/transfer';
 import { Readable } from 'stream';
 
@@ -323,10 +327,7 @@ describe('Storage & File Security Suite', () => {
       };
       mockEventEmitter = { emit: jest.fn() };
 
-      controller = new StreamController(
-        mockStreamService,
-        mockEventEmitter,
-      );
+      controller = new StreamController(mockStreamService, mockEventEmitter);
     });
 
     it('should force attachment and CSP sandbox for dangerous inline MIME types (SVG)', async () => {

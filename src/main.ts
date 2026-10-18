@@ -1,3 +1,4 @@
+import { resolveServiceUrl } from './core/utils/public-urls';
 import 'dotenv/config';
 
 try {
@@ -100,7 +101,11 @@ async function bootstrap() {
   app.useLogger(logger);
 
   // WebSocket Redis Fan-Out Adapter
-  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+  const redisUrl = resolveServiceUrl(
+    'REDIS_URL',
+    process.env.REDIS_URL,
+    'redis://localhost:6379',
+  );
   const redisIoAdapter = new RedisIoAdapter(app);
   await redisIoAdapter.connectToRedis(redisUrl);
   app.useWebSocketAdapter(redisIoAdapter);

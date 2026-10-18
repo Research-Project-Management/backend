@@ -25,7 +25,7 @@ import {
 } from './dto/assignment.dto';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item Assignments')
 @ApiBearerAuth('JWT-auth')
@@ -35,7 +35,7 @@ export class AssignmentController {
   constructor(private readonly assignmentService: AssignmentService) {}
 
   @Get('projects/:projectId/work-items/assignees')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get eligible assignees for work items in a project',
@@ -51,7 +51,7 @@ export class AssignmentController {
 
   @Post('projects/:projectId/work-items/:workItemId/assign')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Assign or unassign a work item to an eligible project member',
@@ -76,7 +76,7 @@ export class AssignmentController {
 
   @Post('projects/:projectId/work-items/:workItemId/unassign')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Unassign a work item',
@@ -96,7 +96,7 @@ export class AssignmentController {
 
   @Post('projects/:projectId/work-items/:workItemId/join')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Join a work item (self-assign by current user)',
@@ -112,7 +112,7 @@ export class AssignmentController {
 
   @Post('projects/:projectId/work-items/:workItemId/leave')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Leave a work item (remove self-assignment)',
@@ -128,7 +128,7 @@ export class AssignmentController {
 
   @Post('projects/:projectId/work-items/bulk-assign')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Bulk assign multiple work items to a member',
@@ -149,7 +149,7 @@ export class AssignmentController {
   // ── MULTI-ASSIGNEE ENDPOINTS ────────────────────────────────────────────────
 
   @Get('projects/:projectId/work-items/:workItemId/assignees')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get all assignees (primary + co-assignees) of a work item',
@@ -167,7 +167,7 @@ export class AssignmentController {
 
   @Put('projects/:projectId/work-items/:workItemId/assignees')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary:
@@ -193,7 +193,7 @@ export class AssignmentController {
 
   @Post('projects/:projectId/work-items/:workItemId/assignees')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Add a single co-assignee to a work item (idempotent)',
@@ -215,7 +215,7 @@ export class AssignmentController {
 
   @Delete('projects/:projectId/work-items/:workItemId/assignees/:targetUserId')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Remove a co-assignee from a work item' })
   @ApiResponse({
@@ -238,7 +238,7 @@ export class AssignmentController {
 
   @Post('projects/:projectId/work-items/:workItemId/subscribers/me')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Subscribe current user to notifications for a work item',
@@ -257,7 +257,7 @@ export class AssignmentController {
 
   @Delete('projects/:projectId/work-items/:workItemId/subscribers/me')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Unsubscribe current user from notifications for a work item',

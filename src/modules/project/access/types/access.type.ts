@@ -31,9 +31,4 @@ export interface IAccessRepository {
     userId: string,
   ): Promise<MemberAccessContext | null>;
   findMemberRole(projectId: string, userId: string): Promise<Role | null>;
-  updateMemberOverrides(
-    projectId: string,
-    userId: string,
-    overrides: PermissionOverrideMap,
-  ): Promise<void>;
 }

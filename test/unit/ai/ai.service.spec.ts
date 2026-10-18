@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AiService } from '@/modules/ai/ai.service';
 import { EngineService } from '@/modules/ai/engine/engine.service';
-import { ChatService, ThreadService } from '@/modules/ai/chat/chat.service';
+import { ChatService } from '@/modules/ai/chat/chat.service';
 import { PrismaService } from '@/core';
 import {
   ForbiddenException,
@@ -72,7 +72,6 @@ describe('AiService (Server-Authoritative Chat & Streaming)', () => {
         AiService,
         { provide: EngineService, useValue: mockEngine },
         { provide: ChatService, useValue: mockThread },
-        { provide: ThreadService, useValue: mockThread },
         { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();

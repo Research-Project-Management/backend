@@ -69,6 +69,9 @@ export class AssignmentService {
   }
 
   private extractAssigneeIds(item: WorkItemWithProject): string[] {
+    if (Array.isArray(item.assignees) && item.assignees.length > 0) {
+      return item.assignees.map((a) => a.userId);
+    }
     if (Array.isArray(item.assigneeIds)) {
       return item.assigneeIds as string[];
     }

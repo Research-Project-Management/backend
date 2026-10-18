@@ -16,6 +16,7 @@ import {
   IStorageQuotaRepository,
   FileScope,
   StorageNode,
+  DEFAULT_STORAGE_QUOTA_BYTES,
 } from '@/modules/storage/drive';
 import {
   BlobService,
@@ -25,7 +26,9 @@ import {
   isBlockedExtension,
   validateMagicBytes,
   sanitizeFilename,
+  streamToBuffer,
 } from '@/modules/storage/core';
+import { getFileContentPath } from '@/modules/storage/storage.port';
 import type {
   UploadDirectInput,
   UploadDirectOutput,
@@ -123,7 +126,7 @@ export class DirectUploadService {
     return {
       fileId,
       blobId,
-      url: `/api/v1/storage/files/${encodeURIComponent(fileId)}/content`,
+      url: getFileContentPath(fileId),
       filename: cleanFilename,
       size: Number(sizeBytes),
       mimeType: input.mimeType,
@@ -158,8 +161,7 @@ export class PresignService {
       input.userId,
       input.projectId ?? null,
     );
-    const DEFAULT_LIMIT = 5n * 1024n * 1024n * 1024n; // 5 GB
-    const maxBytes = quota ? quota.maxBytes : DEFAULT_LIMIT;
+    const maxBytes = quota ? quota.maxBytes : DEFAULT_STORAGE_QUOTA_BYTES;
     const usedBytes = quota ? quota.usedBytes : 0n;
     if (usedBytes + requestedBytes > maxBytes) {
       throw new BadRequestException('Storage quota exceeded');
@@ -181,9 +183,9 @@ export class PresignService {
               input.projectId ?? null,
               existingBlob.sizeBytes,
             )
-            .catch((err) => {
+            .catch((err: unknown) => {
               this.logger.warn(
-                `Failed to increment quota for CAS deduplicated file: ${err?.message || err}`,
+                `Failed to increment quota for CAS deduplicated file: ${err instanceof Error ? err.message : String(err)}`,
               );
             });
 
@@ -211,7 +213,7 @@ export class PresignService {
             fileUuid: existingBlob.id,
             expiresIn: 0,
             fileId,
-            url: `/api/v1/storage/files/${encodeURIComponent(fileId)}/content`,
+            url: getFileContentPath(fileId),
             filename: cleanFilename,
             size: Number(existingBlob.sizeBytes),
             mimeType: input.mimeType,
@@ -288,7 +290,10 @@ export class CompletePresignService {
           actualMime = stat.mimeType;
         }
       }
-    } catch {
+    } catch (err: unknown) {
+      this.logger.debug(
+        `Physical object stat check deferred for ${input.storageKey}: ${(err as Error)?.message}`,
+      );
       // If stat fails, check if caller provided non-zero size
       if (actualSize <= 0n) {
         throw new NotFoundException(
@@ -303,12 +308,8 @@ export class CompletePresignService {
         start: 0,
         end: 511,
       });
-      if (streamRes && streamRes.stream) {
-        const chunks: Buffer[] = [];
-        for await (const chunk of streamRes.stream) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-        const headerBuffer = Buffer.concat(chunks);
+      if (streamRes?.stream) {
+        const headerBuffer = await streamToBuffer(streamRes.stream);
         if (headerBuffer.length > 0) {
           validateMagicBytes(headerBuffer, actualMime, cleanFilename);
         }
@@ -316,9 +317,9 @@ export class CompletePresignService {
     } catch (err: unknown) {
       if (err instanceof BadRequestException) {
         // Immediate cleanup of malicious payload from physical storage
-        this.blobService.delete(input.storageKey).catch((delErr) => {
+        this.blobService.delete(input.storageKey).catch((delErr: unknown) => {
           this.logger.warn(
-            `Failed to clean up rejected malicious upload ${input.storageKey}: ${delErr?.message || delErr}`,
+            `Failed to clean up rejected malicious upload ${input.storageKey}: ${delErr instanceof Error ? delErr.message : String(delErr)}`,
           );
         });
         throw err;
@@ -383,11 +384,10 @@ export class CompletePresignService {
     return {
       fileId,
       blobId,
-      url: `/api/v1/storage/files/${encodeURIComponent(fileId)}/content`,
+      url: getFileContentPath(fileId),
       filename: cleanFilename,
       size: Number(actualSize),
       mimeType: actualMime,
     };
   }
 }
-

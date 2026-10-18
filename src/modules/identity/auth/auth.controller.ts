@@ -339,6 +339,3 @@ export class AuthController {
   }
 }
 
-// Backward compatibility alias
-export const AuthnController = AuthController;
-export type AuthnController = AuthController;

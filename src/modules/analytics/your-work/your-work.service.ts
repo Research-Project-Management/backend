@@ -26,68 +26,12 @@ export class YourWorkService {
   ) {}
 
   /**
-   * Generates a fully zeroed-out structured payload for empty states
-   */
-  private async buildEmptyYourWork(
-    projectId: string | undefined,
-    userId: string,
-  ): Promise<YourWorkSummaryDto> {
-    const userProfile = await this.yourWorkRepo.findUserProfile(userId);
-    return {
-      projectId,
-      userId,
-      assigned: [],
-      created: [],
-      subscribed: [],
-      activity: [],
-      recent: [],
-      stateGroupBreakdown: {
-        backlog: 0,
-        unstarted: 0,
-        started: 0,
-        completed: 0,
-        cancelled: 0,
-      },
-      subscribedStateGroupBreakdown: {
-        backlog: 0,
-        unstarted: 0,
-        started: 0,
-        completed: 0,
-        cancelled: 0,
-      },
-      priorityBreakdown: {
-        urgent: 0,
-        high: 0,
-        medium: 0,
-        low: 0,
-        none: 0,
-      },
-      projectBreakdown: [],
-      userData: userProfile
-        ? {
-            ...userProfile,
-            createdAt:
-              userProfile.createdAt instanceof Date
-                ? userProfile.createdAt.toISOString()
-                : String(userProfile.createdAt),
-          }
-        : undefined,
-      isEmpty: true,
-      success: true,
-    };
-  }
-
-  /**
    * Your Workload & Activity Aggregator
    */
   async getYourWork(
     projectId: string | undefined,
     userId: string,
-    forceEmpty = false,
   ): Promise<YourWorkSummaryDto> {
-    if (forceEmpty) {
-      return this.buildEmptyYourWork(projectId, userId);
-    }
 
     if (projectId) {
       const accessCheck = await this.yourWorkRepo.checkProjectAccess(

@@ -34,7 +34,7 @@ import {
 } from './dto/bulk.dto';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Planning Work Items')
 @ApiBearerAuth('JWT-auth')
@@ -65,7 +65,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   }
 
   @Sse('projects/:projectId/work-items/events')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Stream realtime events for work items in a project',
@@ -100,7 +100,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   }
 
   @Get('projects/:projectId/work-items')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get all work items in a project with optional filters',
@@ -116,7 +116,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   }
 
   @Get(['work-items/:workItemId', 'projects/:projectId/work-items/:workItemId'])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get a single work item by ID or identifier' })
   async getWorkItemById(@Param('workItemId') workItemId: string) {
@@ -125,7 +125,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
 
   @Post('projects/:projectId/work-items')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Create a new work item in a project' })
   async createWorkItem(
@@ -141,7 +141,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   }
 
   @Put(['work-items/:workItemId', 'projects/:projectId/work-items/:workItemId'])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update a work item' })
   async updateWorkItem(
@@ -161,7 +161,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     'projects/:projectId/work-items/:workItemId',
   ])
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete a work item' })
   async deleteWorkItem(
@@ -173,7 +173,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
 
   @Post(['work-items/:workItemId/children', 'work-items/:workItemId/sub-items'])
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Create a child work item under a parent work item',
@@ -196,7 +196,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     'work-items/:workItemId/reorder',
   ])
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Reorder a work item in Kanban or List view' })
   async reorderWorkItem(
@@ -217,7 +217,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
 
   @Put(['projects/:projectId/work-items/bulk', 'work-items/bulk'])
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Bulk update multiple work items' })
   async bulkUpdate(
@@ -239,7 +239,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     'work-items/bulk-delete',
   ])
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Bulk delete multiple work items' })
   async bulkDelete(
@@ -258,7 +258,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
 
   @Post('work-items/:workItemId/duplicate')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Duplicate a work item' })
   async duplicateWorkItem(
@@ -277,7 +277,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
   }
 
   @Post('work-items/:workItemId/convert-to-root')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Convert a child work item to a root work item' })
   async convertToRootWorkItem(@Param('workItemId') workItemId: string) {

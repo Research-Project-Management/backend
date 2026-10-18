@@ -57,7 +57,7 @@ export class StorageEventOutboxService {
         })
         .catch((err: unknown) => {
           this.logger.warn(
-            `Failed to queue background file processing for ${event.fileId}: ${(err as Error)?.message || err}`,
+            `Failed to queue background file processing for ${event.fileId}: ${err instanceof Error ? err.message : String(err)}`,
           );
         });
     }

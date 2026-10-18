@@ -24,27 +24,31 @@ import {
 import { calculateProjectPermissions } from './utils/permission.util';
 import { FavoriteService } from '../favorite/favorite.service';
 import { LabelService } from '../label/label.service';
+import { ArchiveService } from '../archive/archive.service';
 import { deriveProjectPrefix } from './utils/identifier.util';
 
 export const ALLOWED_PROJECT_MODULES = new Set([
   'overview',
-  'work_items',
   'work-items',
-  'cycles',
-  'views',
   'pages',
 ]);
 
 export function sanitizeModules(modules?: string[]): string[] {
   if (!modules || !Array.isArray(modules) || modules.length === 0) {
-    return ['overview', 'work_items', 'cycles', 'views', 'pages'];
+    return ['overview', 'work-items', 'pages'];
   }
-  const filtered = modules
-    .map((m) => String(m).trim().toLowerCase())
-    .filter((m) => ALLOWED_PROJECT_MODULES.has(m));
-  return filtered.length > 0
-    ? filtered
-    : ['overview', 'work_items', 'cycles', 'views', 'pages'];
+  const filtered = Array.from(
+    new Set(
+      modules
+        .map((m) =>
+          String(m).trim().toLowerCase() === 'work_items'
+            ? 'work-items'
+            : String(m).trim().toLowerCase(),
+        )
+        .filter((m) => ALLOWED_PROJECT_MODULES.has(m)),
+    ),
+  );
+  return filtered.length > 0 ? filtered : ['overview', 'work-items', 'pages'];
 }
 
 @Injectable()
@@ -53,6 +57,7 @@ export class CoreService {
     private readonly projectRepo: CoreRepository,
     private readonly favoriteService: FavoriteService,
     private readonly labelService: LabelService,
+    @Optional() private readonly archiveService?: ArchiveService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
@@ -401,48 +406,7 @@ export class CoreService {
   }
 
   /**
-   * Delete a project permanently (Direct hard delete, no soft-delete/trash).
-   */
-  async softDelete(
-    projectId: string,
-    actorId?: string,
-  ): Promise<{ message: string }> {
-    return this.permanentDeleteProject(projectId, actorId || '');
-  }
-
-  /**
-   * Restore a soft-deleted project.
-   */
-  async restore(
-    projectId: string,
-    actorId?: string,
-  ): Promise<{
-    message: string;
-    project: ProjectWithMembers;
-  }> {
-    const restored = await this.projectRepo.restoreProject(projectId);
-    const memberIds = restored.members?.map((m) => m.userId) || [];
-    await this.invalidateProjectCache(projectId, memberIds);
-
-    this.eventEmitter?.emit(
-      'project.restored',
-      new DomainActivityEvent({
-        entityType: 'project' as unknown as EntityType,
-        entityId: projectId,
-        verb: 'restored',
-        actorId: actorId || '',
-        projectId,
-      }),
-    );
-
-    return {
-      message: 'Project restored successfully',
-      project: restored,
-    };
-  }
-
-  /**
-   * Archive a project (freeze & hide from active project lists).
+   * Archive a project (delegates to ArchiveService).
    */
   async archive(
     projectId: string,
@@ -451,37 +415,14 @@ export class CoreService {
     message: string;
     project: ProjectWithMembers;
   }> {
-    const existing = await this.projectRepo.findProjectById(projectId);
-    if (!existing) {
-      throw new NotFoundException('Project not found');
+    if (!this.archiveService) {
+      throw new NotFoundException('ArchiveService is not available');
     }
-    if (existing.isArchived) {
-      throw new BadRequestException('Project is already archived');
-    }
-
-    const archived = await this.projectRepo.archiveProject(projectId);
-    const memberIds = archived.members?.map((m) => m.userId) || [];
-    await this.invalidateProjectCache(projectId, memberIds);
-
-    this.eventEmitter?.emit(
-      'project.archived',
-      new DomainActivityEvent({
-        entityType: 'project' as unknown as EntityType,
-        entityId: projectId,
-        verb: 'archived',
-        actorId: userId || '',
-        projectId,
-      }),
-    );
-
-    return {
-      message: 'Project archived successfully',
-      project: archived,
-    };
+    return this.archiveService.archive(projectId, userId);
   }
 
   /**
-   * Unarchive/restore an archived project to active status.
+   * Unarchive/restore an archived project to active status (delegates to ArchiveService).
    */
   async unarchive(
     projectId: string,
@@ -490,73 +431,20 @@ export class CoreService {
     message: string;
     project: ProjectWithMembers;
   }> {
-    const existing = await this.projectRepo.findProjectById(projectId);
-    if (!existing) {
-      throw new NotFoundException('Project not found');
+    if (!this.archiveService) {
+      throw new NotFoundException('ArchiveService is not available');
     }
-    if (!existing.isArchived) {
-      throw new BadRequestException('Project is not archived');
-    }
-
-    const restored = await this.projectRepo.unarchiveProject(projectId);
-    const memberIds = restored.members?.map((m) => m.userId) || [];
-    await this.invalidateProjectCache(projectId, memberIds);
-
-    this.eventEmitter?.emit(
-      'project.unarchived',
-      new DomainActivityEvent({
-        entityType: 'project' as unknown as EntityType,
-        entityId: projectId,
-        verb: 'restored',
-        actorId: userId || '',
-        projectId,
-      }),
-    );
-
-    return {
-      message: 'Project restored from archive successfully',
-      project: restored,
-    };
+    return this.archiveService.unarchive(projectId, userId);
   }
 
   /**
-   * Find archived projects accessible by a user.
+   * Find archived projects accessible by a user (delegates to ArchiveService).
    */
   async findArchived(userId: string): Promise<{ projects: EnrichedProject[] }> {
-    const projects = await this.projectRepo.findArchivedProjectsByUser(userId);
-    const sharedProjectIds = projects
-      .filter((p) => p.createdById !== userId)
-      .map((p) => p.id);
-
-    const membershipMap = await this.projectRepo.findMembershipsForUser(
-      sharedProjectIds,
-      userId,
-    );
-
-    const enriched: EnrichedProject[] = projects.map((p) => {
-      const yourRole =
-        p.createdById === userId
-          ? Role.owner
-          : membershipMap.get(p.id) ||
-            p.members?.find((m) => m.userId === userId)?.role ||
-            Role.reviewer;
-      const permissions = calculateProjectPermissions(yourRole, p.isActive);
-
-      return {
-        ...p,
-        yourRole,
-        permissions,
-        projectLabelsList: p.labels?.map((l) => l.label) || [],
-      };
-    });
-
-    return { projects: enriched };
-  }
-
-  async allocateNextWorkItemSequence(
-    projectId: string,
-  ): Promise<AllocatedIdentifier> {
-    return this.projectRepo.allocateNextWorkItemSequence(projectId);
+    if (!this.archiveService) {
+      return { projects: [] };
+    }
+    return this.archiveService.findArchived(userId);
   }
 
   // --- Facade / Gateway methods for other modules ---
@@ -640,26 +528,6 @@ export class CoreService {
     return result;
   }
 
-  async getTrashedProjects(
-    userId: string,
-  ): Promise<{ projects: EnrichedProject[] }> {
-    const projects = await this.projectRepo.findTrashedProjectsByUser(userId);
-    const enriched: EnrichedProject[] = projects.map((p) => {
-      const yourRole =
-        p.createdById === userId
-          ? Role.owner
-          : ((p.members?.find((m) => m.userId === userId)?.role as Role) ??
-            Role.reviewer);
-      return {
-        ...p,
-        yourRole,
-        permissions: calculateProjectPermissions(yourRole, p.isActive),
-        projectLabelsList: p.labels?.map((l) => l.label) || [],
-      };
-    });
-    return { projects: enriched };
-  }
-
   async permanentDeleteProject(
     projectId: string,
     userId: string,
@@ -694,5 +562,3 @@ export class CoreService {
     return { message: 'Project permanently deleted' };
   }
 }
-
-export { CoreService as ProjectService };

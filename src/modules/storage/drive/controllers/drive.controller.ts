@@ -11,13 +11,17 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
-  Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
-import { DriveService, TrashService, QuotaService } from '../services/drive.service';
+import {
+  DriveService,
+  TrashService,
+  QuotaService,
+} from '../services/drive.service';
 import { StorageNode, FileScope } from '@/modules/storage/drive';
+import { getFileContentPath } from '@/modules/storage/storage.port';
 import { StorageAccessPolicy } from '../services/access.policy';
 import {
   CreateFolderDto,
@@ -37,7 +41,53 @@ function formatBytes(bytes: number, decimals = 1): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
 
+interface PaginationParams {
+  take: number;
+  skip: number;
+  currentPage: number;
+}
+
+function parsePagination(
+  limit?: number,
+  offset?: number,
+  page?: number,
+): PaginationParams {
+  const take = limit ? Number(limit) : 100;
+  const skip =
+    offset !== undefined
+      ? Number(offset)
+      : page
+        ? (Number(page) - 1) * take
+        : 0;
+  const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
+  return { take, skip, currentPage };
+}
+
+function buildPaginatedDriveResponse(
+  result: { nodes: StorageNode[]; total: number },
+  pagination: PaginationParams,
+) {
+  const files = (result.nodes || []).map((node) => mapStorageNodeToDto(node));
+  return {
+    files,
+    items: files,
+    total: result.total,
+    page: pagination.currentPage,
+    limit: pagination.take,
+    hasMore: pagination.skip + files.length < result.total,
+  };
+}
+
 export function mapStorageNodeToDto(node: StorageNode) {
+  const metadataAuthor =
+    node.metadata?.author && typeof node.metadata.author === 'object'
+      ? (node.metadata.author as {
+          name?: string;
+          email?: string;
+          avatar?: string;
+        })
+      : null;
+
   return {
     id: node.id,
     filename: node.name,
@@ -49,7 +99,7 @@ export function mapStorageNodeToDto(node: StorageNode) {
     isStarred: node.starred,
     parentId: node.parentId,
     parent: node.parentId,
-    url: `/api/v1/storage/files/${encodeURIComponent(node.id)}/content`,
+    url: getFileContentPath(node.id),
     thumbnail:
       typeof node.metadata?.thumbnail === 'string'
         ? node.metadata.thumbnail
@@ -57,10 +107,17 @@ export function mapStorageNodeToDto(node: StorageNode) {
     metaData: node.metadata || {},
     trashedAt: node.trashedAt ? node.trashedAt.toISOString() : null,
     author: {
-      id: node.authorId,
-      name: 'Researcher',
-      email: '',
-      avatar: '',
+      id: node.author?.id || node.authorId,
+      name:
+        node.author?.name ||
+        metadataAuthor?.name ||
+        (typeof node.metadata?.authorName === 'string'
+          ? node.metadata.authorName
+          : '') ||
+        node.author?.email ||
+        '',
+      email: node.author?.email || metadataAuthor?.email || '',
+      avatar: node.author?.avatar || metadataAuthor?.avatar || '',
     },
     createdAt: node.createdAt
       ? node.createdAt.toISOString()
@@ -79,12 +136,22 @@ export class DriveController {
   constructor(
     private readonly driveService: DriveService,
     private readonly trashService: TrashService,
-    @Optional()
-    private readonly accessPolicy?: StorageAccessPolicy,
+    private readonly accessPolicy: StorageAccessPolicy,
   ) {}
 
   private mapNodeToDto(node: StorageNode) {
     return mapStorageNodeToDto(node);
+  }
+
+  private async assertBatchAccess(
+    userId: string | undefined,
+    ids: string[],
+    action: 'read' | 'write' | 'delete',
+  ): Promise<void> {
+    if (!userId) return;
+    for (const id of ids) {
+      await this.accessPolicy.assertCanAccess(userId, id, action);
+    }
   }
 
   @Get('my-files')
@@ -101,15 +168,7 @@ export class DriveController {
     @Query('offset') offset?: number,
     @Query('page') page?: number,
   ) {
-    const take = limit ? Number(limit) : 100;
-    const skip =
-      offset !== undefined
-        ? Number(offset)
-        : page
-          ? (Number(page) - 1) * take
-          : 0;
-    const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
-
+    const pagination = parsePagination(limit, offset, page);
     const parsedTypes = types
       ? types
           .split(',')
@@ -129,18 +188,10 @@ export class DriveController {
       sortBy: sortBy || undefined,
       sortOrder: sortOrder || 'asc',
       types: parsedTypes,
-      limit: take,
-      offset: skip,
+      limit: pagination.take,
+      offset: pagination.skip,
     });
-    const files = (result.nodes || []).map((node) => this.mapNodeToDto(node));
-    return {
-      files,
-      items: files,
-      total: result.total,
-      page: currentPage,
-      limit: take,
-      hasMore: skip + files.length < result.total,
-    };
+    return buildPaginatedDriveResponse(result, pagination);
   }
 
   @Get('shared')
@@ -151,14 +202,7 @@ export class DriveController {
     @Query('offset') offset?: number,
     @Query('page') page?: number,
   ) {
-    const take = limit ? Number(limit) : 100;
-    const skip =
-      offset !== undefined
-        ? Number(offset)
-        : page
-          ? (Number(page) - 1) * take
-          : 0;
-    const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
+    const { take, skip, currentPage } = parsePagination(limit, offset, page);
 
     const { items, total } = await this.driveService.listSharedWithUser(
       userId,
@@ -199,33 +243,15 @@ export class DriveController {
     @Query('offset') offset?: number,
     @Query('page') page?: number,
   ) {
-    const take = limit ? Number(limit) : 100;
-    const skip =
-      offset !== undefined
-        ? Number(offset)
-        : page
-          ? (Number(page) - 1) * take
-          : 0;
-    const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
-
+    const pagination = parsePagination(limit, offset, page);
     const result = await this.driveService.list({
       scope: FileScope.Page,
       projectId: pageId,
       parentId: parentId || null,
-      limit: take,
-      offset: skip,
+      limit: pagination.take,
+      offset: pagination.skip,
     });
-    const files = (result.nodes || []).map((node: StorageNode) =>
-      this.mapNodeToDto(node),
-    );
-    return {
-      files,
-      items: files,
-      total: result.total,
-      page: currentPage,
-      limit: take,
-      hasMore: skip + files.length < result.total,
-    };
+    return buildPaginatedDriveResponse(result, pagination);
   }
 
   @Get('starred')
@@ -236,32 +262,14 @@ export class DriveController {
     @Query('offset') offset?: number,
     @Query('page') page?: number,
   ) {
-    const take = limit ? Number(limit) : 100;
-    const skip =
-      offset !== undefined
-        ? Number(offset)
-        : page
-          ? (Number(page) - 1) * take
-          : 0;
-    const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
-
+    const pagination = parsePagination(limit, offset, page);
     const result = await this.driveService.list({
       userId,
       starredOnly: true,
-      limit: take,
-      offset: skip,
+      limit: pagination.take,
+      offset: pagination.skip,
     });
-    const files = (result.nodes || []).map((node: StorageNode) =>
-      this.mapNodeToDto(node),
-    );
-    return {
-      files,
-      items: files,
-      total: result.total,
-      page: currentPage,
-      limit: take,
-      hasMore: skip + files.length < result.total,
-    };
+    return buildPaginatedDriveResponse(result, pagination);
   }
 
   @Get(':id')
@@ -270,10 +278,9 @@ export class DriveController {
     @Param('id') id: string,
     @CurrentUser('id') userId?: string,
   ) {
-    const node =
-      this.accessPolicy && userId
-        ? await this.accessPolicy.assertCanAccess(userId, id, 'read')
-        : await this.driveService.getNodeById(id);
+    const node = userId
+      ? await this.accessPolicy.assertCanAccess(userId, id, 'read')
+      : await this.driveService.getNodeById(id);
     return this.mapNodeToDto(node);
   }
 
@@ -284,7 +291,7 @@ export class DriveController {
     @Param('id') id: string,
     @CurrentUser('id') userId?: string,
   ) {
-    if (this.accessPolicy && userId) {
+    if (userId) {
       await this.accessPolicy.assertCanAccess(userId, id, 'read');
     }
     const updated = await this.driveService.toggleStar(id);
@@ -300,13 +307,13 @@ export class DriveController {
     @Body() dto: ShareFileDto,
     @CurrentUser('id') currentUserId?: string,
   ) {
-    if (this.accessPolicy && currentUserId) {
+    if (currentUserId) {
       await this.accessPolicy.assertCanAccess(currentUserId, id, 'share');
     }
     const share = await this.driveService.shareNode(
       id,
       dto.userId,
-      dto.permission as 'view' | 'edit' | undefined,
+      dto.permission,
     );
     return {
       success: true,
@@ -350,39 +357,16 @@ export class DriveController {
     return this.mapNodeToDto(created);
   }
 
-  @Post('move')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Move a file or folder' })
-  async moveNode(
-    @Body() dto: MoveFileDto & { fileId?: string; id?: string },
-    @CurrentUser('id') userId?: string,
-  ) {
-    const targetId = dto.fileId || dto.id;
-    if (!targetId) throw new NotFoundException('fileId is required');
-    if (this.accessPolicy && userId) {
-      await this.accessPolicy.assertCanAccess(userId, targetId, 'write');
-      if (dto.parentId) {
-        await this.accessPolicy.assertCanAccess(userId, dto.parentId, 'write');
-      }
-    }
-    const updated = await this.driveService.move(
-      targetId,
-      dto.parentId || null,
-    );
-    return this.mapNodeToDto(updated);
-  }
-
   @Put(':id/move')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Move a file or folder by ID' })
   async moveNodeById(
     @Param('id') id: string,
-    @Body() dto: { parentId?: string | null; targetFolderId?: string | null },
+    @Body() dto: MoveFileDto,
     @CurrentUser('id') userId?: string,
   ) {
-    const targetFolderId =
-      dto.parentId !== undefined ? dto.parentId : (dto.targetFolderId ?? null);
-    if (this.accessPolicy && userId) {
+    const targetFolderId = dto.parentId ?? null;
+    if (userId) {
       await this.accessPolicy.assertCanAccess(userId, id, 'write');
       if (targetFolderId) {
         await this.accessPolicy.assertCanAccess(
@@ -404,7 +388,7 @@ export class DriveController {
     @Body() dto: RenameFileDto,
     @CurrentUser('id') userId?: string,
   ) {
-    if (this.accessPolicy && userId) {
+    if (userId) {
       await this.accessPolicy.assertCanAccess(userId, id, 'write');
     }
     const newName = dto.name || dto.filename;
@@ -421,7 +405,7 @@ export class DriveController {
     @Body() dto: { metaData?: Record<string, unknown>; description?: string },
     @CurrentUser('id') userId?: string,
   ) {
-    if (this.accessPolicy && userId) {
+    if (userId) {
       await this.accessPolicy.assertCanAccess(userId, id, 'write');
     }
     const updated = await this.driveService.updateMetadata(
@@ -439,7 +423,7 @@ export class DriveController {
     @Param('id') id: string,
     @CurrentUser('id') userId?: string,
   ) {
-    if (this.accessPolicy && userId) {
+    if (userId) {
       await this.accessPolicy.assertCanAccess(userId, id, 'delete');
     }
     return this.trashService.softDelete(id);
@@ -452,11 +436,7 @@ export class DriveController {
     @Body() dto: BatchFileIdsDto,
     @CurrentUser('id') userId?: string,
   ) {
-    if (this.accessPolicy && userId) {
-      for (const id of dto.ids) {
-        await this.accessPolicy.assertCanAccess(userId, id, 'delete');
-      }
-    }
+    await this.assertBatchAccess(userId, dto.ids, 'delete');
     const count = await this.trashService.batchSoftDelete(dto.ids);
     return { success: true, count };
   }
@@ -468,11 +448,7 @@ export class DriveController {
     @Body() dto: BatchStarDto,
     @CurrentUser('id') userId?: string,
   ) {
-    if (this.accessPolicy && userId) {
-      for (const id of dto.ids) {
-        await this.accessPolicy.assertCanAccess(userId, id, 'read');
-      }
-    }
+    await this.assertBatchAccess(userId, dto.ids, 'read');
     await this.driveService.batchStar(dto.ids, dto.starred);
     return { success: true };
   }
@@ -491,14 +467,10 @@ export class DriveController {
   ) {
     const targetFolderId =
       dto.parentId !== undefined ? dto.parentId : (dto.targetFolderId ?? null);
-    if (this.accessPolicy && userId && targetFolderId) {
+    if (userId && targetFolderId) {
       await this.accessPolicy.assertCanAccess(userId, targetFolderId, 'write');
     }
-    if (this.accessPolicy && userId) {
-      for (const id of dto.ids || []) {
-        await this.accessPolicy.assertCanAccess(userId, id, 'write');
-      }
-    }
+    await this.assertBatchAccess(userId, dto.ids || [], 'write');
     const count = await this.driveService.batchMove(
       dto.ids || [],
       targetFolderId,
@@ -515,9 +487,20 @@ export class TrashController {
   constructor(
     private readonly driveService: DriveService,
     private readonly trashService: TrashService,
-    @Optional()
-    private readonly accessPolicy?: StorageAccessPolicy,
+    private readonly accessPolicy: StorageAccessPolicy,
   ) {}
+
+  private async assertBatchTrashAccess(
+    userId: string | undefined,
+    ids: string[],
+  ): Promise<void> {
+    if (!userId) return;
+    for (const id of ids) {
+      await this.accessPolicy.assertCanAccess(userId, id, 'delete', {
+        allowTrashed: true,
+      });
+    }
+  }
 
   @Get('trash')
   @ApiOperation({ summary: 'List files and folders currently in trash' })
@@ -527,30 +510,14 @@ export class TrashController {
     @Query('offset') offset?: number,
     @Query('page') page?: number,
   ) {
-    const take = limit ? Number(limit) : 100;
-    const skip =
-      offset !== undefined
-        ? Number(offset)
-        : page
-          ? (Number(page) - 1) * take
-          : 0;
-    const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
-
+    const pagination = parsePagination(limit, offset, page);
     const result = await this.driveService.list({
       userId,
       trashedOnly: true,
-      limit: take,
-      offset: skip,
+      limit: pagination.take,
+      offset: pagination.skip,
     });
-    const files = (result.nodes || []).map((node) => mapStorageNodeToDto(node));
-    return {
-      files,
-      items: files,
-      total: result.total,
-      page: currentPage,
-      limit: take,
-      hasMore: skip + files.length < result.total,
-    };
+    return buildPaginatedDriveResponse(result, pagination);
   }
 
   @Post(':id/trash')
@@ -560,7 +527,7 @@ export class TrashController {
     @Param('id') id: string,
     @CurrentUser('id') userId?: string,
   ) {
-    if (this.accessPolicy && userId) {
+    if (userId) {
       await this.accessPolicy.assertCanAccess(userId, id, 'delete');
     }
     const count = await this.trashService.softDelete(id);
@@ -575,7 +542,7 @@ export class TrashController {
     @Param('id') id: string,
     @CurrentUser('id') userId?: string,
   ) {
-    if (this.accessPolicy && userId) {
+    if (userId) {
       await this.accessPolicy.assertCanAccess(userId, id, 'delete', {
         allowTrashed: true,
       });
@@ -591,7 +558,7 @@ export class TrashController {
     @Param('id') id: string,
     @CurrentUser('id') userId?: string,
   ) {
-    if (this.accessPolicy && userId) {
+    if (userId) {
       await this.accessPolicy.assertCanAccess(userId, id, 'delete', {
         allowTrashed: true,
       });
@@ -607,13 +574,7 @@ export class TrashController {
     @CurrentUser('id') userId: string,
     @Body() dto: BatchFileIdsDto,
   ) {
-    if (this.accessPolicy && userId) {
-      for (const id of dto.ids) {
-        await this.accessPolicy.assertCanAccess(userId, id, 'delete', {
-          allowTrashed: true,
-        });
-      }
-    }
+    await this.assertBatchTrashAccess(userId, dto.ids);
     const count = await this.trashService.batchRestore(dto.ids);
     return { success: true, count };
   }
@@ -626,13 +587,7 @@ export class TrashController {
     @CurrentUser('id') userId: string,
     @Body() dto: BatchFileIdsDto,
   ) {
-    if (this.accessPolicy && userId) {
-      for (const id of dto.ids) {
-        await this.accessPolicy.assertCanAccess(userId, id, 'delete', {
-          allowTrashed: true,
-        });
-      }
-    }
+    await this.assertBatchTrashAccess(userId, dto.ids);
     const count = await this.trashService.batchPermanentDelete(dto.ids);
     return { success: true, count };
   }
@@ -665,4 +620,3 @@ export class QuotaController {
     };
   }
 }
-

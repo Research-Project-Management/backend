@@ -7,21 +7,31 @@ const NON_PROJECT_KEYWORDS = new Set([
   'me',
   'user',
   'personal',
+  'all',
   'undefined',
   'null',
   'default',
 ]);
 
 /**
- * Validates and normalizes project ID, ignoring personal scope keywords like 'me', 'personal'.
+ * Normalizes a project/scope ID, returning undefined for personal/non-project keywords.
  */
-export function toValidProjectId(value: unknown): string | undefined {
+export function normalizeProjectId(value: unknown): string | undefined {
   if (!value || typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   if (!trimmed || NON_PROJECT_KEYWORDS.has(trimmed.toLowerCase())) {
     return undefined;
   }
-  return isUUID(trimmed) ? trimmed : undefined;
+  return trimmed;
+}
+
+/**
+ * Validates and normalizes project ID as UUID, ignoring personal scope keywords like 'me', 'personal'.
+ */
+export function toValidProjectId(value: unknown): string | undefined {
+  const normalized = normalizeProjectId(value);
+  if (!normalized) return undefined;
+  return isUUID(normalized) ? normalized : undefined;
 }
 
 /**

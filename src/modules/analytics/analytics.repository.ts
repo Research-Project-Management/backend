@@ -184,18 +184,24 @@ export class AnalyticsRepository {
     }));
   }
 
-  async findCycleWorkItems(
-    _cycleId: string,
-  ): Promise<Array<{ id: string; completed: boolean }>> {
-    return [];
-  }
-
-  /** Label distribution: count work items per label string in a project */
+  /** Label distribution: count work items per label in a project */
   async findProjectWorkItemsByLabel(projectId: string) {
     if (!isUUID(projectId)) return [];
     return this.prisma.workItem.findMany({
       where: { projectId, deletedAt: null },
-      select: { id: true, labels: true },
+      select: {
+        id: true,
+        labels: true,
+        labelAssignments: {
+          select: {
+            label: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
     });
   }
 
@@ -220,20 +226,5 @@ export class AnalyticsRepository {
       },
     });
   }
-
-  /** Cycle burndown: work items with dates for daily completion tracking */
-  async findCycleWorkItemsWithDates(
-    _cycleId: string,
-  ): Promise<Array<{ id: string; updatedAt: Date; completed: boolean }>> {
-    return [];
-  }
-
-  /** Cycle start and end dates for burndown axis */
-  async findCycleById(_cycleId: string): Promise<{
-    id: string;
-    startDate: Date | null;
-    endDate: Date | null;
-  } | null> {
-    return null;
-  }
 }
+

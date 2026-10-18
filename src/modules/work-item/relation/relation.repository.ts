@@ -4,6 +4,23 @@ import { WorkItem, Prisma, WorkItemRelationType } from '@prisma/client';
 import { WorkItemRelationItem } from './types/relation.types';
 import { buildWorkItemIdOrIdentifierWhere } from '@/modules/work-item/common/types/shared.types';
 
+export type WorkItemWithRelationalLinks = WorkItem & {
+  outgoingRelations?: Array<{
+    id: string;
+    sourceId: string;
+    targetId: string;
+    type: WorkItemRelationType | string;
+    createdAt: Date;
+  }>;
+  incomingRelations?: Array<{
+    id: string;
+    sourceId: string;
+    targetId: string;
+    type: WorkItemRelationType | string;
+    createdAt: Date;
+  }>;
+};
+
 @Injectable()
 export class RelationRepository {
   constructor(private readonly prismaService: PrismaService) {}
@@ -12,9 +29,33 @@ export class RelationRepository {
     return this.prismaService;
   }
 
-  async findWorkItem(workItemId: string): Promise<WorkItem | null> {
+  async findWorkItem(
+    workItemId: string,
+  ): Promise<WorkItemWithRelationalLinks | null> {
     return this.prismaService.workItem.findFirst({
       where: buildWorkItemIdOrIdentifierWhere(workItemId),
+      include: {
+        outgoingRelations: {
+          where: { targetWorkItem: { deletedAt: null } },
+          select: {
+            id: true,
+            sourceId: true,
+            targetId: true,
+            type: true,
+            createdAt: true,
+          },
+        },
+        incomingRelations: {
+          where: { sourceWorkItem: { deletedAt: null } },
+          select: {
+            id: true,
+            sourceId: true,
+            targetId: true,
+            type: true,
+            createdAt: true,
+          },
+        },
+      },
     });
   }
 
@@ -38,13 +79,9 @@ export class RelationRepository {
       ? [
           'blocks',
           'finish_to_start',
-          'FINISH_TO_START',
           'start_to_start',
-          'START_TO_START',
           'finish_to_finish',
-          'FINISH_TO_FINISH',
           'start_to_finish',
-          'START_TO_FINISH',
           'starts_before',
           'finishes_before',
         ]
@@ -81,7 +118,8 @@ export class RelationRepository {
       targetId: string;
       type?: string;
     }>) {
-      if (rel.type && inverseTypes.includes(rel.type)) {
+      const normalizedRelType = rel.type?.toLowerCase();
+      if (normalizedRelType && inverseTypes.includes(normalizedRelType)) {
         edges.push({ sourceId: rel.targetId, targetId: rel.sourceId });
       } else {
         edges.push({ sourceId: rel.sourceId, targetId: rel.targetId });
@@ -92,9 +130,10 @@ export class RelationRepository {
       if (Array.isArray(item.relations)) {
         for (const r of item.relations as unknown as WorkItemRelationItem[]) {
           if (!r.targetWorkItemId) continue;
-          if (forwardTypes.includes(r.type)) {
+          const normalizedType = String(r.type || '').toLowerCase();
+          if (forwardTypes.includes(normalizedType)) {
             edges.push({ sourceId: item.id, targetId: r.targetWorkItemId });
-          } else if (inverseTypes.includes(r.type)) {
+          } else if (inverseTypes.includes(normalizedType)) {
             edges.push({ sourceId: r.targetWorkItemId, targetId: item.id });
           }
         }

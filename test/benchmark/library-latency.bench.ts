@@ -1,4 +1,4 @@
-﻿/**
+/**
  * test/unit/library/library-latency.benchmark.spec.ts
  *
  * Production-grade Latency, Throughput & Algorithmic Benchmark Suite for Flux Library.
@@ -141,8 +141,6 @@ describe('Library Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         {} as any,
         {} as any,
         {} as any,
-        typesService,
-        transformer,
         queryService,
         undefined,
         undefined,
@@ -380,8 +378,6 @@ describe('Library Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         queryRepo,
         {} as any,
         {} as any,
-        {} as any,
-        { isValidItemType: () => true } as any,
         {} as any,
         queryService,
         undefined,

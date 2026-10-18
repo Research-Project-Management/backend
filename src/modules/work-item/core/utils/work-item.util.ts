@@ -427,31 +427,6 @@ export const formatWorkItem = (
   };
 };
 
-export const deriveProjectIdentifierPrefix = (
-  rawIdentifier?: string | null,
-  rawName?: string | null,
-): string => {
-  const prefix = rawIdentifier?.trim().toUpperCase();
-  if (prefix) return prefix;
+import { deriveProjectPrefix } from '@/modules/project/core/utils/identifier.util';
 
-  const name = rawName || 'PROJ';
-  const normalized = name
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/Đ/g, 'D')
-    .replace(/[^a-zA-Z0-9\s]/g, '')
-    .trim();
-
-  const words = normalized.split(/\s+/).filter(Boolean);
-  if (words.length === 1 && words[0]) {
-    return words[0].slice(0, 4).toUpperCase();
-  } else if (words.length > 1) {
-    return words
-      .slice(0, 4)
-      .map((word) => word[0])
-      .join('')
-      .toUpperCase();
-  }
-  return 'PROJ';
-};
+export { deriveProjectPrefix };

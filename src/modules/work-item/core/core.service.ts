@@ -322,7 +322,6 @@ export class CoreService {
         return {
           ...cached,
           workItem: cached,
-          WorkItem: cached,
           item: cached,
         };
       }
@@ -341,7 +340,6 @@ export class CoreService {
     return {
       ...formatted,
       workItem: formatted,
-      WorkItem: formatted,
       item: formatted,
     };
   }

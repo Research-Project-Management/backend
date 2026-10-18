@@ -58,12 +58,6 @@ export class ProjectAnalyticsRepository {
     return counts;
   }
 
-  async getActiveCycle(
-    _projectId: string,
-  ): Promise<{ id: string; name: string; progressPercentage: number } | null> {
-    return null;
-  }
-
   async getWorkItemsDetailed(projectId: string) {
     return this.prisma.workItem.findMany({
       where: {
@@ -89,7 +83,19 @@ export class ProjectAnalyticsRepository {
   async findProjectWorkItemsByLabel(projectId: string) {
     return this.prisma.workItem.findMany({
       where: { projectId, deletedAt: null },
-      select: { id: true, labels: true },
+      select: {
+        id: true,
+        labels: true,
+        labelAssignments: {
+          select: {
+            label: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
     });
   }
 

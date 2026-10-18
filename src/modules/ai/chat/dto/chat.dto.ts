@@ -32,9 +32,6 @@ export class CreateChatDto {
   documentIds?: string[];
 }
 
-// Backward compatibility alias
-export class CreateThreadDto extends CreateChatDto {}
-
 export class AppendMessagesDto {
   @IsArray()
   @IsNotEmpty({ message: 'Messages array is required' })
@@ -59,5 +56,3 @@ export class RenameChatDto {
   projectId?: string;
 }
 
-// Backward compatibility alias
-export class RenameThreadDto extends RenameChatDto {}

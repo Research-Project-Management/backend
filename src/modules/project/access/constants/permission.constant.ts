@@ -314,6 +314,4 @@ export function computeEffectivePermissions(
   return Array.from(baseline);
 }
 
-// ─── Compatibility Aliases ───────────────────────────────────────────────────
 export type RolePermissionsMap = typeof ROLE_PERMISSIONS;
-export const PROJECT_ROLE_PERMISSIONS = ROLE_PERMISSIONS;

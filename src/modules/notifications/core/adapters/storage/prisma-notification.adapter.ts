@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import {
   ManuscriptNotification,
@@ -10,201 +10,157 @@ import {
   QueryNotificationsOptions,
 } from '../../ports/notification-repository.port';
 import { NotificationEntity } from '../../domain/entities/notification.entity';
-import { InMemoryNotificationAdapter } from './in-memory-notification.adapter';
 
 @Injectable()
 export class PrismaNotificationAdapter implements INotificationRepositoryPort {
-  private readonly logger = new Logger(PrismaNotificationAdapter.name);
-  private readonly memoryFallback = new InMemoryNotificationAdapter();
-
   constructor(private readonly prisma: PrismaService) {}
 
   async save(notification: NotificationEntity): Promise<NotificationEntity> {
-    try {
-      const data = {
-        id: notification.id,
-        userId: notification.userId,
-        key: notification.key,
-        templateKey: notification.templateKey,
-        type: notification.type,
-        projectId: notification.projectId,
-        docId: notification.docId,
-        actorId: notification.actorId,
-        messageOpts: (notification.messageOpts ?? {}) as Prisma.InputJsonObject,
-        isRead: notification.isRead,
-        expiresAt: notification.expiresAt,
-        createdAt: notification.createdAt,
-        readAt: notification.readAt,
-      };
+    const data = {
+      id: notification.id,
+      userId: notification.userId,
+      key: notification.key,
+      templateKey: notification.templateKey,
+      type: notification.type,
+      projectId: notification.projectId,
+      docId: notification.docId,
+      actorId: notification.actorId,
+      messageOpts: (notification.messageOpts ?? {}) as Prisma.InputJsonObject,
+      isRead: notification.isRead,
+      expiresAt: notification.expiresAt,
+      createdAt: notification.createdAt,
+      readAt: notification.readAt,
+    };
 
-      const record = await this.prisma.manuscriptNotification.upsert({
-        where: { id: notification.id },
-        create: data,
-        update: data,
-      });
+    const record = await this.prisma.manuscriptNotification.upsert({
+      where: { id: notification.id },
+      create: data,
+      update: data,
+    });
 
-      return this.mapToEntity(record);
-    } catch {
-      return this.memoryFallback.save(notification);
-    }
+    return this.mapToEntity(record);
   }
 
   async findById(id: string): Promise<NotificationEntity | null> {
-    try {
-      const record = await this.prisma.manuscriptNotification.findUnique({
-        where: { id },
-      });
-      return record ? this.mapToEntity(record) : null;
-    } catch {
-      return this.memoryFallback.findById(id);
-    }
+    const record = await this.prisma.manuscriptNotification.findUnique({
+      where: { id },
+    });
+    return record ? this.mapToEntity(record) : null;
   }
 
   async findByKey(
     key: string,
     userId?: string,
   ): Promise<NotificationEntity | null> {
-    try {
-      const where: Prisma.ManuscriptNotificationWhereInput = { key };
-      if (userId) where.userId = userId;
+    const where: Prisma.ManuscriptNotificationWhereInput = { key };
+    if (userId) where.userId = userId;
 
-      const record = await this.prisma.manuscriptNotification.findFirst({
-        where,
-        orderBy: { createdAt: 'desc' },
-      });
-      return record ? this.mapToEntity(record) : null;
-    } catch {
-      return this.memoryFallback.findByKey(key, userId);
-    }
+    const record = await this.prisma.manuscriptNotification.findFirst({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+    return record ? this.mapToEntity(record) : null;
   }
 
   async findByUser(
     userId: string,
     options?: QueryNotificationsOptions,
   ): Promise<NotificationEntity[]> {
-    try {
-      const now = new Date();
-      const where: Prisma.ManuscriptNotificationWhereInput = {
-        userId,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-      };
+    const now = new Date();
+    const where: Prisma.ManuscriptNotificationWhereInput = {
+      userId,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+    };
 
-      if (options?.isRead !== undefined) {
-        where.isRead = options.isRead;
-      }
-      if (options?.type) {
-        where.type = options.type as ManuscriptNotificationType;
-      }
-
-      const records = await this.prisma.manuscriptNotification.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: options?.offset ?? 0,
-        take: options?.limit ?? 50,
-      });
-
-      return records.map((r) => this.mapToEntity(r));
-    } catch {
-      return this.memoryFallback.findByUser(userId, options);
+    if (options?.isRead !== undefined) {
+      where.isRead = options.isRead;
     }
+    if (options?.type) {
+      where.type = options.type as ManuscriptNotificationType;
+    }
+
+    const records = await this.prisma.manuscriptNotification.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: options?.offset ?? 0,
+      take: options?.limit ?? 50,
+    });
+
+    return records.map((r) => this.mapToEntity(r));
   }
 
   async countUnread(userId: string): Promise<number> {
-    try {
-      const now = new Date();
-      return await this.prisma.manuscriptNotification.count({
-        where: {
-          userId,
-          isRead: false,
-          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-        },
-      });
-    } catch {
-      return this.memoryFallback.countUnread(userId);
-    }
+    const now = new Date();
+    return this.prisma.manuscriptNotification.count({
+      where: {
+        userId,
+        isRead: false,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+    });
   }
 
   async markAsRead(id: string, userId?: string): Promise<boolean> {
-    try {
-      const where: Prisma.ManuscriptNotificationWhereInput = { id };
-      if (userId) where.userId = userId;
+    const where: Prisma.ManuscriptNotificationWhereInput = { id };
+    if (userId) where.userId = userId;
 
-      const result = await this.prisma.manuscriptNotification.updateMany({
-        where,
-        data: {
-          isRead: true,
-          readAt: new Date(),
-        },
-      });
-      return result.count > 0;
-    } catch {
-      return this.memoryFallback.markAsRead(id, userId);
-    }
+    const result = await this.prisma.manuscriptNotification.updateMany({
+      where,
+      data: {
+        isRead: true,
+        readAt: new Date(),
+      },
+    });
+    return result.count > 0;
   }
 
   async markAllAsRead(userId: string): Promise<number> {
-    try {
-      const result = await this.prisma.manuscriptNotification.updateMany({
-        where: {
-          userId,
-          isRead: false,
-        },
-        data: {
-          isRead: true,
-          readAt: new Date(),
-        },
-      });
-      return result.count;
-    } catch {
-      return this.memoryFallback.markAllAsRead(userId);
-    }
+    const result = await this.prisma.manuscriptNotification.updateMany({
+      where: {
+        userId,
+        isRead: false,
+      },
+      data: {
+        isRead: true,
+        readAt: new Date(),
+      },
+    });
+    return result.count;
   }
 
   async deleteById(id: string, userId?: string): Promise<boolean> {
-    try {
-      const where: Prisma.ManuscriptNotificationWhereInput = { id };
-      if (userId) where.userId = userId;
+    const where: Prisma.ManuscriptNotificationWhereInput = { id };
+    if (userId) where.userId = userId;
 
-      const result = await this.prisma.manuscriptNotification.deleteMany({
-        where,
-      });
-      return result.count > 0;
-    } catch {
-      return this.memoryFallback.deleteById(id, userId);
-    }
+    const result = await this.prisma.manuscriptNotification.deleteMany({
+      where,
+    });
+    return result.count > 0;
   }
 
   async deleteByKey(key: string, userId?: string): Promise<number> {
-    try {
-      const where: Prisma.ManuscriptNotificationWhereInput = {
-        key: {
-          startsWith: key,
-        },
-      };
-      if (userId) where.userId = userId;
+    const where: Prisma.ManuscriptNotificationWhereInput = {
+      key: {
+        startsWith: key,
+      },
+    };
+    if (userId) where.userId = userId;
 
-      const result = await this.prisma.manuscriptNotification.deleteMany({
-        where,
-      });
-      return result.count;
-    } catch {
-      return this.memoryFallback.deleteByKey(key, userId);
-    }
+    const result = await this.prisma.manuscriptNotification.deleteMany({
+      where,
+    });
+    return result.count;
   }
 
   async deleteExpired(now: Date = new Date()): Promise<number> {
-    try {
-      const result = await this.prisma.manuscriptNotification.deleteMany({
-        where: {
-          expiresAt: {
-            lte: now,
-          },
+    const result = await this.prisma.manuscriptNotification.deleteMany({
+      where: {
+        expiresAt: {
+          lte: now,
         },
-      });
-      return result.count;
-    } catch {
-      return this.memoryFallback.deleteExpired(now);
-    }
+      },
+    });
+    return result.count;
   }
 
   private mapToEntity(record: ManuscriptNotification): NotificationEntity {
@@ -230,3 +186,4 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
     });
   }
 }
+

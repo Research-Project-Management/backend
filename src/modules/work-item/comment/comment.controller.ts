@@ -18,12 +18,12 @@ import {
 } from './dto/comment.dto';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Items')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1', 'api'])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class CommentController {
   constructor(private readonly commentService: CommentService) {}
 

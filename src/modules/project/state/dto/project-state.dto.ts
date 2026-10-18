@@ -149,8 +149,3 @@ export class DeleteProjectStateDto {
   @IsOptional()
   fallbackStateId?: string;
 }
-
-// Aliases for backwards compatibility during refactor
-export { CreateProjectStateDto as CreateLifecycleStateDto };
-export { UpdateProjectStateItemDto as UpdateLifecycleStateDto };
-export { ReorderProjectStatesDto as ReorderLifecycleStatesDto };

@@ -1,9 +1,7 @@
 import {
   IsArray,
-  IsBoolean,
   IsNotEmpty,
   IsNumber,
-  IsObject,
   IsOptional,
   IsString,
   ValidateNested,
@@ -66,40 +64,6 @@ export class CompletePresignedDto {
   parentId?: string;
 }
 
-export class UploadFileDto {
-  @IsString()
-  @IsNotEmpty({ message: 'Filename is required' })
-  filename!: string;
-
-  @IsNumber()
-  @IsOptional()
-  size?: number;
-
-  @IsString()
-  @IsOptional()
-  mimeType?: string;
-
-  @IsString()
-  @IsOptional()
-  url?: string;
-
-  @IsString()
-  @IsOptional()
-  thumbnail?: string;
-
-  @IsString()
-  @IsOptional()
-  parentId?: string;
-
-  @IsObject()
-  @IsOptional()
-  metaData?: Record<string, unknown>;
-
-  @IsString()
-  @IsOptional()
-  pageId?: string;
-}
-
 export class InitiateMultipartDto {
   @IsString()
   @IsNotEmpty({ message: 'Filename is required' })
@@ -136,10 +100,6 @@ export class CompletedPartDto {
 
   @IsString()
   eTag!: string;
-
-  @IsString()
-  @IsOptional()
-  etag?: string;
 }
 
 export class CompleteMultipartDto {
@@ -152,4 +112,3 @@ export class CompleteMultipartDto {
   @Type(() => CompletedPartDto)
   parts!: CompletedPartDto[];
 }
-

@@ -18,7 +18,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { StatusUpdateService } from './status-update.service';
 import { CreateProjectStatusUpdateDto } from './dto/create-status-update.dto';
 import { UpdateProjectStatusUpdateDto } from './dto/update-status-update.dto';
@@ -31,7 +31,7 @@ export class StatusUpdateController {
   constructor(private readonly service: StatusUpdateService) {}
 
   @Get(':projectId/updates')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'List all status updates for a project (chronological)',
@@ -42,7 +42,7 @@ export class StatusUpdateController {
   }
 
   @Get(':projectId/updates/latest')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get the latest status update for a project' })
   @ApiResponse({ status: 200, description: 'Latest status update or null' })
@@ -52,7 +52,7 @@ export class StatusUpdateController {
 
   @Post(':projectId/updates')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Post a new status update for a project' })
   @ApiResponse({
@@ -68,7 +68,7 @@ export class StatusUpdateController {
   }
 
   @Patch(':projectId/updates/:updateId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Edit an existing status update' })
   @ApiResponse({
@@ -84,7 +84,7 @@ export class StatusUpdateController {
   }
 
   @Delete(':projectId/updates/:updateId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator')
   @ApiOperation({ summary: 'Delete a status update' })
   @ApiResponse({

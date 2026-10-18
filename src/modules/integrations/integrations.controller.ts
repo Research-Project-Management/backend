@@ -1,3 +1,4 @@
+import { resolvePublicUrl } from '../../core/utils/public-urls';
 import {
   BadRequestException,
   Body,
@@ -184,9 +185,6 @@ export class IntegrationsController {
       const verifier = query.oauth_verifier || '';
       const state = query.state || '';
 
-      const userIdMatch = state.match(/state_([^_]+)_/);
-      const userId = userIdMatch ? userIdMatch[1] : '';
-
       const host = (req.headers.host as string) || req.hostname;
       const proto =
         (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
@@ -194,7 +192,6 @@ export class IntegrationsController {
       const redirectUri = `${baseUrl.replace(/\/$/, '')}/api/v1/integrations/${provider}/callback`;
 
       await this.service.handleCallback({
-        userId,
         provider,
         codeOrToken,
         verifier,
@@ -202,9 +199,7 @@ export class IntegrationsController {
         redirectUri,
       });
 
-      const clientUrl = (
-        process.env.CLIENT_URL || 'http://localhost:2915'
-      ).replace(/\/$/, '');
+      const clientUrl = resolvePublicUrl('CLIENT_URL', process.env.CLIENT_URL);
 
       const html = `<!DOCTYPE html>
 <html>

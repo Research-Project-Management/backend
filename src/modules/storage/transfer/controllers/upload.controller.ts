@@ -30,6 +30,8 @@ import {
   CompleteMultipartDto,
 } from '../dto/file.dto';
 import { DriveService, FileScope } from '@/modules/storage/drive';
+import { cleanUuid } from '@/modules/storage/core';
+import { getFileContentPath } from '@/modules/storage/storage.port';
 
 interface PageUploadBody {
   filename?: string;
@@ -38,13 +40,22 @@ interface PageUploadBody {
   parentId?: string;
 }
 
-interface UploadRequest extends FastifyRequest {
-  user?: {
-    id?: string;
-    status?: string;
-    isVerified?: boolean;
-  };
+interface UploadUser {
+  id?: string;
+  sub?: string;
+  status?: string;
+  isVerified?: boolean;
 }
+
+interface MultipartField {
+  value?: string;
+}
+
+interface UploadRequest extends FastifyRequest {
+  user?: UploadUser;
+}
+
+const UNVERIFIED_MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
 
 @ApiTags('Storage & Uploads')
 @ApiBearerAuth('JWT-auth')
@@ -59,32 +70,84 @@ export class UploadController {
     private readonly driveService: DriveService,
   ) {}
 
+  private assertVerifiedUploadLimit(
+    user: UploadUser | null | undefined,
+    sizeBytes: number,
+  ): void {
+    const isUnverified =
+      user?.status === 'pending_verification' || user?.isVerified === false;
+    if (isUnverified && sizeBytes > UNVERIFIED_MAX_UPLOAD_BYTES) {
+      throw new BadRequestException(
+        'Unverified accounts are limited to uploading files up to 5MB. Please verify your email address.',
+      );
+    }
+  }
+
+  private formatUploadResponse<
+    T extends {
+      fileId: string;
+      filename: string;
+      size: number;
+      mimeType?: string;
+      url: string;
+    },
+  >(result: T) {
+    return {
+      ...result,
+      id: result.fileId,
+      file: {
+        id: result.fileId,
+        filename: result.filename,
+        size: result.size,
+        mimeType: result.mimeType,
+        url: result.url,
+      },
+    };
+  }
+
+  private async extractMultipartPayload(uploadReq: UploadRequest): Promise<{
+    buffer: Buffer;
+    filename: string;
+    mimeType: string;
+    fields: Record<string, MultipartField | undefined>;
+  }> {
+    const data = await uploadReq.file?.();
+    if (!data) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    const buffer = await data.toBuffer();
+    const fields = (data.fields || {}) as Record<
+      string,
+      MultipartField | undefined
+    >;
+    const fieldFilename =
+      fields.fileName?.value || fields.filename?.value || fields.name?.value;
+    const filename =
+      (data.filename && data.filename !== 'blob'
+        ? data.filename
+        : fieldFilename) ||
+      data.filename ||
+      'uploaded-file';
+    const mimeType = data.mimetype || 'application/octet-stream';
+
+    return { buffer, filename, mimeType, fields };
+  }
+
   @Post('presign')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Generate presigned URL for direct upload' })
   async presign(
-    @CurrentUser()
-    user: {
-      id?: string;
-      sub?: string;
-      status?: string;
-      isVerified?: boolean;
-    } | null,
+    @CurrentUser() user: UploadUser | null,
     @Body() dto: PresignDto,
   ) {
     const userId = user?.id || user?.sub;
     if (!userId) {
       throw new UnauthorizedException('User is not authenticated');
     }
-    const isUnverified =
-      user?.status === 'pending_verification' || user?.isVerified === false;
-    const requestedSize = dto.size || 10 * 1024 * 1024;
 
-    if (isUnverified && requestedSize > 5 * 1024 * 1024) {
-      throw new BadRequestException(
-        'Unverified accounts are limited to uploading files up to 5MB. Please verify your email address.',
-      );
-    }
+    const requestedSize = dto.size || 10 * 1024 * 1024;
+    this.assertVerifiedUploadLimit(user, requestedSize);
 
     return this.presignService.presign({
       userId,
@@ -111,17 +174,7 @@ export class UploadController {
       parentId: dto.parentId,
     });
 
-    return {
-      ...result,
-      id: result.fileId,
-      file: {
-        id: result.fileId,
-        filename: result.filename,
-        size: result.size,
-        mimeType: result.mimeType,
-        url: result.url,
-      },
-    };
+    return this.formatUploadResponse(result);
   }
 
   @Post('upload')
@@ -136,13 +189,12 @@ export class UploadController {
     @Body() body?: Record<string, unknown>,
   ) {
     const uploadReq = req as unknown as UploadRequest;
-    // Check if request is multipart
     const isMultipart =
       typeof uploadReq.isMultipart === 'function'
         ? uploadReq.isMultipart()
         : false;
+
     if (!isMultipart) {
-      // Allow JSON createFileRecord fallback delegated to DriveService
       if (body && (body.filename || body.name)) {
         const created = await this.driveService.createLogicalNode({
           userId,
@@ -157,20 +209,17 @@ export class UploadController {
             ...((body.metaData as Record<string, unknown>) || {}),
           },
         });
+        const fileUrl = (body.url as string) || getFileContentPath(created.id);
         return {
           id: created.id,
           fileId: created.id,
           filename: created.name,
-          url:
-            (body.url as string) ||
-            `/api/v1/storage/files/${encodeURIComponent(created.id)}/content`,
+          url: fileUrl,
           file: {
             id: created.id,
             filename: created.name,
             size: Number(created.size),
-            url:
-              (body.url as string) ||
-              `/api/v1/storage/files/${encodeURIComponent(created.id)}/content`,
+            url: fileUrl,
           },
         };
       }
@@ -179,46 +228,12 @@ export class UploadController {
       );
     }
 
-    const data = await uploadReq.file?.();
-    if (!data) {
-      throw new BadRequestException('No file uploaded');
-    }
+    const { buffer, filename, mimeType, fields } =
+      await this.extractMultipartPayload(uploadReq);
+    this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
 
-    const buffer = await data.toBuffer();
-    const user = uploadReq.user;
-    const isUnverified =
-      user?.status === 'pending_verification' || user?.isVerified === false;
-
-    if (isUnverified && buffer.length > 5 * 1024 * 1024) {
-      throw new BadRequestException(
-        'Unverified accounts are limited to uploading files up to 5MB. Please verify your email address.',
-      );
-    }
-
-    const fields = (data.fields || {}) as Record<
-      string,
-      { value?: string } | undefined
-    >;
-    const fieldFilename =
-      fields.fileName?.value || fields.filename?.value || fields.name?.value;
-    const filename =
-      (data.filename && data.filename !== 'blob'
-        ? data.filename
-        : fieldFilename) ||
-      data.filename ||
-      'uploaded-file';
-    const mimeType = data.mimetype || 'application/octet-stream';
-
-    const UUID_REGEX =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const cleanUuid = (val: unknown): string | undefined => {
-      if (typeof val !== 'string') return undefined;
-      const trimmed = val.trim();
-      return UUID_REGEX.test(trimmed) ? trimmed : undefined;
-    };
-
-    const projectId = cleanUuid(fields.projectId?.value);
-    const parentId = cleanUuid(fields.parentId?.value);
+    const projectId = cleanUuid(fields.projectId?.value) ?? undefined;
+    const parentId = cleanUuid(fields.parentId?.value) ?? undefined;
 
     const result = await this.uploadService.upload({
       userId,
@@ -229,23 +244,13 @@ export class UploadController {
       parentId,
     });
 
-    return {
-      ...result,
-      id: result.fileId,
-      file: {
-        id: result.fileId,
-        filename: result.filename,
-        size: result.size,
-        mimeType: result.mimeType,
-        url: result.url,
-      },
-    };
+    return this.formatUploadResponse(result);
   }
 
   @Post('pages/:pageId/upload')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Upload file attached to a page (Editor compatibility)',
+    summary: 'Upload file attached to a page',
   })
   async uploadPageFile(
     @Param('pageId') pageId: string,
@@ -258,27 +263,10 @@ export class UploadController {
       typeof uploadReq.isMultipart === 'function'
         ? uploadReq.isMultipart()
         : false;
-    if (isMultipart) {
-      const data = await uploadReq.file?.();
-      if (!data) {
-        throw new BadRequestException('No file uploaded');
-      }
-      const buffer = await data.toBuffer();
-      const fields = (data.fields || {}) as Record<
-        string,
-        { value?: string } | undefined
-      >;
-      const fieldFilename =
-        fields.fileName?.value || fields.filename?.value || fields.name?.value;
-      const filename =
-        (data.filename && data.filename !== 'blob'
-          ? data.filename
-          : fieldFilename) ||
-        data.filename ||
-        'uploaded-file';
-      const mimeType = data.mimetype || 'application/octet-stream';
-      const parentId = fields.parentId?.value;
 
+    if (isMultipart) {
+      const { buffer, filename, mimeType, fields } =
+        await this.extractMultipartPayload(uploadReq);
       const res = await this.uploadService.upload({
         userId,
         projectId: pageId,
@@ -286,30 +274,20 @@ export class UploadController {
         filename,
         buffer,
         mimeType,
-        parentId,
+        parentId: fields.parentId?.value,
       });
 
-      return {
-        ...res,
-        id: res.fileId,
-        file: {
-          id: res.fileId,
-          filename: res.filename,
-          size: res.size,
-          mimeType: res.mimeType,
-          url: res.url,
-        },
-      };
+      return this.formatUploadResponse(res);
     }
 
     const filename = body?.filename || 'untitled-file';
     const mimeType = body?.mimeType || 'application/octet-stream';
-    let buffer = Buffer.alloc(0);
-
-    if (body?.fileBase64) {
-      const base64Data = body.fileBase64.replace(/^data:[^;]+;base64,/, '');
-      buffer = Buffer.from(base64Data, 'base64');
-    }
+    const buffer = body?.fileBase64
+      ? Buffer.from(
+          body.fileBase64.replace(/^data:[^;]+;base64,/, ''),
+          'base64',
+        )
+      : Buffer.alloc(0);
 
     const res = await this.uploadService.upload({
       userId,
@@ -321,17 +299,7 @@ export class UploadController {
       parentId: body?.parentId,
     });
 
-    return {
-      ...res,
-      id: res.fileId,
-      file: {
-        id: res.fileId,
-        filename: res.filename,
-        size: res.size,
-        mimeType: res.mimeType,
-        url: res.url,
-      },
-    };
+    return this.formatUploadResponse(res);
   }
 
   // -------------------------

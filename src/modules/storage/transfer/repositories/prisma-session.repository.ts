@@ -140,7 +140,6 @@ export class PrismaUploadSessionRepository implements IUploadSessionRepository {
     return records.map((p) => ({
       partNumber: p.partNumber,
       eTag: p.etag,
-      etag: p.etag,
     }));
   }
 

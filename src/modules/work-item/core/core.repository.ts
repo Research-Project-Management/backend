@@ -10,7 +10,7 @@ import {
   CHILD_WORK_ITEM_SELECT,
 } from './types/work-item.types';
 import { buildWorkItemIdOrIdentifierWhere } from '@/modules/work-item/common/types/shared.types';
-import { deriveProjectIdentifierPrefix } from './utils/work-item.util';
+import { deriveProjectPrefix } from './utils/work-item.util';
 import {
   formatEntityAttachments,
   RawAttachmentRecord,
@@ -683,7 +683,7 @@ export class CoreRepository {
       })
       .catch(() => null);
 
-    return deriveProjectIdentifierPrefix(project?.identifier, project?.name);
+    return deriveProjectPrefix(project?.identifier, project?.name);
   }
 
   async getMaxSequence(projectId: string): Promise<number> {

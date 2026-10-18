@@ -8,7 +8,7 @@ import { PrismaStorageNodeRepository } from './repositories/prisma-node.reposito
 import { PrismaStorageQuotaRepository } from './repositories/prisma-quota.repository';
 import { PrismaStorageVersionRepository } from './repositories/prisma-version.repository';
 
-import { DriveService, TrashService, QuotaService } from './services/drive.service';
+import { DriveService, TrashService, QuotaService } from './services';
 import { VersionService } from './services/version.service';
 import { StorageAccessPolicy } from './services/access.policy';
 

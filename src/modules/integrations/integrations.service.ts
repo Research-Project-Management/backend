@@ -53,52 +53,16 @@ export class IntegrationsService {
     IntegrationProviderType,
     IIntegrationProvider
   >();
-  private readonly exportImportService: ExportImportService;
-  private readonly docstoreService?: DocstoreService;
-  private readonly structureService?: StructureService;
-
   constructor(
     private readonly repo: IntegrationsRepository,
     private readonly zoteroProvider: ZoteroProvider,
     private readonly mendeleyProvider: MendeleyProvider,
     private readonly githubProvider: GithubProvider,
     private readonly filestoreService: FilestoreService,
-    exportImportServiceOrAggregator: ExportImportService,
-    @Optional() hydratorOrDocstore?: any,
-    @Optional() docstoreOrStructure?: any,
-    @Optional() structureService?: StructureService,
+    private readonly exportImportService: ExportImportService,
+    @Optional() private readonly docstoreService?: DocstoreService,
+    @Optional() private readonly structureService?: StructureService,
   ) {
-    if (
-      exportImportServiceOrAggregator &&
-      typeof exportImportServiceOrAggregator.hydrateProjectEntries ===
-        'function' &&
-      typeof exportImportServiceOrAggregator.collectProjectEntries ===
-        'function'
-    ) {
-      this.exportImportService = exportImportServiceOrAggregator;
-      this.docstoreService = hydratorOrDocstore;
-      this.structureService = docstoreOrStructure;
-    } else if (exportImportServiceOrAggregator && hydratorOrDocstore) {
-      this.exportImportService = {
-        collectProjectEntries: (projectId: string, files?: string[]) =>
-          (exportImportServiceOrAggregator as any).collectProjectEntries(
-            projectId,
-            files,
-          ),
-        hydrateProjectEntries: (
-          projectId: string,
-          entries: any[],
-          userId?: string,
-        ) =>
-          hydratorOrDocstore.hydrateProjectEntries(projectId, entries, userId),
-      } as any;
-      this.docstoreService = docstoreOrStructure;
-      this.structureService = structureService;
-    } else {
-      this.exportImportService = exportImportServiceOrAggregator;
-      this.docstoreService = hydratorOrDocstore;
-      this.structureService = docstoreOrStructure;
-    }
     this.providers.set(this.zoteroProvider.provider, this.zoteroProvider);
     this.providers.set(this.mendeleyProvider.provider, this.mendeleyProvider);
     this.providers.set(this.githubProvider.provider, this.githubProvider);
@@ -195,7 +159,7 @@ export class IntegrationsService {
   }
 
   async handleCallback(params: {
-    userId: string;
+    userId?: string;
     provider: IntegrationProviderType;
     codeOrToken: string;
     verifier?: string;

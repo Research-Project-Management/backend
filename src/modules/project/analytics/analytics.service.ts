@@ -20,7 +20,6 @@ export class ProjectAnalyticsService {
 
     const stateCounts =
       await this.analyticsRepo.getWorkItemsCountsByStateGroup(projectId);
-    const activeCycle = await this.analyticsRepo.getActiveCycle(projectId);
 
     const backlog = stateCounts.backlog || 0;
     const unstarted = stateCounts.unstarted || 0;
@@ -74,8 +73,6 @@ export class ProjectAnalyticsService {
       backlogWorkItems: backlog + unstarted,
       completionPercentage,
       totalMembers: project._count.members,
-      totalCycles: 0,
-      activeCycle,
     };
   }
 
@@ -180,9 +177,20 @@ export class ProjectAnalyticsService {
       await this.analyticsRepo.findProjectWorkItemsByLabel(projectId);
     const labelCount: Record<string, number> = {};
     for (const item of items) {
-      const labels: string[] = Array.isArray(item.labels) ? item.labels : [];
-      for (const label of labels) {
-        if (label) labelCount[label] = (labelCount[label] || 0) + 1;
+      const relationalLabels = Array.isArray(item.labelAssignments)
+        ? item.labelAssignments
+            .map((a) => a.label?.name)
+            .filter((name): name is string => Boolean(name))
+        : [];
+      const itemLabels =
+        relationalLabels.length > 0
+          ? relationalLabels
+          : Array.isArray(item.labels)
+            ? item.labels
+            : [];
+      const uniqueLabels = new Set(itemLabels.filter(Boolean));
+      for (const label of uniqueLabels) {
+        labelCount[label] = (labelCount[label] || 0) + 1;
       }
     }
     const labels = Object.entries(labelCount)
@@ -191,3 +199,4 @@ export class ProjectAnalyticsService {
     return { labels };
   }
 }
+

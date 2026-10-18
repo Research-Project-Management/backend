@@ -14,7 +14,8 @@ export class CreateProjectStatusUpdateDto {
 
   @ApiProperty({
     description: 'Summary of progress, blockers, or milestone notes',
-    example: 'Sprint 2 is 80% complete, frontend and backend integration running smoothly.',
+    example:
+      'Sprint 2 is 80% complete, frontend and backend integration running smoothly.',
   })
   @IsString()
   @IsNotEmpty()

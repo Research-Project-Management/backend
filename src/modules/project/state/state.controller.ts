@@ -28,7 +28,7 @@ import {
   UpdateProjectStateItemDto,
   ReorderProjectStatesDto,
 } from './dto/project-state.dto';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Project States')
 @ApiBearerAuth('JWT-auth')
@@ -50,7 +50,7 @@ export class StateController {
   // ── Project Specific States (Customizable & Drag-and-Drop Reorderable) ──────
 
   @Get(':projectId/settings/states')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
@@ -65,7 +65,7 @@ export class StateController {
   }
 
   @Post(':projectId/settings/states')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -80,7 +80,7 @@ export class StateController {
   }
 
   @Patch(':projectId/settings/states/:stateId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary:
@@ -101,7 +101,7 @@ export class StateController {
   }
 
   @Put(':projectId/settings/states/reorder')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Reorder project states sequence after drag & drop (Owner only)',
@@ -115,7 +115,7 @@ export class StateController {
   }
 
   @Delete(':projectId/settings/states/:stateId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary:
@@ -144,7 +144,7 @@ export class StateController {
   // ── Project State Status & Transitions ──────────────────────────────────────
 
   @Get([':projectId/settings/state', ':projectId/state'])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get current state of a research project',
@@ -159,7 +159,7 @@ export class StateController {
   }
 
   @Patch([':projectId/settings/state', ':projectId/state'])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Update research project state by stateId (Owner only)',

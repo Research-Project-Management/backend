@@ -179,9 +179,7 @@ export class StateService {
   ): Promise<{ success: boolean; message: string }> {
     const state = await this.stateRepo.findProjectStateById(projectId, stateId);
     if (!state) {
-      throw new NotFoundException(
-        `State with ID "${stateId}" not found`,
-      );
+      throw new NotFoundException(`State with ID "${stateId}" not found`);
     }
 
     await this.stateRepo.deleteProjectState(

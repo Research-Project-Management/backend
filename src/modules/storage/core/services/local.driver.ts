@@ -141,7 +141,7 @@ export class LocalStorageDriver implements IStorageDriver {
     );
   }
 
-  initiateMultipartUpload(key: string): Promise<{ uploadId: string }> {
+  initiateMultipartUpload(_key: string): Promise<{ uploadId: string }> {
     return Promise.resolve({ uploadId: `local-mpu-${Date.now()}` });
   }
 

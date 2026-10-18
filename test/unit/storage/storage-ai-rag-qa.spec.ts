@@ -1,6 +1,6 @@
 import { AiService } from '@/modules/ai/ai.service';
 import { EngineService } from '@/modules/ai/engine/engine.service';
-import { ThreadService } from '@/modules/ai/chat/chat.service';
+import { ChatService } from '@/modules/ai/chat/chat.service';
 import { PrismaService } from '@/core';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
@@ -8,7 +8,7 @@ import { FastifyReply } from 'fastify';
 describe('Storage AI RAG Q&A & Polymorphic Paper Resolver Suite', () => {
   let aiService: AiService;
   let mockEngineService: jest.Mocked<EngineService>;
-  let mockThreadService: jest.Mocked<ThreadService>;
+  let mockThreadService: jest.Mocked<ChatService>;
   let mockPrisma: any;
   let mockReply: Partial<FastifyReply>;
 

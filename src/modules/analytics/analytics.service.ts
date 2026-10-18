@@ -3,14 +3,10 @@ import { AnalyticsRepository } from './analytics.repository';
 import { RedisCacheService } from '@/core';
 import {
   ProjectWorkItemDistributionDto,
-  CycleAnalyticsDto,
   ProjectOverviewDto,
   UserOverviewDto,
 } from './dto/analytics.dto';
-import {
-  aggregateProjectDistributions,
-  calculateCycleMetrics,
-} from './utils/analytics.utils';
+import { aggregateProjectDistributions } from './utils/analytics.utils';
 
 @Injectable()
 export class AnalyticsService {
@@ -39,15 +35,7 @@ export class AnalyticsService {
   }
 
   /**
-   * Cycle / Sprint Analytics (Burndown rate & progress)
-   */
-  async getCycleAnalytics(cycleId: string): Promise<CycleAnalyticsDto> {
-    const items = await this.analyticsRepo.findCycleWorkItems(cycleId);
-    return calculateCycleMetrics(cycleId, items);
-  }
-
-  /**
-   * Project Dimensional Overview (members, workItems, pages, files, stickies, cycles)
+   * Project Dimensional Overview (members, workItems, pages, files, stickies)
    */
   async getProjectOverview(
     projectId: string,
@@ -88,9 +76,20 @@ export class AnalyticsService {
       await this.analyticsRepo.findProjectWorkItemsByLabel(projectId);
     const labelCount: Record<string, number> = {};
     for (const item of items) {
-      const labels: string[] = Array.isArray(item.labels) ? item.labels : [];
-      for (const label of labels) {
-        if (label) labelCount[label] = (labelCount[label] || 0) + 1;
+      const relationalLabels = Array.isArray(item.labelAssignments)
+        ? item.labelAssignments
+            .map((a) => a.label?.name)
+            .filter((name): name is string => Boolean(name))
+        : [];
+      const itemLabels =
+        relationalLabels.length > 0
+          ? relationalLabels
+          : Array.isArray(item.labels)
+            ? item.labels
+            : [];
+      const uniqueLabels = new Set(itemLabels.filter(Boolean));
+      for (const label of uniqueLabels) {
+        labelCount[label] = (labelCount[label] || 0) + 1;
       }
     }
     const labels = Object.entries(labelCount)
@@ -140,66 +139,5 @@ export class AnalyticsService {
     const series = Object.entries(dateMap).map(([date, v]) => ({ date, ...v }));
     return { series };
   }
-
-  /** Burn-down chart: remaining work items per day from cycle start to today/end */
-  async getCycleBurndown(cycleId: string): Promise<{
-    cycleId: string;
-    burndown: { date: string; remaining: number; completed: number }[];
-  }> {
-    const cycle = await this.analyticsRepo.findCycleById(cycleId);
-    const items = await this.analyticsRepo.findCycleWorkItemsWithDates(cycleId);
-
-    const total = items.length;
-    const startDate = cycle?.startDate ? new Date(cycle.startDate) : new Date();
-    const endDate = cycle?.endDate ? new Date(cycle.endDate) : new Date();
-    const today = new Date();
-    const chartEnd = endDate < today ? endDate : today;
-
-    const burndown: { date: string; remaining: number; completed: number }[] =
-      [];
-    const cursor = new Date(startDate);
-
-    while (cursor <= chartEnd) {
-      const dateStr = cursor.toISOString().slice(0, 10);
-      const completedByDay = items.filter(
-        (t) =>
-          t.completed &&
-          new Date(t.updatedAt) <= new Date(dateStr + 'T23:59:59Z'),
-      ).length;
-      burndown.push({
-        date: dateStr,
-        remaining: total - completedByDay,
-        completed: completedByDay,
-      });
-      cursor.setDate(cursor.getDate() + 1);
-    }
-
-    return { cycleId, burndown };
-  }
-
-  /** Velocity: work items completed vs total in a cycle */
-  async getCycleVelocity(cycleId: string): Promise<{
-    cycleId: string;
-    totalWorkItems: number;
-    completedWorkItems: number;
-    pendingWorkItems: number;
-    velocityRate: number;
-  }> {
-    const items = await this.analyticsRepo.findCycleWorkItems(cycleId);
-    const totalWorkItems = items.length;
-    const completedWorkItems = items.filter((t) => t.completed).length;
-    const pendingWorkItems = totalWorkItems - completedWorkItems;
-    const velocityRate =
-      totalWorkItems > 0
-        ? Math.round((completedWorkItems / totalWorkItems) * 100)
-        : 0;
-
-    return {
-      cycleId,
-      totalWorkItems,
-      completedWorkItems,
-      pendingWorkItems,
-      velocityRate,
-    };
-  }
 }
+

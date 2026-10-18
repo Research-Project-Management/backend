@@ -20,8 +20,7 @@ export interface StorageObjectMetadata {
 
 export interface CompletedPart {
   partNumber: number;
-  eTag?: string;
-  etag?: string;
+  eTag: string;
 }
 
 export interface StorageLifecycleRule {
@@ -94,6 +93,6 @@ export interface IStorageDriver {
   abortMultipartUpload(key: string, uploadId: string): Promise<void>;
   listUploadedParts(key: string, uploadId: string): Promise<CompletedPart[]>;
 
-  applyLifecycleRules?(config?: StorageLifecycleConfiguration): Promise<void>;
-  getLifecycleRules?(): Promise<StorageLifecycleConfiguration | null>;
+  applyLifecycleRules(config?: StorageLifecycleConfiguration): Promise<void>;
+  getLifecycleRules(): Promise<StorageLifecycleConfiguration | null>;
 }

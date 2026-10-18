@@ -29,7 +29,7 @@ import {
 } from './dto/label.dto';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item Labels')
 @ApiBearerAuth('JWT-auth')
@@ -41,7 +41,7 @@ export class LabelController {
   // ── 1. Project-Scoped Endpoints (Canonical) ──────────────────────────────
 
   @Get('projects/:projectId/labels')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'List all project labels with hierarchical sub-labels',
@@ -56,7 +56,7 @@ export class LabelController {
 
   @Post('projects/:projectId/labels')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Create a new project label' })
   @ApiResponse({ status: 201, description: 'Label created successfully' })
@@ -69,7 +69,7 @@ export class LabelController {
   }
 
   @Get('projects/:projectId/labels/:labelId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get details of a specific project label' })
   async getProjectLabelById(
@@ -81,7 +81,7 @@ export class LabelController {
 
   @Patch('projects/:projectId/labels/:labelId')
   @Put('projects/:projectId/labels/:labelId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Update project label attributes or parent',
@@ -95,7 +95,7 @@ export class LabelController {
   }
 
   @Delete('projects/:projectId/labels/:labelId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({
     summary: 'Delete project label and detach from work items',
@@ -109,7 +109,7 @@ export class LabelController {
 
   @Post('projects/:projectId/labels/reorder')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Reorder project labels sequence' })
   async reorderProjectLabels(

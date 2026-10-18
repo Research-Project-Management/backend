@@ -1,14 +1,11 @@
 import {
   Injectable,
   Inject,
-  Optional,
   Logger,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import {
-  STORAGE_NODE_REPOSITORY,
-} from '@/modules/storage/storage.tokens';
+import { STORAGE_NODE_REPOSITORY } from '@/modules/storage/storage.tokens';
 import {
   BlobService,
   StorageRedisCacheService,
@@ -32,17 +29,15 @@ export class StreamService {
     private readonly blobService: BlobService,
     @Inject(STORAGE_NODE_REPOSITORY)
     private readonly nodeRepo: IStorageNodeRepository,
-    @Optional()
-    private readonly cache?: StorageRedisCacheService,
-    @Optional()
-    private readonly accessPolicy?: StorageAccessPolicy,
+    private readonly cache: StorageRedisCacheService,
+    private readonly accessPolicy: StorageAccessPolicy,
   ) {}
 
   async verifyReadAccess(
     fileId: string,
     currentUserId?: string,
   ): Promise<void> {
-    if (this.accessPolicy && currentUserId) {
+    if (currentUserId) {
       await this.accessPolicy.assertCanAccess(currentUserId, fileId, 'read');
       return;
     }
@@ -51,32 +46,17 @@ export class StreamService {
       throw new NotFoundException('File not found or has been trashed');
     }
 
-    if (this.accessPolicy && !currentUserId) {
-      const metadata = (node.metadata || {}) as {
-        isPublic?: boolean;
-        embargoUntil?: string;
-      };
-      if (!metadata.isPublic) {
-        throw new ForbiddenException(
-          'Authentication required to access private research file',
-        );
-      }
-      if (
-        metadata.embargoUntil &&
-        new Date(metadata.embargoUntil) > new Date()
-      ) {
-        throw new ForbiddenException(
-          'File is currently under academic embargo',
-        );
-      }
-      return;
-    }
-
-    // Direct fallback verification: Ensure caller owns the file if context lacks policy
-    if (currentUserId && node.authorId !== currentUserId) {
+    const metadata = (node.metadata || {}) as {
+      isPublic?: boolean;
+      embargoUntil?: string;
+    };
+    if (!metadata.isPublic) {
       throw new ForbiddenException(
-        'Access denied: You do not have permission to access this storage node',
+        'Authentication required to access private research file',
       );
+    }
+    if (metadata.embargoUntil && new Date(metadata.embargoUntil) > new Date()) {
+      throw new ForbiddenException('File is currently under academic embargo');
     }
   }
 
@@ -95,7 +75,12 @@ export class StreamService {
       const [startStr, endStr] = rangeHeader.slice(6).split('-');
       const start = parseInt(startStr, 10);
       const end = parseInt(endStr, 10);
-      if (!Number.isNaN(start) && !Number.isNaN(end) && start >= 0 && end >= start) {
+      if (
+        !Number.isNaN(start) &&
+        !Number.isNaN(end) &&
+        start >= 0 &&
+        end >= start
+      ) {
         range = { start, end };
       }
     }
@@ -108,11 +93,7 @@ export class StreamService {
     };
   }
 
-  async stream(
-    nodeId: string,
-    rangeHeader?: string,
-    ifNoneMatch?: string,
-  ): Promise<StreamBinaryOutput> {
+  private async resolveNodeAndBlob(nodeId: string) {
     const node = await this.nodeRepo.findById(nodeId);
     if (!node || node.isTrashed()) {
       throw new NotFoundException('File not found or has been trashed');
@@ -128,6 +109,16 @@ export class StreamService {
     if (!blob) {
       throw new NotFoundException('Physical blob not found');
     }
+
+    return { node, blob };
+  }
+
+  async stream(
+    nodeId: string,
+    rangeHeader?: string,
+    ifNoneMatch?: string,
+  ): Promise<StreamBinaryOutput> {
+    const { node, blob } = await this.resolveNodeAndBlob(nodeId);
 
     const totalSize = Number(blob.sizeBytes);
     const etag = blob.contentHash?.toHex
@@ -181,28 +172,12 @@ export class StreamService {
     fileId: string,
     expiresInSeconds = 3600,
   ): Promise<string> {
-    const node = await this.nodeRepo.findById(fileId);
-    if (!node || node.isTrashed()) {
-      throw new NotFoundException(`Storage node not found: ${fileId}`);
-    }
-    if (!node.blobId) {
-      throw new NotFoundException(
-        `File has no physical binary payload: ${fileId}`,
-      );
-    }
-    const blob = await this.blobService.findBlobById(node.blobId);
-    if (!blob) {
-      throw new NotFoundException(
-        `Physical storage blob not found for node: ${fileId}`,
-      );
-    }
+    const { node, blob } = await this.resolveNodeAndBlob(fileId);
 
     const cacheKey = `${node.id}:${node.name}`;
-    if (this.cache) {
-      const cachedUrl = await this.cache.getPresignedUrl(cacheKey);
-      if (cachedUrl) {
-        return cachedUrl;
-      }
+    const cachedUrl = await this.cache.getPresignedUrl(cacheKey);
+    if (cachedUrl) {
+      return cachedUrl;
     }
 
     const signedUrl = await this.blobService.getPresignedDownloadUrl(
@@ -213,11 +188,15 @@ export class StreamService {
       },
     );
 
-    if (this.cache && expiresInSeconds > 300) {
+    if (expiresInSeconds > 300) {
       const ttl = Math.min(expiresInSeconds - 300, 3300);
-      await this.cache.setPresignedUrl(cacheKey, signedUrl, ttl).catch((err) => {
-        this.logger.debug(`Failed to cache presigned URL: ${err?.message || err}`);
-      });
+      await this.cache
+        .setPresignedUrl(cacheKey, signedUrl, ttl)
+        .catch((err: unknown) => {
+          this.logger.debug(
+            `Failed to cache presigned URL: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
     }
 
     return signedUrl;
@@ -258,7 +237,9 @@ export class StreamService {
           const { stream } = await this.blobService.openStream(node.blobId);
           const chunks: Buffer[] = [];
           for await (const chunk of stream) {
-            const bufChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            const bufChunk = Buffer.isBuffer(chunk)
+              ? chunk
+              : Buffer.from(chunk);
             accumulatedBytes += bufChunk.length;
             if (accumulatedBytes > StreamService.MAX_BULK_ZIP_BYTES) {
               break;

@@ -1,13 +1,15 @@
-import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
+import { STORAGE_NODE_REPOSITORY } from '@/modules/storage/storage.tokens';
+import { IStorageNodeRepository, StorageNode } from '@/modules/storage/drive';
 import {
-  STORAGE_NODE_REPOSITORY,
-} from '@/modules/storage/storage.tokens';
-import { IStorageNodeRepository } from '@/modules/storage/drive';
-import { BlobService, ZipPackager, sanitizeFilename } from '@/modules/storage/core';
-import { StorageNode } from '@/modules/storage/drive';
-import { StorageBlob } from '@/modules/storage/core';
+  BlobService,
+  StorageBlob,
+  ZipPackager,
+  sanitizeFilename,
+  streamToBuffer,
+} from '@/modules/storage/core';
 
 export interface ProjectBackupResult {
   backupKey: string;
@@ -108,12 +110,10 @@ export class StorageBackupService {
         }
         if (blob) {
           try {
-            const { stream } = await this.blobService.getStream(blob.s3Key.value());
-            const chunks: Buffer[] = [];
-            for await (const chunk of stream) {
-              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-            }
-            const buf = Buffer.concat(chunks);
+            const { stream } = await this.blobService.getStream(
+              blob.s3Key.value(),
+            );
+            const buf = await streamToBuffer(stream);
             const cleanFileName = sanitizeFilename(node.name);
             const entryPath = currentPath
               ? `${currentPath}/${cleanFileName}`
@@ -193,20 +193,12 @@ export class StorageBackupService {
   async exportMetadataSnapshot(): Promise<MetadataBackupResult> {
     this.logger.log('Creating storage metadata catalog snapshot...');
 
-    let catalogNodes: StorageNode[] = [];
-    let catalogTotal = 0;
-    try {
-      const catalog = await this.nodeRepo?.list?.({
-        trashedOnly: false,
-        limit: 1000,
-      });
-      if (catalog && Array.isArray(catalog.nodes)) {
-        catalogNodes = catalog.nodes;
-        catalogTotal = catalog.total ?? catalog.nodes.length;
-      }
-    } catch {
-      // Fallback to empty catalog if repository is unavailable in isolated unit tests
-    }
+    const catalog = await this.nodeRepo.list({
+      trashedOnly: false,
+      limit: 1000,
+    });
+    const catalogNodes = catalog?.nodes ?? [];
+    const catalogTotal = catalog?.total ?? catalogNodes.length;
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const snapshotData = {

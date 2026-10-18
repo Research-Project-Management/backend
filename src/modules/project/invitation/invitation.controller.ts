@@ -23,7 +23,7 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import { VerifiedEmailGuard } from '@/modules/identity/auth';
 import type { AuthenticatedUser } from '@/modules/identity/identity.facade';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Project Invitations')
 @ApiBearerAuth('JWT-auth')
@@ -86,7 +86,7 @@ export class InvitationController {
   // ─── 2. Project-level Invitations (Manage by Owner) ─────────────────────────
 
   @Get(':projectId/invitations')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'List all invitations for a specific project' })
   @ApiResponse({ status: 200, description: 'Project invitations list' })
@@ -96,7 +96,7 @@ export class InvitationController {
 
   @Post(':projectId/invitations')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard, VerifiedEmailGuard)
+  @UseGuards(ProjectAccessGuard, VerifiedEmailGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Invite a user to a project via email' })
   @ApiResponse({ status: 201, description: 'Invitation sent successfully' })
@@ -109,7 +109,7 @@ export class InvitationController {
   }
 
   @Delete(':projectId/invitations/:invitationId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Revoke a project invitation' })
   @ApiResponse({ status: 200, description: 'Invitation revoked' })
@@ -123,7 +123,7 @@ export class InvitationController {
   // ─── 3. Overleaf Parity Link Sharing ────────────────────────────────────────
 
   @Get(':projectId/link-sharing')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator')
   @ApiOperation({ summary: 'Get link sharing settings for a project' })
   @ApiResponse({ status: 200, description: 'Project link sharing settings' })
@@ -133,7 +133,7 @@ export class InvitationController {
 
   @Post(':projectId/link-sharing')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Toggle or regenerate link sharing for a project' })
   @ApiResponse({ status: 200, description: 'Updated link sharing settings' })

@@ -244,38 +244,14 @@ export class ActivityService {
     return result;
   }
 
-  async getActivityFeed(
-    optionsOrProjectId?:
-      | string
-      | {
-          projectId?: string;
-          entityType?: EntityType;
-          page?: number;
-          limit?: number;
-          actorId?: string;
-          userId?: string;
-        },
-    legacyOptions?: {
-      projectId?: string;
-      entityType?: EntityType;
-      page?: number;
-      limit?: number;
-      actorId?: string;
-      userId?: string;
-    },
-  ) {
-    const options =
-      typeof optionsOrProjectId === 'object' && optionsOrProjectId !== null
-        ? optionsOrProjectId
-        : {
-            projectId:
-              legacyOptions?.projectId ||
-              (typeof optionsOrProjectId === 'string'
-                ? optionsOrProjectId
-                : undefined),
-            ...legacyOptions,
-          };
-
+  async getActivityFeed(options?: {
+    projectId?: string;
+    entityType?: EntityType;
+    page?: number;
+    limit?: number;
+    actorId?: string;
+    userId?: string;
+  }) {
     if (options?.projectId) {
       return this.getProjectFeed(options.projectId, options);
     }
@@ -722,7 +698,7 @@ export class ActivityService {
     let items: RecentItemResponse[];
 
     if (uniqueTargets.length === 0) {
-      items = await this.fetchFallbackRecent(userId, limit);
+      items = [];
     } else {
       const workItemIds = uniqueTargets
         .filter(
@@ -762,47 +738,5 @@ export class ActivityService {
 
     return items;
   }
-
-  private async fetchFallbackRecent(
-    userId: string,
-    limit: number,
-  ): Promise<RecentItemResponse[]> {
-    const res = await this.activityRepo.findUserRecentItems(userId, limit);
-    const workItems = res.workItems;
-    const papers = res.papers;
-    const pages = res.pages;
-
-    const combined: RecentItemResponse[] = [
-      ...workItems.map((itemRecord) => ({
-        id: `work_item-${itemRecord.id}`,
-        entityType: EntityType.work_item,
-        entityId: itemRecord.id,
-        title: itemRecord.title,
-        projectId: itemRecord.projectId,
-        lastInteractedAt: itemRecord.updatedAt,
-      })),
-      ...papers.map((paperRecord) => ({
-        id: `paper-${paperRecord.id}`,
-        entityType: 'paper' as const,
-        entityId: paperRecord.id,
-        title: paperRecord.title,
-        projectId: null,
-        lastInteractedAt: paperRecord.updatedAt,
-      })),
-      ...pages.map((pageRecord) => ({
-        id: `page-${pageRecord.id}`,
-        entityType: 'page' as const,
-        entityId: pageRecord.id,
-        title: pageRecord.title,
-        projectId: pageRecord.projectId,
-        lastInteractedAt: pageRecord.updatedAt,
-      })),
-    ];
-
-    return combined
-      .sort(
-        (a, b) => b.lastInteractedAt.getTime() - a.lastInteractedAt.getTime(),
-      )
-      .slice(0, limit);
-  }
 }
+

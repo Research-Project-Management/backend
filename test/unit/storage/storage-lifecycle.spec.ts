@@ -141,6 +141,14 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       mockBlobRepo = {
         findById: jest.fn(),
         update: jest.fn(),
+        incrementRefCount: jest.fn(),
+        decrementRefCount: jest.fn().mockImplementation(async (id: string) => {
+          const blob = await mockBlobRepo.findById(id);
+          if (blob) {
+            blob.decrementRef();
+          }
+          return blob;
+        }),
       };
       mockQuotaRepo = {
         decrementUsage: jest.fn(),
@@ -188,7 +196,7 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
 
       // Verify blob ref decremented
       expect(blob.refCount).toBe(1);
-      expect(mockBlobRepo.update).toHaveBeenCalledWith(blob);
+      expect(mockBlobRepo.decrementRefCount).toHaveBeenCalledWith('blob-001');
 
       // Verify quota decremented
       expect(mockQuotaRepo.decrementUsage).toHaveBeenCalledWith(

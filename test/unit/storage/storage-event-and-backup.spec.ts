@@ -1,4 +1,7 @@
-import { StorageEventOutboxService, StorageBackupService } from '@/modules/storage/worker';
+import {
+  StorageEventOutboxService,
+  StorageBackupService,
+} from '@/modules/storage/worker';
 import {
   BlobService,
   FileUploadedEvent,

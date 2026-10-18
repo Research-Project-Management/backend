@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { resolveServiceUrl } from '../../../core/utils/public-urls';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Readable } from 'stream';
@@ -9,7 +14,7 @@ import {
   SyncChatResponse,
   StreamChatOptions,
 } from './types/engine.types';
-import { getErrorMessage, tryCatch } from '@/core';
+import { getErrorMessage, isOriginAllowed, tryCatch } from '@/core';
 
 @Injectable()
 export class EngineService {
@@ -20,8 +25,11 @@ export class EngineService {
     private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
   ) {
-    this.fluxUrl =
-      this.configService.get<string>('FLUX_AI_URL') || 'http://127.0.0.1:8000';
+    this.fluxUrl = resolveServiceUrl(
+      'FLUX_AI_URL',
+      this.configService.get<string>('FLUX_AI_URL'),
+      'http://127.0.0.1:8000',
+    );
   }
 
   private async createDelegationToken(
@@ -115,7 +123,7 @@ export class EngineService {
       }
     }
 
-    if (origin) {
+    if (origin && isOriginAllowed(origin)) {
       sseHeaders['Access-Control-Allow-Origin'] = origin;
       sseHeaders['Access-Control-Allow-Credentials'] = 'true';
       sseHeaders['Vary'] = 'Origin';
@@ -167,20 +175,9 @@ export class EngineService {
       const errMsg = result.ok
         ? `AI Engine error: status ${result.value.status}`
         : getErrorMessage(result.error);
-      this.logger.warn(`AI Engine streaming fallback: ${errMsg}`);
+      this.logger.warn(`AI Engine streaming error: ${errMsg}`);
 
-      const fallbackMsg =
-        'AI Assistant service is currently offline. Please ensure the Flux-AI backend service is running on ' +
-        this.fluxUrl;
-      rawRes.write(`data: ${fallbackMsg}\n\n`);
-      rawRes.write('data: [DONE]\n\n');
-      if (options?.onComplete) {
-        try {
-          await options.onComplete(fallbackMsg);
-        } catch (err) {
-          this.logger.warn(`Failed in onComplete fallback: ${String(err)}`);
-        }
-      }
+      rawRes.write(`event: error\ndata: ${JSON.stringify({ error: errMsg })}\n\n`);
       rawRes.end();
       return;
     }
@@ -310,14 +307,13 @@ export class EngineService {
       }
     }
 
-    return {
-      role: 'assistant',
-      content:
-        'AI Assistant service is currently offline. Please ensure the Flux-AI backend service is running on ' +
-        this.fluxUrl,
-      sources: [],
-      widgets: [],
-    };
+    const errMsg = result.ok
+      ? `AI Engine error: status ${result.value.status}`
+      : getErrorMessage(result.error);
+    this.logger.warn(`AI Engine syncChat failed: ${errMsg}`);
+    throw new ServiceUnavailableException(
+      `AI Assistant service is currently unavailable: ${errMsg}`,
+    );
   }
 
   async uploadDocument(
@@ -499,4 +495,30 @@ export class EngineService {
 
     return { deleted: true, id: docId };
   }
+
+  async deleteDocumentsByChat(chatId: string, userId: string): Promise<void> {
+    const delegationToken = await this.createDelegationToken(userId);
+    const headers = this.getInternalHeaders(delegationToken);
+    const params = new URLSearchParams({ user_id: userId });
+
+    const result = await tryCatch(
+      fetch(
+        `${this.fluxUrl}/documents/chat/${encodeURIComponent(chatId)}?${params.toString()}`,
+        {
+          method: 'DELETE',
+          headers,
+        },
+      ),
+    );
+
+    if (!result.ok || !result.value.ok) {
+      const errMsg = result.ok
+        ? `HTTP ${result.value.status}`
+        : getErrorMessage(result.error);
+      this.logger.warn(
+        `Failed to delete documents for chat ${chatId}: ${errMsg}`,
+      );
+    }
+  }
 }
+

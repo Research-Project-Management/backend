@@ -1,12 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { StorageBlob as PrismaBlob } from '@prisma/client';
 import { PrismaService } from '@/core';
-import {
-  StorageBlob,
-  BlobStatus,
-  ContentHash,
-  StorageKey,
-} from '../types';
+import { StorageBlob, BlobStatus, ContentHash, StorageKey } from '../types';
 
 export interface IStorageBlobRepository {
   findById(id: string): Promise<StorageBlob | null>;
@@ -15,8 +10,8 @@ export interface IStorageBlobRepository {
   update(blob: StorageBlob): Promise<StorageBlob>;
   delete(id: string): Promise<void>;
   findTombstonedBlobs(threshold: Date, limit: number): Promise<StorageBlob[]>;
-  incrementRefCount?(id: string): Promise<StorageBlob | null>;
-  decrementRefCount?(
+  incrementRefCount(id: string): Promise<StorageBlob | null>;
+  decrementRefCount(
     id: string,
     tombstoneGraceHours?: number,
   ): Promise<StorageBlob | null>;

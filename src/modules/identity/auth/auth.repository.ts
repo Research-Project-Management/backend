@@ -107,20 +107,6 @@ export class AuthRepository implements IRefreshTokenRepository {
     });
   }
 
-  /** Backward-compatible alias */
-  async createRefreshToken(data: {
-    userId: string;
-    token: string;
-    expiresAt: Date;
-  }): Promise<RefreshToken> {
-    const tokenHash = this.normalizeTokenHash(data.token);
-    return this.createSession({
-      userId: data.userId,
-      tokenHash,
-      expiresAt: data.expiresAt,
-    });
-  }
-
   async findRefreshToken(tokenHash: string) {
     const normalized = this.normalizeTokenHash(tokenHash);
     return this.prisma.refreshToken.findFirst({
@@ -218,17 +204,6 @@ export class AuthRepository implements IRefreshTokenRepository {
     });
   }
 
-  async revokeRefreshToken(token: string) {
-    const tokenHash = this.normalizeTokenHash(token);
-    return this.prisma.refreshToken.updateMany({
-      where: { tokenHash },
-      data: {
-        isRevoked: true,
-        revokedAt: new Date(),
-      },
-    });
-  }
-
   /**
    * Revokes all tokens belonging to a family (used when breach/replay is detected).
    */
@@ -259,16 +234,6 @@ export class AuthRepository implements IRefreshTokenRepository {
     });
   }
 
-  async revokeAllUserSessions(userId: string): Promise<number> {
-    const res = await this.revokeAllUserTokens(userId);
-    return res.count;
-  }
-
-  /** Explicit alias used by the password-reset flow. */
-  async revokeAllUserRefreshTokens(userId: string) {
-    return this.revokeAllUserTokens(userId);
-  }
-
   /** Update only the password field for a given user. */
   async updateUserPassword(userId: string, hashedPassword: string) {
     return this.prisma.user.update({
@@ -290,6 +255,3 @@ export class AuthRepository implements IRefreshTokenRepository {
   }
 }
 
-// Backward compatibility alias
-export const AuthnRepository = AuthRepository;
-export type AuthnRepository = AuthRepository;

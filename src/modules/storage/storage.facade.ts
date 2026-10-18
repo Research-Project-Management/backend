@@ -13,11 +13,9 @@ import {
   UploadFileOutput,
   getFileContentPath,
 } from './storage.port';
-import {
-  STORAGE_NODE_REPOSITORY,
-} from './storage.tokens';
+import { STORAGE_NODE_REPOSITORY } from './storage.tokens';
 import { IStorageNodeRepository } from './drive';
-import { BlobService } from './core';
+import { BlobService, streamToBuffer } from './core';
 import {
   DirectUploadService,
   PresignService,
@@ -107,11 +105,7 @@ export class StorageFacade implements IStoragePort {
     );
 
     const { stream } = await this.blobService.getStream(blob.s3Key.value());
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    const buffer = Buffer.concat(chunks);
+    const buffer = await streamToBuffer(stream);
 
     return {
       fileId: node.id,
@@ -319,9 +313,6 @@ export class StorageFacade implements IStoragePort {
     partSize: number;
     totalParts: number;
   }> {
-    if (!this.multipartService) {
-      throw new Error('MultipartService is not available');
-    }
     return this.multipartService.initiate({
       ...input,
       scope: input.scope as FileScope | undefined,

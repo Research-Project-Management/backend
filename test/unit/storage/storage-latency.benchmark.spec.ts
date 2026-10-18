@@ -21,10 +21,7 @@ import { IStorageNodeRepository } from '@/modules/storage/drive';
 import { IStorageBlobRepository } from '@/modules/storage/core';
 import { IStorageQuotaRepository } from '@/modules/storage/drive';
 import { StorageNode } from '@/modules/storage/drive';
-import {
-  StorageBlob,
-  BlobStatus,
-} from '@/modules/storage/core';
+import { StorageBlob, BlobStatus } from '@/modules/storage/core';
 import { ContentHash } from '@/modules/storage/core';
 import { StorageKey } from '@/modules/storage/core';
 import { ByteRange } from '@/modules/storage/transfer';
@@ -141,11 +138,23 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         completeMultipartUpload: jest.fn(),
         abortMultipartUpload: jest.fn(),
         listUploadedParts: jest.fn(),
+        applyLifecycleRules: jest.fn().mockResolvedValue(undefined),
+        getLifecycleRules: jest.fn().mockResolvedValue([]),
       };
+
+      const mockCache = {
+        getPresignedUrl: jest.fn().mockResolvedValue(null),
+        setPresignedUrl: jest.fn().mockResolvedValue(undefined),
+      } as any;
+      const mockAccessPolicy = {
+        assertCanAccess: jest.fn().mockResolvedValue(undefined),
+      } as any;
 
       streamService = new StreamService(
         new BlobService(mockDriver, mockBlobRepo),
         mockNodeRepo,
+        mockCache,
+        mockAccessPolicy,
       );
     });
 
@@ -303,10 +312,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         restore: jest.fn(),
       } as any;
 
-      driveService = new DriveService(
-        mockNodeRepo,
-        storageCacheService,
-      );
+      driveService = new DriveService(mockNodeRepo, storageCacheService);
     });
 
     it('should coalesce 50 concurrent tree browsing requests into 1 DB query (98% stampede suppression)', async () => {
@@ -412,6 +418,8 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         completeMultipartUpload: jest.fn(),
         abortMultipartUpload: jest.fn(),
         listUploadedParts: jest.fn(),
+        applyLifecycleRules: jest.fn().mockResolvedValue(undefined),
+        getLifecycleRules: jest.fn().mockResolvedValue([]),
       };
 
       mockBlobRepo = {
@@ -423,6 +431,24 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         }),
         update: jest.fn().mockImplementation(async (blob: StorageBlob) => {
           storedBlobsByHash.set(blob.contentHash.toHex(), blob);
+        }),
+        incrementRefCount: jest.fn().mockImplementation(async (id: string) => {
+          for (const blob of storedBlobsByHash.values()) {
+            if (blob.id === id) {
+              blob.incrementRef();
+              return blob;
+            }
+          }
+          throw new Error('Blob not found');
+        }),
+        decrementRefCount: jest.fn().mockImplementation(async (id: string) => {
+          for (const blob of storedBlobsByHash.values()) {
+            if (blob.id === id) {
+              blob.decrementRef();
+              return blob;
+            }
+          }
+          throw new Error('Blob not found');
         }),
         findById: jest.fn(),
         delete: jest.fn(),

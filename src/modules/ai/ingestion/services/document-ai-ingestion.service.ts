@@ -6,7 +6,6 @@ import { EngineService } from '../../engine/engine.service';
 import { ScientificChunkingService } from './scientific-chunking.service';
 import { FileUploadedEvent } from '@/modules/storage';
 
-
 @Injectable()
 export class DocumentAiIngestionService {
   private readonly logger = new Logger(DocumentAiIngestionService.name);

@@ -66,25 +66,8 @@ export class TrashRetentionJob {
       try {
         if (node.isFolder) {
           // Cascading subtree purge for folder and all children
-          const subtree = this.nodeRepo.findSubtreeNodes
-            ? await this.nodeRepo.findSubtreeNodes(node.id)
-            : [node];
-          // Compute depth within subtree so children (files & deeper folders) are deleted before parent folders
-          const nodeById = new Map(subtree.map((n) => [n.id, n]));
-          const getDepth = (n: StorageNode): number => {
-            let d = 0;
-            let curr: StorageNode | undefined = n;
-            while (curr?.parentId && nodeById.has(curr.parentId) && d < 100) {
-              d++;
-              curr = nodeById.get(curr.parentId);
-            }
-            return d;
-          };
-          const sortedSubtree = [...subtree].sort((a, b) => {
-            if (!a.isFolder && b.isFolder) return -1;
-            if (a.isFolder && !b.isFolder) return 1;
-            return getDepth(b) - getDepth(a);
-          });
+          const subtree = await this.nodeRepo.findSubtreeNodes(node.id);
+          const sortedSubtree = StorageNode.sortBottomUp(subtree);
 
           for (const subnode of sortedSubtree) {
             if (processedIds.has(subnode.id)) continue;
@@ -117,28 +100,22 @@ export class TrashRetentionJob {
 
   private async purgeSingleNode(node: StorageNode): Promise<bigint> {
     let reclaimed = 0n;
-    if (this.versionRepo && !node.isFolder) {
-      const versions = await this.versionRepo.findByFileId(node.id);
-      if (versions.length > 0) {
-        for (const v of versions) {
-          await this.blobService.releaseBlob(v.blobId);
-          await this.quotaRepo.decrementUsage(
-            node.authorId,
-            node.projectId,
-            v.sizeBytes,
-          );
-          reclaimed += BigInt(v.sizeBytes);
-        }
-        await this.versionRepo.deleteByFileId(node.id);
-      } else if (node.blobId) {
-        await this.blobService.releaseBlob(node.blobId);
+    const versions =
+      this.versionRepo && !node.isFolder
+        ? await this.versionRepo.findByFileId(node.id)
+        : [];
+
+    if (versions.length > 0 && this.versionRepo) {
+      for (const v of versions) {
+        await this.blobService.releaseBlob(v.blobId);
         await this.quotaRepo.decrementUsage(
           node.authorId,
           node.projectId,
-          node.size,
+          v.sizeBytes,
         );
-        reclaimed += BigInt(node.size);
+        reclaimed += BigInt(v.sizeBytes);
       }
+      await this.versionRepo.deleteByFileId(node.id);
     } else if (node.blobId) {
       await this.blobService.releaseBlob(node.blobId);
       await this.quotaRepo.decrementUsage(
@@ -287,4 +264,3 @@ export class StorageLifecycleService implements OnApplicationBootstrap {
     return this.orphanBlobJob.processTombstonedBlobs();
   }
 }
-

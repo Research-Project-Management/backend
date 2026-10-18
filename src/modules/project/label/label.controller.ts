@@ -24,7 +24,7 @@ import {
   UpdateProjectLabelDto,
 } from './dto/create-label.dto';
 import { AssignProjectLabelsDto } from './dto/assign-label.dto';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Project Labels')
 @ApiBearerAuth('JWT-auth')
@@ -70,7 +70,7 @@ export class LabelController {
   // ─── 2. Project Assignment Endpoints ──────────────────────────────────────
 
   @Get('projects/:projectId/project-labels')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get labels assigned to a project' })
   getProjectLabels(@Param('projectId') projectId: string) {
@@ -78,7 +78,7 @@ export class LabelController {
   }
 
   @Post('projects/:projectId/project-labels')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Assign labels to a project' })
   assignLabels(
@@ -94,7 +94,7 @@ export class LabelController {
   }
 
   @Delete('projects/:projectId/project-labels/:labelId')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Remove a label from a project' })
   removeLabel(

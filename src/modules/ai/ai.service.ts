@@ -15,7 +15,9 @@ import { AiQueryDto } from './dto/ai.dto';
 import {
   buildAiPayload,
   formatPaperContext,
+  normalizeProjectId,
   sanitizeChatTitle,
+  toValidProjectId,
 } from './utils/ai.util';
 
 import * as crypto from 'node:crypto';
@@ -45,19 +47,7 @@ export class AiService {
   }
 
   private sanitizeProjectId(projectId?: string | null): string | undefined {
-    if (!projectId) return undefined;
-    const trimmed = projectId.trim();
-    if (
-      trimmed === 'me' ||
-      trimmed === 'user' ||
-      trimmed === 'all' ||
-      trimmed === 'null' ||
-      trimmed === 'undefined' ||
-      !this.isValidUuid(trimmed)
-    ) {
-      return undefined;
-    }
-    return trimmed;
+    return toValidProjectId(projectId);
   }
 
   private async validateAccess(
@@ -695,13 +685,8 @@ export class AiService {
         ? options.chatId
         : undefined;
 
-    const rawScope = options?.scopeId;
-    const isPersonalScope =
-      !rawScope ||
-      rawScope === 'me' ||
-      rawScope === 'user' ||
-      rawScope === 'all';
-    const scopeId = isPersonalScope ? cleanProjectId || userId : rawScope;
+    const scopeId =
+      normalizeProjectId(options?.scopeId) || cleanProjectId || userId;
 
     await this.validateAccess(userId, cleanProjectId, cleanChatId);
     return this.engineService.uploadDocument(

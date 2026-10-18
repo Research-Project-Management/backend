@@ -40,6 +40,32 @@ function mapAuthor(
   };
 }
 
+function toDomainVersion(
+  record: {
+    id: string;
+    fileId: string;
+    blobId: string;
+    versionNumber: number;
+    changeComment: string | null;
+    createdById: string;
+    createdAt: Date;
+    blob?: { sizeBytes: bigint } | null;
+  },
+  author: StorageVersionAuthor | null,
+): StorageVersion {
+  return new StorageVersion({
+    id: record.id,
+    fileId: record.fileId,
+    blobId: record.blobId,
+    versionNumber: record.versionNumber,
+    changeComment: record.changeComment,
+    createdById: record.createdById,
+    createdAt: record.createdAt,
+    sizeBytes: record.blob?.sizeBytes ?? 0n,
+    author,
+  });
+}
+
 @Injectable()
 export class PrismaStorageVersionRepository implements IStorageVersionRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -65,17 +91,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
       select: AUTHOR_SELECT,
     });
 
-    return new StorageVersion({
-      id: created.id,
-      fileId: created.fileId,
-      blobId: created.blobId,
-      versionNumber: created.versionNumber,
-      changeComment: created.changeComment,
-      createdById: created.createdById,
-      createdAt: created.createdAt,
-      sizeBytes: created.blob?.sizeBytes ?? 0n,
-      author: mapAuthor(user),
-    });
+    return toDomainVersion(created, mapAuthor(user));
   }
 
   async findByFileId(fileId: string): Promise<StorageVersion[]> {
@@ -96,19 +112,8 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
     });
     const userMap = new Map(users.map((u) => [u.id, mapAuthor(u)]));
 
-    return records.map(
-      (r) =>
-        new StorageVersion({
-          id: r.id,
-          fileId: r.fileId,
-          blobId: r.blobId,
-          versionNumber: r.versionNumber,
-          changeComment: r.changeComment,
-          createdById: r.createdById,
-          createdAt: r.createdAt,
-          sizeBytes: r.blob?.sizeBytes ?? 0n,
-          author: userMap.get(r.createdById) || null,
-        }),
+    return records.map((r) =>
+      toDomainVersion(r, userMap.get(r.createdById) || null),
     );
   }
 
@@ -130,17 +135,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
       select: AUTHOR_SELECT,
     });
 
-    return new StorageVersion({
-      id: record.id,
-      fileId: record.fileId,
-      blobId: record.blobId,
-      versionNumber: record.versionNumber,
-      changeComment: record.changeComment,
-      createdById: record.createdById,
-      createdAt: record.createdAt,
-      sizeBytes: record.blob?.sizeBytes ?? 0n,
-      author: mapAuthor(user),
-    });
+    return toDomainVersion(record, mapAuthor(user));
   }
 
   async getLatestVersionNumber(fileId: string): Promise<number> {

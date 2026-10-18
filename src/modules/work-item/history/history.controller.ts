@@ -7,7 +7,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { HistoryService } from './history.service';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item History & Activity')
 @ApiBearerAuth('JWT-auth')
@@ -17,7 +17,7 @@ export class HistoryController {
   constructor(private readonly historyService: HistoryService) {}
 
   @Get('work-items/:workItemId/activity')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get activity events for work item (Plane.so Activity tab)',

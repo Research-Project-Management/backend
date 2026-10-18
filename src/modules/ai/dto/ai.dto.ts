@@ -171,12 +171,6 @@ export class AiQueryDto {
   [key: string]: unknown;
 }
 
-export class BulkDocumentsDto {
-  @IsArray()
-  @IsOptional()
-  ids?: string[];
-}
-
 export class GetDocumentsBulkDto {
   @IsArray()
   @IsString({ each: true })
@@ -187,3 +181,4 @@ export class GetDocumentsBulkDto {
   @IsOptional()
   projectId?: string;
 }
+

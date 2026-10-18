@@ -40,6 +40,13 @@ export interface ListDriveFilter {
 // STORAGE NODE MODEL
 // ============================================================================
 
+export interface StorageNodeAuthor {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  avatar?: string | null;
+}
+
 export interface StorageNodeProps {
   id: string;
   projectId?: string | null;
@@ -53,6 +60,7 @@ export interface StorageNodeProps {
   starred?: boolean;
   metadata?: Record<string, unknown>;
   authorId: string;
+  author?: StorageNodeAuthor | null;
   trashedAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
@@ -65,6 +73,7 @@ export class StorageNode {
   public readonly id: string;
   public readonly isFolder: boolean;
   public readonly authorId: string;
+  public readonly author: StorageNodeAuthor | null;
   public readonly createdAt: Date;
 
   private _projectId: string | null;
@@ -84,6 +93,7 @@ export class StorageNode {
     this._projectId = props.projectId ?? null;
     this.isFolder = props.isFolder;
     this.authorId = props.authorId;
+    this.author = props.author ?? null;
     this.createdAt = props.createdAt ?? new Date();
 
     this._parentId = props.parentId ?? null;
@@ -209,27 +219,55 @@ export class StorageNode {
     return {
       id: this.id,
       name: this._name,
-      filename: this._name,
       isFolder: this.isFolder,
       size: Number(this._size),
       mimeType: this._mimeType,
       parentId: this._parentId,
-      parent: this._parentId,
       starred: this._starred,
-      isStarred: this._starred,
       metadata: this._metadata,
-      metaData: this._metadata,
       authorId: this.authorId,
       createdAt: this.createdAt,
       updatedAt: this._updatedAt,
       trashedAt: this._trashedAt,
     };
   }
+
+  /**
+   * Sorts a flat list of StorageNodes bottom-up (files first, then deepest child folders before parents)
+   * so subtrees can be safely deleted without violating foreign key constraints.
+   */
+  public static sortBottomUp(nodes: StorageNode[]): StorageNode[] {
+    const idMap = new Map<string, StorageNode>(nodes.map((n) => [n.id, n]));
+    const depthCache = new Map<string, number>();
+
+    const getDepth = (node: StorageNode): number => {
+      const cached = depthCache.get(node.id);
+      if (cached !== undefined) return cached;
+
+      let depth = 0;
+      let curr: StorageNode | undefined = node;
+      while (curr?.parentId && idMap.has(curr.parentId)) {
+        depth++;
+        curr = idMap.get(curr.parentId);
+        if (depth > 100) break; // cycle guard
+      }
+      depthCache.set(node.id, depth);
+      return depth;
+    };
+
+    return [...nodes].sort((a, b) => {
+      if (!a.isFolder && b.isFolder) return -1;
+      if (a.isFolder && !b.isFolder) return 1;
+      return getDepth(b) - getDepth(a);
+    });
+  }
 }
 
 // ============================================================================
 // STORAGE QUOTA MODEL
 // ============================================================================
+
+export const DEFAULT_STORAGE_QUOTA_BYTES = 5n * 1024n * 1024n * 1024n; // 5 GB
 
 export interface StorageQuotaProps {
   id: string;

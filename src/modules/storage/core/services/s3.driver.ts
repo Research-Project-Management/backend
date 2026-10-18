@@ -247,7 +247,7 @@ export class S3StorageDriver implements IStorageDriver {
       .sort((a, b) => a.partNumber - b.partNumber)
       .map((p) => ({
         PartNumber: p.partNumber,
-        ETag: (p.eTag || p.etag || '').replace(/"/g, ''),
+        ETag: p.eTag.replace(/"/g, ''),
       }));
 
     const res = await this.client.send(
@@ -285,7 +285,6 @@ export class S3StorageDriver implements IStorageDriver {
     return (res.Parts ?? []).map((p) => ({
       partNumber: p.PartNumber!,
       eTag: p.ETag!,
-      etag: p.ETag!,
     }));
   }
 
@@ -391,7 +390,14 @@ export class S3StorageDriver implements IStorageDriver {
           }),
         })),
       };
-    } catch {
+    } catch (err: unknown) {
+      const errorName = (err as { name?: string })?.name;
+      if (errorName === 'NoSuchLifecycleConfiguration') {
+        return null;
+      }
+      this.logger.warn(
+        `Failed to retrieve S3 lifecycle rules for bucket ${this.bucket}: ${(err as Error)?.message}`,
+      );
       return null;
     }
   }

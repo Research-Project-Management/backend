@@ -6,7 +6,6 @@ import {
   AuthzProjectContext,
   IAccessRepository,
   MemberAccessContext,
-  PermissionOverrideMap,
 } from './types/access.type';
 import { computeEffectivePermissions } from './constants/permission.constant';
 
@@ -117,26 +116,5 @@ export class AccessRepository implements IAccessRepository {
     });
 
     return member ? (member.role as Role) : null;
-  }
-
-  /**
-   * Updates permission overrides for a specific project member.
-   */
-  async updateMemberOverrides(
-    _projectId: string,
-    _userId: string,
-    _overrides: PermissionOverrideMap,
-  ): Promise<void> {
-    // ProjectMember uses role-based permissions without separate DB column
-  }
-
-  /**
-   * Compatibility alias for findMemberAccessContext / findMemberContext.
-   */
-  async findMemberContext(
-    projectId: string,
-    userId: string,
-  ): Promise<MemberAccessContext | null> {
-    return this.findMemberAccessContext(projectId, userId);
   }
 }

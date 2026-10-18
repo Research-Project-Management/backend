@@ -1,10 +1,14 @@
 import { Pool } from 'pg';
 import Redis from 'ioredis';
 
+function requireDatabaseUrl() {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  return url;
+}
+
 const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ||
-    'postgresql://postgres:Thanh26102006@127.0.0.1:5433/flux-db?schema=public',
+  connectionString: requireDatabaseUrl(),
 });
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379');
@@ -776,16 +780,22 @@ async function main() {
           item.content,
           item.completed !== undefined ? item.completed : null,
           item.seq,
-        ]
+        ],
       );
       if (res.rowCount > 0) {
-        console.log(`  ✓ Updated ${res.rows[0].identifier}: [${res.rows[0].start_date?.toISOString().slice(0, 10)} -> ${res.rows[0].due_date?.toISOString().slice(0, 10)}] (${res.rows[0].time_spent}h spent)`);
+        console.log(
+          `  ✓ Updated ${res.rows[0].identifier}: [${res.rows[0].start_date?.toISOString().slice(0, 10)} -> ${res.rows[0].due_date?.toISOString().slice(0, 10)}] (${res.rows[0].time_spent}h spent)`,
+        );
       }
     }
 
     // 2. Fetch all IDs to map sequence to uuid
-    const allItemsRes = await client.query('SELECT id, sequence_number FROM work_items');
-    const seqToId = new Map(allItemsRes.rows.map((r) => [r.sequence_number, r.id]));
+    const allItemsRes = await client.query(
+      'SELECT id, sequence_number FROM work_items',
+    );
+    const seqToId = new Map(
+      allItemsRes.rows.map((r) => [r.sequence_number, r.id]),
+    );
 
     // 3. Clear existing relations and seed realistic logical dependencies
     await client.query('DELETE FROM work_item_relations');
@@ -814,9 +824,11 @@ async function main() {
           `INSERT INTO work_item_relations (id, source_id, target_id, type, created_at)
            VALUES (gen_random_uuid(), $1, $2, $3, NOW())
            ON CONFLICT DO NOTHING`,
-          [sourceId, targetId, rel.type]
+          [sourceId, targetId, rel.type],
         );
-        console.log(`  ✓ Relation: FLUX-${rel.sourceSeq} [${rel.type}] -> FLUX-${rel.targetSeq}`);
+        console.log(
+          `  ✓ Relation: FLUX-${rel.sourceSeq} [${rel.type}] -> FLUX-${rel.targetSeq}`,
+        );
       }
     }
 

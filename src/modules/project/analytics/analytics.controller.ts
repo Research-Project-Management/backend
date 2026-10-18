@@ -8,7 +8,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { ProjectAnalyticsService } from './analytics.service';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Project Analytics & Portfolio')
 @ApiBearerAuth('JWT-auth')
@@ -18,7 +18,7 @@ export class ProjectAnalyticsController {
   constructor(private readonly analyticsService: ProjectAnalyticsService) {}
 
   @Get(':projectId/analytics')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get detailed dimensional breakdown for a project' })
   getAnalytics(@Param('projectId') projectId: string) {
@@ -26,7 +26,7 @@ export class ProjectAnalyticsController {
   }
 
   @Get(':projectId/analytics/overview')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get high-level portfolio overview for a project' })
   getOverview(@Param('projectId') projectId: string) {
@@ -34,7 +34,7 @@ export class ProjectAnalyticsController {
   }
 
   @Get(':projectId/analytics/timeseries')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get daily WorkItem creation and completion trend' })
   @ApiQuery({ name: 'from', required: false, example: '2026-09-01' })
@@ -54,7 +54,7 @@ export class ProjectAnalyticsController {
   }
 
   @Get(':projectId/analytics/labels')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get WorkItem distribution by label for a project' })
   getLabelDistribution(@Param('projectId') projectId: string) {

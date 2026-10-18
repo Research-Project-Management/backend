@@ -106,6 +106,8 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
         completeMultipartUpload: jest.fn(),
         abortMultipartUpload: jest.fn(),
         listUploadedParts: jest.fn(),
+        applyLifecycleRules: jest.fn().mockResolvedValue(undefined),
+        getLifecycleRules: jest.fn().mockResolvedValue([]),
       };
 
       mockNodeRepo = {
@@ -120,6 +122,12 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
         restoreSubtree: jest.fn(),
         findSubtreeNodes: jest.fn(),
         findExpiredTrash: jest.fn(),
+        isDescendant: jest.fn().mockResolvedValue(false),
+        getFolderPath: jest.fn().mockResolvedValue([]),
+        listSharedWithUser: jest
+          .fn()
+          .mockResolvedValue({ items: [], total: 0 }),
+        shareNode: jest.fn(),
       };
 
       mockBlobRepo = {
@@ -129,6 +137,8 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
         update: jest.fn(),
         delete: jest.fn(),
         findTombstonedBlobs: jest.fn(),
+        incrementRefCount: jest.fn(),
+        decrementRefCount: jest.fn(),
       };
 
       consumer = new StorageQueueConsumer(

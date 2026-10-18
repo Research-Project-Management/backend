@@ -92,33 +92,11 @@ export interface IActivityRepository {
     limit?: number,
   ): Promise<ActivityEventWithActor[]>;
   findRecentByActor(actorId: string, limit?: number): Promise<ActivityEvent[]>;
-  findUserRecentEvents(
-    actorId: string,
-    limit?: number,
-  ): Promise<ActivityEvent[]>;
   findEntitiesTitleMap(
     workItemIds: string[],
     paperIds: string[],
     pageIds: string[],
   ): Promise<Map<string, string>>;
-  findUserRecentItems(
-    userId: string,
-    limit: number,
-  ): Promise<{
-    workItems: Array<{
-      id: string;
-      title: string;
-      projectId: string;
-      updatedAt: Date;
-    }>;
-    papers: Array<{ id: string; title: string; updatedAt: Date }>;
-    pages: Array<{
-      id: string;
-      title: string;
-      projectId: string;
-      updatedAt: Date;
-    }>;
-  }>;
 
   findWorkItemWithProject(
     workItemId: string,

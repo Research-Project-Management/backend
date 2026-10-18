@@ -62,8 +62,8 @@ export interface IStoragePort {
   linkFile(input: LinkFileInput): Promise<void>;
   uploadFile(input: UploadFileInput): Promise<UploadFileOutput>;
   deleteFile(fileId: string): Promise<void>;
-  deleteObject?(key: string): Promise<void>;
-  uploadBuffer?(
+  deleteObject(key: string): Promise<void>;
+  uploadBuffer(
     key: string,
     buffer: Buffer,
     contentType?: string,
