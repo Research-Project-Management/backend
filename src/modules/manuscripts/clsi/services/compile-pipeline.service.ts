@@ -5,7 +5,6 @@
  * health check probes, and workspace repository, using pure in-process domain logic.
  */
 
-import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
@@ -30,258 +29,15 @@ import { TexEngineDetector } from '../domain/tex-engine.detector';
 import { OverleafLogParser } from '../domain/overleaf-log.parser';
 import { BibBackendDetector } from '../domain/bib-backend.detector';
 import { DraftModeManager } from '../domain/draft-mode.manager';
+import { SandboxPolicyViolationException } from '../domain/sandbox-errors';
 
 // ─────────────────────────────────────────────────────────────────
-// Process Watchdog & Sandbox Runners
+// Process Watchdog & Sandbox Runners (re-exported from ./sandbox/*)
 // ─────────────────────────────────────────────────────────────────
 
-export function killProcessGroup(pid: number, force = false): void {
-  if (process.platform === 'win32') {
-    try {
-      const args = ['/F', '/T', '/PID', pid.toString()];
-      spawn('taskkill', args, { stdio: 'ignore' });
-    } catch {
-      // ignore
-    }
-  } else {
-    try {
-      process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM');
-    } catch (e: unknown) {
-      if ((e as { code?: string })?.code === 'ESRCH') return;
-      try {
-        process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
-      } catch {
-        // ignore
-      }
-    }
-  }
-}
-
-export class Watchdog {
-  private timeoutTimer: NodeJS.Timeout | null = null;
-  private killTimer: NodeJS.Timeout | null = null;
-  private aborted = false;
-  private abortReason?: string;
-
-  constructor(
-    private readonly child: ChildProcess,
-    private readonly timeoutMs: number = 240000,
-    private readonly gracePeriodMs: number = 2000,
-  ) {}
-
-  arm(signal?: AbortSignal): void {
-    if (signal) {
-      if (signal.aborted) {
-        this.terminate('ABORTED_IMMEDIATELY');
-        return;
-      }
-      signal.addEventListener('abort', () => this.terminate('SIGNAL_ABORTED'), {
-        once: true,
-      });
-    }
-
-    this.timeoutTimer = setTimeout(() => {
-      this.terminate('TIMEOUT');
-    }, this.timeoutMs);
-  }
-
-  disarm(): void {
-    if (this.timeoutTimer) {
-      clearTimeout(this.timeoutTimer);
-      this.timeoutTimer = null;
-    }
-    if (this.killTimer) {
-      clearTimeout(this.killTimer);
-      this.killTimer = null;
-    }
-  }
-
-  isAborted(): boolean {
-    return this.aborted;
-  }
-
-  getAbortReason(): string | undefined {
-    return this.abortReason;
-  }
-
-  terminate(reason: string): void {
-    if (this.aborted) return;
-    this.aborted = true;
-    this.abortReason = reason;
-
-    const pid = this.child.pid;
-    if (!pid) return;
-
-    killProcessGroup(pid, false);
-
-    this.killTimer = setTimeout(() => {
-      killProcessGroup(pid, true);
-    }, this.gracePeriodMs);
-  }
-}
-
-export class LocalProcessRunner implements ISandboxRunner {
-  readonly name = 'local-process';
-
-  private static readonly activeChildProcesses = new Set<ChildProcess>();
-  private static shutdownHooksRegistered = false;
-
-  private static registerShutdownHooks(): void {
-    if (this.shutdownHooksRegistered) return;
-    this.shutdownHooksRegistered = true;
-
-    const cleanup = () => {
-      for (const child of this.activeChildProcesses) {
-        if (child.pid && !child.killed) {
-          killProcessGroup(child.pid, true);
-        }
-      }
-      this.activeChildProcesses.clear();
-    };
-
-    process.once('SIGINT', cleanup);
-    process.once('SIGTERM', cleanup);
-    process.once('exit', cleanup);
-  }
-
-  public async run(
-    command: string,
-    args: string[],
-    options: ProcessExecutionOptions,
-  ): Promise<ProcessExecutionResult> {
-    LocalProcessRunner.registerShutdownHooks();
-
-    return new Promise((resolve) => {
-      let stdout = '';
-      let stderr = '';
-
-      const child = spawn(command, args, {
-        cwd: options.cwd,
-        env: {
-          ...process.env,
-          ...(options.env || {}),
-        },
-        detached: process.platform !== 'win32',
-        shell: false,
-      });
-
-      LocalProcessRunner.activeChildProcesses.add(child);
-
-      const watchdog = new Watchdog(child, options.timeoutMs ?? 240000);
-      watchdog.arm(options.signal);
-
-      child.stdout?.on('data', (data) => {
-        const str = data.toString();
-        stdout += str;
-        options.onLogChunk?.(str);
-      });
-
-      child.stderr?.on('data', (data) => {
-        const str = data.toString();
-        stderr += str;
-        options.onLogChunk?.(str);
-      });
-
-      child.on('error', (err) => {
-        LocalProcessRunner.activeChildProcesses.delete(child);
-        watchdog.disarm();
-        resolve({
-          exitCode: 1,
-          stdout,
-          stderr: stderr ? `${stderr}\n${err.message}` : err.message,
-        });
-      });
-
-      child.on('close', (code) => {
-        LocalProcessRunner.activeChildProcesses.delete(child);
-        watchdog.disarm();
-        if (watchdog.isAborted()) {
-          const timeoutAdvice =
-            '\n\n[Compilation Timeout — Troubleshooting Suggestions]\n' +
-            'Your compilation timed out. Common causes and solutions:\n' +
-            '  1. Infinite loops or recursion in custom macros, TikZ code, or complex tables.\n' +
-            '  2. Very large, uncompressed high-resolution images (switch to "Draft mode" in Settings).\n' +
-            '  3. Unclosed environments, braces, or math delimiters.\n' +
-            '  4. Corrupted auxiliary files (click "Clear cached files" in Settings).';
-          resolve({
-            exitCode: 137,
-            stdout,
-            stderr: stderr
-              ? `${stderr}\nCompilation timed out or was canceled.${timeoutAdvice}`
-              : `Compilation timed out or was canceled.${timeoutAdvice}`,
-          });
-          return;
-        }
-
-        resolve({
-          exitCode: code ?? 0,
-          stdout,
-          stderr,
-        });
-      });
-    });
-  }
-}
-
-export class DockerSandboxRunner implements ISandboxRunner {
-  readonly name = 'docker-sandbox';
-  private readonly localRunner = new LocalProcessRunner();
-
-  constructor(
-    private readonly dockerImage: string = 'sharelatex/clsi:latest',
-    private readonly memoryLimit: string = '1024m',
-    private readonly cpuLimit: string = '1.0',
-  ) {}
-
-  public async run(
-    command: string,
-    args: string[],
-    options: ProcessExecutionOptions,
-  ): Promise<ProcessExecutionResult> {
-    const envArgs: string[] = [];
-    if (options.env) {
-      for (const [k, v] of Object.entries(options.env)) {
-        if (v !== undefined) {
-          const containerVal =
-            typeof v === 'string'
-              ? v.split(options.cwd).join('/compile').replace(/\\/g, '/')
-              : String(v);
-          envArgs.push('-e', `${k}=${containerVal}`);
-        }
-      }
-    }
-
-    const dockerArgs = [
-      'run',
-      '--rm',
-      '--net=none',
-      `--memory=${this.memoryLimit}`,
-      `--cpus=${this.cpuLimit}`,
-      '--pids-limit=100',
-      '--cap-drop=ALL',
-      '--security-opt=no-new-privileges',
-      '-v',
-      `${options.cwd}:/compile:rw`,
-      '-w',
-      '/compile',
-      ...envArgs,
-      this.dockerImage,
-      command,
-      ...args,
-    ];
-
-    const result = await this.localRunner.run('docker', dockerArgs, options);
-
-    if (
-      result.exitCode !== 0 &&
-      result.stderr.includes('docker: command not found')
-    ) {
-      throw new Error('Docker is not installed or available on this system');
-    }
-
-    return result;
-  }
-}
+export { killProcessGroup, Watchdog } from './sandbox/process-watchdog';
+export { LocalProcessRunner } from './sandbox/local-process.runner';
+export { DockerSandboxRunner } from './sandbox/docker-sandbox.runner';
 
 // ─────────────────────────────────────────────────────────────────
 // LaTeX Engines (LatexmkEngine & TectonicEngine)
@@ -323,16 +79,22 @@ export class LatexmkEngine implements ILatexEngine {
       compilerFlag = '-pdflua';
     }
 
+    if (options.shellEscape) {
+      throw new SandboxPolicyViolationException(
+        'Shell escape is strictly disabled in compilation sandbox.',
+      );
+    }
+
     const args: string[] = [
       compilerFlag,
       '-cd',
       '-jobname=output',
       '-synctex=1',
       '-file-line-error',
+      '-no-shell-escape',
       options.stopOnFirstError ? '-halt-on-error' : '-interaction=batchmode',
       ...(options.stopOnFirstError ? [] : ['-f']),
       ...(options.syntaxOnly ? ['-draftmode'] : []),
-      ...(options.shellEscape ? ['-shell-escape'] : []),
       options.mainFile,
     ];
 
@@ -455,11 +217,16 @@ export class TectonicEngine implements ILatexEngine {
   public async compile(options: EngineRunOptions): Promise<EngineRunResult> {
     const startTime = Date.now();
 
+    if (options.shellEscape) {
+      throw new SandboxPolicyViolationException(
+        'Shell escape is strictly disabled in compilation sandbox.',
+      );
+    }
+
     const args: string[] = [
       '-X',
       'compile',
       '--synctex',
-      ...(options.shellEscape ? ['-Z', 'shell-escape'] : []),
       '--outdir',
       options.cwd,
       options.mainFile,
@@ -565,6 +332,10 @@ export interface ClsiHealthReport {
     path: string;
     writable: boolean;
   };
+  sandbox: {
+    runner: string;
+    mode: 'container' | 'local-unsafe';
+  };
   compilers: {
     latexmk: BinaryStatus;
     pdflatex: BinaryStatus;
@@ -616,6 +387,9 @@ export class ClsiHealthCheck {
       status = 'degraded';
     }
 
+    const sandboxMode =
+      this.runner.name === 'docker-sandbox' ? 'container' : 'local-unsafe';
+
     return {
       status,
       uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1000),
@@ -623,6 +397,10 @@ export class ClsiHealthCheck {
       scratchDirectory: {
         path: this.scratchDir,
         writable: scratchWritable,
+      },
+      sandbox: {
+        runner: this.runner.name,
+        mode: sandboxMode,
       },
       compilers: {
         latexmk,
@@ -803,7 +581,7 @@ export class CompilePipeline {
 
     const engineDetect = TexEngineDetector.detect(mainSource, dto.engine);
     const resolvedEngine = engineDetect.engine;
-    const requiresShellEscape = Boolean(engineDetect.requiresShellEscape);
+    const shellEscapeAdvisories = engineDetect.shellEscapeAdvisories || [];
 
     if (!dto.mainFile && engineDetect.mainFileHint) {
       mainFile = cleanRelPath(engineDetect.mainFileHint);
@@ -979,7 +757,7 @@ export class CompilePipeline {
             {
               engine: resolvedEngine,
               bibBackend,
-              shellEscape: requiresShellEscape,
+              shellEscape: false,
             },
             userLatexmkFile?.content
               ? Buffer.isBuffer(userLatexmkFile.content)
@@ -1049,7 +827,6 @@ export class CompilePipeline {
                 stopOnFirstError,
                 draft: dto.draft ?? false,
                 syntaxOnly: dto.syntaxOnly ?? false,
-                shellEscape: requiresShellEscape,
                 signal: dto.signal,
                 onLogChunk: dto.onLogChunk,
               },
@@ -1063,7 +840,6 @@ export class CompilePipeline {
               stopOnFirstError,
               draft: dto.draft ?? false,
               syntaxOnly: dto.syntaxOnly ?? false,
-              shellEscape: requiresShellEscape,
               signal: dto.signal,
               onLogChunk: dto.onLogChunk,
             });
@@ -1112,6 +888,18 @@ export class CompilePipeline {
           }
 
           const diagnostics = this.logParser.parse(logs, mainFile);
+
+          if (shellEscapeAdvisories.length > 0) {
+            for (const adv of shellEscapeAdvisories) {
+              diagnostics.push({
+                file: mainFile,
+                line: null,
+                message: `Document references '${adv}' which historically required shell-escape. Shell-escape is strictly disabled in the Flux isolated compile sandbox for security. If compiling fails, consider native LaTeX alternatives (e.g. listings package instead of minted).`,
+                severity: 'info',
+                code: 'SHELL_ESCAPE_ADVISORY',
+              });
+            }
+          }
 
           if (engineResult.pdfGenerated && pdfBase64) {
             try {

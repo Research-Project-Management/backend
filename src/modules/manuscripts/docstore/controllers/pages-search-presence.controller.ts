@@ -15,11 +15,21 @@ import {
   HttpStatus,
   HttpCode,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
-import { AuthenticatedRequest } from '@/core';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+  ResolvedProject,
+} from '@/modules/project/access';
+import {
+  AuthenticatedRequest,
+  UserRateLimit,
+  UserRateLimitGuard,
+} from '@/core';
 import type { FastifyReply } from 'fastify';
 import {
   ManuscriptPresenceService,
@@ -30,7 +40,7 @@ import { ManuscriptSearchReplaceService } from '../services/manuscript-search-re
 @ApiTags('Manuscripts - Pages Search & Presence')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class PagesSearchPresenceController {
   constructor(
@@ -135,7 +145,7 @@ export class PagesSearchPresenceController {
       (Array.isArray(req.headers?.Origin)
         ? req.headers.Origin[0]
         : req.headers?.Origin) ||
-      'http://localhost:2915';
+      undefined;
     await this.presenceService.streamPresenceAndUpdates(
       pageId,
       origin,
@@ -158,9 +168,11 @@ export class PagesSearchPresenceController {
     'docs/search',
     'pages/search',
   ])
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
   @HttpCode(HttpStatus.OK)
   async searchDocuments(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string | undefined,
     @Body()
     body: {
       projectId?: string;
@@ -171,8 +183,13 @@ export class PagesSearchPresenceController {
       fileIds?: string[];
       maxResults?: number;
     },
+    @ResolvedProject() project?: { id: string },
   ) {
-    const targetProjectId = projectId || body?.projectId || '';
+    const targetProjectId =
+      project?.id || routeProjectId || body?.projectId || '';
+    if (!targetProjectId) {
+      throw new BadRequestException('Project context required');
+    }
     return this.searchReplaceService.searchDocuments(targetProjectId, body);
   }
 
@@ -188,9 +205,12 @@ export class PagesSearchPresenceController {
     'docs/replace',
     'pages/replace',
   ])
+  @UseGuards(UserRateLimitGuard)
+  @RequireRole(Role.CONTRIBUTOR)
+  @UserRateLimit('search-replace')
   @HttpCode(HttpStatus.OK)
   async replaceDocuments(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string | undefined,
     @Body()
     body: {
       projectId?: string;
@@ -201,8 +221,13 @@ export class PagesSearchPresenceController {
       wholeWord?: boolean;
       useRegex?: boolean;
     },
+    @ResolvedProject() project?: { id: string },
   ) {
-    const targetProjectId = projectId || body?.projectId || '';
+    const targetProjectId =
+      project?.id || routeProjectId || body?.projectId || '';
+    if (!targetProjectId) {
+      throw new BadRequestException('Project context required');
+    }
     return this.searchReplaceService.replaceDocuments(targetProjectId, body);
   }
 }

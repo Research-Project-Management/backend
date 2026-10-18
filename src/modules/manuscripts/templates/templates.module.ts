@@ -9,17 +9,13 @@ import {
   OverleafTemplatesParityController,
 } from './templates.controller';
 import { TemplatesService } from './templates.service';
-import {
-  TemplatesRepository,
-  InMemoryTemplateAdapter,
-} from './templates.repository';
+import { TemplatesRepository } from './templates.repository';
 import { TEMPLATE_REPOSITORY_PORT, PROJECT_INSTANTIATOR_PORT } from './domain';
 
 @Module({
   imports: [PrismaModule, StructureModule, DocstoreModule],
   controllers: [TemplatesController, OverleafTemplatesParityController],
   providers: [
-    InMemoryTemplateAdapter,
     TemplatesRepository,
     TemplatesService,
     {

@@ -271,10 +271,7 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
           },
           input.createdById,
         );
-        return (await historyRepo.findByVersion(
-          input.projectId,
-          dto.version,
-        ))!;
+        return (await historyRepo.findByVersion(input.projectId, dto.version))!;
       },
     };
     getVersionListUseCase = {

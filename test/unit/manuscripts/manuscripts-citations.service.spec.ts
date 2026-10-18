@@ -855,12 +855,14 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
 
       it('GET /citations/validate should return validation summary', async () => {
-        const entries = Array.from({ length: 5 }, (_, i) =>
-          new BibEntry({
-            key: `k${i}`,
-            entryType: 'article',
-            fields: { title: `T${i}`, author: 'A', year: '2020' },
-          }),
+        const entries = Array.from(
+          { length: 5 },
+          (_, i) =>
+            new BibEntry({
+              key: `k${i}`,
+              entryType: 'article',
+              fields: { title: `T${i}`, author: 'A', year: '2020' },
+            }),
         );
         mockRepo.collectBibFiles.mockResolvedValue([
           new BibliographyFile({ path: '/refs.bib', entries }),
@@ -897,8 +899,8 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           { id: 'c1', name: 'Col 1', itemCount: 10 },
         ]);
 
-        const req = { headers: { 'x-user-id': 'u-custom' } };
-        const list = await utilityController.listLibraryCollections(req);
+        const req = { user: { id: 'u-custom' } };
+        const list = await utilityController.listLibraryCollections(req as any);
         expect(list).toHaveLength(1);
         expect(mockRepo.listCollections).toHaveBeenCalledWith('u-custom');
       });
@@ -912,4 +914,3 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
     });
   });
 });
-

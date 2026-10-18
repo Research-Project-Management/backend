@@ -22,8 +22,16 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+  RequireOperator,
+  OperatorGuard,
+  NoProjectContext,
+} from '@/modules/project/access';
 import { LinkedFilesService } from './linked-files.service';
+import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import {
   CreateLinkedFileDto,
   LinkedFileResponseDto,
@@ -32,7 +40,7 @@ import {
 @ApiTags('Manuscripts - Linked Files')
 @ApiBearerAuth('JWT-auth')
 @Controller()
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class LinkedFilesController {
   constructor(private readonly linkedFilesService: LinkedFilesService) {}
 
@@ -84,7 +92,9 @@ export class LinkedFilesController {
     'project/:projectId/linked_file/:id/refresh',
     'projects/:projectId/linked_file/:id/refresh',
   ])
+  @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
+  @UserRateLimit('linked-file')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Refresh and re-synchronize a linked file immediately',
@@ -122,6 +132,10 @@ export class LinkedFilesController {
     'v1/manuscripts/linked-files/refresh-all',
     'manuscripts/linked-files/refresh-all',
   ])
+  @UseGuards(OperatorGuard, UserRateLimitGuard)
+  @RequireOperator()
+  @NoProjectContext()
+  @UserRateLimit('linked-file')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Trigger background refresh for all auto-refresh linked files',

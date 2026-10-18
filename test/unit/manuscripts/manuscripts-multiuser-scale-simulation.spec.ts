@@ -17,6 +17,7 @@
  *   - Tier 4: Extremely Large-Scale & Stress / Edge Cases (40k lines, 2MB limit, OCC conflict, error storm)
  */
 
+import { randomUUID } from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs/promises';
@@ -443,7 +444,7 @@ describe('Multi-User Collaborative Simulation & Full-Scale Stress Test', () => {
         return results;
       }),
       create: jest.fn(async ({ data }: any) => {
-        const id = data.id || `${require('crypto').randomUUID()}`;
+        const id = data.id || `${randomUUID()}`;
         const record = {
           id,
           projectId: data.projectId,
@@ -656,10 +657,7 @@ describe('Multi-User Collaborative Simulation & Full-Scale Stress Test', () => {
     };
     resolveRootDocUseCase = {
       autoDetectAndSetRootDoc: (projectId, docContents) =>
-        structureService.autoDetectRootDoc(
-          projectId,
-          docContents ?? new Map(),
-        ),
+        structureService.autoDetectRootDoc(projectId, docContents ?? new Map()),
     };
 
     // Track Changes setup

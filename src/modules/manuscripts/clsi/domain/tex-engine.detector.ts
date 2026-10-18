@@ -13,6 +13,9 @@ export interface EngineDetectionResult {
   detectedFrom: 'explicit' | 'magic-comment' | 'package-hint' | 'default';
   mainFileHint?: string;
   bibProgramHint?: 'biber' | 'bibtex';
+  /** Detected constructs for user advisory diagnostics; never used to enable shell escape. */
+  shellEscapeAdvisories?: string[];
+  /** @deprecated Advisory only. */
   requiresShellEscape?: boolean;
 }
 
@@ -30,9 +33,10 @@ export class TexEngineDetector {
     source: string,
     requestedEngine?: string,
   ): EngineDetectionResult {
-    const requiresShellEscape = DraftModeManager.requiresShellEscape(
+    const shellEscapeAdvisories = DraftModeManager.detectShellEscapeUsage(
       source || '',
     );
+    const requiresShellEscape = shellEscapeAdvisories.length > 0;
 
     if (requestedEngine && requestedEngine !== 'auto') {
       const normalized = requestedEngine.toLowerCase();
@@ -45,6 +49,7 @@ export class TexEngineDetector {
         return {
           engine: normalized,
           detectedFrom: 'explicit',
+          shellEscapeAdvisories,
           requiresShellEscape,
         };
       }
@@ -54,6 +59,7 @@ export class TexEngineDetector {
       return {
         engine: 'pdflatex',
         detectedFrom: 'default',
+        shellEscapeAdvisories: [],
         requiresShellEscape: false,
       };
     }
@@ -93,6 +99,7 @@ export class TexEngineDetector {
         detectedFrom: 'magic-comment',
         mainFileHint,
         bibProgramHint,
+        shellEscapeAdvisories,
         requiresShellEscape,
       };
     }
@@ -106,6 +113,7 @@ export class TexEngineDetector {
         detectedFrom: 'package-hint',
         mainFileHint,
         bibProgramHint,
+        shellEscapeAdvisories,
         requiresShellEscape,
       };
     }
@@ -119,6 +127,7 @@ export class TexEngineDetector {
         detectedFrom: 'package-hint',
         mainFileHint,
         bibProgramHint,
+        shellEscapeAdvisories,
         requiresShellEscape,
       };
     }
@@ -128,6 +137,7 @@ export class TexEngineDetector {
       detectedFrom: 'default',
       mainFileHint,
       bibProgramHint,
+      shellEscapeAdvisories,
       requiresShellEscape,
     };
   }

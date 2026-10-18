@@ -25,7 +25,12 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+  ResolvedProject,
+} from '@/modules/project/access';
 import { ManuscriptDoc } from '@prisma/client';
 import { PrismaService, AuthenticatedRequest } from '@/core';
 import * as path from 'path';
@@ -34,6 +39,7 @@ import { DocstoreService } from '../docstore.service';
 import { ManuscriptProjectBootstrapService } from '../services/manuscript-project-bootstrap.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LiveCollaborationPort } from '../domain';
+import { ManuscriptPageScopeRepository } from '../repositories/manuscript-page-scope.repository';
 
 export interface PageDocRanges {
   labels?: Array<{ id: string; name?: string; color?: string }>;
@@ -44,18 +50,20 @@ export interface PageDocRanges {
   [key: string]: unknown;
 }
 
-const isUuid = (val?: string | null): val is string =>
+const isUuid = (val?: string | null): boolean =>
   typeof val === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 @ApiTags('Manuscripts - Pages Compatibility Bridge')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class PagesDocController {
   private readonly logger = new Logger(PagesDocController.name);
   private liveCollab: LiveCollaborationPort | null | undefined;
+
+  private readonly pageScopeRepo: ManuscriptPageScopeRepository;
 
   constructor(
     private readonly docstoreService: DocstoreService,
@@ -63,7 +71,11 @@ export class PagesDocController {
     private readonly projectBootstrapService: ManuscriptProjectBootstrapService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
-  ) {}
+    @Optional() pageScopeRepo?: ManuscriptPageScopeRepository,
+  ) {
+    this.pageScopeRepo =
+      pageScopeRepo || new ManuscriptPageScopeRepository(prisma);
+  }
 
   private getLiveCollaboration(): LiveCollaborationPort | null {
     if (this.liveCollab !== undefined) return this.liveCollab;
@@ -116,41 +128,64 @@ export class PagesDocController {
    */
   @Get(['docs/:pageId', 'pages/:pageId'])
   @ApiOperation({ summary: 'Get document by pageId from database' })
-  async getPageById(@Param('pageId') pageId: string) {
+  async getPageById(
+    @Param('pageId') pageId: string,
+    @ResolvedProject() authorizedProjectId?: string,
+  ) {
     try {
       let record = null;
+      const targetProjectId = authorizedProjectId;
 
-      if (isUuid(pageId)) {
-        record = await this.prisma.manuscriptDoc.findUnique({
-          where: { id: pageId },
-          include: { node: true },
-        });
-
-        // If pageId was actually a projectId, fetch its root document
-        if (!record || record.deleted) {
-          const rootNode = await this.prisma.manuscriptNode.findFirst({
-            where: { projectId: pageId, isRootDoc: true },
+      if (targetProjectId) {
+        if (isUuid(pageId)) {
+          record = await this.prisma.manuscriptDoc.findFirst({
+            where: { id: pageId, projectId: targetProjectId, deleted: false },
+            include: { node: true },
           });
-          if (rootNode?.docId) {
-            record = await this.prisma.manuscriptDoc.findUnique({
-              where: { id: rootNode.docId },
-              include: { node: true },
+
+          // If pageId was actually a projectId, fetch its root document
+          if (!record) {
+            const rootNode = await this.prisma.manuscriptNode.findFirst({
+              where: { projectId: targetProjectId, isRootDoc: true },
             });
+            if (rootNode?.docId) {
+              record = await this.prisma.manuscriptDoc.findFirst({
+                where: {
+                  id: rootNode.docId,
+                  projectId: targetProjectId,
+                  deleted: false,
+                },
+                include: { node: true },
+              });
+            }
           }
+        } else {
+          // Query by path or filename strictly within the authorized project
+          const cleanPath = pageId.startsWith('/') ? pageId.slice(1) : pageId;
+          record = await this.prisma.manuscriptDoc.findFirst({
+            where: {
+              projectId: targetProjectId,
+              deleted: false,
+              OR: [{ path: `/${cleanPath}` }, { path: cleanPath }],
+            },
+            include: { node: true },
+          });
         }
       } else {
-        // Query by path or filename
-        record = await this.prisma.manuscriptDoc.findFirst({
-          where: {
-            OR: [{ path: `/${pageId}` }, { path: pageId }],
-            deleted: false,
-          },
-          include: { node: true },
-        });
+        if (isUuid(pageId)) {
+          record = await this.prisma.manuscriptDoc.findUnique({
+            where: { id: pageId },
+            include: { node: true },
+          });
+        }
       }
 
       if (!record || record.deleted) {
-        throw new NotFoundException(`Document ${pageId} not found`);
+        throw new NotFoundException({
+          statusCode: 404,
+          code: 'RESOURCE_NOT_FOUND',
+          message: `Document ${pageId} not found`,
+        });
       }
 
       let doc: {
@@ -226,6 +261,7 @@ export class PagesDocController {
    * PUT /api/pages/:pageId
    */
   @Put(['docs/:pageId', 'pages/:pageId'])
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({ summary: 'Update document content by pageId' })
   async updatePageContent(
     @Param('pageId') pageId: string,
@@ -238,17 +274,24 @@ export class PagesDocController {
       status?: 'draft' | 'published' | 'archived';
       description?: string;
     },
+    @ResolvedProject() authorizedProjectId?: string,
   ) {
     if (!isUuid(pageId)) {
       throw new BadRequestException('A valid UUID is required for pageId');
     }
 
-    const record = await this.prisma.manuscriptDoc.findUnique({
-      where: { id: pageId },
-    });
+    const record = authorizedProjectId
+      ? await this.pageScopeRepo.findDocInProject(authorizedProjectId, pageId)
+      : await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+        });
 
     if (!record || record.deleted) {
-      throw new NotFoundException(`Document ${pageId} not found`);
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: `Document ${pageId} not found`,
+      });
     }
 
     const hasNewContent =
@@ -371,19 +414,24 @@ export class PagesDocController {
    * PUT /api/pages/:pageId/thumbnail
    */
   @Put(['docs/:pageId/thumbnail', 'pages/:pageId/thumbnail'])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async updateThumbnail(
     @Param('pageId') pageId: string,
     @Body() body: { pdfThumbnail?: string },
+    @ResolvedProject() authorizedProjectId?: string,
   ) {
     const pdfThumbnail = body?.pdfThumbnail || '';
 
     if (isUuid(pageId)) {
       try {
-        const record = await this.prisma.manuscriptDoc.findUnique({
-          where: { id: pageId },
-          select: { id: true, projectId: true, ranges: true },
-        });
+        const targetProjectId = authorizedProjectId;
+        const record = targetProjectId
+          ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
+          : await this.prisma.manuscriptDoc.findUnique({
+              where: { id: pageId },
+              select: { id: true, projectId: true, ranges: true },
+            });
 
         let projectId = record?.projectId || null;
 
@@ -497,34 +545,6 @@ export class PagesDocController {
         }),
       ]);
 
-      const existingDocIds = new Set(nodes.map((n) => n.docId).filter(Boolean));
-      const missingDocs = allDocs.filter((d) => !existingDocIds.has(d.id));
-      if (missingDocs.length > 0) {
-        await Promise.all(
-          missingDocs.map(async (d) => {
-            try {
-              const cleanPath = d.path.startsWith('/') ? d.path : `/${d.path}`;
-              const cleanName = d.path.replace(/^\//, '') || 'main.tex';
-              const newNode = await this.prisma.manuscriptNode.create({
-                data: {
-                  projectId: projectId,
-                  name: cleanName,
-                  path: cleanPath,
-                  type: 'DOC',
-                  docId: d.id,
-                  isRootDoc: d.id === rootDoc?.id,
-                  sizeBytes: d.sizeBytes || 0,
-                },
-              });
-              nodes.push(newNode);
-              existingDocIds.add(d.id);
-            } catch {
-              // ignore duplicate path
-            }
-          }),
-        );
-      }
-
       const docMap = new Map(allDocs.map((d) => [d.id, d]));
 
       const files = nodes
@@ -534,11 +554,8 @@ export class PagesDocController {
           return true;
         })
         .map((node) => {
-          let cleanName =
+          const cleanName =
             node.path.replace(/^\//, '') || node.name || 'main.tex';
-          if (node.isRootDoc && cleanName === 'flux') {
-            cleanName = 'main.tex';
-          }
           const targetDoc = node.docId ? docMap.get(node.docId) : null;
           const docLines = targetDoc?.lines || [];
           const content = Array.isArray(docLines)
@@ -560,10 +577,7 @@ export class PagesDocController {
         });
 
       if (files.length === 0 && rootDoc && !rootDoc.deleted) {
-        let cleanName = rootDoc.path.replace(/^\//, '') || 'main.tex';
-        if (cleanName === 'flux') {
-          cleanName = 'main.tex';
-        }
+        const cleanName = rootDoc.path.replace(/^\//, '') || 'main.tex';
         const rootLines = rootDoc.lines || [];
         const content = Array.isArray(rootLines)
           ? rootLines.join('\n')
@@ -598,19 +612,21 @@ export class PagesDocController {
    * POST /api/pages/:pageId/files
    */
   @Post(['docs/:pageId/files', 'pages/:pageId/files'])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   async createPageFile(
     @Param('pageId') pageId: string,
     @Body() body: { title?: string; name?: string; content?: string },
+    @ResolvedProject() authorizedProjectId?: string,
   ) {
     const fileName = body?.title || body?.name || 'untitled.tex';
     const cleanName = fileName.trim().replace(/^\//, '');
     const content = body?.content || '';
 
-    let projectId: string | null = null;
+    let projectId: string | null = authorizedProjectId || null;
     const parentDocId = pageId;
 
-    if (isUuid(pageId)) {
+    if (!projectId && isUuid(pageId)) {
       const record = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
       });
@@ -709,17 +725,7 @@ export class PagesDocController {
     @Param('projectId') projectId: string,
     @Query('status') _status?: string,
     @Query('search') _search?: string,
-    @Query('forceEmpty') forceEmpty?: string,
-    @Query('forceError') forceError?: string,
   ) {
-    if (forceError === 'true') {
-      throw new InternalServerErrorException(
-        'Simulated internal server error while fetching project pages',
-      );
-    }
-    if (forceEmpty === 'true') {
-      return { pages: [], total: 0, isEmpty: true };
-    }
     if (!isUuid(projectId)) {
       return { pages: [], total: 0, isEmpty: true };
     }
@@ -822,13 +828,20 @@ export class PagesDocController {
    * DELETE /api/pages/:pageId
    */
   @Delete(['docs/:pageId', 'pages/:pageId'])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
-  async deletePage(@Param('pageId') pageId: string) {
+  async deletePage(
+    @Param('pageId') pageId: string,
+    @ResolvedProject() authorizedProjectId?: string,
+  ) {
     if (isUuid(pageId)) {
       try {
-        const doc = await this.prisma.manuscriptDoc.findUnique({
-          where: { id: pageId },
-        });
+        const targetProjectId = authorizedProjectId;
+        const doc = targetProjectId
+          ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
+          : await this.prisma.manuscriptDoc.findUnique({
+              where: { id: pageId },
+            });
         if (doc) {
           await Promise.all([
             this.docstoreService.patchDoc(doc.projectId, pageId, {
@@ -854,9 +867,12 @@ export class PagesDocController {
    */
   @Get(['docs/:pageId/deleted-files', 'pages/:pageId/deleted-files'])
   @ApiOperation({ summary: 'Get list of deleted/trashed files in project' })
-  async getDeletedFiles(@Param('pageId') pageId: string) {
-    let projectId: string | null = null;
-    if (isUuid(pageId)) {
+  async getDeletedFiles(
+    @Param('pageId') pageId: string,
+    @ResolvedProject() authorizedProjectId?: string,
+  ) {
+    let projectId: string | null = authorizedProjectId || null;
+    if (!projectId && isUuid(pageId)) {
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
       });
@@ -914,16 +930,33 @@ export class PagesDocController {
    * POST /api/pages/:pageId/restore
    */
   @Post(['docs/:pageId/restore', 'pages/:pageId/restore'])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Restore a soft-deleted document or file' })
-  async restorePage(@Param('pageId') pageId: string) {
+  async restorePage(
+    @Param('pageId') pageId: string,
+    @ResolvedProject() authorizedProjectId?: string,
+  ) {
     if (!isUuid(pageId)) {
       throw new BadRequestException('A valid UUID is required for pageId');
     }
 
-    const doc = await this.prisma.manuscriptDoc.findUnique({
-      where: { id: pageId },
-    });
+    const targetProjectId = authorizedProjectId;
+    const doc = targetProjectId
+      ? await this.prisma.manuscriptDoc.findFirst({
+          where: { id: pageId, projectId: targetProjectId },
+        })
+      : await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+        });
+
+    if (!doc) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: `Document ${pageId} not found`,
+      });
+    }
 
     if (doc) {
       await this.docstoreService.patchDoc(doc.projectId, pageId, {
@@ -1035,21 +1068,35 @@ export class PagesDocController {
     'pages/:pageId/duplicate',
     'pages/:pageId/clone',
   ])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Duplicate/clone a page by pageId with its content and tree node',
   })
-  async duplicatePage(@Param('pageId') pageId: string) {
+  async duplicatePage(
+    @Param('pageId') pageId: string,
+    @ResolvedProject() authorizedProjectId?: string,
+  ) {
     if (!isUuid(pageId)) {
-      throw new NotFoundException(`Page ${pageId} not found`);
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: `Page ${pageId} not found`,
+      });
     }
 
-    const source = await this.prisma.manuscriptDoc.findUnique({
-      where: { id: pageId },
-    });
+    const source = authorizedProjectId
+      ? await this.pageScopeRepo.findDocInProject(authorizedProjectId, pageId)
+      : await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+        });
 
     if (!source) {
-      throw new NotFoundException(`Page ${pageId} not found`);
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: `Page ${pageId} not found`,
+      });
     }
 
     const sourceTitle = source.path || 'document.tex';
@@ -1131,11 +1178,12 @@ export class PagesDocController {
     'projects/:projectId/docs/:pageId/labels',
     'projects/:projectId/pages/:pageId/labels',
   ])
-  async getPageLabels(@Param('pageId') pageId: string) {
+  async getPageLabels(
+    @Param('projectId') projectId: string,
+    @Param('pageId') pageId: string,
+  ) {
     if (isUuid(pageId)) {
-      const doc = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-      });
+      const doc = await this.pageScopeRepo.findDocInProject(projectId, pageId);
       const ranges = (
         doc?.ranges && typeof doc.ranges === 'object' ? doc.ranges : {}
       ) as PageDocRanges;
@@ -1149,11 +1197,22 @@ export class PagesDocController {
     'projects/:projectId/docs/:pageId/labels',
     'projects/:projectId/pages/:pageId/labels',
   ])
+  @RequireRole(Role.CONTRIBUTOR)
   async assignPageLabels(
+    @Param('projectId') projectId: string,
     @Param('pageId') pageId: string,
     @Body() body: { labelIds?: string[] },
   ) {
     if (isUuid(pageId) && Array.isArray(body?.labelIds)) {
+      const doc = await this.pageScopeRepo.findDocInProject(projectId, pageId);
+      if (!doc) {
+        throw new NotFoundException({
+          statusCode: 404,
+          code: 'RESOURCE_NOT_FOUND',
+          message: `Document ${pageId} not found`,
+        });
+      }
+
       let labels: { id: string; name: string; color: string }[] = [];
       try {
         const found = await this.prisma.label.findMany({
@@ -1179,12 +1238,9 @@ export class PagesDocController {
         // Fallback
       }
 
-      await this.prisma.manuscriptDoc
-        .update({
-          where: { id: pageId },
-          data: { ranges: { labelIds: body.labelIds, labels } },
-        })
-        .catch(() => null);
+      await this.pageScopeRepo.updateDocInProject(projectId, pageId, {
+        ranges: { labelIds: body.labelIds, labels },
+      });
 
       return { labels };
     }
@@ -1195,25 +1251,35 @@ export class PagesDocController {
     'projects/:projectId/docs/:pageId/labels',
     'projects/:projectId/pages/:pageId/labels',
   ])
+  @RequireRole(Role.CONTRIBUTOR)
   async replacePageLabels(
+    @Param('projectId') projectId: string,
     @Param('pageId') pageId: string,
     @Body() body: { labelIds?: string[] },
   ) {
-    return this.assignPageLabels(pageId, body);
+    return this.assignPageLabels(projectId, pageId, body);
   }
 
   @Delete([
     'projects/:projectId/docs/:pageId/labels/:labelId',
     'projects/:projectId/pages/:pageId/labels/:labelId',
   ])
+  @RequireRole(Role.CONTRIBUTOR)
   async removePageLabel(
+    @Param('projectId') projectId: string,
     @Param('pageId') pageId: string,
     @Param('labelId') labelId: string,
   ) {
     if (isUuid(pageId)) {
-      const doc = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-      });
+      const doc = await this.pageScopeRepo.findDocInProject(projectId, pageId);
+      if (!doc) {
+        throw new NotFoundException({
+          statusCode: 404,
+          code: 'RESOURCE_NOT_FOUND',
+          message: `Document ${pageId} not found`,
+        });
+      }
+
       const ranges = (
         doc?.ranges && typeof doc.ranges === 'object' ? doc.ranges : {}
       ) as PageDocRanges;
@@ -1221,12 +1287,9 @@ export class PagesDocController {
       const labelIds = (ranges.labelIds || []).filter(
         (id: string) => id !== labelId,
       );
-      await this.prisma.manuscriptDoc
-        .update({
-          where: { id: pageId },
-          data: { ranges: { labelIds, labels } },
-        })
-        .catch(() => null);
+      await this.pageScopeRepo.updateDocInProject(projectId, pageId, {
+        ranges: { labelIds, labels },
+      });
       return { labels };
     }
     return { labels: [] };

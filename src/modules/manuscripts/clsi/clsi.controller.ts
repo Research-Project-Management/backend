@@ -19,12 +19,16 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
 import {
-  ProjectRoleGuard,
-  ProjectRoles,
+  ProjectAccessGuard,
   RequireRole,
   Role,
+  ResolvedProject,
+  NoProjectContext,
+  RequireOperator,
+  OperatorGuard,
 } from '@/modules/project/access';
 import { FastifyReply } from 'fastify';
+import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { ClsiService } from './clsi.service';
 import { CompileManuscriptDto, ClsiWordCountDto } from './dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
@@ -44,8 +48,9 @@ export class ClsiController {
     'compiler/compile',
     'latex/compile',
   ])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
+  @UserRateLimit('compile')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Compile LaTeX manuscript source to PDF via Overleaf-parity CLSI',
@@ -53,13 +58,15 @@ export class ClsiController {
   async compile(
     @Body() dto: CompileManuscriptDto,
     @CurrentUser('id') userId: string,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') routeProjectId?: string,
+    @ResolvedProject() project?: { id: string },
   ) {
-    if (projectId && !dto.projectId && !dto.project_id) {
-      dto.projectId = projectId;
-      dto.project_id = projectId;
+    const authorizedProjectId = project?.id || routeProjectId;
+    if (authorizedProjectId && !dto.projectId && !dto.project_id) {
+      dto.projectId = authorizedProjectId;
+      dto.project_id = authorizedProjectId;
     }
-    return this.clsiService.compile(dto, userId);
+    return this.clsiService.compile(dto, userId, authorizedProjectId);
   }
 
   @Post([
@@ -67,11 +74,15 @@ export class ClsiController {
     'projects/:projectId/clsi/compile/cancel',
     'projects/:projectId/compiler/compile/cancel',
   ])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @UseGuards(ProjectAccessGuard)
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Cancel an ongoing compilation for a project' })
-  async cancelCompile(@Param('projectId') projectId: string) {
+  async cancelCompile(
+    @Param('projectId') routeProjectId: string,
+    @ResolvedProject() project?: { id: string },
+  ) {
+    const projectId = project?.id || routeProjectId;
     const cancelled = this.clsiService.cancelCompile(projectId);
     return { success: true, cancelled };
   }
@@ -84,6 +95,7 @@ export class ClsiController {
     'compiler/word-count',
     'latex/word-count',
   ])
+  @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Calculate academic word count and metrics (texcount parity)',
@@ -100,19 +112,23 @@ export class ClsiController {
     'latex/synctex/forward',
     'projects/:projectId/clsi/synctex/forward',
   ])
+  @UseGuards(ProjectAccessGuard)
+  @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Forward SyncTeX: map LaTeX source line/column to PDF coordinates',
   })
   async forwardSync(
     @Body() dto: ForwardSyncDto,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') routeProjectId?: string,
+    @ResolvedProject() project?: { id: string },
   ) {
-    if (projectId && !dto.projectId && !dto.project_id) {
-      dto.projectId = projectId;
-      dto.project_id = projectId;
+    const authorizedProjectId = project?.id || routeProjectId;
+    if (authorizedProjectId && !dto.projectId && !dto.project_id) {
+      dto.projectId = authorizedProjectId;
+      dto.project_id = authorizedProjectId;
     }
-    return this.clsiService.forwardSync(dto);
+    return this.clsiService.forwardSync(dto, authorizedProjectId);
   }
 
   @Post([
@@ -123,6 +139,8 @@ export class ClsiController {
     'latex/synctex/reverse',
     'projects/:projectId/clsi/synctex/reverse',
   ])
+  @UseGuards(ProjectAccessGuard)
+  @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -130,13 +148,15 @@ export class ClsiController {
   })
   async reverseSync(
     @Body() dto: ReverseSyncDto,
-    @Param('projectId') projectId?: string,
+    @Param('projectId') routeProjectId?: string,
+    @ResolvedProject() project?: { id: string },
   ) {
-    if (projectId && !dto.projectId && !dto.project_id) {
-      dto.projectId = projectId;
-      dto.project_id = projectId;
+    const authorizedProjectId = project?.id || routeProjectId;
+    if (authorizedProjectId && !dto.projectId && !dto.project_id) {
+      dto.projectId = authorizedProjectId;
+      dto.project_id = authorizedProjectId;
     }
-    return this.clsiService.reverseSync(dto);
+    return this.clsiService.reverseSync(dto, authorizedProjectId);
   }
 
   @Get([
@@ -145,12 +165,16 @@ export class ClsiController {
     ':projectId/clsi/artifacts',
     ':projectId/compiler/artifacts',
   ])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @ApiOperation({
     summary: 'List auxiliary files generated by CLSI compilation',
   })
-  async listAuxFiles(@Param('projectId') projectId: string) {
+  async listAuxFiles(
+    @Param('projectId') routeProjectId: string,
+    @ResolvedProject() project?: { id: string },
+  ) {
+    const projectId = project?.id || routeProjectId;
     return this.clsiService.listAuxFiles(projectId);
   }
 
@@ -160,14 +184,16 @@ export class ClsiController {
     ':projectId/clsi/artifacts/:filename',
     ':projectId/compiler/artifacts/:filename',
   ])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @ApiOperation({ summary: 'Download a specific auxiliary file' })
   async downloadAuxFile(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string,
     @Param('filename') filename: string,
     @Res() res: FastifyReply,
+    @ResolvedProject() project?: { id: string },
   ) {
+    const projectId = project?.id || routeProjectId;
     return this.clsiService.downloadAuxFile(projectId, filename, res);
   }
 
@@ -177,15 +203,17 @@ export class ClsiController {
     ':projectId/clsi/artifacts-zip',
     ':projectId/compiler/artifacts-zip',
   ])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @ApiOperation({
     summary: 'Download all project output artifacts packaged as a ZIP archive',
   })
   async downloadAllArtifactsZip(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string,
     @Res() res: FastifyReply,
+    @ResolvedProject() project?: { id: string },
   ) {
+    const projectId = project?.id || routeProjectId;
     return this.clsiService.downloadAllArtifactsZip(projectId, res);
   }
 
@@ -200,18 +228,25 @@ export class ClsiController {
     'projects/:projectId/artifacts',
     'projects/:projectId/clsi/artifacts',
   ])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
       'Clear cached auxiliary files and compile scratch workspace for a project',
   })
-  async cleanAuxFiles(@Param('projectId') projectId: string) {
+  async cleanAuxFiles(
+    @Param('projectId') routeProjectId: string,
+    @ResolvedProject() project?: { id: string },
+  ) {
+    const projectId = project?.id || routeProjectId;
     return this.clsiService.cleanProjectScratch(projectId);
   }
 
   @Get(['v1/manuscripts/clsi/status', 'clsi/status', 'manuscripts/clsi/status'])
+  @UseGuards(OperatorGuard)
+  @RequireOperator()
+  @NoProjectContext()
   @ApiOperation({
     summary: 'Check health status and probe TeX Live compiler binaries',
   })
@@ -224,6 +259,9 @@ export class ClsiController {
     'clsi/metrics',
     'manuscripts/clsi/metrics',
   ])
+  @UseGuards(OperatorGuard)
+  @RequireOperator()
+  @NoProjectContext()
   @ApiOperation({
     summary: 'Prometheus metrics endpoint for CLSI compilation performance',
   })
@@ -238,12 +276,18 @@ export class ClsiController {
     'clsi/metrics/summary',
     'manuscripts/clsi/metrics/summary',
   ])
+  @UseGuards(OperatorGuard)
+  @RequireOperator()
+  @NoProjectContext()
   @ApiOperation({ summary: 'JSON metrics summary of compilation statistics' })
   async getMetricsSummary() {
     return this.clsiService.getMetricsSummary();
   }
 
   @Post('clsi/admin/clean-scratch')
+  @UseGuards(OperatorGuard)
+  @RequireOperator()
+  @NoProjectContext()
   @ApiOperation({
     summary: 'Trigger LRU garbage collection and disk quota enforcement',
   })

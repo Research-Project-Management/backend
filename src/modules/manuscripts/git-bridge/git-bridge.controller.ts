@@ -34,6 +34,8 @@ import { createGunzip } from 'zlib';
 import { Readable } from 'stream';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
+import { NoProjectContext, RequireRole, Role } from '@/modules/project/access';
+import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { GitBridgeService } from './git-bridge.service';
 import { CreateGitTokenDto } from './dto/git-bridge.dto';
 import {
@@ -113,6 +115,9 @@ export class GitBridgeController {
   }
 
   @Get('git/:repo/info/refs')
+  @UseGuards(UserRateLimitGuard)
+  @NoProjectContext()
+  @UserRateLimit('git')
   @ApiExcludeEndpoint()
   async infoRefs(
     @Param('repo') repo: string,
@@ -159,6 +164,9 @@ export class GitBridgeController {
   }
 
   @Post('git/:repo/git-upload-pack')
+  @UseGuards(UserRateLimitGuard)
+  @NoProjectContext()
+  @UserRateLimit('git')
   @ApiExcludeEndpoint()
   async uploadPack(
     @Param('repo') repo: string,
@@ -189,6 +197,9 @@ export class GitBridgeController {
   }
 
   @Post('git/:repo/git-receive-pack')
+  @UseGuards(UserRateLimitGuard)
+  @NoProjectContext()
+  @UserRateLimit('git')
   @ApiExcludeEndpoint()
   async receivePack(
     @Param('repo') repo: string,
@@ -280,6 +291,7 @@ export class GitBridgeController {
     'v1/manuscripts/projects/:projectId/git',
   ])
   @UseGuards(JwtAuthGuard)
+  @RequireRole(Role.REVIEWER)
   @ApiBearerAuth('JWT-auth')
   async repoInfo(
     @Param('projectId') projectId: string,
@@ -301,6 +313,7 @@ export class GitBridgeController {
 
   @Get(['api/v1/manuscripts/git/tokens', 'v1/manuscripts/git/tokens'])
   @UseGuards(JwtAuthGuard)
+  @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
   async listTokens(@CurrentUser('id') userId: string) {
     return { tokens: await this.gitBridgeService.listTokens(userId) };
@@ -308,6 +321,7 @@ export class GitBridgeController {
 
   @Post(['api/v1/manuscripts/git/tokens', 'v1/manuscripts/git/tokens'])
   @UseGuards(JwtAuthGuard)
+  @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.CREATED)
   async createToken(
@@ -331,6 +345,7 @@ export class GitBridgeController {
     'v1/manuscripts/git/tokens/:tokenId',
   ])
   @UseGuards(JwtAuthGuard)
+  @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
   async revokeToken(
     @CurrentUser('id') userId: string,

@@ -30,9 +30,6 @@ import {
   CommitResult,
   IUpdaterLockPort,
   IDebounceTimerPort,
-  InMemoryInFlightStoreAdapter,
-  LocalMutexUpdaterLockAdapter,
-  NodeTimeoutDebounceAdapter,
   InFlightDoc,
   DocumentVersionVo,
   UpdateOpVo,
@@ -148,10 +145,7 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
   let controller: DocumentUpdaterController;
 
   beforeEach(() => {
-    inFlightStore = new InMemoryInFlightStoreAdapter();
     docstoreWriter = new MockDocstoreWriter();
-    lock = new LocalMutexUpdaterLockAdapter();
-    debounceTimer = new NodeTimeoutDebounceAdapter();
 
     // Pre-populate mock docstore with a baseline LaTeX document
     docstoreWriter.docs.set(`${PROJECT_ID}:${DOC_ID}`, {
@@ -176,8 +170,8 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
     ) => docstoreWriter.commitDocUpdate(projectId, docId, lines, rev);
 
     inFlightStore = updaterRepo;
-    lock = updaterRepo as any;
-    debounceTimer = updaterRepo as any;
+    lock = updaterRepo;
+    debounceTimer = updaterRepo;
 
     service = new DocumentUpdaterService(updaterRepo);
 
@@ -195,10 +189,7 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
     };
     getInFlightDocUseCase = {
       execute: async (input) => {
-        const state = await service.getDocState(
-          input.projectId,
-          input.docId,
-        );
+        const state = await service.getDocState(input.projectId, input.docId);
         return {
           isBuffered: state.isBuffered,
           doc: InFlightDoc.create({
@@ -218,7 +209,7 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
   });
 
   afterEach(() => {
-    debounceTimer.cancelAll();
+    debounceTimer.cancelAllDebounces();
   });
 
   // =========================================================================
@@ -382,20 +373,20 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
       it('should acquire lock and reject concurrent acquisition until released', async () => {
         const resource = `project:${PROJECT_ID}`;
 
-        const lock1 = await lock.acquire(resource, 5000);
+        const lock1 = await lock.acquireLock(resource, 5000);
         expect(lock1).toBe(true);
 
-        const lock2 = await lock.acquire(resource, 5000);
+        const lock2 = await lock.acquireLock(resource, 5000);
         expect(lock2).toBe(false); // Rejected!
 
         expect(await lock.isLocked(resource)).toBe(true);
 
-        await lock.release(resource);
+        await lock.releaseLock(resource);
         expect(await lock.isLocked(resource)).toBe(false);
 
-        const lock3 = await lock.acquire(resource, 5000);
+        const lock3 = await lock.acquireLock(resource, 5000);
         expect(lock3).toBe(true);
-        await lock.release(resource);
+        await lock.releaseLock(resource);
       });
     });
 
@@ -407,9 +398,9 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
         };
 
         // Fire 3 times rapidly
-        debounceTimer.schedule(PROJECT_ID, DOC_ID, 50, callback);
-        debounceTimer.schedule(PROJECT_ID, DOC_ID, 50, callback);
-        debounceTimer.schedule(PROJECT_ID, DOC_ID, 50, callback);
+        debounceTimer.scheduleDebounce(PROJECT_ID, DOC_ID, 50, callback);
+        debounceTimer.scheduleDebounce(PROJECT_ID, DOC_ID, 50, callback);
+        debounceTimer.scheduleDebounce(PROJECT_ID, DOC_ID, 50, callback);
 
         // Wait for debounce timer to fire
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -450,7 +441,7 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
     });
 
     it('QueueDocUpdateUseCase: should reject updates when project is locked', async () => {
-      await lock.acquire(`project:${PROJECT_ID}`, 5000);
+      await lock.acquireLock(`project:${PROJECT_ID}`, 5000);
 
       await expect(
         queueUpdateUseCase.execute({
@@ -460,7 +451,7 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
         }),
       ).rejects.toThrow(DocumentLockedException);
 
-      await lock.release(`project:${PROJECT_ID}`);
+      await lock.releaseLock(`project:${PROJECT_ID}`);
     });
 
     it('FlushSingleDocUseCase: should commit dirty lines into docstore and advance rev', async () => {

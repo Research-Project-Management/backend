@@ -35,6 +35,7 @@ import {
   IDocPersistor,
   IDocHasher,
 } from './domain';
+import { ManuscriptPageScopeRepository } from './repositories/manuscript-page-scope.repository';
 
 @Module({
   imports: [ConfigModule, PrismaModule],
@@ -60,6 +61,7 @@ import {
     DocArchiveRepository,
     S3DocPersistorAdapter,
     DocHasherAdapter,
+    ManuscriptPageScopeRepository,
 
     // Token Bindings
     {
@@ -87,6 +89,7 @@ import {
     PrismaDocRepository,
     DocArchiveRepository,
     S3DocPersistorAdapter,
+    ManuscriptPageScopeRepository,
     IDocRepository,
     IDocPersistor,
     IDocHasher,

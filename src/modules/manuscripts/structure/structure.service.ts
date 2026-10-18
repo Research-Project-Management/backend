@@ -4,7 +4,12 @@
  * Executes directly via StructureRepository / IStructureRepository and pure domain FileTreeBuilder.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import {
   IStructureRepository,
   ITreePublisher,
@@ -26,6 +31,7 @@ import {
 import { WorkspaceFile, CompilationPayload } from '@/modules/manuscripts/core';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
+import { PrismaService } from '@/core';
 
 export type { CompilationPayload };
 
@@ -39,6 +45,7 @@ export class StructureService {
     @Optional() private readonly directRepository?: StructureRepository,
     @Optional() private readonly treePublisher?: ITreePublisher,
     @Optional() private readonly filestoreService?: FilestoreService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   private get repo(): IStructureRepository {
@@ -108,34 +115,67 @@ export class StructureService {
       throw new DuplicateNodePathError(computedPath);
     }
 
-    const node = await this.repo.createNode({
-      projectId,
-      parentId: parentNode ? parentNode.id : null,
-      type: dto.type,
-      name: dto.name,
-      path: computedPath,
-      docId: dto.docId,
-      fileId: dto.fileId,
-      isRootDoc: dto.isRootDoc ?? false,
-    });
-
-    if (dto.isRootDoc && dto.type === 'DOC') {
-      await this.repo.setRootDoc(projectId, node.id);
+    if (dto.docId && this.prisma) {
+      const doc = await this.prisma.manuscriptDoc.findFirst({
+        where: { id: dto.docId, projectId, deleted: false },
+      });
+      if (!doc) {
+        throw new NotFoundException({
+          statusCode: 404,
+          code: 'RESOURCE_NOT_FOUND',
+          message: 'Document not found in project',
+        });
+      }
     }
 
-    await this.treePublisher?.publishTreeMutation({
-      projectId,
-      action: 'create',
-      nodeId: node.id,
-      path: node.path,
-      entityType: node.type,
-    });
+    if (dto.fileId && this.prisma) {
+      const file = await this.prisma.manuscriptFile.findFirst({
+        where: { id: dto.fileId, projectId, deleted: false },
+      });
+      if (!file) {
+        throw new NotFoundException({
+          statusCode: 404,
+          code: 'RESOURCE_NOT_FOUND',
+          message: 'File asset not found in project',
+        });
+      }
+    }
 
-    this.realtimeService?.broadcastFileTreeChange(projectId, {
-      action: 'create',
-      node,
-    });
-    return node;
+    try {
+      const node = await this.repo.createNode({
+        projectId,
+        parentId: parentNode ? parentNode.id : null,
+        type: dto.type,
+        name: dto.name,
+        path: computedPath,
+        docId: dto.docId,
+        fileId: dto.fileId,
+        isRootDoc: dto.isRootDoc ?? false,
+      });
+
+      if (dto.isRootDoc && dto.type === 'DOC') {
+        await this.repo.setRootDoc(projectId, node.id);
+      }
+
+      await this.treePublisher?.publishTreeMutation({
+        projectId,
+        action: 'create',
+        nodeId: node.id,
+        path: node.path,
+        entityType: node.type,
+      });
+
+      this.realtimeService?.broadcastFileTreeChange(projectId, {
+        action: 'create',
+        node,
+      });
+      return node;
+    } catch (err: any) {
+      if (err?.code === 'P2002' || err?.message?.includes('P2002')) {
+        throw new DuplicateNodePathError(computedPath);
+      }
+      throw err;
+    }
   }
 
   private async mkdirpInternal(

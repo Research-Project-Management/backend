@@ -25,7 +25,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import { ProjectAccessGuard, RequireRole, Role } from '@/modules/project/access';
 import { StructureService } from './structure.service';
 import {
   CreateNodeDto,
@@ -54,7 +54,7 @@ import {
   'projects/:projectId/structure',
   'api/projects/:projectId/structure',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class StructureController {
   constructor(private readonly structureService: StructureService) {}

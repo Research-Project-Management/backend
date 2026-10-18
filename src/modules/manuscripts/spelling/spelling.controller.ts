@@ -15,6 +15,7 @@ import {
   Post,
   Query,
   Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -24,7 +25,13 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+  NoProjectContext,
+  ResolvedProject,
+} from '@/modules/project/access';
 import { SpellingService } from './spelling.service';
 import {
   CheckSpellingDto,
@@ -48,7 +55,7 @@ interface RequestWithUser {
   'manuscripts/projects/:projectId/spelling',
   'projects/:projectId/spelling',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class SpellingController {
   constructor(private readonly spellingService: SpellingService) {}
@@ -74,16 +81,16 @@ export class SpellingController {
     @Param('projectId') projectId: string,
     @Body() dto: CheckSpellingDto,
     @Req() req: RequestWithUser,
+    @ResolvedProject() project?: { id: string },
   ): Promise<SpellingReportDto> {
     try {
-      const userId =
-        req?.user?.id ||
-        req?.user?.sub ||
-        req?.user?.userId ||
-        (req?.headers?.['x-user-id'] as string | undefined) ||
-        'user-default';
+      const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
+      if (!userId) {
+        throw new UnauthorizedException('Authentication required');
+      }
+      const targetProjectId = project?.id || projectId;
       return await this.spellingService.checkDocumentSpelling(
-        projectId,
+        targetProjectId,
         userId,
         dto,
       );
@@ -143,6 +150,7 @@ export class SpellingController {
   'spelling',
 ])
 @UseGuards(JwtAuthGuard)
+@NoProjectContext()
 export class SpellingUtilityController {
   constructor(private readonly spellingService: SpellingService) {}
 
@@ -157,6 +165,7 @@ export class SpellingUtilityController {
   }
 
   @Get('suggestions')
+  @NoProjectContext()
   @ApiOperation({
     summary: 'Get candidate spelling suggestions for a queried word',
   })
@@ -170,6 +179,7 @@ export class SpellingUtilityController {
   }
 
   @Get('user-dictionary')
+  @NoProjectContext()
   @ApiOperation({
     summary: 'List custom words learned in user personal dictionary',
   })
@@ -177,26 +187,25 @@ export class SpellingUtilityController {
   async listUserDictionary(
     @Req() req: RequestWithUser,
   ): Promise<CustomDictionaryResponseDto> {
-    const userId =
-      req?.user?.id ||
-      req?.user?.sub ||
-      (req?.headers?.['x-user-id'] as string | undefined) ||
-      'user-default';
+    const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required');
+    }
     return this.spellingService.listUserWords(userId);
   }
 
   @Post('user-dictionary/learn')
+  @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Add a custom word to the user personal dictionary',
   })
   async learnUserWord(@Body() dto: LearnWordDto, @Req() req: RequestWithUser) {
     try {
-      const userId =
-        req?.user?.id ||
-        req?.user?.sub ||
-        (req?.headers?.['x-user-id'] as string | undefined) ||
-        'user-default';
+      const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
+      if (!userId) {
+        throw new UnauthorizedException('Authentication required');
+      }
       await this.spellingService.learnUserWord(userId, dto.word);
       return { success: true, word: dto.word };
     } catch (err: unknown) {
@@ -205,6 +214,7 @@ export class SpellingUtilityController {
   }
 
   @Delete('user-dictionary/:word')
+  @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Remove a custom word from the user personal dictionary',
@@ -213,11 +223,10 @@ export class SpellingUtilityController {
     @Param('word') word: string,
     @Req() req: RequestWithUser,
   ) {
-    const userId =
-      req?.user?.id ||
-      req?.user?.sub ||
-      (req?.headers?.['x-user-id'] as string | undefined) ||
-      'user-default';
+    const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required');
+    }
     const removed = await this.spellingService.unlearnUserWord(userId, word);
     return { success: true, removed, word };
   }

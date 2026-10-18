@@ -66,6 +66,10 @@ export class DocumentUpdaterRepository
     return `docupdater:dirty:${projectId}`;
   }
 
+  private dirtyProjectsKey(): string {
+    return 'docupdater:dirty_projects';
+  }
+
   private lockKey(resourceKey: string): string {
     return `docupdater:lock:${resourceKey}`;
   }
@@ -141,8 +145,15 @@ export class DocumentUpdaterRepository
       if (redisClient) {
         if (doc.isDirty) {
           await redisClient.sadd(this.dirtySetKey(doc.projectId), doc.docId);
+          await redisClient.sadd(this.dirtyProjectsKey(), doc.projectId);
         } else {
           await redisClient.srem(this.dirtySetKey(doc.projectId), doc.docId);
+          const remaining = await redisClient.scard(
+            this.dirtySetKey(doc.projectId),
+          );
+          if (remaining === 0) {
+            await redisClient.srem(this.dirtyProjectsKey(), doc.projectId);
+          }
         }
       }
     } catch {
@@ -160,6 +171,10 @@ export class DocumentUpdaterRepository
       const redisClient = this.redisService.getClient();
       if (redisClient) {
         await redisClient.srem(this.dirtySetKey(projectId), docId);
+        const remaining = await redisClient.scard(this.dirtySetKey(projectId));
+        if (remaining === 0) {
+          await redisClient.srem(this.dirtyProjectsKey(), projectId);
+        }
       }
     } catch {
       // Ignore Redis error on delete
@@ -189,9 +204,9 @@ export class DocumentUpdaterRepository
       try {
         const redisClient = this.redisService.getClient();
         if (redisClient) {
-          const keys: string[] = await redisClient.keys('docupdater:dirty:*');
-          if (keys.length > 0) {
-            return keys.map((k: string) => k.replace('docupdater:dirty:', ''));
+          const members = await redisClient.smembers(this.dirtyProjectsKey());
+          if (members && members.length > 0) {
+            return members;
           }
         }
       } catch {
@@ -258,14 +273,6 @@ export class DocumentUpdaterRepository
       }
     }
     this.lockMemory.delete(resourceKey);
-  }
-
-  public async acquire(resourceKey: string, ttlMs = 15000): Promise<boolean> {
-    return this.acquireLock(resourceKey, ttlMs);
-  }
-
-  public async release(resourceKey: string): Promise<void> {
-    return this.releaseLock(resourceKey);
   }
 
   public async isLocked(resourceKey: string): Promise<boolean> {
@@ -399,34 +406,7 @@ export class DocumentUpdaterRepository
     this.timers.clear();
   }
 
-  public cancelAll(): void {
-    this.cancelAllDebounces();
-  }
-
-  public cancelAllForProject(projectId: string): void {
-    this.cancelAllProjectDebounces(projectId);
-  }
-
-  public schedule(
-    projectId: string,
-    docId: string,
-    delayMs: number,
-    callback: () => Promise<void>,
-  ): void {
-    this.scheduleDebounce(projectId, docId, delayMs, callback);
-  }
-
-  public cancel(projectId: string, docId: string): void {
-    this.cancelDebounce(projectId, docId);
-  }
-
   public onModuleDestroy(): void {
     this.cancelAllDebounces();
   }
 }
-
-export class InMemoryInFlightStoreAdapter extends DocumentUpdaterRepository {}
-
-export class LocalMutexUpdaterLockAdapter extends DocumentUpdaterRepository {}
-
-export class NodeTimeoutDebounceAdapter extends DocumentUpdaterRepository {}

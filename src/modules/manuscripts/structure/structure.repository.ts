@@ -3,7 +3,7 @@
  * Direct Injectable Repository for Manuscript Project File Tree & Hierarchy.
  */
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { ManuscriptNode, Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
 import {
@@ -69,12 +69,8 @@ export class StructureRepository extends IStructureRepository {
   ): Promise<ManuscriptNodeEntity | null> {
     const raw = await this.prisma.manuscriptNode.findFirst({
       where: {
-        OR: [
-          { id: nodeId, projectId },
-          { docId: nodeId, projectId },
-          { id: nodeId },
-          { docId: nodeId },
-        ],
+        projectId,
+        OR: [{ id: nodeId }, { docId: nodeId }],
       },
     });
     return raw ? this.mapToEntity(raw) : null;
@@ -116,25 +112,26 @@ export class StructureRepository extends IStructureRepository {
   public async setRootDoc(projectId: string, nodeId: string): Promise<void> {
     const targetNode = await this.prisma.manuscriptNode.findFirst({
       where: {
-        OR: [
-          { id: nodeId, projectId },
-          { docId: nodeId, projectId },
-          { id: nodeId },
-          { docId: nodeId },
-        ],
+        projectId,
+        OR: [{ id: nodeId }, { docId: nodeId }],
       },
     });
 
-    const targetId = targetNode?.id || nodeId;
-    const targetProjectId = targetNode?.projectId || projectId;
+    if (!targetNode) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: 'Node not found in project',
+      });
+    }
 
     await this.prisma.$transaction([
       this.prisma.manuscriptNode.updateMany({
-        where: { projectId: targetProjectId, isRootDoc: true },
+        where: { projectId, isRootDoc: true },
         data: { isRootDoc: false },
       }),
-      this.prisma.manuscriptNode.update({
-        where: { id: targetId },
+      this.prisma.manuscriptNode.updateMany({
+        where: { id: targetNode.id, projectId },
         data: { isRootDoc: true },
       }),
     ]);
@@ -203,15 +200,25 @@ export class StructureRepository extends IStructureRepository {
     newPath: string,
   ): Promise<ManuscriptNodeEntity> {
     const depth = NodePathVo.depth(newPath);
-    const updated = await this.prisma.manuscriptNode.update({
-      where: { id: nodeId },
+    const result = await this.prisma.manuscriptNode.updateMany({
+      where: { id: nodeId, projectId },
       data: {
         name: newName,
         path: newPath,
         depth,
       },
     });
-    return this.mapToEntity(updated);
+    if (result.count === 0) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: 'Node not found in project',
+      });
+    }
+    const updated = await this.prisma.manuscriptNode.findFirst({
+      where: { id: nodeId, projectId },
+    });
+    return this.mapToEntity(updated!);
   }
 
   public async deleteSubtree(
@@ -232,7 +239,7 @@ export class StructureRepository extends IStructureRepository {
 
     if (targetIds.length > 0) {
       await this.prisma.manuscriptNode.deleteMany({
-        where: { id: { in: targetIds } },
+        where: { id: { in: targetIds }, projectId },
       });
     }
 
@@ -244,10 +251,17 @@ export class StructureRepository extends IStructureRepository {
     nodeId: string,
     sortOrder: number,
   ): Promise<void> {
-    await this.prisma.manuscriptNode.update({
-      where: { id: nodeId },
+    const result = await this.prisma.manuscriptNode.updateMany({
+      where: { id: nodeId, projectId },
       data: { sortOrder },
     });
+    if (result.count === 0) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: 'Node not found in project',
+      });
+    }
   }
 
   public async updateNodeFileId(
@@ -257,15 +271,25 @@ export class StructureRepository extends IStructureRepository {
     sizeBytes?: number,
     hash?: string | null,
   ): Promise<ManuscriptNodeEntity> {
-    const updated = await this.prisma.manuscriptNode.update({
-      where: { id: nodeId },
+    const result = await this.prisma.manuscriptNode.updateMany({
+      where: { id: nodeId, projectId },
       data: {
         fileId,
         ...(sizeBytes !== undefined ? { sizeBytes } : {}),
         ...(hash !== undefined ? { hash } : {}),
       },
     });
-    return this.mapToEntity(updated);
+    if (result.count === 0) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: 'Node not found in project',
+      });
+    }
+    const updated = await this.prisma.manuscriptNode.findFirst({
+      where: { id: nodeId, projectId },
+    });
+    return this.mapToEntity(updated!);
   }
 
   public async countNodes(projectId: string): Promise<number> {

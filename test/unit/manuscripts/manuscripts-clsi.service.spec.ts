@@ -331,7 +331,7 @@ describe('Manuscripts - ClsiService', () => {
       expect(backend).toBe('bibtex');
     });
 
-    it('should generate proper .latexmkrc configuration with shell-escape and biber', () => {
+    it('should generate proper .latexmkrc configuration with no-shell-escape and biber', () => {
       const config = BibBackendDetector.generateLatexmkrc({
         engine: 'xelatex',
         bibBackend: 'biber',
@@ -340,7 +340,7 @@ describe('Manuscripts - ClsiService', () => {
 
       expect(config).toContain("$biber = 'biber %O %S';");
       expect(config).toContain('$pdf_mode = 5;');
-      expect(config).toContain('-shell-escape');
+      expect(config).toContain('-no-shell-escape');
     });
   });
 

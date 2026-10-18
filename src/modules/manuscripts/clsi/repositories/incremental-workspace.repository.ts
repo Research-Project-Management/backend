@@ -135,7 +135,10 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
       const sanitizedRelPath = SafePath.sanitizeRelativePath(file.path);
       currentFileKeys.add(sanitizedRelPath);
 
-      const targetPath = SafePath.resolveSafePath(scratchDir, sanitizedRelPath);
+      const targetPath = await SafePath.assertSafeWorkspacePath(
+        scratchDir,
+        sanitizedRelPath,
+      );
       const contentBuffer = Buffer.isBuffer(file.content)
         ? file.content
         : Buffer.from(file.content, 'utf8');

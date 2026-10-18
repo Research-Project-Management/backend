@@ -17,6 +17,7 @@ import {
   Post,
   Query,
   Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -26,7 +27,13 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+  NoProjectContext,
+  ResolvedProject,
+} from '@/modules/project/access';
 import { CitationsService } from './citations.service';
 import {
   CitationQueryDto,
@@ -56,7 +63,8 @@ interface RequestWithUser {
   'manuscripts/projects/:projectId/citations',
   'projects/:projectId/citations',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
+@RequireRole(Role.REVIEWER)
 export class CitationsController {
   constructor(private readonly citationsService: CitationsService) {}
 
@@ -74,6 +82,7 @@ export class CitationsController {
   }
 
   @Get('search')
+  @RequireRole(Role.REVIEWER)
   @ApiOperation({
     summary:
       'Search citation keys in the project to power \\cite{...} autocomplete',
@@ -82,10 +91,12 @@ export class CitationsController {
   async searchCitationKeys(
     @Param('projectId') projectId: string,
     @Query() queryDto: CitationQueryDto,
+    @ResolvedProject() project?: { id: string },
   ): Promise<BibEntryDto[]> {
     try {
+      const targetProjectId = project?.id || projectId;
       return await this.citationsService.searchCitationKeys(
-        projectId,
+        targetProjectId,
         queryDto,
       );
     } catch (err) {
@@ -94,7 +105,7 @@ export class CitationsController {
   }
 
   @Post('resolve')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -111,15 +122,21 @@ export class CitationsController {
   async resolveIdentifier(
     @Param('projectId') projectId: string,
     @Body() dto: ResolveIdentifierDto,
+    @ResolvedProject() project?: { id: string },
   ) {
     try {
-      return await this.citationsService.resolveIdentifier(projectId, dto);
+      const targetProjectId = project?.id || projectId;
+      return await this.citationsService.resolveIdentifier(
+        targetProjectId,
+        dto,
+      );
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Get('validate')
+  @RequireRole(Role.REVIEWER)
   @ApiOperation({
     summary:
       'Validate all project .bib files for duplicate keys or missing metadata',
@@ -127,16 +144,18 @@ export class CitationsController {
   @ApiResponse({ status: 200, type: CitationValidationDto })
   async validateBibtex(
     @Param('projectId') projectId: string,
+    @ResolvedProject() project?: { id: string },
   ): Promise<CitationValidationDto> {
     try {
-      return await this.citationsService.validateProjectBibtex(projectId);
+      const targetProjectId = project?.id || projectId;
+      return await this.citationsService.validateProjectBibtex(targetProjectId);
     } catch (err) {
       this.handleError(err);
     }
   }
 
   @Post('sync-library')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Sync bibliography collection from external library (Zotero/Flux)',
@@ -146,14 +165,16 @@ export class CitationsController {
     @Param('projectId') projectId: string,
     @Body() dto: SyncLibraryDto,
     @Req() req: RequestWithUser,
+    @ResolvedProject() project?: { id: string },
   ): Promise<SyncLibraryResultDto> {
     try {
-      const userId =
-        req?.user?.id ||
-        (req?.headers?.['x-user-id'] as string | undefined) ||
-        'user-default';
+      const userId = req?.user?.id || req?.user?.sub;
+      if (!userId) {
+        throw new UnauthorizedException('Authentication required');
+      }
+      const targetProjectId = project?.id || projectId;
       return await this.citationsService.syncLibraryCollection(
-        projectId,
+        targetProjectId,
         userId,
         dto,
       );
@@ -171,22 +192,25 @@ export class CitationsController {
   'citations',
 ])
 @UseGuards(JwtAuthGuard)
+@NoProjectContext()
 export class CitationsUtilityController {
   constructor(private readonly citationsService: CitationsService) {}
 
   @Get('library-collections')
+  @NoProjectContext()
   @ApiOperation({
     summary: 'List available bibliography collections from external library',
   })
   async listLibraryCollections(@Req() req: RequestWithUser) {
-    const userId =
-      req?.user?.id ||
-      (req?.headers?.['x-user-id'] as string | undefined) ||
-      'user-default';
+    const userId = req?.user?.id || req?.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required');
+    }
     return this.citationsService.listUserLibraryCollections(userId);
   }
 
   @Post('parse-raw')
+  @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Parse raw BibTeX text content in memory' })
   @ApiResponse({ status: 200, type: [BibEntryDto] })

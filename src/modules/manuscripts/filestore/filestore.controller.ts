@@ -23,7 +23,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import { ProjectAccessGuard, RequireRole, Role } from '@/modules/project/access';
+import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -42,13 +43,15 @@ import { FilestoreService } from './filestore.service';
   'manuscripts/projects/:projectId/files',
   'project/:projectId/file',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class FilestoreController {
   constructor(private readonly filestoreService: FilestoreService) {}
 
   @Post()
+  @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
+  @UserRateLimit('upload')
   @HttpCode(HttpStatus.CREATED)
   public async uploadFile(
     @Param('projectId') projectId: string,

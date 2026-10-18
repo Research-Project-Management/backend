@@ -118,21 +118,31 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     const client = this.getRedisClient();
     if (client) {
       try {
-        const keys = await client.keys('manuscript:linked_files:*');
-        for (const key of keys) {
-          const all = await client.hgetall(key);
-          if (all && Object.keys(all).length > 0) {
-            for (const raw of Object.values(all)) {
-              const entity = this.deserialize(raw);
-              let projectMap = this.memoryStore.get(entity.projectId);
-              if (!projectMap) {
-                projectMap = new Map();
-                this.memoryStore.set(entity.projectId, projectMap);
+        let cursor = '0';
+        do {
+          const [nextCursor, keys] = await client.scan(
+            cursor,
+            'MATCH',
+            'manuscript:linked_files:*',
+            'COUNT',
+            100,
+          );
+          cursor = nextCursor;
+          for (const key of keys) {
+            const all = await client.hgetall(key);
+            if (all && Object.keys(all).length > 0) {
+              for (const raw of Object.values(all)) {
+                const entity = this.deserialize(raw);
+                let projectMap = this.memoryStore.get(entity.projectId);
+                if (!projectMap) {
+                  projectMap = new Map();
+                  this.memoryStore.set(entity.projectId, projectMap);
+                }
+                projectMap.set(entity.id, entity);
               }
-              projectMap.set(entity.id, entity);
             }
           }
-        }
+        } while (cursor !== '0');
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.debug(`Redis scan error in findAllAutoRefresh: ${msg}`);
@@ -189,6 +199,3 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     return new LinkedFileEntity(props);
   }
 }
-
-export { LinkedFilesRepository as RedisLinkedFilesRepository };
-

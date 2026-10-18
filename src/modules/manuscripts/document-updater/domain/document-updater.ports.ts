@@ -70,19 +70,19 @@ export abstract class IDocstoreWriterPort {
 }
 
 export abstract class IUpdaterLockPort {
-  abstract acquire(resourceKey: string, ttlMs?: number): Promise<boolean>;
-  abstract release(resourceKey: string): Promise<void>;
+  abstract acquireLock(resourceKey: string, ttlMs?: number): Promise<boolean>;
+  abstract releaseLock(resourceKey: string): Promise<void>;
   abstract isLocked(resourceKey: string): Promise<boolean>;
 }
 
 export abstract class IDebounceTimerPort {
-  abstract schedule(
+  abstract scheduleDebounce(
     projectId: string,
     docId: string,
     delayMs: number,
     callback: () => Promise<void>,
   ): void;
-  abstract cancel(projectId: string, docId: string): void;
-  abstract cancelAllForProject(projectId: string): void;
-  abstract cancelAll(): void;
+  abstract cancelDebounce(projectId: string, docId: string): void;
+  abstract cancelAllProjectDebounces(projectId: string): void;
+  abstract cancelAllDebounces(): void;
 }

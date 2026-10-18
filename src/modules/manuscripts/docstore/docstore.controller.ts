@@ -31,7 +31,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import { ProjectAccessGuard, RequireRole, Role } from '@/modules/project/access';
 import { DocstoreService } from './docstore.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateDocDto, UpdateDocDto, PatchDocDto } from './dto/doc.dto';
@@ -53,7 +53,7 @@ import {
   'projects/:projectId/pages',
   'docstore/project/:projectId',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class DocstoreController {
   constructor(

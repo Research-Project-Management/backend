@@ -17,7 +17,7 @@ import { FastSyntaxLinterAdapter } from '@/modules/manuscripts/diagnostics';
 import { CompileFairQueue } from '@/modules/manuscripts/clsi';
 import {
   LinkedFileEntity,
-  RedisLinkedFilesRepository,
+  LinkedFilesRepository,
   LinkedFilesService,
 } from '@/modules/manuscripts/linked-files';
 import {
@@ -152,7 +152,7 @@ describe('Manuscripts 4 Major Backend Capabilities (Overleaf Parity)', () => {
   // 2. Linked Files Engine Tests
   // =========================================================================
   describe('2. Linked Files Engine (URL & Citation Library)', () => {
-    let repo: RedisLinkedFilesRepository;
+    let repo: LinkedFilesRepository;
     let service: LinkedFilesService;
     let mockStructureService: any;
     let mockDocstoreService: any;
@@ -161,7 +161,7 @@ describe('Manuscripts 4 Major Backend Capabilities (Overleaf Parity)', () => {
     let mockRealtimeService: any;
 
     beforeEach(() => {
-      repo = new RedisLinkedFilesRepository();
+      repo = new LinkedFilesRepository();
 
       mockStructureService = {
         createNode: jest

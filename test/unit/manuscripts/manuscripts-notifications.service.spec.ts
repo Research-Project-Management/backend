@@ -617,10 +617,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
     });
 
     describe('NotificationsController', () => {
-      const mockReq = (userId: string = 'user-123') =>
-        ({
-          user: { id: userId },
-        }) as unknown as AuthenticatedRequest;
+      const mockReq = (userId: string = 'user-123') => userId;
 
       it('should handle full notification lifecycle via controller', async () => {
         // 1. Create notification

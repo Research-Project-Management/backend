@@ -23,7 +23,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import { ProjectAccessGuard, RequireRole, Role } from '@/modules/project/access';
 import { DocumentUpdaterService } from './document-updater.service';
 import { QueueUpdateDto } from './dto/queue-update.dto';
 import { FlushProjectDto } from './dto/flush-project.dto';
@@ -43,7 +43,7 @@ import {
   'manuscripts/projects/:projectId/updater',
   'project/:projectId',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class DocumentUpdaterController {
   constructor(private readonly service: DocumentUpdaterService) {}
@@ -137,6 +137,7 @@ export class DocumentUpdaterController {
    * Evict document buffer when users disconnect.
    */
   @Delete('doc/:docId/buffer')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
   public async evictDoc(
     @Param('projectId') projectId: string,

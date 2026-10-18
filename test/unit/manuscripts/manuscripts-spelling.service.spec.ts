@@ -15,12 +15,47 @@ import {
   InvalidWordException,
   RegexLatexTokenizerAdapter,
   AcademicSpellEngineAdapter,
-  InMemoryCustomDictionaryAdapter,
+  SpellingRepository,
   SpellingService,
   SpellingController,
   SpellingUtilityController,
 } from '@/modules/manuscripts/spelling';
 import { BadRequestException } from '@nestjs/common';
+
+function createMockSpellingRepository(): SpellingRepository {
+  const store = new Map<string, Set<string>>();
+  const mockPrisma: any = {
+    manuscriptCustomWord: {
+      findMany: jest.fn(async ({ where }: any) => {
+        const key = where.projectId ? `p:${where.projectId}` : `u:${where.userId}`;
+        const set = store.get(key);
+        return set ? Array.from(set).sort().map((word) => ({ word })) : [];
+      }),
+      upsert: jest.fn(async ({ create }: any) => {
+        const key = create.projectId ? `p:${create.projectId}` : `u:${create.userId}`;
+        let set = store.get(key);
+        if (!set) {
+          set = new Set<string>();
+          store.set(key, set);
+        }
+        set.add(create.word);
+        return create;
+      }),
+      deleteMany: jest.fn(async ({ where }: any) => {
+        const key = where.projectId ? `p:${where.projectId}` : `u:${where.userId}`;
+        const set = store.get(key);
+        const deleted = set ? set.delete(where.word) : false;
+        return { count: deleted ? 1 : 0 };
+      }),
+      count: jest.fn(async ({ where }: any) => {
+        const key = where.projectId ? `p:${where.projectId}` : `u:${where.userId}`;
+        const set = store.get(key);
+        return set && set.has(where.word) ? 1 : 0;
+      }),
+    },
+  };
+  return new SpellingRepository(mockPrisma);
+}
 
 describe('Manuscripts Spelling Subsystem (LaTeX Tokenizer, Engine & Custom Dictionaries)', () => {
   // =========================================================================
@@ -320,11 +355,11 @@ The result is valid.
       });
     });
 
-    describe('InMemoryCustomDictionaryAdapter', () => {
-      let dict: InMemoryCustomDictionaryAdapter;
+    describe('SpellingRepository', () => {
+      let dict: SpellingRepository;
 
       beforeEach(() => {
-        dict = new InMemoryCustomDictionaryAdapter();
+        dict = createMockSpellingRepository();
       });
 
       it('should add, list, and verify project words', async () => {
@@ -361,11 +396,11 @@ The result is valid.
   // 3. APPLICATION SERVICE LAYER
   // =========================================================================
   describe('Application Service Layer', () => {
-    let customDict: InMemoryCustomDictionaryAdapter;
+    let customDict: SpellingRepository;
     let service: SpellingService;
 
     beforeEach(() => {
-      customDict = new InMemoryCustomDictionaryAdapter();
+      customDict = createMockSpellingRepository();
       service = new SpellingService(customDict);
     });
 
@@ -458,11 +493,11 @@ The result is valid.
     let service: SpellingService;
     let controller: SpellingController;
     let utilityController: SpellingUtilityController;
-    let customDict: InMemoryCustomDictionaryAdapter;
+    let customDict: SpellingRepository;
     let docstoreMock: any;
 
     beforeEach(() => {
-      customDict = new InMemoryCustomDictionaryAdapter();
+      customDict = createMockSpellingRepository();
       docstoreMock = {
         getDoc: jest.fn(),
       };

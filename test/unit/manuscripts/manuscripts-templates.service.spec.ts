@@ -11,13 +11,130 @@ import {
   ManuscriptTemplateEntity,
   TemplateNotFoundException,
   InvalidTemplateException,
-  InMemoryTemplateAdapter,
   TemplatesRepository,
   TemplatesService,
   TemplatesController,
   OverleafTemplatesParityController,
+  OFFICIAL_TEMPLATE_CATALOG,
 } from '@/modules/manuscripts/templates';
 import { AuthenticatedRequest } from '@/core';
+
+function createMockTemplatesRepo(): {
+  repo: TemplatesRepository;
+  mockPrisma: any;
+} {
+  const store = new Map<string, any>();
+  for (const d of OFFICIAL_TEMPLATE_CATALOG) {
+    const entity = ManuscriptTemplateEntity.create({
+      id: d.id,
+      versionId: d.versionId,
+      name: d.name,
+      category: d.category,
+      description: d.description,
+      compiler: d.compiler,
+      imageName: d.imageName,
+      mainFile: d.mainFile,
+      author: d.author,
+      tags: [...d.tags],
+      isOfficial: d.isOfficial,
+      downloadCount: d.downloadCount,
+      files: { ...d.files },
+    });
+    store.set(entity.id, {
+      id: entity.id,
+      versionId: entity.versionId,
+      name: entity.name,
+      category: entity.category,
+      description: entity.description,
+      compiler: entity.compiler,
+      imageName: entity.imageName,
+      mainFile: entity.mainFile,
+      thumbnailUrl: entity.thumbnailUrl,
+      author: entity.author,
+      tags: entity.tags,
+      isOfficial: entity.isOfficial,
+      downloadCount: entity.downloadCount,
+      files: entity.files,
+      createdAt: entity.createdAt,
+      updatedAt: entity.updatedAt,
+    });
+  }
+
+  const filterStore = (where: any = {}) => {
+    let list = Array.from(store.values());
+    if (where.category) {
+      list = list.filter((t) => t.category.toLowerCase() === String(where.category).toLowerCase());
+    }
+    if (where.isOfficial !== undefined) {
+      list = list.filter((t) => t.isOfficial === where.isOfficial);
+    }
+    if (where.tags?.has) {
+      const tagLower = String(where.tags.has).toLowerCase();
+      list = list.filter((t) => t.tags.some((tg: string) => tg.toLowerCase() === tagLower));
+    }
+    if (Array.isArray(where.OR) && where.OR.length > 0) {
+      const q = String(where.OR[0]?.name?.contains || '').toLowerCase();
+      if (q) {
+        list = list.filter(
+          (t) =>
+            t.name.toLowerCase().includes(q) ||
+            (t.description && t.description.toLowerCase().includes(q)) ||
+            t.author.toLowerCase().includes(q) ||
+            t.tags.some((tg: string) => tg.toLowerCase().includes(q)),
+        );
+      }
+    }
+    return list;
+  };
+
+  const mockPrisma: any = {
+    manuscriptTemplate: {
+      findUnique: jest.fn(async ({ where }: any) => {
+        if (where.id) return store.get(where.id) || null;
+        if (where.versionId) {
+          for (const rec of store.values()) {
+            if (rec.versionId === where.versionId) return rec;
+          }
+        }
+        return null;
+      }),
+      count: jest.fn(async ({ where }: any) => filterStore(where).length),
+      findMany: jest.fn(async ({ where, skip = 0, take = 50 }: any) => {
+        const list = filterStore(where);
+        list.sort((a, b) => {
+          if (a.isOfficial && !b.isOfficial) return -1;
+          if (!a.isOfficial && b.isOfficial) return 1;
+          return b.downloadCount - a.downloadCount;
+        });
+        return list.slice(skip, skip + take);
+      }),
+      upsert: jest.fn(async ({ where, create }: any) => {
+        store.set(where.id, { ...create });
+        return store.get(where.id);
+      }),
+      deleteMany: jest.fn(async ({ where }: any) => {
+        const existed = store.delete(where.id);
+        return { count: existed ? 1 : 0 };
+      }),
+      updateMany: jest.fn(async ({ where }: any) => {
+        const existing = store.get(where.id);
+        if (existing) {
+          existing.downloadCount += 1;
+          return { count: 1 };
+        }
+        return { count: 0 };
+      }),
+    },
+    project: {
+      create: jest.fn().mockResolvedValue({ id: 'proj-parity-1' }),
+    },
+    projectMember: {
+      create: jest.fn().mockResolvedValue({ id: 'pm-parity-1' }),
+    },
+  };
+
+  return { repo: new TemplatesRepository(mockPrisma), mockPrisma };
+}
 
 describe('Manuscripts Templates Subsystem', () => {
   // =========================================================================
@@ -158,14 +275,14 @@ describe('Manuscripts Templates Subsystem', () => {
   });
 
   // =========================================================================
-  // 2. ADAPTERS LAYER: IN-MEMORY & PRISMA
+  // 2. ADAPTERS LAYER: TEMPLATES REPOSITORY
   // =========================================================================
   describe('Adapters Layer', () => {
-    describe('InMemoryTemplateAdapter', () => {
-      let adapter: InMemoryTemplateAdapter;
+    describe('TemplatesRepository', () => {
+      let adapter: TemplatesRepository;
 
       beforeEach(() => {
-        adapter = new InMemoryTemplateAdapter();
+        adapter = createMockTemplatesRepo().repo;
       });
 
       it('should initialize with 7 official starter templates', async () => {
@@ -173,7 +290,7 @@ describe('Manuscripts Templates Subsystem', () => {
         expect(total).toBe(7);
         expect(templates.length).toBe(7);
 
-        const names = templates.map((t) => t.name);
+        const names = templates.map((t: ManuscriptTemplateEntity) => t.name);
         expect(names).toContain('IEEE Transactions Article');
         expect(names).toContain('ACM Conference Proceedings (SIGCONF)');
         expect(names).toContain('Springer LNCS Conference Template');
@@ -188,7 +305,9 @@ describe('Manuscripts Templates Subsystem', () => {
           category: 'journal',
         });
         expect(journals.length).toBeGreaterThanOrEqual(2);
-        journals.forEach((t) => expect(t.category).toBe('journal'));
+        journals.forEach((t: ManuscriptTemplateEntity) =>
+          expect(t.category).toBe('journal'),
+        );
 
         const { templates: thesis } = await adapter.findAll({
           category: 'thesis',
@@ -272,41 +391,7 @@ describe('Manuscripts Templates Subsystem', () => {
       });
     });
 
-    describe('TemplatesRepository with InMemory Fallback', () => {
-      it('should gracefully fallback to memory adapter when Prisma table is empty or unmigrated', async () => {
-        const mockPrisma: any = {
-          manuscriptTemplate: {
-            findUnique: jest
-              .fn()
-              .mockRejectedValue(new Error('Table does not exist')),
-            findMany: jest
-              .fn()
-              .mockRejectedValue(new Error('Table does not exist')),
-            count: jest
-              .fn()
-              .mockRejectedValue(new Error('Table does not exist')),
-            upsert: jest
-              .fn()
-              .mockRejectedValue(new Error('Table does not exist')),
-            deleteMany: jest
-              .fn()
-              .mockRejectedValue(new Error('Table does not exist')),
-            update: jest
-              .fn()
-              .mockRejectedValue(new Error('Table does not exist')),
-          },
-        };
-
-        const adapter = new TemplatesRepository(mockPrisma);
-        const { templates, total } = await adapter.findAll();
-        expect(total).toBe(7);
-        expect(templates.length).toBe(7);
-
-        const found = await adapter.findByVersionId('tmpl-ieee-tran-v1');
-        expect(found).not.toBeNull();
-        expect(found?.name).toBe('IEEE Transactions Article');
-      });
-
+    describe('TemplatesRepository Prisma Mapping', () => {
       it('should map Prisma records to domain entities when query succeeds', async () => {
         const mockPrisma: any = {
           manuscriptTemplate: {
@@ -386,13 +471,14 @@ describe('Manuscripts Templates Subsystem', () => {
   // 3. APPLICATION SERVICE LAYER
   // =========================================================================
   describe('Application Service Layer', () => {
-    let memoryRepo: InMemoryTemplateAdapter;
     let templatesRepo: TemplatesRepository;
+    let mockPrisma: any;
     let service: TemplatesService;
 
     beforeEach(() => {
-      memoryRepo = new InMemoryTemplateAdapter();
-      templatesRepo = new TemplatesRepository(undefined, memoryRepo);
+      const mocked = createMockTemplatesRepo();
+      templatesRepo = mocked.repo;
+      mockPrisma = mocked.mockPrisma;
       service = new TemplatesService(templatesRepo);
     });
 
@@ -426,21 +512,12 @@ describe('Manuscripts Templates Subsystem', () => {
     });
 
     it('instantiateTemplate should clone template and increment download count', async () => {
-      const mockPrisma: any = {
-        project: {
-          create: jest.fn().mockResolvedValue({ id: 'proj-abc' }),
-        },
-        projectMember: {
-          create: jest.fn().mockResolvedValue({ id: 'pm-abc' }),
-        },
-      };
-      const repoWithPrisma = new TemplatesRepository(mockPrisma, memoryRepo);
-      const svcWithPrisma = new TemplatesService(repoWithPrisma);
-
-      const template = await memoryRepo.findByVersionId('tmpl-ieee-tran-v1');
+      mockPrisma.project.create.mockResolvedValue({ id: 'proj-abc' });
+      const template =
+        await templatesRepo.findByVersionId('tmpl-ieee-tran-v1');
       const downloadsBefore = template!.downloadCount;
 
-      const result = await svcWithPrisma.instantiateTemplate('author-1', {
+      const result = await service.instantiateTemplate('author-1', {
         templateId: 'tmpl-ieee-tran-v1',
         projectName: 'My IEEE Submission',
       });
@@ -452,7 +529,7 @@ describe('Manuscripts Templates Subsystem', () => {
       expect(result.fromTemplateId).toBe(template!.id);
 
       // Verify download count incremented
-      const updatedTemplate = await memoryRepo.findById(template!.id);
+      const updatedTemplate = await templatesRepo.findById(template!.id);
       expect(updatedTemplate?.downloadCount).toBe(downloadsBefore + 1);
     });
 
@@ -486,7 +563,7 @@ describe('Manuscripts Templates Subsystem', () => {
       expect(created.category).toBe('report');
       expect(created.isOfficial).toBe(false);
 
-      const retrieved = await memoryRepo.findById(created.id);
+      const retrieved = await templatesRepo.findById(created.id);
       expect(retrieved?.name).toBe('My Lab Technical Report');
     });
   });
@@ -496,20 +573,11 @@ describe('Manuscripts Templates Subsystem', () => {
   // =========================================================================
   describe('TemplatesService Facade', () => {
     let service: TemplatesService;
-    let memoryRepo: InMemoryTemplateAdapter;
 
     beforeEach(() => {
-      memoryRepo = new InMemoryTemplateAdapter();
-      const mockPrisma: any = {
-        project: {
-          create: jest.fn().mockResolvedValue({ id: 'proj-service' }),
-        },
-        projectMember: {
-          create: jest.fn().mockResolvedValue({ id: 'pm-service' }),
-        },
-      };
-      const templatesRepo = new TemplatesRepository(mockPrisma, memoryRepo);
-      service = new TemplatesService(templatesRepo);
+      const { repo, mockPrisma } = createMockTemplatesRepo();
+      mockPrisma.project.create.mockResolvedValue({ id: 'proj-service' });
+      service = new TemplatesService(repo);
     });
 
     it('should list all templates and return plain objects', async () => {
@@ -564,17 +632,8 @@ describe('Manuscripts Templates Subsystem', () => {
     let overleafController: OverleafTemplatesParityController;
 
     beforeEach(() => {
-      const memoryRepo = new InMemoryTemplateAdapter();
-      const mockPrisma: any = {
-        project: {
-          create: jest.fn().mockResolvedValue({ id: 'proj-parity-1' }),
-        },
-        projectMember: {
-          create: jest.fn().mockResolvedValue({ id: 'pm-parity-1' }),
-        },
-      };
-      const templatesRepo = new TemplatesRepository(mockPrisma, memoryRepo);
-      service = new TemplatesService(templatesRepo);
+      const { repo } = createMockTemplatesRepo();
+      service = new TemplatesService(repo);
 
       templatesController = new TemplatesController(service);
       overleafController = new OverleafTemplatesParityController(service);
@@ -612,7 +671,7 @@ describe('Manuscripts Templates Subsystem', () => {
 
     it('OverleafTemplatesParityController should match Overleaf POST /project/new/template response format', async () => {
       const req = {
-        headers: { 'x-user-id': 'overleaf-user-99' },
+        user: { id: 'overleaf-user-99' },
       } as unknown as AuthenticatedRequest;
       const res = await overleafController.instantiateOverleaf(req, {
         template_id: 'tmpl-acm-sigconf-v1',

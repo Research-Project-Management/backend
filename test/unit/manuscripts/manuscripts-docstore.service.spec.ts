@@ -12,6 +12,7 @@
  *  7. Direct CLSI compilation feed (WorkspaceFile[] generation) & Telemetry.
  */
 
+import { randomUUID } from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@/core';
@@ -77,7 +78,7 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
         return results;
       }),
       create: jest.fn(async ({ data }: any) => {
-        const id = data.id || require('crypto').randomUUID();
+        const id = data.id || randomUUID();
         const record = {
           id,
           projectId: data.projectId,

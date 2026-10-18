@@ -70,16 +70,51 @@ export class DraftModeManager {
     return { source, isModified: false, engineFlags };
   }
 
+  /**
+   * Scans TeX source for constructs that historically relied on shell-escape.
+   * Pure advisory function used solely for diagnostic logging; never enables compiler flags.
+   */
+  public static detectShellEscapeUsage(source: string): string[] {
+    if (!source) return [];
+    const detected: string[] = [];
+
+    if (
+      /\\usepackage(?:\[[^\]]*\])?\{(?:[^}]*,)?\s*minted\s*(?:,[^}]*)?\}/i.test(
+        source,
+      )
+    ) {
+      detected.push('minted');
+    }
+    if (
+      /\\usepackage(?:\[[^\]]*\])?\{(?:[^}]*,)?\s*pythontex\s*(?:,[^}]*)?\}/i.test(
+        source,
+      )
+    ) {
+      detected.push('pythontex');
+    }
+    if (
+      /\\usepackage(?:\[[^\]]*\])?\{(?:[^}]*,)?\s*svg\s*(?:,[^}]*)?\}/i.test(
+        source,
+      )
+    ) {
+      detected.push('svg');
+    }
+    if (
+      /\\usetikzlibrary\{(?:[^}]*,)?\s*external\s*(?:,[^}]*)?\}/i.test(source)
+    ) {
+      detected.push('tikz-external');
+    }
+    if (/\\(?:immediate\\)?write18\b/.test(source)) {
+      detected.push('write18');
+    }
+
+    return detected;
+  }
+
+  /**
+   * @deprecated Advisory only. Never used to enable compiler flags or shell escape.
+   */
   public static requiresShellEscape(source: string): boolean {
-    if (!source) return false;
-    return (
-      /\\usepackage(?:\[[^\]]*\])?\{(?:[^}]*,)?\s*(?:minted|pythontex|svg)\s*(?:,[^}]*)?\}/i.test(
-        source,
-      ) ||
-      /\\usetikzlibrary\{(?:[^}]*,)?\s*external\s*(?:,[^}]*)?\}/i.test(
-        source,
-      ) ||
-      /\\(?:immediate\\)?write18\b/.test(source)
-    );
+    return this.detectShellEscapeUsage(source).length > 0;
   }
 }

@@ -29,16 +29,13 @@ import {
   ClsiHealthCheck,
 } from './services/compile-pipeline.service';
 import { ISandboxRunner } from './domain/clsi-ports';
+import {
+  parseSandboxConfig,
+  ClsiSandboxConfig,
+} from './services/sandbox/sandbox-config';
 
-const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
-
-function resolveScratchDir(configService: ConfigService): string {
-  return (
-    configService.get<string>('CLSI_SCRATCH_DIR') ||
-    configService.get<string>('SCRATCH_DIR') ||
-    path.join(os.tmpdir(), 'clsi-scratch')
-  );
-}
+export const CLSI_SANDBOX_CONFIG = Symbol('CLSI_SANDBOX_CONFIG');
+export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
 
 @Module({
   imports: [AppCoreModule, DocstoreModule, FilestoreModule],
@@ -47,23 +44,61 @@ function resolveScratchDir(configService: ConfigService): string {
     RemoteClsiClientAdapter,
     ClsiWorkspacePlannerService,
     {
-      provide: OverleafIncrementalWorkspace,
-      useFactory: (configService: ConfigService) =>
-        new OverleafIncrementalWorkspace(resolveScratchDir(configService)),
+      provide: CLSI_SANDBOX_CONFIG,
+      useFactory: (configService: ConfigService): ClsiSandboxConfig => {
+        return parseSandboxConfig({
+          env: {
+            CLSI_SANDBOX_MODE: configService.get<string>('CLSI_SANDBOX_MODE'),
+            CLSI_SANDBOX_IMAGE: configService.get<string>('CLSI_SANDBOX_IMAGE'),
+            CLSI_SANDBOX_USER: configService.get<string>('CLSI_SANDBOX_USER'),
+            CLSI_SANDBOX_MEMORY_MB: configService.get<string>(
+              'CLSI_SANDBOX_MEMORY_MB',
+            ),
+            CLSI_SANDBOX_CPUS: configService.get<string>('CLSI_SANDBOX_CPUS'),
+            CLSI_SANDBOX_PIDS: configService.get<string>('CLSI_SANDBOX_PIDS'),
+            CLSI_SANDBOX_FSIZE_MB: configService.get<string>(
+              'CLSI_SANDBOX_FSIZE_MB',
+            ),
+            CLSI_SANDBOX_NOFILE: configService.get<string>(
+              'CLSI_SANDBOX_NOFILE',
+            ),
+            CLSI_SANDBOX_TMPFS_MB: configService.get<string>(
+              'CLSI_SANDBOX_TMPFS_MB',
+            ),
+            CLSI_SANDBOX_TIMEOUT_MS: configService.get<string>(
+              'CLSI_SANDBOX_TIMEOUT_MS',
+            ),
+            CLSI_SANDBOX_RUNTIME: configService.get<string>(
+              'CLSI_SANDBOX_RUNTIME',
+            ),
+            CLSI_SCRATCH_DIR: configService.get<string>('CLSI_SCRATCH_DIR'),
+            USE_DOCKER_SANDBOX: configService.get<string>('USE_DOCKER_SANDBOX'),
+            DOCKER_IMAGE: configService.get<string>('DOCKER_IMAGE'),
+            NODE_ENV: configService.get<string>('NODE_ENV'),
+          },
+          isProduction: configService.get<string>('NODE_ENV') === 'production',
+        });
+      },
       inject: [ConfigService],
     },
     {
+      provide: OverleafIncrementalWorkspace,
+      useFactory: (sandboxConfig: ClsiSandboxConfig) =>
+        new OverleafIncrementalWorkspace(sandboxConfig.scratchDir),
+      inject: [CLSI_SANDBOX_CONFIG],
+    },
+    {
       provide: CLSI_SANDBOX_RUNNER,
-      useFactory: (configService: ConfigService): ISandboxRunner => {
-        const useDocker =
-          configService.get<string>('USE_DOCKER_SANDBOX') === 'true';
-        const dockerImage =
-          configService.get<string>('DOCKER_IMAGE') || 'sharelatex/clsi:latest';
-        return useDocker
-          ? new DockerSandboxRunner(dockerImage)
+      useFactory: (sandboxConfig: ClsiSandboxConfig): ISandboxRunner => {
+        return sandboxConfig.mode === 'container'
+          ? new DockerSandboxRunner(
+              sandboxConfig.image,
+              `${sandboxConfig.memoryMb}m`,
+              `${sandboxConfig.cpus}`,
+            )
           : new LocalProcessRunner();
       },
-      inject: [ConfigService],
+      inject: [CLSI_SANDBOX_CONFIG],
     },
     {
       provide: LatexmkEngine,
@@ -85,15 +120,15 @@ function resolveScratchDir(configService: ConfigService): string {
     },
     {
       provide: DiskUsageCleaner,
-      useFactory: (configService: ConfigService) =>
-        new DiskUsageCleaner(resolveScratchDir(configService)),
-      inject: [ConfigService],
+      useFactory: (sandboxConfig: ClsiSandboxConfig) =>
+        new DiskUsageCleaner(sandboxConfig.scratchDir),
+      inject: [CLSI_SANDBOX_CONFIG],
     },
     {
       provide: ClsiHealthCheck,
-      useFactory: (runner: ISandboxRunner, configService: ConfigService) =>
-        new ClsiHealthCheck(runner, resolveScratchDir(configService)),
-      inject: [CLSI_SANDBOX_RUNNER, ConfigService],
+      useFactory: (runner: ISandboxRunner, sandboxConfig: ClsiSandboxConfig) =>
+        new ClsiHealthCheck(runner, sandboxConfig.scratchDir),
+      inject: [CLSI_SANDBOX_RUNNER, CLSI_SANDBOX_CONFIG],
     },
     {
       provide: CompilePipeline,

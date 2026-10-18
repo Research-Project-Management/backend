@@ -49,10 +49,7 @@ import {
   PkzipEngineAdapter,
   ArchiveEntryVo,
 } from '@/modules/manuscripts/export-import';
-import {
-  replaceInText,
-  LineArrayEngine,
-} from '@/modules/manuscripts/docstore';
+import { replaceInText, LineArrayEngine } from '@/modules/manuscripts/docstore';
 import { parseNameStatusZ } from '@/modules/manuscripts/git-bridge';
 import {
   isPrivateOrReservedIPv6,

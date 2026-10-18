@@ -23,7 +23,13 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+  NoProjectContext,
+  ResolvedProject,
+} from '@/modules/project/access';
 import { DiagnosticsService } from './diagnostics.service';
 import {
   ParseLogDto,
@@ -56,6 +62,7 @@ export class DiagnosticsController {
   constructor(private readonly diagnosticsService: DiagnosticsService) {}
 
   @Post('parse-log')
+  @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Parse a raw TeX compilation log into structured diagnostics',
@@ -93,7 +100,7 @@ export class DiagnosticsController {
             column: null,
             severity: 'error',
             code: 'PARSE_ERROR',
-            message: `Log parser error: ${msg}`,
+            message: 'Log parser error: Unable to parse compilation log',
           },
         ],
       };
@@ -101,6 +108,7 @@ export class DiagnosticsController {
   }
 
   @Post('lint')
+  @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Statically check LaTeX document syntax before compilation',
@@ -111,7 +119,7 @@ export class DiagnosticsController {
   }
 
   @Post([':projectId/lint', 'project/:projectId/lint'])
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -120,12 +128,15 @@ export class DiagnosticsController {
   })
   @ApiResponse({ status: 200, type: DiagnosticReportDto })
   public async lintProject(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string,
+    @ResolvedProject() project?: { id: string },
   ): Promise<DiagnosticReportDto> {
+    const projectId = project?.id || routeProjectId;
     return await this.diagnosticsService.lintProject(projectId);
   }
 
-  @Post(['autofix', ':projectId/autofix'])
+  @Post('autofix')
+  @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -136,7 +147,25 @@ export class DiagnosticsController {
     return this.diagnosticsService.autoFix(dto.source);
   }
 
+  @Post([':projectId/autofix', 'project/:projectId/autofix'])
+  @UseGuards(ProjectAccessGuard)
+  @RequireRole(Role.CONTRIBUTOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Automatically repair common LaTeX syntax errors within a project context',
+  })
+  @ApiResponse({ status: 200, type: AutoFixResponseDto })
+  public autoFixProjectDocument(
+    @Param('projectId') routeProjectId: string,
+    @Body() dto: AutoFixRequestDto,
+    @ResolvedProject() project?: { id: string },
+  ): AutoFixResponseDto {
+    return this.diagnosticsService.autoFix(dto.source);
+  }
+
   @Get('explain/:code')
+  @NoProjectContext()
   @ApiOperation({
     summary: 'Retrieve detailed explanation and remedy for an error code',
   })
@@ -157,6 +186,7 @@ export class DiagnosticsController {
   }
 
   @Get('rules')
+  @NoProjectContext()
   @ApiOperation({ summary: 'List all diagnostic and error explanation rules' })
   @ApiResponse({ status: 200, type: [ErrorExplanationDto] })
   public listAllRules(): ErrorExplanationDto[] {

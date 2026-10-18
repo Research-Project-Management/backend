@@ -4,6 +4,7 @@
  */
 
 import { WorkspaceFile } from './workspace-file.interface';
+import { SandboxProfile } from './sandbox-profile';
 
 export interface CompilerDiagnostic {
   file?: string;
@@ -105,6 +106,7 @@ export interface EngineRunResult {
   durationMs: number;
   pdfGenerated: boolean;
   synctexGenerated: boolean;
+  shellEscapeAdvisories?: string[];
 }
 
 export interface ILatexEngine {
@@ -122,6 +124,9 @@ export interface ProcessExecutionOptions {
   env?: Record<string, string | undefined>;
   signal?: AbortSignal;
   onLogChunk?: (chunk: string) => void;
+  maxOutputBytes?: number;
+  profile?: SandboxProfile;
+  runId?: string;
 }
 
 export interface ProcessExecutionResult {
@@ -130,6 +135,7 @@ export interface ProcessExecutionResult {
   stderr: string;
   timedOut?: boolean;
   signal?: string | null;
+  killed?: boolean;
 }
 
 export interface ISandboxRunner {

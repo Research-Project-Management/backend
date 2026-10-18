@@ -25,7 +25,13 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+  NoProjectContext,
+} from '@/modules/project/access';
+import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { ExportImportService } from './export-import.service';
 import {
@@ -50,7 +56,7 @@ import {
   'manuscripts/projects',
   'projects',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ExportImportController {
   constructor(private readonly service: ExportImportService) {}
 
@@ -115,7 +121,9 @@ export class ExportImportController {
   }
 
   @Post(':projectId/import/zip')
+  @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
+  @UserRateLimit('import')
   @ApiOperation({
     summary: 'Import an existing LaTeX project from an uploaded ZIP archive',
   })
@@ -170,6 +178,7 @@ export class ExportImportController {
   }
 
   @Get('templates')
+  @NoProjectContext()
   @ApiOperation({
     summary: 'List all academic starter templates in the catalog',
   })
@@ -200,6 +209,7 @@ export class ExportImportController {
   }
 
   @Get('templates/:templateId')
+  @NoProjectContext()
   @ApiOperation({
     summary: 'Get details and files of an academic starter template',
   })
@@ -238,7 +248,9 @@ export class ExportImportController {
   }
 
   @Post(':projectId/import/convert')
+  @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
+  @UserRateLimit('import')
   @ApiOperation({
     summary:
       'Convert and import a Word (.docx) or Markdown (.md) document into the project',

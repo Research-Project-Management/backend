@@ -103,7 +103,9 @@ export class PkzipEngineAdapter extends IZipEnginePort {
       const isDirectory =
         fileName.endsWith('/') ||
         fileName.endsWith('\\') ||
-        (compressedSize === 0 && uncompressedSize === 0 && fileName.includes('/'));
+        (compressedSize === 0 &&
+          uncompressedSize === 0 &&
+          fileName.includes('/'));
 
       let uncompressedData: Buffer = Buffer.alloc(0);
 

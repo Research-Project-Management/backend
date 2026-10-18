@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '@/core';
+import { isOriginAllowed } from '@/core/http/setup/allowed-origins';
 import type { FastifyReply } from 'fastify';
 import { LiveCollaborationPort, LivePresenceUser } from '../domain';
 
@@ -160,12 +161,14 @@ export class ManuscriptPresenceService {
 
   public async streamPresenceAndUpdates(
     pageId: string,
-    origin: string,
+    origin: string | undefined,
     rawRequest: { on(event: 'close', listener: () => void): void },
     reply: FastifyReply,
   ): Promise<void> {
-    reply.raw.setHeader('Access-Control-Allow-Origin', origin);
-    reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
+    if (origin && isOriginAllowed(origin)) {
+      reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
     reply.raw.setHeader('Connection', 'keep-alive');

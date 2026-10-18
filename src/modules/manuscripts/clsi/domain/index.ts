@@ -15,3 +15,6 @@ export * from './bib-backend.detector';
 export * from './safe-path';
 export * from './clsi.metrics';
 export * from './compile-fair-queue';
+export * from './sandbox-errors';
+export * from './sandbox-profile';
+export * from './sandbox-env.builder';

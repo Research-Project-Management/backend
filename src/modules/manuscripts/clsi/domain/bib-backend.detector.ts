@@ -70,7 +70,8 @@ export class BibBackendDetector {
       `$bibtex = 'bibtex %O %B';`,
     ];
 
-    const shellEscapeFlag = options.shellEscape ? ' -shell-escape' : '';
+    // Zero-trust compile sandbox: shell-escape is strictly disabled across all engines
+    const shellEscapeFlag = ' -no-shell-escape';
 
     if (options.engine === 'xelatex') {
       lines.push(`$pdf_mode = 5;`);

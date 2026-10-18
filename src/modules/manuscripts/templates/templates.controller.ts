@@ -8,6 +8,7 @@ import {
   Post,
   Query,
   Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -17,6 +18,11 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import {
+  NoProjectContext,
+  RequireOperator,
+  OperatorGuard,
+} from '@/modules/project/access';
 import { AuthenticatedRequest } from '@/core';
 import { TemplatesService } from './templates.service';
 import {
@@ -34,27 +40,20 @@ import {
   'manuscripts/templates',
   'templates',
 ])
+@NoProjectContext()
 export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
 
   private extractUserId(req?: AuthenticatedRequest): string {
-    const rawHeader = req?.headers?.['x-user-id'];
-    const headerUserId =
-      typeof rawHeader === 'string'
-        ? rawHeader
-        : Array.isArray(rawHeader)
-          ? rawHeader[0]
-          : undefined;
-    return (
-      req?.user?.id ||
-      req?.user?.sub ||
-      req?.user?.userId ||
-      headerUserId ||
-      'anonymous-user'
-    );
+    const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return userId;
   }
 
   @Get()
+  @NoProjectContext()
   @ApiOperation({ summary: 'List available manuscript starter templates' })
   @ApiResponse({ status: 200, description: 'Paginated list of templates' })
   async listTemplates(@Query() query: QueryTemplatesDto) {
@@ -62,6 +61,7 @@ export class TemplatesController {
   }
 
   @Get('search')
+  @NoProjectContext()
   @ApiOperation({ summary: 'Search manuscript templates by keyword or tag' })
   @ApiResponse({ status: 200, description: 'Search results' })
   async searchTemplates(@Query() query: SearchTemplatesDto) {
@@ -69,6 +69,7 @@ export class TemplatesController {
   }
 
   @Get(':id')
+  @NoProjectContext()
   @ApiOperation({ summary: 'Get details and files of a manuscript template' })
   @ApiResponse({ status: 200, description: 'Template detail' })
   async getTemplate(@Param('id') id: string) {
@@ -77,6 +78,7 @@ export class TemplatesController {
 
   @Post('instantiate')
   @UseGuards(JwtAuthGuard)
+  @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -95,7 +97,9 @@ export class TemplatesController {
   }
 
   @Post('custom')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, OperatorGuard)
+  @RequireOperator()
+  @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Publish or create a custom manuscript template' })
@@ -116,27 +120,20 @@ export class TemplatesController {
   'v1/manuscripts/project',
 ])
 @UseGuards(JwtAuthGuard)
+@NoProjectContext()
 export class OverleafTemplatesParityController {
   constructor(private readonly templatesService: TemplatesService) {}
 
   private extractUserId(req?: AuthenticatedRequest): string {
-    const rawHeader = req?.headers?.['x-user-id'];
-    const headerUserId =
-      typeof rawHeader === 'string'
-        ? rawHeader
-        : Array.isArray(rawHeader)
-          ? rawHeader[0]
-          : undefined;
-    return (
-      req?.user?.id ||
-      req?.user?.sub ||
-      req?.user?.userId ||
-      headerUserId ||
-      'anonymous-user'
-    );
+    const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return userId;
   }
 
   @Post('new/template')
+  @NoProjectContext()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Overleaf 1:1 API Parity: Instantiate project from template',

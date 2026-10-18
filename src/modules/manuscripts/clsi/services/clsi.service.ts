@@ -8,6 +8,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ForbiddenException,
   Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -161,6 +162,7 @@ export class ClsiService {
   public async compile(
     dto: CompileManuscriptDto,
     _userId?: string,
+    authorizedProjectId?: string,
   ): Promise<ClsiCompileResult> {
     if (dto.compile) {
       if (dto.compile.rootResourcePath && !dto.main_file) {
@@ -191,7 +193,20 @@ export class ClsiService {
 
     const requestedEngine = dto.engine;
     const texLiveVersion = dto.tex_live_version || dto.texLiveVersion || '2024';
-    const projectId = await this.workspacePlanner.resolveProjectId(dto);
+    const resolvedFromDto = await this.workspacePlanner.resolveProjectId(dto);
+
+    if (
+      authorizedProjectId &&
+      resolvedFromDto &&
+      authorizedProjectId !== resolvedFromDto
+    ) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'PROJECT_CONTEXT_MISMATCH',
+        message: 'Authorized project context does not match compile payload',
+      });
+    }
+    const projectId = authorizedProjectId || resolvedFromDto;
 
     if (this.realtimeService && projectId) {
       try {
@@ -390,7 +405,10 @@ export class ClsiService {
     return null;
   }
 
-  public async forwardSync(dto: ForwardSyncDto): Promise<{
+  public async forwardSync(
+    dto: ForwardSyncDto,
+    authorizedProjectId?: string,
+  ): Promise<{
     success: boolean;
     result?: SyncPoint;
     error?: string;
@@ -398,12 +416,25 @@ export class ClsiService {
     const remoteRes = await this.remoteClient.tryRemoteForwardSync(dto);
     if (remoteRes) return remoteRes;
 
-    const projectId = await this.workspacePlanner.resolveProjectId({
+    const resolvedFromDto = await this.workspacePlanner.resolveProjectId({
       projectId: dto.projectId,
       project_id: dto.project_id,
       pageId: dto.pageId,
       page_id: dto.page_id,
     });
+
+    if (
+      authorizedProjectId &&
+      resolvedFromDto &&
+      authorizedProjectId !== resolvedFromDto
+    ) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'PROJECT_CONTEXT_MISMATCH',
+        message: 'Authorized project context does not match synctex payload',
+      });
+    }
+    const projectId = authorizedProjectId || resolvedFromDto;
 
     const synctexContent = await this.loadSynctexContent(
       projectId,
@@ -434,7 +465,10 @@ export class ClsiService {
     return { success: true, result: point };
   }
 
-  public async reverseSync(dto: ReverseSyncDto): Promise<{
+  public async reverseSync(
+    dto: ReverseSyncDto,
+    authorizedProjectId?: string,
+  ): Promise<{
     success: boolean;
     result?: ReverseSyncPoint;
     error?: string;
@@ -442,12 +476,25 @@ export class ClsiService {
     const remoteRes = await this.remoteClient.tryRemoteReverseSync(dto);
     if (remoteRes) return remoteRes;
 
-    const projectId = await this.workspacePlanner.resolveProjectId({
+    const resolvedFromDto = await this.workspacePlanner.resolveProjectId({
       projectId: dto.projectId,
       project_id: dto.project_id,
       pageId: dto.pageId,
       page_id: dto.page_id,
     });
+
+    if (
+      authorizedProjectId &&
+      resolvedFromDto &&
+      authorizedProjectId !== resolvedFromDto
+    ) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'PROJECT_CONTEXT_MISMATCH',
+        message: 'Authorized project context does not match synctex payload',
+      });
+    }
+    const projectId = authorizedProjectId || resolvedFromDto;
 
     const synctexContent = await this.loadSynctexContent(
       projectId,

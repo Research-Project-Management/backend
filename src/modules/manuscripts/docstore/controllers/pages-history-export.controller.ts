@@ -23,12 +23,18 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+  ResolvedProject,
+} from '@/modules/project/access';
 import { PrismaService, AuthenticatedRequest } from '@/core';
 import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
 import { PageExportTranspilerService } from '../services/page-export-transpiler.service';
 import { ManuscriptUserResolverService } from '../services/manuscript-user-resolver.service';
+import { ManuscriptPageScopeRepository } from '../repositories/manuscript-page-scope.repository';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LiveCollaborationPort, computeLineDiff } from '../domain';
 
@@ -39,7 +45,7 @@ const isUuid = (val?: string | null): val is string =>
 @ApiTags('Manuscripts - Pages History & Export')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class PagesHistoryExportController {
   private readonly logger = new Logger(PagesHistoryExportController.name);
@@ -48,6 +54,7 @@ export class PagesHistoryExportController {
   constructor(
     private readonly docstoreService: DocstoreService,
     private readonly prisma: PrismaService,
+    private readonly pageScopeRepo: ManuscriptPageScopeRepository,
     private readonly pageExportTranspiler: PageExportTranspilerService,
     private readonly userResolver: ManuscriptUserResolverService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
@@ -154,14 +161,20 @@ export class PagesHistoryExportController {
    * GET /api/pages/:pageId/versions
    */
   @Get(['docs/:pageId/versions', 'pages/:pageId/versions'])
-  async getVersions(@Param('pageId') pageId: string) {
+  async getVersions(
+    @Param('pageId') pageId: string,
+    @ResolvedProject() project?: { id: string },
+  ) {
     if (!isUuid(pageId)) return { versions: [] };
     try {
-      const doc = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-        select: { projectId: true },
-      });
-      const projectId = doc?.projectId;
+      const activeProjectId = project?.id;
+      const doc = activeProjectId
+        ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
+        : await this.prisma.manuscriptDoc.findUnique({
+            where: { id: pageId },
+            select: { projectId: true },
+          });
+      const projectId = doc?.projectId || activeProjectId;
       if (!projectId || !isUuid(projectId)) return { versions: [] };
 
       const snapshots = await this.prisma.manuscriptSnapshot.findMany({
@@ -213,19 +226,26 @@ export class PagesHistoryExportController {
     @Param('pageId') pageId: string,
     @Query('from') from: string,
     @Query('to') to: string,
+    @ResolvedProject() project?: { id: string },
   ) {
+    const activeProjectId = project?.id;
     const doc = isUuid(pageId)
-      ? await this.prisma.manuscriptDoc.findUnique({
-          where: { id: pageId },
-          select: { id: true, path: true, lines: true, projectId: true },
-        })
+      ? activeProjectId
+        ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
+        : await this.prisma.manuscriptDoc.findUnique({
+            where: { id: pageId },
+            select: { id: true, path: true, lines: true, projectId: true },
+          })
       : null;
 
     const loadSnap = async (id: string) => {
       if (!isUuid(id)) return null;
-      const snap = await this.prisma.manuscriptSnapshot.findUnique({
-        where: { id },
-      });
+      const targetProjectId = activeProjectId || doc?.projectId;
+      const snap = targetProjectId
+        ? await this.pageScopeRepo.findSnapshotInProject(targetProjectId, id)
+        : await this.prisma.manuscriptSnapshot.findUnique({
+            where: { id },
+          });
       if (!snap) {
         throw new NotFoundException(`Version ${id} not found`);
       }
@@ -302,22 +322,31 @@ export class PagesHistoryExportController {
   async getVersionById(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
+    @ResolvedProject() project?: { id: string },
   ) {
     if (!isUuid(versionId)) return { version: null };
     try {
+      const activeProjectId = project?.id;
       const [s, doc] = await Promise.all([
-        this.prisma.manuscriptSnapshot.findUnique({
-          where: { id: versionId },
-          include: { labels: true },
-        }),
+        activeProjectId
+          ? this.pageScopeRepo.findSnapshotInProject(activeProjectId, versionId)
+          : this.prisma.manuscriptSnapshot.findUnique({
+              where: { id: versionId },
+              include: { labels: true },
+            }),
         isUuid(pageId)
-          ? this.prisma.manuscriptDoc.findUnique({
-              where: { id: pageId },
-              select: { path: true },
-            })
+          ? activeProjectId
+            ? this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
+            : this.prisma.manuscriptDoc.findUnique({
+                where: { id: pageId },
+                select: { path: true, projectId: true },
+              })
           : Promise.resolve(null),
       ]);
       if (!s) return { version: null };
+      if (activeProjectId && s.projectId !== activeProjectId)
+        return { version: null };
+      if (doc && s.projectId !== doc.projectId) return { version: null };
 
       const userMap = await this.resolveUserNames([s.createdById]);
       const savedByUser = s.createdById
@@ -335,7 +364,10 @@ export class PagesHistoryExportController {
         version: {
           id: s.id,
           title: `v${s.version} Snapshot`,
-          label: s.labels?.[0]?.label || s.summary || `Version ${s.version}`,
+          label:
+            (s as any).labels?.[0]?.label ||
+            s.summary ||
+            `Version ${s.version}`,
           fileName,
           savedBy: {
             id: s.createdById || 'anonymous',
@@ -355,22 +387,26 @@ export class PagesHistoryExportController {
    * POST /api/pages/:pageId/versions
    */
   @Post(['docs/:pageId/versions', 'pages/:pageId/versions'])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   async createVersion(
     @Param('pageId') pageId: string,
     @Body() body: { label?: string; content?: string },
     @Req() req: AuthenticatedRequest,
+    @ResolvedProject() project?: { id: string },
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
-    let projectId: string | undefined;
+    let projectId: string | undefined = project?.id;
     let docPath = 'main.tex';
     let currentContent = '';
     if (isUuid(pageId)) {
-      const doc = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-        select: { projectId: true, path: true, lines: true },
-      });
-      projectId = doc?.projectId;
+      const doc = projectId
+        ? await this.pageScopeRepo.findDocInProject(projectId, pageId)
+        : await this.prisma.manuscriptDoc.findUnique({
+            where: { id: pageId },
+            select: { projectId: true, path: true, lines: true },
+          });
+      projectId = doc?.projectId || projectId;
       if (doc?.path) docPath = doc.path.replace(/^\//, '') || docPath;
       currentContent = Array.isArray(doc?.lines)
         ? (doc.lines as string[]).join('\n')
@@ -448,20 +484,30 @@ export class PagesHistoryExportController {
     'docs/:pageId/versions/:versionId/restore',
     'pages/:pageId/versions/:versionId/restore',
   ])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async restoreVersion(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
+    @ResolvedProject() project?: { id: string },
   ) {
     if (!isUuid(versionId)) throw new BadRequestException('Invalid version ID');
-    const snap = await this.prisma.manuscriptSnapshot.findUnique({
-      where: { id: versionId },
-    });
+    const activeProjectId = project?.id;
+    const snap = activeProjectId
+      ? await this.pageScopeRepo.findSnapshotInProject(
+          activeProjectId,
+          versionId,
+        )
+      : await this.prisma.manuscriptSnapshot.findUnique({
+          where: { id: versionId },
+        });
     if (!snap) throw new NotFoundException(`Snapshot ${versionId} not found`);
 
     const files = (snap.files as Record<string, unknown>) || {};
     const doc = isUuid(pageId)
-      ? await this.prisma.manuscriptDoc.findUnique({ where: { id: pageId } })
+      ? activeProjectId
+        ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
+        : await this.prisma.manuscriptDoc.findUnique({ where: { id: pageId } })
       : null;
 
     if (doc) {
@@ -498,19 +544,27 @@ export class PagesHistoryExportController {
     'docs/:pageId/versions/:versionId/label',
     'pages/:pageId/versions/:versionId/label',
   ])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async labelVersion(
     @Param('versionId') versionId: string,
     @Body() body: { label: string; title?: string },
     @Req() req: AuthenticatedRequest,
+    @ResolvedProject() project?: { id: string },
   ) {
     const labelName = body?.label?.trim();
     if (!labelName) throw new BadRequestException('Label cannot be empty');
     if (!isUuid(versionId)) throw new BadRequestException('Invalid version ID');
 
-    const snap = await this.prisma.manuscriptSnapshot.findUnique({
-      where: { id: versionId },
-    });
+    const activeProjectId = project?.id;
+    const snap = activeProjectId
+      ? await this.pageScopeRepo.findSnapshotInProject(
+          activeProjectId,
+          versionId,
+        )
+      : await this.prisma.manuscriptSnapshot.findUnique({
+          where: { id: versionId },
+        });
     if (!snap) throw new NotFoundException(`Snapshot ${versionId} not found`);
 
     const userId = req?.user?.id || req?.user?.sub || null;
@@ -542,14 +596,19 @@ export class PagesHistoryExportController {
    * GET /api/pages/:pageId/timeline
    */
   @Get(['docs/:pageId/timeline', 'pages/:pageId/timeline'])
-  async getTimeline(@Param('pageId') pageId: string) {
-    let projectId: string | undefined;
+  async getTimeline(
+    @Param('pageId') pageId: string,
+    @ResolvedProject() project?: { id: string },
+  ) {
+    let projectId: string | undefined = project?.id;
     if (isUuid(pageId)) {
-      const doc = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-        select: { projectId: true },
-      });
-      projectId = doc?.projectId;
+      const doc = projectId
+        ? await this.pageScopeRepo.findDocInProject(projectId, pageId)
+        : await this.prisma.manuscriptDoc.findUnique({
+            where: { id: pageId },
+            select: { projectId: true },
+          });
+      projectId = doc?.projectId || projectId;
     }
 
     if (!projectId || !isUuid(projectId)) {
@@ -604,17 +663,21 @@ export class PagesHistoryExportController {
   async getAt(
     @Param('pageId') pageId: string,
     @Query('timestamp') timestamp?: string,
+    @ResolvedProject() project?: { id: string },
   ) {
     let targetTime = timestamp
       ? new Date(Number(timestamp) || timestamp)
       : new Date();
     if (isNaN(targetTime.getTime())) targetTime = new Date();
 
+    const activeProjectId = project?.id;
     const doc = isUuid(pageId)
-      ? await this.prisma.manuscriptDoc.findUnique({
-          where: { id: pageId },
-          select: { projectId: true, path: true },
-        })
+      ? activeProjectId
+        ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
+        : await this.prisma.manuscriptDoc.findUnique({
+            where: { id: pageId },
+            select: { projectId: true, path: true },
+          })
       : null;
     if (!doc) {
       throw new NotFoundException(`Document ${pageId} not found`);
@@ -656,7 +719,11 @@ export class PagesHistoryExportController {
    * GET /api/pages/:projectId/history
    */
   @Get(['projects/:projectId/history', 'pages/:projectId/history'])
-  async getProjectHistory(@Param('projectId') projectId: string) {
+  async getProjectHistory(
+    @Param('projectId') routeProjectId: string,
+    @ResolvedProject() project?: { id: string },
+  ) {
+    const projectId = project?.id || routeProjectId;
     if (!isUuid(projectId)) return { events: [], history: [] };
 
     const snapshots = await this.prisma.manuscriptSnapshot.findMany({
@@ -688,15 +755,24 @@ export class PagesHistoryExportController {
     'docs/:rootPageId/sync-incremental',
     'pages/:rootPageId/sync-incremental',
   ])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async syncIncremental(
     @Param('rootPageId') rootPageId: string,
     @Body() body: { dirtyFileIds?: string[]; forceAll?: boolean },
+    @ResolvedProject() project?: { id: string },
   ) {
     if (!isUuid(rootPageId)) {
       throw new BadRequestException('A valid UUID is required for rootPageId');
     }
-    const projectId = await this.resolveProjectId(rootPageId);
+    const activeProjectId = project?.id;
+    const doc = activeProjectId
+      ? await this.pageScopeRepo.findDocInProject(activeProjectId, rootPageId)
+      : null;
+    const projectId =
+      doc?.projectId ||
+      activeProjectId ||
+      (await this.resolveProjectId(rootPageId));
     if (!projectId) {
       throw new NotFoundException(`Document/project ${rootPageId} not found`);
     }
@@ -747,14 +823,21 @@ export class PagesHistoryExportController {
     @Param('pageId') pageId: string,
     @Query('format') format?: string,
     @Query('includeChildren') includeChildren?: string,
+    @ResolvedProject() project?: { id: string },
   ) {
-    return this.exportDocument(pageId, {
-      format,
-      includeChildren:
-        includeChildren !== undefined
-          ? includeChildren === 'true' || includeChildren === '1'
-          : undefined,
-    });
+    return this.exportDocument(
+      pageId,
+      {
+        format,
+        includeChildren:
+          includeChildren !== undefined
+            ? includeChildren === 'true' || includeChildren === '1'
+            : undefined,
+      },
+      undefined,
+      undefined,
+      project,
+    );
   }
 
   /**
@@ -769,14 +852,18 @@ export class PagesHistoryExportController {
     body?: { format?: string; includeChildren?: boolean | string },
     @Query('format') queryFormat?: string,
     @Query('includeChildren') queryIncludeChildren?: string,
+    @ResolvedProject() project?: { id: string },
   ) {
     if (!isUuid(pageId)) {
       throw new BadRequestException('A valid UUID is required for pageId');
     }
 
-    const doc = await this.prisma.manuscriptDoc.findUnique({
-      where: { id: pageId },
-    });
+    const activeProjectId = project?.id;
+    const doc = activeProjectId
+      ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
+      : await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+        });
     if (!doc || doc.deleted) {
       throw new NotFoundException(`Document ${pageId} not found`);
     }

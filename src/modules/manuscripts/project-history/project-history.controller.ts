@@ -27,7 +27,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
+import { ProjectAccessGuard, RequireRole, Role } from '@/modules/project/access';
 import { ProjectHistoryService } from './project-history.service';
 import {
   CreateSnapshotDto,
@@ -54,7 +54,7 @@ import { AuthenticatedRequest } from '@/core';
   'manuscripts/projects/:projectId/history',
   'projects/:projectId/history',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class ProjectHistoryController {
   constructor(private readonly historyService: ProjectHistoryService) {}

@@ -498,5 +498,4 @@ export abstract class IDocumentTranspilerPort {
 export const MAX_UNCOMPRESSED_PROJECT_BYTES = 500 * 1024 * 1024;
 export const MAX_PROJECT_ENTRY_COUNT = 10000;
 
-
 export { PkzipEngineAdapter } from '../services/pkzip-engine.adapter';
