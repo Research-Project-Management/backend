@@ -1,5 +1,5 @@
-import { ITEM_COLUMN_METADATA_FIELDS } from '@/modules/library/shared-kernel/types/bibliographic.types';
-import { SCHEMA_V42_DATA } from '@/modules/library/shared-kernel/types/schema.constants';
+﻿import { ITEM_COLUMN_METADATA_FIELDS } from '@/modules/library/core/types/bibliographic.types';
+import { SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
 
 export const ALLOWED_MERGE_METADATA_FIELDS = new Set([
   ...ITEM_COLUMN_METADATA_FIELDS,

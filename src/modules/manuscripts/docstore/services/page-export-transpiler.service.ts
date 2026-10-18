@@ -4,7 +4,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import type { PkZipEntry } from '@/modules/manuscripts/shared/zip/pkzip-builder.util';
+import type { PkZipEntry } from '@/modules/manuscripts/core/utils/pkzip-builder.util';
 import {
   IncludedProjectDoc,
   escapeXml,

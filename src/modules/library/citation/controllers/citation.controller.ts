@@ -16,8 +16,11 @@ import {
   FormatBatchCitationDto,
 } from '@/modules/library/citation/dto/citation.dto';
 import { normalizeCitationStyleId } from '@/modules/library/citation/domain/citation.domain';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ProjectRoleGuard } from '@/modules/project/access';
 
+@ApiTags('Library Citation')
+@ApiBearerAuth()
 @Controller([
   'api/v1/projects/:projectId/library/citation',
   'api/v1/projects/:projectId/library/references',

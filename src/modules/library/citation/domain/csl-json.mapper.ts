@@ -10,11 +10,12 @@ import {
   VIETNAMESE_FAMILY_NAMES,
   VIETNAMESE_COMPOUND_SURNAMES,
   VIETNAMESE_MIDDLE_NAMES,
-  hasVietnameseDiacritics,
+  isVietnameseName,
   parseCreatorString,
   isInstitutionName,
   harmonizeZoteroFields,
-} from '@/modules/library/shared-kernel';
+  normalizeTags,
+} from '@/modules/library/core';
 
 /**
  * Mapping of 37 Zotero / Flux item types to CSL v1.0.2 specification types.
@@ -38,6 +39,7 @@ export interface CslSourceItem {
   id?: string | null;
   itemType?: string | null;
   title?: string | null;
+  shortTitle?: string | null;
   version?: number | string | null;
   updatedAt?: Date | string | null;
   citationKey?: string | null;
@@ -78,6 +80,12 @@ export interface CslSourceItem {
   authors?: string[] | null;
   contributors?: ContributorLike[] | null;
   creators?: ContributorLike[] | null;
+  tags?: unknown[] | string | null;
+  keywords?: unknown[] | string | null;
+  itemTags?: Array<{
+    tag?: { name?: string | null } | null;
+    name?: string | null;
+  }> | null;
   extraFields?: Record<string, unknown> | null;
   metadata?: unknown;
   extra?: string | null;
@@ -424,23 +432,58 @@ export class CslJsonMapper {
     const langVal = getStr('language');
     if (langVal) csl.language = langVal;
 
-    const rawKeywords = effectiveExtra.keywords ?? effectiveExtra.tags;
-    if (Array.isArray(rawKeywords) && rawKeywords.length > 0) {
-      const kwStrings = rawKeywords
-        .map((k) =>
-          typeof k === 'string'
-            ? k.trim()
-            : k && typeof k === 'object' && 'name' in k
-              ? String((k as { name: unknown }).name).trim()
-              : '',
-        )
-        .filter(Boolean);
+    const rawKeywordsSource =
+      item.tags ??
+      item.keywords ??
+      (Array.isArray(item.itemTags) && item.itemTags.length > 0
+        ? item.itemTags.map((it) => it.tag?.name || it.name)
+        : undefined) ??
+      effectiveExtra.keywords ??
+      effectiveExtra.tags;
+    if (Array.isArray(rawKeywordsSource) && rawKeywordsSource.length > 0) {
+      const kwStrings = normalizeTags(
+        rawKeywordsSource as Array<string | { name?: string; tag?: string }>,
+      );
       if (kwStrings.length > 0) {
         csl.keyword = kwStrings.join(', ');
         csl._keywords = kwStrings;
       }
-    } else if (typeof rawKeywords === 'string' && rawKeywords.trim()) {
-      csl.keyword = rawKeywords.trim();
+    } else if (
+      typeof rawKeywordsSource === 'string' &&
+      rawKeywordsSource.trim()
+    ) {
+      const kwStrings = normalizeTags([rawKeywordsSource]);
+      if (kwStrings.length > 0) {
+        csl.keyword = kwStrings.join(', ');
+        csl._keywords = kwStrings;
+      }
+    }
+
+    const rawNotesSource =
+      (item as Record<string, unknown>).notes ??
+      (item as Record<string, unknown>).notesList ??
+      effectiveExtra.notes ??
+      effectiveExtra.annote;
+    if (!csl.annote && rawNotesSource) {
+      if (typeof rawNotesSource === 'string' && rawNotesSource.trim()) {
+        csl.annote = rawNotesSource.trim();
+      } else if (Array.isArray(rawNotesSource) && rawNotesSource.length > 0) {
+        const noteBodies = rawNotesSource
+          .map((n) => {
+            if (typeof n === 'string') return n.trim();
+            if (n && typeof n === 'object') {
+              const obj = n as Record<string, unknown>;
+              return String(
+                obj.contentMd || obj.content || obj.note || '',
+              ).trim();
+            }
+            return '';
+          })
+          .filter(Boolean);
+        if (noteBodies.length > 0) {
+          csl.annote = noteBodies.join('\n\n');
+        }
+      }
     }
 
     const rawExtraStr = getStr('extra');
@@ -623,41 +666,16 @@ export class CslJsonMapper {
   private static readonly VIETNAMESE_COMPOUND_SURNAMES =
     VIETNAMESE_COMPOUND_SURNAMES;
 
-  private static readonly DISTINCT_VN_SURNAMES = new Set([
-    'nguyen',
-    'tran',
-    'pham',
-    'huynh',
-    'hoang',
-    'trinh',
-    'luong',
-    'phung',
-    'vuong',
-    'quach',
-    'trieu',
-    'nghiem',
-    'khong',
-    'doan',
-    'dinh',
-    'dang',
-    'bui',
-    'ngo',
-    'duong',
-    'ly',
-    'truong',
-    'vu',
-    'vo',
-  ]);
-
   private static isVietnameseName(parts: string[]): boolean {
     if (parts.length < 2) return false;
+    const joined = parts.join(' ');
+    if (isVietnameseName(joined)) return true;
     const firstLower = parts[0].toLowerCase();
     if (!this.VIETNAMESE_SURNAMES.has(firstLower)) return false;
-    if (hasVietnameseDiacritics(parts.join(' '))) return true;
-    if (this.DISTINCT_VN_SURNAMES.has(firstLower)) return true;
-    if (parts.length >= 3) return true;
     return (
-      parts.length === 2 && VIETNAMESE_MIDDLE_NAMES.has(parts[1].toLowerCase())
+      parts.length >= 3 ||
+      (parts.length === 2 &&
+        VIETNAMESE_MIDDLE_NAMES.has(parts[1].toLowerCase()))
     );
   }
 

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { BurnableAnnotation } from '@/modules/library/citation/types/exports.types';
 
@@ -6,8 +6,6 @@ export type { BurnableAnnotation };
 
 @Injectable()
 export class PdfBakerService {
-  private readonly logger = new Logger(PdfBakerService.name);
-
   /**
    * Embeds highlights, rectangular bounding boxes, and comments directly into PDF pages.
    */

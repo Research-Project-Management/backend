@@ -20,22 +20,20 @@ import { MendeleyProvider } from '@/modules/integrations/providers/mendeley.prov
 import { decryptToken } from '@/modules/integrations/utils/integration-crypto.utils';
 import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
 
-import { ICitationsAggregatorPort } from './core/ports/citations-aggregator.port';
 import {
+  ICitationsAggregatorPort,
   ILibrarySyncPort,
   LibraryCollectionSummary,
-} from './core/ports/library-sync.port';
-import { IIdentifierResolverPort } from './core/ports/identifier-resolver.port';
-import { IBibtexParserPort } from './core/ports/bibtex-parser.port';
-import { BibliographyFile } from './core/domain/entities/bibliography-file.entity';
-import { BibEntry } from './core/domain/entities/bib-entry.entity';
-import { AcademicIdentifierVo } from './core/domain/value-objects/academic-identifier.vo';
-import { RegexAstBibtexParser } from './core/adapters/parser/regex-ast-bibtex.parser';
-import { CrossrefArxivResolverAdapter } from './core/adapters/resolver/crossref-arxiv.resolver';
-import {
+  IIdentifierResolverPort,
+  IBibtexParserPort,
+  BibliographyFile,
+  BibEntry,
+  AcademicIdentifierVo,
+  RegexAstBibtexParser,
+  CrossrefArxivResolverAdapter,
   DbLibraryItem,
   formatLibraryItemToBibtex,
-} from './domain/bibtex.formatter';
+} from './domain';
 
 @Injectable()
 export class CitationsRepository
@@ -46,7 +44,7 @@ export class CitationsRepository
     IBibtexParserPort
 {
   private readonly logger = new Logger(CitationsRepository.name);
-  private readonly bibParser = new RegexAstBibtexParser();
+  protected bibParser: IBibtexParserPort = new RegexAstBibtexParser();
   private readonly identifierResolver = new CrossrefArxivResolverAdapter();
 
   constructor(
@@ -533,5 +531,38 @@ export class CitationsRepository
       }
     }
     return -1;
+  }
+}
+
+export class PluggableLibrarySyncAdapter extends CitationsRepository {
+  constructor(
+    prisma?: PrismaService,
+    integrationsRepo?: IntegrationsRepository,
+    zoteroProvider?: ZoteroProvider,
+    mendeleyProvider?: MendeleyProvider,
+    libraryFacade?: ILibraryFacade,
+  ) {
+    super(
+      undefined,
+      undefined,
+      prisma,
+      integrationsRepo,
+      zoteroProvider,
+      mendeleyProvider,
+      libraryFacade,
+    );
+  }
+}
+
+export class ManuscriptBibAggregatorAdapter extends CitationsRepository {
+  constructor(
+    structureService?: StructureService,
+    docstoreService?: DocstoreService,
+    parser?: IBibtexParserPort,
+  ) {
+    super(structureService, docstoreService);
+    if (parser) {
+      this.bibParser = parser;
+    }
   }
 }

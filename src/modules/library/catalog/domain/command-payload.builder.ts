@@ -3,8 +3,8 @@ import { PrismaService } from '@/core';
 import {
   normalizeTags,
   cleanSingleTag,
-} from '@/modules/library/shared-kernel/domain/tag.domain';
-import { buildTipTapDocFromText } from '@/modules/library/shared-kernel/domain/tiptap.domain';
+} from '@/modules/library/core/domain/tag.domain';
+import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 export { buildTipTapDocFromText };
 import { TagInput } from '@/modules/library/catalog/types/tags.types';
 import {
@@ -20,7 +20,8 @@ import {
   parseCreatorString,
   splitAuthorString,
   isNoiseAuthorName,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+  convertAcademicHtmlToMarkdown,
+} from '@/modules/library/core';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
@@ -31,7 +32,7 @@ import {
   getEffectiveBaseFieldMap,
   harmonizeZoteroFields,
   resolveCanonicalCreatorRole,
-} from '@/modules/library/shared-kernel/domain/zotero-field-harmonizer.domain';
+} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import {
   CreateItemData,
@@ -178,32 +179,6 @@ export function unpackExtraFromDb(rawExtra?: string | null): {
   }
   return { cleanExtra: trimmed, extraFields: {} };
 }
-
-const INTERNAL_EXTRA_IGNORED_FIELDS = new Set([
-  'comment',
-  'comments',
-  'notes',
-  'provenance',
-  'fieldProvenance',
-  'tags',
-  'keywords',
-  'creators',
-  'authors',
-  'repository',
-  'archiveId',
-  'primaryCategory',
-  'categories',
-  'journalRef',
-  'openAccessPdfUrl',
-  'confidenceScore',
-  'originProvider',
-  'source',
-  'warnings',
-  'disambiguationWarning',
-  'rejectedCitedDoi',
-  'wafKind',
-  'promptUploadPdf',
-]);
 
 export function packExtraPayload(
   rawExtra: string | null | undefined,
@@ -393,45 +368,7 @@ export function extractNonColumnExtraFields(
 }
 
 export function convertHtmlToMarkdown(html: string): string {
-  if (!html || typeof html !== 'string') return '';
-  return html
-    .replace(/\r\n/g, '\n')
-    .replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, (_, c) => `# ${c.trim()}\n\n`)
-    .replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, (_, c) => `## ${c.trim()}\n\n`)
-    .replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, (_, c) => `### ${c.trim()}\n\n`)
-    .replace(
-      /<h[4-6][^>]*>([\s\S]*?)<\/h[4-6]>/gi,
-      (_, c) => `#### ${c.trim()}\n\n`,
-    )
-    .replace(
-      /<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi,
-      (_, c) => `> ${c.trim()}\n\n`,
-    )
-    .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, c) => `- ${c.trim()}\n`)
-    .replace(/<\/?(ul|ol)[^>]*>/gi, '\n')
-    .replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, c) => `${c.trim()}\n\n`)
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**')
-    .replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*')
-    .replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
-    .replace(
-      /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
-      '[$2]($1)',
-    )
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&mdash;/g, '—')
-    .replace(/&ndash;/g, '–')
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return convertAcademicHtmlToMarkdown(html);
 }
 
 export function prepareNotesToCreate(
@@ -504,18 +441,22 @@ export function prepareNotesToCreate(
           )
         : [];
 
+      const baseTags = normalizeTags([
+        'imported',
+        ...(sourceName ? [sourceName] : []),
+        ...(isComment ? ['comment'] : []),
+      ]);
+      const mergedTags = Array.from(
+        new Set([...baseTags, ...customTags.map((t) => t.trim())]),
+      );
+
       return {
         userId,
         createdById: createdById || userId,
         title: noteTitle,
         contentMd,
         contentJson: contentJson as Prisma.InputJsonValue,
-        tags: [
-          'imported',
-          ...(sourceName ? [sourceName] : []),
-          ...(isComment ? ['comment'] : []),
-          ...customTags,
-        ],
+        tags: mergedTags,
         version: 1,
       };
     })
@@ -720,33 +661,121 @@ export async function resolveOrCreateTags(
   userId: string,
   rawTagList: (TagInput | null | undefined)[],
   defaultTagType: TagType = TagType.manual,
+  projectId?: string | null,
 ): Promise<ResolvedTag[]> {
   const normalizedTagNames = normalizeTags(rawTagList).slice(0, 30);
   if (normalizedTagNames.length === 0) return [];
 
+  const effectiveProjectId =
+    projectId &&
+    projectId !== 'user' &&
+    projectId !== 'me' &&
+    projectId !== 'personal' &&
+    isUuid(projectId)
+      ? projectId
+      : null;
+
+  const scopeWhere: Prisma.TagWhereInput = effectiveProjectId
+    ? { projectId: effectiveProjectId }
+    : { userId, projectId: null };
+
   const tagTypeMap = buildTagTypeMap(rawTagList);
 
-  await client.tag.createMany({
-    data: normalizedTagNames.map((name) => ({
-      userId,
-      name,
-      type: tagTypeMap.get(name.toLowerCase()) || defaultTagType,
-    })),
-    skipDuplicates: true,
-  });
+  if (
+    typeof client.tag?.createMany === 'function' &&
+    typeof client.tag?.findMany === 'function'
+  ) {
+    const preExistingTags =
+      (await client.tag.findMany({
+        where: {
+          ...scopeWhere,
+          OR: normalizedTagNames.map((name) => ({
+            name: { equals: name, mode: 'insensitive' as const },
+          })),
+        },
+        select: { id: true, name: true, type: true },
+      })) || [];
 
-  const existingTags = await client.tag.findMany({
-    where: {
-      userId,
-      name: { in: normalizedTagNames },
-    },
-    select: { id: true, name: true, type: true },
-  });
+    const existingLowerNames = new Set(
+      preExistingTags
+        .map((t: { id: string; name?: string }) =>
+          typeof t.name === 'string' ? t.name.toLowerCase() : '',
+        )
+        .filter(Boolean),
+    );
+    const missingTagNames = normalizedTagNames.filter(
+      (name) => !existingLowerNames.has(name.toLowerCase()),
+    );
 
-  return existingTags.map((t) => ({
-    id: t.id,
-    type: tagTypeMap.get(t.name.toLowerCase()) || t.type || defaultTagType,
-  }));
+    if (missingTagNames.length > 0) {
+      await client.tag.createMany({
+        data: missingTagNames.map((name) => ({
+          userId,
+          createdById: userId,
+          name,
+          type: tagTypeMap.get(name.toLowerCase()) || defaultTagType,
+          projectId: effectiveProjectId,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    const allMatchingTags =
+      missingTagNames.length > 0
+        ? (await client.tag.findMany({
+            where: {
+              ...scopeWhere,
+              OR: normalizedTagNames.map((name) => ({
+                name: { equals: name, mode: 'insensitive' as const },
+              })),
+            },
+            select: { id: true, name: true, type: true },
+          })) || preExistingTags
+        : preExistingTags;
+
+    const dedupedByLower = new Map<string, ResolvedTag>();
+    for (const t of allMatchingTags as Array<{
+      id: string;
+      name?: string;
+      type?: TagType;
+    }>) {
+      const key = typeof t.name === 'string' ? t.name.toLowerCase() : t.id;
+      if (!dedupedByLower.has(key)) {
+        dedupedByLower.set(key, {
+          id: t.id,
+          type: tagTypeMap.get(key) || t.type || defaultTagType,
+        });
+      }
+    }
+
+    return Array.from(dedupedByLower.values());
+  }
+
+  // Fallback for lightweight mock clients that only implement findFirst + create
+  const resolved: ResolvedTag[] = [];
+  for (const tagName of normalizedTagNames) {
+    const determinedType =
+      tagTypeMap.get(tagName.toLowerCase()) || defaultTagType;
+    let tag = await client.tag.findFirst({
+      where: {
+        ...scopeWhere,
+        name: { equals: tagName, mode: 'insensitive' },
+      },
+    });
+    if (!tag) {
+      tag = await client.tag.create({
+        data: {
+          userId,
+          createdById: userId,
+          name: tagName,
+          type: determinedType,
+          projectId: effectiveProjectId,
+        },
+      });
+    }
+    resolved.push({ id: tag.id, type: determinedType });
+  }
+  return resolved;
 }
 
 export async function syncTagsForCatalogItem(
@@ -755,6 +784,7 @@ export async function syncTagsForCatalogItem(
   itemId: string,
   rawTags: (TagInput | null | undefined)[],
   defaultTagType: TagType = TagType.manual,
+  projectId?: string | null,
 ): Promise<void> {
   const normalizedTagsList = normalizeTags(rawTags);
   if (normalizedTagsList.length === 0) {
@@ -762,74 +792,46 @@ export async function syncTagsForCatalogItem(
     return;
   }
 
-  await client.itemTag.deleteMany({
-    where: {
-      itemId,
-      tag: { name: { notIn: normalizedTagsList } },
-    },
-  });
-
-  if (
-    typeof client.tag?.createMany === 'function' &&
-    typeof client.tag?.findMany === 'function'
-  ) {
-    const resolvedTags = await resolveOrCreateTags(
-      client,
-      userId,
-      rawTags,
-      defaultTagType,
-    );
-    if (resolvedTags.length === 0) return;
-
-    if (typeof client.itemTag?.createMany === 'function') {
-      await client.itemTag.createMany({
-        data: resolvedTags.map((t) => ({
-          tagId: t.id,
-          itemId,
-          type: t.type,
-        })),
-        skipDuplicates: true,
-      });
-      return;
-    }
-
-    await Promise.all(
-      resolvedTags.map((t) =>
-        client.itemTag.upsert({
-          where: { tagId_itemId: { tagId: t.id, itemId } },
-          create: { tagId: t.id, itemId, type: t.type },
-          update: { type: t.type },
-        }),
-      ),
-    );
+  const resolvedTags = await resolveOrCreateTags(
+    client,
+    userId,
+    rawTags,
+    defaultTagType,
+    projectId,
+  );
+  if (resolvedTags.length === 0) {
+    await client.itemTag.deleteMany({ where: { itemId } });
     return;
   }
 
-  const tagTypeMap = buildTagTypeMap(rawTags);
-  for (const tagName of normalizedTagsList) {
-    let tag = await client.tag.findFirst({
-      where: { userId, name: tagName, projectId: null },
-    });
-    const determinedType =
-      tagTypeMap.get(tagName.toLowerCase()) || defaultTagType;
+  await client.itemTag.deleteMany({
+    where: {
+      itemId,
+      tagId: { notIn: resolvedTags.map((t) => t.id) },
+    },
+  });
 
-    if (!tag) {
-      tag = await client.tag.create({
-        data: {
-          userId,
-          createdById: userId,
-          name: tagName,
-          type: determinedType,
-          projectId: null,
-        },
-      });
-    }
-    await client.itemTag.upsert({
-      where: { tagId_itemId: { tagId: tag.id, itemId } },
-      create: { tagId: tag.id, itemId, type: determinedType },
-      update: { type: determinedType },
+  if (typeof client.itemTag?.createMany === 'function') {
+    await client.itemTag.createMany({
+      data: resolvedTags.map((t) => ({
+        tagId: t.id,
+        itemId,
+        type: t.type,
+      })),
+      skipDuplicates: true,
     });
+    return;
   }
+
+  await Promise.all(
+    resolvedTags.map((t) =>
+      client.itemTag.upsert({
+        where: { tagId_itemId: { tagId: t.id, itemId } },
+        create: { tagId: t.id, itemId, type: t.type },
+        update: { type: t.type },
+      }),
+    ),
+  );
 }
 
 export function deriveFirstAuthor(data: {
@@ -1408,6 +1410,12 @@ export async function buildCommandCreateInput(
       att.attachmentType === 'primary_pdf',
   );
 
+  const effectiveProjectId =
+    (projectId && projectId !== 'user' && isUuid(projectId)
+      ? projectId
+      : undefined) ||
+    (data.projectId && isUuid(data.projectId) ? data.projectId : null);
+
   const ids = normalizeItemIdentifiers(data);
   const rawTagList = [
     ...(data.tags || []),
@@ -1424,6 +1432,7 @@ export async function buildCommandCreateInput(
     userId,
     rawTagList,
     defaultTagType,
+    effectiveProjectId,
   );
 
   const resolvedItemType = data.itemType ?? data.type ?? 'journalArticle';
@@ -1685,7 +1694,15 @@ export function buildCommandUpdateInput(
         }
       : {}),
     ...(newNotesToCreate.length > 0
-      ? { notesList: { create: newNotesToCreate } }
+      ? {
+          notesList: { create: newNotesToCreate },
+          noteCount:
+            (Array.isArray(existing.notesList)
+              ? existing.notesList.length
+              : typeof existing.noteCount === 'number'
+                ? existing.noteCount
+                : 0) + newNotesToCreate.length,
+        }
       : {}),
     ...(newAttachmentsToCreate.length > 0
       ? { attachments: { create: newAttachmentsToCreate } }

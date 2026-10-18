@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
-import { SharedKernelModule } from '@/modules/library/shared-kernel/shared-kernel.module';
+import { LibraryCoreModule } from '@/modules/library/core/core.module';
 
 // Controllers
 import {
@@ -60,17 +60,13 @@ import { StateRepository } from './repositories/state.repository';
 import { SavedSearchesRepository } from './repositories/saved-searches.repository';
 import { NotesRepository } from './repositories/notes.repository';
 // Ports
-import {
-  ITEM_EXISTENCE_PORT,
-  ITEM_READ_PORT,
-  ITEM_TRANSFORMER_PORT,
-} from './types/items.types';
+import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './types/items.types';
 
 // Facade
 import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
 
 @Module({
-  imports: [CoreModule, SharedKernelModule],
+  imports: [CoreModule, LibraryCoreModule],
   controllers: [
     ItemCurationController,
     ProjectItemCurationController,
@@ -117,10 +113,6 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     ConditionEvaluatorEngine,
     ItemsMapper,
     ItemTransformer,
-    {
-      provide: ITEM_TRANSFORMER_PORT,
-      useExisting: ItemTransformer,
-    },
 
     // Repositories
     CommandRepository,
@@ -156,7 +148,6 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     StateService,
     SavedSearchesService,
     NotesService,
-    ITEM_TRANSFORMER_PORT,
     ITEM_EXISTENCE_PORT,
     ITEM_READ_PORT,
   ],

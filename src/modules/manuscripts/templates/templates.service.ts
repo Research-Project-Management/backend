@@ -4,15 +4,18 @@
  * Consolidates template listing, search, lookup, instantiation, and custom template creation.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { TemplatesRepository } from './templates.repository';
-import { ManuscriptTemplateEntity } from './core/domain/entities/manuscript-template.entity';
-import { TemplateNotFoundException } from './core/domain/exceptions/template-not-found.exception';
-import { InvalidTemplateException } from './core/domain/exceptions/invalid-template.exception';
+import {
+  ManuscriptTemplateEntity,
+  TemplateNotFoundException,
+  InvalidTemplateException,
+} from './domain';
 import {
   QueryTemplatesDto,
   SearchTemplatesDto,
   InstantiateTemplateDto,
+  OverleafInstantiateTemplateDto,
   CreateTemplateDto,
 } from './dto/template.dto';
 
@@ -86,10 +89,36 @@ export class TemplatesService {
     };
   }
 
-  async instantiateTemplate(userId: string, dto: any) {
+  async instantiateTemplate(
+    userId: string,
+    dto:
+      | InstantiateTemplateDto
+      | OverleafInstantiateTemplateDto
+      | {
+          templateId?: string;
+          template_id?: string;
+          templateVersionId?: string;
+          id?: string;
+          projectName?: string;
+          name?: string;
+        },
+  ) {
     const templateId =
-      dto.templateId || dto.template_id || dto.templateVersionId || dto.id;
-    const projectName = dto.projectName || dto.name;
+      ('templateId' in dto ? dto.templateId : undefined) ||
+      ('template_id' in dto ? dto.template_id : undefined) ||
+      ('templateVersionId' in dto ? dto.templateVersionId : undefined) ||
+      ('id' in dto ? dto.id : undefined);
+    const projectName =
+      ('projectName' in dto ? dto.projectName : undefined) ||
+      ('name' in dto
+        ? dto.name
+        : 'project_name' in dto
+          ? dto.project_name
+          : undefined);
+
+    if (!templateId) {
+      throw new InvalidTemplateException('Template ID must be specified.');
+    }
 
     const template = await this.getTemplateEntity(templateId);
     const resolvedName = projectName || template.name;

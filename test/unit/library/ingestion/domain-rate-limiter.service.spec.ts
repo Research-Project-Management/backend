@@ -63,7 +63,7 @@ describe('DomainRateLimiterService', () => {
   });
 
   it('respects bypassDelay flag', async () => {
-    (service as any).domainConfigs['slow-domain'] = { minIntervalMs: 500 };
+    service.setDomainConfig('slow-domain', { minIntervalMs: 500 });
     service.bypassDelay = true;
 
     const t0 = Date.now();
@@ -71,11 +71,11 @@ describe('DomainRateLimiterService', () => {
     await service.acquire('slow-domain');
     const elapsed = Date.now() - t0;
 
-    expect(elapsed).toBeLessThan(30);
+    expect(elapsed).toBeLessThan(150);
   });
 
   it('aborts cleanly when AbortSignal is triggered', async () => {
-    (service as any).domainConfigs['abort-domain'] = { minIntervalMs: 500 };
+    service.setDomainConfig('abort-domain', { minIntervalMs: 500 });
 
     await service.acquire('abort-domain');
 

@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+﻿import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   IExternalSearchProvider,
@@ -11,7 +11,7 @@ import {
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 
 const DEFAULT_SEARXNG_TIMEOUT_MS = 5000;
 const DEFAULT_LIMIT = 10;

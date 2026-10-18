@@ -16,15 +16,19 @@ import { ClsiController } from './clsi.controller';
 import { ClsiService } from './services/clsi.service';
 import { RemoteClsiClientAdapter } from './services/remote-clsi.client';
 import { ClsiWorkspacePlannerService } from './services/workspace-planner.service';
-import { OverleafIncrementalWorkspace } from './repositories/incremental-workspace.repository';
-import { LocalProcessRunner } from './core/adapters/runners/local-process.runner';
-import { DockerSandboxRunner } from './core/adapters/runners/docker-sandbox.runner';
-import { LatexmkEngine } from './core/adapters/engines/latexmk.engine';
-import { TectonicEngine } from './core/adapters/engines/tectonic.engine';
-import { DiskUsageCleaner } from './core/adapters/workspace/disk-usage.cleaner';
-import { ClsiHealthCheck } from './core/adapters/engines/health-check';
-import { CompilePipeline } from './services/compile-pipeline.service';
-import { ISandboxRunner } from './core/ports/runner.port';
+import {
+  OverleafIncrementalWorkspace,
+  DiskUsageCleaner,
+} from './repositories/incremental-workspace.repository';
+import {
+  CompilePipeline,
+  LocalProcessRunner,
+  DockerSandboxRunner,
+  LatexmkEngine,
+  TectonicEngine,
+  ClsiHealthCheck,
+} from './services/compile-pipeline.service';
+import { ISandboxRunner } from './domain/clsi-ports';
 
 const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
 

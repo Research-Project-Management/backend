@@ -5,6 +5,7 @@ import {
   CreateAnnotationData,
   UpdateAnnotationData,
 } from '@/modules/library/extraction/types/annotations.types';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 
 export const DEFAULT_ANNOTATION_COLOR = '#ffeb3b';
 const HEX_COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
@@ -183,17 +184,12 @@ export class AnnotationNormalizer {
   }
 
   /**
-   * Normalizes annotation tags array, trimming and deduplicating.
+   * Normalizes annotation tags array using canonical tag normalizer.
    */
   normalizeTags(tags?: unknown): string[] {
     if (!Array.isArray(tags)) return [];
-    return Array.from(
-      new Set(
-        tags
-          .filter((t): t is string => typeof t === 'string')
-          .map((t) => t.trim())
-          .filter((t) => t.length > 0 && t.length <= 100),
-      ),
+    return normalizeTags(
+      tags.filter((t): t is string => typeof t === 'string'),
     );
   }
 

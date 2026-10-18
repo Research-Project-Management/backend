@@ -589,5 +589,3 @@ export class ProjectAttachmentController extends BaseAttachmentController {
     return this.executeCaptureWebSnapshot(userId, itemId, body, projectId);
   }
 }
-
-export { AttachmentController as AttachmentsController };

@@ -16,15 +16,16 @@ import {
   DocModifiedError,
   DocNotFoundError,
 } from '@/modules/manuscripts/docstore/domain';
-import { IInFlightStorePort } from './core/ports/in-flight-store.port';
-import { BaseDocData, CommitResult } from './core/ports/docstore-writer.port';
-import { InFlightDoc } from './core/domain/entities/in-flight-doc.entity';
-import { DocumentVersionVo } from './core/domain/value-objects/document-version.vo';
 import {
+  IInFlightStorePort,
+  BaseDocData,
+  CommitResult,
+  InFlightDoc,
+  DocumentVersionVo,
   FlushStatusVo,
   FlushStatusEnum,
-} from './core/domain/value-objects/flush-status.vo';
-import { DocUpdaterConflictException } from './core/domain/exceptions/doc-updater-conflict.exception';
+  DocUpdaterConflictException,
+} from './domain';
 
 interface SerializedInFlightDoc {
   docId: string;
@@ -259,6 +260,14 @@ export class DocumentUpdaterRepository
     this.lockMemory.delete(resourceKey);
   }
 
+  public async acquire(resourceKey: string, ttlMs = 15000): Promise<boolean> {
+    return this.acquireLock(resourceKey, ttlMs);
+  }
+
+  public async release(resourceKey: string): Promise<void> {
+    return this.releaseLock(resourceKey);
+  }
+
   public async isLocked(resourceKey: string): Promise<boolean> {
     if (this.redisService) {
       try {
@@ -390,7 +399,34 @@ export class DocumentUpdaterRepository
     this.timers.clear();
   }
 
+  public cancelAll(): void {
+    this.cancelAllDebounces();
+  }
+
+  public cancelAllForProject(projectId: string): void {
+    this.cancelAllProjectDebounces(projectId);
+  }
+
+  public schedule(
+    projectId: string,
+    docId: string,
+    delayMs: number,
+    callback: () => Promise<void>,
+  ): void {
+    this.scheduleDebounce(projectId, docId, delayMs, callback);
+  }
+
+  public cancel(projectId: string, docId: string): void {
+    this.cancelDebounce(projectId, docId);
+  }
+
   public onModuleDestroy(): void {
     this.cancelAllDebounces();
   }
 }
+
+export class InMemoryInFlightStoreAdapter extends DocumentUpdaterRepository {}
+
+export class LocalMutexUpdaterLockAdapter extends DocumentUpdaterRepository {}
+
+export class NodeTimeoutDebounceAdapter extends DocumentUpdaterRepository {}

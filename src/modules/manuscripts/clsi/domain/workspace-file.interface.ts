@@ -1,10 +1,6 @@
 /**
  * modules/manuscripts/clsi/domain/workspace-file.interface.ts
- * Core workspace file contract representing files in compiler workspace.
+ * Core workspace file contract re-exported from Manuscripts Shared Kernel.
  */
 
-export interface WorkspaceFile {
-  path: string;
-  content: string | Buffer;
-  hash?: string;
-}
+export * from '@/modules/manuscripts/core/domain/workspace-file.interface';

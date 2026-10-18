@@ -3,14 +3,12 @@
  * inference function used when a PDF upload has no DOI, arXiv ID, or other
  * authoritative identifier.
  *
- * @see src/modules/library/shared-kernel/domain/bibliographic.domain.ts
+ * @see src/modules/library/core/domain/bibliographic.domain.ts
  */
-import { inferItemTypeFromPdfSignals } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { inferItemTypeFromPdfSignals } from '@/modules/library/core';
 
 describe('inferItemTypeFromPdfSignals', () => {
-  // ──────────────────────────────────────────────────────────────
   // Tier 1 – ISBN
-  // ──────────────────────────────────────────────────────────────
   describe('Tier 1 – ISBN present', () => {
     it('returns book when ISBN is present without bookTitle', () => {
       const result = inferItemTypeFromPdfSignals({ isbn: '9780262035613' });
@@ -27,9 +25,7 @@ describe('inferItemTypeFromPdfSignals', () => {
     });
   });
 
-  // ──────────────────────────────────────────────────────────────
   // Tier 2 – Native structural signals
-  // ──────────────────────────────────────────────────────────────
   describe('Tier 2 – Native structural signals', () => {
     it('returns conferencePaper when conferenceName is present', () => {
       const result = inferItemTypeFromPdfSignals({
@@ -49,9 +45,7 @@ describe('inferItemTypeFromPdfSignals', () => {
     });
   });
 
-  // ──────────────────────────────────────────────────────────────
   // Tier 3a – Thesis patterns
-  // ──────────────────────────────────────────────────────────────
   describe('Tier 3a – Thesis patterns', () => {
     it('detects PhD thesis from title', () => {
       const result = inferItemTypeFromPdfSignals({
@@ -101,9 +95,7 @@ describe('inferItemTypeFromPdfSignals', () => {
     });
   });
 
-  // ──────────────────────────────────────────────────────────────
   // Tier 3b – Report patterns
-  // ──────────────────────────────────────────────────────────────
   describe('Tier 3b – Report patterns', () => {
     it('detects technical report from title', () => {
       const result = inferItemTypeFromPdfSignals({
@@ -136,9 +128,7 @@ describe('inferItemTypeFromPdfSignals', () => {
     });
   });
 
-  // ──────────────────────────────────────────────────────────────
   // Tier 3c – Conference paper patterns (title/note)
-  // ──────────────────────────────────────────────────────────────
   describe('Tier 3c – Conference paper patterns', () => {
     it('detects conference paper from "Proceedings of" in title', () => {
       const result = inferItemTypeFromPdfSignals({
@@ -164,9 +154,7 @@ describe('inferItemTypeFromPdfSignals', () => {
     });
   });
 
-  // ──────────────────────────────────────────────────────────────
   // Tier 3d – Preprint patterns
-  // ──────────────────────────────────────────────────────────────
   describe('Tier 3d – Preprint patterns', () => {
     it('detects preprint from "under review" note', () => {
       const result = inferItemTypeFromPdfSignals({
@@ -193,9 +181,7 @@ describe('inferItemTypeFromPdfSignals', () => {
     });
   });
 
-  // ──────────────────────────────────────────────────────────────
   // Tier 3e – Patent
-  // ──────────────────────────────────────────────────────────────
   describe('Tier 3e – Patent patterns', () => {
     it('detects patent from title', () => {
       const result = inferItemTypeFromPdfSignals({
@@ -206,9 +192,7 @@ describe('inferItemTypeFromPdfSignals', () => {
     });
   });
 
-  // ──────────────────────────────────────────────────────────────
   // Tier 3f – Dataset
-  // ──────────────────────────────────────────────────────────────
   describe('Tier 3f – Dataset patterns', () => {
     it('detects dataset from title', () => {
       const result = inferItemTypeFromPdfSignals({
@@ -225,9 +209,7 @@ describe('inferItemTypeFromPdfSignals', () => {
     });
   });
 
-  // ──────────────────────────────────────────────────────────────
   // Edge cases
-  // ──────────────────────────────────────────────────────────────
   describe('Edge cases', () => {
     it('returns undefined for empty signals', () => {
       expect(inferItemTypeFromPdfSignals({})).toBeUndefined();

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   Logger,
   OnModuleInit,
@@ -6,16 +6,13 @@ import {
   Inject,
 } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import {
-  IOutboxRegistry,
-  OUTBOX_REGISTRY_PORT,
-} from '@/modules/library/shared-kernel';
+import { IOutboxRegistry, OUTBOX_REGISTRY_PORT } from '@/modules/library/core';
 import { OutboxEvent } from '@prisma/client';
 import {
   INTEGRATION_EVENT_TOPICS,
   BaseIntegrationEvent,
   ItemDeletedIntegrationPayload,
-} from '@/modules/library/shared-kernel/events/integration-events';
+} from '@/modules/library/core/events/integration-events';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 

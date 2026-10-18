@@ -1,9 +1,9 @@
-import { BaseDomainException } from '@/modules/library/shared-kernel/core/errors/domain.exception';
+﻿import { BaseDomainException } from '@/modules/library/core/errors/domain.exception';
 import {
   ProviderName,
   QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
+import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 
 export class SsrfBlockedDomainException extends BaseDomainException {
   constructor(message: string) {

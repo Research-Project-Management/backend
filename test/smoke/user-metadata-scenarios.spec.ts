@@ -12,8 +12,8 @@ import {
   normalizeArxivId,
   normalizeIsbn,
   normalizePmid,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { AcademicRegexCatalog } from '@/modules/library/shared-kernel/domain/academic-regex.catalog';
+} from '@/modules/library/core';
+import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
 import { MetadataReconciliationService } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { buildMockLibraryItem } from '@test/factories';
@@ -150,8 +150,8 @@ describe('🧪 Researcher Persona: Comprehensive Metadata Testing Suite', () => 
 
       // CSL parsing
       const csl1 = CslJsonMapper.parseStringName('Ludwig van Beethoven');
-      expect(csl1.family).toBe('Beethoven');
-      expect(csl1.given).toBe('Ludwig van');
+      expect(csl1.family).toBe('van Beethoven');
+      expect(csl1.given).toBe('Ludwig');
     });
 
     it('Case 2.2: Vietnamese 3-word, 4-word, compound surnames (Họ kép)', () => {

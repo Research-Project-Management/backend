@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, AnnotationType } from '@prisma/client';
-import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import {
   AnnotationEntity,
   CreateAnnotationData,
@@ -13,7 +13,7 @@ import {
   UpsertAnnotationItem,
   BatchAnnotationsResult,
 } from '@/modules/library/extraction/types/annotations.types';
-import { buildAnnotationSortIndex } from '@/modules/library/shared-kernel';
+import { buildAnnotationSortIndex } from '@/modules/library/core';
 
 export type { AnnotationEntity, CreateAnnotationData, UpdateAnnotationData };
 
@@ -43,7 +43,7 @@ export class AnnotationsRepository {
     return tx ?? this.prisma;
   }
 
-  // ─── Queries ───────────────────────────────────────────────────────────────
+  // Queries
 
   async findByAttachment(
     attachmentId: string,
@@ -90,7 +90,7 @@ export class AnnotationsRepository {
     });
   }
 
-  // ─── Mutations ─────────────────────────────────────────────────────────────
+  // Mutations
 
   async create(
     data: CreateAnnotationData,
@@ -191,7 +191,7 @@ export class AnnotationsRepository {
     return result.count > 0;
   }
 
-  // ─── Batch ─────────────────────────────────────────────────────────────────
+  // Batch
 
   async batchUpsert(
     attachmentId: string,

@@ -109,9 +109,8 @@ export class DraftService {
     try {
       await this.draftRepository.delete(id, authorId);
     } catch (delErr) {
-      this.logger.warn(
-        `Failed to delete draft ${id} after publishing: ${delErr}`,
-      );
+      const msg = delErr instanceof Error ? delErr.message : String(delErr);
+      this.logger.warn(`Failed to delete draft ${id} after publishing: ${msg}`);
     }
 
     const publishedWorkItem = result?.workItem || result?.item;

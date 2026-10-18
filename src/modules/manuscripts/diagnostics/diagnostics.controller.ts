@@ -23,6 +23,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { DiagnosticsService } from './diagnostics.service';
 import {
   ParseLogDto,
@@ -110,6 +111,8 @@ export class DiagnosticsController {
   }
 
   @Post([':projectId/lint', 'project/:projectId/lint'])
+  @UseGuards(ProjectRoleGuard)
+  @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

@@ -11,14 +11,14 @@ import {
   DomainEventEnvelope,
   IOutboxRegistry,
   OUTBOX_REGISTRY_PORT,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 import { OutboxEvent } from '@prisma/client';
 import {
   INTEGRATION_EVENT_TOPICS,
   BaseIntegrationEvent,
   ItemCreatedIntegrationPayload,
   ItemDeletedIntegrationPayload,
-} from '@/modules/library/shared-kernel/events/integration-events';
+} from '@/modules/library/core/events/integration-events';
 import { SearchService } from '@/modules/library/search/services/search.service';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 
@@ -72,7 +72,7 @@ export class SearchEventsSubscriber implements OnModuleInit {
     }
   }
 
-  // ─── Integration Events (Cross-BC / Outbox) ────────────────────────────────
+  // Integration Events (Cross-BC / Outbox)
 
   @OnEvent(INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_CREATED, { async: true })
   async handleIntegrationItemCreated(
@@ -208,7 +208,7 @@ export class SearchEventsSubscriber implements OnModuleInit {
     return this.handleIntegrationItemDeleted(event);
   }
 
-  // ─── Domain Events (Local Sync & Extraction Lifecycle) ─────────────────────
+  // Domain Events (Local Sync & Extraction Lifecycle)
 
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_DELETED, { async: true })
   async handleDomainItemDeleted(event: DomainEventEnvelope): Promise<void> {
@@ -285,7 +285,3 @@ export class SearchEventsSubscriber implements OnModuleInit {
     );
   }
 }
-
-// Aliases for backwards compatibility with tests and consumers
-export { SearchEventsSubscriber as CatalogEventsSubscriber };
-export { SearchEventsSubscriber as EventHandler };

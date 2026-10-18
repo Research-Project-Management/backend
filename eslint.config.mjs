@@ -11,7 +11,7 @@ export default tseslint.config(
       'dist/**',
       'coverage/**',
       'uploads/**',
-      'prisma/migrations/**',
+      'prisma/**',
       '*.tsbuildinfo',
       'scripts/**',
     ],
@@ -35,6 +35,7 @@ export default tseslint.config(
   {
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unsafe-enum-comparison': 'warn',
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
       '@typescript-eslint/no-unsafe-assignment': 'warn',

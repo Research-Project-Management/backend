@@ -79,7 +79,7 @@ export class DraftController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
-      'Publish draft into an active work item (cấp mã FLUX-123 & xóa draft)',
+      'Publish draft into an active work item (assign FLUX identifier and delete draft)',
   })
   @ApiParam({ name: 'id', description: 'Draft UUID' })
   async publishDraft(

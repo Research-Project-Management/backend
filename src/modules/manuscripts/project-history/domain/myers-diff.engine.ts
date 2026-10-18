@@ -7,7 +7,7 @@
 import { Snapshot } from './snapshot.entity';
 import { FileDiffVo } from './file-diff.vo';
 import { DiffHunkVo, DiffLine, WordDiffToken } from './diff-hunk.vo';
-import type { TextDiffResult } from '../core/ports/diff-engine.port';
+import type { TextDiffResult } from './diff-engine.port';
 
 export class MyersDiffEngine {
   /**

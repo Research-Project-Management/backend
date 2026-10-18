@@ -4,7 +4,8 @@ import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { EXTRACTION_FACADE, IExtractionFacade } from '@/modules/library';
 import { EngineService } from '../../engine/engine.service';
 import { ScientificChunkingService } from './scientific-chunking.service';
-import { FileUploadedEvent } from '@/modules/storage/domain/events/file-uploaded.event';
+import { FileUploadedEvent } from '@/modules/storage';
+
 
 @Injectable()
 export class DocumentAiIngestionService {

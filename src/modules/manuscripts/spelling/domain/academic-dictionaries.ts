@@ -4,8 +4,8 @@
  * Zero I/O, zero NestJS imports.
  */
 
-export { ENGLISH_COMMON_WORDS } from '@/modules/manuscripts/spelling/core/adapters/engine/dictionaries/english-common.dictionary';
-export { VIETNAMESE_COMMON_WORDS } from '@/modules/manuscripts/spelling/core/adapters/engine/dictionaries/vietnamese-common.dictionary';
+export { ENGLISH_COMMON_WORDS } from './dictionaries/english-common.dictionary';
+export { VIETNAMESE_COMMON_WORDS } from './dictionaries/vietnamese-common.dictionary';
 
 export const ACADEMIC_SHARED_WORDS: readonly string[] = [
   // Core LaTeX & Publishing

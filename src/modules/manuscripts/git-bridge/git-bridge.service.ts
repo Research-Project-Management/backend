@@ -11,24 +11,24 @@ import { Readable } from 'stream';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
-import { LiveCollaborationPort } from '@/modules/manuscripts/docstore/domain';
+import { LiveCollaborationPort } from '@/modules/manuscripts/core';
 import { GitBridgeRepository } from './git-bridge.repository';
 import {
   generateToken,
   GitChange,
+  GitRunResult,
   GitService,
   isTextPath,
   parseBasicAuth,
   parseNameStatusZ,
   parseToken,
   ProjectRole,
+  PushApplyResult,
   StoredGitToken,
   tokenMatches,
   toProjectPath,
   toRepoPath,
-} from './domain/git-bridge.domain';
-import { GitRunResult } from './core/ports/git-cli.port';
-import { PushApplyResult } from './core/use-cases/git-sync.use-case';
+} from './domain';
 
 const MAX_TOKENS = 20;
 

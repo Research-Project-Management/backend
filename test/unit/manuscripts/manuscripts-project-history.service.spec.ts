@@ -37,33 +37,23 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
-import { ProjectHistoryService } from '@/modules/manuscripts/project-history/project-history.service';
-import { ProjectHistoryController } from '@/modules/manuscripts/project-history/project-history.controller';
-import { CreateSnapshotUseCase } from '@/modules/manuscripts/project-history/core/use-cases/create-snapshot.use-case';
-import { GetVersionListUseCase } from '@/modules/manuscripts/project-history/core/use-cases/get-version-list.use-case';
-import { GetSnapshotByVersionUseCase } from '@/modules/manuscripts/project-history/core/use-cases/get-snapshot-by-version.use-case';
-import { CompareVersionsDiffUseCase } from '@/modules/manuscripts/project-history/core/use-cases/compare-versions-diff.use-case';
-import { LabelVersionUseCase } from '@/modules/manuscripts/project-history/core/use-cases/label-version.use-case';
-import { DeleteLabelUseCase } from '@/modules/manuscripts/project-history/core/use-cases/delete-label.use-case';
-import { RestoreVersionUseCase } from '@/modules/manuscripts/project-history/core/use-cases/restore-version.use-case';
-
-import { IHistoryRepositoryPort } from '@/modules/manuscripts/project-history/core/ports/history-repository.port';
-import { IProjectCollectorPort } from '@/modules/manuscripts/project-history/core/ports/project-collector.port';
 import {
+  ProjectHistoryService,
+  ProjectHistoryController,
+  IHistoryRepositoryPort,
+  IProjectCollectorPort,
   IProjectRestorerPort,
   RestoreResult,
-} from '@/modules/manuscripts/project-history/core/ports/project-restorer.port';
-import { MyersDiffEngineAdapter } from '@/modules/manuscripts/project-history/core/adapters/engine/myers-diff-engine.adapter';
-
-import { Snapshot } from '@/modules/manuscripts/project-history/core/domain/entities/snapshot.entity';
-import { VersionLabel } from '@/modules/manuscripts/project-history/core/domain/entities/version-label.entity';
-import { FileSnapshotVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/file-snapshot.vo';
-import { DiffHunkVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/diff-hunk.vo';
-import { FileDiffVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/file-diff.vo';
-
-import { VersionNotFoundException } from '@/modules/manuscripts/project-history/core/domain/exceptions/version-not-found.exception';
-import { DuplicateLabelException } from '@/modules/manuscripts/project-history/core/domain/exceptions/duplicate-label.exception';
-import { EmptyProjectException } from '@/modules/manuscripts/project-history/core/domain/exceptions/empty-project.exception';
+  MyersDiffEngineAdapter,
+  Snapshot,
+  VersionLabel,
+  FileSnapshotVo,
+  DiffHunkVo,
+  FileDiffVo,
+  VersionNotFoundException,
+  DuplicateLabelException,
+  EmptyProjectException,
+} from '@/modules/manuscripts/project-history';
 
 // ---------------------------------------------------------------------------
 // Mock Implementations for Ports (SPIs)
@@ -209,13 +199,50 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
   let collector: MockProjectCollector;
   let restorer: MockProjectRestorer;
 
-  let createSnapshotUseCase: CreateSnapshotUseCase;
-  let getVersionListUseCase: GetVersionListUseCase;
-  let getSnapshotByVersionUseCase: GetSnapshotByVersionUseCase;
-  let compareVersionsDiffUseCase: CompareVersionsDiffUseCase;
-  let labelVersionUseCase: LabelVersionUseCase;
-  let deleteLabelUseCase: DeleteLabelUseCase;
-  let restoreVersionUseCase: RestoreVersionUseCase;
+  let createSnapshotUseCase: {
+    execute: (input: {
+      projectId: string;
+      summary?: string;
+      createdById?: string;
+      label?: string;
+      isAutomatic?: boolean;
+    }) => Promise<Snapshot>;
+  };
+  let getVersionListUseCase: {
+    execute: (projectId: string) => Promise<Snapshot[]>;
+  };
+  let getSnapshotByVersionUseCase: {
+    execute: (projectId: string, version: number) => Promise<Snapshot>;
+  };
+  let compareVersionsDiffUseCase: {
+    execute: (
+      projectId: string,
+      baseVersion: number,
+      targetVersion: number,
+    ) => ReturnType<ProjectHistoryService['compareVersions']>;
+  };
+  let labelVersionUseCase: {
+    execute: (input: {
+      projectId: string;
+      version: number;
+      label: string;
+      createdById?: string;
+    }) => ReturnType<ProjectHistoryService['labelVersion']>;
+  };
+  let deleteLabelUseCase: {
+    execute: (projectId: string, labelId: string) => Promise<void>;
+  };
+  let restoreVersionUseCase: {
+    execute: (input: {
+      projectId: string;
+      targetVersion: number;
+      userId?: string;
+    }) => Promise<{
+      targetSnapshot: Snapshot;
+      newSnapshot: Snapshot;
+      restoreResult: RestoreResult;
+    }>;
+  };
 
   let historyService: ProjectHistoryService;
   let historyController: ProjectHistoryController;
@@ -227,30 +254,77 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
     restorer = new MockProjectRestorer();
     restorer.collectorToUpdate = collector;
 
-    createSnapshotUseCase = new CreateSnapshotUseCase(historyRepo, collector);
-    getVersionListUseCase = new GetVersionListUseCase(historyRepo);
-    getSnapshotByVersionUseCase = new GetSnapshotByVersionUseCase(historyRepo);
-    compareVersionsDiffUseCase = new CompareVersionsDiffUseCase(
-      historyRepo,
-      diffEngine,
-    );
-    labelVersionUseCase = new LabelVersionUseCase(historyRepo);
-    deleteLabelUseCase = new DeleteLabelUseCase(historyRepo);
-    restoreVersionUseCase = new RestoreVersionUseCase(
-      historyRepo,
-      restorer,
-      createSnapshotUseCase,
+    historyService = new ProjectHistoryService(
+      historyRepo as any,
+      collector as any,
+      restorer as any,
     );
 
-    historyService = new ProjectHistoryService(
-      createSnapshotUseCase,
-      getVersionListUseCase,
-      getSnapshotByVersionUseCase,
-      compareVersionsDiffUseCase,
-      labelVersionUseCase,
-      deleteLabelUseCase,
-      restoreVersionUseCase,
-    );
+    createSnapshotUseCase = {
+      execute: async (input) => {
+        const dto = await historyService.createSnapshot(
+          input.projectId,
+          {
+            summary: input.summary,
+            isAutomatic: input.isAutomatic,
+            label: input.label,
+          },
+          input.createdById,
+        );
+        return (await historyRepo.findByVersion(
+          input.projectId,
+          dto.version,
+        ))!;
+      },
+    };
+    getVersionListUseCase = {
+      execute: (pId) => historyRepo.listVersions(pId),
+    };
+    getSnapshotByVersionUseCase = {
+      execute: async (pId, version) => {
+        const snap = await historyRepo.findByVersion(pId, version);
+        if (!snap) throw new VersionNotFoundException(pId, version);
+        return snap;
+      },
+    };
+    compareVersionsDiffUseCase = {
+      execute: (pId, baseV, targetV) =>
+        historyService.compareVersions(pId, baseV, targetV),
+    };
+    labelVersionUseCase = {
+      execute: (input) =>
+        historyService.labelVersion(
+          input.projectId,
+          input.version,
+          input.label,
+          input.createdById,
+        ),
+    };
+    deleteLabelUseCase = {
+      execute: (pId, labelId) => historyService.deleteLabel(pId, labelId),
+    };
+    restoreVersionUseCase = {
+      execute: async (input) => {
+        const res = await historyService.restoreVersion(
+          input.projectId,
+          input.targetVersion,
+          input.userId,
+        );
+        const targetSnapshot = (await historyRepo.findByVersion(
+          input.projectId,
+          res.restoredSnapshot.version,
+        ))!;
+        const newSnapshot = (await historyRepo.findByVersion(
+          input.projectId,
+          res.newSnapshot.version,
+        ))!;
+        return {
+          targetSnapshot,
+          newSnapshot,
+          restoreResult: res.restoreResult,
+        };
+      },
+    };
 
     historyController = new ProjectHistoryController(historyService);
   });

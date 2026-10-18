@@ -13,54 +13,17 @@ import { RetractionCheckResult } from './types/retraction.types';
 
 import {
   INGESTION_FACADE,
-  IIngestionFacade as IKernelIngestionFacade,
-} from '@/modules/library/shared-kernel/ports/ingestion.port';
+  IIngestionFacade,
+} from '@/modules/library/core/ports/ingestion.port';
 export { INGESTION_FACADE };
-
-export interface IIngestionFacade extends IKernelIngestionFacade {
-  submitIngestion(
-    envelope: IngestionSubmissionEnvelope,
-    options?: { enqueue?: boolean },
-  ): Promise<IngestionAcceptedResult>;
-  getIngestionStatus(
-    userId: string,
-    runId: string,
-  ): Promise<IngestionRunSnapshot>;
-  findDuplicates(
-    userId: string,
-    projectId?: string,
-  ): Promise<DuplicateClusterResult[]>;
-  getQualityAudit(
-    userId: string,
-    projectId?: string,
-  ): Promise<QualityAuditReport>;
-  checkRetraction(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<RetractionCheckResult>;
-  reResolveMetadata(
-    userId: string,
-    itemId: string,
-    options?: {
-      doi?: string;
-      arxivId?: string;
-      pmid?: string;
-      isbn?: string;
-      title?: string;
-      forceRefresh?: boolean;
-      expectedVersion?: number;
-    },
-    projectId?: string,
-  ): Promise<Awaited<ReturnType<IngestionService['reResolveMetadata']>>>;
-}
+export type { IIngestionFacade };
 
 /**
  * Public Facade for Ingestion Bounded Context (Supporting Domain).
  * Shields ingestion pipelines, curation/dedup algorithms, and retraction checks.
  */
 @Injectable()
-export class IngestionFacade implements IIngestionFacade {
+export class IngestionFacade {
   constructor(
     private readonly ingestionService: IngestionService,
     private readonly duplicateService: DuplicateService,

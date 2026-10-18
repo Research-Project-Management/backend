@@ -22,6 +22,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { TrackChangesService } from './track-changes.service';
 import {
   RecordChangeDto,
@@ -49,7 +50,8 @@ import { AuthenticatedRequest } from '@/core';
   'manuscripts/projects/:projectId/docs/:docId/review',
   'projects/:projectId/docs/:docId/review',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@RequireRole(Role.REVIEWER)
 export class TrackChangesController {
   constructor(private readonly trackChangesService: TrackChangesService) {}
 
@@ -107,6 +109,7 @@ export class TrackChangesController {
   }
 
   @Post('changes/:changeId/accept')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Accept a proposed change (merges text permanently into Docstore)',
   })
@@ -131,6 +134,7 @@ export class TrackChangesController {
   }
 
   @Post('changes/:changeId/reject')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Reject a proposed change (reverts text in Docstore)',
   })
@@ -155,6 +159,7 @@ export class TrackChangesController {
   }
 
   @Post('changes/batch')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Bulk accept or reject all pending changes in a document',
   })

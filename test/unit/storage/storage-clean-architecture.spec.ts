@@ -1,13 +1,13 @@
-import { ContentHash } from '@/modules/storage/domain/value-objects/content-hash.vo';
-import { ByteRange } from '@/modules/storage/domain/value-objects/byte-range.vo';
-import { StorageKey } from '@/modules/storage/domain/value-objects/storage-key.vo';
+import { ContentHash } from '@/modules/storage/core';
+import { ByteRange } from '@/modules/storage/transfer';
+import { StorageKey } from '@/modules/storage/core';
 import {
   StorageBlob,
   BlobStatus,
-} from '@/modules/storage/domain/entities/storage-blob.entity';
-import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
-import { StorageQuota } from '@/modules/storage/domain/entities/storage-quota.entity';
-import { FileScope } from '@/modules/storage/domain/value-objects/file-scope.vo';
+} from '@/modules/storage/core';
+import { StorageNode } from '@/modules/storage/drive';
+import { StorageQuota } from '@/modules/storage/drive';
+import { FileScope } from '@/modules/storage/drive';
 
 describe('Storage Clean Architecture & DDD Domain Suite', () => {
   describe('ContentHash Value Object', () => {

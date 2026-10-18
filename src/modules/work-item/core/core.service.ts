@@ -823,11 +823,21 @@ export class CoreService {
     const now = Date.now();
 
     for (const rawItem of items) {
-      const item = rawItem as Record<string, unknown>;
-      const group = String(item.stateGroup || 'unstarted').toLowerCase();
+      const item = rawItem as {
+        stateGroup?: string | null;
+        priority?: string | null;
+        completed?: boolean | null;
+        dueDate?: string | Date | null;
+        timeSpent?: number | null;
+      };
+      const group = (
+        typeof item.stateGroup === 'string' ? item.stateGroup : 'unstarted'
+      ).toLowerCase();
       byStateGroup[group] = (byStateGroup[group] || 0) + 1;
 
-      const prio = String(item.priority || 'none').toLowerCase();
+      const prio = (
+        typeof item.priority === 'string' ? item.priority : 'none'
+      ).toLowerCase();
       byPriority[prio] = (byPriority[prio] || 0) + 1;
 
       const isDone = Boolean(item.completed) || group === 'completed';
@@ -836,7 +846,7 @@ export class CoreService {
       } else if (
         group !== 'cancelled' &&
         item.dueDate &&
-        new Date(String(item.dueDate)).getTime() < now
+        new Date(item.dueDate).getTime() < now
       ) {
         overdueCount += 1;
       }

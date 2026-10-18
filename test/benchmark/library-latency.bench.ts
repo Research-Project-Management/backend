@@ -1,4 +1,4 @@
-/**
+﻿/**
  * test/unit/library/library-latency.benchmark.spec.ts
  *
  * Production-grade Latency, Throughput & Algorithmic Benchmark Suite for Flux Library.
@@ -16,12 +16,12 @@ import { ItemQueryService } from '@/modules/library/catalog/services/item-query.
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { TransactionService } from '@/modules/library/shared-kernel';
+import { TransactionService } from '@/modules/library/core';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 
 // High-resolution timer utility (nanosecond precision)
 function hrtimeMs(startNs: bigint): number {

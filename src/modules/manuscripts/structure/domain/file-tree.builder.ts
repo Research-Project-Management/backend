@@ -202,3 +202,22 @@ export class FileTreeBuilder {
     }
   }
 }
+
+export class HeuristicRootDocDetector {
+  public detectRootDoc(
+    nodes: readonly ManuscriptNodeEntity[],
+    docContents: Map<string, string[]>,
+  ): ManuscriptNodeEntity | null {
+    return FileTreeBuilder.detectRootDoc(nodes, docContents);
+  }
+}
+
+export class InMemoryTreePublisher {
+  public readonly events: Array<Record<string, unknown>> = [];
+
+  public async publishTreeMutation(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    this.events.push(payload);
+  }
+}

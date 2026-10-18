@@ -3,16 +3,15 @@ import {
   NotFoundException,
   BadRequestException,
   UnprocessableEntityException,
-  Logger,
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { TransactionHelpers } from '@/modules/library/shared-kernel';
+import type { TransactionHelpers } from '@/modules/library/core';
 import type {
   UpsertSyncCollectionCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
+} from '@/modules/library/core/types/entity-commands.types';
 import { CollectionsRepository } from '@/modules/library/catalog/repositories/collections.repository';
 import {
   CreateCollectionDto,
@@ -30,12 +29,10 @@ import {
 } from '@/modules/library/catalog/domain/collections.domain';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 
 @Injectable()
 export class CollectionsService {
-  private readonly logger = new Logger(CollectionsService.name);
-
   constructor(
     private readonly repo: CollectionsRepository,
     @Optional()

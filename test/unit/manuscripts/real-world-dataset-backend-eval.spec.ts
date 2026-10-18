@@ -10,43 +10,55 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as Y from 'yjs';
 import { RegexAstBibtexParser } from '@/modules/manuscripts/citations';
-import { BibBackendDetector } from '@/modules/manuscripts/clsi/core/adapters/engines/bib-backend.detector';
-import { TexEngineDetector } from '@/modules/manuscripts/clsi/core/adapters/engines/tex-engine.detector';
-import { DraftModeManager } from '@/modules/manuscripts/clsi/core/adapters/engines/draft-mode.manager';
-import { TexWordCounter } from '@/modules/manuscripts/clsi/core/adapters/artifacts/word-counter';
-import { SyncTexProcessor } from '@/modules/manuscripts/clsi/core/adapters/artifacts/synctex.processor';
-import { OverleafLogParser } from '@/modules/manuscripts/clsi/core/adapters/artifacts/latex-log.parser';
-import { HeuristicRootDocDetector } from '@/modules/manuscripts/structure/core/adapters/engine/heuristic-root-doc.detector';
-import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
-import { TexParenTreeLogParser } from '@/modules/manuscripts/diagnostics/core/adapters/parser/tex-paren-tree-log.parser';
-import { FastSyntaxLinterAdapter } from '@/modules/manuscripts/diagnostics/core/adapters/linter/fast-syntax-linter.adapter';
-import { RegexLatexTokenizerAdapter } from '@/modules/manuscripts/spelling/core/adapters/tokenizer/regex-latex-tokenizer.adapter';
-import { DocstorePatcherAdapter } from '@/modules/manuscripts/track-changes/core/adapters/external/docstore-patcher.adapter';
-import { BatchResolveChangesUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/batch-resolve-changes.use-case';
-import { AcceptChangeUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/accept-change.use-case';
-import { RejectChangeUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/reject-change.use-case';
-import { TrackChange } from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
-import { TextRangeVo } from '@/modules/manuscripts/track-changes/core/domain/value-objects/text-range.vo';
-import { YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/core/adapters/crdt/yjs-doc-manager.adapter';
-import { MyersDiffEngineAdapter } from '@/modules/manuscripts/project-history/core/adapters/engine/myers-diff-engine.adapter';
-import { ManuscriptRestorerAdapter } from '@/modules/manuscripts/project-history/core/adapters/external/manuscript-restorer.adapter';
-import { Snapshot } from '@/modules/manuscripts/project-history/core/domain/entities/snapshot.entity';
-import { FileSnapshotVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/file-snapshot.vo';
-import { ManuscriptHydratorAdapter } from '@/modules/manuscripts/export-import/core/adapters/external/manuscript-hydrator.adapter';
-import { ManuscriptAggregatorAdapter } from '@/modules/manuscripts/export-import/core/adapters/external/manuscript-aggregator.adapter';
-import { DocumentTranspilerAdapter } from '@/modules/manuscripts/export-import/core/adapters/transpiler/document-transpiler.adapter';
-import { PkzipEngineAdapter } from '@/modules/manuscripts/export-import/core/adapters/engine/pkzip-engine.adapter';
-import { ArchiveEntryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/archive-entry.vo';
-import { replaceInText } from '@/modules/manuscripts/docstore/core/domain/text-replace';
-import { LineArrayEngine } from '@/modules/manuscripts/docstore/core/adapters/engine/line-array.engine';
-import { NodePathVo } from '@/modules/manuscripts/structure/core/domain/node-path.vo';
-import { InvalidNodeNameError } from '@/modules/manuscripts/structure/core/domain/structure-errors';
-import { parseNameStatusZ } from '@/modules/manuscripts/git-bridge/core/domain/git-bridge.domain';
+import {
+  BibBackendDetector,
+  TexEngineDetector,
+  DraftModeManager,
+  TexWordCounter,
+  SyncTexProcessor,
+  OverleafLogParser,
+} from '@/modules/manuscripts/clsi';
+import {
+  HeuristicRootDocDetector,
+  ManuscriptNodeEntity,
+  NodePathVo,
+  InvalidNodeNameError,
+} from '@/modules/manuscripts/structure';
+import {
+  TexParenTreeLogParser,
+  FastSyntaxLinterAdapter,
+} from '@/modules/manuscripts/diagnostics';
+import { RegexLatexTokenizerAdapter } from '@/modules/manuscripts/spelling';
+import {
+  DocstorePatcherAdapter,
+  TrackChangesService,
+  TrackChange,
+  TextRangeVo,
+} from '@/modules/manuscripts/track-changes';
+import { YjsService as YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/yjs.service';
+import {
+  MyersDiffEngineAdapter,
+  ManuscriptRestorerAdapter,
+  Snapshot,
+  FileSnapshotVo,
+} from '@/modules/manuscripts/project-history';
+import {
+  ManuscriptHydratorAdapter,
+  ManuscriptAggregatorAdapter,
+  DocumentTranspilerAdapter,
+  PkzipEngineAdapter,
+  ArchiveEntryVo,
+} from '@/modules/manuscripts/export-import';
+import {
+  replaceInText,
+  LineArrayEngine,
+} from '@/modules/manuscripts/docstore';
+import { parseNameStatusZ } from '@/modules/manuscripts/git-bridge';
 import {
   isPrivateOrReservedIPv6,
   assertSafeExternalUrl,
   SsrfSecurityException,
-} from '@/modules/manuscripts/linked-files/core/domain/ssrf-guard';
+} from '@/modules/manuscripts/core';
 
 const FIXTURES_DIR = path.resolve(
   __dirname,
@@ -467,27 +479,14 @@ describe('Backend Manuscripts / CLSI / Yjs Gateway - Real-World Dataset Evaluati
       };
 
       const patcher = new DocstorePatcherAdapter(mockDocstore as never);
-      const acceptUseCase = new AcceptChangeUseCase(
+      const trackService = new TrackChangesService(
         mockRepo as never,
+        mockDocstore as never,
         patcher,
         mockNotifier as never,
-      );
-      const rejectUseCase = new RejectChangeUseCase(
-        mockRepo as never,
-        patcher,
-        mockNotifier as never,
-      );
-      const batchUseCase = new BatchResolveChangesUseCase(
-        mockRepo as never,
-        acceptUseCase,
-        rejectUseCase,
       );
 
-      await batchUseCase.execute({
-        projectId: 'p1',
-        docId: 'd1',
-        action: 'accept_all',
-      });
+      await trackService.batchResolveChanges('p1', 'd1', 'accept_all');
 
       expect(docState.lines).toEqual([
         'Line 0: Keep',

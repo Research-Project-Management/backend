@@ -11,16 +11,13 @@ import {
   TransactionService,
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
-} from '@/modules/library/shared-kernel';
-import { DuplicateCandidateItem, ItemsMapper } from '@/modules/library/catalog';
-import {
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
-} from '@/modules/library/ingestion/types/catalog-gateway.types';
-import {
-  EXTRACTION_GATEWAY_PORT,
-  IExtractionGatewayPort,
-} from '@/modules/library/ingestion/types/extraction-gateway.types';
+  CATALOG_FACADE,
+  ICatalogFacade,
+  EXTRACTION_FACADE,
+  IExtractionFacade,
+  DuplicateCandidateItem,
+} from '@/modules/library/core';
+import { ItemsMapper } from '@/modules/library/catalog';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/curation.dto';
 import {
@@ -29,10 +26,7 @@ import {
   PrismaMergeAuditTrail,
   ALLOWED_MERGE_METADATA_FIELDS,
 } from '@/modules/library/ingestion/types/curation.types';
-import {
-  UserId,
-  ProjectId,
-} from '@/modules/library/shared-kernel/core/types/branded.types';
+import { UserId, ProjectId } from '@/modules/library/core/types/branded.types';
 import {
   normalizeTitleForDedupe,
   extractContributorAuthors,
@@ -46,7 +40,7 @@ import {
   normalizeArxivId,
   normalizePmid,
   normalizeIsbn,
-} from '@/modules/library/ingestion/domain/metadata.domain';
+} from '@/modules/library/core';
 
 interface ContributorShape {
   creatorType?: string;
@@ -126,11 +120,11 @@ export class DuplicateService {
   constructor(
     private readonly libraryTx: TransactionService,
     @Optional()
-    @Inject(CATALOG_GATEWAY_PORT)
-    private readonly catalogGateway?: ICatalogGatewayPort,
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
     @Optional()
-    @Inject(EXTRACTION_GATEWAY_PORT)
-    private readonly extractionGateway?: IExtractionGatewayPort,
+    @Inject(EXTRACTION_FACADE)
+    private readonly extractionGateway?: IExtractionFacade,
     @Optional()
     private readonly ingestionRepo?: IngestionRepository,
   ) {}
@@ -446,33 +440,56 @@ export class DuplicateService {
         : item.authors || [];
     };
 
-    const buildClusterItemList = (
-      group: DuplicateCandidateItem[],
-    ): DuplicateClusterItem[] =>
-      group.map((m) => {
-        const domainProjected = ItemsMapper.toDomain({
-          ...m,
-          itemType: this.resolveItemType(m),
-          authors: getItemAuthors(m),
-        }) as unknown as DuplicateClusterItem;
-        return {
-          ...domainProjected,
-          id: m.id,
-          title: m.title,
-          itemType: this.resolveItemType(m),
-          doi: (domainProjected.doi || m.doi) ?? undefined,
-          year: domainProjected.year ?? m.year ?? undefined,
-          authors:
-            Array.isArray(domainProjected.authors) &&
-            domainProjected.authors.length > 0
-              ? domainProjected.authors
-              : getItemAuthors(m),
-          citationKey:
-            (domainProjected.citationKey || m.citationKey) ?? undefined,
-        };
-      });
+    const mapToClusterItem = (
+      m: DuplicateCandidateItem,
+      hydratedRaw?: Record<string, unknown>,
+    ): DuplicateClusterItem => {
+      const source = hydratedRaw ? { ...m, ...hydratedRaw } : m;
+      const domainProjected = (hydratedRaw &&
+      Array.isArray(hydratedRaw.creators) &&
+      Array.isArray(hydratedRaw.tags) &&
+      typeof hydratedRaw.createdAt === 'string'
+        ? hydratedRaw
+        : ItemsMapper.toDomain({
+            ...source,
+            itemType: this.resolveItemType(source),
+            authors: getItemAuthors(
+              source as unknown as DuplicateCandidateItem & {
+                authors?: string[];
+              },
+            ),
+          })) as unknown as DuplicateClusterItem;
 
-    const clusters: DuplicateClusterResult[] = [];
+      return {
+        ...domainProjected,
+        id: m.id,
+        title: domainProjected.title || m.title,
+        itemType:
+          domainProjected.itemType ||
+          this.resolveItemType(m) ||
+          'journalArticle',
+        doi: (domainProjected.doi || m.doi) ?? undefined,
+        year: domainProjected.year ?? m.year ?? undefined,
+        authors:
+          Array.isArray(domainProjected.authors) &&
+          domainProjected.authors.length > 0
+            ? domainProjected.authors
+            : getItemAuthors(m),
+        citationKey:
+          (domainProjected.citationKey || m.citationKey) ?? undefined,
+      };
+    };
+
+    const candidateById = new Map<string, DuplicateCandidateItem>(
+      items.map((it) => [it.id, it]),
+    );
+    const rawClusters: Array<{
+      clusterId: string;
+      matchReason: DuplicateClusterResult['matchReason'];
+      confidence: number;
+      recommendedMasterId: string;
+      rawGroup: DuplicateCandidateItem[];
+    }> = [];
     const groupedItemIds = new Set<string>();
 
     // Tier 0: Ingestion-Suspect Pairs
@@ -483,13 +500,10 @@ export class DuplicateService {
             userId: String(userId),
             projectId: effectiveProjectId,
           });
-        const itemsMap = new Map<string, DuplicateCandidateItem>(
-          items.map((it) => [it.id, it]),
-        );
 
         for (const suspect of suspects) {
-          const itemA = itemsMap.get(suspect.createdItemId);
-          const itemB = itemsMap.get(suspect.targetItemId);
+          const itemA = candidateById.get(suspect.createdItemId);
+          const itemB = candidateById.get(suspect.targetItemId);
           if (
             itemA &&
             itemB &&
@@ -500,14 +514,12 @@ export class DuplicateService {
             groupedItemIds.add(itemA.id);
             groupedItemIds.add(itemB.id);
             const pair = [itemA, itemB];
-            const mappedItems = buildClusterItemList(pair);
-            clusters.push({
+            rawClusters.push({
               clusterId: `ingest-${suspect.runId.substring(0, 8)}-${itemA.id.substring(0, 8)}`,
               matchReason: 'INGESTION_SUSPECT',
               confidence: suspect.confidence,
               recommendedMasterId: this.computeRecommendedMasterId(pair),
-              items: mappedItems,
-              papers: mappedItems,
+              rawGroup: pair,
             });
           }
         }
@@ -572,15 +584,13 @@ export class DuplicateService {
           if (compatibleGroup.length > 1) {
             visitedInBucket.add(seed.id);
             compatibleGroup.forEach((m) => groupedItemIds.add(m.id));
-            const mappedItems = buildClusterItemList(compatibleGroup);
-            clusters.push({
+            rawClusters.push({
               clusterId: `${idType}-${idVal.replace(/[^a-z0-9]/g, '-').substring(0, 32)}`,
               matchReason,
               confidence: 1.0,
               recommendedMasterId:
                 this.computeRecommendedMasterId(compatibleGroup),
-              items: mappedItems,
-              papers: mappedItems,
+              rawGroup: compatibleGroup,
             });
           }
         }
@@ -667,23 +677,20 @@ export class DuplicateService {
 
         if (group.length > 1) {
           group.forEach((g) => groupedItemIds.add(g.id));
-          const mappedItems = buildClusterItemList(group);
-          clusters.push({
+          rawClusters.push({
             clusterId: `fuzzy-${key.replace(/[^a-z0-9]/g, '-').substring(0, 24)}-${itemA.id.substring(0, 8)}`,
             matchReason: 'FUZZY_TITLE_YEAR_AUTHOR',
             confidence: 0.85,
             recommendedMasterId: this.computeRecommendedMasterId(group),
-            items: mappedItems,
-            papers: mappedItems,
+            rawGroup: group,
           });
         }
       }
     });
 
-    // Hydrate clustered items in a single batch query via findByIds + ItemsMapper.toDomain
-    // so the frontend receives complete domain items and never needs N+1 GET /items/:id calls.
+    const hydratedRawById = new Map<string, Record<string, unknown>>();
     if (
-      clusters.length > 0 &&
+      rawClusters.length > 0 &&
       groupedItemIds.size > 0 &&
       typeof this.catalogGateway?.findByIds === 'function'
     ) {
@@ -693,40 +700,10 @@ export class DuplicateService {
           Array.from(groupedItemIds),
           effectiveProjectId,
         );
-        if (Array.isArray(fullRawItems) && fullRawItems.length > 0) {
-          const hydratedMap = new Map<string, DuplicateClusterItem>();
+        if (Array.isArray(fullRawItems)) {
           for (const raw of fullRawItems) {
-            if (!raw || !raw.id) continue;
-            const domainItem = ItemsMapper.toDomain(
-              raw,
-            ) as unknown as DuplicateClusterItem;
-            hydratedMap.set(raw.id, domainItem);
-          }
-
-          if (hydratedMap.size > 0) {
-            for (const cluster of clusters) {
-              const hydratedClusterItems = cluster.items.map((summaryItem) => {
-                const full = hydratedMap.get(summaryItem.id);
-                if (!full) return summaryItem;
-                return {
-                  ...summaryItem,
-                  ...full,
-                  id: summaryItem.id,
-                  title: full.title || summaryItem.title,
-                  itemType:
-                    full.itemType || summaryItem.itemType || 'journalArticle',
-                  doi: (full.doi ?? summaryItem.doi) || undefined,
-                  year: full.year ?? summaryItem.year,
-                  authors:
-                    Array.isArray(full.authors) && full.authors.length > 0
-                      ? full.authors
-                      : summaryItem.authors,
-                  citationKey:
-                    (full.citationKey ?? summaryItem.citationKey) || undefined,
-                };
-              });
-              cluster.items = hydratedClusterItems;
-              cluster.papers = hydratedClusterItems;
+            if (raw && raw.id) {
+              hydratedRawById.set(raw.id, raw);
             }
           }
         }
@@ -737,7 +714,19 @@ export class DuplicateService {
       }
     }
 
-    return clusters;
+    return rawClusters.map((rc) => {
+      const mappedItems = rc.rawGroup.map((m) =>
+        mapToClusterItem(m, hydratedRawById.get(m.id)),
+      );
+      return {
+        clusterId: rc.clusterId,
+        matchReason: rc.matchReason,
+        confidence: rc.confidence,
+        recommendedMasterId: rc.recommendedMasterId,
+        items: mappedItems,
+        papers: mappedItems,
+      };
+    });
   }
 
   private async rewireMergedItemRelations(

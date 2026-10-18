@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Query,
@@ -11,7 +11,7 @@ import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 import { SyncQueryDto } from '@/modules/library/sync/dto/sync-query.dto';
-import { ResilienceRegistryService } from '@/modules/library/shared-kernel/resilience/resilience-registry.service';
+import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
 import { OutboxWorker } from '@/modules/library/sync/services/outbox.worker';
 import { OutboxMetrics } from '@/modules/library/sync/services/outbox.metrics';
 import { compactLibraryChanges } from '@/modules/library/sync/domain/outbox.domain';

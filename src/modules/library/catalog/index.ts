@@ -52,5 +52,12 @@ export * from './types/notes.types';
 export * from './types/saved-search.types';
 export * from './types/state.types';
 
-// Domain Logic & Utilities
-export * from './domain';
+// Domain
+export * from './domain/tree.engine';
+export * from './domain/condition-evaluator.engine';
+export * from './domain/items.mapper';
+export * from './domain/item.transformer';
+export * from './domain/notes.domain';
+export * from './domain/collections.domain';
+export * from './domain/state.domain';
+export * from './domain/command-payload.builder';

@@ -108,7 +108,7 @@ export abstract class BaseItemController {
     const effectiveTag =
       query?.tag ??
       (Array.isArray(query?.tags) && query.tags.length > 0
-        ? query.tags[0]
+        ? query.tags.join(',')
         : undefined);
 
     const listOptions = {
@@ -918,5 +918,3 @@ export class LibraryPermissionsController extends BaseItemController {
     return this.executeGetPermissions(userId, effectiveProjectId, req);
   }
 }
-
-export { ItemController as ItemsController };

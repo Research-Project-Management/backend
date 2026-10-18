@@ -6,8 +6,10 @@ import { TrustedExtractionService } from '@/modules/library/extraction/services/
 import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import { WebFetchLadderService } from '@/modules/library/ingestion/services/web-fetch-ladder.service';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { inferItemTypeFromPdfSignals } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { IExtractionGatewayPort } from '@/modules/library/ingestion/types/extraction-gateway.types';
+import {
+  IExtractionFacade,
+  inferItemTypeFromPdfSignals,
+} from '@/modules/library/core';
 
 interface BenchmarkSample {
   id: number;
@@ -368,7 +370,7 @@ async function runBenchmark() {
       ),
     extractMetadataFromBuffer: async (buf: Buffer) =>
       pdfProvider.extractMetadataFromBuffer(buf),
-  } as unknown as IExtractionGatewayPort;
+  } as unknown as IExtractionFacade;
   const urlScraper = new UrlMetadataScraperService(
     undefined,
     extractionGateway,

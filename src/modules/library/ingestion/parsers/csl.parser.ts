@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { mapCslTypeToZoteroItemType } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+import { mapCslTypeToZoteroItemType } from '@/modules/library/core';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 
 export interface ParsedCslEntry {
   title: string;
@@ -60,6 +60,7 @@ export interface ParsedCslEntry {
   citationKey?: string;
   tags?: string[];
   keywords?: string[];
+  notes?: string[];
   language?: string;
   rights?: string;
   extra?: string;
@@ -136,7 +137,7 @@ export class CslParser {
       const accessedAt = this.formatDateParts(accessed);
 
       const keywords = this.extractKeywords(
-        csl.keyword || csl.keywords || csl.subject,
+        csl._keywords || csl.keyword || csl.keywords || csl.subject,
       );
 
       const numPages =

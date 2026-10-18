@@ -1,8 +1,8 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
-import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
 
 export interface CreateCollectionInput {
@@ -26,8 +26,6 @@ export interface UpdateCollectionInput {
 
 @Injectable()
 export class CollectionsRepository {
-  private readonly logger = new Logger(CollectionsRepository.name);
-
   constructor(private readonly prisma: PrismaService) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
@@ -267,7 +265,7 @@ export class CollectionsRepository {
    * Adds items to a collection.
    */
   async addItemsToCollection(
-    userId: string,
+    _userId: string,
     collectionId: string,
     itemIds: string[],
     tx?: Prisma.TransactionClient,
@@ -316,7 +314,7 @@ export class CollectionsRepository {
    * Removes an item from a collection.
    */
   async removeItemFromCollection(
-    userId: string,
+    _userId: string,
     collectionId: string,
     itemId: string,
     tx?: Prisma.TransactionClient,

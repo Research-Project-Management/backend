@@ -9,8 +9,8 @@ import {
   mapCslTypeToZoteroItemType,
   normalizeDoi,
   parseCreatorString,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+} from '@/modules/library/core';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Cite } = require('@citation-js/core');
@@ -193,26 +193,21 @@ export class RisParser {
 
         // Tags / keywords handling
         const rawKeywords: string[] = [];
-        if (csl.keyword) {
-          if (Array.isArray(csl.keyword)) {
-            rawKeywords.push(
-              ...csl.keyword.map((k: string) => k.trim()).filter(Boolean),
-            );
-          } else if (typeof csl.keyword === 'string') {
-            rawKeywords.push(
-              ...csl.keyword
-                .split(/[,;\n]/)
-                .map((k: string) => k.trim())
-                .filter(Boolean),
-            );
-          }
-        }
         if (currentRawRecord) {
           const kwMatches = currentRawRecord.matchAll(/^(?:KW)\s*-\s*(.+)$/gim);
           for (const m of kwMatches) {
             if (m[1]?.trim()) {
               rawKeywords.push(m[1].trim());
             }
+          }
+        }
+        if (rawKeywords.length === 0 && csl.keyword) {
+          if (Array.isArray(csl.keyword)) {
+            rawKeywords.push(
+              ...csl.keyword.map((k: string) => k.trim()).filter(Boolean),
+            );
+          } else if (typeof csl.keyword === 'string') {
+            rawKeywords.push(csl.keyword.trim());
           }
         }
         const tags = normalizeAcademicTags(rawKeywords);
@@ -401,28 +396,14 @@ export class RisParser {
           }));
 
           for (const { tag, val } of idLines) {
-            if (!pmcid) {
-              const pmcMatch = val.match(/\b(PMC\d{5,12})\b/i);
-              if (pmcMatch) pmcid = pmcMatch[1].toUpperCase();
-            }
-            if (!pmid) {
-              const pmidMatch = val.match(/PMID[:\s]*(\d{5,10})\b/i);
-              if (pmidMatch) {
-                pmid = pmidMatch[1];
-              } else if (
-                tag === 'AN' &&
-                (isPubMedDb || /^\d{7,9}$/.test(val)) &&
-                /^\d{6,10}$/.test(val)
-              ) {
-                pmid = val;
-              }
-            }
-            if (!arxivId) {
-              const axMatch = val.match(
-                /arXiv[:\s/]*(\d{4}\.\d{4,5}(?:v\d+)?)/i,
-              );
-              if (axMatch) arxivId = axMatch[1];
-            }
+            const extracted = this.extractIdentifiersFromText(
+              tag,
+              val,
+              isPubMedDb,
+            );
+            if (!pmcid && extracted.pmcid) pmcid = extracted.pmcid;
+            if (!pmid && extracted.pmid) pmid = extracted.pmid;
+            if (!arxivId && extracted.arxivId) arxivId = extracted.arxivId;
           }
         }
 
@@ -433,35 +414,17 @@ export class RisParser {
         }
         const doi = rawDoi ? normalizeDoi(rawDoi) || rawDoi : undefined;
 
-        const university =
-          itemType === 'thesis' ? rawPublisher || undefined : undefined;
-        const thesisType =
-          itemType === 'thesis' ? rawM3 || rawU1 || undefined : undefined;
-        const institution =
-          itemType === 'report' ? rawPublisher || undefined : undefined;
-        const reportNumber =
-          itemType === 'report' ? rawM1 || rawIs || undefined : undefined;
-        const patentNumber =
-          itemType === 'patent'
-            ? rawM1 || rawIs || rawSn || undefined
-            : undefined;
-        const bookTitle =
-          itemType === 'bookSection' ? rawT2 || undefined : undefined;
-        const proceedingsTitle =
-          itemType === 'conferencePaper' ? rawT2 || undefined : undefined;
-        const conferenceName =
-          itemType === 'conferencePaper' ? rawC3 || undefined : undefined;
-
-        const extraFields: Record<string, unknown> = {
-          ...(university ? { university } : {}),
-          ...(institution ? { institution } : {}),
-          ...(thesisType ? { thesisType } : {}),
-          ...(reportNumber ? { reportNumber } : {}),
-          ...(patentNumber ? { patentNumber } : {}),
-          ...(bookTitle ? { bookTitle } : {}),
-          ...(proceedingsTitle ? { proceedingsTitle } : {}),
-          ...(conferenceName ? { conferenceName } : {}),
-        };
+        const typeSpecific = this.buildTypeSpecificFields({
+          itemType,
+          publisher: rawPublisher,
+          rawM1,
+          rawM3,
+          rawU1,
+          rawIs,
+          rawSn,
+          rawT2,
+          rawC3,
+        });
 
         return {
           itemType,
@@ -476,14 +439,7 @@ export class RisParser {
           publicationTitle: rawT2,
           journalAbbr,
           publisher: rawPublisher,
-          university,
-          institution,
-          thesisType,
-          reportNumber,
-          patentNumber,
-          bookTitle,
-          proceedingsTitle,
-          conferenceName,
+          ...typeSpecific,
           place,
           volume: csl.volume ? String(csl.volume) : undefined,
           issue:
@@ -525,8 +481,6 @@ export class RisParser {
           tags,
           keywords: tags,
           notes,
-          extraFields:
-            Object.keys(extraFields).length > 0 ? extraFields : undefined,
         };
       });
     } catch (err: unknown) {
@@ -536,6 +490,96 @@ export class RisParser {
       );
       return this.fallbackParse(content);
     }
+  }
+
+  private extractIdentifiersFromText(
+    tag: string,
+    val: string,
+    isPubMedDb?: boolean,
+  ): { pmid?: string; pmcid?: string; arxivId?: string } {
+    const pmcMatch = val.match(/\b(PMC\d{5,12})\b/i);
+    const pmcid = pmcMatch ? pmcMatch[1].toUpperCase() : undefined;
+
+    let pmid: string | undefined;
+    const pmidMatch = val.match(/PMID[:\s]*(\d{5,10})\b/i);
+    if (pmidMatch) {
+      pmid = pmidMatch[1];
+    } else if (
+      tag === 'AN' &&
+      (isPubMedDb || /^\d{7,9}$/.test(val)) &&
+      /^\d{6,10}$/.test(val)
+    ) {
+      pmid = val;
+    }
+
+    const axMatch = val.match(/arXiv[:\s/]*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
+    const arxivId = axMatch ? axMatch[1] : undefined;
+
+    return { pmid, pmcid, arxivId };
+  }
+
+  private buildTypeSpecificFields(params: {
+    itemType: string;
+    publisher?: string;
+    rawM1?: string;
+    rawM3?: string;
+    rawU1?: string;
+    rawIs?: string;
+    rawSn?: string;
+    rawT2?: string;
+    rawC3?: string;
+  }) {
+    const {
+      itemType,
+      publisher,
+      rawM1,
+      rawM3,
+      rawU1,
+      rawIs,
+      rawSn,
+      rawT2,
+      rawC3,
+    } = params;
+    const university =
+      itemType === 'thesis' ? publisher || undefined : undefined;
+    const thesisType =
+      itemType === 'thesis' ? rawM3 || rawU1 || undefined : undefined;
+    const institution =
+      itemType === 'report' ? publisher || undefined : undefined;
+    const reportNumber =
+      itemType === 'report' ? rawM1 || rawIs || undefined : undefined;
+    const patentNumber =
+      itemType === 'patent' ? rawM1 || rawIs || rawSn || undefined : undefined;
+    const bookTitle =
+      itemType === 'bookSection' ? rawT2 || undefined : undefined;
+    const proceedingsTitle =
+      itemType === 'conferencePaper' ? rawT2 || undefined : undefined;
+    const conferenceName =
+      itemType === 'conferencePaper' ? rawC3 || undefined : undefined;
+
+    const extraFields: Record<string, unknown> = {
+      ...(university ? { university } : {}),
+      ...(institution ? { institution } : {}),
+      ...(thesisType ? { thesisType } : {}),
+      ...(reportNumber ? { reportNumber } : {}),
+      ...(patentNumber ? { patentNumber } : {}),
+      ...(bookTitle ? { bookTitle } : {}),
+      ...(proceedingsTitle ? { proceedingsTitle } : {}),
+      ...(conferenceName ? { conferenceName } : {}),
+    };
+
+    return {
+      university,
+      institution,
+      thesisType,
+      reportNumber,
+      patentNumber,
+      bookTitle,
+      proceedingsTitle,
+      conferenceName,
+      extraFields:
+        Object.keys(extraFields).length > 0 ? extraFields : undefined,
+    };
   }
 
   private mapCslTypeToItemType(cslType: string): string {
@@ -748,30 +792,24 @@ export class RisParser {
           break;
         case 'AN':
         case 'C2': {
-          const pmcMatch = value.match(/\b(PMC\d{5,12})\b/i);
-          if (pmcMatch) currentRecord.pmcid = pmcMatch[1].toUpperCase();
-          const pmidMatch = value.match(/PMID[:\s]*(\d{5,10})\b/i);
-          if (pmidMatch) {
-            currentRecord.pmid = pmidMatch[1];
-          } else if (
-            tag === 'AN' &&
-            (currentRecord.isPubMedDb || /^\d{7,9}$/.test(value)) &&
-            /^\d{6,10}$/.test(value)
-          ) {
-            currentRecord.pmid = value;
-          }
-          const axMatch = value.match(/arXiv[:\s/]*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
-          if (axMatch && !currentRecord.arxivId) {
-            currentRecord.arxivId = axMatch[1];
+          const ids = this.extractIdentifiersFromText(
+            tag,
+            value,
+            currentRecord.isPubMedDb,
+          );
+          if (ids.pmcid) currentRecord.pmcid = ids.pmcid;
+          if (ids.pmid) currentRecord.pmid = ids.pmid;
+          if (ids.arxivId && !currentRecord.arxivId) {
+            currentRecord.arxivId = ids.arxivId;
           }
           break;
         }
         case 'UR':
         case 'L1': {
           if (!currentRecord.url) currentRecord.url = value;
-          const axMatch = value.match(/arXiv[:\s/]*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
-          if (axMatch && !currentRecord.arxivId) {
-            currentRecord.arxivId = axMatch[1];
+          const ids = this.extractIdentifiersFromText(tag, value);
+          if (ids.arxivId && !currentRecord.arxivId) {
+            currentRecord.arxivId = ids.arxivId;
           }
           break;
         }
@@ -798,17 +836,15 @@ export class RisParser {
         case 'N1': {
           if (!currentRecord.rawNotes) currentRecord.rawNotes = [];
           currentRecord.rawNotes.push(value);
-          const pmcMatch = value.match(/\b(PMC\d{5,12})\b/i);
-          if (pmcMatch && !currentRecord.pmcid) {
-            currentRecord.pmcid = pmcMatch[1].toUpperCase();
+          const ids = this.extractIdentifiersFromText(tag, value);
+          if (ids.pmcid && !currentRecord.pmcid) {
+            currentRecord.pmcid = ids.pmcid;
           }
-          const pmidMatch = value.match(/PMID[:\s]*(\d{5,10})\b/i);
-          if (pmidMatch && !currentRecord.pmid) {
-            currentRecord.pmid = pmidMatch[1];
+          if (ids.pmid && !currentRecord.pmid) {
+            currentRecord.pmid = ids.pmid;
           }
-          const axMatch = value.match(/arXiv[:\s/]*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
-          if (axMatch && !currentRecord.arxivId) {
-            currentRecord.arxivId = axMatch[1];
+          if (ids.arxivId && !currentRecord.arxivId) {
+            currentRecord.arxivId = ids.arxivId;
           }
           break;
         }
@@ -878,43 +914,18 @@ export class RisParser {
     }
 
     const itemType = record.itemType || 'journalArticle';
-    const university =
-      itemType === 'thesis' ? record.publisher || undefined : undefined;
-    const thesisType =
-      itemType === 'thesis'
-        ? record.rawM3 || record.rawU1 || undefined
-        : undefined;
-    const institution =
-      itemType === 'report' ? record.publisher || undefined : undefined;
-    const reportNumber =
-      itemType === 'report'
-        ? record.rawM1 || record.issue || undefined
-        : undefined;
-    const patentNumber =
-      itemType === 'patent'
-        ? record.rawM1 || record.issue || record.rawSn || undefined
-        : undefined;
-    const bookTitle =
-      itemType === 'bookSection'
-        ? record.publicationTitle || undefined
-        : undefined;
-    const proceedingsTitle =
-      itemType === 'conferencePaper'
-        ? record.publicationTitle || undefined
-        : undefined;
-    const conferenceName =
-      itemType === 'conferencePaper' ? record.rawC3 || undefined : undefined;
-
-    const extraFields: Record<string, unknown> = {
-      ...(university ? { university } : {}),
-      ...(institution ? { institution } : {}),
-      ...(thesisType ? { thesisType } : {}),
-      ...(reportNumber ? { reportNumber } : {}),
-      ...(patentNumber ? { patentNumber } : {}),
-      ...(bookTitle ? { bookTitle } : {}),
-      ...(proceedingsTitle ? { proceedingsTitle } : {}),
-      ...(conferenceName ? { conferenceName } : {}),
-    };
+    const typeSpecific = this.buildTypeSpecificFields({
+      itemType,
+      publisher: record.publisher,
+      rawM1: record.rawM1,
+      rawM3: record.rawM3,
+      rawU1: record.rawU1,
+      rawIs: record.issue,
+      rawSn: record.rawSn,
+      rawT2: record.publicationTitle,
+      rawC3: record.rawC3,
+    });
+    const normalizedTags = normalizeAcademicTags(record.rawTags);
 
     return {
       itemType,
@@ -932,14 +943,7 @@ export class RisParser {
       publicationTitle: record.publicationTitle,
       journalAbbr: record.journalAbbr,
       publisher: record.publisher,
-      university,
-      institution,
-      thesisType,
-      reportNumber,
-      patentNumber,
-      bookTitle,
-      proceedingsTitle,
-      conferenceName,
+      ...typeSpecific,
       place: record.place,
       volume: record.volume,
       issue:
@@ -960,15 +964,13 @@ export class RisParser {
       callNumber: record.callNumber,
       archive: record.archive,
       series: record.series,
-      tags: normalizeAcademicTags(record.rawTags),
-      keywords: normalizeAcademicTags(record.rawTags),
+      tags: normalizedTags,
+      keywords: normalizedTags,
       abstract: cleanAbstractText(record.abstract),
       notes:
         record.rawNotes && record.rawNotes.length > 0
           ? record.rawNotes.map((n: string) => ({ content: n, source: 'ris' }))
           : undefined,
-      extraFields:
-        Object.keys(extraFields).length > 0 ? extraFields : undefined,
     };
   }
 }

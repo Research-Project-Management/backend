@@ -73,10 +73,11 @@ export function parseWorkItemStates(raw: unknown): WorkItemState[] {
     return [...DEFAULT_WORK_ITEM_STATES];
   }
 
+  const items = raw as unknown[];
   const result: WorkItemState[] = [];
 
-  for (let index = 0; index < raw.length; index++) {
-    const item = raw[index];
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
     if (!item || typeof item !== 'object') continue;
 
     const rawObj = item as Record<string, unknown>;

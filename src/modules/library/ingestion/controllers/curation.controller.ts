@@ -16,9 +16,12 @@ import {
   DismissDuplicatesDto,
   ReResolveMetadataDto,
 } from '@/modules/library/ingestion/dto/curation.dto';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
+@ApiTags('Library Curation')
+@ApiBearerAuth()
 @Controller([
   'api/v1/library/curation',
   'api/v1/projects/:projectId/library/curation',

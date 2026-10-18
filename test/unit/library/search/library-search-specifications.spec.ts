@@ -8,10 +8,10 @@ import {
   TagSpecification,
   TextSearchSpecification,
   SearchSpecificationBuilder,
-} from '@/modules/library/search/domain';
+} from '@/modules/library/search';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import { SearchService } from '@/modules/library/search/services/search.service';
-import { SearchEventsSubscriber as CatalogEventsSubscriber } from '@/modules/library/search/services/search-events.subscriber';
+import { SearchEventsSubscriber } from '@/modules/library/search/subscribers/search-events.subscriber';
 import { PrismaService } from '@/core';
 import { RedisCacheService } from '@/core';
 
@@ -320,17 +320,17 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
     });
   });
 
-  describe('3. Event-Driven Facet Invalidation (CatalogEventsSubscriber & SearchService)', () => {
+  describe('3. Event-Driven Facet Invalidation (SearchEventsSubscriber & SearchService)', () => {
     let searchService: Partial<SearchService>;
     let searchRepo: Partial<SearchRepository>;
-    let subscriber: CatalogEventsSubscriber;
+    let subscriber: SearchEventsSubscriber;
 
     beforeEach(() => {
       searchRepo = {
         invalidateFacets: jest.fn().mockResolvedValue(undefined),
       };
       searchService = new SearchService(searchRepo as any, {} as any);
-      subscriber = new CatalogEventsSubscriber(searchService as any);
+      subscriber = new SearchEventsSubscriber(searchService as any);
     });
 
     it('should delegate facet invalidation from SearchService to SearchRepository', async () => {

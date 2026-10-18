@@ -8,20 +8,5 @@ export * from './structure.module';
 export * from './structure.service';
 export * from './structure.controller';
 export * from './structure.repository';
-
-// Pure Domain
+export * from './dto/node.dto';
 export * from './domain';
-
-// Ports
-export * from './core/ports/structure-repository.port';
-export * from './core/ports/root-doc-detector.port';
-export * from './core/ports/tree-publisher.port';
-
-// Use Cases
-export * from './core/use-cases/get-file-tree.use-case';
-export * from './core/use-cases/create-node.use-case';
-export * from './core/use-cases/move-node.use-case';
-export * from './core/use-cases/rename-node.use-case';
-export * from './core/use-cases/delete-node.use-case';
-export * from './core/use-cases/resolve-root-doc.use-case';
-export * from './core/use-cases/build-compiler-files.use-case';

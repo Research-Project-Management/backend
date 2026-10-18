@@ -29,8 +29,8 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 
-import { YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/core/adapters/crdt/yjs-doc-manager.adapter';
-import { LineArrayEngine } from '@/modules/manuscripts/docstore/core/adapters/engine/line-array.engine';
+import { YjsService as YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/yjs.service';
+import { LineArrayEngine } from '@/modules/manuscripts/docstore';
 
 // ---------------------------------------------------------------------------
 // TEST INFRASTRUCTURE / MOCK DOUBLES

@@ -1,8 +1,8 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+﻿import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { ReferenceData } from '@/modules/library/citation/types/citation.types';
-import { cleanBibliographicText } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { getAcademicUserAgent } from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
-import { ResilienceRegistryService } from '@/modules/library/shared-kernel/resilience/resilience-registry.service';
+import { cleanBibliographicText } from '@/modules/library/core';
+import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
+import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
 
 export interface DoiCitationResult {
   styleId: string;

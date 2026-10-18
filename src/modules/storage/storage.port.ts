@@ -1,5 +1,5 @@
 import { STORAGE_PORT } from './storage.tokens';
-import { FileScope } from './domain/value-objects/file-scope.vo';
+import { FileScope } from './drive';
 
 export interface ReadOwnedFileInput {
   fileId: string;
@@ -18,7 +18,7 @@ export interface ReadOwnedFileOutput {
 }
 
 export function getFileContentPath(fileId: string): string {
-  return `/api/files/${encodeURIComponent(fileId)}/content`;
+  return `/api/v1/storage/files/${encodeURIComponent(fileId)}/content`;
 }
 
 export interface LinkFileInput {
@@ -48,7 +48,7 @@ export interface UploadFileOutput {
 
 export interface IStoragePort {
   readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput>;
-  getOwnedFileStream?(
+  getOwnedFileStream(
     input: ReadOwnedFileInput & {
       range?: { start: number; end: number };
     },
@@ -61,13 +61,14 @@ export interface IStoragePort {
   }>;
   linkFile(input: LinkFileInput): Promise<void>;
   uploadFile(input: UploadFileInput): Promise<UploadFileOutput>;
-  deleteFile?(fileId: string): Promise<void>;
+  deleteFile(fileId: string): Promise<void>;
+  deleteObject?(key: string): Promise<void>;
   uploadBuffer?(
     key: string,
     buffer: Buffer,
     contentType?: string,
   ): Promise<{ path: string; url: string }>;
-  getFileStream?(
+  getFileStream(
     fileId: string,
     range?: { start: number; end: number },
   ): Promise<{
@@ -77,11 +78,11 @@ export interface IStoragePort {
     filename: string;
     contentRange?: string;
   }>;
-  getPresignedDownloadUrl?(
+  getPresignedDownloadUrl(
     fileId: string,
     expiresInSeconds?: number,
   ): Promise<string>;
-  getPresignedUploadUrl?(input: {
+  getPresignedUploadUrl(input: {
     userId: string;
     filename: string;
     mimeType: string;
@@ -102,7 +103,7 @@ export interface IStoragePort {
     size?: number;
     mimeType?: string;
   }>;
-  completePresignedUpload?(input: {
+  completePresignedUpload(input: {
     userId: string;
     storageKey: string;
     filename: string;
@@ -120,7 +121,7 @@ export interface IStoragePort {
     size: number;
     mimeType: string;
   }>;
-  initiateMultipartUpload?(input: {
+  initiateMultipartUpload(input: {
     userId: string;
     filename: string;
     mimeType: string;
@@ -135,12 +136,12 @@ export interface IStoragePort {
     partSize: number;
     totalParts: number;
   }>;
-  getMultipartPartUrl?(
+  getMultipartPartUrl(
     sessionId: string,
     partNumber: number,
     actor?: { userId: string; projectId?: string | null },
   ): Promise<string>;
-  completeMultipartUpload?(input: {
+  completeMultipartUpload(input: {
     sessionId: string;
     parts: { partNumber: number; eTag: string }[];
     actor?: { userId: string; projectId?: string | null };
@@ -151,11 +152,11 @@ export interface IStoragePort {
     filename: string;
     size: number;
   }>;
-  abortMultipartUpload?(
+  abortMultipartUpload(
     sessionId: string,
     actor?: { userId: string; projectId?: string | null },
   ): Promise<void>;
-  checkQuota?(
+  checkQuota(
     userId?: string | null,
     projectId?: string | null,
   ): Promise<{ usedBytes: number; maxBytes: number; percentage: number }>;

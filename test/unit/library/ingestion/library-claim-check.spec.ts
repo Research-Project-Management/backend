@@ -71,7 +71,7 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
         }),
         uploadFile: jest.fn().mockResolvedValue({
           fileId: storageFileId,
-          url: `/api/files/${storageFileId}`,
+          url: `/api/v1/storage/files/${storageFileId}`,
           path: `extractions/${itemId}/pdf_fulltext.json.gz`,
         }),
       };

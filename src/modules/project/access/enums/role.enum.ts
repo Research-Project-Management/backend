@@ -26,24 +26,24 @@ export const ROLE_DESCRIPTIONS: Record<
   { label: string; description: string }
 > = {
   [Role.OWNER]: {
-    label: 'Chủ nhiệm đề tài / Project Owner',
+    label: 'Project Owner',
     description:
-      'Toàn quyền quản lý dự án, cấu hình, độc quyền quản lý thành viên và xóa dự án.',
+      'Full project management, settings configuration, member administration, and project deletion.',
   },
   [Role.COORDINATOR]: {
-    label: 'Điều phối viên / Project Coordinator',
+    label: 'Project Coordinator',
     description:
-      'Quản lý tiến độ, lập kế hoạch cycles, phân công và kiểm soát work items. Không có quyền quản lý nhân sự.',
+      'Manage timeline, cycle planning, task assignments, and work items oversight. No member management rights.',
   },
   [Role.CONTRIBUTOR]: {
-    label: 'Thành viên nghiên cứu / Contributor',
+    label: 'Contributor',
     description:
-      'Tạo và chỉnh sửa work items, soạn thảo tài liệu/LaTeX, tải tài liệu nghiên cứu.',
+      'Create and edit work items, author manuscripts/LaTeX, and upload research reference materials.',
   },
   [Role.REVIEWER]: {
-    label: 'GVHD / Phản biện / Reviewer',
+    label: 'Reviewer',
     description:
-      'Xem toàn bộ dữ liệu đề tài, viết nhận xét, ghi chú và đề xuất sửa đổi mà không thay đổi trực tiếp dữ liệu gốc.',
+      'View project data, write feedback, notes, and suggestions without direct mutation of baseline documents.',
   },
 };
 

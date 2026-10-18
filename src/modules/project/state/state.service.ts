@@ -56,7 +56,7 @@ export class StateService {
         projectId: project.id,
         stateId: null,
         state: null,
-        stateLabel: 'Chưa đặt trạng thái (Unassigned)',
+        stateLabel: 'Unassigned',
       };
     }
 
@@ -110,7 +110,7 @@ export class StateService {
     );
     if (!existing) {
       throw new NotFoundException(
-        `Trạng thái với ID "${stateId}" không tồn tại trong dự án`,
+        `State with ID "${stateId}" not found in project`,
       );
     }
 
@@ -180,7 +180,7 @@ export class StateService {
     const state = await this.stateRepo.findProjectStateById(projectId, stateId);
     if (!state) {
       throw new NotFoundException(
-        `Trạng thái với ID "${stateId}" không tồn tại`,
+        `State with ID "${stateId}" not found`,
       );
     }
 
@@ -206,7 +206,7 @@ export class StateService {
 
     return {
       success: true,
-      message: `Đã xóa trạng thái "${state.name}" thành công`,
+      message: `State "${state.name}" deleted successfully`,
     };
   }
 
@@ -230,7 +230,7 @@ export class StateService {
         projectId: project.id,
         stateId: null,
         state: null,
-        stateLabel: 'Chưa đặt trạng thái (Unassigned)',
+        stateLabel: 'Unassigned',
       };
     }
 
@@ -240,7 +240,7 @@ export class StateService {
     );
     if (!targetState) {
       throw new NotFoundException(
-        `Trạng thái mục tiêu với ID "${targetStateId}" không tồn tại trong dự án`,
+        `Target state with ID "${targetStateId}" not found in project`,
       );
     }
 

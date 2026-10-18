@@ -12,17 +12,17 @@ import {
   CitationItemInput,
   FormattedCitationResult,
   ReferenceData,
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
+  CatalogItemRecord,
 } from '@/modules/library/citation/types/citation.types';
+import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
 import { DoiContentNegotiationService } from './doi-content-negotiation.service';
 import { CslEngineService } from './csl-engine.service';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
-import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,
-} from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
+} from '@/modules/library/core/constants/academic-client.constants';
 import { CslRepositoryService } from './csl-repository.service';
 
 export type { ReferenceData };
@@ -46,8 +46,8 @@ export class CitationService {
     @Optional()
     private readonly cslRepo?: CslRepositoryService,
     @Optional()
-    @Inject(CATALOG_GATEWAY_PORT)
-    private readonly catalogGateway?: ICatalogGatewayPort,
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
     @Optional()
     @Inject('METADATA_PORT')
     private readonly metadataPort?: {
@@ -625,7 +625,11 @@ export class CitationService {
     projectId?: string,
   ) {
     const item = this.catalogGateway
-      ? await this.catalogGateway.getItem(userId, itemId, projectId)
+      ? await this.catalogGateway.getItem<CatalogItemRecord>(
+          userId,
+          itemId,
+          projectId,
+        )
       : null;
 
     if (!item) {
@@ -679,7 +683,25 @@ export class CitationService {
       }
     }
 
-    const citationInput: CitationItemInput = {
+    return this.formatItem(
+      this.mapCatalogItemToCitationInput(item),
+      styleId,
+      index,
+    );
+  }
+
+  private mapCatalogItemToCitationInput(
+    item: CatalogItemRecord,
+  ): CitationItemInput {
+    const mappedCreators = item.contributors?.map((c) => ({
+      creatorType: c.creatorType || 'author',
+      firstName: c.firstName || '',
+      lastName: c.lastName || '',
+      fullName: c.fullName || undefined,
+      name: c.fullName || undefined,
+    }));
+
+    return {
       id: item.id,
       title: item.title,
       itemType: item.itemType || 'journalArticle',
@@ -690,20 +712,8 @@ export class CitationService {
             (c) =>
               c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
           ) || [],
-      contributors: item.contributors?.map((c) => ({
-        creatorType: c.creatorType || 'author',
-        firstName: c.firstName || '',
-        lastName: c.lastName || '',
-        fullName: c.fullName || undefined,
-        name: c.fullName || undefined,
-      })),
-      creators: item.contributors?.map((c) => ({
-        creatorType: c.creatorType || 'author',
-        firstName: c.firstName || '',
-        lastName: c.lastName || '',
-        fullName: c.fullName || undefined,
-        name: c.fullName || undefined,
-      })),
+      contributors: mappedCreators,
+      creators: mappedCreators,
       publicationTitle: item.publicationTitle || undefined,
       journal: item.publicationTitle || undefined,
       publisher: item.publisher || undefined,
@@ -761,8 +771,6 @@ export class CitationService {
           ? item.version
           : undefined,
     };
-
-    return this.formatItem(citationInput, styleId, index);
   }
 
   /**
@@ -775,7 +783,11 @@ export class CitationService {
     projectId?: string,
   ) {
     const items = this.catalogGateway
-      ? await this.catalogGateway.findByIds(userId, itemIds, projectId)
+      ? await this.catalogGateway.findByIds<CatalogItemRecord>(
+          userId,
+          itemIds,
+          projectId,
+        )
       : [];
 
     let combinedInText = '';
@@ -849,94 +861,11 @@ export class CitationService {
       }
 
       if (!formatted) {
-        const citationInput: CitationItemInput = {
-          id: item.id,
-          title: item.title,
-          itemType: item.itemType || 'journalArticle',
-          authors:
-            item.contributors
-              ?.filter((c) => (c.creatorType || 'author') === 'author')
-              .map(
-                (c) =>
-                  c.fullName ||
-                  `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-              ) || [],
-          contributors: item.contributors?.map((c) => ({
-            creatorType: c.creatorType || 'author',
-            firstName: c.firstName || '',
-            lastName: c.lastName || '',
-            fullName: c.fullName || undefined,
-            name: c.fullName || undefined,
-          })),
-          creators: item.contributors?.map((c) => ({
-            creatorType: c.creatorType || 'author',
-            firstName: c.firstName || '',
-            lastName: c.lastName || '',
-            fullName: c.fullName || undefined,
-            name: c.fullName || undefined,
-          })),
-          publicationTitle: item.publicationTitle || undefined,
-          journal: item.publicationTitle || undefined,
-          publisher: item.publisher || undefined,
-          volume: item.volume || undefined,
-          issue: item.issue || undefined,
-          pages: item.pages || undefined,
-          year: item.year || undefined,
-          publicationDate:
-            typeof item.publicationDate === 'string'
-              ? item.publicationDate
-              : undefined,
-          doi: item.doi || undefined,
-          isbn: typeof item.isbn === 'string' ? item.isbn : undefined,
-          issn: typeof item.issn === 'string' ? item.issn : undefined,
-          pmid: typeof item.pmid === 'string' ? item.pmid : undefined,
-          pmcid: typeof item.pmcid === 'string' ? item.pmcid : undefined,
-          arxivId: typeof item.arxivId === 'string' ? item.arxivId : undefined,
-          url: item.url || undefined,
-          citationKey: item.citationKey || undefined,
-          place: typeof item.place === 'string' ? item.place : undefined,
-          edition:
-            typeof item.edition === 'string' || typeof item.edition === 'number'
-              ? String(item.edition)
-              : undefined,
-          series: typeof item.series === 'string' ? item.series : undefined,
-          bookTitle:
-            typeof item.bookTitle === 'string' ? item.bookTitle : undefined,
-          proceedingsTitle:
-            typeof item.proceedingsTitle === 'string'
-              ? item.proceedingsTitle
-              : undefined,
-          conferenceName:
-            typeof item.conferenceName === 'string'
-              ? item.conferenceName
-              : undefined,
-          thesisType:
-            typeof item.thesisType === 'string' ? item.thesisType : undefined,
-          reportType:
-            typeof item.reportType === 'string' ? item.reportType : undefined,
-          versionNumber:
-            typeof item.versionNumber === 'string'
-              ? item.versionNumber
-              : undefined,
-          accessedAt:
-            item.accessedAt instanceof Date ||
-            typeof item.accessedAt === 'string'
-              ? item.accessedAt
-              : undefined,
-          abstract:
-            typeof item.abstract === 'string' ? item.abstract : undefined,
-          extra: typeof item.extra === 'string' ? item.extra : undefined,
-          metadata: item.metadata,
-          updatedAt:
-            item.updatedAt instanceof Date || typeof item.updatedAt === 'string'
-              ? item.updatedAt
-              : undefined,
-          version:
-            typeof item.version === 'number' || typeof item.version === 'string'
-              ? item.version
-              : undefined,
-        };
-        formatted = this.formatItem(citationInput, styleId, index + 1);
+        formatted = this.formatItem(
+          this.mapCatalogItemToCitationInput(item),
+          styleId,
+          index + 1,
+        );
       }
 
       citationMap.set(item.id, formatted);

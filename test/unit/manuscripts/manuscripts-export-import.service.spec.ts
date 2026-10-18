@@ -42,34 +42,23 @@ import {
 } from '@nestjs/common';
 import { Readable } from 'node:stream';
 
-// Domain
 import {
   ArchiveEntryVo,
   KNOWN_TEXT_EXTENSIONS,
-} from '@/modules/manuscripts/export-import/core/domain/value-objects/archive-entry.vo';
-import { ImportSummaryVo } from '@/modules/manuscripts/export-import/core/domain/value-objects/import-summary.vo';
-import { ProjectTemplate } from '@/modules/manuscripts/export-import/core/domain/entities/project-template.entity';
-import { ArchiveManifest } from '@/modules/manuscripts/export-import/core/domain/entities/archive-manifest.entity';
-import { InvalidZipArchiveException } from '@/modules/manuscripts/export-import/core/domain/exceptions/invalid-zip-archive.exception';
-import { ZipSlipSecurityException } from '@/modules/manuscripts/export-import/core/domain/exceptions/zip-slip-security.exception';
-import { ArchiveSizeExceededException } from '@/modules/manuscripts/export-import/core/domain/exceptions/archive-size-exceeded.exception';
-import { TemplateNotFoundException } from '@/modules/manuscripts/export-import/core/domain/exceptions/template-not-found.exception';
-
-// Ports & Adapters
-import { PkzipEngineAdapter } from '@/modules/manuscripts/export-import/core/adapters/engine/pkzip-engine.adapter';
-import { ManuscriptAggregatorAdapter } from '@/modules/manuscripts/export-import/core/adapters/external/manuscript-aggregator.adapter';
-import { ManuscriptHydratorAdapter } from '@/modules/manuscripts/export-import/core/adapters/external/manuscript-hydrator.adapter';
-import { EmbeddedTemplateCatalogAdapter } from '@/modules/manuscripts/export-import/core/adapters/storage/embedded-template-catalog.adapter';
-
-// Use Cases
-import { ExportProjectZipUseCase } from '@/modules/manuscripts/export-import/core/use-cases/export-project-zip.use-case';
-import { ImportProjectZipUseCase } from '@/modules/manuscripts/export-import/core/use-cases/import-project-zip.use-case';
-import { ListTemplatesUseCase } from '@/modules/manuscripts/export-import/core/use-cases/list-templates.use-case';
-import { ScaffoldTemplateUseCase } from '@/modules/manuscripts/export-import/core/use-cases/scaffold-template.use-case';
-
-// Service & Controller
-import { ExportImportService } from '@/modules/manuscripts/export-import/export-import.service';
-import { ExportImportController } from '@/modules/manuscripts/export-import/export-import.controller';
+  ImportSummaryVo,
+  ProjectTemplate,
+  ArchiveManifest,
+  InvalidZipArchiveException,
+  ZipSlipSecurityException,
+  ArchiveSizeExceededException,
+  TemplateNotFoundException,
+  PkzipEngineAdapter,
+  ManuscriptAggregatorAdapter,
+  ManuscriptHydratorAdapter,
+  EmbeddedTemplateCatalogAdapter,
+  ExportImportService,
+  ExportImportController,
+} from '@/modules/manuscripts/export-import';
 
 // --- In-Memory Mocks for External Subsystems ---
 
@@ -315,10 +304,38 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
   let hydratorAdapter: ManuscriptHydratorAdapter;
   let catalogAdapter: EmbeddedTemplateCatalogAdapter;
 
-  let exportUseCase: ExportProjectZipUseCase;
-  let importUseCase: ImportProjectZipUseCase;
-  let listTemplatesUseCase: ListTemplatesUseCase;
-  let scaffoldTemplateUseCase: ScaffoldTemplateUseCase;
+  let exportUseCase: {
+    execute: (input: {
+      projectId: string;
+      projectName?: string;
+      includePdf?: boolean;
+      cleanArxiv?: boolean;
+    }) => ReturnType<ExportImportService['exportProjectZip']>;
+    executeStream: (input: {
+      projectId: string;
+      projectName?: string;
+      includePdf?: boolean;
+      cleanArxiv?: boolean;
+    }) => ReturnType<ExportImportService['exportProjectZipStream']>;
+  };
+  let importUseCase: {
+    execute: (input: {
+      projectId: string;
+      zipBuffer: Buffer;
+      userId?: string | null;
+      preferredRootDoc?: string;
+    }) => ReturnType<ExportImportService['importProjectZip']>;
+  };
+  let listTemplatesUseCase: {
+    execute: ExportImportService['listTemplates'];
+  };
+  let scaffoldTemplateUseCase: {
+    execute: (input: {
+      projectId: string;
+      templateId: string;
+      userId?: string | null;
+    }) => ReturnType<ExportImportService['scaffoldTemplate']>;
+  };
 
   let service: ExportImportService;
   let controller: ExportImportController;
@@ -345,20 +362,38 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
 
     catalogAdapter = new EmbeddedTemplateCatalogAdapter();
 
-    exportUseCase = new ExportProjectZipUseCase(aggregatorAdapter, zipEngine);
-    importUseCase = new ImportProjectZipUseCase(zipEngine, hydratorAdapter);
-    listTemplatesUseCase = new ListTemplatesUseCase(catalogAdapter);
-    scaffoldTemplateUseCase = new ScaffoldTemplateUseCase(
-      catalogAdapter,
+    service = new ExportImportService(
+      aggregatorAdapter,
+      zipEngine,
       hydratorAdapter,
+      catalogAdapter,
     );
 
-    service = new ExportImportService(
-      exportUseCase,
-      importUseCase,
-      listTemplatesUseCase,
-      scaffoldTemplateUseCase,
-    );
+    exportUseCase = {
+      execute: (input) => service.exportProjectZip(input.projectId, input),
+      executeStream: (input) =>
+        service.exportProjectZipStream(input.projectId, input),
+    };
+    importUseCase = {
+      execute: (input) =>
+        service.importProjectZip(
+          input.projectId,
+          input.zipBuffer,
+          input.userId,
+          input.preferredRootDoc,
+        ),
+    };
+    listTemplatesUseCase = {
+      execute: () => service.listTemplates(),
+    };
+    scaffoldTemplateUseCase = {
+      execute: (input) =>
+        service.scaffoldTemplate(
+          input.projectId,
+          input.templateId,
+          input.userId,
+        ),
+    };
 
     controller = new ExportImportController(service);
   });

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { Prisma, LibraryChange, Tombstone } from '@prisma/client';
 import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
 import {
@@ -8,7 +8,7 @@ import {
 import {
   AppendChangeEntry,
   RecordTombstoneEntry,
-} from '@/modules/library/shared-kernel/ports/unit-of-work.port';
+} from '@/modules/library/core/ports/unit-of-work.port';
 
 export interface GetChangesOptions {
   since?: bigint | number | string;

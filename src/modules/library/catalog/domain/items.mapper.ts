@@ -7,18 +7,19 @@ import {
   cleanAbstractText,
   cleanCommentText,
   splitAuthorString,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+  convertAcademicHtmlToMarkdown,
+} from '@/modules/library/core';
 import {
   resolveCanonicalArxivCategory,
   normalizeTags,
   cleanSingleTag,
-} from '@/modules/library/shared-kernel/domain/tag.domain';
+} from '@/modules/library/core/domain/tag.domain';
 import {
   getEffectiveBaseFieldMap,
   resolveBidirectionalBaseFields,
   resolveCanonicalCreatorRole,
   resolveFieldAliases,
-} from '@/modules/library/shared-kernel/domain/zotero-field-harmonizer.domain';
+} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
 import type { CreatorCreditInput } from '@/modules/library/catalog/types/items.types';
 
 export interface AttachmentLike {
@@ -185,8 +186,15 @@ function parseJsonObject(val: unknown): Record<string, unknown> | null {
  */
 function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
   const metaObj = parseJsonObject(it.metadata);
+  const hasRelationalItemTags = Array.isArray(it.itemTags);
   if (metaObj) {
     for (const [key, value] of Object.entries(metaObj)) {
+      if (
+        hasRelationalItemTags &&
+        (key === 'tags' || key === 'keywords' || key === 'zoteroTags')
+      ) {
+        continue;
+      }
       if (value !== undefined && value !== null && it[key] === undefined) {
         it[key] = value;
       }
@@ -326,18 +334,18 @@ function mapAttachmentsAndPrimaryFilePartial(
     it.fileUrl = getFileContentPath(primaryPdf.fileId);
   } else if (
     typeof it.fileUrl === 'string' &&
-    it.fileUrl.startsWith('/api/files/') &&
+    it.fileUrl.startsWith('/api/v1/storage/files/') &&
     !it.fileUrl.includes('/r2/') &&
     !it.fileUrl.endsWith('/content')
   ) {
-    const match = it.fileUrl.match(/^\/api\/files\/([^/?#]+)$/);
+    const match = it.fileUrl.match(/^\/api\/v1\/storage\/files\/([^/?#]+)$/);
     if (match?.[1]) {
       it.fileUrl = getFileContentPath(match[1]);
     }
   } else if (
     typeof it.fileUrl === 'string' &&
     !it.fileUrl.endsWith('/content') &&
-    !it.fileUrl.startsWith('/api/files/')
+    !it.fileUrl.startsWith('/api/v1/storage/files/')
   ) {
     const isPdfLink =
       /\.pdf(?:[?#]|$)/i.test(it.fileUrl) ||
@@ -509,29 +517,52 @@ function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
       .filter((zt): zt is NonNullable<typeof zt> => Boolean(zt));
   };
 
-  if (Array.isArray(it.itemTags) && it.itemTags.length > 0) {
+  if (Array.isArray(it.itemTags)) {
     const itemTagArr = it.itemTags;
-    const rawTagNames = itemTagArr
-      .map(
-        (t) =>
-          (t.tag as { name?: string } | undefined)?.name ||
-          (t.name as string | undefined),
-      )
-      .filter(Boolean) as string[];
-    const tagNames = normalizeTags(rawTagNames);
-    it.tags = tagNames;
-    it.keywords = tagNames;
-    it.zoteroTags = buildZoteroTags(itemTagArr, (entry) => {
-      const t = entry as Record<string, unknown>;
-      const tagObj = t.tag as { name?: string; type?: unknown } | undefined;
-      return {
-        rawName: tagObj?.name || (t.name as string | undefined) || '',
-        isAuto:
-          t.type === 'automatic' ||
-          t.type === 1 ||
-          (!t.type && tagObj?.type === 'automatic'),
-      };
-    });
+    if (itemTagArr.length > 0) {
+      const rawTagNames = itemTagArr
+        .map(
+          (t) =>
+            (t.tag as { name?: string } | undefined)?.name ||
+            (t.name as string | undefined),
+        )
+        .filter(Boolean) as string[];
+      const tagNames = normalizeTags(rawTagNames);
+      it.tags = tagNames;
+      it.keywords = tagNames;
+      it.zoteroTags = buildZoteroTags(itemTagArr, (entry) => {
+        const t = entry as Record<string, unknown>;
+        const tagObj = t.tag as { name?: string; type?: unknown } | undefined;
+        return {
+          rawName: tagObj?.name || (t.name as string | undefined) || '',
+          isAuto:
+            t.type === 'automatic' ||
+            t.type === 1 ||
+            (!t.type && tagObj?.type === 'automatic'),
+        };
+      });
+    } else if (Array.isArray(it.tags) && it.tags.length > 0) {
+      const rawTags = it.tags;
+      const tagNames = normalizeTags(rawTags as string[]);
+      it.tags = tagNames;
+      it.keywords = tagNames;
+      it.zoteroTags = buildZoteroTags(rawTags, (t) => {
+        const tObj =
+          typeof t === 'object' && t !== null
+            ? (t as Record<string, unknown>)
+            : null;
+        const rawName =
+          typeof t === 'string'
+            ? t
+            : (tObj?.tag as string) || (tObj?.name as string) || '';
+        const isAuto = tObj?.type === 1 || tObj?.type === 'automatic';
+        return { rawName, isAuto };
+      });
+    } else {
+      it.tags = [];
+      it.keywords = [];
+      it.zoteroTags = [];
+    }
   } else {
     const metaObj = parseJsonObject(it.metadata) || {};
     const firstNonEmptyArray = (candidates: unknown[]): unknown[] => {
@@ -587,53 +618,7 @@ function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
   }
 
   // Notes
-  const cleanNoteBody = (raw: string): string => {
-    if (!raw || typeof raw !== 'string') return '';
-    if (!/<\/?[a-z][\s\S]*>/i.test(raw) && !raw.includes('&')) {
-      return raw.trim();
-    }
-    return raw
-      .replace(/\r\n/g, '\n')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, (_, c) => `# ${c.trim()}\n\n`)
-      .replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, (_, c) => `## ${c.trim()}\n\n`)
-      .replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, (_, c) => `### ${c.trim()}\n\n`)
-      .replace(
-        /<h[4-6][^>]*>([\s\S]*?)<\/h[4-6]>/gi,
-        (_, c) => `#### ${c.trim()}\n\n`,
-      )
-      .replace(
-        /<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi,
-        (_, c) => `> ${c.trim()}\n\n`,
-      )
-      .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, c) => `- ${c.trim()}\n`)
-      .replace(/<\/?(ul|ol)[^>]*>/gi, '\n')
-      .replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, c) => `${c.trim()}\n\n`)
-      .replace(/<\/div>/gi, '\n')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**')
-      .replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*')
-      .replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
-      .replace(
-        /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
-        '[$2]($1)',
-      )
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/gi, '&')
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      .replace(/&quot;/gi, '"')
-      .replace(/&#39;|&apos;/gi, "'")
-      .replace(/&mdash;/gi, '—')
-      .replace(/&ndash;/gi, '–')
-      .split('\n')
-      .map((line) => line.trimEnd())
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  };
+  const cleanNoteBody = convertAcademicHtmlToMarkdown;
 
   const normalizeNoteList = (list: Array<Record<string, unknown>>) => {
     const seen = new Set<string>();
@@ -642,7 +627,13 @@ function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
         const rawText = (n.contentMd || n.content || n.note || '') as string;
         const text = cleanNoteBody(rawText);
         if (!text) return null;
-        const dedupeKey = text.toLowerCase();
+        const noteId =
+          typeof n.id === 'string' && n.id.trim().length > 0
+            ? n.id.trim()
+            : null;
+        const dedupeKey = noteId
+          ? `id:${noteId}`
+          : `text:${text.toLowerCase()}`;
         if (seen.has(dedupeKey)) return null;
         seen.add(dedupeKey);
         return {
@@ -1127,7 +1118,7 @@ function mapPublicationsAndRelationsPartial(it: MutableItemPayload): void {
         description: rel.description || '',
         linkedAt: rel.createdAt,
         targetItem: rel.targetItem
-          ? ItemMapper.toDomain(rel.targetItem)
+          ? ItemsMapper.toDomain(rel.targetItem)
           : undefined,
       });
     }
@@ -1142,7 +1133,7 @@ function mapPublicationsAndRelationsPartial(it: MutableItemPayload): void {
         description: rel.description || '',
         linkedAt: rel.createdAt,
         targetItem: rel.sourceItem
-          ? ItemMapper.toDomain(rel.sourceItem)
+          ? ItemsMapper.toDomain(rel.sourceItem)
           : undefined,
       });
     }
@@ -1217,7 +1208,7 @@ export class ItemsMapper {
    */
   static toDomainList<T>(items: T[]): T[] {
     if (!Array.isArray(items)) return items;
-    return items.map((item) => ItemMapper.toDomain(item));
+    return items.map((item) => ItemsMapper.toDomain(item));
   }
 
   /**
@@ -1237,7 +1228,7 @@ export class ItemsMapper {
       lastReadAt?: Date | string | null;
       [key: string]: unknown;
     }
-    const normalized = ItemMapper.toDomain(item) as Record<string, unknown>;
+    const normalized = ItemsMapper.toDomain(item) as Record<string, unknown>;
     const statesArr =
       Array.isArray(normalized.userStates) && normalized.userStates.length > 0
         ? (normalized.userStates as StateRecordLike[])
@@ -1270,6 +1261,3 @@ export class ItemsMapper {
     };
   }
 }
-
-export const ItemMapper = ItemsMapper;
-export type ItemMapper = ItemsMapper;

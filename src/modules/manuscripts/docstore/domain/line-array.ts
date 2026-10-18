@@ -5,10 +5,7 @@
  * Matches Overleaf DocManager and HttpController line processing.
  */
 
-import {
-  DocTooLargeError,
-  NullByteDetectedError,
-} from '../core/domain/doc-errors';
+import { DocTooLargeError, NullByteDetectedError } from './doc-errors';
 
 export class LineArrayEngine {
   public static readonly DEFAULT_MAX_DOC_LENGTH = 2 * 1024 * 1024; // 2MB default text limit (Overleaf parity)

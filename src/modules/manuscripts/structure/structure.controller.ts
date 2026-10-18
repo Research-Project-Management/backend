@@ -25,6 +25,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { StructureService } from './structure.service';
 import {
   CreateNodeDto,
@@ -53,7 +54,8 @@ import {
   'projects/:projectId/structure',
   'api/projects/:projectId/structure',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@RequireRole(Role.REVIEWER)
 export class StructureController {
   constructor(private readonly structureService: StructureService) {}
 
@@ -120,6 +122,7 @@ export class StructureController {
   }
 
   @Post('nodes')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Create new file, document, or folder with auto-mkdirp',
   })
@@ -137,6 +140,7 @@ export class StructureController {
 
   @Patch('nodes/:nodeId/move')
   @Post('nodes/:nodeId/move')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Move node to destination folder or path (with cycle detection)',
   })
@@ -155,6 +159,7 @@ export class StructureController {
 
   @Patch('nodes/:nodeId/rename')
   @Post('nodes/:nodeId/rename')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Rename node (cascades path updates to all children if folder)',
   })
@@ -176,6 +181,7 @@ export class StructureController {
   }
 
   @Delete('nodes/:nodeId')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({ summary: 'Delete node and all nested descendants' })
   async deleteNode(
     @Param('projectId') projectId: string,
@@ -210,6 +216,7 @@ export class StructureController {
   }
 
   @Post('root-doc/:nodeId')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({ summary: 'Explicitly set the master LaTeX entrypoint' })
   async setRootDoc(
     @Param('projectId') projectId: string,
@@ -224,6 +231,7 @@ export class StructureController {
   }
 
   @Post('nodes/:nodeId/reorder')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Update sort order index for display' })
   async reorderNode(

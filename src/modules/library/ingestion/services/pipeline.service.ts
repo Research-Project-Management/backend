@@ -7,30 +7,24 @@ import {
 } from '@nestjs/common';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import {
-  IdentifyStage,
-  NormalizeStage,
-  EnrichStage,
-  ReconcileStage,
-  MatchStage,
-  CommitStage,
-} from '@/modules/library/ingestion/stages';
-import { RetractionScannerProvider } from '@/modules/library/ingestion/providers';
-import {
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
-} from '@/modules/library/ingestion/types/catalog-gateway.types';
-import {
-  EXTRACTION_GATEWAY_PORT,
-  IExtractionGatewayPort,
-} from '@/modules/library/ingestion/types/extraction-gateway.types';
+import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
+import { NormalizeStage } from '@/modules/library/ingestion/stages/normalize.stage';
+import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
+import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
+import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
+import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import {
   LibraryItemSource,
   SCHEMA_V42_DATA,
   ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
   harmonizeZoteroFields,
-} from '@/modules/library/shared-kernel';
+  CATALOG_FACADE,
+  ICatalogFacade,
+  EXTRACTION_FACADE,
+  IExtractionFacade,
+} from '@/modules/library/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
@@ -142,11 +136,11 @@ export class PipelineService {
     private readonly match: MatchStage,
     private readonly commit: CommitStage,
     @Optional()
-    @Inject(CATALOG_GATEWAY_PORT)
-    private readonly catalogGateway?: ICatalogGatewayPort,
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
     @Optional()
-    @Inject(EXTRACTION_GATEWAY_PORT)
-    private readonly extractionGateway?: IExtractionGatewayPort,
+    @Inject(EXTRACTION_FACADE)
+    private readonly extractionGateway?: IExtractionFacade,
     @Optional()
     sagaOrchestrator?: IngestionSagaOrchestrator,
     @Optional()
@@ -254,7 +248,7 @@ export class PipelineService {
       },
     );
 
-    // ── Multi-Record Ingestion Handling (BibTeX / RIS batches) ────────────────
+    // Multi-Record Ingestion Handling (BibTeX / RIS batches)
     if (envelope.payload.kind === 'RECORD' && normalizedCandidates.length > 1) {
       await this.processRecordBatch({
         scopeId,
@@ -339,8 +333,7 @@ export class PipelineService {
                 resolvedScope.userId,
                 targetItemId,
                 enrichPatch,
-                undefined,
-                resolvedScope.projectId,
+                { projectId: resolvedScope.projectId },
               );
               this.logger.log(
                 `[EXACT_MERGE] Enriched item ${targetItemId} with ${patchedFields.join(', ')}`,
@@ -540,7 +533,7 @@ export class PipelineService {
     }
   }
 
-  // ── Helper Domain Routines ──────────────────────────────────────────────────
+  // Helper Domain Routines
 
   private async processRecordBatch(params: {
     scopeId: string;
@@ -1026,5 +1019,3 @@ export class PipelineService {
     }
   }
 }
-
-export { PipelineService as IngestionPipelineRunner };

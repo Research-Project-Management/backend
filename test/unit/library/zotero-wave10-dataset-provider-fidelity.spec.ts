@@ -3,19 +3,19 @@ import { SemanticScholarProvider } from '@/modules/library/ingestion/providers/s
 import { OpenLibraryProvider } from '@/modules/library/ingestion/providers/openlibrary.provider';
 import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { ReconciliationService } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
+import { MetadataReconciliationService } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
-import { parseCreatorString } from '@/modules/library/shared-kernel/domain/author.domain';
-import { stripLatexBraces } from '@/modules/library/shared-kernel/domain/academic-text.domain';
+import { parseCreatorString } from '@/modules/library/core/domain/author.domain';
+import { stripLatexBraces } from '@/modules/library/core/domain/academic-text.domain';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { Prisma } from '@prisma/client';
-import { TransactionService } from '@/modules/library/shared-kernel';
+import { ICatalogFacade, TransactionService } from '@/modules/library/core';
+import { fromPartial } from '@total-typescript/shoehorn';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { ICatalogGatewayPort } from '@/modules/library/ingestion/types/catalog-gateway.types';
 
 describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Remediation', () => {
   const originalFetch = global.fetch;
@@ -286,8 +286,8 @@ describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Reme
       expect(meta.numPages).toBe('1312');
       expect(meta.pages).toBe('1312');
       expect(meta.libraryCatalog).toBe('Open Library');
-      expect(meta.keywords).toEqual(['Computer Algorithms', 'Data Structures']);
-      expect(meta.tags).toEqual(['Computer Algorithms', 'Data Structures']);
+      expect(meta.keywords).toEqual(['Computer algorithms', 'Data structures']);
+      expect(meta.tags).toEqual(['Computer algorithms', 'Data structures']);
       expect(meta.creators).toHaveLength(2);
       expect(meta.creators![0]).toMatchObject({
         firstName: 'Thomas H.',
@@ -404,12 +404,12 @@ describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Reme
     });
 
     it('reconciles SemanticScholar candidates with proper weights and harmonizes creators/authors and Zotero baseField venue/publisher', () => {
-      const service = new ReconciliationService();
+      const service = new MetadataReconciliationService();
       const candidates: MetadataCandidate[] = [
-        {
+        fromPartial<MetadataCandidate>({
           sourceProvider: 'SemanticScholar',
           confidenceScore: 0.92,
-          retrievedAt: new Date().toISOString(),
+          fetchedAt: new Date().toISOString(),
           metadata: {
             title: 'Neural Scaling Laws in Practice',
             authors: ['Jared Kaplan', 'Sam McCandlish'],
@@ -421,7 +421,7 @@ describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Reme
             citationCount: 512,
             referenceCount: 64,
           },
-        },
+        }),
       ];
 
       const result = service.reconcile(candidates);
@@ -609,7 +609,7 @@ describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Reme
           },
         ]),
         mergeItems: jest.fn().mockResolvedValue(undefined),
-      } as unknown as ICatalogGatewayPort;
+      } as unknown as ICatalogFacade;
 
       const duplicateService = new DuplicateService(
         mockTxService,
@@ -663,7 +663,7 @@ describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Reme
           createdPayload = data as Record<string, unknown>;
           return { id: 'item-created-1', ...data };
         }),
-      } as unknown as ICatalogGatewayPort;
+      } as unknown as ICatalogFacade;
 
       const urlCaptureService = new UrlCaptureService(
         mockRepo,

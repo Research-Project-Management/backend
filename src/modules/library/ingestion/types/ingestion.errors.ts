@@ -1,4 +1,4 @@
-import { BaseDomainException } from '@/modules/library/shared-kernel/core/errors/domain.exception';
+﻿import { BaseDomainException } from '@/modules/library/core/errors/domain.exception';
 
 export type IngestionErrorCategory =
   | 'validation_failed'

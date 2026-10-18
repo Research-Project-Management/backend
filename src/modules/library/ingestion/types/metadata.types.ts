@@ -4,15 +4,14 @@
  * Self-contained: defines all types, interfaces, tokens, and execution models.
  */
 
-// ── Tokens ───────────────────────────────────────────────────────────────────
+// Tokens
 
 export const METADATA_PORT = Symbol('METADATA_PORT');
 export const METADATA_PROVIDERS = Symbol('METADATA_PROVIDERS');
 
-// ── Query Types ──────────────────────────────────────────────────────────────
+// Query Types
 
 export type QueryType = 'DOI' | 'ARXIV' | 'PMID' | 'ISBN' | 'URL' | 'TITLE';
-export type AcademicQueryType = QueryType;
 
 export interface ClassifiedQuery {
   raw: string;
@@ -22,12 +21,12 @@ export interface ClassifiedQuery {
 
 import {
   CreatorCreditInput,
+  CreatorInput,
   CreatorType,
   ItemMetadata as CanonicalItemMetadata,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 
-export type { CreatorCreditInput, CreatorType };
-export type CreatorInput = CreatorCreditInput;
+export type { CreatorCreditInput, CreatorInput, CreatorType };
 
 export interface Provenance {
   provider?: string;
@@ -41,15 +40,11 @@ export interface Provenance {
   openAccessPdfUrl?: string;
 }
 
-export type ProvenanceMetadata = Provenance;
-export type LibraryCreatorInput = CreatorInput;
-
-// ── Item Metadata ────────────────────────────────────────────────────────────
+// Item Metadata
 
 export type ItemMetadata = CanonicalItemMetadata;
-export type UnifiedAcademicMetadata = ItemMetadata;
 
-// ── Reconciliation Types ─────────────────────────────────────────────────────
+// Reconciliation Types
 
 export interface MetadataCandidate {
   id: string;
@@ -93,7 +88,7 @@ export interface ReconciledMetadataResult {
   reconciledAt: string;
 }
 
-// ── Provider Identity & Capabilities ─────────────────────────────────────────
+// Provider Identity & Capabilities
 
 export type ProviderName =
   | 'CrossRef'
@@ -113,7 +108,7 @@ export interface ProviderCapability {
   maxConcurrency: number;
 }
 
-// ── Provider Result & Execution Status ───────────────────────────────────────
+// Provider Result & Execution Status
 
 export interface ProviderResult {
   provider: ProviderName;
@@ -143,7 +138,7 @@ export interface ProviderExecutionResult {
   durationMs?: number;
 }
 
-// ── Field-level Provenance ────────────────────────────────────────────────────
+// Field-level Provenance
 
 export interface FieldProvenance {
   provider: ProviderName | 'UserOverride';
@@ -153,7 +148,7 @@ export interface FieldProvenance {
   rawVersion?: string;
 }
 
-// ── Canonical Resolution Result ───────────────────────────────────────────────
+// Canonical Resolution Result
 
 export interface ResolvedMetadata {
   query: string;
@@ -166,7 +161,7 @@ export interface ResolvedMetadata {
   policyVersion: number;
 }
 
-// ── Resolution Request ────────────────────────────────────────────────────────
+// Resolution Request
 
 export interface MetadataRequest {
   query: string;
@@ -177,13 +172,13 @@ export interface MetadataRequest {
   signal?: AbortSignal;
 }
 
-// ── Canonical Metadata Service Interface ──────────────────────────────────────
+// Canonical Metadata Service Interface
 
 export interface MetadataPort {
   resolve(request: MetadataRequest): Promise<ResolvedMetadata | null>;
 }
 
-// ── Metadata Provider Interface ───────────────────────────────────────────────
+// Metadata Provider Interface
 
 export interface MetadataProvider {
   readonly id: ProviderName;

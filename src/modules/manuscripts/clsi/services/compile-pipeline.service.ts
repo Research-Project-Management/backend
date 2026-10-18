@@ -1,32 +1,680 @@
 /**
  * modules/manuscripts/clsi/services/compile-pipeline.service.ts
  * Coordinates the 5-step LaTeX compilation pipeline across the real engine seam
- * (LatexmkEngine vs TectonicEngine) and workspace repository, using pure in-process
- * domain logic for engine detection and log parsing.
+ * (LatexmkEngine vs TectonicEngine), sandbox runners (LocalProcessRunner vs DockerSandboxRunner),
+ * health check probes, and workspace repository, using pure in-process domain logic.
  */
 
+import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
   IWorkspaceManager,
   WorkspaceFile,
-} from '@/modules/manuscripts/clsi/core/ports/workspace.port';
-import {
   ILatexEngine,
+  EngineRunOptions,
   EngineRunResult,
-} from '@/modules/manuscripts/clsi/core/ports/engine.port';
-import {
   ILogParser,
   CompilerDiagnostic,
   DiscoveredOutputFile,
   IOutputFileFinder,
-} from '@/modules/manuscripts/clsi/core/ports/artifacts.port';
-import { ProjectLockManager } from '../core/adapters/workspace/project-lock.manager';
-import { OverleafOutputFileFinder } from '../core/adapters/artifacts/output-file.finder';
+  ISandboxRunner,
+  ProcessExecutionOptions,
+  ProcessExecutionResult,
+} from '../domain/clsi-ports';
+import {
+  ProjectLockManager,
+  OverleafOutputFileFinder,
+} from '../repositories/incremental-workspace.repository';
 import { TexEngineDetector } from '../domain/tex-engine.detector';
 import { OverleafLogParser } from '../domain/overleaf-log.parser';
-import { BibBackendDetector } from '../core/adapters/engines/bib-backend.detector';
-import { DraftModeManager } from '../core/adapters/engines/draft-mode.manager';
+import { BibBackendDetector } from '../domain/bib-backend.detector';
+import { DraftModeManager } from '../domain/draft-mode.manager';
+
+// ─────────────────────────────────────────────────────────────────
+// Process Watchdog & Sandbox Runners
+// ─────────────────────────────────────────────────────────────────
+
+export function killProcessGroup(pid: number, force = false): void {
+  if (process.platform === 'win32') {
+    try {
+      const args = ['/F', '/T', '/PID', pid.toString()];
+      spawn('taskkill', args, { stdio: 'ignore' });
+    } catch {
+      // ignore
+    }
+  } else {
+    try {
+      process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM');
+    } catch (e: unknown) {
+      if ((e as { code?: string })?.code === 'ESRCH') return;
+      try {
+        process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+export class Watchdog {
+  private timeoutTimer: NodeJS.Timeout | null = null;
+  private killTimer: NodeJS.Timeout | null = null;
+  private aborted = false;
+  private abortReason?: string;
+
+  constructor(
+    private readonly child: ChildProcess,
+    private readonly timeoutMs: number = 240000,
+    private readonly gracePeriodMs: number = 2000,
+  ) {}
+
+  arm(signal?: AbortSignal): void {
+    if (signal) {
+      if (signal.aborted) {
+        this.terminate('ABORTED_IMMEDIATELY');
+        return;
+      }
+      signal.addEventListener('abort', () => this.terminate('SIGNAL_ABORTED'), {
+        once: true,
+      });
+    }
+
+    this.timeoutTimer = setTimeout(() => {
+      this.terminate('TIMEOUT');
+    }, this.timeoutMs);
+  }
+
+  disarm(): void {
+    if (this.timeoutTimer) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = null;
+    }
+    if (this.killTimer) {
+      clearTimeout(this.killTimer);
+      this.killTimer = null;
+    }
+  }
+
+  isAborted(): boolean {
+    return this.aborted;
+  }
+
+  getAbortReason(): string | undefined {
+    return this.abortReason;
+  }
+
+  terminate(reason: string): void {
+    if (this.aborted) return;
+    this.aborted = true;
+    this.abortReason = reason;
+
+    const pid = this.child.pid;
+    if (!pid) return;
+
+    killProcessGroup(pid, false);
+
+    this.killTimer = setTimeout(() => {
+      killProcessGroup(pid, true);
+    }, this.gracePeriodMs);
+  }
+}
+
+export class LocalProcessRunner implements ISandboxRunner {
+  readonly name = 'local-process';
+
+  private static readonly activeChildProcesses = new Set<ChildProcess>();
+  private static shutdownHooksRegistered = false;
+
+  private static registerShutdownHooks(): void {
+    if (this.shutdownHooksRegistered) return;
+    this.shutdownHooksRegistered = true;
+
+    const cleanup = () => {
+      for (const child of this.activeChildProcesses) {
+        if (child.pid && !child.killed) {
+          killProcessGroup(child.pid, true);
+        }
+      }
+      this.activeChildProcesses.clear();
+    };
+
+    process.once('SIGINT', cleanup);
+    process.once('SIGTERM', cleanup);
+    process.once('exit', cleanup);
+  }
+
+  public async run(
+    command: string,
+    args: string[],
+    options: ProcessExecutionOptions,
+  ): Promise<ProcessExecutionResult> {
+    LocalProcessRunner.registerShutdownHooks();
+
+    return new Promise((resolve) => {
+      let stdout = '';
+      let stderr = '';
+
+      const child = spawn(command, args, {
+        cwd: options.cwd,
+        env: {
+          ...process.env,
+          ...(options.env || {}),
+        },
+        detached: process.platform !== 'win32',
+        shell: false,
+      });
+
+      LocalProcessRunner.activeChildProcesses.add(child);
+
+      const watchdog = new Watchdog(child, options.timeoutMs ?? 240000);
+      watchdog.arm(options.signal);
+
+      child.stdout?.on('data', (data) => {
+        const str = data.toString();
+        stdout += str;
+        options.onLogChunk?.(str);
+      });
+
+      child.stderr?.on('data', (data) => {
+        const str = data.toString();
+        stderr += str;
+        options.onLogChunk?.(str);
+      });
+
+      child.on('error', (err) => {
+        LocalProcessRunner.activeChildProcesses.delete(child);
+        watchdog.disarm();
+        resolve({
+          exitCode: 1,
+          stdout,
+          stderr: stderr ? `${stderr}\n${err.message}` : err.message,
+        });
+      });
+
+      child.on('close', (code) => {
+        LocalProcessRunner.activeChildProcesses.delete(child);
+        watchdog.disarm();
+        if (watchdog.isAborted()) {
+          const timeoutAdvice =
+            '\n\n[Compilation Timeout — Troubleshooting Suggestions]\n' +
+            'Your compilation timed out. Common causes and solutions:\n' +
+            '  1. Infinite loops or recursion in custom macros, TikZ code, or complex tables.\n' +
+            '  2. Very large, uncompressed high-resolution images (switch to "Draft mode" in Settings).\n' +
+            '  3. Unclosed environments, braces, or math delimiters.\n' +
+            '  4. Corrupted auxiliary files (click "Clear cached files" in Settings).';
+          resolve({
+            exitCode: 137,
+            stdout,
+            stderr: stderr
+              ? `${stderr}\nCompilation timed out or was canceled.${timeoutAdvice}`
+              : `Compilation timed out or was canceled.${timeoutAdvice}`,
+          });
+          return;
+        }
+
+        resolve({
+          exitCode: code ?? 0,
+          stdout,
+          stderr,
+        });
+      });
+    });
+  }
+}
+
+export class DockerSandboxRunner implements ISandboxRunner {
+  readonly name = 'docker-sandbox';
+  private readonly localRunner = new LocalProcessRunner();
+
+  constructor(
+    private readonly dockerImage: string = 'sharelatex/clsi:latest',
+    private readonly memoryLimit: string = '1024m',
+    private readonly cpuLimit: string = '1.0',
+  ) {}
+
+  public async run(
+    command: string,
+    args: string[],
+    options: ProcessExecutionOptions,
+  ): Promise<ProcessExecutionResult> {
+    const envArgs: string[] = [];
+    if (options.env) {
+      for (const [k, v] of Object.entries(options.env)) {
+        if (v !== undefined) {
+          const containerVal =
+            typeof v === 'string'
+              ? v.split(options.cwd).join('/compile').replace(/\\/g, '/')
+              : String(v);
+          envArgs.push('-e', `${k}=${containerVal}`);
+        }
+      }
+    }
+
+    const dockerArgs = [
+      'run',
+      '--rm',
+      '--net=none',
+      `--memory=${this.memoryLimit}`,
+      `--cpus=${this.cpuLimit}`,
+      '--pids-limit=100',
+      '--cap-drop=ALL',
+      '--security-opt=no-new-privileges',
+      '-v',
+      `${options.cwd}:/compile:rw`,
+      '-w',
+      '/compile',
+      ...envArgs,
+      this.dockerImage,
+      command,
+      ...args,
+    ];
+
+    const result = await this.localRunner.run('docker', dockerArgs, options);
+
+    if (
+      result.exitCode !== 0 &&
+      result.stderr.includes('docker: command not found')
+    ) {
+      throw new Error('Docker is not installed or available on this system');
+    }
+
+    return result;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// LaTeX Engines (LatexmkEngine & TectonicEngine)
+// ─────────────────────────────────────────────────────────────────
+
+export class LatexmkEngine implements ILatexEngine {
+  readonly name = 'latexmk';
+
+  constructor(
+    private readonly runner: ISandboxRunner,
+    private readonly binaryPath: string = 'latexmk',
+    private readonly defaultCompiler:
+      'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex',
+  ) {}
+
+  public async isAvailable(): Promise<boolean> {
+    try {
+      const result = await this.runner.run(this.binaryPath, ['-v'], {
+        cwd: process.cwd(),
+        timeoutMs: 5000,
+      });
+      return result.exitCode === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  public async compile(
+    options: EngineRunOptions,
+    compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex',
+  ): Promise<EngineRunResult> {
+    const startTime = Date.now();
+    const compiler = compilerOverride || this.defaultCompiler;
+
+    let compilerFlag = '-pdf';
+    if (compiler === 'xelatex') {
+      compilerFlag = '-pdfxe';
+    } else if (compiler === 'lualatex') {
+      compilerFlag = '-pdflua';
+    }
+
+    const args: string[] = [
+      compilerFlag,
+      '-cd',
+      '-jobname=output',
+      '-synctex=1',
+      '-file-line-error',
+      options.stopOnFirstError ? '-halt-on-error' : '-interaction=batchmode',
+      ...(options.stopOnFirstError ? [] : ['-f']),
+      ...(options.syntaxOnly ? ['-draftmode'] : []),
+      ...(options.shellEscape ? ['-shell-escape'] : []),
+      options.mainFile,
+    ];
+
+    const cwdPath = path.resolve(options.cwd);
+    const texInputs =
+      process.platform === 'win32'
+        ? `.;${cwdPath}\\//;${options.env?.TEXINPUTS || ''}`
+        : `.:${cwdPath}//:${options.env?.TEXINPUTS || ''}`;
+    const bibInputs =
+      process.platform === 'win32'
+        ? `.;${cwdPath}\\//;${options.env?.BIBINPUTS || ''}`
+        : `.:${cwdPath}//:${options.env?.BIBINPUTS || ''}`;
+
+    const envWithInputs = {
+      ...(options.env || {}),
+      TEXINPUTS: texInputs,
+      BIBINPUTS: bibInputs,
+      BSTINPUTS: bibInputs,
+    };
+
+    const execResult = await this.runner.run(this.binaryPath, args, {
+      cwd: options.cwd,
+      timeoutMs: options.timeoutMs ?? 240000,
+      signal: options.signal,
+      onLogChunk: options.onLogChunk,
+      env: envWithInputs,
+    });
+
+    const durationMs = Date.now() - startTime;
+
+    const pdfPath = path.join(options.cwd, 'output.pdf');
+    const mainBase = path.parse(options.mainFile).name;
+    const altPdfPath = path.join(options.cwd, `${mainBase}.pdf`);
+    const synctexGzPath = path.join(options.cwd, 'output.synctex.gz');
+    const synctexPlainPath = path.join(options.cwd, 'output.synctex');
+
+    const [
+      initialPdfGenerated,
+      altPdfGenerated,
+      synctexGzExists,
+      synctexPlainExists,
+    ] = await Promise.all([
+      this.fileExists(pdfPath),
+      this.fileExists(altPdfPath),
+      this.fileExists(synctexGzPath),
+      this.fileExists(synctexPlainPath),
+    ]);
+    let pdfGenerated = initialPdfGenerated;
+
+    if (!pdfGenerated && altPdfGenerated) {
+      try {
+        await fs.copyFile(altPdfPath, pdfPath);
+        pdfGenerated = true;
+      } catch {}
+    }
+
+    if (!pdfGenerated) {
+      const forceResult = await this.runner.run(
+        this.binaryPath,
+        ['-g', ...args],
+        {
+          cwd: options.cwd,
+          timeoutMs: options.timeoutMs ?? 240000,
+          signal: options.signal,
+          onLogChunk: options.onLogChunk,
+          env: envWithInputs,
+        },
+      );
+      execResult.stdout =
+        (execResult.stdout || '') + '\n' + (forceResult.stdout || '');
+      execResult.stderr =
+        (execResult.stderr || '') + '\n' + (forceResult.stderr || '');
+      pdfGenerated = await this.fileExists(pdfPath);
+      if (!pdfGenerated && (await this.fileExists(altPdfPath))) {
+        await fs.copyFile(altPdfPath, pdfPath).catch(() => {});
+        pdfGenerated = true;
+      }
+    }
+
+    return {
+      exitCode: execResult.exitCode,
+      stdout: execResult.stdout,
+      stderr: execResult.stderr,
+      durationMs,
+      pdfGenerated,
+      synctexGenerated: synctexGzExists || synctexPlainExists,
+    };
+  }
+
+  private async fileExists(filePath: string): Promise<boolean> {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+export class TectonicEngine implements ILatexEngine {
+  readonly name = 'tectonic';
+
+  constructor(
+    private readonly runner: ISandboxRunner,
+    private readonly binaryPath: string = 'tectonic',
+  ) {}
+
+  public async isAvailable(): Promise<boolean> {
+    try {
+      const result = await this.runner.run(this.binaryPath, ['--version'], {
+        cwd: process.cwd(),
+        timeoutMs: 5000,
+      });
+      return result.exitCode === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  public async compile(options: EngineRunOptions): Promise<EngineRunResult> {
+    const startTime = Date.now();
+
+    const args: string[] = [
+      '-X',
+      'compile',
+      '--synctex',
+      ...(options.shellEscape ? ['-Z', 'shell-escape'] : []),
+      '--outdir',
+      options.cwd,
+      options.mainFile,
+    ];
+
+    const execResult = await this.runner.run(this.binaryPath, args, {
+      cwd: options.cwd,
+      timeoutMs: options.timeoutMs ?? 240000,
+      signal: options.signal,
+      onLogChunk: options.onLogChunk,
+    });
+
+    const durationMs = Date.now() - startTime;
+
+    const baseName = options.mainFile.replace(/\.[^/.]+$/, '');
+    const generatedPdf = path.join(options.cwd, `${baseName}.pdf`);
+    const targetPdf = path.join(options.cwd, 'output.pdf');
+    try {
+      if ((await this.fileExists(generatedPdf)) && generatedPdf !== targetPdf) {
+        await fs.copyFile(generatedPdf, targetPdf);
+      }
+    } catch {}
+
+    const generatedSynctex = path.join(options.cwd, `${baseName}.synctex.gz`);
+    const targetSynctex = path.join(options.cwd, 'output.synctex.gz');
+    try {
+      if (
+        (await this.fileExists(generatedSynctex)) &&
+        generatedSynctex !== targetSynctex
+      ) {
+        await fs.copyFile(generatedSynctex, targetSynctex);
+      }
+    } catch {}
+
+    const generatedBbl = path.join(options.cwd, `${baseName}.bbl`);
+    const targetBbl = path.join(options.cwd, 'output.bbl');
+    try {
+      if ((await this.fileExists(generatedBbl)) && generatedBbl !== targetBbl) {
+        await fs.copyFile(generatedBbl, targetBbl);
+      }
+    } catch {}
+
+    const targetLog = path.join(options.cwd, 'output.log');
+    const generatedLog = path.join(options.cwd, `${baseName}.log`);
+    try {
+      if (!(await this.fileExists(targetLog))) {
+        if (await this.fileExists(generatedLog)) {
+          await fs.copyFile(generatedLog, targetLog);
+        } else {
+          const logContent =
+            `${execResult.stdout || ''}\n${execResult.stderr || ''}`.trim();
+          await fs.writeFile(targetLog, logContent, 'utf8');
+        }
+      }
+    } catch {}
+
+    const pdfPath = path.join(options.cwd, 'output.pdf');
+    const synctexGzPath = path.join(options.cwd, 'output.synctex.gz');
+    const synctexPlainPath = path.join(options.cwd, 'output.synctex');
+
+    const [pdfGenerated, synctexGzExists, synctexPlainExists] =
+      await Promise.all([
+        this.fileExists(pdfPath),
+        this.fileExists(synctexGzPath),
+        this.fileExists(synctexPlainPath),
+      ]);
+
+    return {
+      exitCode: execResult.exitCode,
+      stdout: execResult.stdout,
+      stderr: execResult.stderr,
+      durationMs,
+      pdfGenerated,
+      synctexGenerated: synctexGzExists || synctexPlainExists,
+    };
+  }
+
+  private async fileExists(filePath: string): Promise<boolean> {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// CLSI Health Check
+// ─────────────────────────────────────────────────────────────────
+
+export interface BinaryStatus {
+  available: boolean;
+  version?: string;
+  error?: string;
+}
+
+export interface ClsiHealthReport {
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  uptimeSeconds: number;
+  timestamp: string;
+  scratchDirectory: {
+    path: string;
+    writable: boolean;
+  };
+  compilers: {
+    latexmk: BinaryStatus;
+    pdflatex: BinaryStatus;
+    xelatex: BinaryStatus;
+    lualatex: BinaryStatus;
+    biber: BinaryStatus;
+    bibtex: BinaryStatus;
+    tectonic: BinaryStatus;
+  };
+}
+
+export class ClsiHealthCheck {
+  private readonly startTime = Date.now();
+
+  constructor(
+    private readonly runner: ISandboxRunner,
+    private readonly scratchDir: string = '/tmp/clsi-scratch',
+  ) {}
+
+  public async checkHealth(): Promise<ClsiHealthReport> {
+    const [
+      latexmk,
+      pdflatex,
+      xelatex,
+      lualatex,
+      biber,
+      bibtex,
+      tectonic,
+      scratchWritable,
+    ] = await Promise.all([
+      this.probeBinary('latexmk', ['-v']),
+      this.probeBinary('pdflatex', ['-version']),
+      this.probeBinary('xelatex', ['-version']),
+      this.probeBinary('lualatex', ['-version']),
+      this.probeBinary('biber', ['--version']),
+      this.probeBinary('bibtex', ['--version']),
+      this.probeBinary('tectonic', ['--version']),
+      this.probeScratchDir(),
+    ]);
+
+    const hasAnyEngine =
+      latexmk.available || pdflatex.available || tectonic.available;
+    const hasStandardLatex = latexmk.available && pdflatex.available;
+
+    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+    if (!scratchWritable || !hasAnyEngine) {
+      status = 'unhealthy';
+    } else if (!hasStandardLatex) {
+      status = 'degraded';
+    }
+
+    return {
+      status,
+      uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1000),
+      timestamp: new Date().toISOString(),
+      scratchDirectory: {
+        path: this.scratchDir,
+        writable: scratchWritable,
+      },
+      compilers: {
+        latexmk,
+        pdflatex,
+        xelatex,
+        lualatex,
+        biber,
+        bibtex,
+        tectonic,
+      },
+    };
+  }
+
+  private async probeBinary(
+    binary: string,
+    versionArgs: string[],
+  ): Promise<BinaryStatus> {
+    try {
+      const result = await this.runner.run(binary, versionArgs, {
+        cwd: process.cwd(),
+        timeoutMs: 3000,
+      });
+
+      if (result.exitCode === 0) {
+        const firstLine = (result.stdout || result.stderr || '')
+          .split('\n')[0]
+          .trim();
+        return { available: true, version: firstLine };
+      }
+
+      return { available: false, error: `Exited with code ${result.exitCode}` };
+    } catch (err: unknown) {
+      return { available: false, error: (err as Error)?.message };
+    }
+  }
+
+  private async probeScratchDir(): Promise<boolean> {
+    try {
+      await fs.mkdir(this.scratchDir, { recursive: true });
+      const testFile = path.join(this.scratchDir, `.probe-${Date.now()}`);
+      await fs.writeFile(testFile, 'probe');
+      await fs.unlink(testFile);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Compile Pipeline Orchestrator
+// ─────────────────────────────────────────────────────────────────
 
 export interface CompilePipelineRequest {
   projectId?: string;
@@ -153,7 +801,6 @@ export class CompilePipeline {
       ? rawMain.toString('utf8')
       : rawMain;
 
-    // Pure in-process TeX Magic Comments & Package-based Engine Detection
     const engineDetect = TexEngineDetector.detect(mainSource, dto.engine);
     const resolvedEngine = engineDetect.engine;
     const requiresShellEscape = Boolean(engineDetect.requiresShellEscape);
@@ -163,7 +810,6 @@ export class CompilePipeline {
       if (!mainFile.endsWith('.tex')) mainFile = `${mainFile}.tex`;
     }
 
-    // Academic Draft Mode Transformation
     if (dto.draft || dto.syntaxOnly) {
       const draftApp = DraftModeManager.apply(mainSource, {
         draft: dto.draft,

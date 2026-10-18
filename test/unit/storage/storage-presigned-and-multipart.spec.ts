@@ -1,15 +1,15 @@
-import { CompletePresignUseCase } from '@/modules/storage/application/use-cases/upload/complete-presign.use-case';
-import { MultipartUploadUseCase } from '@/modules/storage/application/use-cases/upload/multipart-upload.use-case';
-import { StorageQueueProducer } from '@/modules/storage/application/queues/storage-queue.producer';
-import { IStorageDriver } from '@/modules/storage/domain/ports/storage-driver.port';
-import { IStorageNodeRepository } from '@/modules/storage/domain/ports/storage-node.repository.port';
-import { IStorageBlobRepository } from '@/modules/storage/domain/ports/storage-blob.repository.port';
-import { IUploadSessionRepository } from '@/modules/storage/domain/ports/upload-session.repository.port';
-import { IStorageQuotaRepository } from '@/modules/storage/domain/ports/storage-quota.repository.port';
-import { StorageRedisCacheService } from '@/modules/storage/infrastructure/cache/storage-redis-cache.service';
-import { UploadSession } from '@/modules/storage/domain/entities/upload-session.entity';
-import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
-import { StorageBlob } from '@/modules/storage/domain/entities/storage-blob.entity';
+import { CompletePresignService } from '@/modules/storage/transfer';
+import { MultipartService } from '@/modules/storage/transfer';
+import { StorageQueueProducer } from '@/modules/storage/worker';
+import { BlobService, IStorageDriver } from '@/modules/storage/core';
+import { IStorageNodeRepository } from '@/modules/storage/drive';
+import { IStorageBlobRepository } from '@/modules/storage/core';
+import { IUploadSessionRepository } from '@/modules/storage/transfer';
+import { IStorageQuotaRepository } from '@/modules/storage/drive';
+import { StorageRedisCacheService } from '@/modules/storage/core';
+import { UploadSession } from '@/modules/storage/transfer';
+import { StorageNode } from '@/modules/storage/drive';
+import { StorageBlob } from '@/modules/storage/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
@@ -112,23 +112,21 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     } as any;
   });
 
-  describe('CompletePresignUseCase', () => {
-    let useCase: CompletePresignUseCase;
+  describe('CompletePresignService', () => {
+    let service: CompletePresignService;
 
     beforeEach(() => {
-      useCase = new CompletePresignUseCase(
-        mockDriver,
+      service = new CompletePresignService(
+        new BlobService(mockDriver, mockBlobRepo),
         mockNodeRepo,
-        mockBlobRepo,
         mockQuotaRepo,
         mockCache,
         mockEvents,
-        mockQueueProducer,
       );
     });
 
-    it('should complete presigned upload, consume quota, persist node/blob, and trigger BullMQ queue', async () => {
-      const result = await useCase.execute({
+    it('should complete presigned upload, consume quota, persist node/blob, and emit file.uploaded event', async () => {
+      const result = await service.complete({
         userId: 'user-100',
         storageKey: 'uploads/user-100/paper.pdf',
         filename: 'paper.pdf',
@@ -149,9 +147,6 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       expect(mockCache.invalidateFolder).toHaveBeenCalledWith('proj-1', null);
       expect(mockEvents.emit).toHaveBeenCalledWith(
         'file.uploaded',
-        expect.anything(),
-      );
-      expect(mockQueueProducer.queueFileProcessing).toHaveBeenCalledWith(
         expect.objectContaining({
           fileId: result.fileId,
           filename: 'paper.pdf',
@@ -163,7 +158,7 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
 
     it('should reject dangerous executable file extensions', async () => {
       await expect(
-        useCase.execute({
+        service.complete({
           userId: 'user-100',
           storageKey: 'uploads/user-100/virus.exe',
           filename: 'virus.exe',
@@ -175,7 +170,7 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       mockDriver.stat.mockRejectedValue(new Error('Object not found'));
 
       await expect(
-        useCase.execute({
+        service.complete({
           userId: 'user-100',
           storageKey: 'uploads/user-100/missing.pdf',
           filename: 'missing.pdf',
@@ -184,24 +179,22 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     });
   });
 
-  describe('MultipartUploadUseCase', () => {
-    let useCase: MultipartUploadUseCase;
+  describe('MultipartService', () => {
+    let service: MultipartService;
 
     beforeEach(() => {
-      useCase = new MultipartUploadUseCase(
-        mockDriver,
+      service = new MultipartService(
+        new BlobService(mockDriver, mockBlobRepo),
         mockNodeRepo,
-        mockBlobRepo,
         mockSessionRepo,
         mockQuotaRepo,
         mockCache,
         mockEvents,
-        mockQueueProducer,
       );
     });
 
     it('should initiate multipart upload session with dynamic chunk size', async () => {
-      const result = await useCase.initiate({
+      const result = await service.initiate({
         userId: 'user-200',
         filename: 'dataset.csv',
         mimeType: 'text/csv',
@@ -232,7 +225,7 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       });
       mockSessionRepo.findById.mockResolvedValue(session);
 
-      const result = await useCase.complete({
+      const result = await service.complete({
         sessionId: 'session-123',
         parts: [
           { partNumber: 1, eTag: 'etag-part-1' },
@@ -255,7 +248,8 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       );
       expect(mockBlobRepo.create).toHaveBeenCalledTimes(1);
       expect(mockNodeRepo.create).toHaveBeenCalledTimes(1);
-      expect(mockQueueProducer.queueFileProcessing).toHaveBeenCalledWith(
+      expect(mockEvents.emit).toHaveBeenCalledWith(
+        'file.uploaded',
         expect.objectContaining({
           fileId: result.fileId,
           filename: 'dataset.csv',
@@ -279,7 +273,7 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       });
       mockSessionRepo.findById.mockResolvedValue(session);
 
-      await useCase.abort('session-abort');
+      await service.abort('session-abort');
 
       expect(mockDriver.abortMultipartUpload).toHaveBeenCalledWith(
         'uploads/multipart/session-abort/payload.bin',

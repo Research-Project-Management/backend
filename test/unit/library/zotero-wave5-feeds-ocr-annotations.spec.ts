@@ -20,12 +20,14 @@ import { PdfAnnotationImporterService } from '@/modules/library/extraction/servi
 import { NotesService } from '@/modules/library/catalog/services/notes.service';
 import { PdfBakerService } from '@/modules/library/citation/services/pdf-baker.service';
 import { ExportsService } from '@/modules/library/citation/services/exports.service';
-import { buildAnnotationSortIndex } from '@/modules/library/shared-kernel';
+import { buildAnnotationSortIndex } from '@/modules/library/core';
+import { fromPartial } from '@total-typescript/shoehorn';
+import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import type { PrismaService } from '@/core';
 import type {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 import type { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import type { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import type {
@@ -45,9 +47,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
   const ATTACHMENT_1 = '77777777-7777-4777-8777-777777777777';
   const CONTRIBUTOR_1 = '88888888-8888-4888-8888-888888888888';
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // USER STORY 1: Zotero RSS / Atom Feeds & ArXiv Daily Alerts
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('User Story 1: Zotero RSS 2.0, RDF/PRISM 1.0 & Atom Feeds Parsing and Library Promotion', () => {
     it('parses Atom 1.0 / ArXiv daily feed with CDATA, HTML stripping, categories, DOI/arXiv normalization, and license links', () => {
       const atomXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -264,9 +264,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // USER STORY 2: Zotero "My Publications" Lifecycle & Open Access License Guard
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('User Story 2: Zotero "My Publications" Lifecycle, Open Access License Guard & Duplicate Merge', () => {
     it('adds an item to My Publications with authorship confirmation, Open Access license (CC-BY-4.0), and removes it from My Publications without trashing the item', async () => {
       const userPublicationsStore = new Map<
@@ -388,9 +386,9 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
             ) => Promise<T>,
           ) => {
             const helpers: TransactionHelpers = {
-              appendChange: jest.fn(async () => undefined),
-              publishOutbox: jest.fn(async () => undefined),
-              recordTombstone: jest.fn(async () => undefined),
+              appendChange: jest.fn(async () => undefined) as any,
+              publishOutbox: jest.fn(async () => undefined) as any,
+              recordTombstone: jest.fn(async () => undefined) as any,
             };
             return fn(
               mockTxClient as unknown as Prisma.TransactionClient,
@@ -404,6 +402,10 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
         {} as unknown as QueryRepository,
         commandRepo,
         mockLibraryTx,
+        {} as unknown as any,
+        {} as unknown as any,
+        new ItemTransformer({} as any),
+        {} as unknown as any,
       );
 
       // Step 1: Mark as My Publication with CC-BY-4.0 license and authorship verification
@@ -625,9 +627,9 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
               ) => Promise<T>,
             ) =>
               fn(mockMergeTx as unknown as Prisma.TransactionClient, {
-                appendChange: jest.fn(async () => undefined),
-                publishOutbox: jest.fn(async () => undefined),
-                recordTombstone: jest.fn(async () => undefined),
+                appendChange: jest.fn(async () => undefined) as any,
+                publishOutbox: jest.fn(async () => undefined) as any,
+                recordTombstone: jest.fn(async () => undefined) as any,
               }),
           ),
         } as unknown as TransactionService,
@@ -664,9 +666,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // USER STORY 3: Scanned PDF Detection, OCR Sandwich PDF & Full-Text Search
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('User Story 3: Scanned PDF Detection, OCR Sandwich PDF Injection & Full-Text Page Anchor Indexing', () => {
     it('classifies image-only (< 32 chars), hybrid (< 150 chars + image operator), and born-digital pages accurately', async () => {
       const ocrProvider = new OcrProvider();
@@ -839,9 +839,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // USER STORY 4: Zotero Embedded PDF Annotations Import & Annotated Export
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('User Story 4: Embedded PDF Annotations Import Deduplication, Reading-Order Note Extraction & Annotated PDF Export', () => {
     it('imports embedded PDF annotations via PdfAnnotationImporterService, preserves normalized rectCoords through AnnotationNormalizer, and deduplicates on repeated imports', async () => {
       const storedAnnotations: Array<{
@@ -919,9 +917,9 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
             ) => Promise<T>,
           ) =>
             fn(mockAnnotPrisma as unknown as Prisma.TransactionClient, {
-              appendChange: jest.fn(async () => undefined),
-              publishOutbox: jest.fn(async () => undefined),
-              recordTombstone: jest.fn(async () => undefined),
+              appendChange: jest.fn(async () => undefined) as any,
+              publishOutbox: jest.fn(async () => undefined) as any,
+              recordTombstone: jest.fn(async () => undefined) as any,
             }),
         ),
       } as unknown as TransactionService;
@@ -1058,7 +1056,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
         ),
       } as unknown as NotesRepository;
 
-      const mockItemReadPort: IItemReadPort = {
+      const mockItemReadPort: IItemReadPort = fromPartial<IItemReadPort>({
         findById: jest.fn(
           async (userId: string, itemId: string, projectId?: string) => {
             // Enforce personal vs project scope isolation
@@ -1081,11 +1079,11 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
             return null;
           },
         ),
-      };
+      });
 
-      const mockItemExistencePort: IItemExistencePort = {
+      const mockItemExistencePort: IItemExistencePort = fromPartial<IItemExistencePort>({
         exists: jest.fn(async () => true),
-      };
+      });
 
       const notesService = new NotesService(
         mockNotesRepo,
@@ -1098,9 +1096,9 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
               ) => Promise<T>,
             ) =>
               fn({} as unknown as Prisma.TransactionClient, {
-                appendChange: jest.fn(async () => undefined),
-                publishOutbox: jest.fn(async () => undefined),
-                recordTombstone: jest.fn(async () => undefined),
+                appendChange: jest.fn(async () => undefined) as any,
+                publishOutbox: jest.fn(async () => undefined) as any,
+                recordTombstone: jest.fn(async () => undefined) as any,
               }),
           ),
         } as unknown as TransactionService,

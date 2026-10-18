@@ -4,7 +4,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
-import { SCHEMA_V42_DATA } from '../src/modules/library/shared-kernel/types/schema.constants';
+import { SCHEMA_V42_DATA } from '../src/modules/library/core/types/schema.constants';
 import { seedLibrary } from './seed-library';
 
 const pool = new Pool({

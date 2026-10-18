@@ -27,12 +27,14 @@ import {
   SyncPoint,
   ReverseSyncPoint,
   WordCountStats,
-} from '../core/ports/artifacts.port';
-import { OverleafIncrementalWorkspace } from '../repositories/incremental-workspace.repository';
-import { LocalProcessRunner } from '../core/adapters/runners/local-process.runner';
-import { DockerSandboxRunner } from '../core/adapters/runners/docker-sandbox.runner';
-import { LatexmkEngine } from '../core/adapters/engines/latexmk.engine';
-import { TectonicEngine } from '../core/adapters/engines/tectonic.engine';
+} from '../domain/clsi-ports';
+import {
+  OverleafIncrementalWorkspace,
+  DiskUsageCleaner,
+  DiskUsageOptions,
+  createZipStreamFromDisk,
+  ZipDiskEntry,
+} from '../repositories/incremental-workspace.repository';
 import { OverleafLogParser } from '../domain/overleaf-log.parser';
 import { SyncTexProcessor } from '../domain/synctex.parser';
 import { TexWordCounter } from '../domain/tex-word.counter';
@@ -40,19 +42,15 @@ import { PlannedFileSet } from '../domain/compile-fileset.planner';
 import {
   CompilePipeline,
   CompilePipelineResult,
+  LocalProcessRunner,
+  DockerSandboxRunner,
+  LatexmkEngine,
+  TectonicEngine,
+  ClsiHealthCheck,
 } from './compile-pipeline.service';
-import { CompileFairQueue } from '../core/pipeline/compile-fair-queue';
-import {
-  DiskUsageCleaner,
-  DiskUsageOptions,
-} from '../core/adapters/workspace/disk-usage.cleaner';
-import { ClsiHealthCheck } from '../core/adapters/engines/health-check';
-import { ClsiMetrics } from '../core/adapters/telemetry/clsi.metrics';
-import {
-  createZipStreamFromDisk,
-  ZipDiskEntry,
-} from '../core/adapters/artifacts/zip-stream.adapter';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { CompileFairQueue } from '../domain/compile-fair-queue';
+import { ClsiMetrics } from '../domain/clsi.metrics';
+import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { RemoteClsiClientAdapter } from './remote-clsi.client';
 import { ClsiWorkspacePlannerService } from './workspace-planner.service';
 
@@ -80,7 +78,7 @@ export class ClsiService {
   constructor(
     private readonly configService: ConfigService,
     @Optional() private readonly cache?: RedisCacheService,
-    @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly realtimeService?: RealtimeFacade,
     @Optional() remoteClient?: RemoteClsiClientAdapter,
     @Optional() workspacePlanner?: ClsiWorkspacePlannerService,
     @Optional() workspace?: OverleafIncrementalWorkspace,

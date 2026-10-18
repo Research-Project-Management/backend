@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, BadRequestException } from '@nestjs/common';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemsMapper } from './items.mapper';
 import {
@@ -15,7 +15,7 @@ import {
 import {
   ItemFieldDefinition,
   CreatorTypeDefinition,
-} from '@/modules/library/shared-kernel/types/schema.types';
+} from '@/modules/library/core/types/schema.types';
 
 export interface IItemTransformerPort {
   getItemFieldValue(item: Record<string, unknown>, key: string): unknown;

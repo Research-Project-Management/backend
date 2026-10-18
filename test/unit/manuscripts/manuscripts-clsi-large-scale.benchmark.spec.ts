@@ -15,12 +15,14 @@ import * as path from 'path';
 import * as os from 'os';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
-import { SyncTexProcessor } from '@/modules/manuscripts/clsi/core/adapters/artifacts/synctex.processor';
-import { OverleafIncrementalWorkspace } from '@/modules/manuscripts/clsi/core/adapters/workspace/incremental-workspace';
-import { ProjectLockManager } from '@/modules/manuscripts/clsi/core/adapters/workspace/project-lock.manager';
-import { DiskUsageCleaner } from '@/modules/manuscripts/clsi/core/adapters/workspace/disk-usage.cleaner';
-import { TexWordCounter } from '@/modules/manuscripts/clsi/core/adapters/artifacts/word-counter';
-import { WorkspaceFile } from '@/modules/manuscripts/clsi/core/ports/workspace.port';
+import {
+  SyncTexProcessor,
+  OverleafIncrementalWorkspace,
+  ProjectLockManager,
+  DiskUsageCleaner,
+  TexWordCounter,
+  WorkspaceFile,
+} from '@/modules/manuscripts/clsi';
 
 const gzipAsync = promisify(zlib.gzip);
 

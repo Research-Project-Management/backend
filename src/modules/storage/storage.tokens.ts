@@ -12,5 +12,5 @@ export const STORAGE_VERSION_REPOSITORY = Symbol('STORAGE_VERSION_REPOSITORY');
 export const STORAGE_REDIS_CACHE = Symbol('STORAGE_REDIS_CACHE');
 export const STORAGE_FACADE = Symbol('STORAGE_FACADE');
 
-// Legacy token for backward compatibility with Library and other modules
+// Public Port Injection Token for modular monolith boundary
 export const STORAGE_PORT = 'STORAGE_PORT';

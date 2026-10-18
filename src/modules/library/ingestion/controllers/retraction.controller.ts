@@ -16,8 +16,11 @@ import {
   BatchCheckRetractionDto,
   SyncRetractionDto,
 } from '@/modules/library/ingestion/dto/retraction.dto';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
+@ApiTags('Library Retraction')
+@ApiBearerAuth()
 @Controller([
   'api/v1/library/retraction',
   'api/v1/projects/:projectId/library/retraction',
@@ -35,7 +38,7 @@ export class RetractionController {
   @Post('database/seed')
   @ProjectRoles('owner')
   async seedDatabase(
-    @CurrentUser('id') userId: string,
+    @CurrentUser('id') _userId: string,
     @CurrentUser('role') role?: string,
     @Body('force') force?: boolean,
   ) {

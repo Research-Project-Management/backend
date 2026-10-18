@@ -10,6 +10,7 @@ import {
   TCVN_NUMERIC_CSL,
 } from '@/modules/library/citation/data/official-styles.data';
 import { CatalogItemRecord } from '@/modules/library/citation/types/citation.types';
+import type { ICatalogFacade } from '@/modules/library/core';
 
 describe('Wave 8 — Citation, Export & Metadata Format Grounding & Accuracy', () => {
   let cslEngine: CslEngineService;
@@ -20,7 +21,7 @@ describe('Wave 8 — Citation, Export & Metadata Format Grounding & Accuracy', (
     citationService = new CitationService(undefined, cslEngine);
   });
 
-  // ── 1. Official CSL 1.0 XML Styles: IEEE, Chicago 17th, MLA 9th, Nature ──
+  // 1. Official CSL 1.0 XML Styles: IEEE, Chicago 17th, MLA 9th, Nature
   describe('1. Official CSL 1.0 XML Styles Accuracy (IEEE, Chicago 17th, MLA 9th, Nature)', () => {
     it('renders IEEE journal article with volume, issue, page range, year, and DOI without invalid date-part bugs', () => {
       // Ensure invalid <date-part name="volume"/> is eliminated from IEEE_CSL
@@ -160,7 +161,7 @@ describe('Wave 8 — Citation, Export & Metadata Format Grounding & Accuracy', (
     });
   });
 
-  // ── 2. Vietnamese MOET / TCVN 7571 Grounding ────────────────────────────
+  // 2. Vietnamese MOET / TCVN 7571 Grounding
   describe('2. Vietnamese MOET / TCVN 7571 Grounding', () => {
     it('uses official Zotero style URIs for TCVN_CSL and TCVN_NUMERIC_CSL (no fabricated http://flux.academic URIs)', () => {
       expect(TCVN_CSL).not.toContain('http://flux.academic');
@@ -250,7 +251,7 @@ describe('Wave 8 — Citation, Export & Metadata Format Grounding & Accuracy', (
     });
   });
 
-  // ── 3. RefMan RIS & BibTeX Format Fidelity ───────────────────────────────
+  // 3. RefMan RIS & BibTeX Format Fidelity
   describe('3. RefMan RIS & BibTeX Standard Specification Fidelity', () => {
     it('splits page ranges into SP and EP lines in RIS and preserves SN, CY, PB, DO, AB', () => {
       const cslItem = CslJsonMapper.toCsl({
@@ -339,7 +340,7 @@ describe('Wave 8 — Citation, Export & Metadata Format Grounding & Accuracy', (
     });
   });
 
-  // ── 4. CSL-JSON Purity & CitationService Full Metadata Fidelity ──────────
+  // 4. CSL-JSON Purity & CitationService Full Metadata Fidelity
   describe('4. CSL-JSON Schema Purity & CitationService Full Metadata Fidelity', () => {
     it('does not pollute CSL-JSON `version` with DB optimistic lock counter unless versionNumber is set', () => {
       const regularArticle = CslJsonMapper.toCsl({
@@ -404,7 +405,7 @@ describe('Wave 8 — Citation, Export & Metadata Format Grounding & Accuracy', (
         undefined,
         cslEngine,
         undefined,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       const singleRes = await serviceWithGateway.formatItemById(

@@ -12,13 +12,6 @@ import {
   TemplateNotFoundException,
   InvalidTemplateException,
   InMemoryTemplateAdapter,
-  PrismaTemplateAdapter,
-  ManuscriptInstantiatorAdapter,
-  ListTemplatesUseCase,
-  GetTemplateByIdUseCase,
-  SearchTemplatesUseCase,
-  InstantiateTemplateUseCase,
-  CreateCustomTemplateUseCase,
   TemplatesRepository,
   TemplatesService,
   TemplatesController,
@@ -279,7 +272,7 @@ describe('Manuscripts Templates Subsystem', () => {
       });
     });
 
-    describe('PrismaTemplateAdapter with InMemory Fallback', () => {
+    describe('TemplatesRepository with InMemory Fallback', () => {
       it('should gracefully fallback to memory adapter when Prisma table is empty or unmigrated', async () => {
         const mockPrisma: any = {
           manuscriptTemplate: {
@@ -304,7 +297,7 @@ describe('Manuscripts Templates Subsystem', () => {
           },
         };
 
-        const adapter = new PrismaTemplateAdapter(mockPrisma);
+        const adapter = new TemplatesRepository(mockPrisma);
         const { templates, total } = await adapter.findAll();
         expect(total).toBe(7);
         expect(templates.length).toBe(7);
@@ -338,7 +331,7 @@ describe('Manuscripts Templates Subsystem', () => {
           },
         };
 
-        const adapter = new PrismaTemplateAdapter(mockPrisma);
+        const adapter = new TemplatesRepository(mockPrisma);
         const res = await adapter.findById(
           '20000000-0000-0000-0000-000000000001',
         );
@@ -348,7 +341,7 @@ describe('Manuscripts Templates Subsystem', () => {
       });
     });
 
-    describe('ManuscriptInstantiatorAdapter', () => {
+    describe('TemplatesRepository Instantiation', () => {
       it('should instantiate project blueprint from template', async () => {
         const mockPrisma: any = {
           project: {
@@ -359,7 +352,7 @@ describe('Manuscripts Templates Subsystem', () => {
           },
         };
 
-        const adapter = new ManuscriptInstantiatorAdapter(mockPrisma);
+        const adapter = new TemplatesRepository(mockPrisma);
         const template = ManuscriptTemplateEntity.create({
           name: 'Nature Letter',
           compiler: 'pdflatex',
@@ -390,49 +383,49 @@ describe('Manuscripts Templates Subsystem', () => {
   });
 
   // =========================================================================
-  // 3. USE CASES LAYER
+  // 3. APPLICATION SERVICE LAYER
   // =========================================================================
-  describe('Use Cases Layer', () => {
+  describe('Application Service Layer', () => {
     let memoryRepo: InMemoryTemplateAdapter;
+    let templatesRepo: TemplatesRepository;
+    let service: TemplatesService;
 
     beforeEach(() => {
       memoryRepo = new InMemoryTemplateAdapter();
+      templatesRepo = new TemplatesRepository(undefined, memoryRepo);
+      service = new TemplatesService(templatesRepo);
     });
 
-    it('ListTemplatesUseCase should return filtered results', async () => {
-      const useCase = new ListTemplatesUseCase(memoryRepo);
-      const res = await useCase.execute({ category: 'conference' });
+    it('listTemplates should return filtered results', async () => {
+      const res = await service.listTemplates({ category: 'conference' });
       expect(res.templates.length).toBe(2);
       res.templates.forEach((t) => expect(t.category).toBe('conference'));
     });
 
-    it('GetTemplateByIdUseCase should throw TemplateNotFoundException on non-existent template', async () => {
-      const useCase = new GetTemplateByIdUseCase(memoryRepo);
-      await expect(useCase.execute('non-existent-id')).rejects.toThrow(
+    it('getTemplate should throw TemplateNotFoundException on non-existent template', async () => {
+      await expect(service.getTemplate('non-existent-id')).rejects.toThrow(
         TemplateNotFoundException,
       );
-      await expect(useCase.execute('')).rejects.toThrow(
+      await expect(service.getTemplate('')).rejects.toThrow(
         TemplateNotFoundException,
       );
     });
 
-    it('GetTemplateByIdUseCase should resolve by ID or Version ID', async () => {
-      const useCase = new GetTemplateByIdUseCase(memoryRepo);
-      const byVersion = await useCase.execute('tmpl-ieee-tran-v1');
+    it('getTemplate should resolve by ID or Version ID', async () => {
+      const byVersion = await service.getTemplate('tmpl-ieee-tran-v1');
       expect(byVersion.name).toBe('IEEE Transactions Article');
 
-      const byId = await useCase.execute(byVersion.id);
+      const byId = await service.getTemplate(byVersion.id);
       expect(byId.name).toBe('IEEE Transactions Article');
     });
 
-    it('SearchTemplatesUseCase should return matches', async () => {
-      const useCase = new SearchTemplatesUseCase(memoryRepo);
-      const res = await useCase.execute({ query: 'beamer' });
+    it('searchTemplates should return matches', async () => {
+      const res = await service.searchTemplates({ q: 'beamer' });
       expect(res.templates.length).toBe(1);
       expect(res.templates[0].name).toBe('Beamer Presentation Slides');
     });
 
-    it('InstantiateTemplateUseCase should clone template and increment download count', async () => {
+    it('instantiateTemplate should clone template and increment download count', async () => {
       const mockPrisma: any = {
         project: {
           create: jest.fn().mockResolvedValue({ id: 'proj-abc' }),
@@ -441,21 +434,15 @@ describe('Manuscripts Templates Subsystem', () => {
           create: jest.fn().mockResolvedValue({ id: 'pm-abc' }),
         },
       };
-      const instantiator = new ManuscriptInstantiatorAdapter(mockPrisma);
-      const getTemplateUseCase = new GetTemplateByIdUseCase(memoryRepo);
-      const instantiateUseCase = new InstantiateTemplateUseCase(
-        memoryRepo,
-        instantiator,
-        getTemplateUseCase,
-      );
+      const repoWithPrisma = new TemplatesRepository(mockPrisma, memoryRepo);
+      const svcWithPrisma = new TemplatesService(repoWithPrisma);
 
       const template = await memoryRepo.findByVersionId('tmpl-ieee-tran-v1');
       const downloadsBefore = template!.downloadCount;
 
-      const result = await instantiateUseCase.execute({
-        templateIdOrVersionId: 'tmpl-ieee-tran-v1',
+      const result = await svcWithPrisma.instantiateTemplate('author-1', {
+        templateId: 'tmpl-ieee-tran-v1',
         projectName: 'My IEEE Submission',
-        userId: 'author-1',
       });
 
       expect(result.projectId).toBe('proj-abc');
@@ -469,17 +456,15 @@ describe('Manuscripts Templates Subsystem', () => {
       expect(updatedTemplate?.downloadCount).toBe(downloadsBefore + 1);
     });
 
-    it('CreateCustomTemplateUseCase should validate and persist custom template', async () => {
-      const useCase = new CreateCustomTemplateUseCase(memoryRepo);
-
+    it('createCustomTemplate should validate and persist custom template', async () => {
       // Should fail if name is empty
-      await expect(useCase.execute({ name: '' })).rejects.toThrow(
+      await expect(service.createCustomTemplate({ name: '' })).rejects.toThrow(
         InvalidTemplateException,
       );
 
       // Should fail if mainFile specified but not in files payload
       await expect(
-        useCase.execute({
+        service.createCustomTemplate({
           name: 'Broken Template',
           mainFile: 'index.tex',
           files: { 'other.tex': 'content' },
@@ -487,7 +472,7 @@ describe('Manuscripts Templates Subsystem', () => {
       ).rejects.toThrow(InvalidTemplateException);
 
       // Should succeed when properly configured
-      const created = await useCase.execute({
+      const created = await service.createCustomTemplate({
         name: 'My Lab Technical Report',
         category: 'report',
         mainFile: 'report.tex',
@@ -523,16 +508,6 @@ describe('Manuscripts Templates Subsystem', () => {
           create: jest.fn().mockResolvedValue({ id: 'pm-service' }),
         },
       };
-      const instantiator = new ManuscriptInstantiatorAdapter(mockPrisma);
-
-      const listUseCase = new ListTemplatesUseCase(memoryRepo);
-      const getByIdUseCase = new GetTemplateByIdUseCase(memoryRepo);
-      const searchUseCase = new SearchTemplatesUseCase(memoryRepo);
-      const instantiateUseCase = new InstantiateTemplateUseCase(
-        memoryRepo,
-        instantiator,
-        getByIdUseCase,
-      );
       const templatesRepo = new TemplatesRepository(mockPrisma, memoryRepo);
       service = new TemplatesService(templatesRepo);
     });
@@ -598,16 +573,6 @@ describe('Manuscripts Templates Subsystem', () => {
           create: jest.fn().mockResolvedValue({ id: 'pm-parity-1' }),
         },
       };
-      const instantiator = new ManuscriptInstantiatorAdapter(mockPrisma);
-
-      const listUseCase = new ListTemplatesUseCase(memoryRepo);
-      const getByIdUseCase = new GetTemplateByIdUseCase(memoryRepo);
-      const searchUseCase = new SearchTemplatesUseCase(memoryRepo);
-      const instantiateUseCase = new InstantiateTemplateUseCase(
-        memoryRepo,
-        instantiator,
-        getByIdUseCase,
-      );
       const templatesRepo = new TemplatesRepository(mockPrisma, memoryRepo);
       service = new TemplatesService(templatesRepo);
 

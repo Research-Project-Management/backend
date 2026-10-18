@@ -1,12 +1,11 @@
 import {
   ItemMetadata,
   CreatorInput,
-  CreatorType,
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   SCHEMA_V42_DATA,
   FIELD_ALIASES,
-} from '@/modules/library/shared-kernel/types/schema.constants';
+} from '@/modules/library/core/types/schema.constants';
 import {
   cleanBibliographicText,
   cleanAbstractText,
@@ -25,12 +24,13 @@ import {
   normalizePageRange,
   isInstitutionName,
   stripLatexBraces,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+  convertAcademicHtmlToMarkdown,
+} from '@/modules/library/core';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import {
   resolveBidirectionalBaseFields,
   resolveCanonicalCreatorRole,
-} from '@/modules/library/shared-kernel/domain/zotero-field-harmonizer.domain';
+} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
 
 const SPECIALLY_NORMALIZED_KEYS = new Set([
   'title',
@@ -97,27 +97,26 @@ const SCHEMA_DRIVEN_STRING_FIELDS: string[] = Array.from(
   ]),
 ).filter((key) => !SPECIALLY_NORMALIZED_KEYS.has(key));
 
-export class NormalizationPolicy {
-  private static readonly BANNED_STRINGS = new Set([
-    'undefined',
-    'null',
-    'n/a',
-    'na',
-    'none',
-    'unknown',
-    '',
-  ]);
+/**
+ * Untrusted provider/parser payload (BibTeX, RIS, CSL, Crossref, PDF, ...).
+ * Shapes differ per source, so fields are probed defensively and every value
+ * is validated by `cleanString` / dedicated normalizers before it reaches
+ * `ItemMetadata`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RawMetadataInput = Record<string, any>;
 
+export class NormalizationPolicy {
   /**
    * Normalizes an entire ItemMetadata object deterministically.
    * Strips out empty placeholders, invalid dates, and formats creators.
    */
-  normalize(raw: Partial<ItemMetadata>): ItemMetadata {
+  normalize(raw: RawMetadataInput): ItemMetadata {
     const result: ItemMetadata = {};
     const rawRecord = raw as Record<string, unknown>;
     const rawExtra =
       raw.extraFields && typeof raw.extraFields === 'object'
-        ? raw.extraFields
+        ? (raw.extraFields as Record<string, unknown>)
         : {};
     const getRawVal = (key: string): unknown => {
       if (rawRecord[key] !== undefined && rawRecord[key] !== null) {
@@ -419,56 +418,7 @@ export class NormalizationPolicy {
           (/<\/?[a-z][\s\S]*>/i.test(trimmedRaw) || trimmedRaw.includes('\n'))
         ) {
           // Preserve multi-paragraph / Markdown / HTML structure for Zotero notes
-          const md = trimmedRaw
-            .replace(/\r\n/g, '\n')
-            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-            .replace(
-              /<h1[^>]*>([\s\S]*?)<\/h1>/gi,
-              (_, c) => `# ${c.trim()}\n\n`,
-            )
-            .replace(
-              /<h2[^>]*>([\s\S]*?)<\/h2>/gi,
-              (_, c) => `## ${c.trim()}\n\n`,
-            )
-            .replace(
-              /<h3[^>]*>([\s\S]*?)<\/h3>/gi,
-              (_, c) => `### ${c.trim()}\n\n`,
-            )
-            .replace(
-              /<h[4-6][^>]*>([\s\S]*?)<\/h[4-6]>/gi,
-              (_, c) => `#### ${c.trim()}\n\n`,
-            )
-            .replace(
-              /<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi,
-              (_, c) => `> ${c.trim()}\n\n`,
-            )
-            .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, c) => `- ${c.trim()}\n`)
-            .replace(/<\/?(ul|ol)[^>]*>/gi, '\n')
-            .replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, c) => `${c.trim()}\n\n`)
-            .replace(/<\/div>/gi, '\n')
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**')
-            .replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*')
-            .replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
-            .replace(
-              /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
-              '[$2]($1)',
-            )
-            .replace(/<[^>]+>/g, '')
-            .replace(/&nbsp;/gi, ' ')
-            .replace(/&amp;/gi, '&')
-            .replace(/&lt;/gi, '<')
-            .replace(/&gt;/gi, '>')
-            .replace(/&quot;/gi, '"')
-            .replace(/&#39;|&apos;/gi, "'")
-            .replace(/&mdash;/gi, '—')
-            .replace(/&ndash;/gi, '–')
-            .split('\n')
-            .map((line) => line.trimEnd())
-            .join('\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
+          const md = convertAcademicHtmlToMarkdown(trimmedRaw);
           cleanContent = cleanBannedString(md);
         } else {
           const clean = cleanCommentText(trimmedRaw);
@@ -531,14 +481,16 @@ export class NormalizationPolicy {
       if (cleanExtra) result.extra = cleanExtra;
     }
     if (raw.extraFields && typeof raw.extraFields === 'object') {
-      result.extraFields = this.cleanExtraFields(raw.extraFields);
+      result.extraFields = this.cleanExtraFields(
+        raw.extraFields as Record<string, unknown>,
+      );
     }
     if (Array.isArray(raw.seeAlso) && raw.seeAlso.length > 0) {
       result.seeAlso = raw.seeAlso
         .map((s: unknown) => (typeof s === 'string' ? s.trim() : ''))
         .filter(Boolean);
     }
-    if (raw.relations && typeof raw.relations === 'object') {
+    if (raw.relations) {
       result.relations = raw.relations;
     }
     if (raw.libraryCatalog) {

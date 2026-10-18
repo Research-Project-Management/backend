@@ -7,11 +7,8 @@ import { RetractionDatabaseService } from '@/modules/library/ingestion/services/
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,
-} from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
-import {
-  normalizeDoi,
-  normalizePmid,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core/constants/academic-client.constants';
+import { normalizeDoi, normalizePmid } from '@/modules/library/core';
 
 @Injectable()
 export class RetractionScannerProvider {
@@ -101,7 +98,7 @@ export class RetractionScannerProvider {
   }> {
     const mailto = getAcademicContactEmail();
 
-    // ── Tier 1: Check OpenAlex (Full Retraction Watch Registry) ─────────────
+    // Tier 1: Check OpenAlex (Full Retraction Watch Registry)
     try {
       const openalexTarget = doi
         ? `https://doi.org/${doi}`
@@ -151,7 +148,7 @@ export class RetractionScannerProvider {
       );
     }
 
-    // ── Tier 2: Check CrossRef CrossMark (Real-Time Publisher Notices) ──────
+    // Tier 2: Check CrossRef CrossMark (Real-Time Publisher Notices)
     if (doi) {
       try {
         const crUrl = `https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=${encodeURIComponent(mailto)}`;

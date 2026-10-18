@@ -38,7 +38,7 @@ export class TrackChange {
   private readonly _createdAt: Date;
   private _updatedAt: Date;
 
-  private constructor(props: CreateTrackChangeProps) {
+  public constructor(props: CreateTrackChangeProps) {
     if (!props.projectId || !props.projectId.trim()) {
       throw new Error('Project ID cannot be empty.');
     }

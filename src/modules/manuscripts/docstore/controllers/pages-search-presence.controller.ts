@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { AuthenticatedRequest } from '@/core';
 import type { FastifyReply } from 'fastify';
 import {
@@ -29,7 +30,8 @@ import { ManuscriptSearchReplaceService } from '../services/manuscript-search-re
 @ApiTags('Manuscripts - Pages Search & Presence')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@RequireRole(Role.REVIEWER)
 export class PagesSearchPresenceController {
   constructor(
     private readonly presenceService: ManuscriptPresenceService,

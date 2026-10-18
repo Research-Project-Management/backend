@@ -15,17 +15,17 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class CreateProjectStateDto {
   @ApiProperty({
     description: 'Name of the project state',
-    example: 'Khảo sát thực địa (Field Trip)',
+    example: 'Field Trip & Sampling',
     maxLength: 100,
   })
   @IsString()
-  @IsNotEmpty({ message: 'Tên trạng thái không được để trống' })
-  @MaxLength(100, { message: 'Tên trạng thái tối đa 100 ký tự' })
+  @IsNotEmpty({ message: 'State name cannot be empty' })
+  @MaxLength(100, { message: 'State name must not exceed 100 characters' })
   name!: string;
 
   @ApiPropertyOptional({
     description: 'Description or guidelines for this project state',
-    example: 'Giai đoạn thu thập mẫu địa chất và khảo nghiệm hiện trường.',
+    example: 'Field specimen collection and on-site testing phase.',
   })
   @IsString()
   @IsOptional()
@@ -62,7 +62,7 @@ export class CreateProjectStateDto {
 export class UpdateProjectStateItemDto {
   @ApiPropertyOptional({
     description: 'Updated state name',
-    example: 'Khảo sát thực địa & Thu mẫu',
+    example: 'Field Survey & Sampling',
     maxLength: 100,
   })
   @IsString()
@@ -107,7 +107,7 @@ export class TransitionProjectStateDto {
     example: '01957c91-2345-7890-abcd-ef0123456789',
     nullable: true,
   })
-  @IsUUID('all', { message: 'ID trạng thái phải là UUID hợp lệ' })
+  @IsUUID('all', { message: 'State ID must be a valid UUID' })
   @IsOptional()
   stateId?: string | null;
 }
@@ -117,7 +117,7 @@ export class ReorderProjectStateItemDto {
     description: 'State UUID',
     example: '01957c91-2345-7890-abcd-ef0123456789',
   })
-  @IsUUID('all', { message: 'ID trạng thái phải là UUID hợp lệ' })
+  @IsUUID('all', { message: 'State ID must be a valid UUID' })
   id!: string;
 
   @ApiProperty({
@@ -145,7 +145,7 @@ export class DeleteProjectStateDto {
       'Fallback state ID to migrate the project to if it is currently at the state being deleted',
     example: '01957c91-2345-7890-abcd-ef0123456789',
   })
-  @IsUUID('all', { message: 'Fallback state ID phải là UUID hợp lệ' })
+  @IsUUID('all', { message: 'Fallback state ID must be a valid UUID' })
   @IsOptional()
   fallbackStateId?: string;
 }

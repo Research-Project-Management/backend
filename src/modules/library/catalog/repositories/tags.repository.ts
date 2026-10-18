@@ -74,7 +74,7 @@ export class TagsRepository {
         : { userId, projectId: null };
     return client.tag.findFirst({
       where: {
-        name,
+        name: { equals: name, mode: 'insensitive' },
         ...scopeWhere,
       },
     });
@@ -104,7 +104,7 @@ export class TagsRepository {
       const existingProjectTag = await client.tag.findFirst({
         where: {
           projectId: effectiveProjectId,
-          name,
+          name: { equals: name, mode: 'insensitive' },
         },
       });
       if (existingProjectTag) {
@@ -134,7 +134,7 @@ export class TagsRepository {
       where: {
         userId,
         projectId: null,
-        name,
+        name: { equals: name, mode: 'insensitive' },
       },
     });
 

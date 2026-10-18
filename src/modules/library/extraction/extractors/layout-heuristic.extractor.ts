@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+﻿import { Injectable, Logger } from '@nestjs/common';
 import { getDocumentProxy } from 'unpdf';
 import {
   cleanAuthorName,
@@ -6,7 +6,7 @@ import {
   cleanAbstractText,
   normalizeAcademicTitleCase,
   isInstitutionName,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 
 export interface LayoutExtractedFields {
   title?: string;

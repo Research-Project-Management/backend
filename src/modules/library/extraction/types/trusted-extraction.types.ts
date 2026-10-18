@@ -1,4 +1,4 @@
-import { ItemMetadata } from '@/modules/library/shared-kernel';
+﻿import { ItemMetadata } from '@/modules/library/core';
 
 /**
  * Breakdown of individual field quality scores evaluating extraction reliability.

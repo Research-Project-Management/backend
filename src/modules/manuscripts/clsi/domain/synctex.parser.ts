@@ -7,11 +7,7 @@
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
-import {
-  ISyncTexProcessor,
-  SyncPoint,
-  ReverseSyncPoint,
-} from '@/modules/manuscripts/clsi/core/ports/artifacts.port';
+import { ISyncTexProcessor, SyncPoint, ReverseSyncPoint } from './clsi-ports';
 
 const gunzipAsync = promisify(zlib.gunzip);
 const MAX_CACHE_ENTRIES = 20;
@@ -321,3 +317,127 @@ export class SyncTexProcessor implements ISyncTexProcessor {
 }
 
 export { SyncTexProcessor as SyncTexParser };
+
+export interface ForwardSyncRequest {
+  projectId?: string;
+  file: string;
+  line: number;
+  column?: number;
+  synctex?: string;
+}
+
+export interface ReverseSyncRequest {
+  projectId?: string;
+  page: number;
+  x: number;
+  y: number;
+  synctex?: string;
+}
+
+export class SyncTexUseCase {
+  constructor(
+    private readonly workspace: {
+      readArtifact(projectId: string, fileName: string): Promise<Buffer | null>;
+    },
+    private readonly processor: ISyncTexProcessor,
+  ) {}
+
+  private async getSynctexText(
+    projectId: string,
+    providedSynctex?: string,
+  ): Promise<string> {
+    if (providedSynctex) {
+      if (providedSynctex.startsWith('SyncTeX Version:')) {
+        return providedSynctex;
+      }
+      try {
+        const buffer = Buffer.from(providedSynctex, 'base64');
+        const decompressed = await this.processor.decompress(buffer);
+        if (decompressed) return decompressed;
+      } catch {}
+      return providedSynctex;
+    }
+
+    const gzBuffer = await this.workspace.readArtifact(
+      projectId,
+      'output.synctex.gz',
+    );
+    if (gzBuffer) {
+      return this.processor.decompress(gzBuffer);
+    }
+
+    const plainBuffer = await this.workspace.readArtifact(
+      projectId,
+      'output.synctex',
+    );
+    if (plainBuffer) {
+      return plainBuffer.toString('utf8');
+    }
+
+    return '';
+  }
+
+  public async forwardSync(dto: ForwardSyncRequest): Promise<{
+    success: boolean;
+    result?: SyncPoint;
+    error?: string;
+  }> {
+    const projectId = dto.projectId || 'default';
+    const synctexText = await this.getSynctexText(projectId, dto.synctex);
+
+    if (!synctexText) {
+      return {
+        success: false,
+        error: 'SyncTeX data not available. Please compile the document first.',
+      };
+    }
+
+    const result = this.processor.forwardLookup(
+      synctexText,
+      dto.file,
+      dto.line,
+      dto.column,
+    );
+
+    if (!result) {
+      return {
+        success: false,
+        error: `Could not map line ${dto.line} to PDF coordinates`,
+      };
+    }
+
+    return { success: true, result };
+  }
+
+  public async reverseSync(dto: ReverseSyncRequest): Promise<{
+    success: boolean;
+    result?: ReverseSyncPoint;
+    error?: string;
+  }> {
+    const projectId = dto.projectId || 'default';
+    const synctexText = await this.getSynctexText(projectId, dto.synctex);
+
+    if (!synctexText) {
+      return {
+        success: false,
+        error: 'SyncTeX data not available. Please compile the document first.',
+      };
+    }
+
+    const result = this.processor.reverseLookup(
+      synctexText,
+      dto.page,
+      dto.x,
+      dto.y,
+    );
+
+    if (!result) {
+      return {
+        success: false,
+        error: `Could not map PDF coordinates on page ${dto.page} to LaTeX source`,
+      };
+    }
+
+    return { success: true, result };
+  }
+}

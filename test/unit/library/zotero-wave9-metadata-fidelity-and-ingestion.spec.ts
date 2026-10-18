@@ -105,10 +105,9 @@ describe('Wave 9 — Metadata Ingestion, Extraction & Persistence Completeness &
       // Verify IdentifyStage.mapBibtexToRaw forwards all fields
       const stage = new IdentifyStage(
         {} as never,
-        {} as never,
         parser,
         new RisParser(),
-        new CslParser(),
+        new NormalizationPolicy(),
       );
       const mapFn = (
         stage as unknown as {
@@ -383,7 +382,7 @@ describe('Wave 9 — Metadata Ingestion, Extraction & Persistence Completeness &
 
   describe('6. ArxivProvider & PubMedProvider metadata completeness', () => {
     it('ArxivProvider maps arxiv:journal_ref into extraFields.journalRef and publicationTitle', () => {
-      const provider = new ArxivProvider({});
+      const provider = new ArxivProvider();
       const parseAtomXml = (
         provider as unknown as {
           parseAtomXml: (
@@ -417,7 +416,7 @@ describe('Wave 9 — Metadata Ingestion, Extraction & Persistence Completeness &
     });
 
     it('PubMedProvider.transformCslPayload extracts shortTitle, language, publisher, and place', () => {
-      const provider = new PubMedProvider({});
+      const provider = new PubMedProvider();
       const transformCsl = (
         provider as unknown as {
           transformCslPayload: (

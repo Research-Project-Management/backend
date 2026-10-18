@@ -8,13 +8,11 @@ import {
   SemaphoreQueueFullError,
   SemaphoreWaitTimeoutError,
   SemaphoreAbortedError,
-} from '@/modules/manuscripts/clsi/core/pipeline/fair-semaphore';
-import {
   planDbFileSet,
   planInlineFileSet,
   ManifestDoc,
   ManifestNode,
-} from '@/modules/manuscripts/clsi/core/pipeline/compile-fileset';
+} from '@/modules/manuscripts/clsi';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

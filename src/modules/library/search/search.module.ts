@@ -3,16 +3,13 @@ import { CoreModule } from '@/core';
 import { SearchFacade, SEARCH_FACADE } from './search.facade';
 
 // Presentation
-import { SearchController } from './controllers';
+import { SearchController } from './controllers/search.controller';
 
 // Services & Infrastructure
 import { SearchService } from './services/search.service';
 import { SearchRepository } from './repositories/search.repository';
 import { FullTextProvider } from './services/full-text.provider';
 import { SearchEventsSubscriber } from './subscribers/search-events.subscriber';
-import { PostgresFtsAdapter } from './services/search-engine.adapter';
-import { VectorSearchAdapter } from './services/vector-search.adapter';
-import { SEARCH_ENGINE_PORT, VECTOR_SEARCH_ENGINE_PORT } from './domain';
 
 /**
  * Search Bounded Context Unified Module (Generic Domain).
@@ -35,23 +32,7 @@ import { SEARCH_ENGINE_PORT, VECTOR_SEARCH_ENGINE_PORT } from './domain';
     SearchService,
     FullTextProvider,
     SearchEventsSubscriber,
-    PostgresFtsAdapter,
-    {
-      provide: SEARCH_ENGINE_PORT,
-      useClass: PostgresFtsAdapter,
-    },
-    VectorSearchAdapter,
-    {
-      provide: VECTOR_SEARCH_ENGINE_PORT,
-      useClass: VectorSearchAdapter,
-    },
   ],
-  exports: [
-    SearchFacade,
-    SEARCH_FACADE,
-    SearchService,
-    SEARCH_ENGINE_PORT,
-    VECTOR_SEARCH_ENGINE_PORT,
-  ],
+  exports: [SearchFacade, SEARCH_FACADE, SearchService],
 })
 export class SearchModule {}

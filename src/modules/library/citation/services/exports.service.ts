@@ -874,5 +874,3 @@ export class ExportsService {
     };
   }
 }
-
-export { ExportsService as ExportService };

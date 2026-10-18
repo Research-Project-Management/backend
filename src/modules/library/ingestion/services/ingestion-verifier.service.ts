@@ -1,10 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import {
   titleSimilarity,
   TITLE_MATCH_THRESHOLD,
   parseCreatorString,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 
 export interface PdfFingerprint {
   doi?: string;
@@ -48,8 +48,6 @@ const BOT_CHALLENGE_HTML_RE =
  */
 @Injectable()
 export class IngestionVerifierService {
-  private readonly logger = new Logger(IngestionVerifierService.name);
-
   // Verification Scoring Weights (defined in ingestion_pipeline_design.md)
   public static readonly WEIGHT_IDENTIFIER_MATCH = 0.4;
   public static readonly WEIGHT_TITLE_MATCH = 0.3;
@@ -99,7 +97,7 @@ export class IngestionVerifierService {
 
     const pageText = (fingerprint.firstPageText || '').toLowerCase();
 
-    // ── 1. Identifier Verification (+0.40) ──────────────────────────────────
+    // 1. Identifier Verification (+0.40)
     let idMatched = false;
     if (candidate.doi) {
       const cleanCandidateDoi = candidate.doi.toLowerCase().trim();
@@ -141,7 +139,7 @@ export class IngestionVerifierService {
       warnings.push('candidate_identifier_not_found_in_pdf');
     }
 
-    // ── 2. Title Verification (+0.30) ───────────────────────────────────────
+    // 2. Title Verification (+0.30)
     let titleVerified = false;
     let isDisambiguationMismatch = false;
     if (candidate.title && fingerprint.title) {
@@ -181,7 +179,7 @@ export class IngestionVerifierService {
       }
     }
 
-    // ── 3. First Author Surname Match (+0.20) ───────────────────────────────
+    // 3. First Author Surname Match (+0.20)
     let authorVerified = false;
     let candidateAuthorSurname: string | undefined;
     if (candidate.authors && candidate.authors.length > 0) {
@@ -213,7 +211,7 @@ export class IngestionVerifierService {
       }
     }
 
-    // ── 4. Year Match (+0.10) ───────────────────────────────────────────────
+    // 4. Year Match (+0.10)
     let yearVerified = false;
     if (candidate.year && fingerprint.year) {
       const yearDiff = Math.abs(candidate.year - fingerprint.year);

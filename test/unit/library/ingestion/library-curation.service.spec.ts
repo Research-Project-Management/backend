@@ -4,19 +4,15 @@ import { Prisma } from '@prisma/client';
 import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
 import { PrismaService } from '@/core';
 import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+  EXTRACTION_FACADE,
+  IExtractionFacade,
+  ItemDetail,
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/shared-kernel';
-import {
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
-} from '@/modules/library/ingestion/types/catalog-gateway.types';
-import {
-  EXTRACTION_GATEWAY_PORT,
-  IExtractionGatewayPort,
-} from '@/modules/library/ingestion/types/extraction-gateway.types';
+} from '@/modules/library/core';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { ItemDetail } from '@/modules/library/catalog/types/items.types';
 import {
   normalizeTitleForDedupe,
   extractFirstAuthorFamily,
@@ -57,8 +53,8 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     let service: DuplicateService;
     let mockPrisma: any;
     let mockLibraryTx: any;
-    let mockBibliographyFacade: jest.Mocked<ICatalogGatewayPort>;
-    let mockReaderFacade: jest.Mocked<IExtractionGatewayPort>;
+    let mockBibliographyFacade: jest.Mocked<ICatalogFacade>;
+    let mockReaderFacade: jest.Mocked<IExtractionFacade>;
     let mockTx: any;
     let mockHelpers: jest.Mocked<TransactionHelpers>;
     let mockIngestionRepo: any;
@@ -140,8 +136,8 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
           DuplicateService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: TransactionService, useValue: mockLibraryTx },
-          { provide: CATALOG_GATEWAY_PORT, useValue: mockBibliographyFacade },
-          { provide: EXTRACTION_GATEWAY_PORT, useValue: mockReaderFacade },
+          { provide: CATALOG_FACADE, useValue: mockBibliographyFacade },
+          { provide: EXTRACTION_FACADE, useValue: mockReaderFacade },
           { provide: IngestionRepository, useValue: mockIngestionRepo },
         ],
       }).compile();
@@ -366,14 +362,14 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         title: 'Deep Learning',
         version: 1,
         citationKey: 'lecun2015',
-        extra: null,
+        extra: undefined,
       });
       const duplicateItem = fromPartial<ItemDetail>({
         id: 'dup-2',
         title: 'Deep Learning (Reprint)',
         version: 1,
         citationKey: 'lecun2015deep',
-        extra: null,
+        extra: undefined,
       });
 
       mockBibliographyFacade.findByIds.mockResolvedValueOnce([

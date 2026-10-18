@@ -8,6 +8,7 @@ import { TransactionService } from './sync';
 import { LibraryChange, Tombstone } from '@prisma/client';
 
 import { ExtractedPdfDocument, AttachmentEntity } from './extraction';
+import { cleanSingleTag } from './core/domain/tag.domain';
 
 export interface LibraryItemSummary {
   id: string;
@@ -253,20 +254,25 @@ export class LibraryFacade implements ILibraryFacade {
     projectId?: string,
   ): Promise<LibraryItemDetail | null> {
     if (!this.catalogFacade) return null;
-    // Scatter-gather across Bounded Contexts (Microservices-Ready)
-    const [catalogItem, attachmentsRes, notes] = await Promise.all([
+
+    const [catalogItem, attachmentsRes] = await Promise.all([
       this.catalogFacade.getItem(userId, itemId, projectId),
       this.extractionFacade
         ? this.extractionFacade.getItemAttachments(userId, itemId, projectId)
         : Promise.resolve([]),
-      this.catalogFacade.listNotes(userId, itemId, projectId),
     ]);
 
     if (!catalogItem) return null;
 
     const rawAttachments: AttachmentEntity[] = Array.isArray(attachmentsRes)
       ? attachmentsRes
-      : [];
+      : Array.isArray(
+            (catalogItem as unknown as { attachments?: AttachmentEntity[] })
+              .attachments,
+          )
+        ? ((catalogItem as unknown as { attachments: AttachmentEntity[] })
+            .attachments ?? [])
+        : [];
 
     const attachments: AttachmentSummaryDto[] = rawAttachments.map(
       (attachment) => ({
@@ -277,13 +283,18 @@ export class LibraryFacade implements ILibraryFacade {
         url:
           attachment.url ||
           (attachment.fileId
-            ? `/api/files/${attachment.fileId}/content`
+            ? `/api/v1/storage/files/${attachment.fileId}/content`
             : null),
         linkMode: attachment.linkMode || 'imported_file',
         attachmentType: attachment.attachmentType || null,
       }),
     );
 
+    const existingNotes = (catalogItem as unknown as { notes?: RawNoteLike[] })
+      .notes;
+    const notes = Array.isArray(existingNotes)
+      ? existingNotes
+      : await this.catalogFacade.listNotes(userId, itemId, projectId);
     const rawNotes = Array.isArray(notes) ? (notes as RawNoteLike[]) : [];
     const noteSummaries: NoteSummaryDto[] = rawNotes.map((note) => ({
       id: note.id,
@@ -293,9 +304,6 @@ export class LibraryFacade implements ILibraryFacade {
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
     }));
-
-    const tags = this.extractTagSummaries(catalogItem);
-    const collections = this.extractCollectionSummaries(catalogItem);
 
     return {
       id: catalogItem.id,
@@ -307,8 +315,8 @@ export class LibraryFacade implements ILibraryFacade {
       authors: CslJsonMapper.getAuthorNames(catalogItem),
       attachments,
       notes: noteSummaries,
-      tags,
-      collections,
+      tags: this.extractTagSummaries(catalogItem),
+      collections: this.extractCollectionSummaries(catalogItem),
     };
   }
 
@@ -316,56 +324,68 @@ export class LibraryFacade implements ILibraryFacade {
     item?: CatalogItemWithRelations | null,
   ): TagSummaryDto[] {
     if (!item) return [];
-    if (Array.isArray(item.itemTags)) {
-      return item.itemTags
-        .map((it): TagSummaryDto => ({
-          id: it.tag?.id || it.tagId || undefined,
+    const seenLower = new Set<string>();
+    const result: TagSummaryDto[] = [];
+    const addUnique = (rawName: string, id?: string, color?: string | null) => {
+      const cleaned = cleanSingleTag(rawName);
+      if (!cleaned) return;
+      const key = cleaned.toLowerCase();
+      if (seenLower.has(key)) return;
+      seenLower.add(key);
+      result.push({
+        ...(id ? { id } : {}),
+        name: cleaned,
+        ...(color !== undefined ? { color } : {}),
+      });
+    };
+
+    const sourceList = Array.isArray(item.itemTags)
+      ? item.itemTags.map((it) => ({
           name: it.tag?.name || it.name || '',
+          id: it.tag?.id || it.tagId || undefined,
           color: it.tag?.color || null,
         }))
-        .filter((t): t is TagSummaryDto => Boolean(t.name));
+      : Array.isArray(item.tags)
+        ? item.tags.map((t) =>
+            typeof t === 'string'
+              ? { name: t, id: undefined, color: undefined }
+              : {
+                  name: t?.name || t?.tag || '',
+                  id: t?.id || undefined,
+                  color: t?.color || null,
+                },
+          )
+        : [];
+
+    for (const entry of sourceList) {
+      addUnique(entry.name, entry.id, entry.color);
     }
-    if (Array.isArray(item.tags)) {
-      return item.tags
-        .map((t): TagSummaryDto =>
-          typeof t === 'string'
-            ? { name: t }
-            : {
-                id: t.id || undefined,
-                name: t.name || t.tag || '',
-                color: t.color || null,
-              },
-        )
-        .filter((t): t is TagSummaryDto => Boolean(t.name));
-    }
-    return [];
+    return result;
   }
 
   private extractCollectionSummaries(
     item?: CatalogItemWithRelations | null,
   ): CollectionSummaryDto[] {
     if (!item) return [];
-    if (Array.isArray(item.collectionItems)) {
-      return item.collectionItems
-        .filter((ci) => Boolean(ci.collection?.id || ci.collectionId))
-        .map((ci) => ({
-          id: (ci.collection?.id || ci.collectionId) as string,
+    const rawCollections = Array.isArray(item.collectionItems)
+      ? item.collectionItems.map((ci) => ({
+          id: ci.collection?.id || ci.collectionId,
           name: ci.collection?.name || '',
           color: ci.collection?.color || null,
           parentId: ci.collection?.parentId || null,
-        }));
-    }
-    if (Array.isArray(item.collections)) {
-      return item.collections
-        .filter((c) => Boolean(c.id))
-        .map((c) => ({
-          id: c.id as string,
-          name: c.name || '',
-          color: c.color || null,
-          parentId: c.parentId || null,
-        }));
-    }
-    return [];
+        }))
+      : Array.isArray(item.collections)
+        ? item.collections
+        : [];
+
+    return rawCollections
+      .filter((c): c is typeof c & { id: string } => Boolean(c?.id))
+      .map((c) => ({
+        id: c.id,
+        name: c.name || '',
+        color: c.color || null,
+        parentId: c.parentId || null,
+      }));
   }
 
   async countItems(

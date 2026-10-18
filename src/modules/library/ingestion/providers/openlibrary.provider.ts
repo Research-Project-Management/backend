@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -8,13 +8,10 @@ import {
   ProviderResult,
   QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
-import {
-  normalizeIsbn,
-  normalizeTags,
-} from '@/modules/library/ingestion/domain/metadata.domain';
+import { normalizeIsbn, normalizeTags } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import { getAcademicUserAgent } from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
-import { parseCreatorString } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
+import { parseCreatorString } from '@/modules/library/core';
 
 @Injectable()
 export class OpenLibraryProvider implements MetadataProvider {
@@ -26,7 +23,6 @@ export class OpenLibraryProvider implements MetadataProvider {
     maxConcurrency: 2,
   };
 
-  private readonly logger = new Logger(OpenLibraryProvider.name);
   private readonly BASE_URL =
     process.env.OPENLIBRARY_API_URL || 'https://openlibrary.org/api/books';
 

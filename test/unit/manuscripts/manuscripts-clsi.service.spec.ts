@@ -8,21 +8,21 @@ import * as path from 'path';
 import * as os from 'os';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { ClsiService } from '@/modules/manuscripts/clsi/clsi.service';
 import { RedisCacheService } from '@/core';
-import { ProjectLockManager } from '@/modules/manuscripts/clsi/core/adapters/workspace/project-lock.manager';
-import { OverleafOutputFileFinder } from '@/modules/manuscripts/clsi/core/adapters/artifacts/output-file.finder';
-import { OverleafIncrementalWorkspace } from '@/modules/manuscripts/clsi/core/adapters/workspace/incremental-workspace';
-import { TexEngineDetector } from '@/modules/manuscripts/clsi/core/adapters/engines/tex-engine.detector';
-import { BibBackendDetector } from '@/modules/manuscripts/clsi/core/adapters/engines/bib-backend.detector';
-import { DraftModeManager } from '@/modules/manuscripts/clsi/core/adapters/engines/draft-mode.manager';
-import { DiskUsageCleaner } from '@/modules/manuscripts/clsi/core/adapters/workspace/disk-usage.cleaner';
-import { ClsiMetrics } from '@/modules/manuscripts/clsi/core/adapters/telemetry/clsi.metrics';
 import {
+  ClsiService,
+  ProjectLockManager,
+  OverleafOutputFileFinder,
+  OverleafIncrementalWorkspace,
+  TexEngineDetector,
+  BibBackendDetector,
+  DraftModeManager,
+  DiskUsageCleaner,
+  ClsiMetrics,
   buildZipArchive,
   createZipStream,
   createZipStreamFromDisk,
-} from '@/modules/manuscripts/clsi/core/adapters/artifacts/zip-stream.adapter';
+} from '@/modules/manuscripts/clsi';
 
 describe('Manuscripts - ClsiService', () => {
   let service: ClsiService;

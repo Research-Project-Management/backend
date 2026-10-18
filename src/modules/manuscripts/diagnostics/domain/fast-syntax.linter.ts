@@ -868,3 +868,20 @@ export class FastSyntaxLinter {
     return result;
   }
 }
+
+export { FastSyntaxLinter as FastSyntaxLinterAdapter };
+
+export class LintDocumentSyntaxUseCase {
+  constructor(private readonly linter = new FastSyntaxLinter()) {}
+  public execute(input: {
+    source: string;
+    filename?: string;
+    knownBibKeys?: Set<string>;
+  }): DiagnosticReport {
+    return this.linter.lintToReport(
+      input.source,
+      input.filename,
+      input.knownBibKeys,
+    );
+  }
+}

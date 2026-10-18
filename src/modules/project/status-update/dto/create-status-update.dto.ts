@@ -5,7 +5,7 @@ import { ProjectUpdateStatus } from '@prisma/client';
 export class CreateProjectStatusUpdateDto {
   @ApiProperty({
     enum: ProjectUpdateStatus,
-    description: 'Trạng thái sức khỏe dự án: on_track, at_risk, off_track',
+    description: 'Project health status: on_track, at_risk, off_track',
     example: 'on_track',
   })
   @IsEnum(ProjectUpdateStatus)
@@ -13,8 +13,8 @@ export class CreateProjectStatusUpdateDto {
   status!: ProjectUpdateStatus;
 
   @ApiProperty({
-    description: 'Nội dung tóm tắt cập nhật tiến độ, blockers hoặc ghi chú',
-    example: 'Sprint 2 đã hoàn thành 80%, frontend và backend kết nối mượt mà.',
+    description: 'Summary of progress, blockers, or milestone notes',
+    example: 'Sprint 2 is 80% complete, frontend and backend integration running smoothly.',
   })
   @IsString()
   @IsNotEmpty()

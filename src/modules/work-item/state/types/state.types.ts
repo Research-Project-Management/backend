@@ -21,7 +21,7 @@ export interface WorkItemState {
   name: string;
   color: string;
   icon?: string | null;
-  group: StateGroup | string;
+  group: string;
   description?: string | null;
   sequence: number;
   isDefault: boolean;
@@ -30,7 +30,7 @@ export interface WorkItemState {
   accentColor?: string | null;
 }
 
-export function getStateDefaultIcon(group: StateGroup | string): string {
+export function getStateDefaultIcon(group: string): string {
   switch (group) {
     case 'backlog':
       return 'circle-dashed';

@@ -12,20 +12,18 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 
-import { YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/core/adapters/crdt/yjs-doc-manager.adapter';
-import { FastSyntaxLinterAdapter } from '@/modules/manuscripts/diagnostics/core/adapters/linter/fast-syntax-linter.adapter';
-import { CompileFairQueue } from '@/modules/manuscripts/clsi/core/pipeline/compile-fair-queue';
-import { LinkedFileEntity } from '@/modules/manuscripts/linked-files/core/domain/entities/linked-file.entity';
-import { RedisLinkedFilesRepository } from '@/modules/manuscripts/linked-files/core/adapters/persistence/redis-linked-files.repository';
-import { CreateLinkedFileUseCase } from '@/modules/manuscripts/linked-files/core/use-cases/create-linked-file.use-case';
-import { RefreshLinkedFileUseCase } from '@/modules/manuscripts/linked-files/core/use-cases/refresh-linked-file.use-case';
-import { DeleteLinkedFileUseCase } from '@/modules/manuscripts/linked-files/core/use-cases/delete-linked-file.use-case';
-import { LinkedFilesService } from '@/modules/manuscripts/linked-files/linked-files.service';
-import { ListLinkedFilesUseCase } from '@/modules/manuscripts/linked-files/core/use-cases/list-linked-files.use-case';
+import { YjsService as YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/yjs.service';
+import { FastSyntaxLinterAdapter } from '@/modules/manuscripts/diagnostics';
+import { CompileFairQueue } from '@/modules/manuscripts/clsi';
+import {
+  LinkedFileEntity,
+  RedisLinkedFilesRepository,
+  LinkedFilesService,
+} from '@/modules/manuscripts/linked-files';
 import {
   assertSafeExternalUrl,
   isPrivateOrReservedIPv4,
-} from '@/modules/manuscripts/linked-files/core/domain/ssrf-guard';
+} from '@/modules/manuscripts/core';
 
 describe('Manuscripts 4 Major Backend Capabilities (Overleaf Parity)', () => {
   // =========================================================================
@@ -199,24 +197,6 @@ describe('Manuscripts 4 Major Backend Capabilities (Overleaf Parity)', () => {
         broadcastFileTreeChange: jest.fn(),
         broadcastEvent: jest.fn(),
       };
-
-      const createUseCase = new CreateLinkedFileUseCase(
-        repo,
-        mockStructureService,
-        mockDocstoreService,
-        mockFilestoreService,
-        mockCitationsService,
-        mockRealtimeService,
-      );
-
-      const refreshUseCase = new RefreshLinkedFileUseCase(
-        repo,
-        mockStructureService,
-        mockDocstoreService,
-        mockFilestoreService,
-        mockCitationsService,
-        mockRealtimeService,
-      );
 
       const mockEventEmitter = {
         emit: jest.fn((event: string, payload: any) => {

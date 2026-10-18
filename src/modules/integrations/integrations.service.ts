@@ -356,6 +356,16 @@ export class IntegrationsService {
           `Could not sync docstore node for ${targetBibFile}: ${errMsg}`,
         );
       }
+    } else if (
+      this.filestoreService &&
+      typeof this.filestoreService.uploadFileFromBuffer === 'function'
+    ) {
+      await this.filestoreService.uploadFileFromBuffer(
+        dto.projectId,
+        targetBibFile,
+        Buffer.from(bibtexContent, 'utf-8'),
+        'application/x-bibtex',
+      );
     }
 
     const link = await this.repo.upsertProjectLink({

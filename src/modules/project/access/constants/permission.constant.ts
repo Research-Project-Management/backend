@@ -11,7 +11,7 @@ import { PermissionOverrideMap } from '../types/access.type';
  * - REVIEWER: Advisor / Peer Reviewer (read-only with annotations, comments, and suggestions)
  */
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
-  // ─── 1. OWNER (Chủ nhiệm đề tài / Project Leader / PI) ────────────────────
+  // ─── 1. OWNER (Project Leader / PI) ────────────────────────────────────────
   [Role.OWNER]: [
     // Project Management (Full Control & Exclusive Personnel Authority)
     Permission.PROJECT_VIEW,
@@ -84,7 +84,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     Permission.AI_MANAGE_PROMPTS,
   ],
 
-  // ─── 2. COORDINATOR (Điều phối viên đề tài / Project Coordinator) ─────────
+  // ─── 2. COORDINATOR (Project Coordinator) ──────────────────────────────────
   [Role.COORDINATOR]: [
     // Project Management (Read-only on project, NO personnel management)
     Permission.PROJECT_VIEW,
@@ -147,7 +147,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     Permission.AI_MANAGE_PROMPTS,
   ],
 
-  // ─── 3. CONTRIBUTOR (Thành viên nghiên cứu / Contributor) ─────────────────
+  // ─── 3. CONTRIBUTOR (Research Member / Contributor) ────────────────────────
   [Role.CONTRIBUTOR]: [
     // Project Management (Read-only)
     Permission.PROJECT_VIEW,
@@ -208,7 +208,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     Permission.AI_RAG_SEARCH,
   ],
 
-  // ─── 4. REVIEWER (GVHD / Người phản biện / Reviewer) ──────────────────────
+  // ─── 4. REVIEWER (Advisor / Peer Reviewer / Reviewer) ──────────────────────
   [Role.REVIEWER]: [
     // Project (Read-only)
     Permission.PROJECT_VIEW,

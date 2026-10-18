@@ -15,13 +15,11 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 import { LinkedFilesRepository } from './linked-files.repository';
-import { ILinkedFilesRepositoryPort } from './core/ports/linked-files-repository.port';
 import {
   CreateLinkedFileDto,
   LinkedFileResponseDto,
 } from './dto/linked-file.dto';
-import { LinkedFileEntity } from './core/domain/entities/linked-file.entity';
-import { assertSafeExternalUrl } from './domain/ssrf-guard';
+import { LinkedFileEntity, assertSafeExternalUrl } from './domain';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';

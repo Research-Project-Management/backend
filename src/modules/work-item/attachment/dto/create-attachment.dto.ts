@@ -57,7 +57,7 @@ export class CreateAttachmentDto extends BaseAttachmentMetadataDto {
 
   @ApiProperty({
     description: 'Public URL or streaming path of the attachment',
-    example: '/api/files/r2/...',
+    example: '/api/v1/storage/files/r2/...',
   })
   @IsNotEmpty()
   @IsString()

@@ -1,24 +1,19 @@
-import { UploadNewVersionUseCase } from '@/modules/storage/application/use-cases/version/upload-new-version.use-case';
-import { GetFileVersionsUseCase } from '@/modules/storage/application/use-cases/version/get-file-versions.use-case';
-import { DownloadFileVersionUseCase } from '@/modules/storage/application/use-cases/version/download-file-version.use-case';
-import { RevertFileVersionUseCase } from '@/modules/storage/application/use-cases/version/revert-file-version.use-case';
-import { StorageVersion } from '@/modules/storage/domain/entities/storage-version.entity';
-import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
+import { VersionService } from '@/modules/storage/drive';
+import { StorageVersion } from '@/modules/storage/drive';
+import { StorageNode } from '@/modules/storage/drive';
 import {
+  BlobService,
   StorageBlob,
   BlobStatus,
-} from '@/modules/storage/domain/entities/storage-blob.entity';
-import { ContentHash } from '@/modules/storage/domain/value-objects/content-hash.vo';
-import { StorageKey } from '@/modules/storage/domain/value-objects/storage-key.vo';
-import { FileScope } from '@/modules/storage/domain/value-objects/file-scope.vo';
+} from '@/modules/storage/core';
+import { ContentHash } from '@/modules/storage/core';
+import { StorageKey } from '@/modules/storage/core';
+import { FileScope } from '@/modules/storage/drive';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Readable } from 'stream';
 
 describe('Storage File & Dataset Versioning Suite', () => {
-  let uploadNewVersionUseCase: UploadNewVersionUseCase;
-  let getFileVersionsUseCase: GetFileVersionsUseCase;
-  let downloadFileVersionUseCase: DownloadFileVersionUseCase;
-  let revertFileVersionUseCase: RevertFileVersionUseCase;
+  let versionService: VersionService;
 
   let mockDriver: any;
   let mockNodeRepo: any;
@@ -133,32 +128,10 @@ describe('Storage File & Dataset Versioning Suite', () => {
       emit: jest.fn(),
     };
 
-    uploadNewVersionUseCase = new UploadNewVersionUseCase(
-      mockDriver,
+    versionService = new VersionService(
+      new BlobService(mockDriver, mockBlobRepo),
       mockNodeRepo,
-      mockBlobRepo,
       mockQuotaRepo,
-      mockVersionRepo,
-      mockAccessPolicy,
-      mockCache,
-      mockEventEmitter,
-    );
-
-    getFileVersionsUseCase = new GetFileVersionsUseCase(
-      mockVersionRepo,
-      mockAccessPolicy,
-    );
-
-    downloadFileVersionUseCase = new DownloadFileVersionUseCase(
-      mockDriver,
-      mockBlobRepo,
-      mockVersionRepo,
-      mockAccessPolicy,
-    );
-
-    revertFileVersionUseCase = new RevertFileVersionUseCase(
-      mockNodeRepo,
-      mockBlobRepo,
       mockVersionRepo,
       mockAccessPolicy,
       mockCache,
@@ -166,7 +139,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
     );
   });
 
-  describe('UploadNewVersionUseCase', () => {
+  describe('VersionService.uploadVersion', () => {
     it('should upload version 2 for an existing file and backfill version 1', async () => {
       // Setup initial file
       const initialHash = ContentHash.fromBuffer(
@@ -200,7 +173,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
       const v2Buffer = Buffer.from(
         '%PDF-1.5 Updated research paper content with new experiments',
       );
-      const result = await uploadNewVersionUseCase.execute({
+      const result = await versionService.uploadVersion({
         fileId: fileNode.id,
         userId: 'author-user-1',
         buffer: v2Buffer,
@@ -260,7 +233,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
       });
       blobsInDb.set(existingBlob.id, existingBlob);
 
-      const result = await uploadNewVersionUseCase.execute({
+      const result = await versionService.uploadVersion({
         fileId: fileNode.id,
         userId: 'user-1',
         buffer: identicalBuffer,
@@ -286,7 +259,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
       nodesInDb.set(folderNode.id, folderNode);
 
       await expect(
-        uploadNewVersionUseCase.execute({
+        versionService.uploadVersion({
           fileId: folderNode.id,
           userId: 'user-1',
           buffer: Buffer.from('data'),
@@ -297,7 +270,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
     });
   });
 
-  describe('GetFileVersionsUseCase', () => {
+  describe('VersionService.listVersions', () => {
     it('should return all versions with isCurrent flag and author info', async () => {
       const fileId = 'file-doc-1';
       const fileNode = new StorageNode({
@@ -331,7 +304,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
         }),
       ]);
 
-      const result = await getFileVersionsUseCase.execute(fileId, 'student-1');
+      const result = await versionService.listVersions(fileId, 'student-1');
 
       expect(result.totalVersions).toBe(2);
       expect(result.currentVersionNumber).toBe(2);
@@ -342,7 +315,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
     });
   });
 
-  describe('DownloadFileVersionUseCase', () => {
+  describe('VersionService.downloadVersion', () => {
     it('should download the specific historical version binary with versioned name', async () => {
       const fileId = 'file-target-1';
       const v1Hash = ContentHash.fromBuffer(Buffer.from('v1-content'));
@@ -378,7 +351,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
         }),
       ]);
 
-      const result = await downloadFileVersionUseCase.execute(
+      const result = await versionService.downloadVersion(
         fileId,
         1,
         'user-1',
@@ -391,7 +364,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
     });
   });
 
-  describe('RevertFileVersionUseCase', () => {
+  describe('VersionService.revertVersion', () => {
     it('should revert to an older version and create a new audit snapshot', async () => {
       const fileId = 'file-revert-1';
       const v1Blob = new StorageBlob({
@@ -436,7 +409,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
         }),
       ]);
 
-      const result = await revertFileVersionUseCase.execute(
+      const result = await versionService.revertVersion(
         fileId,
         1,
         'user-1',

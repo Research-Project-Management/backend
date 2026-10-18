@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Inject } from '@nestjs/common';
+﻿import { Injectable, BadRequestException, Inject } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
 import { UpdateStateDto } from '@/modules/library/catalog/dto/state.dto';
@@ -12,7 +12,7 @@ import {
   TransactionService,
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 import {
   ITEM_EXISTENCE_PORT,
   IItemExistencePort,

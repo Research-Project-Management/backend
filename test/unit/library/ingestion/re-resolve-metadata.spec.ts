@@ -1,10 +1,10 @@
+import { fromPartial } from '@total-typescript/shoehorn';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { PipelineService } from '@/modules/library/ingestion/services/pipeline.service';
 import { QueueService } from '@/modules/library/ingestion/services/queue.service';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
-import { ICatalogGatewayPort } from '@/modules/library/ingestion/types/catalog-gateway.types';
-import { ItemDetail } from '@/modules/library/catalog/types/items.types';
+import { ICatalogFacade, ItemDetail } from '@/modules/library/core';
 import {
   MetadataPort,
   ResolvedMetadata,
@@ -13,7 +13,7 @@ import { NotFoundException, BadRequestException } from '@nestjs/common';
 
 describe('IngestionService - reResolveMetadata', () => {
   let ingestionService: IngestionService;
-  let mockCatalogGateway: jest.Mocked<ICatalogGatewayPort>;
+  let mockCatalogGateway: jest.Mocked<ICatalogFacade>;
   let mockMetadataService: jest.Mocked<MetadataPort>;
 
   const mockRepo = {} as unknown as IngestionRepository;
@@ -34,7 +34,7 @@ describe('IngestionService - reResolveMetadata', () => {
   });
 
   beforeEach(() => {
-    mockCatalogGateway = {
+    mockCatalogGateway = fromPartial({
       getItem: jest.fn(),
       updateItem: jest.fn(),
       createItem: jest.fn(),
@@ -43,7 +43,7 @@ describe('IngestionService - reResolveMetadata', () => {
       findByIds: jest.fn(),
       mergeItems: jest.fn(),
       findQualityAuditItems: jest.fn(),
-    };
+    });
 
     mockMetadataService = {
       resolve: jest.fn(),
@@ -144,8 +144,7 @@ describe('IngestionService - reResolveMetadata', () => {
         publisher: 'Nature Publishing Group',
         abstractNote: expect.stringContaining('Proteins are essential to life'),
       }),
-      2, // expectedVersion
-      undefined,
+      { expectedVersion: 2, projectId: undefined },
     );
   });
 
@@ -200,8 +199,7 @@ describe('IngestionService - reResolveMetadata', () => {
           }),
         ],
       }),
-      1,
-      undefined,
+      { expectedVersion: 1, projectId: undefined },
     );
   });
 

@@ -10,9 +10,7 @@ import { Readable } from 'stream';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { IDocPersistor } from '../core/ports/doc-persistor.port';
-import { Md5MismatchError } from '../core/domain/doc-errors';
-import { computeContentMd5 } from '../domain/doc-hasher';
+import { IDocPersistor, Md5MismatchError, computeContentMd5 } from '../domain';
 
 /**
  * Pure in-memory archive repository adapter for fast, deterministic unit tests.
@@ -173,4 +171,4 @@ export class DocArchiveRepository implements IDocPersistor {
 }
 
 export { DocArchiveRepository as S3DocPersistorAdapter };
-export { IDocPersistor } from '../core/ports/doc-persistor.port';
+export { IDocPersistor } from '../domain';

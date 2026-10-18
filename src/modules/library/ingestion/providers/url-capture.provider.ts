@@ -7,15 +7,15 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
-import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
+import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 
 import {
   UrlMetadataScraperService,
   ScrapedUrlResult,
 } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
-import { parseCreatorString } from '@/modules/library/ingestion/domain/metadata.domain';
+import { parseCreatorString } from '@/modules/library/core';
 
-// ─── Public Interfaces ────────────────────────────────────────────────────────
+// Public Interfaces
 
 export interface CapturedItemMetadata {
   title: string;

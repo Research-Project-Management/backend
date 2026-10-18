@@ -9,8 +9,9 @@ import { PrismaService } from '@/core';
 import {
   IStructureRepository,
   CreateNodeParams,
-} from './core/ports/structure-repository.port';
-import { ManuscriptNodeEntity, NodePathVo } from './domain';
+  ManuscriptNodeEntity,
+  NodePathVo,
+} from './domain';
 
 @Injectable()
 export class StructureRepository extends IStructureRepository {

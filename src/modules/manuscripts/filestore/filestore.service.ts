@@ -8,12 +8,19 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { FilestoreRepository } from './filestore.repository';
-import { ManuscriptFile } from './core/domain/entities/manuscript-file.entity';
-import { ByteRange } from './core/domain/value-objects/byte-range.vo';
-import { FileNotFoundException } from './core/domain/exceptions/file-not-found.exception';
-import { StorageObjectMetadata } from './core/ports/binary-storage.port';
-import { StreamManuscriptFileOutput } from './core/use-cases/stream-manuscript-file.use-case';
-import { GetFileHeadOutput } from './core/use-cases/get-manuscript-file-head.use-case';
+import {
+  ManuscriptFile,
+  ByteRange,
+  FileNotFoundException,
+  StorageObjectMetadata,
+  StreamManuscriptFileOutput,
+  GetFileHeadOutput,
+  StreamHashResult,
+  StorageKey,
+  ContentHash,
+  StorageUploadOptions,
+  StorageRangeOptions,
+} from './filestore.types';
 
 export interface IFilestoreServiceRepository {
   findByProjectAndId(
@@ -30,17 +37,24 @@ export interface IFilestoreServiceRepository {
   ): Promise<ManuscriptFile[]>;
   save(file: ManuscriptFile): Promise<ManuscriptFile>;
   countReferencesByHash(hash: string): Promise<number>;
-  hashStream(stream: Readable): Promise<any>;
-  buildStorageKey(hash: any, prefix?: string): any;
+  hashStream(stream: Readable): Promise<StreamHashResult>;
+  buildStorageKey(hash: ContentHash, prefix?: string): StorageKey;
   checkObjectExists(bucket: string, key: string): Promise<boolean>;
   sendStream(
     bucket: string,
     key: string,
     stream: Readable,
-    options?: any,
+    options?: StorageUploadOptions,
   ): Promise<void>;
-  getObjectStream(bucket: string, key: string, range?: any): Promise<Readable>;
-  getObjectMetadata?(bucket: string, key: string): Promise<any>;
+  getObjectStream(
+    bucket: string,
+    key: string,
+    range?: StorageRangeOptions,
+  ): Promise<Readable>;
+  getObjectMetadata?(
+    bucket: string,
+    key: string,
+  ): Promise<StorageObjectMetadata>;
   deleteObject(bucket: string, key: string): Promise<void>;
   getSignedDownloadUrl(
     bucket: string,
@@ -139,6 +153,7 @@ export class FilestoreService {
     );
 
     if (blobExists) {
+      dataStream.destroy();
       this.logger.log(
         `[CAS Deduplication] Reusing existing blob '${storageKey.getValue()}' for file '${name}' in project '${projectId}'. (0 bytes written to storage)`,
       );
@@ -245,7 +260,7 @@ export class FilestoreService {
       const remainingRefs = await this.repository.countReferencesByHash(
         file.hash.getValue(),
       );
-      if (remainingRefs <= 1) {
+      if (remainingRefs === 0) {
         try {
           await this.repository.deleteObject(
             file.bucketName,

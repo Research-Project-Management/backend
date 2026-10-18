@@ -11,7 +11,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { CompileManuscriptDto } from '../dto/clsi.dto';
 import {
   planDbFileSet,
@@ -29,7 +29,7 @@ export class ClsiWorkspacePlannerService {
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly filestoreService?: FilestoreService,
-    @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly realtimeService?: RealtimeFacade,
   ) {}
 
   /**

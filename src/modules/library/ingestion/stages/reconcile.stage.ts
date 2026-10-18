@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+﻿import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   MetadataCandidate,
   ReconciliationDecision,
@@ -6,7 +6,7 @@ import {
 import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
 import { IngestionVerifierService } from '@/modules/library/ingestion/services/ingestion-verifier.service';
 import { IWorkflowStage } from '@/modules/library/ingestion/types/workflow-stage.types';
-import { titleSimilarity } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { titleSimilarity } from '@/modules/library/core';
 
 @Injectable()
 export class ReconcileStage implements IWorkflowStage<

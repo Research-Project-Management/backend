@@ -25,6 +25,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { ExportImportService } from './export-import.service';
 import {
@@ -33,10 +34,13 @@ import {
   TemplateResponseDto,
   ScaffoldTemplateDto,
 } from './dto/export-import.dto';
-import { InvalidZipArchiveException } from './core/domain/exceptions/invalid-zip-archive.exception';
-import { ZipSlipSecurityException } from './core/domain/exceptions/zip-slip-security.exception';
-import { ArchiveSizeExceededException } from './core/domain/exceptions/archive-size-exceeded.exception';
-import { TemplateNotFoundException } from './core/domain/exceptions/template-not-found.exception';
+import {
+  InvalidZipArchiveException,
+  ZipSlipSecurityException,
+  ArchiveSizeExceededException,
+  ArchiveFileLimitExceededException,
+  TemplateNotFoundException,
+} from './domain';
 
 @ApiTags('Manuscripts - Project Archive & Templates')
 @ApiBearerAuth('JWT-auth')
@@ -46,12 +50,15 @@ import { TemplateNotFoundException } from './core/domain/exceptions/template-not
   'manuscripts/projects',
   'projects',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class ExportImportController {
   constructor(private readonly service: ExportImportService) {}
 
   private handleError(error: unknown): never {
-    if (error instanceof InvalidZipArchiveException) {
+    if (
+      error instanceof InvalidZipArchiveException ||
+      error instanceof ArchiveFileLimitExceededException
+    ) {
       throw new BadRequestException(error.message);
     }
     if (error instanceof ZipSlipSecurityException) {
@@ -67,6 +74,7 @@ export class ExportImportController {
   }
 
   @Get([':projectId/export/zip', ':projectId/export'])
+  @RequireRole(Role.REVIEWER)
   @ApiOperation({
     summary: 'Export complete manuscript project as a PKZIP archive',
   })
@@ -107,6 +115,7 @@ export class ExportImportController {
   }
 
   @Post(':projectId/import/zip')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Import an existing LaTeX project from an uploaded ZIP archive',
   })
@@ -210,6 +219,7 @@ export class ExportImportController {
   }
 
   @Post(':projectId/templates/:templateId/scaffold')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Initialize project structure and files from an academic template',
   })
@@ -228,6 +238,7 @@ export class ExportImportController {
   }
 
   @Post(':projectId/import/convert')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary:
       'Convert and import a Word (.docx) or Markdown (.md) document into the project',

@@ -19,16 +19,16 @@ import {
   formatCanonicalId,
   normalizeArxivId,
   normalizeDoi,
-} from '@/modules/library/ingestion/domain/metadata.domain';
+} from '@/modules/library/core';
 import {
   MetadataRoutingPolicy,
   METADATA_POLICY_VERSION,
 } from '@/modules/library/ingestion/policies/metadata.policy';
 import { MetadataCache } from '@/modules/library/ingestion/repositories/metadata.cache';
-import { ReconciliationService } from './metadata-reconciliation.service';
-import { ExecutorService } from './metadata-executor.service';
+import { MetadataReconciliationService } from './metadata-reconciliation.service';
+import { MetadataExecutorService } from './metadata-executor.service';
 import { validateMetadata } from '@/modules/library/ingestion/domain/metadata.validator';
-import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
+import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 
 @Injectable()
 export class MetadataService implements MetadataPort {
@@ -37,11 +37,11 @@ export class MetadataService implements MetadataPort {
 
   constructor(
     @Inject(METADATA_PROVIDERS)
-    private readonly providers: MetadataProvider[],
+    providers: MetadataProvider[],
     private readonly cache: MetadataCache,
-    private readonly reconciler: ReconciliationService,
-    private readonly executor: ExecutorService,
-    @Optional() private readonly ingestionRepo?: IngestionRepository,
+    private readonly reconciler: MetadataReconciliationService,
+    private readonly executor: MetadataExecutorService,
+    @Optional() private readonly _ingestionRepo?: IngestionRepository,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
   ) {
     for (const provider of providers) {

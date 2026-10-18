@@ -4,7 +4,7 @@ import {
   IdempotentConsumerService as SharedIdempotentConsumerService,
   IdempotentConsumerOptions,
   IdempotentResult,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 
 export type { IdempotentConsumerOptions, IdempotentResult };
 
@@ -154,7 +154,7 @@ export class IdempotentConsumerService extends SharedIdempotentConsumerService {
     this.memoryStore.clear();
   }
 
-  // ─── Internal Lease & State Management ─────────────────────────────────────
+  // Internal Lease & State Management
 
   private async tryAcquireProcessingLease(
     key: string,

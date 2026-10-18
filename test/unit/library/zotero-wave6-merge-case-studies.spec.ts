@@ -6,14 +6,14 @@ import { StateService } from '@/modules/library/catalog/services/state.service';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { CollectionsService } from '@/modules/library/catalog/services/collections.service';
 import { NotesService } from '@/modules/library/catalog/services/notes.service';
-import { LIBRARY_EVENT_TYPES } from '@/modules/library/shared-kernel';
+import { LIBRARY_EVENT_TYPES } from '@/modules/library/core';
 import type { PrismaService } from '@/core';
 import type {
+  ICatalogFacade,
+  IExtractionFacade,
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/shared-kernel';
-import type { ICatalogGatewayPort } from '@/modules/library/ingestion/types/catalog-gateway.types';
-import type { IExtractionGatewayPort } from '@/modules/library/ingestion/types/extraction-gateway.types';
+} from '@/modules/library/core';
 import type { ItemService } from '@/modules/library/catalog/services/items.service';
 import type { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import type { TypesService } from '@/modules/library/catalog/services/types.service';
@@ -50,15 +50,15 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
           const helpers: TransactionHelpers = {
             appendChange: jest.fn(async (scope, change) => {
               changes.push({ scope, change });
-            }),
+            }) as any,
             publishOutbox: jest.fn(
               async (scope, aggregateId, eventType, payload) => {
                 outboxEvents.push({ scope, aggregateId, eventType, payload });
               },
-            ),
+            ) as any,
             recordTombstone: jest.fn(async (scope, tombstone) => {
               tombstones.push({ scope, tombstone });
-            }),
+            }) as any,
           };
           return fn(mockTx as unknown as Prisma.TransactionClient, helpers);
         },
@@ -68,9 +68,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     return { service, outboxEvents, changes, tombstones };
   };
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 1: Preprint -> Published Journal Article Evolution & Child Notes Reassignment
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 1: Preprint -> Published Journal Article Evolution & Child Notes Reassignment', () => {
     it('merges an arXiv preprint with its published journal article, preserves both arxivId and DOI, merges citation keys, and reassigns child Note rows via CatalogFacade.mergeItems', async () => {
       const notesReassigned: Array<{
@@ -106,7 +104,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         mockNotesService,
       );
 
-      let updatedPrimaryPayload: Record<string, unknown> | null = null;
+      let updatedPrimaryPayload: any = null;
       const mockTx = {
         $executeRaw: jest.fn(async () => 1),
         itemRelation: { findMany: jest.fn(async () => []) },
@@ -138,7 +136,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
 
       const { service: txService } = createMockTxService(mockTx);
 
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findByIds: jest.fn(async () => [
           {
             id: 'item-published',
@@ -177,7 +175,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
             version: 1,
             deletedAt: null,
           },
-        ]) as unknown as ICatalogGatewayPort['findByIds'],
+        ]) as unknown as ICatalogFacade['findByIds'],
         mergeItems: jest.fn(async (tx, dupIds, primaryId) => {
           await catalogFacade.mergeItems(tx, dupIds, primaryId);
         }),
@@ -186,7 +184,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       await duplicateService.mergeDuplicates(USER_OWNER, {
@@ -217,9 +215,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 2: Identical PDF fileHash Deduplication & Annotation Consolidation
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 2: Identical PDF fileHash Deduplication & Annotation Consolidation', () => {
     it('deduplicates attachments sharing the same fileHash, consolidates unique annotations onto the surviving PDF, and deletes identical duplicate highlights', async () => {
       const deletedAttachmentIds: string[] = [];
@@ -339,9 +335,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 3: Distinct PDFs on Duplicates — Single primary_pdf Demotion
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 3: Distinct PDFs on Duplicates — Single primary_pdf Enforcement', () => {
     it('retains both distinct PDFs when fileHashes differ, keeping the master primary_pdf and demoting the duplicate primary_pdf to supplementary', async () => {
       const updatedAttachments: Array<{
@@ -402,12 +396,10 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 4: Non-Destructive Zotero Extra Field & Identifier Merging
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 4: Non-Destructive Zotero Extra Field & Identifier Merging (No Circular Reference)', () => {
     it('merges unique string lines in metadata.extra without creating a circular reference and backfills PMID/PMCID', async () => {
-      let savedMetadata: Record<string, unknown> | null = null;
+      let savedMetadata: any = null;
 
       const mockTx = {
         $executeRaw: jest.fn(async () => 1),
@@ -440,7 +432,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
 
       const { service: txService } = createMockTxService(mockTx);
 
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findByIds: jest.fn(async () => [
           {
             id: 'item-a',
@@ -475,14 +467,14 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
             version: 1,
             deletedAt: null,
           },
-        ]) as unknown as ICatalogGatewayPort['findByIds'],
+        ]) as unknown as ICatalogFacade['findByIds'],
         mergeItems: jest.fn(async () => undefined),
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       await duplicateService.mergeDuplicates(USER_OWNER, {
@@ -508,9 +500,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 5: Project Library Multi-Member Independent Reading States
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 5: Project Library Multi-Member Independent Reading States (4 Roles)', () => {
     it('consolidates reading states per member independently across duplicates and selects scrollPosition from the most recently read duplicate', async () => {
       const upsertedStates = new Map<string, Record<string, unknown>>();
@@ -657,16 +647,14 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 6: Cross-Scope Merge Security Guard & Scope Normalization
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 6: Cross-Scope Merge Security Guard (Personal vs Project & Project A vs Project B)', () => {
     it('rejects merging items across Personal and Project scopes or between two different Projects, and normalizes "personal"/"user"/"me" to undefined', async () => {
       const { service: txService } = createMockTxService({});
 
-      const mockCatalogGateway: ICatalogGatewayPort = {
-        findByIds: jest.fn(async (_userId, ids) =>
-          ids.map((id) => ({
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
+        findByIds: jest.fn(async (_userId: string, ids: string[]) =>
+          ids.map((id: string) => ({
             id,
             userId: USER_OWNER,
             projectId: id === 'item-personal' ? null : PROJECT_A,
@@ -675,14 +663,14 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
             version: 1,
             deletedAt: null,
           })),
-        ),
+        ) as any,
         mergeItems: jest.fn(async () => undefined),
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       // 1. Personal item merged with Project A item -> rejected
@@ -717,9 +705,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 7: "Not Duplicates" Dismissal for Multi-Part Companion Papers
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 7: "Not Duplicates" Dismissal for Multi-Part Companion Papers', () => {
     it('allows dismissing false-positive companion papers (Part I & Part II) so detectDuplicates no longer clusters them together', async () => {
       const itemsStore: Array<{
@@ -778,19 +764,19 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
 
       const { service: txService } = createMockTxService(mockTx);
 
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findDuplicateCandidateItems: jest.fn(
           async () => itemsStore,
-        ) as unknown as ICatalogGatewayPort['findDuplicateCandidateItems'],
+        ) as unknown as ICatalogFacade['findDuplicateCandidateItems'],
         findByIds: jest.fn(async (_userId, ids) =>
           itemsStore.filter((it) => ids.includes(it.id)),
-        ) as unknown as ICatalogGatewayPort['findByIds'],
+        ) as unknown as ICatalogFacade['findByIds'],
         mergeItems: jest.fn(async () => undefined),
       };
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       // Before dismissal: Part I and Part II match via fuzzy title + year + author
@@ -819,9 +805,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 8: Bidirectional ItemRelation Consolidation & Self-Loop Prevention
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 8: Bidirectional ItemRelation Consolidation & Self-Loop Prevention', () => {
     it('rewires relations from duplicates to primary, deletes Master<->Duplicate self-relations, and deduplicates parallel edges to external items', async () => {
       const deletedRelationIds: string[] = [];
@@ -903,7 +887,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
 
       const { service: txService } = createMockTxService(mockTx);
 
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findByIds: jest.fn(async () => [
           {
             id: 'item-master',
@@ -932,14 +916,14 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
             version: 1,
             deletedAt: null,
           },
-        ]) as unknown as ICatalogGatewayPort['findByIds'],
+        ]) as unknown as ICatalogFacade['findByIds'],
         mergeItems: jest.fn(async () => undefined),
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       await duplicateService.mergeDuplicates(USER_OWNER, {
@@ -960,12 +944,10 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 9: Retraction Warning Survival Across Merge
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 9: Retraction Warning Survival Across Merge', () => {
     it('preserves isRetracted=true and retraction provenance when a retracted duplicate is merged into an unflagged primary item', async () => {
-      let updatedPrimaryData: Record<string, unknown> | null = null;
+      let updatedPrimaryData: any = null;
 
       const mockTx = {
         $executeRaw: jest.fn(async () => 1),
@@ -998,7 +980,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
 
       const { service: txService } = createMockTxService(mockTx);
 
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findByIds: jest.fn(async () => [
           {
             id: 'item-unflagged-master',
@@ -1030,14 +1012,14 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
             version: 1,
             deletedAt: null,
           },
-        ]) as unknown as ICatalogGatewayPort['findByIds'],
+        ]) as unknown as ICatalogFacade['findByIds'],
         mergeItems: jest.fn(async () => undefined),
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       await duplicateService.mergeDuplicates(USER_OWNER, {
@@ -1060,13 +1042,11 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 10: N-Way Cluster Merge with Collections, Tags & Outbox Sync Events
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 10: 4-Way Cluster Merge (arXiv + PubMed + CrossRef + Manual) with Outbox Sync Events', () => {
     it('consolidates a 4-item duplicate cluster in a Project Library, soft-deletes all 3 duplicates with merge tombstones, and emits library.items.merged', async () => {
       const softDeletedIds: string[] = [];
-      let masterUpdateData: Record<string, unknown> | null = null;
+      let masterUpdateData: any = null;
 
       const mockTx = {
         $executeRaw: jest.fn(async () => 1),
@@ -1108,7 +1088,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         tombstones,
       } = createMockTxService(mockTx);
 
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findByIds: jest.fn(async () => [
           {
             id: 'item-crossref',
@@ -1183,18 +1163,18 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
             version: 1,
             deletedAt: null,
           },
-        ]) as unknown as ICatalogGatewayPort['findByIds'],
+        ]) as unknown as ICatalogFacade['findByIds'],
         mergeItems: jest.fn(async () => undefined),
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
-      const mockExtractionGateway: IExtractionGatewayPort = {
+      const mockExtractionGateway: IExtractionFacade = {
         reassignContentToItem: jest.fn(async () => undefined),
-      } as unknown as IExtractionGatewayPort;
+      } as unknown as IExtractionFacade;
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
         mockExtractionGateway,
       );
 
@@ -1252,9 +1232,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 11: Zotero 8.0.2 Book Chapters Sharing Parent ISBN & Multi-Volume Books
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 11: Zotero 8.0.2 Book Chapters Sharing Parent ISBN & Multi-Volume Books', () => {
     it('does NOT falsely flag distinct book chapters (bookSection) or multi-volume books sharing a parent ISBN, while detecting true duplicate chapters', async () => {
       const candidateItems = [
@@ -1334,17 +1312,17 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
       ];
 
       const { service: txService } = createMockTxService({});
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findDuplicateCandidateItems: jest.fn(
           async () => candidateItems,
-        ) as unknown as ICatalogGatewayPort['findDuplicateCandidateItems'],
+        ) as unknown as ICatalogFacade['findDuplicateCandidateItems'],
         findByIds: jest.fn(async () => []),
         mergeItems: jest.fn(async () => undefined),
       };
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       const clusters = await duplicateService.detectDuplicates(USER_OWNER);
@@ -1359,9 +1337,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 12: Bramer / Deduklick Benchmark: Author Diacritics & LaTeX/HTML Title Normalization
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 12: Bramer / Deduklick Benchmark — Author Diacritics & LaTeX/HTML Title Normalization', () => {
     it('clusters records across PubMed, Scopus, and BibTeX despite German umlauts (Müller vs Mueller vs Muller), LaTeX math ($\\beta$), HTML tags (<i>β</i>), and trailing [Article] tags', async () => {
       const candidateItems = [
@@ -1392,17 +1368,17 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
       ];
 
       const { service: txService } = createMockTxService({});
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findDuplicateCandidateItems: jest.fn(
           async () => candidateItems,
-        ) as unknown as ICatalogGatewayPort['findDuplicateCandidateItems'],
+        ) as unknown as ICatalogFacade['findDuplicateCandidateItems'],
         findByIds: jest.fn(async () => []),
         mergeItems: jest.fn(async () => undefined),
       };
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       const clusters = await duplicateService.detectDuplicates(USER_OWNER);
@@ -1416,9 +1392,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 13: Bramer / Deduklick Benchmark: Erratum, Corrigendum, Comment & Reply Protection
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 13: Bramer / Deduklick Benchmark — Erratum, Corrigendum, Comment & Reply Protection', () => {
     it('never clusters an Original Paper, its Erratum, a Comment on the paper, and the Reply to Comment on the paper even when authors, year, or parent DOI overlap', async () => {
       const candidateItems = [
@@ -1463,17 +1437,17 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
       ];
 
       const { service: txService } = createMockTxService({});
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findDuplicateCandidateItems: jest.fn(
           async () => candidateItems,
-        ) as unknown as ICatalogGatewayPort['findDuplicateCandidateItems'],
+        ) as unknown as ICatalogFacade['findDuplicateCandidateItems'],
         findByIds: jest.fn(async () => []),
         mergeItems: jest.fn(async () => undefined),
       };
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       const clusters = await duplicateService.detectDuplicates(USER_OWNER);
@@ -1481,9 +1455,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 14: Generic Title Boilerplate & Conflicting Publisher DOI / Pagination Protection
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 14: Generic Title Boilerplate & Conflicting Publisher DOI / Pagination Protection', () => {
     it('prevents false-positive clustering of generic "Editorial" items and same-author clinical reports with distinct publisher DOIs/pages, while clustering Preprint -> Published evolutions', async () => {
       const candidateItems = [
@@ -1553,17 +1525,17 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
       ];
 
       const { service: txService } = createMockTxService({});
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findDuplicateCandidateItems: jest.fn(
           async () => candidateItems,
-        ) as unknown as ICatalogGatewayPort['findDuplicateCandidateItems'],
+        ) as unknown as ICatalogFacade['findDuplicateCandidateItems'],
         findByIds: jest.fn(async () => []),
         mergeItems: jest.fn(async () => undefined),
       };
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
       );
 
       const clusters = await duplicateService.detectDuplicates(USER_OWNER);
@@ -1577,9 +1549,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 15: Zoplicate recommendedMasterId & PRISMA 2020 Systematic Review Audit Trail
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 15: Zoplicate recommendedMasterId & PRISMA 2020 Systematic Review Audit Trail', () => {
     it('outputs a complete, reproducible PRISMA 2020 audit summary from mergeDuplicates recording masterItemId, mergedDuplicateIds, matchReasons, preservedCitationKeys, and consolidated counts', async () => {
       const mockTx = {
@@ -1623,7 +1593,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
       };
 
       const { service: txService } = createMockTxService(mockTx);
-      const mockCatalogGateway: ICatalogGatewayPort = {
+      const mockCatalogGateway: Partial<ICatalogFacade> = {
         findByIds: jest.fn(async () => [
           {
             id: 'master-pub',
@@ -1655,18 +1625,18 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
             version: 1,
             deletedAt: null,
           },
-        ]) as unknown as ICatalogGatewayPort['findByIds'],
+        ]) as unknown as ICatalogFacade['findByIds'],
         mergeItems: jest.fn(async () => undefined),
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
-      const mockExtractionGateway: IExtractionGatewayPort = {
+      const mockExtractionGateway: IExtractionFacade = {
         reassignContentToItem: jest.fn(async () => undefined),
-      } as unknown as IExtractionGatewayPort;
+      } as unknown as IExtractionFacade;
 
       const duplicateService = new DuplicateService(
         txService,
-        mockCatalogGateway,
+        mockCatalogGateway as unknown as ICatalogFacade,
         mockExtractionGateway,
       );
 
@@ -1698,9 +1668,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // CASE STUDY 16: CurationController.dismissDuplicates Endpoint & 4-Role Guard Verification
-  // ═══════════════════════════════════════════════════════════════════════════
   describe('Case Study 16: CurationController.dismissDuplicates HTTP Endpoint & 4-Role Guard', () => {
     it('exposes POST /duplicates/dismiss with @ProjectRoles(owner, coordinator, contributor) and delegates to DuplicateService.dismissDuplicates', async () => {
       const mockDuplicateService = {

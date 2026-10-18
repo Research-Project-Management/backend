@@ -1,4 +1,4 @@
-import { SCHEMA_V42_DATA } from '@/modules/library/shared-kernel/types/schema.constants';
+import { SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
@@ -171,7 +171,7 @@ describe('Wave 12: Exhaustive End-to-End Type, Field & Format Round-Trip Verific
           rawInput.creators = inputCreators;
         }
 
-        // ── STAGE A: NormalizationPolicy.normalize -> CommitStage.toItemData ──
+        // STAGE A: NormalizationPolicy.normalize -> CommitStage.toItemData
         const normalizedMeta = normalizationPolicy.normalize(rawInput);
         expect(normalizedMeta.itemType).toBe(itemType);
 
@@ -185,7 +185,7 @@ describe('Wave 12: Exhaustive End-to-End Type, Field & Format Round-Trip Verific
         expect(committedItemData.title).toBeTruthy();
         expect(committedItemData.title).not.toBe('Untitled Document');
 
-        // ── STAGE B: ZoteroSchemaValidatorService -> buildCommandCreateInput & buildCommandUpdateInput ──
+        // STAGE B: ZoteroSchemaValidatorService -> buildCommandCreateInput & buildCommandUpdateInput
         const validationResult = validator.validateAndSanitizeItem(
           itemType,
           committedItemData,
@@ -260,7 +260,7 @@ describe('Wave 12: Exhaustive End-to-End Type, Field & Format Round-Trip Verific
           notesList: [],
         };
 
-        // ── STAGE C: ItemsMapper.toDomain (Read Path) ──
+        // STAGE C: ItemsMapper.toDomain (Read Path)
         const domainItem = ItemsMapper.toDomain(simulatedDbRow);
         expect(domainItem.itemType).toBe(itemType);
         expect(domainItem.type).toBeTruthy();
@@ -389,7 +389,7 @@ describe('Wave 12: Exhaustive End-to-End Type, Field & Format Round-Trip Verific
           expect(String(updatedDomainItem[firstField])).toBe(updatedVal);
         }
 
-        // ── STAGE D: CslJsonMapper.toCsl -> CslEngineService (CSL-JSON, BibTeX, RIS, APA) ──
+        // STAGE D: CslJsonMapper.toCsl -> CslEngineService (CSL-JSON, BibTeX, RIS, APA)
         if (typeDef.isBibliographic) {
           const cslData = CslJsonMapper.toCsl(domainItem);
           const expectedCslType = SCHEMA_V42_DATA.cslTypeMap[itemType];

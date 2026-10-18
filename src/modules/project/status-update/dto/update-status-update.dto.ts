@@ -5,7 +5,7 @@ import { ProjectUpdateStatus } from '@prisma/client';
 export class UpdateProjectStatusUpdateDto {
   @ApiPropertyOptional({
     enum: ProjectUpdateStatus,
-    description: 'Trạng thái sức khỏe dự án: on_track, at_risk, off_track',
+    description: 'Project health status: on_track, at_risk, off_track',
     example: 'on_track',
   })
   @IsEnum(ProjectUpdateStatus)
@@ -13,7 +13,7 @@ export class UpdateProjectStatusUpdateDto {
   status?: ProjectUpdateStatus;
 
   @ApiPropertyOptional({
-    description: 'Nội dung tóm tắt cập nhật tiến độ, blockers hoặc ghi chú',
+    description: 'Summary of progress, blockers, or milestone notes',
   })
   @IsString()
   @IsOptional()

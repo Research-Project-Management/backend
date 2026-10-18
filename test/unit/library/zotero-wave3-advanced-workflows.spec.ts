@@ -6,7 +6,7 @@ import {
   SearchSpecificationBuilder,
   TextSearchSpecification,
   sanitizeSearchQuery,
-} from '@/modules/library/search/domain';
+} from '@/modules/library/search';
 import { SyncController } from '@/modules/library/sync/controllers/sync.controller';
 import { ChangeLogService } from '@/modules/library/sync/services/changelog.service';
 import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
@@ -17,9 +17,9 @@ import { NotesRepository } from '@/modules/library/catalog/repositories/notes.re
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
-import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import { LayoutHeuristicExtractor } from '@/modules/library/extraction/extractors/layout-heuristic.extractor';
-import { ScientificChunkingService } from '@/modules/library/extraction/services/scientific-chunking.service';
+import { ScientificChunkingService } from '@/modules/ai/ingestion/services/scientific-chunking.service';
 import { ReferenceMatcherService } from '@/modules/library/extraction/services/reference-matcher.service';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import { ExtractionHandler } from '@/modules/library/extraction/services/extraction.handler';
@@ -37,9 +37,7 @@ import { CatalogFacade } from '@/modules/library/catalog/catalog.facade';
 import { NotFoundException } from '@nestjs/common';
 
 describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2-Column PDF & Reference Graph, LaTeX Citation Integration', () => {
-  // ============================================================================
   // USER STORY 1: Zotero Advanced Search, Full-Text PDF Page Anchors & Facets
-  // ============================================================================
   describe('User Story 1: Zotero Advanced Search, Full-Text PDF Page Anchors & Faceted Filtering', () => {
     it('handles special regex/SQL characters (% _ \\ \' ") and empty queries cleanly without breaking SQL or throwing', async () => {
       const findManyMock = jest.fn().mockResolvedValue([
@@ -288,9 +286,7 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
     });
   });
 
-  // ============================================================================
   // USER STORY 2: Zotero Sync Protocol — Delta Compaction, Tombstones, & OCC
-  // ============================================================================
   describe('User Story 2: Zotero Sync Protocol — Delta Compaction, Tombstones, & Optimistic Concurrency', () => {
     const userId = '11111111-1111-4111-8111-111111111111';
     const itemId = '22222222-2222-4222-8222-222222222222';
@@ -700,9 +696,7 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
     });
   });
 
-  // ============================================================================
   // USER STORY 3: 2-Column PDF Layout Extraction, Chunking & Reference Matching
-  // ============================================================================
   describe('User Story 3: 2-Column Academic PDF Layout Extraction, Scientific Chunking & Cited Reference Matching', () => {
     it('extracts Title, Authors, and Left-Column Abstract from a 2-column IEEE/ACM PDF without interleaving Right-Column body text', async () => {
       // Simulate a 2-column IEEE conference paper page where:
@@ -902,9 +896,7 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
     });
   });
 
-  // ============================================================================
   // USER STORY 4: Manuscript / LaTeX Editor Integration via LibraryFacade
-  // ============================================================================
   describe('User Story 4: Manuscript / LaTeX Editor Integration via LibraryFacade & ExportsService.exportByCitationKeys', () => {
     it('resolves primary citationKeys, mergedCitationKeys (from duplicate merges), and BetterBibTeX tex.ids aliases so LaTeX manuscripts never suffer broken [?] citations', async () => {
       const survivorVaswaniItem = {

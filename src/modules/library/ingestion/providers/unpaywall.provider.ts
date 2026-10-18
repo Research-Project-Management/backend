@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -8,12 +8,12 @@ import {
   ProviderResult,
   QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { normalizeDoi } from '@/modules/library/ingestion/domain/metadata.domain';
+import { normalizeDoi } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,
-} from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
+} from '@/modules/library/core/constants/academic-client.constants';
 
 @Injectable()
 export class UnpaywallProvider implements MetadataProvider {
@@ -25,7 +25,6 @@ export class UnpaywallProvider implements MetadataProvider {
     maxConcurrency: 2,
   };
 
-  private readonly logger = new Logger(UnpaywallProvider.name);
   private readonly BASE_URL =
     process.env.UNPAYWALL_API_URL || 'https://api.unpaywall.org/v2';
 

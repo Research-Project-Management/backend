@@ -8,21 +8,4 @@ export * from './track-changes.service';
 export * from './track-changes.controller';
 export * from './track-changes.repository';
 export * from './dto/track-changes.dto';
-
-// Domain
 export * from './domain';
-
-// Ports
-export * from './core/ports/track-changes-repository.port';
-export * from './core/ports/docstore-patcher.port';
-export * from './core/ports/realtime-notifier.port';
-
-// Use Cases
-export * from './core/use-cases/record-change.use-case';
-export * from './core/use-cases/accept-change.use-case';
-export * from './core/use-cases/reject-change.use-case';
-export * from './core/use-cases/batch-resolve-changes.use-case';
-export * from './core/use-cases/create-comment-thread.use-case';
-export * from './core/use-cases/add-comment-reply.use-case';
-export * from './core/use-cases/resolve-comment-thread.use-case';
-export * from './core/use-cases/get-doc-reviews.use-case';

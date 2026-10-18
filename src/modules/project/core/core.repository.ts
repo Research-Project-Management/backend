@@ -611,11 +611,9 @@ export class CoreRepository {
       daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
       const terminalStates = [
         'completed',
+        'completed & archived',
         'cancelled',
         'suspended',
-        'hoàn thành & lưu trữ',
-        'hủy bỏ',
-        'tạm dừng',
       ];
       isOverdue =
         daysRemaining < 0 &&

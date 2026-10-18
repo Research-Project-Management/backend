@@ -29,12 +29,12 @@ import {
   DocArchiveRepository,
   S3DocPersistorAdapter,
 } from './repositories/doc-archive.repository';
-import { DocHasherAdapter } from './core/adapters/engine/doc-hasher.adapter';
-
-// Tokens
-import { IDocRepository } from './core/ports/doc-repository.port';
-import { IDocPersistor } from './core/ports/doc-persistor.port';
-import { IDocHasher } from './core/ports/doc-hasher.port';
+import {
+  DocHasherAdapter,
+  IDocRepository,
+  IDocPersistor,
+  IDocHasher,
+} from './domain';
 
 @Module({
   imports: [ConfigModule, PrismaModule],

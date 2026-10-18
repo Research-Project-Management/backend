@@ -7,6 +7,8 @@ import {
   Inject,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { RedisCacheService } from '@/core';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import {
   CreateNoteData,
@@ -19,17 +21,14 @@ import {
   sanitizeNoteTitle,
   sanitizeNoteContent,
 } from '@/modules/library/catalog/domain/notes.domain';
-import { buildTipTapDocFromText } from '@/modules/library/shared-kernel/domain/tiptap.domain';
-import {
-  TransactionService,
-  TransactionHelpers,
-} from '@/modules/library/shared-kernel';
-import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
+import { TransactionService, TransactionHelpers } from '@/modules/library/core';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import type {
   UpsertSyncNoteCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
+} from '@/modules/library/core/types/entity-commands.types';
 import {
   ITEM_EXISTENCE_PORT,
   ITEM_READ_PORT,
@@ -50,7 +49,52 @@ export class NotesService {
     @Optional()
     @Inject(ITEM_READ_PORT)
     private readonly itemReadPort?: IItemReadPort,
+    @Optional()
+    private readonly cache?: RedisCacheService,
   ) {}
+
+  private async invalidateNoteItemCaches(
+    userId?: string,
+    projectId?: string | null,
+    itemId?: string | null,
+  ): Promise<void> {
+    if (!this.cache) return;
+    try {
+      const tasks: Promise<unknown>[] = [];
+      if (itemId) {
+        tasks.push(
+          this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
+          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
+        );
+      }
+      if (userId) {
+        tasks.push(
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+          this.cache.del(`library:counts:user:${userId}`),
+        );
+      }
+      if (
+        projectId &&
+        projectId !== 'user' &&
+        projectId !== 'me' &&
+        projectId !== 'personal'
+      ) {
+        tasks.push(
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`),
+          ),
+          this.cache.del(`library:counts:proj:${projectId}`),
+        );
+      }
+      if (tasks.length > 0) {
+        await Promise.all(tasks);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to invalidate note item cache: ${message}`);
+    }
+  }
 
   async listNotes(userId: string, itemId?: string, projectId?: string) {
     return this.repo.findMany(userId, itemId, projectId);
@@ -71,7 +115,7 @@ export class NotesService {
         throw new NotFoundException(`Item not found`);
       }
     }
-    return this.libraryTx.executeInTransaction(
+    const createdNote = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const sanitizedData: CreateNoteData = {
           ...data,
@@ -103,6 +147,13 @@ export class NotesService {
         return note;
       },
     );
+
+    await this.invalidateNoteItemCaches(
+      userId,
+      createdNote?.projectId ?? data.projectId,
+      createdNote?.itemId ?? data.itemId,
+    );
+    return createdNote;
   }
 
   async updateNote(
@@ -135,7 +186,7 @@ export class NotesService {
       expectedVersion = data.expectedVersion;
     }
 
-    return this.libraryTx.executeInTransaction(
+    const updatedNote = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const sanitizedData: UpdateNoteData = {
           ...data,
@@ -180,6 +231,13 @@ export class NotesService {
         return updated;
       },
     );
+
+    await this.invalidateNoteItemCaches(
+      userId,
+      updatedNote?.projectId ?? effectiveProjectId,
+      updatedNote?.itemId,
+    );
+    return updatedNote;
   }
 
   async deleteNote(
@@ -188,34 +246,25 @@ export class NotesService {
     expectedVersion?: number,
     projectId?: string,
   ): Promise<boolean> {
-    return this.libraryTx.executeInTransaction(
+    let deletedItemId: string | null | undefined;
+    let deletedProjectId: string | undefined = projectId;
+
+    const deleted = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const existing = await this.repo.findById(userId, id, tx, projectId);
-        if (
-          existing &&
-          expectedVersion !== undefined &&
-          existing.version !== expectedVersion
-        ) {
-          await this.repo.softDelete(
-            userId,
-            id,
-            expectedVersion,
-            tx,
-            projectId,
-          );
-        }
-        const deleted = await this.repo.softDelete(
+        deletedItemId = existing?.itemId;
+        deletedProjectId = projectId || existing?.projectId || undefined;
+
+        const isDeleted = await this.repo.softDelete(
           userId,
           id,
-          undefined,
+          expectedVersion,
           tx,
           projectId,
         );
 
-        if (deleted) {
-          const effectiveProjectId =
-            projectId || existing?.projectId || undefined;
-          const eventScope = { userId, projectId: effectiveProjectId };
+        if (isDeleted) {
+          const eventScope = { userId, projectId: deletedProjectId };
 
           await helpers.recordTombstone(eventScope, {
             entityType: 'Note',
@@ -228,9 +277,19 @@ export class NotesService {
           });
         }
 
-        return deleted;
+        return isDeleted;
       },
     );
+
+    if (deleted) {
+      await this.invalidateNoteItemCaches(
+        userId,
+        deletedProjectId,
+        deletedItemId,
+      );
+    }
+
+    return deleted;
   }
 
   async upsertFromSync(
@@ -260,11 +319,26 @@ export class NotesService {
           ? normalizeTags(command.tags)
           : existing.tags;
 
+      const sanitizedMd =
+        command.contentMd !== undefined
+          ? sanitizeNoteContent(command.contentMd)
+          : existing.contentMd;
+
       const updated = await tx.note.update({
         where: { id: command.existingId },
         data: {
-          contentMd: command.contentMd,
-          title: command.title,
+          contentMd: sanitizedMd,
+          ...(command.contentMd !== undefined
+            ? {
+                contentJson: buildTipTapDocFromText(
+                  sanitizedMd ?? '',
+                ) as Prisma.InputJsonValue,
+              }
+            : {}),
+          title:
+            command.title !== undefined
+              ? sanitizeNoteTitle(command.title)
+              : existing.title,
           tags: mergedNoteTags,
           version: { increment: 1 },
         },
@@ -281,10 +355,17 @@ export class NotesService {
         version: updated.version,
       });
 
+      await this.invalidateNoteItemCaches(
+        targetUserId,
+        noteProjectId,
+        updated.itemId,
+      );
+
       return { id: updated.id, isNew: false, version: updated.version };
     } else {
       const noteProjectId = command.projectId || undefined;
       const syncScope = { userId: targetUserId, projectId: noteProjectId };
+      const sanitizedMd = sanitizeNoteContent(command.contentMd);
 
       const created = await tx.note.create({
         data: {
@@ -292,12 +373,19 @@ export class NotesService {
           projectId: noteProjectId || null,
           createdById: command.userId,
           itemId: command.itemId,
-          contentMd: command.contentMd,
-          title: command.title || 'Note',
+          contentMd: sanitizedMd,
+          contentJson: buildTipTapDocFromText(
+            sanitizedMd,
+          ) as Prisma.InputJsonValue,
+          title: sanitizeNoteTitle(command.title || 'Note'),
           tags: command.tags ? normalizeTags(command.tags) : [],
           version: 1,
         },
       });
+
+      if (command.itemId) {
+        await this.repo.syncItemNoteCount(command.itemId, tx);
+      }
 
       await helpers.appendChange(syncScope, {
         entityType: 'Note',
@@ -311,6 +399,12 @@ export class NotesService {
         created.id,
         'library.note.created',
         { noteId: created.id },
+      );
+
+      await this.invalidateNoteItemCaches(
+        targetUserId,
+        noteProjectId,
+        command.itemId,
       );
 
       return { id: created.id, isNew: true, version: 1 };
@@ -340,6 +434,9 @@ export class NotesService {
       where: { id: entityId, deletedAt: null },
       data: { deletedAt: new Date() },
     });
+    if (existing.itemId) {
+      await this.repo.syncItemNoteCount(existing.itemId, tx);
+    }
     await helpers.appendChange(syncScope, {
       entityType: 'Note',
       entityId,
@@ -351,6 +448,12 @@ export class NotesService {
       entityId,
       deletedById: targetUserId || undefined,
     });
+
+    await this.invalidateNoteItemCaches(
+      targetUserId,
+      noteProjectId,
+      existing.itemId,
+    );
   }
 
   async reassignToItem(
@@ -396,13 +499,46 @@ export class NotesService {
     }
 
     const markdown = formatLiteratureNoteMarkdown(item, annotations, opts);
+    const effectiveProjectId =
+      opts.projectId ||
+      ('projectId' in item && typeof item.projectId === 'string'
+        ? item.projectId
+        : undefined);
+
+    if (opts.noteId) {
+      const existingNote = await this.getNote(
+        userId,
+        opts.noteId,
+        effectiveProjectId,
+      );
+      if (existingNote) {
+        const mergedTags = normalizeTags([
+          ...(Array.isArray(existingNote.tags) ? existingNote.tags : []),
+          'literature-note',
+          'highlights',
+        ]);
+        const updatedNote = await this.updateNote(
+          userId,
+          existingNote.id,
+          existingNote.version,
+          {
+            contentMd: markdown,
+            contentJson: buildTipTapDocFromText(markdown),
+            tags: mergedTags,
+          },
+          effectiveProjectId,
+        );
+        return {
+          success: true,
+          totalExtracted: annotations.length,
+          literatureNote: updatedNote,
+        } as ExtractLiteratureNoteResult;
+      }
+    }
 
     const note = await this.createNote(userId, {
       itemId,
-      projectId:
-        'projectId' in item && typeof item.projectId === 'string'
-          ? item.projectId
-          : undefined,
+      projectId: effectiveProjectId,
       title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
       contentMd: markdown,
       contentJson: buildTipTapDocFromText(markdown),

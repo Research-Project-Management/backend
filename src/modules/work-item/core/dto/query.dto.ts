@@ -18,7 +18,11 @@ const toArrayOrString = ({
   if (value === undefined || value === null || value === '') return undefined;
   if (Array.isArray(value)) {
     return value
-      .map(String)
+      .map((v) =>
+        typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+          ? String(v)
+          : '',
+      )
       .map((s) => s.trim())
       .filter(Boolean);
   }
@@ -31,7 +35,10 @@ const toArrayOrString = ({
     }
     return value.trim();
   }
-  return [String(value)];
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return [String(value)];
+  }
+  return undefined;
 };
 
 export class QueryWorkItemDto {

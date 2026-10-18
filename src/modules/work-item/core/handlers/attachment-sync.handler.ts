@@ -2,6 +2,37 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, EntityType } from '@prisma/client';
 import { WorkItemAttachments } from '@/modules/work-item/core/types/work-item.types';
 
+interface RawPageAttachment {
+  id?: string;
+  pageId?: string;
+  title?: string;
+}
+
+interface RawPaperAttachment {
+  id?: string;
+  paperId?: string;
+  title?: string;
+  doi?: string | null;
+  citationKey?: string | null;
+}
+
+interface RawFileAttachment {
+  id?: string;
+  fileId?: string;
+  name?: string;
+  filename?: string;
+  url?: string;
+  type?: string | null;
+  mimeType?: string | null;
+  size?: number | string | null;
+}
+
+interface RawLinkAttachment {
+  id?: string;
+  title?: string;
+  url?: string;
+}
+
 @Injectable()
 export class AttachmentSyncHandler {
   buildAttachmentRecords(
@@ -15,10 +46,17 @@ export class AttachmentSyncHandler {
     }
 
     const records: Prisma.EntityAttachmentCreateManyInput[] = [];
+    const source = attachments as {
+      pages?: RawPageAttachment[];
+      papers?: RawPaperAttachment[];
+      files?: RawFileAttachment[];
+      links?: RawLinkAttachment[];
+    };
 
-    if (Array.isArray(attachments.pages)) {
-      for (const p of attachments.pages) {
-        const pageId = p?.pageId || p?.id;
+    if (Array.isArray(source.pages)) {
+      for (const p of source.pages) {
+        if (!p || typeof p !== 'object') continue;
+        const pageId = p.pageId || p.id;
         if (pageId) {
           records.push({
             entityType: EntityType.work_item,
@@ -39,9 +77,10 @@ export class AttachmentSyncHandler {
       }
     }
 
-    if (Array.isArray(attachments.papers)) {
-      for (const p of attachments.papers) {
-        const paperId = p?.paperId || p?.id;
+    if (Array.isArray(source.papers)) {
+      for (const p of source.papers) {
+        if (!p || typeof p !== 'object') continue;
+        const paperId = p.paperId || p.id;
         if (paperId) {
           records.push({
             entityType: EntityType.work_item,
@@ -56,17 +95,18 @@ export class AttachmentSyncHandler {
               category: 'paper',
               paperId,
               title: p.title,
-              doi: p.doi,
-              citationKey: p.citationKey,
+              doi: p.doi ?? undefined,
+              citationKey: p.citationKey ?? undefined,
             },
           });
         }
       }
     }
 
-    if (Array.isArray(attachments.files)) {
-      for (const f of attachments.files) {
-        if (f?.url) {
+    if (Array.isArray(source.files)) {
+      for (const f of source.files) {
+        if (!f || typeof f !== 'object') continue;
+        if (f.url) {
           records.push({
             entityType: EntityType.work_item,
             entityId: workItemId,
@@ -86,9 +126,10 @@ export class AttachmentSyncHandler {
       }
     }
 
-    if (Array.isArray(attachments.links)) {
-      for (const l of attachments.links) {
-        if (l?.url) {
+    if (Array.isArray(source.links)) {
+      for (const l of source.links) {
+        if (!l || typeof l !== 'object') continue;
+        if (l.url) {
           records.push({
             entityType: EntityType.work_item,
             entityId: workItemId,

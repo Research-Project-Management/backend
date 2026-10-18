@@ -24,6 +24,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { SpellingService } from './spelling.service';
 import {
   CheckSpellingDto,
@@ -47,7 +48,8 @@ interface RequestWithUser {
   'manuscripts/projects/:projectId/spelling',
   'projects/:projectId/spelling',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@RequireRole(Role.REVIEWER)
 export class SpellingController {
   constructor(private readonly spellingService: SpellingService) {}
 
@@ -100,6 +102,7 @@ export class SpellingController {
   }
 
   @Post('dictionary/learn')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Add a custom word to the project dictionary' })
   @ApiResponse({ status: 200, description: 'Word added to project dictionary' })
@@ -116,6 +119,7 @@ export class SpellingController {
   }
 
   @Delete('dictionary/:word')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Remove a custom word from the project dictionary' })
   async unlearnProjectWord(

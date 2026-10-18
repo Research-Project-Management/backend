@@ -1,4 +1,4 @@
-import { CreatorCreditInput } from '@/modules/library/shared-kernel/types/bibliographic.types';
+import { CreatorCreditInput } from '@/modules/library/core/types/bibliographic.types';
 
 export interface IngestionStage {
   id: string;
@@ -63,17 +63,6 @@ export type IngestionStatus =
   | 'processing'
   | 'completed'
   | 'failed';
-
-export type IngestionSourceType =
-  | 'doi'
-  | 'arxiv'
-  | 'pmid'
-  | 'isbn'
-  | 'url'
-  | 'bibtex'
-  | 'ris'
-  | 'pdf'
-  | 'zotero';
 
 export type IngestionCommand =
   | {
@@ -229,30 +218,3 @@ export interface IngestionRunSnapshot {
   reviewCases?: IngestionReviewCase[];
   errors: unknown[];
 }
-
-export const INGESTION_PORT = Symbol('INGESTION_PORT');
-
-export interface IngestionPort {
-  ingest(command: IngestionCommand): Promise<IngestionResult>;
-  getRunStatus(projectId: string, runId: string): Promise<IngestionRunSnapshot>;
-}
-
-export type {
-  SubmissionKind,
-  IdentifierType,
-  RecordFormat,
-  IdentifierSubmissionInput,
-  RecordSubmissionInput,
-  UrlSubmissionInput,
-  FileSubmissionInput,
-  ConnectorSubmissionInput,
-  SubmissionPayload,
-  IngestionSubmissionEnvelope,
-} from './submission.types';
-
-export type {
-  FieldEvidence,
-  MetadataConflictDetail,
-  ReconciliationDecision,
-  DuplicateMatchResult,
-} from './metadata-candidate.types';

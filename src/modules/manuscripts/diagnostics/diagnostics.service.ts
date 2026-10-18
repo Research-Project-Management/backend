@@ -1,13 +1,10 @@
 /**
  * modules/manuscripts/diagnostics/diagnostics.service.ts
- * Deep module facade orchestrating LaTeX Diagnostics, Log Parsing, Linter, and Explanations.
+ * Deep module service orchestrating LaTeX Diagnostics, Log Parsing, Linter, and Explanations.
  * Executes directly via pure domain CompileLogAnalyzer, FastSyntaxLinter, and DiagnosticsRepository.
  */
 
-import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { ParseCompileLogUseCase } from './core/use-cases/parse-compile-log.use-case';
-import { LintDocumentSyntaxUseCase } from './core/use-cases/lint-document-syntax.use-case';
-import { GetErrorExplanationUseCase } from './core/use-cases/get-error-explanation.use-case';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ParseLogDto,
   LintDocumentDto,
@@ -22,12 +19,7 @@ import {
   FastSyntaxLinter,
   ErrorKnowledgeBase,
 } from './domain';
-import {
-  SYNTAX_LINTER_PORT,
-  ISyntaxLinterPort,
-} from './core/ports/syntax-linter.port';
 import { DiagnosticsRepository } from './diagnostics.repository';
-import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 
 @Injectable()
 export class DiagnosticsService {
@@ -37,15 +29,6 @@ export class DiagnosticsService {
   private readonly syntaxLinter = new FastSyntaxLinter(this.knowledgeBase);
 
   constructor(
-    @Optional() private readonly parseLogUseCase?: ParseCompileLogUseCase,
-    @Optional() private readonly lintSyntaxUseCase?: LintDocumentSyntaxUseCase,
-    @Optional()
-    private readonly getExplanationUseCase?: GetErrorExplanationUseCase,
-    @Optional()
-    @Inject(SYNTAX_LINTER_PORT)
-    private readonly linter?: ISyntaxLinterPort,
-    @Optional()
-    private readonly docstoreService?: DocstoreService,
     @Optional()
     private readonly repository?: DiagnosticsRepository,
   ) {}
@@ -66,28 +49,14 @@ export class DiagnosticsService {
     defaultFile = 'main.tex',
     engine = 'pdflatex',
   ): DiagnosticReport {
-    if (this.repository || !this.parseLogUseCase) {
-      return this.logAnalyzer.analyzeLog(logText, defaultFile, engine);
-    }
-    return this.parseLogUseCase.execute({
-      logText,
-      defaultFile,
-      engine,
-    });
+    return this.logAnalyzer.analyzeLog(logText, defaultFile, engine);
   }
 
   /**
    * Statically lint a document source in memory.
    */
   public lintDocument(dto: LintDocumentDto): DiagnosticReportDto {
-    const report =
-      this.repository || !this.lintSyntaxUseCase
-        ? this.syntaxLinter.lintToReport(dto.source, dto.filename)
-        : this.lintSyntaxUseCase.execute({
-            source: dto.source,
-            filename: dto.filename,
-          });
-
+    const report = this.syntaxLinter.lintToReport(dto.source, dto.filename);
     return report.toJSON();
   }
 
@@ -100,12 +69,9 @@ export class DiagnosticsService {
     const allItems: DiagnosticItem[] = [];
     const knownBibKeys = new Set<string>();
 
-    const hasDocSource = Boolean(this.repository || this.docstoreService);
-    if (hasDocSource) {
+    if (this.repository) {
       try {
-        const docs = this.repository
-          ? await this.repository.getProjectDocuments(projectId)
-          : await this.docstoreService!.getAllDocs(projectId);
+        const docs = await this.repository.getProjectDocuments(projectId);
 
         for (const doc of docs) {
           if (doc.path?.endsWith('.bib')) {
@@ -120,18 +86,11 @@ export class DiagnosticsService {
         for (const doc of docs) {
           if (doc.path?.endsWith('.tex')) {
             const rawText = doc.lines?.join('\n') || '';
-            const report =
-              this.repository || !this.lintSyntaxUseCase
-                ? this.syntaxLinter.lintToReport(
-                    rawText,
-                    doc.path,
-                    knownBibKeys,
-                  )
-                : this.lintSyntaxUseCase.execute({
-                    source: rawText,
-                    filename: doc.path,
-                    knownBibKeys,
-                  });
+            const report = this.syntaxLinter.lintToReport(
+              rawText,
+              doc.path,
+              knownBibKeys,
+            );
             allItems.push(...report.items);
           }
         }
@@ -154,19 +113,6 @@ export class DiagnosticsService {
    * (smart quotes, unescaped _, %, unclosed environments).
    */
   public autoFix(source: string): AutoFixResponseDto {
-    if (
-      !this.repository &&
-      this.linter &&
-      typeof this.linter.autoFix === 'function'
-    ) {
-      const res = this.linter.autoFix(source);
-      return {
-        isFixed: res.isFixed,
-        fixedSource: res.fixedSource,
-        appliedFixes: res.appliedFixes,
-      };
-    }
-
     const res = this.syntaxLinter.autoFix(source);
     return {
       isFixed: res.isFixed,
@@ -182,9 +128,6 @@ export class DiagnosticsService {
     if (this.repository) {
       return this.repository.requireByCode(code).toJSON();
     }
-    if (this.getExplanationUseCase) {
-      return this.getExplanationUseCase.execute(code).toJSON();
-    }
     return this.knowledgeBase.requireByCode(code).toJSON();
   }
 
@@ -194,9 +137,7 @@ export class DiagnosticsService {
   public listAllRules(): ErrorExplanationDto[] {
     const rules = this.repository
       ? this.repository.getAllRules()
-      : this.getExplanationUseCase
-        ? this.getExplanationUseCase.listRules()
-        : this.knowledgeBase.getAllRules();
+      : this.knowledgeBase.getAllRules();
     return rules.map((r) => r.toJSON() as ErrorExplanationDto);
   }
 }

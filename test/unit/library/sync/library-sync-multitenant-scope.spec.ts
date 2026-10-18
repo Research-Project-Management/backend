@@ -1,4 +1,4 @@
-import { Test, TestingModule } from '@nestjs/testing';
+﻿import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma, TagType } from '@prisma/client';
 import { NotesService } from '@/modules/library/catalog/services/notes.service';
@@ -12,7 +12,7 @@ import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annota
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 import { PrismaService } from '@/core';
 import { CATALOG_FACADE } from '@/modules/library/catalog/catalog.facade';
 import { ITEM_EXISTENCE_PORT } from '@/modules/library/catalog/types/items.types';

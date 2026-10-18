@@ -15,31 +15,27 @@ import {
   MetadataCandidate,
   FieldEvidence,
 } from '@/modules/library/ingestion/types/metadata-candidate.types';
+import { DoiParser } from '@/modules/library/ingestion/parsers/doi.parser';
 import {
-  DoiParser,
   BibtexParser,
-  RisParser,
-  CslParser,
-  QueryClassifier,
   ParsedBibtexEntry,
-} from '@/modules/library/ingestion/parsers';
+} from '@/modules/library/ingestion/parsers/bibtex.parser';
+import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
+import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
+import { QueryClassifier } from '@/modules/library/ingestion/parsers/query.classifier';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
+  EXTRACTION_FACADE,
+  IExtractionFacade,
   normalizeAcademicTitleCase,
   inferItemTypeFromPdfSignals,
-} from '@/modules/library/shared-kernel/domain/academic-text.domain';
-import {
   normalizeArxivId,
   normalizePmid,
   normalizeIsbn,
   deriveDoiFromPublisherUrl,
-} from '@/modules/library/shared-kernel/domain/identifier.domain';
+} from '@/modules/library/core';
 import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
-import {
-  EXTRACTION_GATEWAY_PORT,
-  IExtractionGatewayPort,
-} from '@/modules/library/ingestion/types/extraction-gateway.types';
 import {
   IWorkflowStage,
   IdentifyStageInput,
@@ -109,8 +105,8 @@ export class IdentifyStage implements IWorkflowStage<
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
     @Optional()
-    @Inject(EXTRACTION_GATEWAY_PORT)
-    private readonly extractionGateway?: IExtractionGatewayPort,
+    @Inject(EXTRACTION_FACADE)
+    private readonly extractionGateway?: IExtractionFacade,
     @Optional() private readonly urlScraper?: UrlMetadataScraperService,
     @Optional() private readonly cslParser: CslParser = new CslParser(),
   ) {}
@@ -225,7 +221,7 @@ export class IdentifyStage implements IWorkflowStage<
     return candidates;
   }
 
-  // ── Helper Resolvers ───────────────────────────────────────────────────────
+  // Helper Resolvers
 
   private buildIdentifierCandidate(
     type: string,
@@ -478,10 +474,7 @@ export class IdentifyStage implements IWorkflowStage<
               await this.extractionGateway.extractDocumentFromBuffer<{
                 metadata?: Record<string, unknown>;
               }>(fileRecord.buffer, { headerOnly: true, maxPages: 3 });
-            extractedMetadata =
-              extractedDoc?.metadata ||
-              (extractedDoc as Record<string, unknown>) ||
-              {};
+            extractedMetadata = extractedDoc?.metadata || extractedDoc || {};
           }
 
           if (
@@ -489,9 +482,9 @@ export class IdentifyStage implements IWorkflowStage<
             this.extractionGateway.extractMetadataFromBuffer
           ) {
             extractedMetadata =
-              (await this.extractionGateway.extractMetadataFromBuffer<
+              this.extractionGateway.extractMetadataFromBuffer<
                 Record<string, unknown>
-              >(fileRecord.buffer)) || {};
+              >(fileRecord.buffer) || {};
           }
         }
       } catch (caughtError: unknown) {

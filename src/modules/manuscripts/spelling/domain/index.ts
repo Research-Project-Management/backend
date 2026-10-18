@@ -12,3 +12,4 @@ export * from './word-token.vo';
 export * from './dictionary-scope.vo';
 export * from './unsupported-language.exception';
 export * from './invalid-word.exception';
+export * from './spelling.ports';

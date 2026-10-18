@@ -16,14 +16,14 @@ import {
   cleanAbstractText,
   titleSimilarity,
   TITLE_MATCH_THRESHOLD,
-} from '@/modules/library/ingestion/domain/metadata.domain';
+} from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import { getAcademicContactEmail } from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
+import { getAcademicContactEmail } from '@/modules/library/core/constants/academic-client.constants';
 import {
   CSL_TYPE_TO_ITEM_TYPE,
   normalizePageRange,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+} from '@/modules/library/core';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 
 @Injectable()
 export class CrossRefProvider implements MetadataProvider {

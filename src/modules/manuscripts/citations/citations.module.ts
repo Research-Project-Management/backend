@@ -10,23 +10,20 @@ import { PrismaModule } from '@/core';
 import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 import { LibraryModule } from '@/modules/library';
 
-// Controllers, Service & Repository
 import {
   CitationsController,
   CitationsUtilityController,
 } from './citations.controller';
 import { CitationsService } from './citations.service';
 import { CitationsRepository } from './citations.repository';
-
-// Ports & Adapters
-import { BIBTEX_PARSER_PORT } from './core/ports/bibtex-parser.port';
-import { IDENTIFIER_RESOLVER_PORT } from './core/ports/identifier-resolver.port';
-import { CITATIONS_AGGREGATOR_PORT } from './core/ports/citations-aggregator.port';
-import { LIBRARY_SYNC_PORT } from './core/ports/library-sync.port';
-import { RegexAstBibtexParser } from './core/adapters/parser/regex-ast-bibtex.parser';
-import { CrossrefArxivResolverAdapter } from './core/adapters/resolver/crossref-arxiv.resolver';
-import { ManuscriptBibAggregatorAdapter } from './core/adapters/external/manuscript-bib-aggregator.adapter';
-import { PluggableLibrarySyncAdapter } from './core/adapters/library/pluggable-library-sync.adapter';
+import {
+  BIBTEX_PARSER_PORT,
+  IDENTIFIER_RESOLVER_PORT,
+  CITATIONS_AGGREGATOR_PORT,
+  LIBRARY_SYNC_PORT,
+  RegexAstBibtexParser,
+  CrossrefArxivResolverAdapter,
+} from './domain';
 
 @Module({
   imports: [
@@ -40,12 +37,8 @@ import { PluggableLibrarySyncAdapter } from './core/adapters/library/pluggable-l
   providers: [
     CitationsRepository,
     CitationsService,
-
-    // External client bridges & driven adapters
     RegexAstBibtexParser,
     CrossrefArxivResolverAdapter,
-    ManuscriptBibAggregatorAdapter,
-    PluggableLibrarySyncAdapter,
     {
       provide: BIBTEX_PARSER_PORT,
       useExisting: CitationsRepository,

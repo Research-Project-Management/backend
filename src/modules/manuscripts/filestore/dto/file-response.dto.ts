@@ -2,7 +2,7 @@
  * filestore/dto/file-response.dto.ts
  */
 
-import { ManuscriptFile } from '@/modules/manuscripts/filestore/core/domain/entities/manuscript-file.entity';
+import { ManuscriptFile } from '../filestore.types';
 
 export class ManuscriptFileResponseDto {
   id!: string;

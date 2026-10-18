@@ -8,15 +8,17 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { mapSettledWithConcurrency } from '@/core';
 import { DocumentUpdaterRepository } from './document-updater.repository';
-import { InFlightDoc } from './core/domain/entities/in-flight-doc.entity';
-import { UpdateOpVo } from './core/domain/value-objects/update-op.vo';
-import { DocumentVersionVo } from './core/domain/value-objects/document-version.vo';
-import { DocumentLockedException } from './core/domain/exceptions/document-locked.exception';
-import { DocUpdaterConflictException } from './core/domain/exceptions/doc-updater-conflict.exception';
-import { InFlightNotFoundException } from './core/domain/exceptions/in-flight-not-found.exception';
-import { QueueDocUpdateOutput } from './core/use-cases/queue-doc-update.use-case';
-import { FlushProjectDocsOutput } from './core/use-cases/flush-project-docs.use-case';
-import { FlushSingleDocOutput } from './core/use-cases/flush-single-doc.use-case';
+import {
+  InFlightDoc,
+  UpdateOpVo,
+  DocumentVersionVo,
+  DocumentLockedException,
+  DocUpdaterConflictException,
+  InFlightNotFoundException,
+  QueueDocUpdateOutput,
+  FlushProjectDocsOutput,
+  FlushSingleDocOutput,
+} from './domain';
 import { QueueUpdateDto } from './dto/queue-update.dto';
 import { InFlightDocStateDto } from './dto/in-flight-doc-state.dto';
 

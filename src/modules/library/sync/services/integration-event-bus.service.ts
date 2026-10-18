@@ -1,12 +1,12 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+﻿import { Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TransactionService } from './transaction.service';
 import {
   BaseIntegrationEvent,
   IIntegrationEventBus,
   INTEGRATION_EVENT_BUS,
-} from '@/modules/library/shared-kernel/events/integration-events';
-import { TransactionHelpers } from '@/modules/library/shared-kernel';
+} from '@/modules/library/core/events/integration-events';
+import { TransactionHelpers } from '@/modules/library/core';
 
 export { INTEGRATION_EVENT_BUS };
 export type { IIntegrationEventBus };

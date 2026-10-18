@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   Logger,
   NotFoundException,
@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
 
 /**

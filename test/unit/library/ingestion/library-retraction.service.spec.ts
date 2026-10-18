@@ -115,7 +115,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     await retractionDb.importRecords(retractionWatchSeed as any);
 
     scanner = new RetractionScannerProvider(retractionDb);
-    syncService = new RetractionSyncService(repo, scanner, retractionDb);
+    syncService = new RetractionSyncService(repo, scanner);
     service = new RetractionService(repo, scanner, retractionDb, syncService);
   });
 

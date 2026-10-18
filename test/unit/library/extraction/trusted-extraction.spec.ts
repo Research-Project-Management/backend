@@ -1,5 +1,5 @@
 import { XmpParser } from '@/modules/library/extraction/extractors/xmp.parser';
-import { AcademicRegexCatalog } from '@/modules/library/shared-kernel/domain/academic-regex.catalog';
+import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
 import { MetadataQualityGate } from '@/modules/library/extraction/extractors/metadata-quality.gate';
 import { LayoutHeuristicExtractor } from '@/modules/library/extraction/extractors/layout-heuristic.extractor';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
@@ -22,9 +22,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
     jest.clearAllMocks();
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // 1. ISO 16684-1:2019 XMP Binary Packet Parser
-  // ───────────────────────────────────────────────────────────────────────────
   describe('XmpParser (Tier 1)', () => {
     it('extracts complete Dublin Core and PRISM metadata from an XML packet', () => {
       const xmlPacket = `
@@ -121,9 +119,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // 2. Academic Regex Catalog
-  // ───────────────────────────────────────────────────────────────────────────
   describe('AcademicRegexCatalog (Tier 2)', () => {
     it('detects ISO 26324 DOI with punctuation cleanup', () => {
       const text =
@@ -196,9 +192,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // 3. Metadata Quality Gate (Deterministic Decision Boundary S >= 0.85)
-  // ───────────────────────────────────────────────────────────────────────────
   describe('MetadataQualityGate (Decision Boundary)', () => {
     it('accepts complete academic record as self-sufficient (score >= 0.85)', () => {
       const metadata = {
@@ -265,9 +259,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // 4. Layout Heuristic Extractor (Tier 3)
-  // ───────────────────────────────────────────────────────────────────────────
   describe('LayoutHeuristicExtractor (Tier 3)', () => {
     it('ranks largest font size text in top half as Title and succeeding lines as Authors', async () => {
       mockedGetDocumentProxy.mockResolvedValue({
@@ -325,9 +317,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // 5. Master Facade Orchestration (TrustedExtractionFacade)
-  // ───────────────────────────────────────────────────────────────────────────
   describe('TrustedExtractionFacade (Multi-Tier Orchestration)', () => {
     it('executes Tier 1 (XMP) and succeeds fast when XMP contains full metadata', async () => {
       const xmlPacket = `
@@ -426,9 +416,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // 6. Ingestion Pipeline Integration (IdentifyStage, EnrichStage, ReconciliationPolicy)
-  // ───────────────────────────────────────────────────────────────────────────
   describe('Pipeline Integration: Strangler Fig & Remote API Bypass', () => {
     it('ReconciliationPolicy: TrustedPaper candidate (92) beats CrossRef (90) and EnrichedProvider (85)', () => {
       const trustedCandidate: MetadataCandidate = {
@@ -542,9 +530,7 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // 7. Latency Performance Benchmark (Target: < 50ms)
-  // ───────────────────────────────────────────────────────────────────────────
   describe('Performance & Latency Benchmark', () => {
     it('executes in-process extraction in < 50ms per document', async () => {
       const xmlPacket = `

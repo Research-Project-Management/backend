@@ -1,9 +1,9 @@
 import { NotFoundException } from '@nestjs/common';
-import { ItemsController } from '@/modules/library/catalog/controllers/items.controller';
-import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+import { ItemController } from '@/modules/library/catalog/controllers/items.controller';
+import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 
-describe('ItemsController (Hexagonal Driver Adapter)', () => {
-  let controller: ItemsController;
+describe('ItemController (Hexagonal Driver Adapter)', () => {
+  let controller: ItemController;
   let mockItemService: {
     listItems: jest.Mock;
     getItem: jest.Mock;
@@ -80,7 +80,7 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
       }),
     };
 
-    controller = new ItemsController(mockItemService as any);
+    controller = new ItemController(mockItemService as any);
   });
 
   it('should list items by delegating to ItemService', async () => {

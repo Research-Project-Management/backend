@@ -227,5 +227,4 @@ export class QueryClassifier {
   }
 }
 
-export const QueryClassifierUtil = QueryClassifier;
 export type { QueryType, ClassifiedQuery };

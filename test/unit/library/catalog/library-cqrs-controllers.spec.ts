@@ -1,12 +1,12 @@
 import { NotFoundException } from '@nestjs/common';
-import { AttachmentsController } from '@/modules/library/extraction/controllers/attachments.controller';
+import { AttachmentController } from '@/modules/library/extraction/controllers/attachments.controller';
 import { IngestionController } from '@/modules/library/ingestion/controllers/ingestion.controller';
-import { NotesController } from '@/modules/library/catalog/controllers/notes.controller';
+import { NoteController } from '@/modules/library/catalog/controllers/notes.controller';
 import { AnnotationsController } from '@/modules/library/extraction/controllers/annotations.controller';
 
 describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', () => {
-  describe('AttachmentsController (Reader CQRS Adapter)', () => {
-    let controller: AttachmentsController;
+  describe('AttachmentController (Reader CQRS Adapter)', () => {
+    let controller: AttachmentController;
     let mockAttachmentsService: {
       createAttachment: jest.Mock;
       getItemAttachment: jest.Mock;
@@ -48,7 +48,7 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         captureAndAttach: jest.fn().mockResolvedValue({ success: true }),
       };
 
-      controller = new AttachmentsController(
+      controller = new AttachmentController(
         mockAttachmentsService as any,
         mockWebSnapshotService as any,
       );
@@ -352,8 +352,8 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
     });
   });
 
-  describe('NotesController (Reader Adapter)', () => {
-    let controller: NotesController;
+  describe('NoteController (Reader Adapter)', () => {
+    let controller: NoteController;
     let mockNotesService: {
       createNote: jest.Mock;
       getNote: jest.Mock;
@@ -386,7 +386,7 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
           .mockResolvedValue({ success: true, totalExtracted: 2 }),
       };
 
-      controller = new NotesController(mockNotesService as any);
+      controller = new NoteController(mockNotesService as any);
     });
 
     it('should list notes by delegating to NotesService', async () => {

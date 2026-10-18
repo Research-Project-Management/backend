@@ -22,92 +22,15 @@ import {
   BatchAnnotationsResult,
   AnnotationType,
 } from './types/annotations.types';
-import { EXTRACTION_FACADE } from '@/modules/library/shared-kernel/ports/extraction.port';
+import {
+  EXTRACTION_FACADE,
+  IExtractionFacade,
+} from '@/modules/library/core/ports/extraction.port';
 export { EXTRACTION_FACADE };
-
-export interface IExtractionFacade {
-  getItemAttachments(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<AttachmentEntity[]>;
-  getItemAttachment(
-    userId: string,
-    attachmentId: string,
-    itemId?: string,
-    projectId?: string,
-  ): Promise<AttachmentEntity | null>;
-  createAttachment(
-    data: CreateAttachmentInput,
-    projectId?: string,
-  ): Promise<AttachmentEntity>;
-  extractDocumentFromBuffer(
-    buffer: Buffer,
-    options?: { maxPages?: number; headerOnly?: boolean },
-  ): Promise<ExtractedPdfDocument>;
-  extractMetadataFromBuffer(buffer: Buffer): ExtractedPdfMetadata;
-  extractTrustedMetadata(
-    buffer: Buffer,
-    preferredFilename?: string,
-  ): Promise<TrustedExtractionResult>;
-  captureWebSnapshot(
-    url: string,
-    itemId: string,
-    userId: string,
-  ): Promise<AttachmentEntity>;
-  reassignContentToItem(
-    duplicateItemIds: string[],
-    primaryItemId: string,
-    tx?: Prisma.TransactionClient,
-  ): Promise<void>;
-  // Annotation delegation methods
-  getAnnotationsByAttachment(
-    userId: string,
-    attachmentId: string,
-  ): Promise<AnnotationEntity[]>;
-  getAnnotationsByAttachmentFull(
-    userId: string,
-    attachmentId: string,
-    pageIndex?: number,
-    type?: AnnotationType,
-  ): Promise<AnnotationEntity[]>;
-  getAnnotation(
-    userId: string,
-    annotationId: string,
-    projectId?: string,
-  ): Promise<AnnotationEntity | null>;
-  createAnnotation(
-    userId: string,
-    data: CreateAnnotationData,
-  ): Promise<AnnotationEntity>;
-  updateAnnotation(
-    userId: string,
-    annotationId: string,
-    expectedVersion: number,
-    data: UpdateAnnotationData,
-  ): Promise<AnnotationEntity>;
-  deleteAnnotation(
-    userId: string,
-    annotationId: string,
-    expectedVersion?: number,
-  ): Promise<boolean>;
-  batchUpsertAnnotations(
-    userId: string,
-    attachmentId: string,
-    data: BatchAnnotationsData,
-  ): Promise<BatchAnnotationsResult>;
-  listAnnotations(
-    userId: string,
-    filters?: {
-      attachmentId?: string;
-      pageIndex?: number;
-      type?: AnnotationType;
-    },
-  ): Promise<AnnotationEntity[]>;
-}
+export type { IExtractionFacade };
 
 @Injectable()
-export class ExtractionFacade implements IExtractionFacade {
+export class ExtractionFacade {
   constructor(
     private readonly attachmentsService: AttachmentsService,
     private readonly pdfProvider: PdfProvider,
@@ -194,7 +117,7 @@ export class ExtractionFacade implements IExtractionFacade {
     );
   }
 
-  // ─── Annotation delegation methods ─────────────────────────────────────────
+  // Annotation delegation methods
 
   async getAnnotationsByAttachment(
     userId: string,

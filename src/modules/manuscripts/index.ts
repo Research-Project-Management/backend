@@ -5,6 +5,7 @@
  */
 
 export * from './manuscripts.module';
+export * from './core';
 
 // Subsystems
 export * from './clsi';
@@ -20,3 +21,5 @@ export * from './citations';
 export * from './spelling';
 export * from './templates';
 export * from './linked-files';
+export { escapeLatex } from './citations';
+export { TemplateNotFoundException } from './templates';

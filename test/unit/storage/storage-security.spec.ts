@@ -8,13 +8,11 @@ import {
   isBlockedExtension,
   sanitizeFilename,
   isDangerousInlineMime,
-} from '@/modules/storage/domain/value-objects/file-validator.util';
-import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
-import { StorageAccessPolicy } from '@/modules/storage/application/policies/storage-access.policy';
-import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
-import { FileScope } from '@/modules/storage/domain/value-objects/file-scope.vo';
-import { StreamController } from '@/modules/storage/presentation/controllers/stream.controller';
-import { FileDownloadedEvent } from '@/modules/storage/domain/events/file-downloaded.event';
+  LocalStorageDriver,
+  FileDownloadedEvent,
+} from '@/modules/storage/core';
+import { StorageAccessPolicy, StorageNode, FileScope } from '@/modules/storage/drive';
+import { StreamController } from '@/modules/storage/transfer';
 import { Readable } from 'stream';
 
 describe('Storage & File Security Suite', () => {
@@ -150,35 +148,32 @@ describe('Storage & File Security Suite', () => {
     });
   });
 
-  describe('R2Service - Path Traversal Prevention on Local Fallback', () => {
-    let r2Service: R2Service;
+  describe('LocalStorageDriver - Path Traversal Prevention on Local Storage', () => {
+    let localDriver: LocalStorageDriver;
 
     beforeEach(() => {
-      const mockConfigService = {
-        get: jest.fn().mockReturnValue(''),
-      };
-      r2Service = new R2Service(mockConfigService as any);
+      localDriver = new LocalStorageDriver('./test-storage');
     });
 
     it('should throw BadRequestException when storage key attempts directory traversal with ..', () => {
       expect(() => {
-        r2Service.getLocalFilePath('../../../.env');
+        localDriver.resolveFilePath('../../../.env');
       }).toThrow(BadRequestException);
 
       expect(() => {
-        r2Service.getLocalFilePath('uploads/../../passwords.txt');
+        localDriver.resolveFilePath('uploads/../../passwords.txt');
       }).toThrow(BadRequestException);
 
       expect(() => {
-        r2Service.getLocalFilePath('..\\..\\windows\\system32');
+        localDriver.resolveFilePath('..\\..\\windows\\system32');
       }).toThrow(BadRequestException);
     });
 
-    it('should safely resolve legitimate keys strictly inside uploads directory', () => {
-      const legitimatePath = r2Service.getLocalFilePath(
+    it('should safely resolve legitimate keys strictly inside storage directory', () => {
+      const legitimatePath = localDriver.resolveFilePath(
         'users/user-123/paper.pdf',
       );
-      expect(legitimatePath).toContain('uploads');
+      expect(legitimatePath).toContain('test-storage');
       expect(legitimatePath).not.toContain('..');
     });
   });
@@ -318,33 +313,24 @@ describe('Storage & File Security Suite', () => {
 
   describe('StreamController - Security Headers & Audit Logging', () => {
     let controller: StreamController;
-    let mockStreamBinaryUseCase: any;
-    let mockR2Service: any;
-    let mockNodeRepo: any;
-    let mockBlobRepo: any;
-    let mockDriver: any;
+    let mockStreamService: any;
     let mockEventEmitter: any;
 
     beforeEach(() => {
-      mockStreamBinaryUseCase = { execute: jest.fn() };
-      mockR2Service = { getObjectStream: jest.fn() };
-      mockNodeRepo = { findById: jest.fn(), list: jest.fn() };
-      mockBlobRepo = { findById: jest.fn() };
-      mockDriver = { getStream: jest.fn() };
+      mockStreamService = {
+        stream: jest.fn(),
+        verifyReadAccess: jest.fn().mockResolvedValue(undefined),
+      };
       mockEventEmitter = { emit: jest.fn() };
 
       controller = new StreamController(
-        mockStreamBinaryUseCase,
-        mockR2Service,
-        mockNodeRepo,
-        mockBlobRepo,
-        mockDriver,
+        mockStreamService,
         mockEventEmitter,
       );
     });
 
     it('should force attachment and CSP sandbox for dangerous inline MIME types (SVG)', async () => {
-      mockStreamBinaryUseCase.execute.mockResolvedValue({
+      mockStreamService.stream.mockResolvedValue({
         statusCode: 200,
         mimeType: 'image/svg+xml',
         contentLength: 512,
@@ -354,7 +340,7 @@ describe('Storage & File Security Suite', () => {
 
       const headers: Record<string, string> = {};
       const mockReq: any = {
-        url: '/api/files/test-svg-id/content',
+        url: '/api/v1/storage/files/test-svg-id/content',
         headers: {},
         query: {},
         ip: '127.0.0.1',
@@ -387,7 +373,7 @@ describe('Storage & File Security Suite', () => {
     });
 
     it('should serve safe documents inline without sandbox CSP restriction', async () => {
-      mockStreamBinaryUseCase.execute.mockResolvedValue({
+      mockStreamService.stream.mockResolvedValue({
         statusCode: 200,
         mimeType: 'application/pdf',
         contentLength: 2048,
@@ -397,7 +383,7 @@ describe('Storage & File Security Suite', () => {
 
       const headers: Record<string, string> = {};
       const mockReq: any = {
-        url: '/api/files/test-pdf-id/content',
+        url: '/api/v1/storage/files/test-pdf-id/content',
         headers: {},
         query: {},
         ip: '127.0.0.1',
@@ -420,7 +406,7 @@ describe('Storage & File Security Suite', () => {
     });
 
     it('should force attachment when user accesses /download endpoint', async () => {
-      mockStreamBinaryUseCase.execute.mockResolvedValue({
+      mockStreamService.stream.mockResolvedValue({
         statusCode: 200,
         mimeType: 'application/pdf',
         contentLength: 2048,
@@ -430,7 +416,7 @@ describe('Storage & File Security Suite', () => {
 
       const headers: Record<string, string> = {};
       const mockReq: any = {
-        url: '/api/files/test-pdf-id/download',
+        url: '/api/v1/storage/files/test-pdf-id/download',
         headers: {},
         query: {},
         ip: '127.0.0.1',
@@ -452,7 +438,7 @@ describe('Storage & File Security Suite', () => {
     it('should return 304 Not Modified when client sends matching If-None-Match header', async () => {
       const mockEtag =
         '"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"';
-      mockStreamBinaryUseCase.execute.mockResolvedValue({
+      mockStreamService.stream.mockResolvedValue({
         statusCode: 200,
         mimeType: 'application/pdf',
         contentLength: 2048,
@@ -463,7 +449,7 @@ describe('Storage & File Security Suite', () => {
 
       const headers: Record<string, string> = {};
       const mockReq: any = {
-        url: '/api/files/test-pdf-id/content',
+        url: '/api/v1/storage/files/test-pdf-id/content',
         headers: { 'if-none-match': mockEtag },
         query: {},
         ip: '127.0.0.1',
@@ -490,7 +476,7 @@ describe('Storage & File Security Suite', () => {
 
     it('should block path traversal attempts in streamR2File (SEC-002)', async () => {
       const mockReq: any = {
-        url: '/api/files/r2/..%2F..%2Fetc%2Fpasswd',
+        url: '/api/v1/storage/files/r2/..%2F..%2Fetc%2Fpasswd',
         headers: {},
         params: { '*': '../../etc/passwd' },
       };
@@ -513,7 +499,7 @@ describe('Storage & File Security Suite', () => {
 
     it('should block access to sensitive prefixes like backups/ or private/ in streamR2File (SEC-002)', async () => {
       const mockReq: any = {
-        url: '/api/files/r2/backups%2Fproject-backup.zip',
+        url: '/api/v1/storage/files/r2/backups%2Fproject-backup.zip',
         headers: {},
         params: { '*': 'backups/project-backup.zip' },
       };
@@ -535,33 +521,19 @@ describe('Storage & File Security Suite', () => {
     });
 
     it('should block unauthenticated requests to private research files in streamFile (SEC-004)', async () => {
-      mockNodeRepo.findById.mockResolvedValue(
-        new StorageNode({
-          id: 'private-doc-id',
-          name: 'confidential_research.pdf',
-          isFolder: false,
-          size: 1024n,
-          authorId: 'scientist-1',
-          scope: FileScope.Personal,
-          metadata: { isPublic: false },
-        }),
+      mockStreamService.verifyReadAccess.mockRejectedValue(
+        new ForbiddenException(
+          'Authentication required to access private research file',
+        ),
       );
 
-      const mockAccessPolicy = {
-        assertCanAccess: jest.fn(),
-      };
       const securedController = new StreamController(
-        mockStreamBinaryUseCase,
-        mockR2Service,
-        mockNodeRepo,
-        mockBlobRepo,
-        mockDriver,
+        mockStreamService,
         mockEventEmitter,
-        mockAccessPolicy as any,
       );
 
       const mockReq: any = {
-        url: '/api/files/private-doc-id/content',
+        url: '/api/v1/storage/files/private-doc-id/content',
         headers: {},
         query: {},
         ip: '127.0.0.1',
@@ -585,18 +557,8 @@ describe('Storage & File Security Suite', () => {
     });
 
     it('should allow unauthenticated requests if the research file is explicitly public (SEC-004)', async () => {
-      mockNodeRepo.findById.mockResolvedValue(
-        new StorageNode({
-          id: 'public-doc-id',
-          name: 'open_access_paper.pdf',
-          isFolder: false,
-          size: 2048n,
-          authorId: 'scientist-1',
-          scope: FileScope.Personal,
-          metadata: { isPublic: true },
-        }),
-      );
-      mockStreamBinaryUseCase.execute.mockResolvedValue({
+      mockStreamService.verifyReadAccess.mockResolvedValue(undefined);
+      mockStreamService.stream.mockResolvedValue({
         statusCode: 200,
         mimeType: 'application/pdf',
         contentLength: 2048,
@@ -604,21 +566,13 @@ describe('Storage & File Security Suite', () => {
         stream: Readable.from(['open-access-content']),
       });
 
-      const mockAccessPolicy = {
-        assertCanAccess: jest.fn(),
-      };
       const securedController = new StreamController(
-        mockStreamBinaryUseCase,
-        mockR2Service,
-        mockNodeRepo,
-        mockBlobRepo,
-        mockDriver,
+        mockStreamService,
         mockEventEmitter,
-        mockAccessPolicy as any,
       );
 
       const mockReq: any = {
-        url: '/api/files/public-doc-id/content',
+        url: '/api/v1/storage/files/public-doc-id/content',
         headers: {},
         query: {},
         ip: '127.0.0.1',
@@ -633,8 +587,9 @@ describe('Storage & File Security Suite', () => {
       await securedController.streamFile('public-doc-id', mockReq, mockRes);
 
       expect(mockRes.status).toHaveBeenCalledWith(200);
-      expect(mockStreamBinaryUseCase.execute).toHaveBeenCalledWith(
+      expect(mockStreamService.stream).toHaveBeenCalledWith(
         'public-doc-id',
+        undefined,
         undefined,
       );
     });

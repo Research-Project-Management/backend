@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -6,12 +6,12 @@ import {
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { CreateItemData } from '@/modules/library/catalog/types/items.types';
-import { BibliographicReference } from '@/modules/library/shared-kernel/types/bibliographic.types';
+import { BibliographicReference } from '@/modules/library/core/types/bibliographic.types';
 import {
   TransactionService,
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 
 interface CslItemData {

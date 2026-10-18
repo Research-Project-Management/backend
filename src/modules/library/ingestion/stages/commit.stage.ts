@@ -1,32 +1,24 @@
 import { Injectable, Inject, BadRequestException } from '@nestjs/common';
-import {
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
-} from '@/modules/library/ingestion/types/catalog-gateway.types';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import {
+  CATALOG_FACADE,
+  ICatalogFacade,
   CreateItemData,
   CreatorCreditInput,
-} from '@/modules/library/shared-kernel/types/bibliographic.types';
-import { ItemDetail } from '@/modules/library/catalog';
-import {
+  ItemDetail,
   splitAuthorString,
   parseCreatorString,
-} from '@/modules/library/shared-kernel/domain/author.domain';
-import {
   cleanAbstractText,
   cleanCommentText,
-} from '@/modules/library/shared-kernel/domain/academic-text.domain';
-import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+  normalizeTags,
+  getEffectiveBaseFieldMap,
+  harmonizeZoteroFields,
+  resolveCanonicalCreatorRole,
+} from '@/modules/library/core';
 import {
   IWorkflowStage,
   CommitStageInput,
 } from '@/modules/library/ingestion/types/workflow-stage.types';
-import {
-  getEffectiveBaseFieldMap,
-  harmonizeZoteroFields,
-  resolveCanonicalCreatorRole,
-} from '@/modules/library/shared-kernel/domain/zotero-field-harmonizer.domain';
 
 export type LibraryItemSource =
   | 'WEB_CAPTURE'
@@ -508,8 +500,8 @@ export class CommitStage implements IWorkflowStage<
 > {
   readonly stageName = 'COMMIT' as const;
   constructor(
-    @Inject(CATALOG_GATEWAY_PORT)
-    private readonly catalogGateway: ICatalogGatewayPort,
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway: ICatalogFacade,
   ) {}
 
   async execute(

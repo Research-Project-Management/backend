@@ -13,7 +13,7 @@ import {
   IsBoolean,
   IsDateString,
 } from 'class-validator';
-import { DocRanges } from '@/modules/manuscripts/docstore/core/domain/doc-range.vo';
+import { DocRanges } from '../domain';
 
 export class CreateDocDto {
   @ApiProperty({

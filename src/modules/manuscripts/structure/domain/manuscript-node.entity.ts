@@ -14,20 +14,36 @@ export interface ManuscriptNodeProps {
   type: ManuscriptNodeType;
   name: string;
   path: string;
-  depth: number;
+  depth?: number;
   docId?: string | null;
   fileId?: string | null;
-  isRootDoc: boolean;
-  sizeBytes: number;
+  isRootDoc?: boolean;
+  sizeBytes?: number;
   hash?: string | null;
-  sortOrder: number;
-  createdAt: Date;
-  updatedAt: Date;
+  sortOrder?: number;
+  createdAt?: Date;
+  updatedAt?: Date;
   children?: ManuscriptNodeEntity[];
 }
 
 export class ManuscriptNodeEntity {
-  private props: ManuscriptNodeProps;
+  private props: Required<
+    Pick<
+      ManuscriptNodeProps,
+      | 'id'
+      | 'projectId'
+      | 'type'
+      | 'name'
+      | 'path'
+      | 'depth'
+      | 'isRootDoc'
+      | 'sizeBytes'
+      | 'sortOrder'
+      | 'createdAt'
+      | 'updatedAt'
+    >
+  > &
+    ManuscriptNodeProps;
 
   constructor(props: ManuscriptNodeProps) {
     NodePathVo.validateFilename(props.name);
@@ -35,6 +51,11 @@ export class ManuscriptNodeEntity {
       ...props,
       path: NodePathVo.normalize(props.path),
       depth: NodePathVo.depth(props.path),
+      isRootDoc: props.isRootDoc ?? false,
+      sizeBytes: props.sizeBytes ?? 0,
+      sortOrder: props.sortOrder ?? 0,
+      createdAt: props.createdAt ?? new Date(),
+      updatedAt: props.updatedAt ?? new Date(),
     };
   }
 

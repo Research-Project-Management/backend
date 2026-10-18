@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { PdfThumbnailService } from '@/modules/storage/application/services/pdf-thumbnail.service';
+import { PdfThumbnailService } from '@/modules/storage/worker';
 
 jest.mock('unpdf', () => ({
   renderPageAsImage: jest.fn(async (buffer: Buffer, _page: number) => {

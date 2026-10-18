@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -17,9 +17,9 @@ import {
   decodeHtmlEntities,
   normalizeTags,
   parseCreatorString,
-} from '@/modules/library/ingestion/domain/metadata.domain';
+} from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import { getAcademicUserAgent } from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
+import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 
 @Injectable()
 export class ArxivProvider implements MetadataProvider {
@@ -31,7 +31,6 @@ export class ArxivProvider implements MetadataProvider {
     maxConcurrency: 2,
   };
 
-  private readonly logger = new Logger(ArxivProvider.name);
   private readonly BASE_URL =
     process.env.ARXIV_API_URL || 'https://export.arxiv.org/api/query';
 
@@ -114,7 +113,9 @@ export class ArxivProvider implements MetadataProvider {
 
     let year: number | null = null;
     let publicationDate: string | undefined;
-    const publishedMatch = entry.match(/<published>([\s\S]*?)<\/published>/i);
+    const publishedMatch =
+      entry.match(/<published>([\s\S]*?)<\/published>/i) ||
+      entry.match(/<updated>([\s\S]*?)<\/updated>/i);
     if (publishedMatch) {
       const rawPublished = publishedMatch[1].trim();
       const dateOnly = rawPublished.match(/^(\d{4}-\d{2}-\d{2})/);
@@ -201,9 +202,14 @@ export class ArxivProvider implements MetadataProvider {
     const versionMatch = cleanId.match(/v(\d+)$/i);
     const versionNumber = versionMatch ? `v${versionMatch[1]}` : undefined;
 
-    const extraLines = [
-      `arXiv: ${canonicalArxivId}${primaryCategory ? ` [${primaryCategory}]` : ''}`,
-    ];
+    // Legacy archive IDs containing '/' do not append [primaryCategory]
+    const arxivExtraLine = canonicalArxivId.includes('/')
+      ? `arXiv:${canonicalArxivId}`
+      : `arXiv:${canonicalArxivId}${primaryCategory ? ` [${primaryCategory}]` : ''}`;
+    const extraLines = [arxivExtraLine];
+    if (versionMatch) {
+      extraLines.push(`version: ${versionMatch[1]}`);
+    }
     if (journal) extraLines.push(`Journal reference: ${journal}`);
     const extra = extraLines.join('\n');
 

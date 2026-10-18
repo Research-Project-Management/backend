@@ -12,11 +12,11 @@ import {
   normalizeDoi,
   normalizeArxivId,
   normalizeIsbn,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+} from '@/modules/library/core';
+import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import { buildMockLibraryItem } from '@test/factories';
 
-describe('🔬 Real-World User Journey: End-to-End Researcher Lifecycle Simulation', () => {
+describe('Real-World User Journey: End-to-End Researcher Lifecycle Simulation', () => {
   const userId = '01920b92-1111-7111-8111-111111111111';
   let typesService: TypesService;
   let schemaValidator: ZoteroSchemaValidatorService;
@@ -216,8 +216,8 @@ describe('🔬 Real-World User Journey: End-to-End Researcher Lifecycle Simulati
       return userActions.updateItem(
         itemId,
         {
-          itemType: targetType,
           ...projected,
+          itemType: targetType,
         },
         item.version,
       );
@@ -249,9 +249,7 @@ describe('🔬 Real-World User Journey: End-to-End Researcher Lifecycle Simulati
     },
   };
 
-  // =========================================================================
   // STEP 1: Ingestion & Metadata Discovery from Outside World
-  // =========================================================================
   describe('Phase 1: Ingestion, Identifier Cleaning & Academic Data Intake', () => {
     it('User Action 1.1: Researcher feeds a raw Nature URL containing DOI', () => {
       const rawUrl = 'https://doi.org/10.1038/s41586-021-03819-2';
@@ -364,9 +362,7 @@ describe('🔬 Real-World User Journey: End-to-End Researcher Lifecycle Simulati
     });
   });
 
-  // =========================================================================
   // STEP 2: Collection Tree Organization & Tag Invariants
-  // =========================================================================
   describe('Phase 2: Tree Organization, Hierarchical Collections & Cycle Immunity', () => {
     it('User Action 2.1: Creates parent collection "AI & Deep Learning" and subcollection "Foundations"', () => {
       const rootCol = userActions.createCollection(
@@ -411,9 +407,7 @@ describe('🔬 Real-World User Journey: End-to-End Researcher Lifecycle Simulati
     });
   });
 
-  // =========================================================================
   // STEP 3: Concurrency Control (OCC) & Metadata Curation
-  // =========================================================================
   describe('Phase 3: Optimistic Concurrency Control (OCC) & Data Protection', () => {
     it('User Action 3.1: Rejects stale update when another client has already modified the item', () => {
       const paper = Array.from(dbItems.values())[0];
@@ -429,9 +423,7 @@ describe('🔬 Real-World User Journey: End-to-End Researcher Lifecycle Simulati
     });
   });
 
-  // =========================================================================
   // STEP 4: Scholarly Type Conversion & Field Preservation
-  // =========================================================================
   describe('Phase 4: Converting Accepted Preprints into Journal Articles', () => {
     it('User Action 4.1: Upgrades preprint to journalArticle upon peer-review publication', () => {
       const preprint = Array.from(dbItems.values()).find(
@@ -452,9 +444,7 @@ describe('🔬 Real-World User Journey: End-to-End Researcher Lifecycle Simulati
     });
   });
 
-  // =========================================================================
   // STEP 5: Live Citation Formatting across Research Styles
-  // =========================================================================
   describe('Phase 5: Accurate Multi-Style Citation Generation for Research Manuscripts', () => {
     it('User Action 5.1: Formats citations in APA, IEEE, Nature, and Vietnamese TCVN', () => {
       const items = Array.from(dbItems.values());
@@ -548,9 +538,7 @@ describe('🔬 Real-World User Journey: End-to-End Researcher Lifecycle Simulati
     });
   });
 
-  // =========================================================================
   // STEP 6: Multi-Device Sync Stream & Tombstones Pruning
-  // =========================================================================
   describe('Phase 6: Multi-Device Sync Stream, Tombstone Tracking & Restore', () => {
     it('User Action 6.1: Verifies strictly monotonic sync sequence across all operations', () => {
       expect(syncLog.length).toBeGreaterThanOrEqual(4);

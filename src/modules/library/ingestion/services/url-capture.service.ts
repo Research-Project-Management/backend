@@ -13,21 +13,17 @@ import {
   CapturedItemMetadata,
 } from '@/modules/library/ingestion/providers/url-capture.provider';
 import { ConfirmCapturedUrlDto } from '@/modules/library/ingestion/dto/capture-url.dto';
-import { ItemDetail } from '@/modules/library/catalog';
 import {
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
-} from '@/modules/library/ingestion/types/catalog-gateway.types';
-import {
-  EXTRACTION_GATEWAY_PORT,
-  IExtractionGatewayPort,
-} from '@/modules/library/ingestion/types/extraction-gateway.types';
-import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+  EXTRACTION_FACADE,
+  IExtractionFacade,
+  ItemDetail,
   TransactionService,
   CreateItemData,
   harmonizeZoteroFields,
   resolveCanonicalCreatorRole,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 import { createHash } from 'crypto';
 
 @Injectable()
@@ -39,11 +35,11 @@ export class UrlCaptureService {
     @Optional() private readonly urlCaptureProvider?: UrlCaptureProvider,
     @Optional() private readonly txService?: TransactionService,
     @Optional()
-    @Inject(CATALOG_GATEWAY_PORT)
-    private readonly catalogGateway?: ICatalogGatewayPort,
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
     @Optional()
-    @Inject(EXTRACTION_GATEWAY_PORT)
-    private readonly extractionGateway?: IExtractionGatewayPort,
+    @Inject(EXTRACTION_FACADE)
+    private readonly extractionGateway?: IExtractionFacade,
   ) {}
 
   /**
@@ -339,7 +335,7 @@ export class UrlCaptureService {
       uploadedById: targetUserId,
     };
 
-    let createdItem: ItemDetail | null = null;
+    let createdItem: ItemDetail;
     if (this.txService?.executeInTransaction) {
       createdItem = await this.txService.executeInTransaction(
         async (tx: Prisma.TransactionClient, _helpers: unknown) => {

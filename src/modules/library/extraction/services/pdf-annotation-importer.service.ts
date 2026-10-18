@@ -12,6 +12,7 @@ import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { AnnotationsService } from './annotations.service';
 import { AttachmentsService } from './attachments.service';
 import { AnnotationType } from '@/modules/library/extraction/types/annotations.types';
+import { extractFileIdFromUrl } from '@/modules/library/core';
 import { getDocumentProxy } from 'unpdf';
 
 export interface ImportAnnotationsResult {
@@ -61,11 +62,7 @@ export class PdfAnnotationImporterService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    const fileId =
-      attachment.fileId ||
-      attachment.url?.match(
-        /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?(?:attachments\/)?files\/([a-zA-Z0-9_-]+)/,
-      )?.[1];
+    const fileId = attachment.fileId || extractFileIdFromUrl(attachment.url);
 
     if (!fileId) {
       throw new BadRequestException(

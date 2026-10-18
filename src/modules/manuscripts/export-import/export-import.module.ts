@@ -10,14 +10,16 @@ import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
 import { ClsiModule } from '@/modules/manuscripts/clsi/clsi.module';
 
-// Ports
-import { IZipEnginePort } from './core/ports/zip-engine.port';
-import { IManuscriptAggregatorPort } from './core/ports/manuscript-aggregator.port';
-import { IManuscriptHydratorPort } from './core/ports/manuscript-hydrator.port';
-import { ITemplateCatalogPort } from './core/ports/template-catalog.port';
+// Ports & Engines
+import {
+  IZipEnginePort,
+  IManuscriptAggregatorPort,
+  IManuscriptHydratorPort,
+  ITemplateCatalogPort,
+  PkzipEngineAdapter,
+} from './domain';
 
-// Repositories & Engines
-import { PkzipEngineAdapter } from './core/adapters/engine/pkzip-engine.adapter';
+// Repositories
 import {
   ManuscriptAggregatorAdapter,
   ManuscriptHydratorAdapter,

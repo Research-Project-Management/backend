@@ -1,16 +1,19 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
-  EXTRACTION_GATEWAY_PORT,
-  IExtractionGatewayPort,
-} from '@/modules/library/ingestion/types/extraction-gateway.types';
-import {
   WEB_FETCH_PORT,
   IWebFetchPort,
 } from '@/modules/library/ingestion/types/web-fetch.types';
-import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
+import {
+  SsrfGuardService,
+  DEFAULT_BROWSER_FETCH_HEADERS,
+  DEFAULT_SAFE_REDIRECT_MAX_HOPS,
+  UnsafeRedirectError,
+} from '@/modules/library/core/services/ssrf-guard.service';
 import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
 import {
+  EXTRACTION_FACADE,
+  IExtractionFacade,
   cleanBibliographicText,
   cleanAbstractText,
   normalizeDoi,
@@ -25,7 +28,7 @@ import {
   splitAuthorString,
   isBotChallengePage,
   deriveDoiFromPublisherUrl,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 
 /** Canonical actor identifier for automated system-level ingestion downloads */
 export const SYSTEM_INGESTION_USER_ID = 'system';
@@ -99,9 +102,6 @@ export interface ScrapedUrlResult {
   ladderStepReached?: number;
 }
 
-/** Thrown when a redirect hop targets an unsafe destination. */
-class UnsafeRedirectError extends Error {}
-
 type MetaEntry = { key: string; value: string; alias: boolean };
 
 /** Partial metadata from a structured fallback source (JSON-LD / COinS). */
@@ -130,15 +130,7 @@ type FallbackMeta = {
   itemType?: string;
 };
 
-const MAX_REDIRECTS = 5;
 const FETCH_TIMEOUT_MS = 14000;
-const FETCH_HEADERS: Record<string, string> = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (Academic Client; mailto:contact@flux.academic)',
-  Accept:
-    'text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.9,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.9',
-};
 
 /** JSON-LD @type values considered bibliographic, in priority order. */
 const JSONLD_TYPES = [
@@ -176,8 +168,8 @@ export class UrlMetadataScraperService {
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
     @Optional()
-    @Inject(EXTRACTION_GATEWAY_PORT)
-    private readonly extractionGateway?: IExtractionGatewayPort,
+    @Inject(EXTRACTION_FACADE)
+    private readonly extractionGateway?: IExtractionFacade,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
     @Optional()
     @Inject(WEB_FETCH_PORT)
@@ -267,11 +259,11 @@ export class UrlMetadataScraperService {
     return SsrfGuardService.executeSafeRedirectFetch(
       startUrl,
       {
-        headers: FETCH_HEADERS,
+        headers: DEFAULT_BROWSER_FETCH_HEADERS,
         signal,
       },
       {
-        maxRedirects: MAX_REDIRECTS,
+        maxRedirects: DEFAULT_SAFE_REDIRECT_MAX_HOPS,
         validateUrl: async (nextUrl) => {
           try {
             await this.assertSafeUrl(nextUrl);

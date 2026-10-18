@@ -1,45 +1,46 @@
 /**
  * test/unit/manuscripts/manuscripts-redis-room-manager.spec.ts
  *
- * Unit tests for RedisRoomManagerAdapter verifying both local in-memory fallback
+ * Unit tests for RoomStore verifying both local in-memory fallback
  * and multi-node Redis distributed presence querying and state synchronization.
  */
 
-import { RedisRoomManagerAdapter } from '@/modules/realtime/manuscripts/core/adapters/storage/redis-room-manager.adapter';
-import { PresenceSession } from '@/modules/realtime/manuscripts/core/domain/entities/presence-session.entity';
-import { CursorPositionVo } from '@/modules/realtime/manuscripts/core/domain/value-objects/cursor-position.vo';
+import { RoomStore } from '@/modules/realtime/manuscripts/room.store';
+import { UserPresence, CursorPosition } from '@/modules/realtime/manuscripts/types/presence.type';
 
-describe('RedisRoomManagerAdapter (Distributed Presence)', () => {
+describe('RoomStore (Distributed Presence)', () => {
   const projectId = 'proj-redis-test-001';
   const docId = 'doc-section-1.tex';
 
   describe('When Redis is inactive / absent (In-memory fallback)', () => {
-    let adapter: RedisRoomManagerAdapter;
+    let adapter: RoomStore;
 
     beforeEach(() => {
-      adapter = new RedisRoomManagerAdapter(undefined);
+      adapter = new RoomStore(undefined);
     });
 
     it('manages project sessions and retrieves them from fallback memory', async () => {
-      const session1 = PresenceSession.create({
+      const session1: UserPresence = {
         userId: 'u-1',
         socketId: 'sock-1',
         projectId,
         name: 'Researcher Alice',
-      });
-      const session2 = PresenceSession.create({
+        lastHeartbeat: Date.now(),
+      };
+      const session2: UserPresence = {
         userId: 'u-2',
         socketId: 'sock-2',
         projectId,
         name: 'Researcher Bob',
-      });
+        lastHeartbeat: Date.now(),
+      };
 
       await adapter.addProjectSession(session1);
       await adapter.addProjectSession(session2);
 
       const presences = await adapter.getProjectSessions(projectId);
       expect(presences).toHaveLength(2);
-      expect(presences.map((p) => p.name)).toEqual(
+      expect(presences.map((p: UserPresence) => p.name)).toEqual(
         expect.arrayContaining(['Researcher Alice', 'Researcher Bob']),
       );
 
@@ -51,19 +52,20 @@ describe('RedisRoomManagerAdapter (Distributed Presence)', () => {
     });
 
     it('manages doc rooms and cursor updates', async () => {
-      const session = PresenceSession.create({
+      const session: UserPresence = {
         userId: 'u-1',
         socketId: 'sock-1',
         projectId,
         name: 'Researcher Alice',
-      });
+        lastHeartbeat: Date.now(),
+      };
       await adapter.addProjectSession(session);
 
       const docUsers = await adapter.joinDocRoom(projectId, docId, 'sock-1');
       expect(docUsers).toHaveLength(1);
       expect(docUsers[0].activeDocId).toBe(docId);
 
-      const cursor = CursorPositionVo.create({ row: 12, column: 5 });
+      const cursor: CursorPosition = { row: 12, column: 5 };
       const updatedPresence = await adapter.updateSessionCursor(
         projectId,
         docId,
@@ -79,7 +81,7 @@ describe('RedisRoomManagerAdapter (Distributed Presence)', () => {
   });
 
   describe('When Redis is active (Multi-node distributed clustering)', () => {
-    let adapter: RedisRoomManagerAdapter;
+    let adapter: RoomStore;
     let mockClient: any;
     let mockRedisCacheService: any;
     let redisStorage: Map<string, string>;
@@ -131,29 +133,29 @@ describe('RedisRoomManagerAdapter (Distributed Presence)', () => {
         getClient: () => mockClient,
       };
 
-      adapter = new RedisRoomManagerAdapter(mockRedisCacheService);
+      adapter = new RoomStore(mockRedisCacheService);
     });
 
     it('synchronizes presence sessions across simulated pods via Redis SMEMBERS & MGET', async () => {
-      // Simulate Pod A registering User 1
-      const session1 = PresenceSession.create({
+      const session1: UserPresence = {
         userId: 'u-1',
         socketId: 'sock-podA-1',
         projectId,
         name: 'Pod A User',
-      });
+        lastHeartbeat: Date.now(),
+      };
       await adapter.addProjectSession(session1);
 
-      // Simulate Pod B registering User 2 directly into Redis
-      const session2 = PresenceSession.create({
+      const session2: UserPresence = {
         userId: 'u-2',
         socketId: 'sock-podB-2',
         projectId,
         name: 'Pod B User',
-      });
+        lastHeartbeat: Date.now(),
+      };
       redisStorage.set(
         `manuscript:presence:sock-podB-2`,
-        JSON.stringify(session2.toJSON()),
+        JSON.stringify(session2),
       );
       let pSet = redisSets.get(`manuscript:project_rooms:${projectId}`);
       if (!pSet) {
@@ -162,17 +164,14 @@ describe('RedisRoomManagerAdapter (Distributed Presence)', () => {
       }
       pSet.add('sock-podB-2');
 
-      // Now query project sessions from this adapter instance
-      // It MUST return both users (cross-pod awareness)
       const presences = await adapter.getProjectSessions(projectId);
       expect(presences).toHaveLength(2);
-      const names = presences.map((p) => p.name);
+      const names = presences.map((p: UserPresence) => p.name);
       expect(names).toContain('Pod A User');
       expect(names).toContain('Pod B User');
     });
 
     it('prunes dead socket IDs when Redis TTL expires', async () => {
-      // Register socket in project set but no presence key (expired)
       let pSet = redisSets.get(`manuscript:project_rooms:${projectId}`);
       if (!pSet) {
         pSet = new Set();
@@ -180,20 +179,19 @@ describe('RedisRoomManagerAdapter (Distributed Presence)', () => {
       }
       pSet.add('stale-dead-socket-999');
 
-      // Also register a live session
-      const liveSession = PresenceSession.create({
+      const liveSession: UserPresence = {
         userId: 'u-live',
         socketId: 'sock-live',
         projectId,
         name: 'Active User',
-      });
+        lastHeartbeat: Date.now(),
+      };
       await adapter.addProjectSession(liveSession);
 
       const presences = await adapter.getProjectSessions(projectId);
       expect(presences).toHaveLength(1);
       expect(presences[0].name).toBe('Active User');
 
-      // Stale socket should have been pruned from Redis set
       expect(mockClient.srem).toHaveBeenCalledWith(
         `manuscript:project_rooms:${projectId}`,
         'stale-dead-socket-999',
@@ -201,28 +199,27 @@ describe('RedisRoomManagerAdapter (Distributed Presence)', () => {
     });
 
     it('synchronizes doc room presence and cursor position across pods', async () => {
-      const session = PresenceSession.create({
+      const session: UserPresence = {
         userId: 'u-1',
         socketId: 'sock-1',
         projectId,
         name: 'Author 1',
-      });
+        lastHeartbeat: Date.now(),
+      };
       await adapter.addProjectSession(session);
 
-      // Join doc room
       const docUsers = await adapter.joinDocRoom(projectId, docId, 'sock-1');
       expect(docUsers).toHaveLength(1);
       expect(docUsers[0].activeDocId).toBe(docId);
 
-      // Update cursor
-      const cursor = CursorPositionVo.create({
+      const cursor: CursorPosition = {
         row: 42,
         column: 10,
         selection: {
           anchor: { row: 42, column: 5 },
           head: { row: 42, column: 10 },
         },
-      });
+      };
       const updated = await adapter.updateSessionCursor(
         projectId,
         docId,
@@ -233,24 +230,23 @@ describe('RedisRoomManagerAdapter (Distributed Presence)', () => {
       expect(updated?.cursor?.column).toBe(10);
       expect(updated?.cursor?.selection?.anchor.column).toBe(5);
 
-      // Verify that doc session in Redis has the cursor
       const docSessions = await adapter.getDocSessions(projectId, docId);
       expect(docSessions).toHaveLength(1);
       expect(docSessions[0].cursor?.row).toBe(42);
 
-      // Leave doc room
       await adapter.leaveDocRoom(projectId, docId, 'sock-1');
       const remainingDocUsers = await adapter.getDocSessions(projectId, docId);
       expect(remainingDocUsers).toHaveLength(0);
     });
 
     it('cleans up doc room and project room sets when session is removed', async () => {
-      const session = PresenceSession.create({
+      const session: UserPresence = {
         userId: 'u-1',
         socketId: 'sock-1',
         projectId,
         name: 'Author 1',
-      });
+        lastHeartbeat: Date.now(),
+      };
       await adapter.addProjectSession(session);
       await adapter.joinDocRoom(projectId, docId, 'sock-1');
 

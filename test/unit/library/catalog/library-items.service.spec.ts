@@ -1,15 +1,15 @@
 import { UnprocessableEntityException } from '@nestjs/common';
 import { fromPartial } from '@total-typescript/shoehorn';
-import { ItemsService } from '@/modules/library/catalog/services/items.service';
+import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { TransactionService } from '@/modules/library/shared-kernel';
+import { TransactionService } from '@/modules/library/core';
 import { PrismaService } from '@/core';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
-import { sanitizeItemTitle } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+import { sanitizeItemTitle } from '@/modules/library/core';
+import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import {
   resolveExtraPlainText,
@@ -59,8 +59,8 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
     });
   });
 
-  describe('ItemsService', () => {
-    let service: ItemsService;
+  describe('ItemService', () => {
+    let service: ItemService;
     let queryRepo: jest.Mocked<QueryRepository>;
     let commandRepo: jest.Mocked<CommandRepository>;
     let libraryTx: jest.Mocked<TransactionService>;
@@ -114,13 +114,11 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         })),
       };
 
-      service = new ItemsService(
+      service = new ItemService(
         queryRepo,
         commandRepo,
         libraryTx,
         tagsService,
-        {} as any,
-        {} as any,
         mockQueryService,
         {} as any,
         {} as any,

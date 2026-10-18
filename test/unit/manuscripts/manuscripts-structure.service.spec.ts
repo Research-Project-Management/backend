@@ -4,32 +4,23 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { StructureService } from '@/modules/manuscripts/structure/structure.service';
-import { GetFileTreeUseCase } from '@/modules/manuscripts/structure/core/use-cases/get-file-tree.use-case';
-import { CreateNodeUseCase } from '@/modules/manuscripts/structure/core/use-cases/create-node.use-case';
-import { MoveNodeUseCase } from '@/modules/manuscripts/structure/core/use-cases/move-node.use-case';
-import { RenameNodeUseCase } from '@/modules/manuscripts/structure/core/use-cases/rename-node.use-case';
-import { DeleteNodeUseCase } from '@/modules/manuscripts/structure/core/use-cases/delete-node.use-case';
-import { ResolveRootDocUseCase } from '@/modules/manuscripts/structure/core/use-cases/resolve-root-doc.use-case';
-import { BuildCompilerFilesUseCase } from '@/modules/manuscripts/structure/core/use-cases/build-compiler-files.use-case';
 import {
+  StructureService,
   IStructureRepository,
   CreateNodeParams,
-} from '@/modules/manuscripts/structure/core/ports/structure-repository.port';
-import { IRootDocDetector } from '@/modules/manuscripts/structure/core/ports/root-doc-detector.port';
-import { ITreePublisher } from '@/modules/manuscripts/structure/core/ports/tree-publisher.port';
-import { HeuristicRootDocDetector } from '@/modules/manuscripts/structure/core/adapters/engine/heuristic-root-doc.detector';
-import { InMemoryTreePublisher } from '@/modules/manuscripts/structure/core/adapters/event/in-memory-tree.publisher';
-import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
-import { NodePathVo } from '@/modules/manuscripts/structure/core/domain/node-path.vo';
-import {
+  IRootDocDetector,
+  ITreePublisher,
+  HeuristicRootDocDetector,
+  InMemoryTreePublisher,
+  ManuscriptNodeEntity,
+  NodePathVo,
   CyclicMoveError,
   DuplicateNodePathError,
   InvalidNodeNameError,
   NodeNotFoundError,
   RootDocNotFoundError,
   MaxProjectFilesExceededError,
-} from '@/modules/manuscripts/structure/core/domain/structure-errors';
+} from '@/modules/manuscripts/structure';
 
 /**
  * In-Memory Test Double for IStructureRepository
@@ -209,13 +200,6 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StructureService,
-        GetFileTreeUseCase,
-        CreateNodeUseCase,
-        MoveNodeUseCase,
-        RenameNodeUseCase,
-        DeleteNodeUseCase,
-        ResolveRootDocUseCase,
-        BuildCompilerFilesUseCase,
         {
           provide: IStructureRepository,
           useValue: repository,

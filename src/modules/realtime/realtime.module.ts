@@ -1,22 +1,18 @@
-/**
- * realtime/realtime.module.ts
- * Enterprise Root Real-Time Module (Global).
- * Aggregates domain realtime submodules (Manuscripts, Notifications, Collaboration).
- */
-
 import { Module, Global } from '@nestjs/common';
-import { ManuscriptsRealtimeModule } from './manuscripts/manuscripts-realtime.module';
-import { NotificationsRealtimeModule } from './notifications/notifications-realtime.module';
-import { RealtimeService } from './realtime.service';
+import { CoreModule } from './core/core.module';
+import { ManuscriptsModule } from './manuscripts/manuscripts.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { RealtimeFacade } from './realtime.facade';
 
 @Global()
 @Module({
-  imports: [ManuscriptsRealtimeModule, NotificationsRealtimeModule],
-  providers: [RealtimeService],
+  imports: [CoreModule, ManuscriptsModule, NotificationsModule],
+  providers: [RealtimeFacade],
   exports: [
-    RealtimeService,
-    ManuscriptsRealtimeModule,
-    NotificationsRealtimeModule,
+    RealtimeFacade,
+    CoreModule,
+    ManuscriptsModule,
+    NotificationsModule,
   ],
 })
 export class RealtimeModule {}

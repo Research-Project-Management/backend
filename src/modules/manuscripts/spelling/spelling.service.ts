@@ -1,183 +1,191 @@
 /**
  * modules/manuscripts/spelling/spelling.service.ts
- * Deep module facade orchestrating LaTeX Spell Checking, Suggestions, and Custom Dictionaries.
- * Executes directly via SpellingRepository and pure domain AcademicSpellEngine.
+ * Deep Application Service for academic spell checking, LaTeX prose tokenization,
+ * Levenshtein suggestion ranking, and custom project/user dictionary management.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { CheckSpellingUseCase } from './core/use-cases/check-spelling.use-case';
-import { GetSuggestionsUseCase } from './core/use-cases/get-suggestions.use-case';
-import { LearnWordUseCase } from './core/use-cases/learn-word.use-case';
-import { UnlearnWordUseCase } from './core/use-cases/unlearn-word.use-case';
-import { ListCustomWordsUseCase } from './core/use-cases/list-custom-words.use-case';
+import { Injectable, Optional } from '@nestjs/common';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import {
-  AcademicSpellEngine,
-  LanguageCodeVo,
-  InvalidWordException,
-} from './domain';
 import { SpellingRepository } from './spelling.repository';
 import {
+  AcademicSpellEngine,
+  InvalidWordException,
+  LanguageCodeVo,
+  LatexProseTokenizer,
+  MisspelledWord,
+  SpellingReport,
+} from './domain';
+import {
   CheckSpellingDto,
-  SuggestionQueryDto,
-  SpellingReportDto,
   CustomDictionaryResponseDto,
+  SpellingReportDto,
+  SuggestionQueryDto,
 } from './dto/spelling.dto';
+
+export interface CheckSpellingQuery {
+  text?: string;
+  projectId?: string;
+  docId?: string;
+  language?: string;
+  userId?: string;
+  maxSuggestions?: number;
+}
 
 @Injectable()
 export class SpellingService {
-  private readonly logger = new Logger(SpellingService.name);
+  private readonly tokenizer = new LatexProseTokenizer();
   private readonly spellEngine = new AcademicSpellEngine();
 
   constructor(
-    @Optional() private readonly checkSpellingUseCase?: CheckSpellingUseCase,
-    @Optional() private readonly getSuggestionsUseCase?: GetSuggestionsUseCase,
-    @Optional() private readonly learnWordUseCase?: LearnWordUseCase,
-    @Optional() private readonly unlearnWordUseCase?: UnlearnWordUseCase,
-    @Optional()
-    private readonly listCustomWordsUseCase?: ListCustomWordsUseCase,
-    @Optional()
-    private readonly docstoreService?: DocstoreService,
     @Optional() private readonly repository?: SpellingRepository,
+    @Optional() private readonly docstoreService?: DocstoreService,
   ) {}
 
+  private get repo(): SpellingRepository {
+    if (!this.repository) {
+      throw new Error('SpellingRepository is not configured');
+    }
+    return this.repository;
+  }
+
   /**
-   * Checks spelling of a document's content (via direct text or docId).
+   * Executes a spell check across inline text or a persisted document.
+   */
+  public async checkSpelling(
+    query: CheckSpellingQuery,
+  ): Promise<SpellingReport> {
+    const language = LanguageCodeVo.create(query.language);
+    const maxSuggestions = query.maxSuggestions ?? 5;
+
+    let sourceText = query.text ?? '';
+    if (!sourceText && query.projectId && query.docId && this.docstoreService) {
+      const doc = await this.docstoreService.getDoc(
+        query.projectId,
+        query.docId,
+      );
+      sourceText = (doc.lines || []).join('\n');
+    }
+
+    const tokens = this.tokenizer.tokenize(sourceText);
+
+    const customWordSet = new Set<string>();
+    if (query.projectId) {
+      const pWords = await this.repo.listProjectWords(query.projectId);
+      for (const w of pWords) customWordSet.add(w.toLowerCase());
+    }
+    if (query.userId) {
+      const uWords = await this.repo.listUserWords(query.userId);
+      for (const w of uWords) customWordSet.add(w.toLowerCase());
+    }
+
+    const suggestionCache = new Map<string, string[]>();
+    const errors: MisspelledWord[] = [];
+
+    for (const token of tokens) {
+      const normalized = token.normalized;
+      if (customWordSet.has(normalized)) {
+        continue;
+      }
+
+      const isCorrect =
+        this.spellEngine.isCorrect(token.word, language) ||
+        this.spellEngine.isCorrect(normalized, language);
+
+      if (!isCorrect) {
+        let suggestions = suggestionCache.get(normalized);
+        if (!suggestions) {
+          suggestions = this.spellEngine.getSuggestions(
+            token.word,
+            language,
+            maxSuggestions,
+          );
+          suggestionCache.set(normalized, suggestions);
+        }
+
+        errors.push(
+          new MisspelledWord({
+            word: token.word,
+            line: token.line,
+            col: token.col,
+            length: token.length,
+            suggestions,
+          }),
+        );
+      }
+    }
+
+    return new SpellingReport({
+      language: language.code,
+      totalWordsChecked: tokens.length,
+      errors,
+    });
+  }
+
+  /**
+   * Checks document spelling for controller endpoint.
    */
   public async checkDocumentSpelling(
     projectId: string,
     userId: string,
     dto: CheckSpellingDto,
   ): Promise<SpellingReportDto> {
-    let contentToScan = dto.text || '';
-
-    // If docId is provided and text is empty, load from Docstore
-    if (!contentToScan && dto.docId && this.docstoreService) {
-      try {
-        const doc = await this.docstoreService.getDoc(projectId, dto.docId);
-        contentToScan = (doc.lines || []).join('\n');
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Could not load doc ${dto.docId} from docstore: ${(err as Error)?.message}`,
-        );
-      }
-    }
-
-    if (this.repository) {
-      const [projectWords, userWords] = await Promise.all([
-        projectId ? this.repository.listProjectWords(projectId) : [],
-        userId ? this.repository.listUserWords(userId) : [],
-      ]);
-
-      const report = this.spellEngine.checkText(contentToScan, dto.language, [
-        ...projectWords,
-        ...userWords,
-      ]);
-      return report.toJSON();
-    }
-
-    if (this.checkSpellingUseCase) {
-      const report = await this.checkSpellingUseCase.execute({
-        text: contentToScan,
-        projectId,
-        userId,
-        language: dto.language,
-      });
-      return report.toJSON();
-    }
-
-    const report = this.spellEngine.checkText(contentToScan, dto.language, []);
+    const report = await this.checkSpelling({
+      projectId,
+      userId,
+      text: dto.text,
+      docId: dto.docId,
+      language: dto.language,
+    });
     return report.toJSON();
   }
 
   /**
-   * Retrieves ranked candidate suggestions for a word.
+   * Computes ranked candidate replacements for a potentially misspelled word.
    */
   public getSuggestions(query: SuggestionQueryDto): string[] {
-    if (this.repository || !this.getSuggestionsUseCase) {
-      if (!query.word || query.word.trim() === '') {
-        return [];
-      }
-      const langVo = LanguageCodeVo.create(query.language);
-      return this.spellEngine.getSuggestions(
-        query.word,
-        langVo,
-        query.maxSuggestions || 5,
-      );
+    const trimmed = (query.word ?? '').trim();
+    if (!trimmed) {
+      return [];
     }
 
-    return this.getSuggestionsUseCase.execute({
-      word: query.word,
-      language: query.language,
-      maxSuggestions: query.maxSuggestions,
-    });
+    const language = LanguageCodeVo.create(query.language);
+    const maxSuggestions = Math.min(Math.max(query.maxSuggestions ?? 5, 1), 25);
+    if (this.spellEngine.isCorrect(trimmed, language)) {
+      return [];
+    }
+    return this.spellEngine.getSuggestions(trimmed, language, maxSuggestions);
   }
 
   /**
-   * Learn word in Project dictionary.
+   * Adds a custom word to the project dictionary.
    */
   public async learnProjectWord(
     projectId: string,
     word: string,
   ): Promise<void> {
-    if (this.repository) {
-      const raw = AcademicSpellEngine.validateCustomWord(word);
-      if (!projectId) {
-        throw new InvalidWordException(
-          raw,
-          'projectId is required for project dictionary',
-        );
-      }
-      await this.repository.addProjectWord(projectId, raw);
-      return;
-    }
-
-    if (this.learnWordUseCase) {
-      await this.learnWordUseCase.execute({
-        word,
-        scope: 'PROJECT',
-        projectId,
-      });
-    }
+    const cleaned = this.validateAndNormalizeWord(word);
+    await this.repo.addProjectWord(projectId, cleaned);
   }
 
   /**
-   * Remove word from Project dictionary.
+   * Removes a custom word from the project dictionary.
    */
   public async unlearnProjectWord(
     projectId: string,
     word: string,
   ): Promise<boolean> {
-    if (this.repository) {
-      const raw = (word || '').trim();
-      if (!raw || !projectId) return false;
-      return this.repository.removeProjectWord(projectId, raw);
-    }
-
-    if (this.unlearnWordUseCase) {
-      return this.unlearnWordUseCase.execute({
-        word,
-        scope: 'PROJECT',
-        projectId,
-      });
-    }
-    return false;
+    const cleaned = (word ?? '').trim().toLowerCase();
+    if (!cleaned) return false;
+    return this.repo.removeProjectWord(projectId, cleaned);
   }
 
   /**
-   * List Project custom dictionary words.
+   * Lists custom words in the project dictionary.
    */
   public async listProjectWords(
     projectId: string,
   ): Promise<CustomDictionaryResponseDto> {
-    const words = this.repository
-      ? projectId
-        ? await this.repository.listProjectWords(projectId)
-        : []
-      : await this.listCustomWordsUseCase!.execute({
-          scope: 'PROJECT',
-          projectId,
-        });
+    const words = await this.repo.listProjectWords(projectId);
     return {
       scope: 'PROJECT',
       words,
@@ -186,68 +194,62 @@ export class SpellingService {
   }
 
   /**
-   * Learn word in User personal dictionary.
+   * Adds a custom word to the user dictionary.
    */
   public async learnUserWord(userId: string, word: string): Promise<void> {
-    if (this.repository) {
-      const raw = AcademicSpellEngine.validateCustomWord(word);
-      if (!userId) {
-        throw new InvalidWordException(
-          raw,
-          'userId is required for user dictionary',
-        );
-      }
-      await this.repository.addUserWord(userId, raw);
-      return;
-    }
-
-    if (this.learnWordUseCase) {
-      await this.learnWordUseCase.execute({
-        word,
-        scope: 'USER',
-        userId,
-      });
-    }
+    const cleaned = this.validateAndNormalizeWord(word);
+    await this.repo.addUserWord(userId, cleaned);
   }
 
   /**
-   * Remove word from User personal dictionary.
+   * Removes a custom word from the user dictionary.
    */
   public async unlearnUserWord(userId: string, word: string): Promise<boolean> {
-    if (this.repository) {
-      const raw = (word || '').trim();
-      if (!raw || !userId) return false;
-      return this.repository.removeUserWord(userId, raw);
-    }
-
-    if (this.unlearnWordUseCase) {
-      return this.unlearnWordUseCase.execute({
-        word,
-        scope: 'USER',
-        userId,
-      });
-    }
-    return false;
+    const cleaned = (word ?? '').trim().toLowerCase();
+    if (!cleaned) return false;
+    return this.repo.removeUserWord(userId, cleaned);
   }
 
   /**
-   * List User personal dictionary words.
+   * Lists custom words in the user dictionary.
    */
   public async listUserWords(
     userId: string,
   ): Promise<CustomDictionaryResponseDto> {
-    const words = this.repository
-      ? userId
-        ? await this.repository.listUserWords(userId)
-        : []
-      : await this.listCustomWordsUseCase!.execute({
-          scope: 'USER',
-          userId,
-        });
+    const words = await this.repo.listUserWords(userId);
     return {
       scope: 'USER',
       words,
       count: words.length,
     };
+  }
+
+  private validateAndNormalizeWord(raw: string): string {
+    const trimmed = (raw ?? '').trim();
+    if (trimmed.length < 2) {
+      throw new InvalidWordException(
+        raw,
+        'Learned word must be at least 2 characters long.',
+      );
+    }
+    if (trimmed.length > 64) {
+      throw new InvalidWordException(
+        raw,
+        'Learned word cannot exceed 64 characters.',
+      );
+    }
+    if (/\s/.test(trimmed)) {
+      throw new InvalidWordException(
+        raw,
+        'Learned word must be a single token without whitespace.',
+      );
+    }
+    if (!/^[\p{L}\p{M}'’-]+$/u.test(trimmed)) {
+      throw new InvalidWordException(
+        raw,
+        'Learned word may only contain letters, hyphens, or apostrophes.',
+      );
+    }
+    return trimmed.toLowerCase();
   }
 }

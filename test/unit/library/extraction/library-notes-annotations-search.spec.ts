@@ -366,7 +366,7 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
       const fallbackFileId = '018f3a21-1234-7000-8000-000000000002';
       const fallbackData = {
         filename: 'single_doc.pdf',
-        fileUrl: '/api/files/018f3a21-1234-7000-8000-000000000002/content',
+        fileUrl: '/api/v1/storage/files/018f3a21-1234-7000-8000-000000000002/content',
         size: 500000,
         mimeType: 'application/pdf',
       };

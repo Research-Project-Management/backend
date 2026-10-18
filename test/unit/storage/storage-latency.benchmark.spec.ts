@@ -11,24 +11,24 @@
  *  5. Cryptographic ContentHash (SHA-256) & 65,536 Sharded StorageKey Algorithmic Scalability.
  */
 
-import { StreamBinaryUseCase } from '@/modules/storage/application/use-cases/stream/stream-binary.use-case';
-import { ListDriveUseCase } from '@/modules/storage/application/use-cases/drive/list-drive.use-case';
-import { UploadDirectUseCase } from '@/modules/storage/application/use-cases/upload/upload-direct.use-case';
-import { StorageRedisCacheService } from '@/modules/storage/infrastructure/cache/storage-redis-cache.service';
+import { StreamService } from '@/modules/storage/transfer';
+import { DriveService } from '@/modules/storage/drive';
+import { DirectUploadService } from '@/modules/storage/transfer';
+import { BlobService, StorageRedisCacheService } from '@/modules/storage/core';
 import { RedisCacheService } from '@/core';
-import { IStorageDriver } from '@/modules/storage/domain/ports/storage-driver.port';
-import { IStorageNodeRepository } from '@/modules/storage/domain/ports/storage-node.repository.port';
-import { IStorageBlobRepository } from '@/modules/storage/domain/ports/storage-blob.repository.port';
-import { IStorageQuotaRepository } from '@/modules/storage/domain/ports/storage-quota.repository.port';
-import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
+import { IStorageDriver } from '@/modules/storage/core';
+import { IStorageNodeRepository } from '@/modules/storage/drive';
+import { IStorageBlobRepository } from '@/modules/storage/core';
+import { IStorageQuotaRepository } from '@/modules/storage/drive';
+import { StorageNode } from '@/modules/storage/drive';
 import {
   StorageBlob,
   BlobStatus,
-} from '@/modules/storage/domain/entities/storage-blob.entity';
-import { ContentHash } from '@/modules/storage/domain/value-objects/content-hash.vo';
-import { StorageKey } from '@/modules/storage/domain/value-objects/storage-key.vo';
-import { ByteRange } from '@/modules/storage/domain/value-objects/byte-range.vo';
-import { FileScope } from '@/modules/storage/domain/value-objects/file-scope.vo';
+} from '@/modules/storage/core';
+import { ContentHash } from '@/modules/storage/core';
+import { StorageKey } from '@/modules/storage/core';
+import { ByteRange } from '@/modules/storage/transfer';
+import { FileScope } from '@/modules/storage/drive';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
 import * as crypto from 'crypto';
@@ -64,7 +64,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
   // BENCHMARK 1: RFC 7232 Zero-Driver 304 Short-Circuit Latency
   // =========================================================================
   describe('Benchmark 1: RFC 7232 Zero-Driver 304 Not Modified Short-Circuit', () => {
-    let streamBinaryUseCase: StreamBinaryUseCase;
+    let streamService: StreamService;
     let mockDriver: jest.Mocked<IStorageDriver>;
     let mockNodeRepo: jest.Mocked<IStorageNodeRepository>;
     let mockBlobRepo: jest.Mocked<IStorageBlobRepository>;
@@ -143,10 +143,9 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         listUploadedParts: jest.fn(),
       };
 
-      streamBinaryUseCase = new StreamBinaryUseCase(
-        mockDriver,
+      streamService = new StreamService(
+        new BlobService(mockDriver, mockBlobRepo),
         mockNodeRepo,
-        mockBlobRepo,
       );
     });
 
@@ -157,7 +156,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
 
       // 1. Cold Request: 200 OK without If-None-Match (Requires full S3/Driver stream acquisition)
       const coldStart = process.hrtime.bigint();
-      const coldRes = await streamBinaryUseCase.execute(mockNodeId);
+      const coldRes = await streamService.stream(mockNodeId);
       const coldLatency = hrtimeMs(coldStart);
 
       expect(coldRes.statusCode).toBe(200);
@@ -175,7 +174,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
 
       for (let i = 0; i < iterations; i++) {
         const start = process.hrtime.bigint();
-        const warmRes = await streamBinaryUseCase.execute(
+        const warmRes = await streamService.stream(
           mockNodeId,
           undefined,
           mockEtag,
@@ -213,7 +212,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
   // BENCHMARK 2: Single-Flight Drive Tree Coalescing (Thundering Herd Suppression)
   // =========================================================================
   describe('Benchmark 2: Single-Flight Drive Tree Coalescing & Stampede Suppression', () => {
-    let listDriveUseCase: ListDriveUseCase;
+    let driveService: DriveService;
     let mockNodeRepo: jest.Mocked<IStorageNodeRepository>;
     let realCacheService: RedisCacheService;
     let storageCacheService: StorageRedisCacheService;
@@ -304,7 +303,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         restore: jest.fn(),
       } as any;
 
-      listDriveUseCase = new ListDriveUseCase(
+      driveService = new DriveService(
         mockNodeRepo,
         storageCacheService,
       );
@@ -320,7 +319,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
 
       const requests = Array.from({ length: concurrentCount }, async () => {
         const start = process.hrtime.bigint();
-        const result = await listDriveUseCase.execute({
+        const result = await driveService.list({
           projectId: mockScopeKey,
         });
         const lat = hrtimeMs(start);
@@ -359,7 +358,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
 
       // Subsequent warm cache reads should be sub-millisecond
       const warmStart = process.hrtime.bigint();
-      const warmRes = await listDriveUseCase.execute({
+      const warmRes = await driveService.list({
         projectId: mockScopeKey,
       });
       const warmLatency = hrtimeMs(warmStart);
@@ -377,7 +376,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
   // BENCHMARK 3: Content-Addressable Storage (CAS) Deduplication & WAN Bypass
   // =========================================================================
   describe('Benchmark 3: Content-Addressable Storage (CAS) Deduplication Speedup', () => {
-    let uploadDirectUseCase: UploadDirectUseCase;
+    let uploadService: DirectUploadService;
     let mockDriver: jest.Mocked<IStorageDriver>;
     let mockNodeRepo: jest.Mocked<IStorageNodeRepository>;
     let mockBlobRepo: jest.Mocked<IStorageBlobRepository>;
@@ -464,10 +463,9 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         emit: jest.fn(),
       } as any;
 
-      uploadDirectUseCase = new UploadDirectUseCase(
-        mockDriver,
+      uploadService = new DirectUploadService(
+        new BlobService(mockDriver, mockBlobRepo),
         mockNodeRepo,
-        mockBlobRepo,
         mockQuotaRepo,
         mockCache,
         mockEvents,
@@ -493,7 +491,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
 
       // 1. Initial Cold Upload
       const coldStart = process.hrtime.bigint();
-      const firstRes = await uploadDirectUseCase.execute({
+      const firstRes = await uploadService.upload({
         userId: 'user-001',
         filename: 'foundation-paper.pdf',
         buffer: samplePdfBuffer,
@@ -518,7 +516,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
       // 2. 19 Subsequent Duplicate Uploads by various users/projects
       for (let i = 1; i < totalUploads; i++) {
         const start = process.hrtime.bigint();
-        const dupRes = await uploadDirectUseCase.execute({
+        const dupRes = await uploadService.upload({
           userId: `user-${i + 1}`,
           filename: `copy-of-paper-${i}.pdf`,
           buffer: samplePdfBuffer,

@@ -14,16 +14,13 @@ import {
   normalizePmid,
   cleanBibliographicText,
   cleanAbstractText,
-} from '@/modules/library/ingestion/domain/metadata.domain';
+} from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,
-} from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
-import {
-  normalizePageRange,
-  parseCreatorString,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core/constants/academic-client.constants';
+import { normalizePageRange, parseCreatorString } from '@/modules/library/core';
 
 @Injectable()
 export class PubMedProvider implements MetadataProvider {
@@ -36,9 +33,6 @@ export class PubMedProvider implements MetadataProvider {
   };
 
   private readonly logger = new Logger(PubMedProvider.name);
-  private readonly CTXP_BASE_URL =
-    process.env.NCBI_CTXP_BASE_URL ||
-    'https://api.ncbi.nlm.nih.gov/lit/ctxp/v1/pubmed/';
   private readonly EUTILS_BASE_URL =
     process.env.NCBI_EUTILS_BASE_URL ||
     'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi';

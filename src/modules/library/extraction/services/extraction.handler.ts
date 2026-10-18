@@ -11,14 +11,15 @@ import { OutboxEvent, Prisma } from '@prisma/client';
 import {
   OutboxDispatchHandler,
   IdempotentConsumerService,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 import { AttachmentStorageException } from '@/modules/library/extraction/types/attachments.types';
 import {
   parseCreatorString,
   isNoiseAuthorName,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+  extractFileIdFromUrl,
+} from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { ReferenceMatcherService } from './reference-matcher.service';
 
 export const EXTRACTION_EVENT_TYPES = {
@@ -70,6 +71,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     idempotentConsumer?: IdempotentConsumerService,
     @Optional()
     private readonly cache?: RedisCacheService,
+    @Optional()
+    private readonly referenceMatcher?: ReferenceMatcherService,
   ) {
     this.storagePort = storagePort;
 
@@ -212,11 +215,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     );
 
     try {
-      const fileId =
-        attachment.fileId ||
-        attachment.url?.match(
-          /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?(?:attachments\/)?files\/([a-zA-Z0-9_-]+)/,
-        )?.[1];
+      const fileId = attachment.fileId || extractFileIdFromUrl(attachment.url);
 
       if (!fileId) {
         throw new AttachmentStorageException(
@@ -227,7 +226,11 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       if (!attachment.fileId) {
         await this.extractionRepo
           .updateAttachmentFileId(attachment.id, fileId)
-          .catch(() => {});
+          .catch((err: unknown) => {
+            this.logger.warn(
+              `Failed to backfill attachment fileId for ${attachment.id}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
       }
 
       // 2. Storage-first reading via Storage Port
@@ -441,11 +444,6 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           await this.extractionRepo.saveMetadataSourceRecord(
             attachment.itemId,
             'pdf_fulltext',
-            payloadToSave as unknown as Prisma.InputJsonValue,
-          );
-          await this.extractionRepo.saveMetadataSourceRecord(
-            attachment.itemId,
-            'mextract_fulltext',
             payloadToSave as unknown as Prisma.InputJsonValue,
           );
 
@@ -768,9 +766,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     if (typeof this.extractionRepo?.findScopePapers !== 'function') {
       return;
     }
-    const matcher = new ReferenceMatcherService(this.extractionRepo);
+    const matcher =
+      this.referenceMatcher ?? new ReferenceMatcherService(this.extractionRepo);
     await matcher.linkCitationsInLibrary(scope, sourceItemId, references);
   }
 }
-
-export { ExtractionHandler as AttachmentExtractionHandler };

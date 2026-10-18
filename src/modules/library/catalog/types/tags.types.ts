@@ -1,10 +1,6 @@
-export interface TagObjectInput {
-  tag?: string;
-  name?: string;
-  type?: number | string;
-}
+import type { TagObjectInput, TagInput } from '@/modules/library/core';
 
-export type TagInput = string | TagObjectInput;
+export type { TagObjectInput, TagInput };
 
 export interface TagDetail {
   id: string;

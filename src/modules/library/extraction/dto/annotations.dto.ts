@@ -17,12 +17,12 @@ import {
 import { Type, Transform } from 'class-transformer';
 import { AnnotationType } from '@/modules/library/extraction/types/annotations.types';
 
-// ─── Shared color validator ───────────────────────────────────────────────────
+// Shared color validator
 
 const COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
 const COLOR_MSG = 'color must be a valid hex color (e.g. #ffd400 or #fff)';
 
-// ─── Create ──────────────────────────────────────────────────────────────────
+// Create
 
 export class CreateAnnotationDto {
   @IsEnum(AnnotationType)
@@ -85,7 +85,7 @@ export class CreateAnnotationDto {
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 }
 
-// ─── Update ──────────────────────────────────────────────────────────────────
+// Update
 
 export class UpdateAnnotationDto {
   @IsString()
@@ -118,7 +118,7 @@ export class UpdateAnnotationDto {
   expectedVersion?: number;
 }
 
-// ─── Batch upsert item ───────────────────────────────────────────────────────
+// Batch upsert item
 
 export class UpsertAnnotationItemDto {
   /** If present → update existing annotation, otherwise create new */
@@ -187,7 +187,7 @@ export class UpsertAnnotationItemDto {
   expectedVersion?: number;
 }
 
-// ─── Batch request ───────────────────────────────────────────────────────────
+// Batch request
 
 export class BatchAnnotationsDto {
   @IsArray()

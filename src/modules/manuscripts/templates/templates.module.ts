@@ -3,19 +3,17 @@ import { PrismaModule } from '@/core';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 
-// Controllers & Core Services
+// Controllers & Services
 import {
   TemplatesController,
   OverleafTemplatesParityController,
 } from './templates.controller';
 import { TemplatesService } from './templates.service';
-import { TemplatesRepository } from './templates.repository';
-
-// Ports & Adapters
-import { TEMPLATE_REPOSITORY_PORT } from './core/ports/template-repository.port';
-import { PROJECT_INSTANTIATOR_PORT } from './core/ports/project-instantiator.port';
-import { InMemoryTemplateAdapter } from './core/adapters/storage/in-memory-template.adapter';
-import { ManuscriptInstantiatorAdapter } from './core/adapters/external/manuscript-instantiator.adapter';
+import {
+  TemplatesRepository,
+  InMemoryTemplateAdapter,
+} from './templates.repository';
+import { TEMPLATE_REPOSITORY_PORT, PROJECT_INSTANTIATOR_PORT } from './domain';
 
 @Module({
   imports: [PrismaModule, StructureModule, DocstoreModule],
@@ -24,7 +22,6 @@ import { ManuscriptInstantiatorAdapter } from './core/adapters/external/manuscri
     InMemoryTemplateAdapter,
     TemplatesRepository,
     TemplatesService,
-    ManuscriptInstantiatorAdapter,
     {
       provide: TEMPLATE_REPOSITORY_PORT,
       useExisting: TemplatesRepository,

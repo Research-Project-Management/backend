@@ -21,28 +21,24 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
-import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
-import { FilestoreController } from '@/modules/manuscripts/filestore/filestore.controller';
-import { UploadManuscriptFileUseCase } from '@/modules/manuscripts/filestore/core/use-cases/upload-manuscript-file.use-case';
-import { StreamManuscriptFileUseCase } from '@/modules/manuscripts/filestore/core/use-cases/stream-manuscript-file.use-case';
-import { GetManuscriptFileHeadUseCase } from '@/modules/manuscripts/filestore/core/use-cases/get-manuscript-file-head.use-case';
-import { DeleteManuscriptFileUseCase } from '@/modules/manuscripts/filestore/core/use-cases/delete-manuscript-file.use-case';
-import { GetSignedDownloadUrlUseCase } from '@/modules/manuscripts/filestore/core/use-cases/get-signed-download-url.use-case';
-import { IBinaryStoragePort } from '@/modules/manuscripts/filestore/core/ports/binary-storage.port';
-import { IManuscriptFileRepository } from '@/modules/manuscripts/filestore/core/ports/manuscript-file-repository.port';
-import { IContentHasherPort } from '@/modules/manuscripts/filestore/core/ports/content-hasher.port';
-import { CryptoGitBlobHasherAdapter } from '@/modules/manuscripts/filestore/core/adapters/engine/crypto-git-blob-hasher.adapter';
-import { LocalDiskBinaryStorageAdapter } from '@/modules/manuscripts/filestore/core/adapters/storage/local-disk-binary-storage.adapter';
-import { ContentHash } from '@/modules/manuscripts/filestore/core/domain/value-objects/content-hash.vo';
-import { StorageKey } from '@/modules/manuscripts/filestore/core/domain/value-objects/storage-key.vo';
-import { ByteRange } from '@/modules/manuscripts/filestore/core/domain/value-objects/byte-range.vo';
 import {
+  FilestoreService,
+  IFilestoreServiceRepository,
+  FilestoreController,
+  IBinaryStoragePort,
+  IManuscriptFileRepository,
+  IContentHasherPort,
+  CryptoGitBlobHasherAdapter,
+  LocalDiskBinaryStorageAdapter,
+  ContentHash,
+  StorageKey,
+  ByteRange,
   ManuscriptFile,
   MAX_FILE_SIZE_BYTES,
-} from '@/modules/manuscripts/filestore/core/domain/entities/manuscript-file.entity';
-import { FileNotFoundException } from '@/modules/manuscripts/filestore/core/domain/exceptions/file-not-found.exception';
-import { InvalidByteRangeException } from '@/modules/manuscripts/filestore/core/domain/exceptions/invalid-byte-range.exception';
-import { StorageQuotaExceededException } from '@/modules/manuscripts/filestore/core/domain/exceptions/storage-quota-exceeded.exception';
+  FileNotFoundException,
+  InvalidByteRangeException,
+  StorageQuotaExceededException,
+} from '@/modules/manuscripts/filestore';
 
 // Helper to convert readable stream to buffer
 async function streamToBuffer(stream: Readable): Promise<Buffer> {
@@ -183,11 +179,6 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
   let hasher: IContentHasherPort;
   let localStorage: IBinaryStoragePort;
 
-  let uploadUseCase: UploadManuscriptFileUseCase;
-  let streamUseCase: StreamManuscriptFileUseCase;
-  let headUseCase: GetManuscriptFileHeadUseCase;
-  let deleteUseCase: DeleteManuscriptFileUseCase;
-  let signedUrlUseCase: GetSignedDownloadUrlUseCase;
   let filestoreService: FilestoreService;
   let filestoreController: FilestoreController;
 
@@ -209,19 +200,6 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
     inMemoryRepo = new InMemoryManuscriptFileRepository();
     hasher = new CryptoGitBlobHasherAdapter();
     localStorage = new LocalDiskBinaryStorageAdapter(tempStorageDir);
-
-    uploadUseCase = new UploadManuscriptFileUseCase(
-      localStorage,
-      inMemoryRepo,
-      hasher,
-    );
-    streamUseCase = new StreamManuscriptFileUseCase(localStorage, inMemoryRepo);
-    headUseCase = new GetManuscriptFileHeadUseCase(localStorage, inMemoryRepo);
-    deleteUseCase = new DeleteManuscriptFileUseCase(localStorage, inMemoryRepo);
-    signedUrlUseCase = new GetSignedDownloadUrlUseCase(
-      localStorage,
-      inMemoryRepo,
-    );
 
     const testRepo = new TestFilestoreRepository(
       inMemoryRepo,
@@ -562,19 +540,19 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
   });
 
   // =========================================================================
-  // 4. USE CASES
+  // 4. FILESTORE SERVICE OPERATIONS (CAS UPLOAD, STREAMING, HEAD, DELETE)
   // =========================================================================
-  describe('Use Cases', () => {
-    it('UploadManuscriptFileUseCase: should upload file and deduplicate by hash', async () => {
+  describe('FilestoreService Core Operations', () => {
+    it('uploadFileFromStream: should upload file and deduplicate by hash', async () => {
       const imagePayload = Buffer.from('PNG_IMAGE_BINARY_DATA_TEST_123');
 
       // First upload
-      const uploadedFile1 = await uploadUseCase.execute({
-        projectId: PROJECT_ID,
-        name: 'figure1.png',
-        mimeType: 'image/png',
-        stream: Readable.from(imagePayload),
-      });
+      const uploadedFile1 = await filestoreService.uploadFileFromStream(
+        PROJECT_ID,
+        'figure1.png',
+        Readable.from(imagePayload),
+        'image/png',
+      );
 
       expect(uploadedFile1.id).toBeDefined();
       expect(uploadedFile1.name).toBe('figure1.png');
@@ -589,12 +567,12 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       expect(existsInStorage).toBe(true);
 
       // Second upload with identical content (Deduplication check)
-      const uploadedFile2 = await uploadUseCase.execute({
-        projectId: PROJECT_ID,
-        name: 'figure1_copy.png',
-        mimeType: 'image/png',
-        stream: Readable.from(imagePayload),
-      });
+      const uploadedFile2 = await filestoreService.uploadFileFromStream(
+        PROJECT_ID,
+        'figure1_copy.png',
+        Readable.from(imagePayload),
+        'image/png',
+      );
 
       expect(uploadedFile2.hash.getValue()).toBe(uploadedFile1.hash.getValue());
       expect(uploadedFile2.storageKey.getValue()).toBe(
@@ -602,21 +580,18 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       );
     });
 
-    it('StreamManuscriptFileUseCase: should stream full content when no range header is supplied', async () => {
+    it('streamFile: should stream full content when no range header is supplied', async () => {
       const data = Buffer.from(
         'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
       );
-      const file = await uploadUseCase.execute({
-        projectId: PROJECT_ID,
-        name: 'sample.txt',
-        mimeType: 'text/plain',
-        stream: Readable.from(data),
-      });
+      const file = await filestoreService.uploadFileFromStream(
+        PROJECT_ID,
+        'sample.txt',
+        Readable.from(data),
+        'text/plain',
+      );
 
-      const result = await streamUseCase.execute({
-        projectId: PROJECT_ID,
-        fileId: file.id,
-      });
+      const result = await filestoreService.streamFile(PROJECT_ID, file.id);
 
       expect(result.file.id).toBe(file.id);
       expect(result.isPartialContent).toBe(false);
@@ -627,21 +602,21 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       expect(streamed.toString('utf8')).toBe(data.toString('utf8'));
     });
 
-    it('StreamManuscriptFileUseCase: should stream partial content (206) when Range header is provided', async () => {
+    it('streamFile: should stream partial content (206) when Range header is provided', async () => {
       const data = Buffer.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ'); // 26 bytes
-      const file = await uploadUseCase.execute({
-        projectId: PROJECT_ID,
-        name: 'alphabet.txt',
-        mimeType: 'text/plain',
-        stream: Readable.from(data),
-      });
+      const file = await filestoreService.uploadFileFromStream(
+        PROJECT_ID,
+        'alphabet.txt',
+        Readable.from(data),
+        'text/plain',
+      );
 
       // Request range bytes 5-10 ("FGHIJK")
-      const result = await streamUseCase.execute({
-        projectId: PROJECT_ID,
-        fileId: file.id,
-        rangeHeader: 'bytes=5-10',
-      });
+      const result = await filestoreService.streamFile(
+        PROJECT_ID,
+        file.id,
+        'bytes=5-10',
+      );
 
       expect(result.isPartialContent).toBe(true);
       expect(result.byteRange?.start).toBe(5);
@@ -652,48 +627,41 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       expect(streamed.toString('utf8')).toBe('FGHIJK');
     });
 
-    it('StreamManuscriptFileUseCase: should throw FileNotFoundException when file does not exist', async () => {
+    it('streamFile: should throw FileNotFoundException when file does not exist', async () => {
       await expect(
-        streamUseCase.execute({
-          projectId: PROJECT_ID,
-          fileId: 'non-existent-file-id',
-        }),
+        filestoreService.streamFile(PROJECT_ID, 'non-existent-file-id'),
       ).rejects.toThrow(FileNotFoundException);
     });
 
-    it('GetManuscriptFileHeadUseCase: should return metadata without opening body stream', async () => {
+    it('getFileHead: should return metadata without opening body stream', async () => {
       const data = Buffer.from('PDF_METADATA_HEADER_TEST');
-      const file = await uploadUseCase.execute({
-        projectId: PROJECT_ID,
-        name: 'doc.pdf',
-        mimeType: 'application/pdf',
-        stream: Readable.from(data),
-      });
+      const file = await filestoreService.uploadFileFromStream(
+        PROJECT_ID,
+        'doc.pdf',
+        Readable.from(data),
+        'application/pdf',
+      );
 
-      const headResult = await headUseCase.execute({
-        projectId: PROJECT_ID,
-        fileId: file.id,
-      });
+      const headResult = await filestoreService.getFileHead(
+        PROJECT_ID,
+        file.id,
+      );
 
       expect(headResult.file.id).toBe(file.id);
       expect(headResult.file.name).toBe('doc.pdf');
       expect(headResult.file.sizeBytes).toBe(data.length);
     });
 
-    it('DeleteManuscriptFileUseCase: should soft delete file and keep physical blob', async () => {
+    it('deleteFile: should soft delete file and keep physical blob', async () => {
       const data = Buffer.from('Data to be soft deleted');
-      const file = await uploadUseCase.execute({
-        projectId: PROJECT_ID,
-        name: 'soft_delete.dat',
-        mimeType: 'application/octet-stream',
-        stream: Readable.from(data),
-      });
+      const file = await filestoreService.uploadFileFromStream(
+        PROJECT_ID,
+        'soft_delete.dat',
+        Readable.from(data),
+        'application/octet-stream',
+      );
 
-      await deleteUseCase.execute({
-        projectId: PROJECT_ID,
-        fileId: file.id,
-        purgePhysicalBlob: false,
-      });
+      await filestoreService.deleteFile(PROJECT_ID, file.id, false);
 
       const deletedFile = await inMemoryRepo.findByProjectAndId(
         PROJECT_ID,
@@ -709,20 +677,16 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       ).toBe(true);
     });
 
-    it('DeleteManuscriptFileUseCase: should purge physical blob when requested', async () => {
+    it('deleteFile: should purge physical blob when requested and unreferenced', async () => {
       const data = Buffer.from('Data to be completely purged');
-      const file = await uploadUseCase.execute({
-        projectId: PROJECT_ID,
-        name: 'purge_me.dat',
-        mimeType: 'application/octet-stream',
-        stream: Readable.from(data),
-      });
+      const file = await filestoreService.uploadFileFromStream(
+        PROJECT_ID,
+        'purge_me.dat',
+        Readable.from(data),
+        'application/octet-stream',
+      );
 
-      await deleteUseCase.execute({
-        projectId: PROJECT_ID,
-        fileId: file.id,
-        purgePhysicalBlob: true,
-      });
+      await filestoreService.deleteFile(PROJECT_ID, file.id, true);
 
       expect(
         await localStorage.checkObjectExists(

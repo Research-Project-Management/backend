@@ -20,7 +20,7 @@ import {
 } from '@/modules/library/extraction/domain/renamer.domain';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
-import { TransactionService } from '@/modules/library/shared-kernel';
+import { TransactionService } from '@/modules/library/core';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
@@ -35,13 +35,11 @@ import {
   normalizeIsbn,
   isValidIsbnChecksum,
   convertIsbn10To13,
-} from '@/modules/library/shared-kernel/domain/identifier.domain';
+} from '@/modules/library/core/domain/identifier.domain';
 import { BadRequestException } from '@nestjs/common';
 
 describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stress Test', () => {
-  // ============================================================================
   // USER STORY 1: Zotero "Extra" Field Cheater Syntax -> CSL & Export Integration
-  // ============================================================================
   describe('User Story 1: Zotero "Extra" Field Cheater Syntax (Key: Value & {:Key: Value}) -> CSL & Export Integration', () => {
     let cslEngine: CslEngineService;
     let citationService: CitationService;
@@ -247,9 +245,7 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
     });
   });
 
-  // ============================================================================
   // USER STORY 2: Zotero 7 Template-Driven File Renaming
-  // ============================================================================
   describe('User Story 2: Zotero 7 Template-Driven File Renaming (renamer.domain.ts & AttachmentsService)', () => {
     it('formats Zotero 7 default double-brace template for 1, 2, and 3+ authors', () => {
       const singleAuthor = formatAttachmentFilename(
@@ -480,9 +476,7 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
     });
   });
 
-  // ============================================================================
   // USER STORY 3: Zotero System Views Lifecycle
-  // ============================================================================
   describe('User Story 3: Zotero System Views Lifecycle (Unfiled Items, My Publications, Recently Read, Trash & Restore/Purge)', () => {
     it('QueryRepository.buildWhereClause constructs accurate Prisma filters for unfiled, my-publications, recent, starred, and trash views', () => {
       const mockPrisma = {};
@@ -609,9 +603,7 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
     });
   });
 
-  // ============================================================================
   // USER STORY 4: Zotero Item Type Switching Across Diverse Academic Taxonomy
-  // ============================================================================
   describe('User Story 4: Zotero Item Type Switching (ItemTypeConversionService & ItemTransformer)', () => {
     let transformer: ItemTransformer;
 
@@ -743,9 +735,7 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
     });
   });
 
-  // ============================================================================
   // USER STORY 5: Bidirectional Related Items & Citation Graph
-  // ============================================================================
   describe('User Story 5: Bidirectional Related Items & Citation Graph', () => {
     it('prevents self-relations, maps reciprocal semantic relation types, and filters out soft-deleted peers', async () => {
       const userId = '00000000-0000-4000-8000-000000000001';
@@ -963,9 +953,7 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
     });
   });
 
-  // ============================================================================
   // USER STORY 6: Standalone PDF Drop & "Add Item by Identifier" Lookup
-  // ============================================================================
   describe('User Story 6: Identifier Lookup (Add Item by Identifier) & Trailing Punctuation Sanitization', () => {
     it('strips trailing sentence punctuation and surrounding parentheses/brackets across DOI, ISBN, PMID, PMCID, and arXiv IDs', () => {
       // DOIs copied from bibliography sentences

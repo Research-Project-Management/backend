@@ -37,9 +37,11 @@ import {
   CitationValidationDto,
   SyncLibraryResultDto,
 } from './dto/citations.dto';
-import { IdentifierNotFoundException } from './core/domain/exceptions/identifier-not-found.exception';
-import { DuplicateCitationKeyException } from './core/domain/exceptions/duplicate-citation-key.exception';
-import { InvalidBibtexException } from './core/domain/exceptions/invalid-bibtex.exception';
+import {
+  IdentifierNotFoundException,
+  DuplicateCitationKeyException,
+  InvalidBibtexException,
+} from './domain';
 
 interface RequestWithUser {
   user?: { id?: string; sub?: string; userId?: string };

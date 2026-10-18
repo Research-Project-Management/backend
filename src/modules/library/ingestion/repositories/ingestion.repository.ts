@@ -51,6 +51,15 @@ export interface CreateIngestionReviewCaseData {
   assignedToId?: string;
 }
 
+function parseReviewCase(val: unknown): IngestionReviewCase | null {
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
+  return val as IngestionReviewCase;
+}
+
+function toJsonValue<T>(val: T): Prisma.InputJsonValue {
+  return val as unknown as Prisma.InputJsonValue;
+}
+
 export type IngestionScope =
   { userId?: string; projectId?: string | null } | string;
 
@@ -102,7 +111,7 @@ export class IngestionRepository {
     return tx || this.prisma;
   }
 
-  // ── Run Operations ────────────────────────────────────────────────────────
+  // Run Operations
 
   async createRun(
     scope: IngestionScope,
@@ -217,8 +226,9 @@ export class IngestionRepository {
           : new Date(),
       };
     });
-    const reviewCases: IngestionReviewCase[] = run.reviewData
-      ? [run.reviewData as unknown as IngestionReviewCase]
+    const parsedReview = parseReviewCase(run.reviewData);
+    const reviewCases: IngestionReviewCase[] = parsedReview
+      ? [parsedReview]
       : [];
     return {
       ...run,
@@ -262,8 +272,7 @@ export class IngestionRepository {
     // Only increment attempts when retrying: transitioning from FAILED_RETRYABLE back to PENDING
     const isRetry =
       details?.previousStatus === IngestionStatus.FAILED_RETRYABLE &&
-      (status === IngestionStatus.PENDING ||
-        (status as unknown as string) === 'RECEIVED');
+      status === IngestionStatus.PENDING;
     return client.ingestionRun.update({
       where: {
         id: runId,
@@ -378,49 +387,7 @@ export class IngestionRepository {
     return result.count;
   }
 
-  async findRecoverableRuns(
-    since: Date,
-    limit = 50,
-    tx?: Prisma.TransactionClient,
-  ): Promise<IngestionRun[]> {
-    const client = this.getClient(tx);
-    return client.ingestionRun.findMany({
-      where: {
-        status: {
-          in: [IngestionStatus.PENDING, IngestionStatus.FAILED_RETRYABLE],
-        },
-        startedAt: { gte: since },
-        completedAt: null,
-      },
-      orderBy: { startedAt: 'asc' },
-      take: limit,
-    });
-  }
-
-  async reconcileRun(
-    _scope: { userId?: string; projectId?: string } | string,
-    runId: string,
-    data: {
-      status: IngestionStatus;
-      lastError: string;
-      completedAt?: Date | null;
-      attemptsIncrement?: boolean;
-    },
-    tx?: Prisma.TransactionClient,
-  ): Promise<IngestionRun> {
-    const client = this.getClient(tx);
-    return client.ingestionRun.update({
-      where: { id: runId },
-      data: {
-        status: data.status,
-        lastError: data.lastError,
-        completedAt: data.completedAt,
-        ...(data.attemptsIncrement ? { attempts: { increment: 1 } } : {}),
-      },
-    });
-  }
-
-  // ── Stage Operations ──────────────────────────────────────────────────────
+  // Stage Operations
 
   async createStage(
     ingestionRunId: string,
@@ -500,7 +467,7 @@ export class IngestionRepository {
     return Array.isArray(log.stages) ? (log.stages as IngestionStage[]) : [];
   }
 
-  // ── Review Case Operations ────────────────────────────────────────────────
+  // Review Case Operations
 
   async createReviewCase(
     scope: IngestionScope,
@@ -547,7 +514,7 @@ export class IngestionRepository {
     await client.ingestionRun.update({
       where: { id: ingestionRunId },
       data: {
-        reviewData: reviewCase as unknown as Prisma.InputJsonValue,
+        reviewData: toJsonValue(reviewCase),
       },
     });
 
@@ -575,8 +542,8 @@ export class IngestionRepository {
       select: { reviewData: true },
     });
     return runs
-      .map((r) => r.reviewData as unknown as IngestionReviewCase)
-      .filter(Boolean);
+      .map((r) => parseReviewCase(r.reviewData))
+      .filter((rc): rc is IngestionReviewCase => Boolean(rc));
   }
 
   async findReviewCaseById(
@@ -589,7 +556,7 @@ export class IngestionRepository {
       where: this.buildRunIdWhere(scope, id),
       select: { reviewData: true },
     });
-    return (run?.reviewData as unknown as IngestionReviewCase) ?? null;
+    return parseReviewCase(run?.reviewData);
   }
 
   async updateReviewCaseStatus(
@@ -604,8 +571,7 @@ export class IngestionRepository {
       select: { reviewData: true },
     });
     const currentReview =
-      (run?.reviewData as unknown as IngestionReviewCase) ||
-      ({} as IngestionReviewCase);
+      parseReviewCase(run?.reviewData) || ({} as IngestionReviewCase);
     const updatedReview: IngestionReviewCase = {
       ...currentReview,
       status,
@@ -614,7 +580,7 @@ export class IngestionRepository {
     await client.ingestionRun.update({
       where: { id },
       data: {
-        reviewData: updatedReview as unknown as Prisma.InputJsonValue,
+        reviewData: toJsonValue(updatedReview),
         status:
           status === 'APPROVED'
             ? IngestionStatus.COMPLETED
@@ -663,7 +629,7 @@ export class IngestionRepository {
     }> = [];
 
     for (const run of runs) {
-      const rd = run.reviewData as unknown as
+      const rd = parseReviewCase(run.reviewData) as
         | (IngestionReviewCase & {
             evidence?: { confidence?: number; matchReason?: string };
           })
@@ -702,23 +668,21 @@ export class IngestionRepository {
     });
 
     for (const run of runs) {
-      const rd =
-        (run.reviewData as unknown as IngestionReviewCase) ||
-        ({} as IngestionReviewCase);
+      const rd = parseReviewCase(run.reviewData) || ({} as IngestionReviewCase);
       await client.ingestionRun.update({
         where: { id: run.id },
         data: {
-          reviewData: {
+          reviewData: toJsonValue({
             ...rd,
             status: 'RESOLVED',
             resolvedAt: new Date(),
-          } as unknown as Prisma.InputJsonValue,
+          }),
         },
       });
     }
   }
 
-  // ── Capture Preview Operations (Persistent Database Store) ─────────────────
+  // Capture Preview Operations (Persistent Database Store)
   async createCapturePreview(
     data: Prisma.CapturePreviewCreateInput,
     tx?: Prisma.TransactionClient,
@@ -767,7 +731,7 @@ export class IngestionRepository {
     return res.count;
   }
 
-  // ── Local Metadata Identifier Lookup ────────────────────────────────────
+  // Local Metadata Identifier Lookup
   /**
    * Tenant-scoped lookup of an Item by external identifier.
    * A scope is REQUIRED: items are user-owned and must never be resolved

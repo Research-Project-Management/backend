@@ -1,9 +1,12 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { SearchService } from '@/modules/library/search/services/search.service';
 import { SearchItemsQueryDto } from '@/modules/library/search/dto/search.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
+@ApiTags('Library Search')
+@ApiBearerAuth()
 @Controller([
   'api/v1/library/search',
   'api/v1/projects/:projectId/library/search',

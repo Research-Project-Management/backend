@@ -3,10 +3,10 @@ import { CoreModule } from '@/core';
 import { StorageModule } from '@/modules/storage/storage.module';
 import { CatalogModule } from '@/modules/library/catalog/catalog.module';
 import {
-  SharedKernelModule,
+  LibraryCoreModule,
   IOutboxRegistry,
   OUTBOX_REGISTRY_PORT,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 
 // Presentation
 import {
@@ -32,6 +32,7 @@ import { OcrSandwichPdfService } from './services/ocr-sandwich-pdf.service';
 import { TrustedExtractionService } from './services/trusted-extraction.service';
 import { AnnotationsService } from './services/annotations.service';
 import { PdfAnnotationImporterService } from './services/pdf-annotation-importer.service';
+import { ReferenceMatcherService } from './services/reference-matcher.service';
 
 // Repositories
 import { AttachmentsRepository } from './repositories/attachments.repository';
@@ -47,24 +48,14 @@ import {
 } from './services/extraction.handler';
 import { ItemLifecycleSubscriber } from './subscribers/item-lifecycle.subscriber';
 import { AnnotationNormalizer } from './domain/annotation.normalizer';
-import { InProcessCatalogGatewayAdapter } from './gateways/in-process-catalog-gateway.adapter';
-import { HttpCatalogGatewayAdapter } from './gateways/http-catalog-gateway.adapter';
-import {
-  XmpParser,
-  AcademicRegexCatalog,
-  MetadataQualityGate,
-  LayoutHeuristicExtractor,
-  MeXtractExtractor,
-} from './extractors';
-
-// Tokens
-import { TRUSTED_EXTRACTOR_PORT } from './types/trusted-extraction.types';
-import { CATALOG_GATEWAY_PORT } from './types/catalog-gateway.types';
-import { ATTACHMENT_REPOSITORY_PORT } from './types/attachments.types';
-import { ANNOTATION_REPOSITORY_PORT } from './types/annotations.types';
+import { XmpParser } from './extractors/xmp.parser';
+import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
+import { MetadataQualityGate } from './extractors/metadata-quality.gate';
+import { LayoutHeuristicExtractor } from './extractors/layout-heuristic.extractor';
+import { MeXtractExtractor } from './extractors/mextract.extractor';
 
 @Module({
-  imports: [CoreModule, StorageModule, SharedKernelModule, CatalogModule],
+  imports: [CoreModule, StorageModule, LibraryCoreModule, CatalogModule],
   controllers: [
     AttachmentStorageController,
     ProjectAttachmentStorageController,
@@ -85,14 +76,6 @@ import { ANNOTATION_REPOSITORY_PORT } from './types/annotations.types';
     AttachmentsRepository,
     ExtractionRepository,
     AnnotationsRepository,
-    {
-      provide: ATTACHMENT_REPOSITORY_PORT,
-      useExisting: AttachmentsRepository,
-    },
-    {
-      provide: ANNOTATION_REPOSITORY_PORT,
-      useExisting: AnnotationsRepository,
-    },
 
     // Services
     AttachmentsService,
@@ -101,12 +84,9 @@ import { ANNOTATION_REPOSITORY_PORT } from './types/annotations.types';
     OcrWorkerPoolService,
     OcrSandwichPdfService,
     TrustedExtractionService,
-    {
-      provide: TRUSTED_EXTRACTOR_PORT,
-      useExisting: TrustedExtractionService,
-    },
     AnnotationsService,
     PdfAnnotationImporterService,
+    ReferenceMatcherService,
 
     // Utilities & Providers
     OcrProvider,
@@ -114,18 +94,6 @@ import { ANNOTATION_REPOSITORY_PORT } from './types/annotations.types';
     ExtractionHandler,
     ItemLifecycleSubscriber,
     AnnotationNormalizer,
-    InProcessCatalogGatewayAdapter,
-    HttpCatalogGatewayAdapter,
-    {
-      provide: CATALOG_GATEWAY_PORT,
-      useFactory: (
-        inProcess: InProcessCatalogGatewayAdapter,
-        http: HttpCatalogGatewayAdapter,
-      ) => {
-        return process.env.LIBRARY_CATALOG_URL ? http : inProcess;
-      },
-      inject: [InProcessCatalogGatewayAdapter, HttpCatalogGatewayAdapter],
-    },
     XmpParser,
     AcademicRegexCatalog,
     MetadataQualityGate,
@@ -139,13 +107,12 @@ import { ANNOTATION_REPOSITORY_PORT } from './types/annotations.types';
     PdfProvider,
     OcrProvider,
     ExtractionHandler,
+    ReferenceMatcherService,
     OcrSandwichPdfService,
     OcrWorkerPoolService,
     OcrPreprocessorService,
-    ATTACHMENT_REPOSITORY_PORT,
 
     // Trusted Extraction Exports
-    TRUSTED_EXTRACTOR_PORT,
     TrustedExtractionService,
     XmpParser,
     AcademicRegexCatalog,
@@ -156,7 +123,6 @@ import { ANNOTATION_REPOSITORY_PORT } from './types/annotations.types';
     // Annotation domain exports
     AnnotationsService,
     AnnotationNormalizer,
-    ANNOTATION_REPOSITORY_PORT,
     PdfAnnotationImporterService,
   ],
 })

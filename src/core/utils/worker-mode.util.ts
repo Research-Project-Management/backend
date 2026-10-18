@@ -20,3 +20,38 @@ export function shouldRunWorkerConsumers(): boolean {
   }
   return process.env.NODE_ENV !== 'production';
 }
+
+export type StoragePlaneMode = 'all' | 'drive' | 'transfer' | 'worker';
+
+/**
+ * Determines which storage plane the current process is serving.
+ * - Defaults to 'worker' if WORKER_MODE === 'true' and STORAGE_PLANE is not set.
+ * - Defaults to 'all' for standard monolith / hybrid deployments.
+ */
+export function getStoragePlaneMode(): StoragePlaneMode {
+  const raw = (process.env.STORAGE_PLANE || '').trim().toLowerCase();
+  if (raw === 'drive' || raw === 'transfer' || raw === 'worker' || raw === 'all') {
+    return raw;
+  }
+  if (process.env.WORKER_MODE === 'true') {
+    return 'worker';
+  }
+  return 'all';
+}
+
+/**
+ * Whether Control-Plane HTTP controllers (Drive, Trash, Quota, Version) should be mounted.
+ */
+export function shouldMountDriveControllers(): boolean {
+  const plane = getStoragePlaneMode();
+  return plane === 'all' || plane === 'drive';
+}
+
+/**
+ * Whether Data-Plane HTTP controllers (Upload, Stream/Download) should be mounted.
+ */
+export function shouldMountTransferControllers(): boolean {
+  const plane = getStoragePlaneMode();
+  return plane === 'all' || plane === 'transfer';
+}
+

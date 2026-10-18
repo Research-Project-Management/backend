@@ -15,7 +15,7 @@ import { LinkedFilesService } from './linked-files.service';
 import { LinkedFilesRepository } from './linked-files.repository';
 
 // Ports
-import { ILinkedFilesRepositoryPort } from './core/ports/linked-files-repository.port';
+import { ILinkedFilesRepositoryPort } from './domain';
 
 @Module({
   imports: [

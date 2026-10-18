@@ -1,10 +1,10 @@
 import { ItemService as ItemsService } from '@/modules/library/catalog/services/items.service';
 import { ItemFulltextService } from '@/modules/library/catalog/services/item-fulltext.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
-import { IdempotencyMiddleware } from '@/modules/library/shared-kernel/core/middlewares/idempotency.middleware';
+import { IdempotencyMiddleware } from '@/modules/library/core/middlewares/idempotency.middleware';
 import { NotFoundException } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 
 describe('Library Security Hardening & Performance Optimization', () => {
   describe('1. Security: Multi-Tenant Cache Isolation in ItemsService.getFulltext', () => {
@@ -43,8 +43,6 @@ describe('Library Security Hardening & Performance Optimization', () => {
         mockQueryRepo,
         mockCommandRepo,
         mockTxService,
-        {} as any,
-        {} as any,
         {} as any,
         {} as any,
         fulltextService,
@@ -194,8 +192,6 @@ describe('Library Security Hardening & Performance Optimization', () => {
 
       service = new ItemsService(
         mockQueryRepo,
-        {} as any,
-        {} as any,
         {} as any,
         {} as any,
         {} as any,

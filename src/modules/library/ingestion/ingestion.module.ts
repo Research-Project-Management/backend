@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
-import { SharedKernelModule } from '@/modules/library/shared-kernel/shared-kernel.module';
+import { LibraryCoreModule } from '@/modules/library/core/core.module';
 import { StorageModule } from '@/modules/storage/storage.module';
 import { CatalogModule } from '@/modules/library/catalog/catalog.module';
 import { ExtractionModule } from '@/modules/library/extraction/extraction.module';
@@ -12,14 +12,6 @@ import {
 } from './types/queue.constants';
 import { shouldRunWorkerConsumers } from '@/core';
 
-// Gateway Ports & Adapters
-import { CATALOG_GATEWAY_PORT } from './types/catalog-gateway.types';
-import { InProcessCatalogGatewayAdapter } from './gateways/in-process-catalog-gateway.adapter';
-import { HttpCatalogGatewayAdapter } from './gateways/http-catalog-gateway.adapter';
-import { EXTRACTION_GATEWAY_PORT } from './types/extraction-gateway.types';
-import { InProcessExtractionGatewayAdapter } from './gateways/in-process-extraction-gateway.adapter';
-import { HttpExtractionGatewayAdapter } from './gateways/http-extraction-gateway.adapter';
-
 // Facade
 import { IngestionFacade, INGESTION_FACADE } from './ingestion.facade';
 
@@ -27,21 +19,20 @@ import { IngestionFacade, INGESTION_FACADE } from './ingestion.facade';
 import {
   IngestionController,
   ProjectIngestionController,
-  CurationController,
-  RetractionController,
-} from './controllers';
+} from './controllers/ingestion.controller';
+import { CurationController } from './controllers/curation.controller';
+import { RetractionController } from './controllers/retraction.controller';
 
 // Services
 import { IngestionService } from './services/ingestion.service';
 import { PipelineService } from './services/pipeline.service';
 import { IngestionSagaOrchestrator } from './services/ingestion-saga.orchestrator';
 import { QueueService } from './services/queue.service';
-import { WatchdogService } from './services/watchdog.service';
 import { UrlCaptureService } from './services/url-capture.service';
 import { UrlMetadataScraperService } from './services/url-metadata-scraper.service';
 import { IngestionQueueConsumer } from './services/ingestion-queue.consumer';
-import { ReconciliationService } from './services/metadata-reconciliation.service';
-import { ExecutorService } from './services/metadata-executor.service';
+import { MetadataReconciliationService } from './services/metadata-reconciliation.service';
+import { MetadataExecutorService } from './services/metadata-executor.service';
 import { MetadataService } from './services/metadata.service';
 import { DuplicateService } from './services/duplicate.service';
 import { QualityService } from './services/quality.service';
@@ -67,36 +58,32 @@ import {
 } from './types/metadata.types';
 
 // Parsers & Policies & Stages & Providers
-import { DoiParser, BibtexParser, RisParser, CslParser } from './parsers';
-import {
-  NormalizationPolicy,
-  ReconciliationPolicy,
-  DuplicatePolicy,
-} from './policies';
-import {
-  IdentifyStage,
-  NormalizeStage,
-  EnrichStage,
-  ReconcileStage,
-  MatchStage,
-  CommitStage,
-} from './stages';
-import {
-  UrlCaptureProvider,
-  CrossRefProvider,
-  ArxivProvider,
-  PubMedProvider,
-  OpenLibraryProvider,
-  OpenAlexProvider,
-  UnpaywallProvider,
-  RetractionScannerProvider,
-  SearxngSearchProvider,
-  EuropePmcSearchProvider,
-  DblpProvider,
-  SemanticScholarProvider,
-} from './providers';
+import { DoiParser } from './parsers/doi.parser';
+import { BibtexParser } from './parsers/bibtex.parser';
+import { RisParser } from './parsers/ris.parser';
+import { CslParser } from './parsers/csl.parser';
+import { NormalizationPolicy } from './policies/normalization.policy';
+import { ReconciliationPolicy } from './policies/reconciliation.policy';
+import { DuplicatePolicy } from './policies/duplicate.policy';
+import { IdentifyStage } from './stages/identify.stage';
+import { NormalizeStage } from './stages/normalize.stage';
+import { EnrichStage } from './stages/enrich.stage';
+import { ReconcileStage } from './stages/reconcile.stage';
+import { MatchStage } from './stages/match.stage';
+import { CommitStage } from './stages/commit.stage';
+import { UrlCaptureProvider } from './providers/url-capture.provider';
+import { CrossRefProvider } from './providers/crossref.provider';
+import { ArxivProvider } from './providers/arxiv.provider';
+import { PubMedProvider } from './providers/pubmed.provider';
+import { OpenLibraryProvider } from './providers/openlibrary.provider';
+import { OpenAlexProvider } from './providers/openalex.provider';
+import { UnpaywallProvider } from './providers/unpaywall.provider';
+import { RetractionScannerProvider } from './providers/retraction-scanner.provider';
+import { SearxngSearchProvider } from './providers/searxng.provider';
+import { EuropePmcSearchProvider } from './providers/europe-pmc-search.provider';
+import { DblpProvider } from './providers/dblp.provider';
+import { SemanticScholarProvider } from './providers/semantic-scholar.provider';
 import { ExternalSearchComparatorService } from './services/external-search-comparator.service';
-import { EXTERNAL_SEARCH_PORT } from './types/external-search.types';
 import { RetractionItemEventsSubscriber } from './subscribers/retraction-item-events.subscriber';
 
 const ingestionWorkerProviders = shouldRunWorkerConsumers()
@@ -106,7 +93,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
 @Module({
   imports: [
     CoreModule,
-    SharedKernelModule,
+    LibraryCoreModule,
     StorageModule,
     CatalogModule,
     ExtractionModule,
@@ -130,32 +117,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
       useExisting: IngestionFacade,
     },
 
-    // Gateway Ports & Adapters
-    InProcessCatalogGatewayAdapter,
-    HttpCatalogGatewayAdapter,
-    {
-      provide: CATALOG_GATEWAY_PORT,
-      useFactory: (
-        inProcess: InProcessCatalogGatewayAdapter,
-        http: HttpCatalogGatewayAdapter,
-      ) => {
-        return process.env.LIBRARY_CATALOG_URL ? http : inProcess;
-      },
-      inject: [InProcessCatalogGatewayAdapter, HttpCatalogGatewayAdapter],
-    },
-    InProcessExtractionGatewayAdapter,
-    HttpExtractionGatewayAdapter,
-    {
-      provide: EXTRACTION_GATEWAY_PORT,
-      useFactory: (
-        inProcess: InProcessExtractionGatewayAdapter,
-        http: HttpExtractionGatewayAdapter,
-      ) => {
-        return process.env.LIBRARY_EXTRACTION_URL ? http : inProcess;
-      },
-      inject: [InProcessExtractionGatewayAdapter, HttpExtractionGatewayAdapter],
-    },
-
     // Repositories
     IngestionRepository,
     IdempotencyRepository,
@@ -167,7 +128,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     PipelineService,
     IngestionSagaOrchestrator,
     QueueService,
-    WatchdogService,
     UrlCaptureService,
     UrlMetadataScraperService,
     IngestionVerifierService,
@@ -196,8 +156,8 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
 
     // Metadata Providers & Enrichment
     DomainRateLimiterService,
-    ReconciliationService,
-    ExecutorService,
+    MetadataReconciliationService,
+    MetadataExecutorService,
     CrossRefProvider,
     ArxivProvider,
     PubMedProvider,
@@ -259,10 +219,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     SearxngSearchProvider,
     EuropePmcSearchProvider,
     ExternalSearchComparatorService,
-    {
-      provide: EXTERNAL_SEARCH_PORT,
-      useExisting: ExternalSearchComparatorService,
-    },
   ],
   exports: [
     IngestionFacade,
@@ -272,7 +228,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     IngestionVerifierService,
     WebFetchLadderService,
     WEB_FETCH_PORT,
-    EXTERNAL_SEARCH_PORT,
     ExternalSearchComparatorService,
     SearxngSearchProvider,
     EuropePmcSearchProvider,

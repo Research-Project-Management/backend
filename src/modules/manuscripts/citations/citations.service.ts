@@ -1,19 +1,16 @@
 /**
  * citations/citations.service.ts
- * Facade Service orchestrating Citations, BibTeX, DOI/arXiv resolution & Library sync.
+ * Deep Service orchestrating Citations, BibTeX, DOI/arXiv resolution & Library sync.
  */
 
-import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { CitationsRepository } from './citations.repository';
-import { RegexAstBibtexParser } from './core/adapters/parser/regex-ast-bibtex.parser';
-import { SearchCitationKeysUseCase } from './core/use-cases/search-citation-keys.use-case';
-import { ResolveIdentifierToBibUseCase } from './core/use-cases/resolve-identifier-to-bib.use-case';
-import { ValidateProjectBibtexUseCase } from './core/use-cases/validate-project-bibtex.use-case';
-import { SyncLibraryCollectionUseCase } from './core/use-cases/sync-library-collection.use-case';
 import {
-  IBibtexParserPort,
-  BIBTEX_PARSER_PORT,
-} from './core/ports/bibtex-parser.port';
+  AcademicIdentifierVo,
+  BibEntry,
+  IdentifierNotFoundException,
+  RegexAstBibtexParser,
+} from './domain';
 import {
   CitationQueryDto,
   ResolveIdentifierDto,
@@ -25,44 +22,9 @@ import {
 
 @Injectable()
 export class CitationsService {
-  private readonly logger = new Logger(CitationsService.name);
-  private readonly searchKeysUseCase: SearchCitationKeysUseCase;
-  private readonly resolveIdentifierUseCase: ResolveIdentifierToBibUseCase;
-  private readonly validateBibtexUseCase: ValidateProjectBibtexUseCase;
-  private readonly syncLibraryUseCase: SyncLibraryCollectionUseCase;
-  private readonly bibParser: IBibtexParserPort;
+  private readonly bibParser = new RegexAstBibtexParser();
 
-  constructor(
-    @Optional() searchKeysUseCase?: SearchCitationKeysUseCase,
-    @Optional() resolveIdentifierUseCase?: ResolveIdentifierToBibUseCase,
-    @Optional() validateBibtexUseCase?: ValidateProjectBibtexUseCase,
-    @Optional() syncLibraryUseCase?: SyncLibraryCollectionUseCase,
-    @Optional() @Inject(BIBTEX_PARSER_PORT) bibParser?: IBibtexParserPort,
-    @Optional() repository?: CitationsRepository,
-  ) {
-    const parser = bibParser ?? repository ?? new RegexAstBibtexParser();
-    const aggregator = repository;
-    const resolver = repository;
-    const sync = repository;
-
-    this.searchKeysUseCase =
-      searchKeysUseCase ??
-      (aggregator ? new SearchCitationKeysUseCase(aggregator) : undefined!);
-    this.resolveIdentifierUseCase =
-      resolveIdentifierUseCase ??
-      (resolver && aggregator
-        ? new ResolveIdentifierToBibUseCase(resolver, aggregator)
-        : undefined!);
-    this.validateBibtexUseCase =
-      validateBibtexUseCase ??
-      (aggregator ? new ValidateProjectBibtexUseCase(aggregator) : undefined!);
-    this.syncLibraryUseCase =
-      syncLibraryUseCase ??
-      (sync && parser && aggregator
-        ? new SyncLibraryCollectionUseCase(sync, parser, aggregator)
-        : undefined!);
-    this.bibParser = parser;
-  }
+  constructor(private readonly repository: CitationsRepository) {}
 
   /**
    * Search citation keys in the project to power \cite{...} autocomplete.
@@ -71,13 +33,30 @@ export class CitationsService {
     projectId: string,
     queryDto: CitationQueryDto,
   ): Promise<BibEntryDto[]> {
-    const entries = await this.searchKeysUseCase.execute({
-      projectId,
-      query: queryDto.query,
-      limit: queryDto.limit,
-    });
+    const bibFiles = await this.repository.collectBibFiles(projectId);
+    const limit = queryDto.limit && queryDto.limit > 0 ? queryDto.limit : 50;
 
-    return entries.map((e) => e.toJSON() as BibEntryDto);
+    const allMatches: BibEntry[] = [];
+    const seenKeys = new Set<string>();
+
+    for (const file of bibFiles) {
+      const matches = file.findMatches(queryDto.query);
+      for (const m of matches) {
+        const lowerKey = m.key.value.toLowerCase();
+        if (!seenKeys.has(lowerKey)) {
+          seenKeys.add(lowerKey);
+          allMatches.push(m);
+        }
+        if (allMatches.length >= limit) {
+          break;
+        }
+      }
+      if (allMatches.length >= limit) {
+        break;
+      }
+    }
+
+    return allMatches.map((e) => e.toJSON() as BibEntryDto);
   }
 
   /**
@@ -87,16 +66,27 @@ export class CitationsService {
     projectId: string,
     dto: ResolveIdentifierDto,
   ): Promise<{ entry: BibEntryDto; filePath: string; identifierType: string }> {
-    const res = await this.resolveIdentifierUseCase.execute({
+    const idVo = AcademicIdentifierVo.parse(dto.identifier);
+    if (idVo.type === 'unknown') {
+      throw new IdentifierNotFoundException(dto.identifier);
+    }
+
+    const resolvedEntry = await this.repository.resolve(idVo);
+    if (!resolvedEntry) {
+      throw new IdentifierNotFoundException(dto.identifier);
+    }
+
+    const targetFile = dto.targetBibFile || 'references.bib';
+    const filePath = await this.repository.appendEntryToBib(
       projectId,
-      identifier: dto.identifier,
-      targetBibFile: dto.targetBibFile,
-    });
+      resolvedEntry,
+      targetFile,
+    );
 
     return {
-      entry: res.entry.toJSON(),
-      filePath: res.filePath,
-      identifierType: res.identifierType,
+      entry: resolvedEntry.toJSON(),
+      filePath,
+      identifierType: idVo.type,
     };
   }
 
@@ -106,7 +96,67 @@ export class CitationsService {
   public async validateProjectBibtex(
     projectId: string,
   ): Promise<CitationValidationDto> {
-    return this.validateBibtexUseCase.execute(projectId);
+    const bibFiles = await this.repository.collectBibFiles(projectId);
+
+    const allKeysMap = new Map<string, string[]>();
+    const warnings: string[] = [];
+    const missingFieldWarnings: Array<{
+      key: string;
+      missingFields: string[];
+    }> = [];
+    let totalEntries = 0;
+
+    for (const file of bibFiles) {
+      totalEntries += file.totalCount;
+
+      for (const entry of file.entries) {
+        const k = entry.key.value;
+        const existing = allKeysMap.get(k) || [];
+        existing.push(file.path);
+        allKeysMap.set(k, existing);
+
+        const missingFields: string[] = [];
+        if (!entry.title) {
+          warnings.push(`Entry '${k}' in ${file.path} is missing a title.`);
+          missingFields.push('title');
+        }
+        if (!entry.authors.authors.length) {
+          warnings.push(`Entry '${k}' in ${file.path} is missing an author.`);
+          missingFields.push('author');
+        }
+        if (!entry.year) {
+          warnings.push(
+            `Entry '${k}' in ${file.path} is missing a publication year.`,
+          );
+          missingFields.push('year');
+        }
+        if (missingFields.length > 0) {
+          missingFieldWarnings.push({ key: k, missingFields });
+        }
+      }
+    }
+
+    const duplicateKeys: string[] = [];
+    for (const [k, files] of allKeysMap.entries()) {
+      if (files.length > 1) {
+        duplicateKeys.push(k);
+        warnings.push(
+          `Duplicate citation key '${k}' appears ${files.length} times in: ${files.join(', ')}`,
+        );
+      }
+    }
+
+    const isValid = duplicateKeys.length === 0;
+
+    return {
+      valid: isValid,
+      isValid,
+      totalFiles: bibFiles.length,
+      totalEntries,
+      duplicateKeys,
+      warnings,
+      missingFieldWarnings,
+    };
   }
 
   /**
@@ -117,19 +167,36 @@ export class CitationsService {
     userId: string,
     dto: SyncLibraryDto,
   ): Promise<SyncLibraryResultDto> {
-    return this.syncLibraryUseCase.execute({
-      projectId,
+    const rawBibtex = await this.repository.fetchCollectionBibtex(
       userId,
+      dto.collectionId,
+    );
+
+    const entries = this.bibParser.parse(rawBibtex);
+    const targetFile =
+      dto.targetFilename || dto.targetBibFile || 'references.bib';
+
+    let lastPath = targetFile;
+    for (const entry of entries) {
+      lastPath = await this.repository.appendEntryToBib(
+        projectId,
+        entry,
+        targetFile,
+      );
+    }
+
+    return {
       collectionId: dto.collectionId,
-      targetFilename: dto.targetFilename,
-    });
+      syncedCount: entries.length,
+      filePath: lastPath,
+    };
   }
 
   /**
    * List available collections for user from external library.
    */
   public async listUserLibraryCollections(userId: string) {
-    return this.syncLibraryUseCase.listUserCollections(userId);
+    return this.repository.listCollections(userId);
   }
 
   /**

@@ -9,10 +9,3 @@ export * from './linked-files.repository';
 export * from './linked-files.controller';
 export * from './dto/linked-file.dto';
 export * from './domain';
-
-// Backward-compatible re-exports on core/*
-export * from './core/ports/linked-files-repository.port';
-export * from './core/use-cases/create-linked-file.use-case';
-export * from './core/use-cases/refresh-linked-file.use-case';
-export * from './core/use-cases/list-linked-files.use-case';
-export * from './core/use-cases/delete-linked-file.use-case';

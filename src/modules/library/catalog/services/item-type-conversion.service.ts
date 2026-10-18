@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
@@ -15,7 +15,7 @@ import {
   FIELD_ALIASES,
 } from '@/modules/library/catalog/types/items.constants';
 
-import { ItemFieldDefinition } from '@/modules/library/shared-kernel/types/schema.types';
+import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';
 
 /**
  * ItemTypeConversionService — Dedicated Domain Service for Item Type conversions.

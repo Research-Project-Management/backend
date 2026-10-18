@@ -6,20 +6,17 @@ import {
 } from '@nestjs/common';
 import { Prisma, TagType } from '@prisma/client';
 import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repository';
-import { TransactionService } from '@/modules/library/shared-kernel';
-import {
-  normalizeTags,
-  cleanSingleTag,
-} from '@/modules/library/shared-kernel/domain/tag.domain';
+import { TransactionService } from '@/modules/library/core';
+import { cleanSingleTag } from '@/modules/library/core/domain/tag.domain';
 import { resolveOrCreateTags } from '@/modules/library/catalog/domain/command-payload.builder';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import {
   UserId,
   TagId,
   ItemId,
   ProjectId,
-} from '@/modules/library/shared-kernel/core/types/branded.types';
+} from '@/modules/library/core/types/branded.types';
 
 @Injectable()
 export class TagsService {
@@ -32,12 +29,22 @@ export class TagsService {
   async invalidateTagsCache(
     userId: UserId | string,
     projectId?: ProjectId | string,
+    itemId?: ItemId | string,
   ): Promise<void> {
     if (this.cache) {
       await this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(userId));
+      await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId));
+      if (itemId) {
+        await this.cache.del(LIBRARY_REDIS_KEYS.item(itemId));
+        await this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId));
+        await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId));
+      }
       if (projectId && projectId !== 'user') {
         await this.cache.delPattern(
           LIBRARY_REDIS_KEYS.tagsPattern(`proj:${projectId}`),
+        );
+        await this.cache.delPattern(
+          LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`),
         );
       }
     }
@@ -278,14 +285,15 @@ export class TagsService {
     itemId: ItemId | string,
     projectId?: ProjectId | string,
   ) {
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const effectiveProjectId =
-        projectId &&
-        projectId !== 'user' &&
-        projectId !== 'me' &&
-        projectId !== 'personal'
-          ? projectId
-          : undefined;
+    const effectiveProjectId =
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
+        ? projectId
+        : undefined;
+
+    await this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const tagWhere: Prisma.TagWhereInput = effectiveProjectId
         ? { id: tagId, projectId: effectiveProjectId }
         : { id: tagId, userId, projectId: null };
@@ -326,6 +334,8 @@ export class TagsService {
         projectId: effectiveProjectId,
       });
     });
+
+    await this.invalidateTagsCache(userId, effectiveProjectId, itemId);
   }
 
   async assignTagToItem(
@@ -344,14 +354,15 @@ export class TagsService {
     itemId: ItemId | string,
     projectId?: ProjectId | string,
   ) {
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const effectiveProjectId =
-        projectId &&
-        projectId !== 'user' &&
-        projectId !== 'me' &&
-        projectId !== 'personal'
-          ? projectId
-          : undefined;
+    const effectiveProjectId =
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
+        ? projectId
+        : undefined;
+
+    await this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const tagWhere: Prisma.TagWhereInput = effectiveProjectId
         ? { id: tagId, projectId: effectiveProjectId }
         : { id: tagId, userId, projectId: null };
@@ -389,6 +400,8 @@ export class TagsService {
         projectId: effectiveProjectId,
       });
     });
+
+    await this.invalidateTagsCache(userId, effectiveProjectId, itemId);
   }
 
   async detachTagFromItem(
@@ -447,22 +460,39 @@ export class TagsService {
       select: { tagId: true },
     });
 
-    for (const dup of dupTags) {
-      if (!primaryTagIds.has(dup.tagId)) {
-        await tx.itemTag.upsert({
-          where: {
-            tagId_itemId: {
-              tagId: dup.tagId,
-              itemId: targetItemId,
-            },
-          },
-          create: {
+    const newTagIds = Array.from(
+      new Set(
+        dupTags
+          .map((dup) => dup.tagId)
+          .filter((tagId) => !primaryTagIds.has(tagId)),
+      ),
+    );
+
+    if (newTagIds.length > 0) {
+      if (typeof tx.itemTag.createMany === 'function') {
+        await tx.itemTag.createMany({
+          data: newTagIds.map((tagId) => ({
             itemId: targetItemId,
-            tagId: dup.tagId,
-          },
-          update: {},
+            tagId,
+          })),
+          skipDuplicates: true,
         });
-        primaryTagIds.add(dup.tagId);
+      } else {
+        for (const tagId of newTagIds) {
+          await tx.itemTag.upsert({
+            where: {
+              tagId_itemId: {
+                tagId,
+                itemId: targetItemId,
+              },
+            },
+            create: {
+              itemId: targetItemId,
+              tagId,
+            },
+            update: {},
+          });
+        }
       }
     }
 

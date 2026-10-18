@@ -10,32 +10,30 @@ import { IngestionModule } from './ingestion/ingestion.module';
 import { SearchModule } from './search/search.module';
 import { CitationModule } from './citation/citation.module';
 
-// Shared Kernel (lean infrastructure & cross-cutting concerns)
-import { SharedKernelModule } from './shared-kernel/shared-kernel.module';
+// Core (primitives, resilience & cross-cutting concerns)
+import { LibraryCoreModule } from './core/core.module';
 
 import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
 
 /**
  * Macro Composition Root for the Library Subsystem.
  *
- * Microservices-Ready Architecture matching Manuscripts / Overleaf Scale (1M+ Users):
- * Consists of exactly 6 Symmetrical Modules + 1 Shared Kernel + 1 Unified Facade:
+ * Modular Monolith Architecture matching Manuscripts / Overleaf Scale (1M+ Users):
+ * Consists of 6 Domain Sub-Modules + 1 Core Module + 1 Unified Facade:
  *
- * 1. SyncModule    — CDC, Outbox, Monotonic Sequence, TransactionService
- * 2. CatalogModule — Metadata (37 CSL Types), OCC, Collections, Tags, Notes, Annotations
- * 3. ExtractionModule — In-Process Trusted Extractor (XMP, Regex, Layout, MeXtract), OCR, Sandwich PDF, Claim-Check S3
- * 4. IngestionModule  — CrossRef/arXiv/PubMed Pipeline, Dedup, Retraction Watch
- * 5. SearchModule     — Postgres FTS, Semantic Vector, Event-driven Indexing
- * 6. CitationModule   — CSL Engine, 10k+ Styles, DOI Negotiation, Multi-format Exports
- *
- * Note: BibliographyModule and ReaderModule are no longer needed — consumers
- * should import CatalogModule (or ExtractionModule) directly or use LibraryFacade.
+ * 1. SyncModule        — CDC, Outbox, Monotonic Sequence, TransactionService
+ * 2. CatalogModule     — Metadata (37 CSL Types), OCC, Collections, Tags, Notes, Annotations
+ * 3. ExtractionModule  — In-Process Trusted Extractor (XMP, Regex, Layout, MeXtract), OCR, Sandwich PDF, Claim-Check S3
+ * 4. IngestionModule   — CrossRef/arXiv/PubMed Pipeline, Dedup, Retraction Watch
+ * 5. SearchModule      — Postgres FTS, Semantic Vector, Event-driven Indexing
+ * 6. CitationModule    — CSL Engine, 10k+ Styles, DOI Negotiation, Multi-format Exports
+ * 7. LibraryCoreModule — Domain primitives, Zotero schema, resilience, security & middlewares
  */
 @Module({
   imports: [
     ConfigModule,
     AppCoreModule,
-    SharedKernelModule,
+    LibraryCoreModule,
     SyncModule,
     CatalogModule,
     ExtractionModule,
@@ -53,7 +51,7 @@ import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
   exports: [
     LibraryFacade,
     LIBRARY_FACADE,
-    SharedKernelModule,
+    LibraryCoreModule,
     SyncModule,
     CatalogModule,
     ExtractionModule,

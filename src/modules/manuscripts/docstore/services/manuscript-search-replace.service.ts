@@ -15,8 +15,11 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { DocstoreService } from '../docstore.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { LiveCollaborationPort } from '../core/ports/live-collaboration.port';
-import { buildSearchRegex, replaceInText } from '../core/domain/text-replace';
+import {
+  LiveCollaborationPort,
+  buildSearchRegex,
+  replaceInText,
+} from '../domain';
 
 export interface SearchDocumentsParams {
   query: string;

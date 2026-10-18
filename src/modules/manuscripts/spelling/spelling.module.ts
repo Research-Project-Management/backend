@@ -16,12 +16,13 @@ import { SpellingService } from './spelling.service';
 import { SpellingRepository } from './spelling.repository';
 
 // Ports & Adapters
-import { LATEX_TOKENIZER_PORT } from './core/ports/latex-tokenizer.port';
-import { SPELL_ENGINE_PORT } from './core/ports/spell-engine.port';
-import { CUSTOM_DICTIONARY_REPOSITORY_PORT } from './core/ports/custom-dictionary-repository.port';
-
-import { RegexLatexTokenizerAdapter } from './core/adapters/tokenizer/regex-latex-tokenizer.adapter';
-import { AcademicSpellEngineAdapter } from './core/adapters/engine/academic-spell-engine.adapter';
+import {
+  LATEX_TOKENIZER_PORT,
+  SPELL_ENGINE_PORT,
+  CUSTOM_DICTIONARY_REPOSITORY_PORT,
+  RegexLatexTokenizerAdapter,
+  AcademicSpellEngineAdapter,
+} from './domain';
 
 @Module({
   imports: [PrismaModule, DocstoreModule],

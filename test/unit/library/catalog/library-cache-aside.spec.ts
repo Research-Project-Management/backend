@@ -3,12 +3,12 @@ import { ItemQueryService } from '@/modules/library/catalog/services/item-query.
 import { ItemFulltextService } from '@/modules/library/catalog/services/item-fulltext.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { TransactionService } from '@/modules/library/shared-kernel';
+import { TransactionService } from '@/modules/library/core';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 
 describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
   let service: ItemsService;
@@ -126,8 +126,6 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       commandRepo,
       txService,
       tagsService,
-      typesService,
-      transformer,
       queryService,
       fulltextService,
       undefined,
@@ -362,8 +360,6 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
         commandRepo,
         txService,
         tagsService,
-        typesService,
-        transformer,
         bareQueryService,
         bareFulltextService,
       );

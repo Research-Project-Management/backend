@@ -22,12 +22,10 @@ import {
   parseCreatorString,
   splitAuthorString,
   stripLatexBraces,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 
 describe('Real-World Zotero & Mendeley Datasets + User Case-Study Stress Test Suite', () => {
-  // ===========================================================================
   // CASE STUDY 1: Zotero / Mendeley Multi-Format Bulk Migration & Round-Trip
-  // ===========================================================================
   describe('Case Study 1: Zotero / Mendeley BibTeX, RIS & CSL-JSON Bulk Import + Round-Trip Export', () => {
     const bibtexParser = new BibtexParser();
     const risParser = new RisParser();
@@ -356,9 +354,7 @@ ER  -
     });
   });
 
-  // ===========================================================================
   // CASE STUDY 2: Duplicate Detection & Smart Merge (Zotero "Duplicate Items")
-  // ===========================================================================
   describe('Case Study 2: Duplicate Detection & Non-Destructive Smart Merge', () => {
     const duplicatePolicy = new DuplicatePolicy();
 
@@ -686,9 +682,7 @@ ER  -
     });
   });
 
-  // ===========================================================================
   // CASE STUDY 3: Saved Searches (Smart Collections), Hierarchical Folders & Tags
-  // ===========================================================================
   describe('Case Study 3: Saved Searches (Smart Collections), Hierarchical Subcollection Roll-Up & Tag Curation', () => {
     it('3.1 compiles nested Saved Search AST with matchMode (all/any), snake_case operators, recursive subcollections, and isStarred/readStatus', async () => {
       const mockPrisma = {
@@ -856,9 +850,7 @@ ER  -
     });
   });
 
-  // ===========================================================================
   // CASE STUDY 4: Citation Formatting Across Academic Styles & LaTeX Sync
-  // ===========================================================================
   describe('Case Study 4: Multi-Style Citation Engine (APA, IEEE, Vancouver, Chicago, MLA, Harvard) & LaTeX Bibliography Sync', () => {
     const cslEngine = new CslEngineService();
     const citationService = new CitationService(undefined, cslEngine);
@@ -1045,9 +1037,7 @@ ER  -
     });
   });
 
-  // ===========================================================================
   // CASE STUDY 5: PDF Annotation Extraction & Retraction Watch Alerting
-  // ===========================================================================
   describe('Case Study 5: PDF Highlight-to-Note Extraction & Retraction Watch Alerting', () => {
     it('5.1 extracts PDF highlights & comments sorted by page + Zotero sortIndex, grouped by semantic color with deep backlinks', () => {
       const item = {

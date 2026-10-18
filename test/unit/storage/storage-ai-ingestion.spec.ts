@@ -1,7 +1,7 @@
 import { FileUploadedAiListener } from '@/modules/ai/ingestion/listeners/file-uploaded-ai.listener';
 import { DocumentAiIngestionService } from '@/modules/ai/ingestion/services/document-ai-ingestion.service';
 import { ScientificChunkingService } from '@/modules/ai/ingestion/services/scientific-chunking.service';
-import { FileUploadedEvent } from '@/modules/storage/domain/events/file-uploaded.event';
+import { FileUploadedEvent } from '@/modules/storage/core';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { IExtractionFacade } from '@/modules/library/extraction/extraction.facade';
 import { EngineService } from '@/modules/ai/engine/engine.service';
@@ -29,7 +29,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
       linkFile: jest.fn(),
       uploadFile: jest.fn(),
       uploadBuffer: jest.fn(),
-    };
+    } as any;
 
     mockContentFacade = {
       extractDocumentFromBuffer: jest.fn(),
@@ -95,7 +95,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
       mimeType: 'application/pdf',
       size: 2048,
       storageKey: 'blobs/qc.pdf',
-      contentUrl: `/api/files/${fileId}/content`,
+      contentUrl: `/api/v1/storage/files/${fileId}/content`,
       buffer: Buffer.from('%PDF-1.7 sample quantum paper data'),
     });
 
@@ -215,7 +215,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
       mimeType: 'application/pdf',
       size: 2048,
       storageKey: 'blobs/offline.pdf',
-      contentUrl: `/api/files/${fileId}/content`,
+      contentUrl: `/api/v1/storage/files/${fileId}/content`,
       buffer: Buffer.from('%PDF-1.7 sample data'),
     });
 

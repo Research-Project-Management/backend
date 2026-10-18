@@ -55,6 +55,3 @@ export class SearchItemsQueryDto {
   @IsString()
   sortOrder?: 'asc' | 'desc';
 }
-
-export const SearchQueryDto = SearchItemsQueryDto;
-export type SearchQueryDto = SearchItemsQueryDto;

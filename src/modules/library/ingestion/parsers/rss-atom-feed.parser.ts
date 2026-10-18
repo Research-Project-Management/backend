@@ -5,9 +5,9 @@ import {
   normalizeArxivId,
   normalizeDoi,
   normalizeTags,
-} from '@/modules/library/ingestion/domain/metadata.domain';
-import { parseCreatorString } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { AcademicCreator } from '@/modules/library/shared-kernel/types/bibliographic.types';
+} from '@/modules/library/core';
+import { parseCreatorString } from '@/modules/library/core';
+import { AcademicCreator } from '@/modules/library/core/types/bibliographic.types';
 
 export type FeedFormat = 'rss2' | 'rss1-rdf' | 'atom';
 

@@ -16,11 +16,6 @@ import {
   RegexLatexTokenizerAdapter,
   AcademicSpellEngineAdapter,
   InMemoryCustomDictionaryAdapter,
-  CheckSpellingUseCase,
-  GetSuggestionsUseCase,
-  LearnWordUseCase,
-  UnlearnWordUseCase,
-  ListCustomWordsUseCase,
   SpellingService,
   SpellingController,
   SpellingUtilityController,
@@ -363,30 +358,22 @@ The result is valid.
   });
 
   // =========================================================================
-  // 3. USE CASES LAYER
+  // 3. APPLICATION SERVICE LAYER
   // =========================================================================
-  describe('Use Cases Layer', () => {
-    let tokenizer: RegexLatexTokenizerAdapter;
-    let spellEngine: AcademicSpellEngineAdapter;
+  describe('Application Service Layer', () => {
     let customDict: InMemoryCustomDictionaryAdapter;
+    let service: SpellingService;
 
     beforeEach(() => {
-      tokenizer = new RegexLatexTokenizerAdapter();
-      spellEngine = new AcademicSpellEngineAdapter();
       customDict = new InMemoryCustomDictionaryAdapter();
+      service = new SpellingService(customDict);
     });
 
-    describe('CheckSpellingUseCase', () => {
+    describe('checkSpelling', () => {
       it('should check LaTeX document and report misspelled words with suggestions', async () => {
-        const useCase = new CheckSpellingUseCase(
-          tokenizer,
-          spellEngine,
-          customDict,
-        );
-
         const latex =
           'This paper presents a novel neural netwrok architecture.';
-        const report = await useCase.execute({
+        const report = await service.checkSpelling({
           text: latex,
           language: 'en-US',
         });
@@ -401,14 +388,9 @@ The result is valid.
         await customDict.addProjectWord('proj-1', 'FluxPlatform');
         await customDict.addUserWord('user-1', 'GigaBERT');
 
-        const useCase = new CheckSpellingUseCase(
-          tokenizer,
-          spellEngine,
-          customDict,
-        );
         const text = 'Testing FluxPlatform and GigaBERT models.';
 
-        const report = await useCase.execute({
+        const report = await service.checkSpelling({
           text,
           projectId: 'proj-1',
           userId: 'user-1',
@@ -418,47 +400,29 @@ The result is valid.
       });
 
       it('should return empty report on blank text', async () => {
-        const useCase = new CheckSpellingUseCase(
-          tokenizer,
-          spellEngine,
-          customDict,
-        );
-        const report = await useCase.execute({ text: '' });
+        const report = await service.checkSpelling({ text: '' });
         expect(report.totalWordsChecked).toBe(0);
         expect(report.misspelledCount).toBe(0);
       });
     });
 
-    describe('GetSuggestionsUseCase', () => {
+    describe('getSuggestions', () => {
       it('should return suggestions for single word query', () => {
-        const useCase = new GetSuggestionsUseCase(spellEngine);
-        const suggestions = useCase.execute({ word: 'hypotheis' });
+        const suggestions = service.getSuggestions({ word: 'hypotheis' });
         expect(suggestions).toContain('hypothesis');
       });
 
       it('should return empty for empty word', () => {
-        const useCase = new GetSuggestionsUseCase(spellEngine);
-        expect(useCase.execute({ word: '' })).toEqual([]);
+        expect(service.getSuggestions({ word: '' })).toEqual([]);
       });
     });
 
-    describe('LearnWordUseCase & UnlearnWordUseCase', () => {
+    describe('learnProjectWord & unlearnProjectWord', () => {
       it('should learn and unlearn project words', async () => {
-        const learnUseCase = new LearnWordUseCase(customDict);
-        const unlearnUseCase = new UnlearnWordUseCase(customDict);
-
-        await learnUseCase.execute({
-          word: 'TransformerXL',
-          scope: 'PROJECT',
-          projectId: 'p1',
-        });
+        await service.learnProjectWord('p1', 'TransformerXL');
         expect(await customDict.isCustomWord('transformerxl', 'p1')).toBe(true);
 
-        const removed = await unlearnUseCase.execute({
-          word: 'TransformerXL',
-          scope: 'PROJECT',
-          projectId: 'p1',
-        });
+        const removed = await service.unlearnProjectWord('p1', 'TransformerXL');
         expect(removed).toBe(true);
         expect(await customDict.isCustomWord('transformerxl', 'p1')).toBe(
           false,
@@ -466,32 +430,23 @@ The result is valid.
       });
 
       it('should reject invalid words containing spaces or illegal characters', async () => {
-        const learnUseCase = new LearnWordUseCase(customDict);
         await expect(
-          learnUseCase.execute({
-            word: 'two words',
-            scope: 'PROJECT',
-            projectId: 'p1',
-          }),
+          service.learnProjectWord('p1', 'two words'),
         ).rejects.toThrow(InvalidWordException);
 
-        await expect(
-          learnUseCase.execute({ word: '', scope: 'PROJECT', projectId: 'p1' }),
-        ).rejects.toThrow(InvalidWordException);
+        await expect(service.learnProjectWord('p1', '')).rejects.toThrow(
+          InvalidWordException,
+        );
       });
     });
 
-    describe('ListCustomWordsUseCase', () => {
+    describe('listProjectWords', () => {
       it('should list words in requested scope', async () => {
         await customDict.addProjectWord('p1', 'AlphaWord');
         await customDict.addProjectWord('p1', 'BetaWord');
 
-        const useCase = new ListCustomWordsUseCase(customDict);
-        const words = await useCase.execute({
-          scope: 'PROJECT',
-          projectId: 'p1',
-        });
-        expect(words).toEqual(['alphaword', 'betaword']);
+        const res = await service.listProjectWords('p1');
+        expect(res.words).toEqual(['alphaword', 'betaword']);
       });
     });
   });
@@ -507,32 +462,12 @@ The result is valid.
     let docstoreMock: any;
 
     beforeEach(() => {
-      const tokenizer = new RegexLatexTokenizerAdapter();
-      const spellEngine = new AcademicSpellEngineAdapter();
       customDict = new InMemoryCustomDictionaryAdapter();
-
-      const checkSpellingUseCase = new CheckSpellingUseCase(
-        tokenizer,
-        spellEngine,
-        customDict,
-      );
-      const getSuggestionsUseCase = new GetSuggestionsUseCase(spellEngine);
-      const learnWordUseCase = new LearnWordUseCase(customDict);
-      const unlearnWordUseCase = new UnlearnWordUseCase(customDict);
-      const listCustomWordsUseCase = new ListCustomWordsUseCase(customDict);
-
       docstoreMock = {
         getDoc: jest.fn(),
       };
 
-      service = new SpellingService(
-        checkSpellingUseCase,
-        getSuggestionsUseCase,
-        learnWordUseCase,
-        unlearnWordUseCase,
-        listCustomWordsUseCase,
-        docstoreMock,
-      );
+      service = new SpellingService(customDict, docstoreMock);
 
       controller = new SpellingController(service);
       utilityController = new SpellingUtilityController(service);

@@ -1,9 +1,7 @@
-declare const _brand: unique symbol;
-export type Brand<T, TBrand extends string> = T & { readonly [_brand]: TBrand };
+import type { Brand, UserId, ItemId } from '@/modules/library/core';
 
 export type StateId = Brand<string, 'StateId'>;
-export type UserId = Brand<string, 'UserId'>;
-export type ItemId = Brand<string, 'ItemId'>;
+export type { UserId, ItemId };
 
 export enum ReadingStatus {
   UNREAD = 'unread',
@@ -19,12 +17,6 @@ export const READING_STATUS = {
 
 export type ReadingStatusValue =
   (typeof READING_STATUS)[keyof typeof READING_STATUS];
-
-export type ReadStatus = ReadingStatus;
-export const ReadStatus = ReadingStatus;
-
-export type StateStatus = ReadingStatus;
-export const StateStatus = ReadingStatus;
 
 export interface StateEntity {
   id?: string;
@@ -50,9 +42,6 @@ export interface StateData {
   lastReadAt: string | null;
 }
 
-export type ItemState = StateData;
-export type ReadingState = StateData;
-
 export interface UpsertStateData {
   isStarred?: boolean;
   readStatus?: ReadingStatus;
@@ -71,8 +60,6 @@ export const VALID_READING_TRANSITIONS: Record<
   [ReadingStatus.READING]: [ReadingStatus.COMPLETED, ReadingStatus.UNREAD],
   [ReadingStatus.COMPLETED]: [ReadingStatus.READING, ReadingStatus.UNREAD],
 };
-
-export const VALID_STATE_TRANSITIONS = VALID_READING_TRANSITIONS;
 
 export type StateResult =
   | { success: true; data: StateData }

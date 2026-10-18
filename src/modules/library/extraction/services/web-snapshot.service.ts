@@ -9,7 +9,7 @@ import type { Attachment } from '@prisma/client';
 import { createHash } from 'crypto';
 import { AttachmentsService } from './attachments.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
+import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 
 export interface SnapshotResult {
   title: string;
@@ -435,7 +435,7 @@ export class WebSnapshotService {
     const fileKey = `${userId}/library/snapshots/${itemId}_snapshot_${timestamp}.html`;
     const filename = `Snapshot_${sanitizedTitle}_${new Date().toISOString().slice(0, 10)}.html`;
 
-    let fileUrl = `/api/files/snapshots/${fileKey}`;
+    let fileUrl = `/api/v1/storage/files/snapshots/${fileKey}`;
     let resolvedFileId: string | undefined;
     const buffer = Buffer.from(snapshot.htmlContent, 'utf-8');
 

@@ -14,31 +14,25 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { PrismaService } from '@/core';
-import { GetDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/get-doc.use-case';
-import { PeekDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/peek-doc.use-case';
-import { UpdateDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/update-doc.use-case';
-import { PatchDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/patch-doc.use-case';
-import { GetAllDocsUseCase } from '@/modules/manuscripts/docstore/core/use-cases/get-all-docs.use-case';
-import { ArchiveProjectUseCase } from '@/modules/manuscripts/docstore/core/use-cases/archive-project.use-case';
-import { PrismaDocRepository } from '@/modules/manuscripts/docstore/core/adapters/database/prisma-doc.repository';
-import { S3DocPersistorAdapter } from '@/modules/manuscripts/docstore/core/adapters/storage/s3-doc-persistor.adapter';
-import { DocHasherAdapter } from '@/modules/manuscripts/docstore/core/adapters/engine/doc-hasher.adapter';
-import { IDocRepository } from '@/modules/manuscripts/docstore/core/ports/doc-repository.port';
-import { IDocPersistor } from '@/modules/manuscripts/docstore/core/ports/doc-persistor.port';
-import { IDocHasher } from '@/modules/manuscripts/docstore/core/ports/doc-hasher.port';
-import { LineArrayEngine } from '@/modules/manuscripts/docstore/core/adapters/engine/line-array.engine';
-import { NoopDiffChecker } from '@/modules/manuscripts/docstore/core/adapters/engine/noop-diff.checker';
-import { DocRangeVo } from '@/modules/manuscripts/docstore/core/domain/doc-range.vo';
 import {
+  DocstoreService,
+  PrismaDocRepository,
+  S3DocPersistorAdapter,
+  DocHasherAdapter,
+  IDocRepository,
+  IDocPersistor,
+  IDocHasher,
+  LineArrayEngine,
+  NoopDiffChecker,
+  DocRangeVo,
   DocNotFoundError,
   DocModifiedError,
   DocTooLargeError,
   NullByteDetectedError,
-} from '@/modules/manuscripts/docstore/core/domain/doc-errors';
-import { TextDoc } from '@/modules/manuscripts/docstore/core/domain/text-doc.entity';
-import { DocstoreMetrics } from '@/modules/manuscripts/docstore/core/adapters/telemetry/docstore.metrics';
+  TextDoc,
+  DocstoreMetrics,
+} from '@/modules/manuscripts/docstore';
 
 describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
   let service: DocstoreService;
@@ -164,12 +158,6 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DocstoreService,
-        GetDocUseCase,
-        PeekDocUseCase,
-        UpdateDocUseCase,
-        PatchDocUseCase,
-        GetAllDocsUseCase,
-        ArchiveProjectUseCase,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: IDocRepository, useClass: PrismaDocRepository },

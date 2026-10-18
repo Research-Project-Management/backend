@@ -70,10 +70,10 @@ export class HealthController {
             stats: parsedStats,
           };
         }
-      } catch (err: unknown) {
+      } catch (_err) {
         redisStats = {
           connected: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: 'Redis connection unavailable',
         };
       }
     }

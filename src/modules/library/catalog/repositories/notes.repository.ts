@@ -2,9 +2,9 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, Annotation } from '@prisma/client';
 import { isUUID } from 'class-validator';
-import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
-import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
-import { buildTipTapDocFromText } from '@/modules/library/shared-kernel/domain/tiptap.domain';
+import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
+import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 import {
   CreateNoteData,
   UpdateNoteData,
@@ -79,6 +79,27 @@ export class NotesRepository {
     });
   }
 
+  async syncItemNoteCount(
+    itemId: string | null | undefined,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (!itemId || !isUuid(itemId)) return;
+    const client = this.getClient(tx);
+    if (
+      typeof client.note?.count !== 'function' ||
+      typeof client.item?.updateMany !== 'function'
+    ) {
+      return;
+    }
+    const activeCount = await client.note.count({
+      where: { itemId, deletedAt: null },
+    });
+    await client.item.updateMany({
+      where: { id: itemId },
+      data: { noteCount: activeCount },
+    });
+  }
+
   async create(
     userId: string,
     data: CreateNoteData,
@@ -86,7 +107,7 @@ export class NotesRepository {
   ) {
     const client = this.getClient(tx);
     const contentMd = data.contentMd ?? '';
-    return client.note.create({
+    const created = await client.note.create({
       data: {
         userId,
         projectId: data.projectId ?? null,
@@ -102,6 +123,8 @@ export class NotesRepository {
         version: 1,
       },
     });
+    await this.syncItemNoteCount(created.itemId ?? data.itemId, tx);
+    return created;
   }
 
   async update(
@@ -236,10 +259,13 @@ export class NotesRepository {
       isUuid(projectId)
         ? { projectId }
         : { userId, projectId: null };
+    const existing =
+      typeof client.note?.findFirst === 'function'
+        ? await client.note.findFirst({
+            where: { id, ...scopeWhere, deletedAt: null },
+          })
+        : null;
     if (expectedVersion !== undefined) {
-      const existing = await client.note.findFirst({
-        where: { id, ...scopeWhere, deletedAt: null },
-      });
       if (existing && existing.version !== expectedVersion) {
         throw new VersionMismatchException({
           aggregateType: 'Note',
@@ -255,6 +281,10 @@ export class NotesRepository {
       data: { deletedAt: new Date() },
     });
 
+    if (result.count > 0 && existing?.itemId) {
+      await this.syncItemNoteCount(existing.itemId, tx);
+    }
+
     return result.count > 0;
   }
 
@@ -269,6 +299,10 @@ export class NotesRepository {
       where: { itemId: { in: sourceItemIds } },
       data: { itemId: targetItemId },
     });
+    for (const sourceId of sourceItemIds) {
+      await this.syncItemNoteCount(sourceId, tx);
+    }
+    await this.syncItemNoteCount(targetItemId, tx);
   }
 
   async createLiteratureNote(
@@ -297,15 +331,13 @@ export class NotesRepository {
         itemId,
         title: source ? `Imported Note (${source})` : 'Imported Note',
         contentMd: trimmed,
-        contentJson: {
-          type: 'doc',
-          content: [{ type: 'paragraph', text: trimmed }],
-        },
+        contentJson: buildTipTapDocFromText(trimmed) as Prisma.InputJsonValue,
         createdById: userId,
-        tags: ['imported', ...(source ? [source] : [])],
+        tags: normalizeTags(['imported', ...(source ? [source] : [])]),
         version: 1,
       },
     });
+    await this.syncItemNoteCount(itemId, tx);
   }
 
   async findItemAnnotations(itemId: string): Promise<Annotation[]> {

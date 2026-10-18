@@ -13,10 +13,7 @@ import {
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '@/core';
 import type { FastifyReply } from 'fastify';
-import {
-  LiveCollaborationPort,
-  LivePresenceUser,
-} from '../core/ports/live-collaboration.port';
+import { LiveCollaborationPort, LivePresenceUser } from '../domain';
 
 export interface ActivePresenceUser {
   id: string;

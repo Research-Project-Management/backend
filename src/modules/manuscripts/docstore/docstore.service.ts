@@ -5,48 +5,52 @@
  */
 
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { IDocRepository } from './core/ports/doc-repository.port';
-import { IDocPersistor } from './core/ports/doc-persistor.port';
-import { IDocHasher } from './core/ports/doc-hasher.port';
-import { GetDocUseCase } from './core/use-cases/get-doc.use-case';
+import { Readable } from 'stream';
+import * as crypto from 'crypto';
+import { mapWithConcurrency } from '@/core';
+import { WorkspaceFile } from '@/modules/manuscripts/core';
 import {
-  PeekDocUseCase,
-  PeekDocResult,
-} from './core/use-cases/peek-doc.use-case';
-import {
-  UpdateDocUseCase,
-  UpdateDocResult,
-} from './core/use-cases/update-doc.use-case';
-import { PatchDocUseCase } from './core/use-cases/patch-doc.use-case';
-import { GetAllDocsUseCase } from './core/use-cases/get-all-docs.use-case';
-import { ArchiveProjectUseCase } from './core/use-cases/archive-project.use-case';
-import { TextDoc } from './core/domain/text-doc.entity';
-import { DocRanges } from './core/domain/doc-range.vo';
-import { LineArrayEngine } from './core/adapters/engine/line-array.engine';
-import {
+  IDocRepository,
+  IDocPersistor,
+  IDocHasher,
+  TextDoc,
+  DocRanges,
+  LineArrayEngine,
+  NoopDiffChecker,
   DocstoreMetrics,
   DocstoreMetricsSummary,
-} from './core/adapters/telemetry/docstore.metrics';
+  DocNotFoundError,
+  Md5MismatchError,
+  NullByteDetectedError,
+  computeDocSha256,
+  TrackChangeSuggestionSpec,
+  applySuggestionToLines,
+  applyBatchSuggestionsToLines,
+  IncludedProjectDoc,
+  resolveIncludedLatexContent,
+  convertLatexToMarkdown,
+  convertLatexToHtml,
+  convertLatexToDocxBuffer,
+} from './domain';
 import {
   CreateDocDto,
   UpdateDocDto,
   PatchDocDto,
   DocResponseDto,
 } from './dto/doc.dto';
-import { WorkspaceFile } from '@/modules/manuscripts/clsi/domain';
-import { computeDocSha256 } from './domain/doc-hasher';
-import {
-  TrackChangeSuggestionSpec,
-  applySuggestionToLines,
-  applyBatchSuggestionsToLines,
-} from './domain/text-suggestion-mutator';
-import {
-  IncludedProjectDoc,
-  resolveIncludedLatexContent,
-  convertLatexToMarkdown,
-  convertLatexToHtml,
-  convertLatexToDocxBuffer,
-} from './domain/latex-export-transpiler';
+
+const COLD_HYDRATION_CONCURRENCY = 8;
+
+export interface PeekDocResult {
+  doc: TextDoc;
+  status: 'active' | 'archived';
+}
+
+export interface UpdateDocResult {
+  doc: TextDoc;
+  modified: boolean;
+  rev: number;
+}
 
 export interface ExportFormattedDocResult {
   filename: string;
@@ -59,40 +63,15 @@ export interface ExportFormattedDocResult {
 @Injectable()
 export class DocstoreService {
   private readonly logger = new Logger(DocstoreService.name);
-  private readonly getDocUseCase: GetDocUseCase;
-  private readonly peekDocUseCase: PeekDocUseCase;
-  private readonly updateDocUseCase: UpdateDocUseCase;
-  private readonly patchDocUseCase: PatchDocUseCase;
-  private readonly getAllDocsUseCase: GetAllDocsUseCase;
-  private readonly archiveProjectUseCase: ArchiveProjectUseCase;
+  private readonly docPersistor: IDocPersistor;
 
   constructor(
     private readonly docRepository: IDocRepository,
     @Optional() private readonly docHasher?: IDocHasher,
-    @Optional() getDocUseCase?: GetDocUseCase,
-    @Optional() peekDocUseCase?: PeekDocUseCase,
-    @Optional() updateDocUseCase?: UpdateDocUseCase,
-    @Optional() patchDocUseCase?: PatchDocUseCase,
-    @Optional() getAllDocsUseCase?: GetAllDocsUseCase,
-    @Optional() archiveProjectUseCase?: ArchiveProjectUseCase,
     @Optional() @Inject(IDocPersistor) docPersistor?: IDocPersistor,
   ) {
-    const persistor =
+    this.docPersistor =
       docPersistor ?? (docRepository as unknown as IDocPersistor);
-    this.getDocUseCase =
-      getDocUseCase ?? new GetDocUseCase(docRepository, persistor);
-    this.peekDocUseCase =
-      peekDocUseCase ?? new PeekDocUseCase(docRepository, persistor);
-    this.updateDocUseCase =
-      updateDocUseCase ?? new UpdateDocUseCase(docRepository, docHasher);
-    this.patchDocUseCase =
-      patchDocUseCase ?? new PatchDocUseCase(docRepository);
-    this.getAllDocsUseCase =
-      getAllDocsUseCase ??
-      new GetAllDocsUseCase(docRepository, this.getDocUseCase);
-    this.archiveProjectUseCase =
-      archiveProjectUseCase ??
-      new ArchiveProjectUseCase(docRepository, persistor, this.getDocUseCase);
   }
 
   public mapToDto(doc: TextDoc): DocResponseDto {
@@ -112,12 +91,82 @@ export class DocstoreService {
     };
   }
 
+  private async getDocEntity(
+    projectId: string,
+    docId: string,
+    options?: { includeDeleted?: boolean },
+  ): Promise<TextDoc> {
+    const doc = await this.docRepository.getDoc(projectId, docId);
+
+    if (!doc) {
+      throw new DocNotFoundError(
+        `Document ${docId} not found in project ${projectId}`,
+      );
+    }
+
+    if (doc.deleted && !options?.includeDeleted) {
+      throw new DocNotFoundError(`Document ${docId} has been deleted`);
+    }
+
+    if (doc.inStorage && doc.storageKey) {
+      this.logger.log(
+        `Hydrating cold-tier document ${docId} from key ${doc.storageKey}`,
+      );
+      const stream = await this.docPersistor.getObjectStream(doc.storageKey);
+      const expectedMd5 = await this.docPersistor.getObjectMd5Hash(
+        doc.storageKey,
+      );
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const rawJson = Buffer.concat(chunks).toString('utf8');
+      const actualMd5 = crypto.createHash('md5').update(rawJson).digest('hex');
+
+      if (expectedMd5 && actualMd5 !== expectedMd5) {
+        throw new Md5MismatchError('MD5 mismatch during document unarchival', {
+          key: doc.storageKey,
+          sourceMd5: expectedMd5,
+          actualMd5,
+        });
+      }
+
+      const parsed = JSON.parse(rawJson);
+      const lines = Array.isArray(parsed.lines) ? parsed.lines : [];
+      const ranges = parsed.ranges || { changes: [], comments: [] };
+
+      return await this.docRepository.unarchiveDoc(
+        projectId,
+        docId,
+        lines,
+        ranges,
+      );
+    }
+
+    return doc;
+  }
+
+  private async getAllDocEntities(projectId: string): Promise<TextDoc[]> {
+    const docs = await this.docRepository.getAllDocs(projectId);
+    return await mapWithConcurrency<TextDoc, TextDoc>(
+      docs,
+      COLD_HYDRATION_CONCURRENCY,
+      async (doc: TextDoc) => {
+        if (doc.inStorage) {
+          return await this.getDocEntity(projectId, doc.id);
+        }
+        return doc;
+      },
+    );
+  }
+
   public async getDoc(
     projectId: string,
     docId: string,
     options?: { includeDeleted?: boolean },
   ): Promise<DocResponseDto> {
-    const doc = await this.getDocUseCase.execute(projectId, docId, options);
+    const doc = await this.getDocEntity(projectId, docId, options);
     return this.mapToDto(doc);
   }
 
@@ -131,16 +180,59 @@ export class DocstoreService {
     projectId: string,
     docId: string,
   ): Promise<PeekDocResult> {
-    return await this.peekDocUseCase.execute(projectId, docId);
+    const doc = await this.docRepository.getDoc(projectId, docId);
+
+    if (!doc) {
+      throw new DocNotFoundError(
+        `Document ${docId} not found in project ${projectId}`,
+      );
+    }
+
+    if (!doc.inStorage) {
+      return { doc, status: 'active' };
+    }
+
+    if (!doc.storageKey) {
+      return { doc, status: 'archived' };
+    }
+
+    const stream = await this.docPersistor.getObjectStream(doc.storageKey);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const rawJson = Buffer.concat(chunks).toString('utf8');
+    const parsed = JSON.parse(rawJson);
+    const lines = Array.isArray(parsed.lines) ? parsed.lines : [];
+
+    const peekedDoc = new TextDoc({
+      id: doc.id,
+      projectId: doc.projectId,
+      path: doc.path,
+      lines,
+      rev: doc.rev,
+      version: doc.version,
+      ranges: parsed.ranges || doc.ranges,
+      hash: doc.hash,
+      sizeBytes: doc.sizeBytes,
+      inStorage: true,
+      storageKey: doc.storageKey,
+      deleted: doc.deleted,
+      deletedAt: doc.deletedAt,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+    });
+
+    return { doc: peekedDoc, status: 'archived' };
   }
 
   public async getRawDoc(projectId: string, docId: string): Promise<string> {
-    const doc = await this.getDocUseCase.execute(projectId, docId);
+    const doc = await this.getDocEntity(projectId, docId);
     return doc.toRawText();
   }
 
   public async getAllDocs(projectId: string): Promise<DocResponseDto[]> {
-    const docs = await this.getAllDocsUseCase.execute(projectId);
+    const docs = await this.getAllDocEntities(projectId);
     return docs.map((d) => this.mapToDto(d));
   }
 
@@ -177,14 +269,62 @@ export class DocstoreService {
     docId: string,
     dto: UpdateDocDto,
   ): Promise<UpdateDocResult> {
-    return await this.updateDocUseCase.execute(
+    const lines = dto.lines;
+    const version = dto.version;
+    const ranges = dto.ranges;
+    const expectedRev = dto.expectedRev ?? dto.rev;
+
+    LineArrayEngine.validateLinesSize(lines);
+
+    const currentDoc = await this.docRepository.getDoc(projectId, docId);
+    if (!currentDoc) {
+      throw new DocNotFoundError(
+        `Document ${docId} not found in project ${projectId}`,
+      );
+    }
+
+    const resolvedVersion =
+      version !== undefined ? version : (currentDoc.version ?? 0) + 1;
+
+    const diff = NoopDiffChecker.checkDiff(
+      currentDoc,
+      lines,
+      resolvedVersion,
+      ranges,
+    );
+    if (!diff.shouldUpdate) {
+      this.logger.debug(
+        `Document ${docId} lines and ranges have not changed - skipping database write`,
+      );
+      DocstoreMetrics.recordNoopSkip();
+      return {
+        doc: currentDoc,
+        modified: false,
+        rev: currentDoc.rev,
+      };
+    }
+
+    const hash = this.docHasher
+      ? this.docHasher.computeHash(lines)
+      : computeDocSha256(lines);
+
+    const { doc, modified } = await this.docRepository.updateDoc(
       projectId,
       docId,
-      dto.lines,
-      dto.version,
-      dto.ranges,
-      dto.expectedRev ?? dto.rev,
+      {
+        lines,
+        version: resolvedVersion,
+        ranges,
+        hash,
+        expectedRev,
+      },
     );
+
+    return {
+      doc,
+      modified,
+      rev: doc.rev,
+    };
   }
 
   public async patchDoc(
@@ -192,7 +332,7 @@ export class DocstoreService {
     docId: string,
     dto: PatchDocDto,
   ): Promise<DocResponseDto> {
-    const doc = await this.patchDocUseCase.execute(projectId, docId, {
+    const doc = await this.docRepository.patchDoc(projectId, docId, {
       deleted: dto.deleted,
       name: dto.name ?? dto.path,
       deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : undefined,
@@ -200,10 +340,6 @@ export class DocstoreService {
     return this.mapToDto(doc);
   }
 
-  /**
-   * High-leverage deep operation: applies single or batch track-change suggestions
-   * to a document's lines and persists the updated version.
-   */
   public async applySuggestionsToDoc(
     projectId: string,
     docId: string,
@@ -221,10 +357,6 @@ export class DocstoreService {
     return { lines: mutatedLines, result };
   }
 
-  /**
-   * High-leverage deep operation: resolves child LaTeX includes and transpiles
-   * document content into TeX, Markdown, HTML, or DOCX format.
-   */
   public transpileDocumentForExport(params: {
     rawFilename: string;
     content: string;
@@ -289,14 +421,38 @@ export class DocstoreService {
   }
 
   public async archiveDoc(projectId: string, docId: string): Promise<void> {
-    await this.archiveProjectUseCase.archiveDoc(projectId, docId);
+    const doc = await this.docRepository.getDoc(projectId, docId);
+    if (!doc) {
+      throw new DocNotFoundError(docId);
+    }
+    if (doc.inStorage) return;
+
+    const payload = JSON.stringify({
+      lines: doc.lines,
+      ranges: doc.ranges,
+      schema_v: 1,
+    });
+
+    if (payload.indexOf('\u0000') !== -1) {
+      throw new NullByteDetectedError(
+        `Null byte detected when archiving doc ${docId}`,
+      );
+    }
+
+    const key = `${projectId}/${doc.id}.json`;
+    const sourceMd5 = crypto.createHash('md5').update(payload).digest('hex');
+    const stream = Readable.from(Buffer.from(payload, 'utf8'));
+
+    await this.docPersistor.sendStream(key, stream, { sourceMd5 });
+    await this.docRepository.markAsArchived(projectId, doc.id, key, doc.rev);
+    this.logger.log(`Archived single document ${docId} to S3 cold tier`);
   }
 
   public async isDocDeleted(
     projectId: string,
     docId: string,
   ): Promise<boolean> {
-    const doc = await this.getDocUseCase.execute(projectId, docId, {
+    const doc = await this.getDocEntity(projectId, docId, {
       includeDeleted: true,
     });
     return doc.deleted;
@@ -305,7 +461,7 @@ export class DocstoreService {
   public async getAllRanges(
     projectId: string,
   ): Promise<{ _id: string; ranges: DocRanges }[]> {
-    const docs = await this.getAllDocsUseCase.execute(projectId);
+    const docs = await this.getAllDocEntities(projectId);
     return docs.map((d) => ({
       _id: d.id,
       ranges: d.ranges,
@@ -313,24 +469,63 @@ export class DocstoreService {
   }
 
   public async archiveAllDocs(projectId: string): Promise<number> {
-    return await this.archiveProjectUseCase.archiveAllDocs(projectId);
+    const docs = await this.docRepository.getAllDocs(projectId);
+    let count = 0;
+
+    for (const doc of docs) {
+      if (doc.inStorage) continue;
+
+      const payload = JSON.stringify({
+        lines: doc.lines,
+        ranges: doc.ranges,
+        schema_v: 1,
+      });
+
+      if (payload.indexOf('\u0000') !== -1) {
+        throw new NullByteDetectedError(
+          `Null byte detected when archiving doc ${doc.id}`,
+        );
+      }
+
+      const key = `${projectId}/${doc.id}.json`;
+      const sourceMd5 = crypto.createHash('md5').update(payload).digest('hex');
+      const stream = Readable.from(Buffer.from(payload, 'utf8'));
+
+      await this.docPersistor.sendStream(key, stream, { sourceMd5 });
+      await this.docRepository.markAsArchived(projectId, doc.id, key, doc.rev);
+      count++;
+    }
+
+    this.logger.log(
+      `Archived ${count} documents for project ${projectId} to S3 cold tier`,
+    );
+    return count;
   }
 
   public async unArchiveAllDocs(projectId: string): Promise<number> {
-    return await this.archiveProjectUseCase.unarchiveAllDocs(projectId);
+    const docs = await this.docRepository.getAllDocs(projectId);
+    let count = 0;
+
+    for (const doc of docs) {
+      if (doc.inStorage) {
+        await this.getDocEntity(projectId, doc.id);
+        count++;
+      }
+    }
+
+    this.logger.log(`Unarchived ${count} documents for project ${projectId}`);
+    return count;
   }
 
   public async destroyAllDocs(projectId: string): Promise<number> {
-    return await this.archiveProjectUseCase.destroyAllDocs(projectId);
+    return await this.docRepository.destroyAllDocs(projectId);
   }
 
-  /**
-   * DIRECT CLSI INTEGRATION: Returns project files ready for compilation.
-   */
   public async getAsWorkspaceFiles(
     projectId: string,
   ): Promise<WorkspaceFile[]> {
-    return await this.getAllDocsUseCase.executeAsWorkspaceFiles(projectId);
+    const docs = await this.getAllDocEntities(projectId);
+    return docs.map((doc) => doc.toWorkspaceFile());
   }
 
   public getPrometheusMetrics(): string {

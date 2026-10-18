@@ -680,3 +680,8 @@ export class AcademicSpellEngine {
     }
   }
 }
+
+export {
+  LatexProseTokenizer as RegexLatexTokenizerAdapter,
+  AcademicSpellEngine as AcademicSpellEngineAdapter,
+};

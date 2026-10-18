@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   MetadataCandidate,
   FieldEvidence,
@@ -12,8 +12,6 @@ export class NormalizeStage implements IWorkflowStage<
   MetadataCandidate[]
 > {
   readonly stageName = 'NORMALIZE' as const;
-  private readonly logger = new Logger(NormalizeStage.name);
-
   constructor(private readonly normalizer: NormalizationPolicy) {}
 
   /**

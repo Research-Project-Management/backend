@@ -4,21 +4,21 @@
  * Includes graceful in-memory fallback if database table is not yet migrated in local dev.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { ManuscriptDictionaryScope } from '@prisma/client';
-import { ICustomDictionaryRepositoryPort } from './core/ports/custom-dictionary-repository.port';
+import { ICustomDictionaryRepositoryPort } from './domain';
 
 @Injectable()
 export class SpellingRepository implements ICustomDictionaryRepositoryPort {
   private readonly logger = new Logger(SpellingRepository.name);
   private readonly memoryFallback = new Map<string, Set<string>>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Optional() private readonly prisma?: PrismaService) {}
 
   public async listProjectWords(projectId: string): Promise<string[]> {
     try {
-      const records = await this.prisma.manuscriptCustomWord.findMany({
+      const records = await this.prisma!.manuscriptCustomWord.findMany({
         where: { projectId, scope: ManuscriptDictionaryScope.project },
         select: { word: true },
         orderBy: { word: 'asc' },
@@ -32,7 +32,7 @@ export class SpellingRepository implements ICustomDictionaryRepositoryPort {
 
   public async listUserWords(userId: string): Promise<string[]> {
     try {
-      const records = await this.prisma.manuscriptCustomWord.findMany({
+      const records = await this.prisma!.manuscriptCustomWord.findMany({
         where: { userId, scope: ManuscriptDictionaryScope.user },
         select: { word: true },
         orderBy: { word: 'asc' },
@@ -49,7 +49,7 @@ export class SpellingRepository implements ICustomDictionaryRepositoryPort {
     if (!clean) return;
 
     try {
-      await this.prisma.manuscriptCustomWord.upsert({
+      await this.prisma!.manuscriptCustomWord.upsert({
         where: {
           projectId_word: { projectId, word: clean },
         },
@@ -75,7 +75,7 @@ export class SpellingRepository implements ICustomDictionaryRepositoryPort {
     if (!clean) return;
 
     try {
-      await this.prisma.manuscriptCustomWord.upsert({
+      await this.prisma!.manuscriptCustomWord.upsert({
         where: {
           userId_word: { userId, word: clean },
         },
@@ -102,7 +102,7 @@ export class SpellingRepository implements ICustomDictionaryRepositoryPort {
   ): Promise<boolean> {
     const clean = word.toLowerCase().trim();
     try {
-      const res = await this.prisma.manuscriptCustomWord.deleteMany({
+      const res = await this.prisma!.manuscriptCustomWord.deleteMany({
         where: {
           projectId,
           word: clean,
@@ -119,7 +119,7 @@ export class SpellingRepository implements ICustomDictionaryRepositoryPort {
   public async removeUserWord(userId: string, word: string): Promise<boolean> {
     const clean = word.toLowerCase().trim();
     try {
-      const res = await this.prisma.manuscriptCustomWord.deleteMany({
+      const res = await this.prisma!.manuscriptCustomWord.deleteMany({
         where: { userId, word: clean, scope: ManuscriptDictionaryScope.user },
       });
       return res.count > 0;
@@ -139,7 +139,7 @@ export class SpellingRepository implements ICustomDictionaryRepositoryPort {
 
     if (projectId) {
       try {
-        const count = await this.prisma.manuscriptCustomWord.count({
+        const count = await this.prisma!.manuscriptCustomWord.count({
           where: {
             projectId,
             word: clean,
@@ -155,7 +155,7 @@ export class SpellingRepository implements ICustomDictionaryRepositoryPort {
 
     if (userId) {
       try {
-        const count = await this.prisma.manuscriptCustomWord.count({
+        const count = await this.prisma!.manuscriptCustomWord.count({
           where: { userId, word: clean, scope: ManuscriptDictionaryScope.user },
         });
         if (count > 0) return true;
@@ -166,5 +166,11 @@ export class SpellingRepository implements ICustomDictionaryRepositoryPort {
     }
 
     return false;
+  }
+}
+
+export class InMemoryCustomDictionaryAdapter extends SpellingRepository {
+  constructor() {
+    super(undefined);
   }
 }

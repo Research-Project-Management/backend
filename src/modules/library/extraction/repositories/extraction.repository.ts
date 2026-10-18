@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { Prisma } from '@prisma/client';
-import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
-import { buildTipTapDocFromText } from '@/modules/library/shared-kernel/domain/tiptap.domain';
+import { Prisma, TagType } from '@prisma/client';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+import { resolveOrCreateTags } from '@/modules/library/catalog/domain/command-payload.builder';
+import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 
 @Injectable()
 export class ExtractionRepository {
@@ -337,98 +338,43 @@ export class ExtractionRepository {
     const normalized = normalizeAcademicTags(params.rawTags);
     if (normalized.length === 0) return [];
 
-    const projectId = params.projectId ?? null;
-    if (
-      typeof client.tag?.createMany === 'function' &&
-      typeof client.tag?.findMany === 'function'
-    ) {
-      await client.tag.createMany({
-        data: normalized.map((tagName) => ({
-          userId: params.userId,
-          createdById: params.userId,
-          name: tagName,
-          type: 'automatic',
-          projectId,
-        })),
-        skipDuplicates: true,
-      });
+    const resolvedTags = await resolveOrCreateTags(
+      client,
+      params.userId,
+      normalized,
+      TagType.automatic,
+      params.projectId ?? null,
+    );
 
-      const resolvedTags = await client.tag.findMany({
-        where: {
-          userId: params.userId,
-          name: { in: normalized },
-          projectId,
-        },
-        select: { id: true },
-      });
-
-      if (resolvedTags.length > 0) {
-        if (typeof client.itemTag?.createMany === 'function') {
-          await client.itemTag.createMany({
-            data: resolvedTags.map((t) => ({
-              tagId: t.id,
-              itemId: params.itemId,
-              type: 'automatic',
-            })),
-            skipDuplicates: true,
-          });
-        } else {
-          await Promise.all(
-            resolvedTags.map((t) =>
-              client.itemTag.upsert({
-                where: {
-                  tagId_itemId: {
-                    tagId: t.id,
-                    itemId: params.itemId,
-                  },
-                },
-                create: {
-                  tagId: t.id,
-                  itemId: params.itemId,
-                  type: 'automatic',
-                },
-                update: {},
-              }),
-            ),
-          );
-        }
-      }
-    } else {
-      for (const tagName of normalized) {
-        let tag = await client.tag.findFirst({
-          where: {
-            userId: params.userId,
-            name: tagName,
-            projectId,
-          },
-        });
-
-        if (!tag) {
-          tag = await client.tag.create({
-            data: {
-              userId: params.userId,
-              createdById: params.userId,
-              name: tagName,
-              type: 'automatic',
-              projectId,
-            },
-          });
-        }
-
-        await client.itemTag.upsert({
-          where: {
-            tagId_itemId: {
-              tagId: tag.id,
-              itemId: params.itemId,
-            },
-          },
-          create: {
-            tagId: tag.id,
+    if (resolvedTags.length > 0) {
+      if (typeof client.itemTag?.createMany === 'function') {
+        await client.itemTag.createMany({
+          data: resolvedTags.map((t) => ({
+            tagId: t.id,
             itemId: params.itemId,
             type: 'automatic',
-          },
-          update: {},
+          })),
+          skipDuplicates: true,
         });
+      } else {
+        await Promise.all(
+          resolvedTags.map((t) =>
+            client.itemTag.upsert({
+              where: {
+                tagId_itemId: {
+                  tagId: t.id,
+                  itemId: params.itemId,
+                },
+              },
+              create: {
+                tagId: t.id,
+                itemId: params.itemId,
+                type: 'automatic',
+              },
+              update: {},
+            }),
+          ),
+        );
       }
     }
 
@@ -443,7 +389,10 @@ export class ExtractionRepository {
             (t): t is string => typeof t === 'string',
           )
         : [];
-      const mergedTags = Array.from(new Set([...existingTags, ...normalized]));
+      const mergedTags = normalizeAcademicTags([
+        ...existingTags,
+        ...normalized,
+      ]);
       await client.item.update({
         where: { id: params.itemId },
         data: {
@@ -451,6 +400,7 @@ export class ExtractionRepository {
             ...currentMeta,
             tags: mergedTags,
             keywords: mergedTags,
+            labels: mergedTags,
           },
         },
       });

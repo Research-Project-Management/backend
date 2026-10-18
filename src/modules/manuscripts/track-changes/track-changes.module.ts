@@ -1,6 +1,6 @@
 /**
  * track-changes/track-changes.module.ts
- * NestJS Module for Manuscripts Review Mode: Track Changes & Comments (Adaptive Modular Monolith).
+ * NestJS Module for Manuscripts Review Mode: Track Changes & Comments.
  */
 
 import { Module } from '@nestjs/common';
@@ -9,16 +9,16 @@ import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 
 import { TrackChangesController } from './track-changes.controller';
 import { TrackChangesService } from './track-changes.service';
-import { TrackChangesRepository } from './track-changes.repository';
-
-// Ports
-import { ITrackChangesRepositoryPort } from './core/ports/track-changes-repository.port';
-import { IDocstorePatcherPort } from './core/ports/docstore-patcher.port';
-import { IRealtimeNotifierPort } from './core/ports/realtime-notifier.port';
-
-// Adapters
-import { DocstorePatcherAdapter } from './core/adapters/external/docstore-patcher.adapter';
-import { RealtimeNotifierAdapter } from './core/adapters/external/realtime-notifier.adapter';
+import {
+  TrackChangesRepository,
+  DocstorePatcherAdapter,
+  RealtimeNotifierAdapter,
+} from './track-changes.repository';
+import {
+  ITrackChangesRepositoryPort,
+  IDocstorePatcherPort,
+  IRealtimeNotifierPort,
+} from './domain';
 
 @Module({
   imports: [PrismaModule, DocstoreModule],
@@ -26,12 +26,8 @@ import { RealtimeNotifierAdapter } from './core/adapters/external/realtime-notif
   providers: [
     TrackChangesService,
     TrackChangesRepository,
-
-    // Driven Adapters
     DocstorePatcherAdapter,
     RealtimeNotifierAdapter,
-
-    // Ports SPI Bindings
     {
       provide: ITrackChangesRepositoryPort,
       useExisting: TrackChangesRepository,

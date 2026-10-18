@@ -6,8 +6,8 @@
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { ITrackChangesRepositoryPort } from './core/ports/track-changes-repository.port';
 import {
+  ITrackChangesRepositoryPort,
   LinePatcher,
   TrackChange,
   CommentThread,
@@ -16,10 +16,12 @@ import {
   ChangeNotFoundException,
   ThreadNotFoundException,
   ResolvedThreadException,
+  BatchAction,
 } from './domain';
-import { DocstorePatcherAdapter } from './core/adapters/external/docstore-patcher.adapter';
-import { RealtimeNotifierAdapter } from './core/adapters/external/realtime-notifier.adapter';
-import { BatchAction } from './core/use-cases/batch-resolve-changes.use-case';
+import {
+  DocstorePatcherAdapter,
+  RealtimeNotifierAdapter,
+} from './track-changes.repository';
 
 import {
   RecordChangeDto,

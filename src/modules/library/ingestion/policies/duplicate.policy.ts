@@ -1,6 +1,6 @@
-import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
+﻿import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import { DuplicateMatchResult } from '@/modules/library/ingestion/types/metadata-candidate.types';
-import { normalizeDoi } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { normalizeDoi } from '@/modules/library/core';
 import {
   calculateTitleSimilarity,
   firstAuthorMatches,

@@ -36,6 +36,9 @@ export interface FormatNoteOptions {
   protocol?: 'flux' | 'web' | 'zotero';
   webBaseUrl?: string;
   projectId?: string;
+  noteId?: string;
+  tagColor?: boolean;
+  includeComments?: boolean;
 }
 
 const COLOR_LABEL_MAP: Record<string, string> = {
@@ -71,7 +74,7 @@ const COLOR_LABEL_MAP: Record<string, string> = {
   grey: '⬜ Notes',
 };
 
-import { parseAnnotationSortIndex as canonicalParseAnnotationSortIndex } from '@/modules/library/shared-kernel/domain/sort-index.domain';
+import { parseAnnotationSortIndex as canonicalParseAnnotationSortIndex } from '@/modules/library/core/domain/sort-index.domain';
 
 export function parseAnnotationSortIndex(
   sortIndex: string | null | undefined,
@@ -84,7 +87,7 @@ export function parseAnnotationSortIndex(
   return { y: parsed.y, x: parsed.x };
 }
 
-import { stripNoteHtml } from '@/modules/library/shared-kernel/domain/tiptap.domain';
+import { stripNoteHtml } from '@/modules/library/core/domain/tiptap.domain';
 
 export { stripNoteHtml };
 
@@ -184,6 +187,9 @@ export function formatLiteratureNoteMarkdown(
   const citationYear = item.year ? String(item.year) : 'n.d.';
   const authorCitationBase = `${firstAuthorName}${hasMultipleAuthors ? ' et al.' : ''}, ${citationYear}`;
 
+  const showColorHeaders = options?.tagColor !== false;
+  const showComments = options?.includeComments !== false;
+
   let currentPage = -1;
   let currentColor: string | null = null;
 
@@ -197,12 +203,14 @@ export function formatLiteratureNoteMarkdown(
       lines.push('');
     }
 
-    const annColor = (ann.color ?? '').toLowerCase();
-    const colorLabel = COLOR_LABEL_MAP[annColor] ?? '📌 General';
-    if (annColor !== currentColor) {
-      currentColor = annColor;
-      lines.push(`#### ${colorLabel}`);
-      lines.push('');
+    if (showColorHeaders) {
+      const annColor = (ann.color ?? '').toLowerCase();
+      const colorLabel = COLOR_LABEL_MAP[annColor] ?? '📌 General';
+      if (annColor !== currentColor) {
+        currentColor = annColor;
+        lines.push(`#### ${colorLabel}`);
+        lines.push('');
+      }
     }
 
     const citationLabel = `(${authorCitationBase}, p. ${pageNum})`;
@@ -230,7 +238,7 @@ export function formatLiteratureNoteMarkdown(
       lines.push('');
     }
 
-    if (ann.comment) {
+    if (showComments && ann.comment) {
       lines.push(`**Note:** ${ann.comment.trim()}`);
       lines.push('');
     }

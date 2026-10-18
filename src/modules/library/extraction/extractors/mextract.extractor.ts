@@ -1,11 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ItemMetadata } from '@/modules/library/shared-kernel';
+﻿import { Injectable, Logger } from '@nestjs/common';
+import { ItemMetadata } from '@/modules/library/core';
 import {
   cleanAuthorName,
   normalizeAcademicTitleCase,
   cleanAbstractText,
   splitAuthorString,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 
 export interface MeXtractResult {
   metadata: Partial<ItemMetadata>;

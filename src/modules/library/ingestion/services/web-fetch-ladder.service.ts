@@ -6,7 +6,11 @@ import {
   MirrorBibliographicMetadata,
 } from '@/modules/library/ingestion/types/web-fetch.types';
 import { IngestionVerifierService } from './ingestion-verifier.service';
-import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
+import {
+  SsrfGuardService,
+  DEFAULT_BROWSER_FETCH_HEADERS,
+  DEFAULT_SAFE_REDIRECT_MAX_HOPS,
+} from '@/modules/library/core/services/ssrf-guard.service';
 import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
 import { DomainRateLimiterService } from './domain-rate-limiter.service';
 import {
@@ -19,21 +23,9 @@ import {
   isBotChallengePage,
   cleanAbstractText,
   cleanBibliographicText,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 14000;
-const MAX_REDIRECTS = 5;
-
-const BROWSER_FETCH_HEADERS: Record<string, string> = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (Academic Client; mailto:contact@flux.academic)',
-  Accept:
-    'text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.9,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.9',
-};
-
-/** Thrown when a redirect hop targets an unsafe destination. */
-class UnsafeRedirectError extends Error {}
 
 /**
  * Enterprise Web Retrieval Ladder Service.
@@ -73,11 +65,11 @@ export class WebFetchLadderService implements IWebFetchPort {
     return SsrfGuardService.executeSafeRedirectFetch(
       startUrl,
       {
-        headers: BROWSER_FETCH_HEADERS,
+        headers: DEFAULT_BROWSER_FETCH_HEADERS,
         signal,
       },
       {
-        maxRedirects: MAX_REDIRECTS,
+        maxRedirects: DEFAULT_SAFE_REDIRECT_MAX_HOPS,
         validateUrl: (nextUrl) => this.assertSafeUrl(nextUrl),
         beforeHop: async (currentUrl, hopSignal) => {
           if (this.rateLimiter) {
@@ -557,7 +549,7 @@ export class WebFetchLadderService implements IWebFetchPort {
     const canonicalUrl = url.trim();
     const warnings: string[] = [];
 
-    // ── Ladder Step 0: Identifier Derivation (0đ, 0ms) ────────────────────────
+    // Ladder Step 0: Identifier Derivation (0đ, 0ms)
     const derivedIdentifier = this.deriveIdentifiers(canonicalUrl);
 
     try {
@@ -580,7 +572,7 @@ export class WebFetchLadderService implements IWebFetchPort {
       };
     }
 
-    // ── Ladder Step 1: Direct Plain HTTP Fetch (0đ) ───────────────────────────
+    // Ladder Step 1: Direct Plain HTTP Fetch (0đ)
     const directPdfUrl = deriveDirectPdfUrl(canonicalUrl);
     const urlsToTry =
       directPdfUrl && directPdfUrl !== canonicalUrl
@@ -713,7 +705,7 @@ export class WebFetchLadderService implements IWebFetchPort {
       }
     }
 
-    // ── Ladder Step 2: Open Mirror Resolver (0đ) ──────────────────────────────
+    // Ladder Step 2: Open Mirror Resolver (0đ)
     const targetDoi = derivedIdentifier.doi;
     const targetPmid = derivedIdentifier.pmid;
     const targetPmcid = derivedIdentifier.pmcid;
@@ -768,7 +760,7 @@ export class WebFetchLadderService implements IWebFetchPort {
       }
     }
 
-    // ── Ladder Step 3: Stealth / External Proxy Fetcher ───────────────────────
+    // Ladder Step 3: Stealth / External Proxy Fetcher
     if (!options?.skipStealth) {
       this.logger.log(
         `[Ladder Step 3] Attempting stealth proxy fetch for "${canonicalUrl}"...`,
@@ -792,7 +784,7 @@ export class WebFetchLadderService implements IWebFetchPort {
       }
     }
 
-    // ── Ladder Step 4: Graceful BLOCKED State ─────────────────────────────────
+    // Ladder Step 4: Graceful BLOCKED State
     this.logger.warn(
       `[Ladder Step 4] All retrieval ladders exhausted for "${canonicalUrl}". Flagging as BLOCKED.`,
     );

@@ -27,6 +27,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { ProjectHistoryService } from './project-history.service';
 import {
   CreateSnapshotDto,
@@ -53,7 +54,8 @@ import { AuthenticatedRequest } from '@/core';
   'manuscripts/projects/:projectId/history',
   'projects/:projectId/history',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@RequireRole(Role.REVIEWER)
 export class ProjectHistoryController {
   constructor(private readonly historyService: ProjectHistoryService) {}
 
@@ -86,6 +88,7 @@ export class ProjectHistoryController {
   }
 
   @Post('snapshots')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Manually capture an immutable snapshot of current project files',
   })
@@ -143,6 +146,7 @@ export class ProjectHistoryController {
   }
 
   @Post('versions/:version/labels')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary:
       'Attach or update a named label/milestone tag on a specific version',
@@ -169,6 +173,7 @@ export class ProjectHistoryController {
   }
 
   @Delete('labels/:labelId')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove a named label from project history' })
   @ApiResponse({ status: 204 })
@@ -184,6 +189,7 @@ export class ProjectHistoryController {
   }
 
   @Post('restore')
+  @RequireRole(Role.COORDINATOR)
   @ApiOperation({
     summary:
       'Rollback project to a historical version (creates version N+1 non-destructively)',

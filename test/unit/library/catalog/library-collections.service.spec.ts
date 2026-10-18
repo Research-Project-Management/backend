@@ -112,6 +112,47 @@ describe('Library Collections — Tree Invariants & Sanitization', () => {
       expect(tree[1].id).toBe('col-3');
       expect(tree[1].children).toHaveLength(0);
     });
+
+    describe('getDescendantIds', () => {
+      it('should return empty array when root has no children', () => {
+        const collections = [
+          { id: 'col-1', parentId: null },
+          { id: 'col-2', parentId: null },
+        ];
+        expect(treeEngine.getDescendantIds(collections, 'col-1')).toEqual([]);
+      });
+
+      it('should return all descendants across multiple levels in BFS order', () => {
+        const collections = [
+          { id: 'root', parentId: null },
+          { id: 'child-1', parentId: 'root' },
+          { id: 'child-2', parentId: 'root' },
+          { id: 'grandchild-1', parentId: 'child-1' },
+          { id: 'grandchild-2', parentId: 'child-2' },
+          { id: 'great-grandchild', parentId: 'grandchild-1' },
+        ];
+        const descendants = treeEngine.getDescendantIds(collections, 'root');
+        expect(descendants).toEqual([
+          'child-1',
+          'child-2',
+          'grandchild-1',
+          'grandchild-2',
+          'great-grandchild',
+        ]);
+      });
+
+      it('should gracefully terminate and avoid infinite loop if collections contain cycles', () => {
+        const collectionsWithCycle = [
+          { id: 'A', parentId: 'B' },
+          { id: 'B', parentId: 'A' },
+        ];
+        const descendants = treeEngine.getDescendantIds(
+          collectionsWithCycle,
+          'A',
+        );
+        expect(descendants).toEqual(['B']);
+      });
+    });
   });
 
   describe('CollectionsService', () => {

@@ -21,9 +21,9 @@
  *   ⑩ dataset         — ImageNet (ILSVRC) dataset paper
  */
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { inferItemTypeFromPdfSignals } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { inferItemTypeFromPdfSignals } from '@/modules/library/core';
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+// helpers
 
 function makePolicy() {
   return new NormalizationPolicy();
@@ -43,7 +43,6 @@ function rawMeta(overrides: Record<string, any>) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 
 describe('10 Canonical Papers — Full Metadata Accuracy Regression', () => {
   let policy: NormalizationPolicy;
@@ -460,7 +459,7 @@ describe('10 Canonical Papers — Full Metadata Accuracy Regression', () => {
     });
   });
 
-  // ─── Cross-cutting: heuristic must NOT fire on plain journal papers ─────────
+  // Cross-cutting: heuristic must NOT fire on plain journal papers
   describe('Negative cases — generic journal papers must return undefined', () => {
     it('plain journal title with no special signals → undefined (pipeline defaults to journalArticle)', () => {
       expect(

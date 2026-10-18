@@ -1,6 +1,5 @@
 import {
   Injectable,
-  Logger,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -14,22 +13,17 @@ import {
   AnnotationType,
 } from '@/modules/library/extraction/types/annotations.types';
 import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
-import {
-  TransactionService,
-  TransactionHelpers,
-} from '@/modules/library/shared-kernel';
+import { TransactionService, TransactionHelpers } from '@/modules/library/core';
 import { AttachmentsService } from './attachments.service';
 import type {
   UpsertSyncAnnotationCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
-import { buildAnnotationSortIndex } from '@/modules/library/shared-kernel';
+} from '@/modules/library/core/types/entity-commands.types';
+import { buildAnnotationSortIndex } from '@/modules/library/core';
 
 @Injectable()
 export class AnnotationsService {
-  private readonly logger = new Logger(AnnotationsService.name);
-
   constructor(
     private readonly annotationsRepo: AnnotationsRepository,
     private readonly libraryTx: TransactionService,
@@ -37,7 +31,7 @@ export class AnnotationsService {
     private readonly normalizer: AnnotationNormalizer,
   ) {}
 
-  // ─── Queries ───────────────────────────────────────────────────────────────
+  // Queries
 
   async getAnnotationsByAttachment(
     userId: string,
@@ -73,7 +67,7 @@ export class AnnotationsService {
     return annotation;
   }
 
-  // ─── Mutations ─────────────────────────────────────────────────────────────
+  // Mutations
 
   async createAnnotation(userId: string, data: CreateAnnotationData) {
     return this.libraryTx.executeInTransaction(
@@ -206,7 +200,7 @@ export class AnnotationsService {
     );
   }
 
-  // ─── Batch ─────────────────────────────────────────────────────────────────
+  // Batch
 
   async batchUpsertAnnotations(
     userId: string,
@@ -286,7 +280,7 @@ export class AnnotationsService {
     );
   }
 
-  // ─── Sync adapters ─────────────────────────────────────────────────────────
+  // Sync adapters
 
   async upsertFromSync(
     command: UpsertSyncAnnotationCommand,
@@ -425,7 +419,7 @@ export class AnnotationsService {
     });
   }
 
-  // ─── Auth helpers ──────────────────────────────────────────────────────────
+  // Auth helpers
 
   private assertCanModifyAnnotation(
     userId: string,
@@ -438,6 +432,3 @@ export class AnnotationsService {
     }
   }
 }
-
-export const AnnotationService = AnnotationsService;
-export type AnnotationService = AnnotationsService;

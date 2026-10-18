@@ -4,10 +4,7 @@
  * diagnostics (errors, warnings, badboxes) with file and line associations.
  */
 
-import {
-  CompilerDiagnostic,
-  ILogParser,
-} from '@/modules/manuscripts/clsi/core/ports/artifacts.port';
+import { CompilerDiagnostic, ILogParser } from './clsi-ports';
 
 export class OverleafLogParser implements ILogParser {
   private static readonly LATEX_WARNING_REGEX =

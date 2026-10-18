@@ -19,131 +19,21 @@ import {
 import { TagEntity } from './types/tags.types';
 import { StateData } from './types/state.types';
 import { NoteEntity, CreateNoteData } from './types/notes.types';
-import { ItemFieldDefinition } from '@/modules/library/shared-kernel/types/schema.types';
-import { LibraryItemSource } from '@/modules/library/shared-kernel';
-import { CATALOG_FACADE } from '@/modules/library/shared-kernel/ports/catalog.port';
+import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';
+import { LibraryItemSource } from '@/modules/library/core';
+import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+} from '@/modules/library/core/ports/catalog.port';
 export { CATALOG_FACADE };
-
-export interface ICatalogFacade {
-  getItem(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<ItemDetail | null>;
-  getItemSummary(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<ItemSummary | null>;
-  itemExists(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<boolean>;
-  getTags(
-    userId: string,
-    options?: { includeInactive?: boolean; projectId?: string },
-  ): Promise<TagEntity[]>;
-  getItemState(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<StateData | null>;
-  createItem(
-    userId: string,
-    data: CreateItemData,
-    options?: {
-      expectedVersion?: number;
-      suppressIndexing?: boolean;
-      projectId?: string;
-      source?: string;
-      idempotencyKey?: string;
-      correlationId?: string;
-    },
-    projectId?: string,
-  ): Promise<ItemDetail>;
-  updateItem(
-    userId: string,
-    itemId: string,
-    data: UpdateItemData,
-    options?: { expectedVersion?: number; projectId?: string },
-  ): Promise<ItemDetail>;
-  deleteItem(userId: string, itemId: string, projectId?: string): Promise<void>;
-  findByIds(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-  ): Promise<ItemDetail[]>;
-  countItems(
-    userId: string,
-    options?: Parameters<QueryRepository['count']>[1],
-  ): Promise<number>;
-  findMany(
-    userId: string,
-    options?: Parameters<QueryRepository['findMany']>[1],
-  ): Promise<ItemDetail[]>;
-  validateItemType(type: string): Promise<boolean>;
-  getPrimaryCreatorType(itemType: string): string;
-  getOrderedFields(itemType: string): ItemFieldDefinition[];
-  findQualityAuditItems(
-    userId: string,
-    limit?: number,
-    projectId?: string,
-  ): Promise<QualityAuditCandidateItem[]>;
-  findDuplicateCandidateItems(
-    userId: string,
-    limit?: number,
-    projectId?: string,
-  ): Promise<DuplicateCandidateItem[]>;
-  mergeItems(
-    tx: Prisma.TransactionClient,
-    duplicateItemIds: string[],
-    primaryItemId: string,
-  ): Promise<void>;
-  listNotes(
-    userId: string,
-    itemId?: string,
-    projectId?: string,
-  ): Promise<NoteEntity[]>;
-  createNote(userId: string, data: CreateNoteData): Promise<NoteEntity>;
-  listCollections(
-    userId: string,
-    projectId?: string,
-  ): Promise<Awaited<ReturnType<CollectionsService['findAll']>>>;
-  findMatchCandidates?(
-    scope: { userId?: string; projectId?: string | null } | string,
-    criteria: {
-      doi?: string | null;
-      arxivId?: string | null;
-      pmid?: string | null;
-      isbn?: string | null;
-      titleWords?: string[];
-      titlePrefix?: string;
-    },
-  ): Promise<{
-    exactMatch?: {
-      id: string;
-      title: string;
-      matchReason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
-      evidence: Record<string, unknown>;
-    } | null;
-    candidateItems: Array<{
-      id: string;
-      title: string;
-      doi: string | null;
-      year: number | null;
-      citationKey: string | null;
-      authors: string[];
-    }>;
-  }>;
-}
+export type { ICatalogFacade };
 
 /**
  * Public Facade for Catalog Bounded Context.
  * Directly communicates with clean, modular services.
  */
 @Injectable()
-export class CatalogFacade implements ICatalogFacade {
+export class CatalogFacade {
   constructor(
     private readonly queryService: ItemQueryService,
     private readonly itemService: ItemService,

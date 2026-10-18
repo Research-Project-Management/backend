@@ -290,7 +290,7 @@ export class RetractionRepository {
       .slice(0, limit);
   }
 
-  // ── Retraction Database Seed / Cache Operations ──────────────────────────
+  // Retraction Database Seed / Cache Operations
   async countRetractionRecords(): Promise<number> {
     return this.prisma.retraction.count();
   }

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -10,13 +10,13 @@ import {
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
-} from '@/modules/library/shared-kernel';
-import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+} from '@/modules/library/core';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import type {
   UpsertSyncItemCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
+} from '@/modules/library/core/types/entity-commands.types';
 
 @Injectable()
 export class ItemSyncDelegate {

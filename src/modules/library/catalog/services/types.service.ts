@@ -1,16 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   ItemFieldDefinition,
   CreatorTypeDefinition,
   ItemTypeDefinition,
   SchemaRegistrySnapshot,
-} from '@/modules/library/shared-kernel/types/schema.types';
-import { SCHEMA_V42_DATA } from '@/modules/library/shared-kernel/types/schema.constants';
-import { normalizeCanonicalItemType } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core/types/schema.types';
+import { SCHEMA_V42_DATA } from '@/modules/library/core/types/schema.constants';
+import { normalizeCanonicalItemType } from '@/modules/library/core';
 
 @Injectable()
 export class TypesService {
-  private readonly logger = new Logger(TypesService.name);
   private readonly snapshot: SchemaRegistrySnapshot = SCHEMA_V42_DATA;
 
   getVersion(): number {

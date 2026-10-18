@@ -1,23 +1,23 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { TypesService } from './types.service';
 import {
   SchemaValidationResult,
   CreatorHarmonizationChange,
   CreatorTypeDefinition,
   ItemFieldDefinition,
-} from '@/modules/library/shared-kernel/types/schema.types';
+} from '@/modules/library/core/types/schema.types';
 import {
   FIELD_ALIASES,
   REVERSE_FIELD_ALIASES,
   BASE_FIELD_MAPPINGS,
   REVERSE_BASE_FIELD_MAPPINGS,
   SCHEMA_V42_DATA,
-} from '@/modules/library/shared-kernel/types/schema.constants';
+} from '@/modules/library/core/types/schema.constants';
 import {
   CreatorCreditInput,
   ITEM_COLUMN_METADATA_FIELDS,
   getValidCreatorMapForType,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 
 const SYSTEM_AND_TELEMETRY_KEYS = new Set([
   'id',

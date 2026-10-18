@@ -25,63 +25,51 @@ import * as os from 'os';
 import { PrismaService } from '@/core';
 
 // Docstore Subsystem
-import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { GetDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/get-doc.use-case';
-import { PeekDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/peek-doc.use-case';
-import { UpdateDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/update-doc.use-case';
-import { PatchDocUseCase } from '@/modules/manuscripts/docstore/core/use-cases/patch-doc.use-case';
-import { GetAllDocsUseCase } from '@/modules/manuscripts/docstore/core/use-cases/get-all-docs.use-case';
-import { ArchiveProjectUseCase } from '@/modules/manuscripts/docstore/core/use-cases/archive-project.use-case';
-import { PrismaDocRepository } from '@/modules/manuscripts/docstore/core/adapters/database/prisma-doc.repository';
-import { S3DocPersistorAdapter } from '@/modules/manuscripts/docstore/core/adapters/storage/s3-doc-persistor.adapter';
-import { DocHasherAdapter } from '@/modules/manuscripts/docstore/core/adapters/engine/doc-hasher.adapter';
-import { IDocRepository } from '@/modules/manuscripts/docstore/core/ports/doc-repository.port';
-import { IDocPersistor } from '@/modules/manuscripts/docstore/core/ports/doc-persistor.port';
-import { IDocHasher } from '@/modules/manuscripts/docstore/core/ports/doc-hasher.port';
-import { LineArrayEngine } from '@/modules/manuscripts/docstore/core/adapters/engine/line-array.engine';
 import {
+  DocstoreService,
+  PrismaDocRepository,
+  S3DocPersistorAdapter,
+  DocHasherAdapter,
+  IDocRepository,
+  IDocPersistor,
+  IDocHasher,
+  LineArrayEngine,
   DocTooLargeError,
   DocModifiedError,
   NullByteDetectedError,
-} from '@/modules/manuscripts/docstore/core/domain/doc-errors';
+} from '@/modules/manuscripts/docstore';
 
 // Track Changes Subsystem
-import { TextRangeVo } from '@/modules/manuscripts/track-changes/core/domain/value-objects/text-range.vo';
-import { ChangeMetadataVo } from '@/modules/manuscripts/track-changes/core/domain/value-objects/change-metadata.vo';
-import { TrackChange } from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
-import { CommentReply } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-reply.entity';
-import { CommentThread } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-thread.entity';
-import { ITrackChangesRepositoryPort } from '@/modules/manuscripts/track-changes/core/ports/track-changes-repository.port';
-import { IRealtimeNotifierPort } from '@/modules/manuscripts/track-changes/core/ports/realtime-notifier.port';
-import { DocstorePatcherAdapter } from '@/modules/manuscripts/track-changes/core/adapters/external/docstore-patcher.adapter';
-import { RecordChangeUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/record-change.use-case';
-import { AcceptChangeUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/accept-change.use-case';
-import { RejectChangeUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/reject-change.use-case';
-import { CreateCommentThreadUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/create-comment-thread.use-case';
-import { AddCommentReplyUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/add-comment-reply.use-case';
-import { ResolveCommentThreadUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/resolve-comment-thread.use-case';
-import { GetDocReviewsUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/get-doc-reviews.use-case';
+import {
+  TextRangeVo,
+  ChangeMetadataVo,
+  TrackChange,
+  CommentReply,
+  CommentThread,
+  ITrackChangesRepositoryPort,
+  IRealtimeNotifierPort,
+  DocstorePatcherAdapter,
+  TrackChangesService,
+} from '@/modules/manuscripts/track-changes';
 
 // Structure Subsystem
-import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/core/domain/manuscript-node.entity';
-import { NodePathVo } from '@/modules/manuscripts/structure/core/domain/node-path.vo';
-import { CyclicMoveError } from '@/modules/manuscripts/structure/core/domain/structure-errors';
 import {
+  ManuscriptNodeEntity,
+  NodePathVo,
+  CyclicMoveError,
   IStructureRepository,
   CreateNodeParams,
-} from '@/modules/manuscripts/structure/core/ports/structure-repository.port';
-import { CreateNodeUseCase } from '@/modules/manuscripts/structure/core/use-cases/create-node.use-case';
-import { MoveNodeUseCase } from '@/modules/manuscripts/structure/core/use-cases/move-node.use-case';
-import { RenameNodeUseCase } from '@/modules/manuscripts/structure/core/use-cases/rename-node.use-case';
-import { GetFileTreeUseCase } from '@/modules/manuscripts/structure/core/use-cases/get-file-tree.use-case';
-import { ResolveRootDocUseCase } from '@/modules/manuscripts/structure/core/use-cases/resolve-root-doc.use-case';
-import { HeuristicRootDocDetector } from '@/modules/manuscripts/structure/core/adapters/engine/heuristic-root-doc.detector';
-import { InMemoryTreePublisher } from '@/modules/manuscripts/structure/core/adapters/event/in-memory-tree.publisher';
+  StructureService,
+  HeuristicRootDocDetector,
+  InMemoryTreePublisher,
+} from '@/modules/manuscripts/structure';
 
 // CLSI & Diagnostics Subsystem
-import { SyncTexProcessor } from '@/modules/manuscripts/clsi/core/adapters/artifacts/synctex.processor';
-import { ProjectLockManager } from '@/modules/manuscripts/clsi/core/adapters/workspace/project-lock.manager';
-import { TexWordCounter } from '@/modules/manuscripts/clsi/core/adapters/artifacts/word-counter';
+import {
+  SyncTexProcessor,
+  ProjectLockManager,
+  TexWordCounter,
+} from '@/modules/manuscripts/clsi';
 import {
   TexParenTreeLogParser,
   TectonicLogParser,
@@ -519,19 +507,109 @@ describe('Multi-User Collaborative Simulation & Full-Scale Stress Test', () => {
   let trackRepo: InMemoryTrackChangesRepo;
   let realtimeNotifier: TestRealtimeNotifier;
 
-  let createNodeUseCase: CreateNodeUseCase;
-  let moveNodeUseCase: MoveNodeUseCase;
-  let renameNodeUseCase: RenameNodeUseCase;
-  let getFileTreeUseCase: GetFileTreeUseCase;
-  let resolveRootDocUseCase: ResolveRootDocUseCase;
+  let structureService: StructureService;
+  let trackChangesService: TrackChangesService;
 
-  let recordChangeUseCase: RecordChangeUseCase;
-  let acceptChangeUseCase: AcceptChangeUseCase;
-  let rejectChangeUseCase: RejectChangeUseCase;
-  let createCommentUseCase: CreateCommentThreadUseCase;
-  let addReplyUseCase: AddCommentReplyUseCase;
-  let resolveCommentUseCase: ResolveCommentThreadUseCase;
-  let getReviewsUseCase: GetDocReviewsUseCase;
+  let createNodeUseCase: {
+    execute: (
+      projectId: string,
+      dto: Parameters<StructureService['createNode']>[1],
+    ) => ReturnType<StructureService['createNode']>;
+  };
+  let moveNodeUseCase: {
+    execute: (
+      projectId: string,
+      nodeId: string,
+      dto: Parameters<StructureService['moveNode']>[2],
+    ) => ReturnType<StructureService['moveNode']>;
+  };
+  let renameNodeUseCase: {
+    execute: (
+      projectId: string,
+      nodeId: string,
+      newName: string,
+    ) => ReturnType<StructureService['renameNode']>;
+  };
+  let getFileTreeUseCase: {
+    execute: (projectId: string) => ReturnType<StructureService['getFileTree']>;
+  };
+  let resolveRootDocUseCase: {
+    autoDetectAndSetRootDoc: (
+      projectId: string,
+      docContents?: Map<string, string[]>,
+    ) => ReturnType<StructureService['autoDetectRootDoc']>;
+  };
+
+  let recordChangeUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      userId?: string;
+      type: 'insert' | 'delete';
+      text: string;
+      range: {
+        startLine: number;
+        startCol: number;
+        endLine: number;
+        endCol: number;
+      };
+    }) => ReturnType<TrackChangesService['recordChange']>;
+  };
+  let acceptChangeUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      changeId: string;
+      userId?: string;
+    }) => ReturnType<TrackChangesService['acceptChange']>;
+  };
+  let rejectChangeUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      changeId: string;
+      userId?: string;
+    }) => ReturnType<TrackChangesService['rejectChange']>;
+  };
+  let createCommentUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      userId?: string;
+      content: string;
+      quote?: string;
+      range: {
+        startLine: number;
+        startCol: number;
+        endLine: number;
+        endCol: number;
+      };
+    }) => ReturnType<TrackChangesService['createCommentThread']>;
+  };
+  let addReplyUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      threadId: string;
+      userId?: string;
+      content: string;
+    }) => ReturnType<TrackChangesService['addCommentReply']>;
+  };
+  let resolveCommentUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      threadId: string;
+      userId?: string;
+      resolve: boolean;
+    }) => ReturnType<TrackChangesService['resolveCommentThread']>;
+  };
+  let getReviewsUseCase: {
+    execute: (
+      projectId: string,
+      docId: string,
+    ) => ReturnType<TrackChangesService['getDocReviews']>;
+  };
   let docstorePatcher: DocstorePatcherAdapter;
 
   beforeAll(async () => {
@@ -540,12 +618,6 @@ describe('Multi-User Collaborative Simulation & Full-Scale Stress Test', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DocstoreService,
-        GetDocUseCase,
-        PeekDocUseCase,
-        UpdateDocUseCase,
-        PatchDocUseCase,
-        GetAllDocsUseCase,
-        ArchiveProjectUseCase,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: IDocRepository, useClass: PrismaDocRepository },
@@ -562,42 +634,104 @@ describe('Multi-User Collaborative Simulation & Full-Scale Stress Test', () => {
     // Structure setup
     structureRepo = new InMemoryStructureRepo();
     const treePublisher = new InMemoryTreePublisher();
-    createNodeUseCase = new CreateNodeUseCase(structureRepo, treePublisher);
-    moveNodeUseCase = new MoveNodeUseCase(structureRepo, treePublisher);
-    renameNodeUseCase = new RenameNodeUseCase(structureRepo, treePublisher);
-    getFileTreeUseCase = new GetFileTreeUseCase(structureRepo);
-    resolveRootDocUseCase = new ResolveRootDocUseCase(
+    structureService = new StructureService(
       structureRepo,
-      new HeuristicRootDocDetector(),
-      treePublisher,
+      undefined,
+      undefined,
+      treePublisher as any,
     );
+    createNodeUseCase = {
+      execute: (projectId, dto) => structureService.createNode(projectId, dto),
+    };
+    moveNodeUseCase = {
+      execute: (projectId, nodeId, dto) =>
+        structureService.moveNode(projectId, nodeId, dto),
+    };
+    renameNodeUseCase = {
+      execute: (projectId, nodeId, newName) =>
+        structureService.renameNode(projectId, nodeId, { name: newName }),
+    };
+    getFileTreeUseCase = {
+      execute: (projectId) => structureService.getFileTree(projectId),
+    };
+    resolveRootDocUseCase = {
+      autoDetectAndSetRootDoc: (projectId, docContents) =>
+        structureService.autoDetectRootDoc(
+          projectId,
+          docContents ?? new Map(),
+        ),
+    };
 
     // Track Changes setup
     trackRepo = new InMemoryTrackChangesRepo();
     realtimeNotifier = new TestRealtimeNotifier();
     docstorePatcher = new DocstorePatcherAdapter(docstoreService);
+    trackChangesService = new TrackChangesService(
+      trackRepo,
+      docstoreService,
+      docstorePatcher,
+      realtimeNotifier as any,
+    );
 
-    recordChangeUseCase = new RecordChangeUseCase(trackRepo, realtimeNotifier);
-    acceptChangeUseCase = new AcceptChangeUseCase(
-      trackRepo,
-      docstorePatcher,
-      realtimeNotifier,
-    );
-    rejectChangeUseCase = new RejectChangeUseCase(
-      trackRepo,
-      docstorePatcher,
-      realtimeNotifier,
-    );
-    createCommentUseCase = new CreateCommentThreadUseCase(
-      trackRepo,
-      realtimeNotifier,
-    );
-    addReplyUseCase = new AddCommentReplyUseCase(trackRepo, realtimeNotifier);
-    resolveCommentUseCase = new ResolveCommentThreadUseCase(
-      trackRepo,
-      realtimeNotifier,
-    );
-    getReviewsUseCase = new GetDocReviewsUseCase(trackRepo);
+    recordChangeUseCase = {
+      execute: (input) =>
+        trackChangesService.recordChange(
+          input.projectId,
+          input.docId,
+          { type: input.type, text: input.text, range: input.range },
+          input.userId,
+        ),
+    };
+    acceptChangeUseCase = {
+      execute: (input) =>
+        trackChangesService.acceptChange(
+          input.projectId,
+          input.docId,
+          input.changeId,
+          input.userId,
+        ),
+    };
+    rejectChangeUseCase = {
+      execute: (input) =>
+        trackChangesService.rejectChange(
+          input.projectId,
+          input.docId,
+          input.changeId,
+          input.userId,
+        ),
+    };
+    createCommentUseCase = {
+      execute: (input) =>
+        trackChangesService.createCommentThread(
+          input.projectId,
+          input.docId,
+          { quote: input.quote, range: input.range, content: input.content },
+          input.userId,
+        ),
+    };
+    addReplyUseCase = {
+      execute: (input) =>
+        trackChangesService.addCommentReply(
+          input.projectId,
+          input.docId,
+          input.threadId,
+          { content: input.content },
+          input.userId,
+        ),
+    };
+    resolveCommentUseCase = {
+      execute: (input) =>
+        trackChangesService.resolveCommentThread(
+          input.projectId,
+          input.docId,
+          input.threadId,
+          input.resolve,
+          input.userId,
+        ),
+    };
+    getReviewsUseCase = {
+      execute: (pId, dId) => trackChangesService.getDocReviews(pId, dId),
+    };
   });
 
   // =========================================================================

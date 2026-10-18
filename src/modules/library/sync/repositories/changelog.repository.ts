@@ -1,11 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+﻿import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, LibraryChange, Tombstone } from '@prisma/client';
 
 import {
   AppendChangeEntry,
   RecordTombstoneEntry,
-} from '@/modules/library/shared-kernel/ports/unit-of-work.port';
+} from '@/modules/library/core/ports/unit-of-work.port';
 
 @Injectable()
 export class ChangeLogRepository {

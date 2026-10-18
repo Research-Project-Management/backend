@@ -9,7 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '@/core';
-import { OutboxMetrics as SyncMetricsService } from './outbox.metrics';
+import { OutboxMetrics } from './outbox.metrics';
 import { OutboxStatus, OutboxEvent, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import {
@@ -17,7 +17,7 @@ import {
   LIBRARY_OUTBOX_JOB,
 } from '@/modules/library/sync/types/outbox.constants';
 
-import { OutboxDispatchHandler } from '@/modules/library/sync/types/outbox.types';
+import { OutboxDispatchHandler } from '@/modules/library/core';
 export type { OutboxDispatchHandler };
 
 @Injectable()
@@ -37,7 +37,7 @@ export class OutboxWorker
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly configService?: ConfigService,
-    @Optional() private readonly metricsService?: SyncMetricsService,
+    @Optional() private readonly metricsService?: OutboxMetrics,
     @Optional()
     @InjectQueue(LIBRARY_OUTBOX_QUEUE)
     private readonly bullQueue?: Queue,

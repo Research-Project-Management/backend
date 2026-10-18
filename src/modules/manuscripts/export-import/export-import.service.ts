@@ -12,22 +12,21 @@ import {
 } from '@nestjs/common';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
-import { IManuscriptAggregatorPort } from './core/ports/manuscript-aggregator.port';
-import { IZipEnginePort } from './core/ports/zip-engine.port';
-import { IManuscriptHydratorPort } from './core/ports/manuscript-hydrator.port';
-import { ITemplateCatalogPort } from './core/ports/template-catalog.port';
-import { IDocumentTranspilerPort } from './core/ports/document-transpiler.port';
-import { PkzipEngineAdapter } from './core/adapters/engine/pkzip-engine.adapter';
-import { EmbeddedTemplateCatalogAdapter } from './core/adapters/storage/embedded-template-catalog.adapter';
-import { DocumentTranspilerAdapter } from './domain/document-transpiler';
 import {
+  IManuscriptAggregatorPort,
+  IZipEnginePort,
+  IManuscriptHydratorPort,
+  ITemplateCatalogPort,
+  IDocumentTranspilerPort,
+  PkzipEngineAdapter,
+  DocumentTranspilerAdapter,
   ArchiveEntryVo,
   ArchiveManifest,
   ImportSummaryVo,
-  ProjectTemplate,
   TemplateNotFoundException,
   validateExtractedArchiveEntries,
-} from './domain/archive-validator';
+} from './domain';
+import { EmbeddedTemplateCatalogAdapter } from './repositories/manuscript-aggregator.repository';
 import {
   ExportZipQueryDto,
   ImportSummaryResponseDto,
@@ -74,87 +73,29 @@ export interface ConvertDocumentInput {
   userId?: string | null;
 }
 
-interface LegacyExportUseCaseLike {
-  execute: (input: ExportProjectZipInput) => Promise<ExportProjectZipOutput>;
-  executeStream: (
-    input: ExportProjectZipInput,
-  ) => Promise<ExportProjectZipStreamOutput>;
-}
-
-interface LegacyImportUseCaseLike {
-  execute: (input: ImportProjectZipInput) => Promise<ImportSummaryVo>;
-}
-
-interface LegacyListTemplatesUseCaseLike {
-  execute: () => Promise<ProjectTemplate[]>;
-}
-
-interface LegacyScaffoldUseCaseLike {
-  execute: (input: ScaffoldTemplateInput) => Promise<ImportSummaryVo>;
-}
-
-interface LegacyConvertUseCaseLike {
-  execute: (input: ConvertDocumentInput) => Promise<ImportSummaryVo>;
-}
-
 @Injectable()
 export class ExportImportService {
   private readonly logger = new Logger(ExportImportService.name);
-  private readonly aggregator?: IManuscriptAggregatorPort;
+  private readonly aggregator: IManuscriptAggregatorPort;
   private readonly zipEngine: IZipEnginePort;
-  private readonly hydrator?: IManuscriptHydratorPort;
+  private readonly hydrator: IManuscriptHydratorPort;
   private readonly catalog: ITemplateCatalogPort;
   private readonly transpiler: IDocumentTranspilerPort;
 
-  // Legacy use-case delegates (populated only when constructed with legacy use-case instances in unit tests)
-  private readonly legacyExportUseCase?: LegacyExportUseCaseLike;
-  private readonly legacyImportUseCase?: LegacyImportUseCaseLike;
-  private readonly legacyListTemplatesUseCase?: LegacyListTemplatesUseCaseLike;
-  private readonly legacyScaffoldUseCase?: LegacyScaffoldUseCaseLike;
-  private readonly legacyConvertUseCase?: LegacyConvertUseCaseLike;
-
   constructor(
-    aggregatorOrExportUseCase:
-      IManuscriptAggregatorPort | LegacyExportUseCaseLike,
-    zipEngineOrImportUseCase?: IZipEnginePort | LegacyImportUseCaseLike,
-    hydratorOrListTemplatesUseCase?:
-      IManuscriptHydratorPort | LegacyListTemplatesUseCaseLike,
+    aggregator: IManuscriptAggregatorPort,
+    zipEngine: IZipEnginePort = new PkzipEngineAdapter(),
+    hydrator: IManuscriptHydratorPort,
     @Optional()
-    catalogOrScaffoldUseCase?: ITemplateCatalogPort | LegacyScaffoldUseCaseLike,
-    @Optional()
-    transpilerOrConvertUseCase?:
-      IDocumentTranspilerPort | LegacyConvertUseCaseLike,
+    catalog: ITemplateCatalogPort = new EmbeddedTemplateCatalogAdapter(),
+    @Optional() transpiler?: IDocumentTranspilerPort,
   ) {
-    if (
-      aggregatorOrExportUseCase &&
-      'execute' in aggregatorOrExportUseCase &&
-      typeof aggregatorOrExportUseCase.execute === 'function'
-    ) {
-      this.legacyExportUseCase = aggregatorOrExportUseCase;
-      this.legacyImportUseCase =
-        zipEngineOrImportUseCase as LegacyImportUseCaseLike;
-      this.legacyListTemplatesUseCase =
-        hydratorOrListTemplatesUseCase as LegacyListTemplatesUseCaseLike;
-      this.legacyScaffoldUseCase =
-        catalogOrScaffoldUseCase as LegacyScaffoldUseCaseLike;
-      this.legacyConvertUseCase =
-        transpilerOrConvertUseCase as LegacyConvertUseCaseLike;
-      this.zipEngine = new PkzipEngineAdapter();
-      this.catalog = new EmbeddedTemplateCatalogAdapter();
-      this.transpiler = new DocumentTranspilerAdapter(this.zipEngine);
-    } else {
-      this.aggregator = aggregatorOrExportUseCase as IManuscriptAggregatorPort;
-      this.zipEngine =
-        (zipEngineOrImportUseCase as IZipEnginePort) ??
-        new PkzipEngineAdapter();
-      this.hydrator = hydratorOrListTemplatesUseCase as IManuscriptHydratorPort;
-      this.catalog =
-        (catalogOrScaffoldUseCase as ITemplateCatalogPort) ??
-        new EmbeddedTemplateCatalogAdapter();
-      this.transpiler =
-        (transpilerOrConvertUseCase as IDocumentTranspilerPort) ??
-        new DocumentTranspilerAdapter(this.zipEngine);
-    }
+    this.aggregator = aggregator;
+    this.zipEngine = zipEngine;
+    this.hydrator = hydrator;
+    this.catalog = catalog;
+    this.transpiler =
+      transpiler ?? new DocumentTranspilerAdapter(this.zipEngine);
   }
 
   public async collectProjectEntries(
@@ -162,9 +103,6 @@ export class ExportImportService {
     includePdf = false,
     cleanArxiv = false,
   ) {
-    if (!this.aggregator) {
-      throw new Error('Aggregator is not available');
-    }
     return await this.aggregator.collectProjectEntries(
       projectId,
       includePdf,
@@ -178,9 +116,6 @@ export class ExportImportService {
     userId?: string | null,
     preferredRootDoc?: string,
   ): Promise<ImportSummaryVo> {
-    if (!this.hydrator) {
-      throw new Error('Hydrator is not available');
-    }
     return await this.hydrator.hydrateProjectEntries(
       projectId,
       entries,
@@ -193,20 +128,11 @@ export class ExportImportService {
     projectId: string,
     query?: ExportZipQueryDto,
   ): Promise<ExportProjectZipOutput> {
-    if (this.legacyExportUseCase) {
-      return await this.legacyExportUseCase.execute({
-        projectId,
-        projectName: query?.projectName,
-        includePdf: query?.includePdf,
-        cleanArxiv: query?.cleanArxiv,
-      });
-    }
-
     const includePdf = query?.includePdf ?? false;
     const cleanArxiv = query?.cleanArxiv ?? false;
     const projectName = query?.projectName;
 
-    const files = await this.aggregator!.collectProjectEntries(
+    const files = await this.aggregator.collectProjectEntries(
       projectId,
       includePdf,
       cleanArxiv,
@@ -248,20 +174,11 @@ export class ExportImportService {
     projectId: string,
     query?: ExportZipQueryDto,
   ): Promise<ExportProjectZipStreamOutput> {
-    if (this.legacyExportUseCase) {
-      return await this.legacyExportUseCase.executeStream({
-        projectId,
-        projectName: query?.projectName,
-        includePdf: query?.includePdf,
-        cleanArxiv: query?.cleanArxiv,
-      });
-    }
-
     const includePdf = query?.includePdf ?? false;
     const cleanArxiv = query?.cleanArxiv ?? false;
     const projectName = query?.projectName;
 
-    const files = await this.aggregator!.collectLazyProjectEntries(
+    const files = await this.aggregator.collectLazyProjectEntries(
       projectId,
       includePdf,
       cleanArxiv,
@@ -299,20 +216,10 @@ export class ExportImportService {
     userId?: string | null,
     preferredRootDoc?: string,
   ): Promise<ImportSummaryResponseDto> {
-    if (this.legacyImportUseCase) {
-      const summary = await this.legacyImportUseCase.execute({
-        projectId,
-        zipBuffer,
-        userId,
-        preferredRootDoc,
-      });
-      return summary.toJSON();
-    }
-
     const entries = validateExtractedArchiveEntries(
       this.zipEngine.extractZip(zipBuffer),
     );
-    const summary = await this.hydrator!.hydrateProjectEntries(
+    const summary = await this.hydrator.hydrateProjectEntries(
       projectId,
       entries,
       userId,
@@ -322,18 +229,14 @@ export class ExportImportService {
   }
 
   public async listTemplates(): Promise<TemplateResponseDto[]> {
-    const templates = this.legacyListTemplatesUseCase
-      ? await this.legacyListTemplatesUseCase.execute()
-      : await this.catalog.listTemplates();
+    const templates = await this.catalog.listTemplates();
     return templates.map((t) => t.toJSON());
   }
 
   public async getTemplate(
     templateId: string,
   ): Promise<TemplateResponseDto | null> {
-    const templates = this.legacyListTemplatesUseCase
-      ? await this.legacyListTemplatesUseCase.execute()
-      : await this.catalog.listTemplates();
+    const templates = await this.catalog.listTemplates();
     const found = templates.find((t) => t.id === templateId);
     return found ? found.toJSON() : null;
   }
@@ -343,15 +246,6 @@ export class ExportImportService {
     templateId: string,
     userId?: string | null,
   ): Promise<ImportSummaryResponseDto> {
-    if (this.legacyScaffoldUseCase) {
-      const summary = await this.legacyScaffoldUseCase.execute({
-        projectId,
-        templateId,
-        userId,
-      });
-      return summary.toJSON();
-    }
-
     const template = await this.catalog.getTemplateById(templateId);
     if (!template) {
       throw new TemplateNotFoundException(templateId);
@@ -364,7 +258,7 @@ export class ExportImportService {
       return ArchiveEntryVo.create(file.path, data, false);
     });
 
-    const summary = await this.hydrator!.hydrateProjectEntries(
+    const summary = await this.hydrator.hydrateProjectEntries(
       projectId,
       entries,
       userId,
@@ -376,15 +270,6 @@ export class ExportImportService {
   public async convertDocument(
     input: ConvertDocumentInput,
   ): Promise<ImportSummaryResponseDto> {
-    if (this.legacyConvertUseCase) {
-      const summary = await this.legacyConvertUseCase.execute(input);
-      return summary.toJSON();
-    }
-
-    if (!this.hydrator) {
-      throw new Error('ConvertDocumentUseCase is not available');
-    }
-
     const { projectId, fileBuffer, fileName, userId } = input;
     if (!fileBuffer || fileBuffer.length === 0) {
       throw new BadRequestException('Uploaded document payload is empty.');

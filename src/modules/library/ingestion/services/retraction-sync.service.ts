@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
-import { RetractionDatabaseService } from './retraction-database.service';
 
 export interface RetractionSyncOptions {
   maxDays?: number;
@@ -43,7 +42,6 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly repo: RetractionRepository,
     private readonly scanner: RetractionScannerProvider,
-    private readonly retractionDb: RetractionDatabaseService,
   ) {}
 
   onModuleInit(): void {
@@ -59,19 +57,17 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     // Initial delay of 2 minutes after boot before first background scan
     this.initTimer = setTimeout(() => {
       this.initTimer = null;
-      this.syncAllStaleItems().catch((err) => {
-        this.logger.warn(
-          `Initial background retraction sync error: ${err?.message}`,
-        );
+      this.syncAllStaleItems().catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Initial background retraction sync error: ${msg}`);
       });
     }, 120000);
     this.initTimer.unref();
 
     this.syncTimer = setInterval(() => {
-      this.syncAllStaleItems().catch((err) => {
-        this.logger.warn(
-          `Periodic background retraction sync error: ${err?.message}`,
-        );
+      this.syncAllStaleItems().catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Periodic background retraction sync error: ${msg}`);
       });
     }, intervalMs);
     this.syncTimer.unref();

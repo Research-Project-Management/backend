@@ -1,4 +1,4 @@
-import { Test, TestingModule } from '@nestjs/testing';
+﻿import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { StateService } from '@/modules/library/catalog/services/state.service';
 import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
@@ -17,7 +17,7 @@ import {
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 import { ITEM_EXISTENCE_PORT } from '@/modules/library/catalog/types/items.types';
 import { PrismaService } from '@/core';
 

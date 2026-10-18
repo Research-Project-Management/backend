@@ -7,9 +7,11 @@ import {
   BadRequestException,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
+import { JwtAuthGuard } from '@/modules/identity/auth';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
 
 export interface BenchmarkPayloadDto {
@@ -24,6 +26,8 @@ export interface BenchmarkPayloadDto {
 export const BASELINE_LEGACY_EXTRACTION_LATENCY_MS = 1200;
 
 @ApiTags('Library Extraction Telemetry')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('api/v1/library/extraction')
 export class ExtractionTelemetryController {
   constructor(private readonly trustedExtractor: TrustedExtractionService) {}

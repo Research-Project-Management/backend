@@ -23,14 +23,17 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { DocumentUpdaterService } from './document-updater.service';
 import { QueueUpdateDto } from './dto/queue-update.dto';
 import { FlushProjectDto } from './dto/flush-project.dto';
 import { FlushResultDto } from './dto/flush-result.dto';
 import { InFlightDocStateDto } from './dto/in-flight-doc-state.dto';
-import { DocUpdaterConflictException } from './core/domain/exceptions/doc-updater-conflict.exception';
-import { InFlightNotFoundException } from './core/domain/exceptions/in-flight-not-found.exception';
-import { DocumentLockedException } from './core/domain/exceptions/document-locked.exception';
+import {
+  DocUpdaterConflictException,
+  InFlightNotFoundException,
+  DocumentLockedException,
+} from './domain';
 
 @ApiTags('Manuscripts - Document Updater')
 @ApiBearerAuth('JWT-auth')
@@ -40,7 +43,8 @@ import { DocumentLockedException } from './core/domain/exceptions/document-locke
   'manuscripts/projects/:projectId/updater',
   'project/:projectId',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@RequireRole(Role.REVIEWER)
 export class DocumentUpdaterController {
   constructor(private readonly service: DocumentUpdaterService) {}
 
@@ -48,6 +52,7 @@ export class DocumentUpdaterController {
    * Queue real-time updates for a document (keystrokes / lines / splice).
    */
   @Post('doc/:docId/update')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.ACCEPTED)
   public async queueUpdate(
     @Param('projectId') projectId: string,
@@ -71,6 +76,7 @@ export class DocumentUpdaterController {
    * Flush-Before-Compile endpoint: flushes all dirty docs in a project into Docstore.
    */
   @Post('flush')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   public async flushProject(
     @Param('projectId') projectId: string,
@@ -90,6 +96,7 @@ export class DocumentUpdaterController {
    * Flush a single document into Docstore.
    */
   @Post('doc/:docId/flush')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   public async flushDoc(
     @Param('projectId') projectId: string,

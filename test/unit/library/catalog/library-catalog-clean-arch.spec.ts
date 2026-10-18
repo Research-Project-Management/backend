@@ -1,16 +1,11 @@
 import {
-  isValidCitationKey,
-  sanitizeCitationKey,
   buildCollectionTree,
   ConditionEvaluatorEngine,
-} from '@/modules/library/catalog/domain';
-import {
-  cleanDoi,
-  isValidDoi,
-} from '@/modules/library/shared-kernel/domain/identifier.domain';
+} from '@/modules/library/catalog';
+import { cleanDoi, isValidDoi } from '@/modules/library/core';
 
 describe('Catalog Bounded Context - Modular Monolith Domain Engines', () => {
-  describe('DOI & Citation Key Domain Logic', () => {
+  describe('DOI Domain Logic', () => {
     it('cleanDoi and isValidDoi should validate and normalize DOIs to lowercase', () => {
       const rawDoi = 'https://doi.org/10.1000/182.XYZ';
       expect(isValidDoi(rawDoi)).toBe(true);
@@ -19,16 +14,6 @@ describe('Catalog Bounded Context - Modular Monolith Domain Engines', () => {
       expect(cleanDoi('10.1000/182.xyz')).toBe('10.1000/182.xyz');
       expect(isValidDoi('invalid-doi')).toBe(false);
       expect(cleanDoi(null)).toBe('');
-    });
-
-    it('isValidCitationKey and sanitizeCitationKey should validate and sanitize BibTeX citation keys', () => {
-      expect(isValidCitationKey('Einstein1905_relativity')).toBe(true);
-      expect(isValidCitationKey('invalid key with spaces')).toBe(false);
-
-      expect(sanitizeCitationKey('Einstein 1905: relativity!')).toBe(
-        'Einstein_1905:_relativity',
-      );
-      expect(sanitizeCitationKey('')).toBe('');
     });
   });
 

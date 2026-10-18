@@ -1,6 +1,6 @@
-import { WebFetchLadderService } from '@/modules/library/ingestion/services/web-fetch-ladder.service';
+﻿import { WebFetchLadderService } from '@/modules/library/ingestion/services/web-fetch-ladder.service';
 import { IngestionVerifierService } from '@/modules/library/ingestion/services/ingestion-verifier.service';
-import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
+import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 
 describe('WebFetchLadderService', () => {
   let service: WebFetchLadderService;

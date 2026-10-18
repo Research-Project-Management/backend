@@ -1,11 +1,7 @@
-import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import {
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
-} from '@/modules/library/ingestion/types/catalog-gateway.types';
+import { Injectable, Inject, Optional } from '@nestjs/common';
+import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
 import { DuplicateService } from './duplicate.service';
 import { ItemsMapper } from '@/modules/library/catalog';
-import { DuplicateClusterItem } from '@/modules/library/ingestion/types/curation.types';
 
 export interface CompletenessAnalysis {
   score: number; // 0 - 100
@@ -27,12 +23,10 @@ export interface QualityAuditReport {
 
 @Injectable()
 export class QualityService {
-  private readonly logger = new Logger(QualityService.name);
-
   constructor(
     @Optional()
-    @Inject(CATALOG_GATEWAY_PORT)
-    private readonly catalogGateway?: ICatalogGatewayPort,
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
     @Optional()
     private readonly duplicateService?: DuplicateService,
   ) {}
@@ -306,6 +300,3 @@ export class QualityService {
     };
   }
 }
-
-export const MetadataCompletenessService = QualityService;
-export type MetadataCompletenessService = QualityService;

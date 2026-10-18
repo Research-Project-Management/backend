@@ -1,19 +1,19 @@
-import { MultipartUploadUseCase } from '@/modules/storage/application/use-cases/upload/multipart-upload.use-case';
-import { IStorageDriver } from '@/modules/storage/domain/ports/storage-driver.port';
-import { IStorageNodeRepository } from '@/modules/storage/domain/ports/storage-node.repository.port';
-import { IStorageBlobRepository } from '@/modules/storage/domain/ports/storage-blob.repository.port';
-import { IUploadSessionRepository } from '@/modules/storage/domain/ports/upload-session.repository.port';
-import { IStorageQuotaRepository } from '@/modules/storage/domain/ports/storage-quota.repository.port';
-import { StorageRedisCacheService } from '@/modules/storage/infrastructure/cache/storage-redis-cache.service';
+import { MultipartService } from '@/modules/storage/transfer';
+import { BlobService, IStorageDriver } from '@/modules/storage/core';
+import { IStorageNodeRepository } from '@/modules/storage/drive';
+import { IStorageBlobRepository } from '@/modules/storage/core';
+import { IUploadSessionRepository } from '@/modules/storage/transfer';
+import { IStorageQuotaRepository } from '@/modules/storage/drive';
+import { StorageRedisCacheService } from '@/modules/storage/core';
 import {
   UploadSession,
   UploadSessionStatus,
-} from '@/modules/storage/domain/entities/upload-session.entity';
+} from '@/modules/storage/transfer';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
-  let useCase: MultipartUploadUseCase;
+  let service: MultipartService;
   let mockDriver: jest.Mocked<IStorageDriver>;
   let mockNodeRepo: jest.Mocked<IStorageNodeRepository>;
   let mockBlobRepo: jest.Mocked<IStorageBlobRepository>;
@@ -117,10 +117,9 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       emit: jest.fn(),
     } as any;
 
-    useCase = new MultipartUploadUseCase(
-      mockDriver,
+    service = new MultipartService(
+      new BlobService(mockDriver, mockBlobRepo),
       mockNodeRepo,
-      mockBlobRepo,
       mockSessionRepo,
       mockQuotaRepo,
       mockCache,
@@ -133,7 +132,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       const session = createTestSession();
       mockSessionRepo.findById.mockResolvedValue(session);
 
-      const url = await useCase.getPartUrl('session-valid-1', 1, {
+      const url = await service.getPartUrl('session-valid-1', 1, {
         userId: ownerId,
       });
 
@@ -151,7 +150,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       const session = createTestSession({ userId: ownerId, projectId });
       mockSessionRepo.findById.mockResolvedValue(session);
 
-      const url = await useCase.getPartUrl('session-valid-1', 2, {
+      const url = await service.getPartUrl('session-valid-1', 2, {
         userId: 'collab-user-888',
         projectId,
       });
@@ -164,7 +163,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.getPartUrl('session-valid-1', 1, { userId: attackerId }),
+        service.getPartUrl('session-valid-1', 1, { userId: attackerId }),
       ).rejects.toThrow(NotFoundException);
 
       expect(mockDriver.getPresignedPartUploadUrl).not.toHaveBeenCalled();
@@ -175,15 +174,15 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.getPartUrl('session-valid-1', 0, { userId: ownerId }),
+        service.getPartUrl('session-valid-1', 0, { userId: ownerId }),
       ).rejects.toThrow(BadRequestException);
 
       await expect(
-        useCase.getPartUrl('session-valid-1', 4, { userId: ownerId }),
+        service.getPartUrl('session-valid-1', 4, { userId: ownerId }),
       ).rejects.toThrow(BadRequestException);
 
       await expect(
-        useCase.getPartUrl('session-valid-1', 1.5, { userId: ownerId }),
+        service.getPartUrl('session-valid-1', 1.5, { userId: ownerId }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -194,7 +193,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.getPartUrl('session-valid-1', 1, { userId: ownerId }),
+        service.getPartUrl('session-valid-1', 1, { userId: ownerId }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -205,7 +204,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.getPartUrl('session-valid-1', 1, { userId: ownerId }),
+        service.getPartUrl('session-valid-1', 1, { userId: ownerId }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -216,7 +215,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.getPartUrl('session-valid-1', 1, { userId: ownerId }),
+        service.getPartUrl('session-valid-1', 1, { userId: ownerId }),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -226,7 +225,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       const session = createTestSession();
       mockSessionRepo.findById.mockResolvedValue(session);
 
-      const result = await useCase.complete({
+      const result = await service.complete({
         sessionId: 'session-valid-1',
         parts: [
           { partNumber: 1, eTag: 'etag-1' },
@@ -254,7 +253,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.complete({
+        service.complete({
           sessionId: 'session-valid-1',
           parts: [{ partNumber: 1, eTag: 'etag-1' }],
           actor: { userId: attackerId },
@@ -272,7 +271,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.complete({
+        service.complete({
           sessionId: 'session-valid-1',
           parts: [{ partNumber: 1, eTag: 'etag-1' }],
           actor: { userId: ownerId },
@@ -291,7 +290,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.complete({
+        service.complete({
           sessionId: 'session-valid-1',
           parts: [{ partNumber: 1, eTag: 'etag-1' }],
           actor: { userId: ownerId },
@@ -304,7 +303,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.complete({
+        service.complete({
           sessionId: 'session-valid-1',
           parts: [],
           actor: { userId: ownerId },
@@ -318,7 +317,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       const session = createTestSession();
       mockSessionRepo.findById.mockResolvedValue(session);
 
-      await useCase.abort('session-valid-1', { userId: ownerId });
+      await service.abort('session-valid-1', { userId: ownerId });
 
       expect(mockDriver.abortMultipartUpload).toHaveBeenCalledWith(
         session.s3Key,
@@ -333,7 +332,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.abort('session-valid-1', { userId: attackerId }),
+        service.abort('session-valid-1', { userId: attackerId }),
       ).rejects.toThrow(NotFoundException);
 
       expect(mockDriver.abortMultipartUpload).not.toHaveBeenCalled();
@@ -346,7 +345,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        useCase.abort('session-valid-1', { userId: ownerId }),
+        service.abort('session-valid-1', { userId: ownerId }),
       ).rejects.toThrow(BadRequestException);
 
       expect(mockDriver.abortMultipartUpload).not.toHaveBeenCalled();
@@ -358,7 +357,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       });
       mockSessionRepo.findById.mockResolvedValue(session);
 
-      await useCase.abort('session-valid-1', { userId: ownerId });
+      await service.abort('session-valid-1', { userId: ownerId });
 
       expect(mockDriver.abortMultipartUpload).not.toHaveBeenCalled();
     });

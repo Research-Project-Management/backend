@@ -8,10 +8,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, ManuscriptDoc } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { TextDoc } from '../core/domain/text-doc.entity';
-import { DocModifiedError, DocNotFoundError } from '../core/domain/doc-errors';
-import { DocRanges } from '../core/domain/doc-range.vo';
-import { DocstoreMetrics } from '../core/adapters/telemetry/docstore.metrics';
+import {
+  TextDoc,
+  DocModifiedError,
+  DocNotFoundError,
+  DocRanges,
+  DocstoreMetrics,
+} from '../domain';
 
 export interface CreateDocData {
   projectId: string;

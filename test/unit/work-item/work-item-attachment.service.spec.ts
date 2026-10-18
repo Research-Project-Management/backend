@@ -9,7 +9,6 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
   let mockRepo: any;
   let mockPrisma: any;
   let mockStoragePort: any;
-  let mockR2Service: any;
 
   beforeEach(() => {
     mockRepo = {
@@ -37,7 +36,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
     mockStoragePort = {
       uploadFile: jest.fn().mockResolvedValue({
         fileId: 'cas-file-999',
-        url: '/api/files/cas-file-999/content',
+        url: '/api/v1/storage/files/cas-file-999/content',
         path: 'cas/blobs/cas-file-999',
         filename: 'report.pdf',
         size: 1024,
@@ -45,24 +44,11 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
       }),
       readOwnedFile: jest.fn(),
       deleteFile: jest.fn().mockResolvedValue(undefined),
-    };
-
-    mockR2Service = {
-      uploadBuffer: jest.fn().mockResolvedValue({
-        path: 'attachments/r2-key',
-        url: 'https://cdn.example.com/r2-key',
-      }),
       deleteObject: jest.fn().mockResolvedValue(undefined),
-      getPresignedUploadUrl: jest.fn().mockResolvedValue({
-        signedUrl: 'https://upload.example.com',
-        path: 'attachments/presigned-key',
-        url: 'https://cdn.example.com/presigned-key',
-      }),
     };
 
     service = new AttachmentService(
       mockRepo as AttachmentRepository,
-      mockR2Service,
       mockPrisma as PrismaService,
       mockStoragePort as IStoragePort,
     );
@@ -114,7 +100,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
           entityType: 'work_item',
           entityId: 'item-uuid-1',
           filename: 'research_proposal.pdf',
-          url: '/api/files/cas-file-999/content',
+          url: '/api/v1/storage/files/cas-file-999/content',
           storageKey: 'cas/blobs/cas-file-999',
           metadata: expect.objectContaining({
             fileId: 'cas-file-999',
@@ -128,11 +114,10 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
     });
   });
 
-  describe('uploadMultipart fallback to R2Service', () => {
-    it('should fallback to r2Service if storagePort is not injected', async () => {
+  describe('uploadMultipart when STORAGE_PORT is unavailable', () => {
+    it('should throw BadRequestException if storagePort is not injected', async () => {
       const serviceWithoutStoragePort = new AttachmentService(
         mockRepo as AttachmentRepository,
-        mockR2Service,
         mockPrisma as PrismaService,
         undefined,
       );
@@ -160,16 +145,9 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
         },
       };
 
-      await serviceWithoutStoragePort.uploadMultipart(mockReq, 'user-uuid-2');
-
-      expect(mockR2Service.uploadBuffer).toHaveBeenCalled();
-      expect(mockRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          filename: 'dataset.csv',
-          storageKey: 'attachments/r2-key',
-        }),
-        'user-uuid-2',
-      );
+      await expect(
+        serviceWithoutStoragePort.uploadMultipart(mockReq, 'user-uuid-2'),
+      ).rejects.toThrow('Storage provider is not available');
     });
   });
 
@@ -193,7 +171,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
         id: 'att-789',
         entityType: EntityType.work_item,
         entityId: 'item-uuid-1',
-        url: '/api/files/cas-url-uuid-555/content',
+        url: '/api/v1/storage/files/cas-url-uuid-555/content',
         metadata: {},
       } as any);
 
@@ -205,7 +183,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
       expect(mockRepo.delete).toHaveBeenCalledWith('att-789');
     });
 
-    it('should delete from r2Service when only storageKey is present', async () => {
+    it('should delete via storagePort.deleteObject when only storageKey is present', async () => {
       mockRepo.findById!.mockResolvedValueOnce({
         id: 'att-456',
         entityType: EntityType.work_item,
@@ -216,7 +194,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       await service.deleteAttachment('att-456');
 
-      expect(mockR2Service.deleteObject).toHaveBeenCalledWith(
+      expect(mockStoragePort.deleteObject).toHaveBeenCalledWith(
         'legacy/attachments/old.pdf',
       );
       expect(mockRepo.delete).toHaveBeenCalledWith('att-456');
@@ -242,7 +220,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
           entityType: EntityType.work_item,
           entityId: mockItemId,
           metadata: { fileId: 'cas-file-999' },
-          url: '/api/files/cas-file-999/content',
+          url: '/api/v1/storage/files/cas-file-999/content',
         },
       ]);
       mockRepo.findById.mockResolvedValueOnce({
@@ -261,7 +239,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
   });
 
   describe('generatePresignedUpload', () => {
-    it('should prioritize storagePort.getPresignedUploadUrl if available', async () => {
+    it('should generate presigned upload URL via storagePort.getPresignedUploadUrl', async () => {
       mockStoragePort.getPresignedUploadUrl = jest.fn().mockResolvedValue({
         uploadUrl: 'https://storage-port.example.com/upload',
         storageKey: 'cas-keys/blob-1',
@@ -282,26 +260,24 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       expect(mockStoragePort.getPresignedUploadUrl).toHaveBeenCalled();
       expect(res.signedUrl).toBe('https://storage-port.example.com/upload');
-      expect(res.fileUrl).toBe('/api/files/file-uuid-777/content');
+      expect(res.fileUrl).toBe('/api/v1/storage/files/file-uuid-777/content');
     });
 
-    it('should delegate to r2Service for direct client uploads when storagePort is not configured for presign', async () => {
+    it('should throw BadRequestException when storagePort is not configured for presign', async () => {
       delete mockStoragePort.getPresignedUploadUrl;
 
-      const res = await service.generatePresignedUpload(
-        {
-          entityType: EntityType.work_item,
-          entityId: '11111111-1111-1111-1111-111111111111',
-          filename: 'large_archive.zip',
-          contentType: 'application/zip',
-          size: 5 * 1024 * 1024,
-        },
-        'user-1',
-      );
-
-      expect(mockR2Service.getPresignedUploadUrl).toHaveBeenCalled();
-      expect(res.signedUrl).toBe('https://upload.example.com');
-      expect(res.fileUrl).toBe('https://cdn.example.com/presigned-key');
+      await expect(
+        service.generatePresignedUpload(
+          {
+            entityType: EntityType.work_item,
+            entityId: '11111111-1111-1111-1111-111111111111',
+            filename: 'large_archive.zip',
+            contentType: 'application/zip',
+            size: 5 * 1024 * 1024,
+          },
+          'user-1',
+        ),
+      ).rejects.toThrow('Object storage direct upload is not configured');
     });
   });
 

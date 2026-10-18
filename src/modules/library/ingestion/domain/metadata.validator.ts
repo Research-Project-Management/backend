@@ -10,7 +10,7 @@ import {
   normalizeIsbn,
   normalizeIssn,
   normalizeTags,
-} from './metadata.domain';
+} from '@/modules/library/core';
 
 export function validateMetadata(metadata: unknown): ItemMetadata | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
@@ -54,5 +54,3 @@ export function validateMetadata(metadata: unknown): ItemMetadata | null {
 
   return normalized;
 }
-
-export const validateAcademicMetadata = validateMetadata;

@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import { CursorPaginatedResult } from '@/modules/library/catalog/dto/items.dto';
 import {
@@ -445,7 +445,7 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
     return this.query.getItemSnapshots(userId, itemIds);
   }
 
-  // ── IItemExistencePort Implementation ────────────────────────────────────
+  // IItemExistencePort Implementation
 
   async exists(
     userId: string,
@@ -489,7 +489,7 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
     };
   }
 
-  // ── IItemReadPort Implementation ─────────────────────────────────────────
+  // IItemReadPort Implementation
 
   async findById(userId: string, itemId: string, projectId?: string) {
     return this.query.findById(userId, itemId, projectId);

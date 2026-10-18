@@ -6,12 +6,7 @@ import {
   RetractionNature,
   RetractionSource,
 } from '@/modules/library/ingestion/types/retraction.types';
-import * as path from 'path';
-import * as fs from 'fs';
-import {
-  normalizeDoi,
-  normalizePmid,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { normalizeDoi, normalizePmid } from '@/modules/library/core';
 
 export interface RetractionSeedItem {
   doi: string;
@@ -21,6 +16,7 @@ export interface RetractionSeedItem {
   reason?: string;
   noticeUrl?: string;
   retractionDate?: string;
+  retractedAt?: string;
   source: RetractionSource;
 }
 
@@ -60,7 +56,6 @@ export class RetractionDatabaseService implements OnModuleInit {
    */
   async initializeDataset(): Promise<void> {
     try {
-      await this.seedIfEmpty();
       await this.warmMemoryIndex();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -69,93 +64,14 @@ export class RetractionDatabaseService implements OnModuleInit {
   }
 
   /**
-   * Seeds the local PostgreSQL RetractionRecord table from the bundled Retraction Watch seed file if empty.
+   * Returns current count of retraction records in PostgreSQL.
    */
-  async seedIfEmpty(force = false): Promise<number> {
+  async seedIfEmpty(_force = false): Promise<number> {
     try {
-      const existingCount = await this.repo.countRetractionRecords();
-      if (existingCount > 0 && !force) {
-        this.logger.log(
-          `Retraction database already populated (${existingCount} records).`,
-        );
-        return existingCount;
-      }
-
-      const candidatePaths = [
-        path.resolve(__dirname, '../data/retraction-watch-seed.json'),
-        path.resolve(
-          process.cwd(),
-          'src/modules/library/ingestion/data/retraction-watch-seed.json',
-        ),
-        path.resolve(
-          process.cwd(),
-          'dist/modules/library/ingestion/data/retraction-watch-seed.json',
-        ),
-        path.resolve(__dirname, '../repositories/retraction-watch-seed.json'),
-      ];
-      const seedPath = candidatePaths.find((p) => fs.existsSync(p));
-      if (!seedPath) {
-        this.logger.warn(
-          `Retraction seed file not found in candidates: ${candidatePaths.join(', ')}`,
-        );
-        return existingCount;
-      }
-
-      const raw = fs.readFileSync(seedPath, 'utf8');
-      const seedData: RetractionSeedItem[] = JSON.parse(raw);
-
-      this.logger.log(
-        `Seeding ${seedData.length} Retraction Watch records into PostgreSQL...`,
-      );
-      let seeded = 0;
-
-      for (const item of seedData) {
-        const cleanDoi =
-          normalizeDoi(item.doi) || item.doi.trim().toLowerCase();
-        const cleanPmid = item.pmid?.trim() || null;
-
-        await this.repo.upsertRetractionRecord({
-          where: { doi: cleanDoi },
-          create: {
-            doi: cleanDoi,
-            pmid: cleanPmid,
-            title: item.title || null,
-            isRetracted: true,
-            nature: item.nature,
-            noticeType: item.nature,
-            reason: item.reason || '',
-            noticeUrl: item.noticeUrl || null,
-            retractionDate: item.retractionDate
-              ? new Date(item.retractionDate)
-              : null,
-            source: item.source || 'retraction_watch',
-            rawMetadata: item as unknown as Prisma.InputJsonValue,
-          },
-          update: {
-            pmid: cleanPmid,
-            title: item.title || null,
-            isRetracted: true,
-            nature: item.nature,
-            noticeType: item.nature,
-            reason: item.reason || '',
-            noticeUrl: item.noticeUrl || null,
-            retractionDate: item.retractionDate
-              ? new Date(item.retractionDate)
-              : null,
-            source: item.source || 'retraction_watch',
-            rawMetadata: item as unknown as Prisma.InputJsonValue,
-          },
-        });
-        seeded++;
-      }
-
-      this.logger.log(
-        `Successfully seeded ${seeded} Retraction Watch records.`,
-      );
-      return seeded;
+      return await this.repo.countRetractionRecords();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Error seeding Retraction Watch dataset: ${msg}`);
+      this.logger.error(`Error counting Retraction Watch dataset: ${msg}`);
       return 0;
     }
   }

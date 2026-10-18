@@ -8,7 +8,8 @@ import {
 } from '@nestjs/common';
 import { Prisma, RelationType } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { extractFileIdFromUrl } from '@/modules/library/core';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   CreateItemData,
@@ -201,7 +202,14 @@ export class CommandRepository {
     });
 
     if (hasTagSync && rawTags) {
-      await syncTagsForCatalogItem(client, userId, updated.id, rawTags);
+      await syncTagsForCatalogItem(
+        client,
+        userId,
+        updated.id,
+        rawTags,
+        undefined,
+        projectId ?? existing.projectId,
+      );
 
       const reloaded = await client.item.findUnique({
         where: { id: updated.id },
@@ -362,6 +370,13 @@ export class CommandRepository {
       data: { deletedAt: null },
     });
 
+    const restoredNoteCount =
+      typeof client.note?.count === 'function'
+        ? await client.note.count({
+            where: { itemId: id, deletedAt: null },
+          })
+        : undefined;
+
     const attachments = await client.attachment.findMany({
       where: { itemId: id },
       select: { id: true },
@@ -382,6 +397,9 @@ export class CommandRepository {
       where: { id },
       data: {
         deletedAt: null,
+        ...(restoredNoteCount !== undefined
+          ? { noteCount: restoredNoteCount }
+          : {}),
         ...(expectedVersion !== undefined ? {} : { version: { increment: 1 } }),
       },
       include: {
@@ -427,11 +445,7 @@ export class CommandRepository {
     });
 
     for (const att of attachments) {
-      const fileId =
-        att.fileId ||
-        att.url?.match(
-          /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?(?:attachments\/)?files\/([a-zA-Z0-9_-]+)/,
-        )?.[1];
+      const fileId = att.fileId || extractFileIdFromUrl(att.url);
       if (fileId && this.storagePort?.deleteFile) {
         try {
           await this.storagePort.deleteFile(fileId);

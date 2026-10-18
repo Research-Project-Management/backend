@@ -1,7 +1,7 @@
 import {
   StateData,
   ReadingStatus,
-  VALID_STATE_TRANSITIONS,
+  VALID_READING_TRANSITIONS,
 } from '@/modules/library/catalog/types/state.types';
 
 export function isValidStateTransition(
@@ -9,10 +9,8 @@ export function isValidStateTransition(
   next: ReadingStatus,
 ): boolean {
   if (current === next) return true;
-  return VALID_STATE_TRANSITIONS[current]?.includes(next) ?? false;
+  return VALID_READING_TRANSITIONS[current]?.includes(next) ?? false;
 }
-
-export const isValidReadingTransition = isValidStateTransition;
 
 export function isValidRating(rating?: number | null): boolean {
   if (rating === undefined || rating === null) return true;
@@ -84,5 +82,3 @@ export function toStateResponse(
     lastReadAt: formatStateDate(state?.lastReadAt),
   };
 }
-
-export const toReadingStateResponse = toStateResponse;

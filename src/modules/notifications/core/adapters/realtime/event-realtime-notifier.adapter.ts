@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { IRealtimeNotifierPort } from '../../ports/realtime-notifier.port';
 import { NotificationEntity } from '../../domain/entities/notification.entity';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 
 export interface DispatchedNotificationPayload {
   unreadCount?: number;
@@ -21,7 +21,7 @@ export class EventRealtimeNotifierAdapter implements IRealtimeNotifierPort {
   private readonly logger = new Logger(EventRealtimeNotifierAdapter.name);
   public readonly dispatchedEvents: DispatchedNotificationEvent[] = [];
 
-  constructor(@Optional() private readonly realtimeService?: RealtimeService) {}
+  constructor(@Optional() private readonly realtimeService?: RealtimeFacade) {}
 
   async notifyUser(
     userId: string,

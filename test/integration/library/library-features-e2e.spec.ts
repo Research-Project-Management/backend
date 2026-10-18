@@ -12,13 +12,13 @@ import {
   normalizeDoi,
   normalizeArxivId,
   normalizeIsbn,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 import {
   ARXIV_CATEGORY_MAP,
   resolveCanonicalArxivCategory,
   normalizeTags,
   cleanSingleTag,
-} from '@/modules/library/shared-kernel/domain/tag.domain';
+} from '@/modules/library/core/domain/tag.domain';
 import { formatLiteratureNoteMarkdown } from '@/modules/library/catalog/domain/notes.domain';
 import {
   isValidRating,
@@ -27,10 +27,10 @@ import {
   isValidStateTransition,
 } from '@/modules/library/catalog/domain/state.domain';
 import { ReadingStatus } from '@/modules/library/catalog/types/state.types';
-import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import { buildMockLibraryItem } from '@test/factories';
 
-describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation', () => {
+describe('Comprehensive Library End-to-End (E2E) Feature Matrix Simulation', () => {
   const userId = '01920b92-user-7111-8111-111111111111';
   const projectId = '01920b92-proj-7111-8111-222222222222';
 
@@ -266,9 +266,7 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
     return updated;
   }
 
-  // =========================================================================
   // FLOW 1: INGESTION, MULTI-SOURCE IDENTIFIER CLEANING & NORMALIZATION
-  // =========================================================================
   describe('Flow 1: Ingestion, Identifier Cleaning & Academic Data Intake', () => {
     it('1.1 Should normalize DOI formats and clean raw HTML/XML and LaTeX abstract', () => {
       const rawDoiInput = 'https://doi.org/10.1038/s41586-021-03819-2';
@@ -362,9 +360,9 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
       expect(item.projectId).toBe(projectId);
       expect(item.citationKey).toBe('vaswani2017attention');
       expect(item.tags).toEqual([
-        'Machine-Learning',
-        'Transformers',
-        'Dirty Tag',
+        'machine-learning',
+        'transformers',
+        'dirty tag',
       ]);
     });
 
@@ -384,9 +382,7 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
     });
   });
 
-  // =========================================================================
   // FLOW 2: DEDUPLICATION, MATCH CLUSTERING & ZOTERO-STYLE MERGING
-  // =========================================================================
   describe('Flow 2: Deduplication, Conflict Detection & Zotero-style Merging', () => {
     it('2.1 Should detect exact DOI duplicate and perform safe non-destructive merge', () => {
       const item1 = createItem(
@@ -470,15 +466,13 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
         'col-reading-list',
         'col-neurips',
       ]);
-      expect(mergedMaster.tags).toEqual(['Deep-Learning', 'Attention', 'NLP']);
+      expect(mergedMaster.tags).toEqual(['deep-learning', 'attention', 'nlp']);
       expect(mergedMaster.creators).toHaveLength(2);
       expect(trashed.isDeleted).toBe(true);
     });
   });
 
-  // =========================================================================
   // FLOW 3: CATALOGING, COLLECTIONS HIERARCHY & CONCURRENCY (OCC)
-  // =========================================================================
   describe('Flow 3: Hierarchical Collections, Cycle Prevention & Concurrency Control', () => {
     it('3.1 Should manage multi-level collection tree and reject circular loops', () => {
       const rootCol: E2ECollection = {
@@ -536,9 +530,7 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
     });
   });
 
-  // =========================================================================
   // FLOW 4: SAVED SEARCHES & DYNAMIC FILTERING ENGINE
-  // =========================================================================
   describe('Flow 4: Saved Searches & Specification Evaluation', () => {
     it('4.1 Should accurately evaluate complex search predicates across items', () => {
       createItem(
@@ -547,7 +539,7 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
           title: 'AlphaFold 2',
           itemType: 'journalArticle',
           year: 2021,
-          tags: ['bio', 'ai'],
+          tags: ['bio', 'AI'],
         },
       );
       createItem(
@@ -556,7 +548,7 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
           title: 'BERT NLP',
           itemType: 'preprint',
           year: 2018,
-          tags: ['nlp', 'transformers'],
+          tags: ['NLP', 'Transformers'],
         },
       );
       createItem(
@@ -565,13 +557,13 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
           title: 'GPT-4 Technical Report',
           itemType: 'preprint',
           year: 2023,
-          tags: ['llm', 'ai'],
+          tags: ['LLM', 'AI'],
         },
       );
 
       const allItems = Array.from(dbItems.values());
 
-      // Search rule: year >= 2020 AND tags contain 'AI' (normalized)
+      // Search rule: year >= 2020 AND tags contain 'AI'
       const matched = allItems.filter(
         (it) => it.year && it.year >= 2020 && it.tags.includes('AI'),
       );
@@ -583,9 +575,7 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
     });
   });
 
-  // =========================================================================
   // FLOW 5: READING STATE & LITERATURE NOTES EXTRACTION
-  // =========================================================================
   describe('Flow 5: Reading States, PDF Annotations & Literature Notes Synthesis', () => {
     it('5.1 Should track reading state transitions and auto-advance from unread to reading', () => {
       const item = createItem(
@@ -692,9 +682,7 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
     });
   });
 
-  // =========================================================================
   // FLOW 6: CITATION FORMATTING, OVERLEAF BIBTEX & RETRACTION MONITORING
-  // =========================================================================
   describe('Flow 6: Multi-Style Citations, BibTeX Protection & Retraction Monitoring', () => {
     it('6.1 Should format citations across APA, IEEE, Nature, and Vietnamese TCVN styles', () => {
       const alphafold = createItem(
@@ -786,9 +774,7 @@ describe('🚀 Comprehensive Library End-to-End (E2E) Feature Matrix Simulation'
     });
   });
 
-  // =========================================================================
   // FLOW 7: MULTI-DEVICE CDC REPLICATION STREAM & TOMBSTONES
-  // =========================================================================
   describe('Flow 7: Sync Engine, Monotonic Sequencing & CDC Stream', () => {
     it('7.1 Should maintain strictly sequential monotonic log across user and project scopes', () => {
       const p1 = createItem(

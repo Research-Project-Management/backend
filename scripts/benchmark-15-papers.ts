@@ -18,7 +18,7 @@ import { NormalizationPolicy } from '../src/modules/library/ingestion/policies/n
 import { RetractionScannerProvider } from '../src/modules/library/ingestion/providers/retraction-scanner.provider';
 import { RetractionDatabaseService } from '../src/modules/library/ingestion/services/retraction-database.service';
 import { ZoteroSchemaValidatorService } from '../src/modules/library/catalog/services/zotero-schema-validator.service';
-import { ItemMetadata } from '../src/modules/library/shared-kernel';
+import { ItemMetadata } from '../src/modules/library/core';
 
 interface PaperTestCase {
   id: number;

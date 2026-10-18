@@ -19,12 +19,9 @@ import {
   cleanBibliographicText,
   titleSimilarity,
   TITLE_MATCH_THRESHOLD,
-} from '@/modules/library/ingestion/domain/metadata.domain';
+} from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
-import {
-  normalizePageRange,
-  parseCreatorString,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { normalizePageRange, parseCreatorString } from '@/modules/library/core';
 
 @Injectable()
 export class OpenAlexProvider implements MetadataProvider {

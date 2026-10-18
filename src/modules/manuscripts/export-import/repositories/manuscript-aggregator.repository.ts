@@ -1,26 +1,53 @@
 /**
  * modules/manuscripts/export-import/repositories/manuscript-aggregator.repository.ts
  * Repository collecting virtual file tree nodes, docstore text lines, and filestore
- * binary assets into a consolidated list for ZIP archiving, alongside project hydration.
+ * binary assets into a consolidated list for ZIP archiving, alongside project hydration
+ * and embedded template catalog management.
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import * as path from 'node:path';
+import { Readable } from 'node:stream';
+import { mapWithConcurrency } from '@/core';
 import {
   IManuscriptAggregatorPort,
   ExportableFileEntry,
-} from '../core/ports/manuscript-aggregator.port';
+  IManuscriptHydratorPort,
+  ITemplateCatalogPort,
+  ArchiveEntryVo,
+  ImportSummaryVo,
+  ProjectTemplate,
+  isArxivAllowed,
+} from '../domain';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { ClsiService } from '@/modules/manuscripts/clsi/clsi.service';
-import { Readable } from 'node:stream';
-import { mapWithConcurrency } from '@/core';
+import { OFFICIAL_TEMPLATE_CATALOG } from '@/modules/manuscripts/templates/domain';
 import type { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
-import { isArxivAllowed } from '../domain/archive-validator';
-import { ManuscriptHydratorAdapter } from '../core/adapters/external/manuscript-hydrator.adapter';
-import { EmbeddedTemplateCatalogAdapter } from '../core/adapters/storage/embedded-template-catalog.adapter';
 
 const COLLECT_CONCURRENCY = 6;
+
+const MIME_MAP: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.pdf': 'application/pdf',
+  '.eps': 'application/postscript',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
+function inferMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  return MIME_MAP[ext] || 'application/octet-stream';
+}
 
 @Injectable()
 export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
@@ -235,8 +262,276 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
   }
 }
 
-export {
-  ManuscriptAggregatorAdapter as ManuscriptAggregatorRepository,
-  ManuscriptHydratorAdapter,
-  EmbeddedTemplateCatalogAdapter,
-};
+@Injectable()
+export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
+  private readonly logger = new Logger(ManuscriptHydratorAdapter.name);
+
+  constructor(
+    private readonly structureService: StructureService,
+    private readonly docstoreService: DocstoreService,
+    private readonly filestoreService: FilestoreService,
+  ) {
+    super();
+  }
+
+  public async hydrateProjectEntries(
+    projectId: string,
+    entries: ArchiveEntryVo[],
+    userId?: string | null,
+    preferredRootDoc?: string,
+  ): Promise<ImportSummaryVo> {
+    let totalDocs = 0;
+    let totalFiles = 0;
+    let totalFolders = 0;
+    const docContentsMap = new Map<string, string[]>();
+
+    const wrapperPrefix = this.detectSingleWrapperFolder(entries);
+
+    for (const entry of entries) {
+      let cleanRelPath = entry.path.replace(/^\/+/, '');
+      if (wrapperPrefix) {
+        if (cleanRelPath === wrapperPrefix) {
+          continue;
+        }
+        if (cleanRelPath.startsWith(wrapperPrefix + '/')) {
+          cleanRelPath = cleanRelPath.slice(wrapperPrefix.length + 1);
+        }
+      }
+      const normalizedPath = '/' + cleanRelPath;
+      const parentDir = path.posix.dirname(normalizedPath);
+      const baseName = path.posix.basename(normalizedPath);
+
+      if (!baseName) continue;
+
+      if (parentDir !== '/' && parentDir !== '.') {
+        await this.structureService.mkdirp(projectId, parentDir);
+      }
+
+      if (entry.isDirectory) {
+        await this.structureService.mkdirp(projectId, normalizedPath);
+        totalFolders++;
+        continue;
+      }
+
+      const storageType = entry.getStorageType();
+      const existingNode = await this.structureService.getNodeByPath(
+        projectId,
+        normalizedPath,
+      );
+
+      if (storageType === 'doc') {
+        const text = entry.data.toString('utf8').replace(/^\uFEFF/, '');
+        const lines = text
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '\n')
+          .split('\n');
+
+        if (existingNode && existingNode.type === 'DOC' && existingNode.docId) {
+          const current = await this.docstoreService
+            .getDoc(projectId, existingNode.docId)
+            .catch(() => null);
+          await this.docstoreService.updateDoc(projectId, existingNode.docId, {
+            lines,
+            version: (current?.version ?? 0) + 1,
+          });
+          docContentsMap.set(existingNode.docId, lines);
+          totalDocs++;
+          continue;
+        }
+
+        if (existingNode) {
+          await this.structureService.deleteNode(projectId, existingNode.id);
+        }
+
+        const doc = await this.docstoreService.createDoc(projectId, {
+          path: normalizedPath,
+          lines,
+        });
+
+        await this.structureService.createNode(projectId, {
+          path: normalizedPath,
+          name: baseName,
+          type: 'DOC',
+          docId: doc._id,
+        });
+
+        docContentsMap.set(doc._id, lines);
+        totalDocs++;
+      } else {
+        const mimeType = inferMimeType(entry.path);
+
+        if (existingNode) {
+          if (existingNode.fileId) {
+            await this.filestoreService
+              .deleteFile(projectId, existingNode.fileId, false)
+              .catch(() => undefined);
+          }
+          await this.structureService.deleteNode(projectId, existingNode.id);
+        }
+
+        const file = await this.filestoreService.uploadFileFromBuffer(
+          projectId,
+          baseName,
+          entry.data,
+          mimeType,
+        );
+
+        await this.structureService.createNode(projectId, {
+          path: normalizedPath,
+          name: baseName,
+          type: 'FILE',
+          fileId: file.id,
+        });
+
+        totalFiles++;
+      }
+    }
+
+    let rootDocId: string | null = null;
+    let rootDocPath: string | null = null;
+
+    if (preferredRootDoc) {
+      let cleanPreferred = preferredRootDoc.replace(/^\/+/, '');
+      if (wrapperPrefix && cleanPreferred.startsWith(wrapperPrefix + '/')) {
+        cleanPreferred = cleanPreferred.slice(wrapperPrefix.length + 1);
+      }
+      const preferredNorm = '/' + cleanPreferred;
+      const match = await this.structureService.getNodeByPath(
+        projectId,
+        preferredNorm,
+      );
+      if (match && match.type === 'DOC') {
+        const updated = await this.structureService.setRootDoc(
+          projectId,
+          match.id,
+        );
+        rootDocId = updated.id;
+        rootDocPath = updated.path;
+      }
+    }
+
+    if (!rootDocId) {
+      const detected = await this.structureService.autoDetectRootDoc(
+        projectId,
+        docContentsMap,
+      );
+
+      if (detected) {
+        rootDocId = detected.id;
+        rootDocPath = detected.path;
+      }
+    }
+
+    return new ImportSummaryVo({
+      projectId,
+      totalEntries: entries.length,
+      totalDocs,
+      totalFiles,
+      totalFolders,
+      rootDocId,
+      rootDocPath,
+    });
+  }
+
+  private detectSingleWrapperFolder(entries: ArchiveEntryVo[]): string | null {
+    const fileEntries = entries.filter((e) => !e.isDirectory);
+    if (fileEntries.length === 0) return null;
+
+    let commonTopFolder: string | null = null;
+    let hasRootTexInsideWrapper = false;
+
+    for (const entry of entries) {
+      const clean = entry.path.replace(/^\/+/, '').replace(/\/+$/, '');
+      if (!clean) continue;
+      const segments = clean.split('/');
+      const firstSegment = segments[0];
+
+      if (commonTopFolder === null) {
+        commonTopFolder = firstSegment;
+      } else if (commonTopFolder !== firstSegment) {
+        return null;
+      }
+
+      if (!entry.isDirectory) {
+        if (segments.length < 2) {
+          return null;
+        }
+        if (
+          segments.length === 2 &&
+          /\.(tex|ltx|rtex|latex)$/i.test(segments[1])
+        ) {
+          hasRootTexInsideWrapper = true;
+        }
+      }
+    }
+
+    return hasRootTexInsideWrapper ? commonTopFolder : null;
+  }
+}
+
+@Injectable()
+export class EmbeddedTemplateCatalogAdapter extends ITemplateCatalogPort {
+  private readonly templates: Map<string, ProjectTemplate> = new Map();
+  private readonly aliasIndex: Map<string, ProjectTemplate> = new Map();
+
+  constructor() {
+    super();
+    this.seedDefaultTemplates();
+  }
+
+  public async listTemplates(): Promise<ProjectTemplate[]> {
+    return Array.from(this.templates.values());
+  }
+
+  public async getTemplateById(
+    templateId: string,
+  ): Promise<ProjectTemplate | null> {
+    if (!templateId) return null;
+    const direct = this.templates.get(templateId);
+    if (direct) return direct;
+    return (
+      this.aliasIndex.get(templateId) ||
+      this.aliasIndex.get(templateId.toLowerCase().trim()) ||
+      null
+    );
+  }
+
+  private seedDefaultTemplates(): void {
+    for (const def of OFFICIAL_TEMPLATE_CATALOG) {
+      const files = Object.entries(def.files).map(([filePath, content]) => ({
+        path: filePath,
+        content,
+      }));
+      if (!files.some((f) => f.path === 'main.tex')) {
+        const rootContent =
+          def.files[def.mainFile] || Object.values(def.files)[0] || '';
+        files.push({ path: 'main.tex', content: rootContent });
+      }
+
+      const template = new ProjectTemplate({
+        id: def.slug,
+        title: def.title,
+        category: def.category,
+        description: def.description,
+        author: def.author,
+        defaultRootDoc:
+          def.slug === 'ieee-transactions'
+            ? 'main.tex'
+            : def.mainFile || 'main.tex',
+        files,
+      });
+
+      this.templates.set(def.slug, template);
+      this.aliasIndex.set(def.slug.toLowerCase(), template);
+      this.aliasIndex.set(def.id, template);
+      this.aliasIndex.set(def.id.toLowerCase(), template);
+      this.aliasIndex.set(def.versionId, template);
+      this.aliasIndex.set(def.versionId.toLowerCase(), template);
+      for (const alias of def.aliases) {
+        this.aliasIndex.set(alias.toLowerCase(), template);
+      }
+    }
+  }
+}
+
+export { ManuscriptAggregatorAdapter as ManuscriptAggregatorRepository };

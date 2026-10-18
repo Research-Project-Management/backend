@@ -12,18 +12,18 @@ import { DocumentUpdaterModule } from '@/modules/manuscripts/document-updater/do
 
 import { ProjectHistoryController } from './project-history.controller';
 import { ProjectHistoryService } from './project-history.service';
-import { ProjectHistoryRepository } from './project-history.repository';
-
-// Ports
-import { IHistoryRepositoryPort } from './core/ports/history-repository.port';
-import { IDiffEnginePort } from './core/ports/diff-engine.port';
-import { IProjectCollectorPort } from './core/ports/project-collector.port';
-import { IProjectRestorerPort } from './core/ports/project-restorer.port';
-
-// Adapters
-import { MyersDiffEngineAdapter } from './core/adapters/engine/myers-diff-engine.adapter';
-import { ManuscriptCollectorAdapter } from './core/adapters/external/manuscript-collector.adapter';
-import { ManuscriptRestorerAdapter } from './core/adapters/external/manuscript-restorer.adapter';
+import {
+  ProjectHistoryRepository,
+  MyersDiffEngineAdapter,
+  ManuscriptCollectorAdapter,
+  ManuscriptRestorerAdapter,
+} from './project-history.repository';
+import {
+  IHistoryRepositoryPort,
+  IDiffEnginePort,
+  IProjectCollectorPort,
+  IProjectRestorerPort,
+} from './domain';
 
 @Module({
   imports: [

@@ -32,14 +32,14 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
       const template = stateService.getDefaultStatesTemplate();
       expect(template).toHaveLength(8);
       expect(template.map((c) => c.name)).toEqual([
-        'Thuyết minh đề cương',
-        'Thẩm định & Phê duyệt',
-        'Triển khai & Thực nghiệm',
-        'Soạn thảo & Công bố',
-        'Nghiệm thu & Đánh giá',
-        'Hoàn thành & Lưu trữ',
-        'Tạm dừng',
-        'Hủy bỏ',
+        'Proposal & Literature Review',
+        'Review & Approval',
+        'Execution & Experimentation',
+        'Drafting & Publication',
+        'Evaluation & Defense',
+        'Completed & Archived',
+        'Suspended',
+        'Cancelled',
       ]);
     });
 
@@ -82,7 +82,7 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
       const result = await stateService.transitionToState('proj-1', null);
       expect(result.stateId).toBeNull();
       expect(result.state).toBeNull();
-      expect(result.stateLabel).toBe('Chưa đặt trạng thái (Unassigned)');
+      expect(result.stateLabel).toBe('Unassigned');
     });
   });
 

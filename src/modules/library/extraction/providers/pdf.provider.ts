@@ -1,6 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { getDocumentProxy, getMeta } from 'unpdf';
-import { isIP } from 'node:net';
 import {
   AcademicCreator,
   BibliographicReference,
@@ -8,10 +7,10 @@ import {
   DocumentFigure,
   DocumentTable,
   DocumentFormula,
-} from '@/modules/library/shared-kernel/types/bibliographic.types';
-import { SsrfGuardService } from '@/modules/library/shared-kernel/core/services/ssrf-guard.service';
-import { cleanAbstractText } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+} from '@/modules/library/core/types/bibliographic.types';
+import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
+import { cleanAbstractText } from '@/modules/library/core';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import { OcrProvider } from './ocr.provider';
 import {
   OcrPageResult,
@@ -922,48 +921,4 @@ export class PdfProvider {
       buffer.subarray(0, PdfProvider.TEXT_SCAN_LIMIT).toString('latin1'),
     );
   }
-
-  private validateUrlSecurity(urlString: string): void {
-    let parsed: URL;
-    try {
-      parsed = new URL(urlString);
-    } catch {
-      throw new Error('Invalid URL format');
-    }
-
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      throw new Error(`Forbidden protocol: ${parsed.protocol}`);
-    }
-
-    const hostname = parsed.hostname;
-    if (
-      hostname === 'localhost' ||
-      hostname.endsWith('.localhost') ||
-      hostname.endsWith('.internal') ||
-      hostname.endsWith('.local')
-    ) {
-      throw new Error(`SSRF violation: Forbidden target domain ${hostname}`);
-    }
-
-    const cleanIp = hostname.replace(/^\[|\]$/g, '');
-    if (isIP(cleanIp)) {
-      if (
-        cleanIp === '127.0.0.1' ||
-        cleanIp === '::1' ||
-        cleanIp.startsWith('127.') ||
-        cleanIp.startsWith('10.') ||
-        cleanIp.startsWith('192.168.') ||
-        cleanIp.startsWith('169.254.') ||
-        cleanIp.startsWith('fc00:') ||
-        cleanIp.startsWith('fe80:') ||
-        cleanIp === '0.0.0.0' ||
-        cleanIp === '::' ||
-        /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(cleanIp)
-      ) {
-        throw new Error(`SSRF violation: Forbidden IP ${cleanIp}`);
-      }
-    }
-  }
 }
-
-export { PdfProvider as PdfExtractorProvider };

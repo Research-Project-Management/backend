@@ -55,8 +55,8 @@ export class InvitationService {
   }
 
   /**
-   * Get all incoming project invitations for the current logged in user.
-   * ("người khác mời tôi vào project của họ")
+   * Get all incoming project invitations for the current logged in user
+   * (invitations sent to the user to join external projects).
    */
   async getMyInvitations(user: AuthenticatedUser) {
     if (!user || !user.email) {

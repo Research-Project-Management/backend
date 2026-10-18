@@ -7,9 +7,9 @@ import {
   resolveCanonicalCreatorRole,
   resolveFieldAliases,
   SCHEMA_V42_DATA,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { ReconciliationService } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
+import { MetadataReconciliationService } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
 import { toItemData } from '@/modules/library/ingestion/stages/commit.stage';
 import {
   buildCommandCreateInput,
@@ -18,10 +18,12 @@ import {
   resolveCanonicalCommandFields,
 } from '@/modules/library/catalog/domain/command-payload.builder';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import { fromPartial } from '@total-typescript/shoehorn';
+import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 
 describe('Wave 13: Standardized Pipeline Architecture & Single-Source-of-Truth Harmonizer', () => {
   const normalizationPolicy = new NormalizationPolicy();
-  const reconciliationService = new ReconciliationService();
+  const reconciliationService = new MetadataReconciliationService();
 
   const mockPrismaClient = {
     tag: {
@@ -203,7 +205,7 @@ describe('Wave 13: Standardized Pipeline Architecture & Single-Source-of-Truth H
       expect(contributors?.[0]?.creatorType).toBe('bookAuthor');
       expect(contributors?.[1]?.creatorType).toBe('seriesEditor');
 
-      const domainItem = ItemsMapper.toDomain({
+      const domainItem: any = ItemsMapper.toDomain({
         id: 'item-1',
         itemType: 'bookSection',
         title: 'Notes on the Analytical Engine',
@@ -438,11 +440,11 @@ describe('Wave 13: Standardized Pipeline Architecture & Single-Source-of-Truth H
         }
 
         // Verify roundtrip through ItemsMapper.toDomain produces identical domain projection
-        const domainFromCreate = ItemsMapper.toDomain({
+        const domainFromCreate: any = ItemsMapper.toDomain({
           id: 'item-new',
           ...createData,
         });
-        const domainFromUpdate = ItemsMapper.toDomain({
+        const domainFromUpdate: any = ItemsMapper.toDomain({
           ...existingBlankItem,
           ...updateData,
         });
@@ -480,7 +482,7 @@ describe('Wave 13: Standardized Pipeline Architecture & Single-Source-of-Truth H
 
       // Reconcile a legal case where only Zotero type-specific fields are provided
       const reconciledCase = reconciliationService.reconcile([
-        {
+        fromPartial<MetadataCandidate>({
           sourceProvider: 'ZoteroSync',
           confidenceScore: 0.95,
           metadata: {
@@ -505,7 +507,7 @@ describe('Wave 13: Standardized Pipeline Architecture & Single-Source-of-Truth H
               },
             ],
           },
-        },
+        }),
       ]);
 
       // Must NOT fall back to 'Untitled Document' when caseName is present

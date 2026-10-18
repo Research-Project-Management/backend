@@ -24,6 +24,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { Prisma, ManuscriptChangeType } from '@prisma/client';
 import { PrismaService, AuthenticatedRequest } from '@/core';
 import { ModuleRef } from '@nestjs/core';
@@ -35,7 +36,7 @@ import {
   applyBatchSuggestionsToLines,
 } from '../domain/text-suggestion-mutator';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { LiveCollaborationPort } from '../core/ports/live-collaboration.port';
+import { LiveCollaborationPort } from '../domain';
 
 export interface CreateSuggestionBody {
   type?: string;
@@ -56,7 +57,8 @@ const isUuid = (val?: string | null): val is string =>
 @ApiTags('Manuscripts - Pages Review & Comments')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@RequireRole(Role.REVIEWER)
 export class PagesReviewController {
   private readonly logger = new Logger(PagesReviewController.name);
   private liveCollab: LiveCollaborationPort | null | undefined;

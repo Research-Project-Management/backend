@@ -37,40 +37,23 @@
 
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 
-// Domain Value Objects & Entities
-import { TextRangeVo } from '@/modules/manuscripts/track-changes/core/domain/value-objects/text-range.vo';
-import { ChangeMetadataVo } from '@/modules/manuscripts/track-changes/core/domain/value-objects/change-metadata.vo';
 import {
+  TextRangeVo,
+  ChangeMetadataVo,
   TrackChange,
   ChangeType,
   ChangeStatus,
-} from '@/modules/manuscripts/track-changes/core/domain/entities/track-change.entity';
-import { CommentReply } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-reply.entity';
-import { CommentThread } from '@/modules/manuscripts/track-changes/core/domain/entities/comment-thread.entity';
-
-// Exceptions
-import { ChangeNotFoundException } from '@/modules/manuscripts/track-changes/core/domain/exceptions/change-not-found.exception';
-import { ThreadNotFoundException } from '@/modules/manuscripts/track-changes/core/domain/exceptions/thread-not-found.exception';
-import { ResolvedThreadException } from '@/modules/manuscripts/track-changes/core/domain/exceptions/resolved-thread.exception';
-
-// Ports & Adapters
-import { ITrackChangesRepositoryPort } from '@/modules/manuscripts/track-changes/core/ports/track-changes-repository.port';
-import { IRealtimeNotifierPort } from '@/modules/manuscripts/track-changes/core/ports/realtime-notifier.port';
-import { DocstorePatcherAdapter } from '@/modules/manuscripts/track-changes/core/adapters/external/docstore-patcher.adapter';
-
-// Use Cases
-import { RecordChangeUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/record-change.use-case';
-import { AcceptChangeUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/accept-change.use-case';
-import { RejectChangeUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/reject-change.use-case';
-import { BatchResolveChangesUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/batch-resolve-changes.use-case';
-import { CreateCommentThreadUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/create-comment-thread.use-case';
-import { AddCommentReplyUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/add-comment-reply.use-case';
-import { ResolveCommentThreadUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/resolve-comment-thread.use-case';
-import { GetDocReviewsUseCase } from '@/modules/manuscripts/track-changes/core/use-cases/get-doc-reviews.use-case';
-
-// Application Service & Controller
-import { TrackChangesService } from '@/modules/manuscripts/track-changes/track-changes.service';
-import { TrackChangesController } from '@/modules/manuscripts/track-changes/track-changes.controller';
+  CommentReply,
+  CommentThread,
+  ChangeNotFoundException,
+  ThreadNotFoundException,
+  ResolvedThreadException,
+  ITrackChangesRepositoryPort,
+  IRealtimeNotifierPort,
+  DocstorePatcherAdapter,
+  TrackChangesService,
+  TrackChangesController,
+} from '@/modules/manuscripts/track-changes';
 
 // --- In-Memory Mocks for Ports ---
 
@@ -287,19 +270,90 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
   let repo: InMemoryTrackChangesRepository;
   let notifier: MockRealtimeNotifier;
 
-  // Use cases
-  let recordChangeUseCase: RecordChangeUseCase;
-  let acceptChangeUseCase: AcceptChangeUseCase;
-  let rejectChangeUseCase: RejectChangeUseCase;
-  let batchResolveUseCase: BatchResolveChangesUseCase;
-  let createThreadUseCase: CreateCommentThreadUseCase;
-  let addReplyUseCase: AddCommentReplyUseCase;
-  let resolveThreadUseCase: ResolveCommentThreadUseCase;
-  let getDocReviewsUseCase: GetDocReviewsUseCase;
-
   // Service & Controller
   let service: TrackChangesService;
   let controller: TrackChangesController;
+
+  // Use case delegates to service
+  let recordChangeUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      type: ChangeType;
+      text: string;
+      range: {
+        startLine: number;
+        startCol: number;
+        endLine: number;
+        endCol: number;
+      };
+      userId?: string;
+    }) => ReturnType<TrackChangesService['recordChange']>;
+  };
+  let acceptChangeUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      changeId: string;
+      userId?: string;
+    }) => ReturnType<TrackChangesService['acceptChange']>;
+  };
+  let rejectChangeUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      changeId: string;
+      userId?: string;
+    }) => ReturnType<TrackChangesService['rejectChange']>;
+  };
+  let batchResolveUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      action: 'accept_all' | 'reject_all';
+      changeIds?: string[];
+      userId?: string;
+    }) => ReturnType<TrackChangesService['batchResolveChanges']>;
+  };
+  let createThreadUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      quote?: string;
+      range: {
+        startLine: number;
+        startCol: number;
+        endLine: number;
+        endCol: number;
+      };
+      content: string;
+      userId?: string;
+    }) => ReturnType<TrackChangesService['createCommentThread']>;
+  };
+  let addReplyUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      threadId: string;
+      content: string;
+      userId?: string;
+    }) => ReturnType<TrackChangesService['addCommentReply']>;
+  };
+  let resolveThreadUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      threadId: string;
+      resolve: boolean;
+      userId?: string;
+    }) => ReturnType<TrackChangesService['resolveCommentThread']>;
+  };
+  let getDocReviewsUseCase: {
+    execute: (
+      projectId: string,
+      docId: string,
+    ) => ReturnType<TrackChangesService['getDocReviews']>;
+  };
 
   beforeEach(() => {
     mockDocstore = new MockDocstoreService();
@@ -307,33 +361,82 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
     repo = new InMemoryTrackChangesRepository();
     notifier = new MockRealtimeNotifier();
 
-    recordChangeUseCase = new RecordChangeUseCase(repo, notifier);
-    acceptChangeUseCase = new AcceptChangeUseCase(
-      repo,
-      patcherAdapter,
-      notifier,
-    );
-    rejectChangeUseCase = new RejectChangeUseCase(
-      repo,
-      patcherAdapter,
-      notifier,
-    );
-    batchResolveUseCase = new BatchResolveChangesUseCase(
-      repo,
-      acceptChangeUseCase,
-      rejectChangeUseCase,
-    );
-    createThreadUseCase = new CreateCommentThreadUseCase(repo, notifier);
-    addReplyUseCase = new AddCommentReplyUseCase(repo, notifier);
-    resolveThreadUseCase = new ResolveCommentThreadUseCase(repo, notifier);
-    getDocReviewsUseCase = new GetDocReviewsUseCase(repo);
-
     service = new TrackChangesService(
       repo,
       mockDocstore as any,
       patcherAdapter,
       notifier as any,
     );
+
+    recordChangeUseCase = {
+      execute: (input) =>
+        service.recordChange(
+          input.projectId,
+          input.docId,
+          { type: input.type, text: input.text, range: input.range },
+          input.userId,
+        ),
+    };
+    acceptChangeUseCase = {
+      execute: (input) =>
+        service.acceptChange(
+          input.projectId,
+          input.docId,
+          input.changeId,
+          input.userId,
+        ),
+    };
+    rejectChangeUseCase = {
+      execute: (input) =>
+        service.rejectChange(
+          input.projectId,
+          input.docId,
+          input.changeId,
+          input.userId,
+        ),
+    };
+    batchResolveUseCase = {
+      execute: (input) =>
+        service.batchResolveChanges(
+          input.projectId,
+          input.docId,
+          input.action,
+          input.changeIds,
+          input.userId,
+        ),
+    };
+    createThreadUseCase = {
+      execute: (input) =>
+        service.createCommentThread(
+          input.projectId,
+          input.docId,
+          { quote: input.quote, range: input.range, content: input.content },
+          input.userId,
+        ),
+    };
+    addReplyUseCase = {
+      execute: (input) =>
+        service.addCommentReply(
+          input.projectId,
+          input.docId,
+          input.threadId,
+          { content: input.content },
+          input.userId,
+        ),
+    };
+    resolveThreadUseCase = {
+      execute: (input) =>
+        service.resolveCommentThread(
+          input.projectId,
+          input.docId,
+          input.threadId,
+          input.resolve,
+          input.userId,
+        ),
+    };
+    getDocReviewsUseCase = {
+      execute: (pId, dId) => service.getDocReviews(pId, dId),
+    };
 
     controller = new TrackChangesController(service);
   });

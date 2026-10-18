@@ -1,12 +1,7 @@
 /**
  * citations/domain/bibtex.formatter.ts
- * Pure domain BibTeX escaping, value formatting, library-item serialization,
- * and zero-dependency AST/Regex BibTeX parser & formatter.
+ * Pure domain BibTeX escaping, value formatting, and library-item serialization.
  */
-
-import { IBibtexParserPort } from '../core/ports/bibtex-parser.port';
-import { BibEntry } from '../core/domain/entities/bib-entry.entity';
-import { CitationKeyVo } from '../core/domain/value-objects/citation-key.vo';
 
 /** Fields whose content is read verbatim by BibTeX/biblatex and must NOT be escaped. */
 const VERBATIM_FIELDS = new Set([

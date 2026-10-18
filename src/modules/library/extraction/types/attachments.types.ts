@@ -1,4 +1,4 @@
-import { BaseDomainException } from '@/modules/library/shared-kernel/core/errors/domain.exception';
+﻿import { BaseDomainException } from '@/modules/library/core/errors/domain.exception';
 import type { AttachmentExtractionStatus as PrismaExtractionStatus } from '@prisma/client';
 import type { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 

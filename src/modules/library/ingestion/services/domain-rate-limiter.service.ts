@@ -149,6 +149,14 @@ export class DomainRateLimiterService {
   }
 
   /**
+   * Configures rate limit for a specific domain (useful for tests or custom endpoints).
+   */
+  public setDomainConfig(domain: string, config: DomainRateLimitConfig): void {
+    const key = this.normalizeKey(domain);
+    this.domainConfigs[key] = config;
+  }
+
+  /**
    * Resets rate limiter state (useful in test teardown).
    */
   public reset(): void {

@@ -1,9 +1,9 @@
-import {
+﻿import {
   CircuitBreaker,
   CircuitBreakerOpenError,
-} from '@/modules/library/shared-kernel/resilience/circuit-breaker';
-import { TokenBucketRateLimiter } from '@/modules/library/shared-kernel/resilience/rate-limiter';
-import { ResilienceRegistryService } from '@/modules/library/shared-kernel/resilience/resilience-registry.service';
+} from '@/modules/library/core/resilience/circuit-breaker';
+import { TokenBucketRateLimiter } from '@/modules/library/core/resilience/rate-limiter';
+import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
 import { DoiContentNegotiationService } from '@/modules/library/citation/services/doi-content-negotiation.service';
 
 describe('Library Resilience Engine (Circuit Breaker & Token Bucket Rate Limiter)', () => {

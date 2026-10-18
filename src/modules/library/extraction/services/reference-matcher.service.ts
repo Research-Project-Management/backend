@@ -1,9 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+﻿import { Injectable, Logger } from '@nestjs/common';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import {
   normalizeDoi,
   normalizeArxivId,
-} from '@/modules/library/shared-kernel/domain/identifier.domain';
+} from '@/modules/library/core/domain/identifier.domain';
 
 export interface ExtractedReferenceCandidate {
   title?: string;

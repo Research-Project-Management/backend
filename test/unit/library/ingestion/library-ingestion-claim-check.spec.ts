@@ -11,6 +11,7 @@ import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
+import { fromPartial } from '@total-typescript/shoehorn';
 import zlib from 'zlib';
 
 describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
@@ -50,7 +51,7 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
   beforeEach(async () => {
     storedFiles.clear();
 
-    mockStoragePort = {
+    mockStoragePort = fromPartial({
       uploadFile: jest.fn().mockImplementation(async (input) => {
         const fileId = `file-claim-check-${Date.now()}`;
         storedFiles.set(fileId, {
@@ -59,7 +60,7 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
         });
         return {
           fileId,
-          url: `/api/files/${fileId}/content`,
+          url: `/api/v1/storage/files/${fileId}/content`,
           path: `storage/${input.filename}`,
           filename: input.filename,
           size: input.buffer.length,
@@ -75,12 +76,12 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
           mimeType: 'application/gzip',
           size: entry.buffer.length,
           storageKey: `storage/${entry.filename}`,
-          contentUrl: `/api/files/${input.fileId}/content`,
+          contentUrl: `/api/v1/storage/files/${input.fileId}/content`,
           buffer: entry.buffer,
         };
       }),
       linkFile: jest.fn().mockResolvedValue(undefined),
-    };
+    });
 
     mockRepo = {
       findRunByIdempotencyKey: jest.fn().mockResolvedValue(null),

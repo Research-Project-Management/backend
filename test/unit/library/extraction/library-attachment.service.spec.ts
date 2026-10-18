@@ -26,10 +26,8 @@ jest.mock('@mozilla/readability', () => ({
 import { fromPartial, fromAny } from '@total-typescript/shoehorn';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { WebSnapshotService } from '@/modules/library/extraction/services/web-snapshot.service';
-import {
-  AttachmentsController,
-  AttachmentStorageController,
-} from '@/modules/library/extraction/controllers';
+import { AttachmentController } from '@/modules/library/extraction/controllers/attachments.controller';
+import { AttachmentStorageController } from '@/modules/library/extraction/controllers/attachment-storage.controller';
 import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
 import { ExtractionHandler } from '@/modules/library/extraction/services/extraction.handler';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
@@ -43,10 +41,10 @@ describe('Library Attachments & Storage Integration Suite', () => {
   let mockItemExistencePort: any;
 
   beforeEach(() => {
-    mockStoragePort = {
+    mockStoragePort = fromPartial({
       uploadFile: jest.fn().mockResolvedValue({
         fileId: 'storage-file-123',
-        url: '/api/files/storage-file-123/content',
+        url: '/api/v1/storage/files/storage-file-123/content',
         path: 'cas/blobs/storage-file-123',
         filename: 'nature_paper.pdf',
         size: 2048,
@@ -58,7 +56,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         mimeType: 'application/pdf',
         size: 2048,
         storageKey: 'cas/blobs/storage-file-123',
-        contentUrl: '/api/files/storage-file-123/content',
+        contentUrl: '/api/v1/storage/files/storage-file-123/content',
         buffer: Buffer.from('%PDF-1.4 sample content'),
       }),
       deleteFile: jest.fn().mockResolvedValue(undefined),
@@ -71,9 +69,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
       }),
       uploadBuffer: jest.fn().mockResolvedValue({
         path: 'snapshots/web.html',
-        url: '/api/files/snapshots/web.html',
+        url: '/api/v1/storage/files/snapshots/web.html',
       }),
-    };
+    });
 
     mockPrisma = {
       attachment: {
@@ -161,7 +159,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         id: 'att-1',
         itemId: 'item-1',
         filename: 'nature_paper.pdf',
-        url: '/api/files/storage-file-123/content',
+        url: '/api/v1/storage/files/storage-file-123/content',
         fileId: 'storage-file-123',
         revisions: [{ revisionNumber: 1 }],
       });
@@ -170,7 +168,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         userId: 'user-1',
         itemId: 'item-1',
         filename: 'nature_paper.pdf',
-        url: '/api/files/storage-file-123/content',
+        url: '/api/v1/storage/files/storage-file-123/content',
         fileId: 'storage-file-123',
         size: 2048,
         mimeType: 'application/pdf',
@@ -233,7 +231,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       mockRepo.findFirst.mockResolvedValue({
         id: 'att-1',
         fileId: 'storage-file-123',
-        url: '/api/files/storage-file-123/content',
+        url: '/api/v1/storage/files/storage-file-123/content',
         item: { id: 'item-1', userId: 'user-1' },
       });
 
@@ -393,7 +391,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
   });
 
   describe('AttachmentsController & AttachmentStorageController', () => {
-    let controller: AttachmentsController;
+    let controller: AttachmentController;
     let storageController: AttachmentStorageController;
     let mockAttachmentsService: any;
     let mockWebSnapshotService: any;
@@ -417,7 +415,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         mockStoragePort,
         {} as any,
       );
-      controller = new AttachmentsController(
+      controller = new AttachmentController(
         mockAttachmentsService,
         mockWebSnapshotService,
       );
@@ -587,7 +585,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(mockAttachmentsService.createAttachment).toHaveBeenCalledWith(
         expect.objectContaining({
           fileId: 'storage-file-123',
-          url: '/api/files/storage-file-123/content',
+          url: '/api/v1/storage/files/storage-file-123/content',
         }),
       );
     });
@@ -660,13 +658,15 @@ describe('Library Attachments & Storage Integration Suite', () => {
       mockExtractionRepo = {
         claimPendingOrRetryable: jest.fn().mockResolvedValue({ count: 1 }),
         claimStaleProcessing: jest.fn().mockResolvedValue({ count: 0 }),
-        findUniqueAttachment: jest.fn().mockResolvedValue({
-          id: 'att-1',
-          itemId: 'item-1',
-          fileId: null,
-          url: '/api/files/storage-file-123/content',
-          file: null,
-        }),
+        findUniqueAttachment: jest.fn().mockImplementation(() =>
+          Promise.resolve({
+            id: 'att-1',
+            itemId: 'item-1',
+            fileId: null,
+            url: '/api/v1/storage/files/storage-file-123/content',
+            file: null,
+          }),
+        ),
         updateAttachmentFileId: jest.fn().mockResolvedValue({ id: 'att-1' }),
         saveMetadataSourceRecord: jest.fn().mockResolvedValue({ id: 'rec-1' }),
         updateAttachmentMetadata: jest.fn().mockResolvedValue({ id: 'att-1' }),
@@ -758,7 +758,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         expect.objectContaining({
           attachmentId: 'att-1',
           fileId: 'storage-file-123',
-          url: '/api/files/storage-file-123/content',
+          url: '/api/v1/storage/files/storage-file-123/content',
           comment: expect.stringContaining('OCR Sandwich PDF'),
         }),
       );
@@ -781,7 +781,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         {
           id: 'att-1',
           fileId: 'storage-file-1',
-          url: '/api/files/storage-file-1/content',
+          url: '/api/v1/storage/files/storage-file-1/content',
         },
         {
           id: 'att-2',

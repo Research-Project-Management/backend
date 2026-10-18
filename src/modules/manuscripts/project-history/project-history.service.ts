@@ -1,11 +1,15 @@
 /**
  * project-history/project-history.service.ts
  * Deep Module Service orchestrating Manuscript Project History directly via ProjectHistoryRepository
- * and pure MyersDiffEngine, while preserving backward compatibility for legacy use-case tests.
+ * and pure MyersDiffEngine.
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { ProjectHistoryRepository } from './project-history.repository';
+import {
+  ProjectHistoryRepository,
+  ManuscriptCollectorAdapter,
+  ManuscriptRestorerAdapter,
+} from './project-history.repository';
 import {
   MyersDiffEngine,
   Snapshot,
@@ -13,16 +17,6 @@ import {
   VersionNotFoundException,
   DuplicateLabelException,
 } from './domain';
-import { ManuscriptCollectorAdapter } from './core/adapters/external/manuscript-collector.adapter';
-import { ManuscriptRestorerAdapter } from './core/adapters/external/manuscript-restorer.adapter';
-
-import { CreateSnapshotUseCase } from './core/use-cases/create-snapshot.use-case';
-import { GetVersionListUseCase } from './core/use-cases/get-version-list.use-case';
-import { GetSnapshotByVersionUseCase } from './core/use-cases/get-snapshot-by-version.use-case';
-import { CompareVersionsDiffUseCase } from './core/use-cases/compare-versions-diff.use-case';
-import { LabelVersionUseCase } from './core/use-cases/label-version.use-case';
-import { DeleteLabelUseCase } from './core/use-cases/delete-label.use-case';
-import { RestoreVersionUseCase } from './core/use-cases/restore-version.use-case';
 import {
   CreateSnapshotDto,
   SnapshotDetailDto,
@@ -30,7 +24,7 @@ import {
   VersionLabelDto,
   DiffResponseDto,
 } from './dto/history.dto';
-import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { ManuscriptUserResolverService } from '@/modules/manuscripts/docstore/services/manuscript-user-resolver.service';
 
 @Injectable()
@@ -39,20 +33,11 @@ export class ProjectHistoryService {
   private readonly diffEngine = new MyersDiffEngine();
 
   constructor(
-    @Optional() private readonly createSnapshotUseCase?: CreateSnapshotUseCase,
-    @Optional() private readonly getVersionListUseCase?: GetVersionListUseCase,
-    @Optional()
-    private readonly getSnapshotByVersionUseCase?: GetSnapshotByVersionUseCase,
-    @Optional()
-    private readonly compareVersionsDiffUseCase?: CompareVersionsDiffUseCase,
-    @Optional() private readonly labelVersionUseCase?: LabelVersionUseCase,
-    @Optional() private readonly deleteLabelUseCase?: DeleteLabelUseCase,
-    @Optional() private readonly restoreVersionUseCase?: RestoreVersionUseCase,
-    @Optional() private readonly realtimeService?: RealtimeService,
+    private readonly repository: ProjectHistoryRepository,
+    private readonly collector: ManuscriptCollectorAdapter,
+    private readonly restorer: ManuscriptRestorerAdapter,
+    @Optional() private readonly realtimeService?: RealtimeFacade,
     @Optional() private readonly userResolver?: ManuscriptUserResolverService,
-    @Optional() private readonly repository?: ProjectHistoryRepository,
-    @Optional() private readonly collector?: ManuscriptCollectorAdapter,
-    @Optional() private readonly restorer?: ManuscriptRestorerAdapter,
   ) {}
 
   public async createSnapshot(
@@ -60,22 +45,13 @@ export class ProjectHistoryService {
     dto: CreateSnapshotDto,
     userId?: string | null,
   ): Promise<SnapshotDetailDto> {
-    const snapshot =
-      this.repository && this.collector
-        ? await this.createSnapshotDirect({
-            projectId,
-            summary: dto.summary,
-            createdById: userId,
-            isAutomatic: dto.isAutomatic ?? false,
-            label: dto.label,
-          })
-        : await this.createSnapshotUseCase!.execute({
-            projectId,
-            summary: dto.summary,
-            createdById: userId,
-            isAutomatic: dto.isAutomatic ?? false,
-            label: dto.label,
-          });
+    const snapshot = await this.createSnapshotDirect({
+      projectId,
+      summary: dto.summary,
+      createdById: userId,
+      isAutomatic: dto.isAutomatic ?? false,
+      label: dto.label,
+    });
 
     this.realtimeService?.broadcastSnapshotCreated(projectId, {
       version: snapshot.version,
@@ -88,9 +64,7 @@ export class ProjectHistoryService {
   }
 
   public async listVersions(projectId: string): Promise<VersionListItemDto[]> {
-    const snapshots = this.repository
-      ? await this.repository.listVersions(projectId)
-      : await this.getVersionListUseCase!.execute(projectId);
+    const snapshots = await this.repository.listVersions(projectId);
 
     const authorMap = this.userResolver
       ? await this.userResolver.resolveUserNames(
@@ -113,19 +87,11 @@ export class ProjectHistoryService {
     projectId: string,
     version: number,
   ): Promise<SnapshotDetailDto> {
-    if (this.repository) {
-      const found = await this.repository.findByVersion(projectId, version);
-      if (!found) {
-        throw new VersionNotFoundException(projectId, version);
-      }
-      return this.toDetailDto(found);
+    const found = await this.repository.findByVersion(projectId, version);
+    if (!found) {
+      throw new VersionNotFoundException(projectId, version);
     }
-
-    const snapshot = await this.getSnapshotByVersionUseCase!.execute(
-      projectId,
-      version,
-    );
-    return this.toDetailDto(snapshot);
+    return this.toDetailDto(found);
   }
 
   public async compareVersions(
@@ -133,51 +99,35 @@ export class ProjectHistoryService {
     baseVersion: number,
     targetVersion: number,
   ): Promise<DiffResponseDto> {
-    if (this.repository) {
-      const [baseSnapshot, targetSnapshot] = await Promise.all([
-        this.repository.findByVersion(projectId, baseVersion),
-        this.repository.findByVersion(projectId, targetVersion),
-      ]);
-      if (!baseSnapshot) {
-        throw new VersionNotFoundException(projectId, baseVersion);
-      }
-      if (!targetSnapshot) {
-        throw new VersionNotFoundException(projectId, targetVersion);
-      }
-
-      const fileDiffs = this.diffEngine.compareSnapshots(
-        baseSnapshot,
-        targetSnapshot,
-      );
-      let totalAdditions = 0;
-      let totalDeletions = 0;
-      for (const fd of fileDiffs) {
-        totalAdditions += fd.additions;
-        totalDeletions += fd.deletions;
-      }
-
-      return {
-        baseVersion,
-        targetVersion,
-        totalAdditions,
-        totalDeletions,
-        filesChanged: fileDiffs.length,
-        files: fileDiffs,
-      };
+    const [baseSnapshot, targetSnapshot] = await Promise.all([
+      this.repository.findByVersion(projectId, baseVersion),
+      this.repository.findByVersion(projectId, targetVersion),
+    ]);
+    if (!baseSnapshot) {
+      throw new VersionNotFoundException(projectId, baseVersion);
+    }
+    if (!targetSnapshot) {
+      throw new VersionNotFoundException(projectId, targetVersion);
     }
 
-    const result = await this.compareVersionsDiffUseCase!.execute(
-      projectId,
+    const fileDiffs = this.diffEngine.compareSnapshots(
+      baseSnapshot,
+      targetSnapshot,
+    );
+    let totalAdditions = 0;
+    let totalDeletions = 0;
+    for (const fd of fileDiffs) {
+      totalAdditions += fd.additions;
+      totalDeletions += fd.deletions;
+    }
+
+    return {
       baseVersion,
       targetVersion,
-    );
-    return {
-      baseVersion: result.baseVersion,
-      targetVersion: result.targetVersion,
-      totalAdditions: result.totalAdditions,
-      totalDeletions: result.totalDeletions,
-      filesChanged: result.filesChanged,
-      files: result.files,
+      totalAdditions,
+      totalDeletions,
+      filesChanged: fileDiffs.length,
+      files: fileDiffs,
     };
   }
 
@@ -187,54 +137,40 @@ export class ProjectHistoryService {
     label: string,
     userId?: string | null,
   ): Promise<VersionLabelDto> {
-    if (this.repository) {
-      const cleanLabel = label.trim();
-      const snapshot = await this.repository.findByVersion(projectId, version);
-      if (!snapshot) {
-        throw new VersionNotFoundException(projectId, version);
-      }
-
-      const existing = await this.repository.findLabelByName(
-        projectId,
-        cleanLabel,
-      );
-      if (existing && existing.version !== version) {
-        throw new DuplicateLabelException(projectId, cleanLabel);
-      }
-
-      const versionLabel =
-        existing ??
-        VersionLabel.create({
-          projectId,
-          snapshotId: snapshot.id,
-          version,
-          label: cleanLabel,
-          createdById: userId || null,
-        });
-
-      if (existing) {
-        versionLabel.updateLabel(cleanLabel);
-      }
-
-      const saved = await this.repository.saveLabel(versionLabel);
-      return this.toLabelDto(saved);
+    const cleanLabel = label.trim();
+    const snapshot = await this.repository.findByVersion(projectId, version);
+    if (!snapshot) {
+      throw new VersionNotFoundException(projectId, version);
     }
 
-    const versionLabel = await this.labelVersionUseCase!.execute({
+    const existing = await this.repository.findLabelByName(
       projectId,
-      version,
-      label,
-      createdById: userId,
-    });
-    return this.toLabelDto(versionLabel);
+      cleanLabel,
+    );
+    if (existing && existing.version !== version) {
+      throw new DuplicateLabelException(projectId, cleanLabel);
+    }
+
+    const versionLabel =
+      existing ??
+      VersionLabel.create({
+        projectId,
+        snapshotId: snapshot.id,
+        version,
+        label: cleanLabel,
+        createdById: userId || null,
+      });
+
+    if (existing) {
+      versionLabel.updateLabel(cleanLabel);
+    }
+
+    const saved = await this.repository.saveLabel(versionLabel);
+    return this.toLabelDto(saved);
   }
 
   public async deleteLabel(projectId: string, labelId: string): Promise<void> {
-    if (this.repository) {
-      await this.repository.deleteLabel(projectId, labelId);
-      return;
-    }
-    await this.deleteLabelUseCase!.execute(projectId, labelId);
+    await this.repository.deleteLabel(projectId, labelId);
   }
 
   public async restoreVersion(
@@ -246,44 +182,30 @@ export class ProjectHistoryService {
     newSnapshot: SnapshotDetailDto;
     restoreResult: { restoredFilesCount: number; restoredDocIds: string[] };
   }> {
-    if (this.repository && this.restorer && this.collector) {
-      const targetSnapshot = await this.repository.findByVersion(
-        projectId,
-        targetVersion,
-      );
-      if (!targetSnapshot) {
-        throw new VersionNotFoundException(projectId, targetVersion);
-      }
-
-      const restoreResult = await this.restorer.restoreToState(
-        projectId,
-        targetSnapshot,
-      );
-
-      const newSnapshot = await this.createSnapshotDirect({
-        projectId,
-        summary: `Restored to version ${targetVersion}`,
-        createdById: userId || null,
-        isAutomatic: false,
-      });
-
-      return {
-        restoredSnapshot: this.toDetailDto(targetSnapshot),
-        newSnapshot: this.toDetailDto(newSnapshot),
-        restoreResult,
-      };
-    }
-
-    const result = await this.restoreVersionUseCase!.execute({
+    const targetSnapshot = await this.repository.findByVersion(
       projectId,
       targetVersion,
-      userId,
+    );
+    if (!targetSnapshot) {
+      throw new VersionNotFoundException(projectId, targetVersion);
+    }
+
+    const restoreResult = await this.restorer.restoreToState(
+      projectId,
+      targetSnapshot,
+    );
+
+    const newSnapshot = await this.createSnapshotDirect({
+      projectId,
+      summary: `Restored to version ${targetVersion}`,
+      createdById: userId || null,
+      isAutomatic: false,
     });
 
     return {
-      restoredSnapshot: this.toDetailDto(result.targetSnapshot),
-      newSnapshot: this.toDetailDto(result.newSnapshot),
-      restoreResult: result.restoreResult,
+      restoredSnapshot: this.toDetailDto(targetSnapshot),
+      newSnapshot: this.toDetailDto(newSnapshot),
+      restoreResult,
     };
   }
 
@@ -303,7 +225,7 @@ export class ProjectHistoryService {
     } = input;
 
     if (label && label.trim()) {
-      const existingLabel = await this.repository!.findLabelByName(
+      const existingLabel = await this.repository.findLabelByName(
         projectId,
         label.trim(),
       );
@@ -312,9 +234,9 @@ export class ProjectHistoryService {
       }
     }
 
-    const latestVersion = await this.repository!.getLatestVersion(projectId);
+    const latestVersion = await this.repository.getLatestVersion(projectId);
     const nextVersion = latestVersion + 1;
-    const files = await this.collector!.collectCurrentState(projectId);
+    const files = await this.collector.collectCurrentState(projectId);
 
     const snapshot = Snapshot.create({
       projectId,
@@ -337,9 +259,9 @@ export class ProjectHistoryService {
       snapshot.addLabel(versionLabel);
     }
 
-    const saved = await this.repository!.saveSnapshot(snapshot);
+    const saved = await this.repository.saveSnapshot(snapshot);
     if (versionLabel) {
-      await this.repository!.saveLabel(versionLabel);
+      await this.repository.saveLabel(versionLabel);
     }
 
     return saved;

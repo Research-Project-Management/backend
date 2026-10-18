@@ -25,6 +25,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { ManuscriptDoc } from '@prisma/client';
 import { PrismaService, AuthenticatedRequest } from '@/core';
 import * as path from 'path';
@@ -32,7 +33,7 @@ import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
 import { ManuscriptProjectBootstrapService } from '../services/manuscript-project-bootstrap.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { LiveCollaborationPort } from '../core/ports/live-collaboration.port';
+import { LiveCollaborationPort } from '../domain';
 
 export interface PageDocRanges {
   labels?: Array<{ id: string; name?: string; color?: string }>;
@@ -50,7 +51,8 @@ const isUuid = (val?: string | null): val is string =>
 @ApiTags('Manuscripts - Pages Compatibility Bridge')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@RequireRole(Role.REVIEWER)
 export class PagesDocController {
   private readonly logger = new Logger(PagesDocController.name);
   private liveCollab: LiveCollaborationPort | null | undefined;

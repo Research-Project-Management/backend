@@ -1,14 +1,18 @@
-import { StorageEventOutboxService } from '@/modules/storage/application/services/storage-event-outbox.service';
-import { StorageBackupService } from '@/modules/storage/application/services/storage-backup.service';
-import { FileUploadedEvent } from '@/modules/storage/domain/events/file-uploaded.event';
-import { FileDownloadedEvent } from '@/modules/storage/domain/events/file-downloaded.event';
-import { FileDeletedEvent } from '@/modules/storage/domain/events/file-deleted.event';
-import { FileTrashedEvent } from '@/modules/storage/domain/events/file-trashed.event';
-import { QuotaExceededEvent } from '@/modules/storage/domain/events/quota-exceeded.event';
-import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
-import { StorageBlob } from '@/modules/storage/domain/entities/storage-blob.entity';
-import { ContentHash } from '@/modules/storage/domain/value-objects/content-hash.vo';
-import { StorageKey } from '@/modules/storage/domain/value-objects/storage-key.vo';
+import { StorageEventOutboxService, StorageBackupService } from '@/modules/storage/worker';
+import {
+  BlobService,
+  FileUploadedEvent,
+  FileDownloadedEvent,
+  StorageBlob,
+  ContentHash,
+  StorageKey,
+} from '@/modules/storage/core';
+import {
+  FileDeletedEvent,
+  FileTrashedEvent,
+  QuotaExceededEvent,
+  StorageNode,
+} from '@/modules/storage/drive';
 import { Readable } from 'stream';
 
 describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5)', () => {
@@ -146,9 +150,8 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
       };
 
       backupService = new StorageBackupService(
-        mockDriver,
+        new BlobService(mockDriver, mockBlobRepo),
         mockNodeRepo,
-        mockBlobRepo,
       );
     });
 

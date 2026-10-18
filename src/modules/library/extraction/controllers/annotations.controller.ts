@@ -47,7 +47,7 @@ export class AnnotationsController {
     private readonly pdfAnnotationImporterService: PdfAnnotationImporterService,
   ) {}
 
-  // ─── GET / ─────────────────────────────────────────────────────────────────
+  // GET /
 
   @Get()
   @ApiOperation({
@@ -97,7 +97,7 @@ export class AnnotationsController {
     );
   }
 
-  // ─── POST / ────────────────────────────────────────────────────────────────
+  // POST /
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -129,7 +129,7 @@ export class AnnotationsController {
     return this.annotationsService.createAnnotation(userId, createData);
   }
 
-  // ─── PATCH /:id ────────────────────────────────────────────────────────────
+  // PATCH /:id
 
   @Patch(':id')
   @ApiOperation({
@@ -139,7 +139,7 @@ export class AnnotationsController {
   @ApiParam({ name: 'id', description: 'Annotation UUID' })
   async updateAnnotation(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
+    @Param('attachmentId') _attachmentId: string,
     @Param('id') id: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateAnnotationDto,
@@ -164,14 +164,14 @@ export class AnnotationsController {
     );
   }
 
-  // ─── DELETE /:id ───────────────────────────────────────────────────────────
+  // DELETE /:id
 
   @Delete(':id')
   @ApiOperation({ summary: 'Soft-delete an annotation' })
   @ApiParam({ name: 'id', description: 'Annotation UUID' })
   async deleteAnnotation(
     @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
+    @Param('attachmentId') _attachmentId: string,
     @Param('id') id: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
@@ -203,7 +203,7 @@ export class AnnotationsController {
     return { id, deleted: true };
   }
 
-  // ─── PUT /batch ────────────────────────────────────────────────────────────
+  // PUT /batch
 
   @Put('batch')
   @ApiOperation({
@@ -226,7 +226,7 @@ export class AnnotationsController {
     );
   }
 
-  // ─── POST /import-external ──────────────────────────────────────────────────
+  // POST /import-external
 
   @Post('import-external')
   @HttpCode(HttpStatus.OK)

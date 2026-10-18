@@ -364,7 +364,17 @@ export class ProjectAccessGuard implements CanActivate {
             select: { projectId: true },
           })
           .catch(() => null);
-        if (doc?.projectId) resolvedProjectId = doc.projectId;
+        if (doc?.projectId) {
+          resolvedProjectId = doc.projectId;
+        } else {
+          const project = await this.prisma.project
+            .findUnique({
+              where: { id: targetId },
+              select: { id: true },
+            })
+            .catch(() => null);
+          if (project?.id) resolvedProjectId = project.id;
+        }
       }
     }
 

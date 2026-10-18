@@ -31,7 +31,7 @@ import {
   INGESTION_FACADE,
   IIngestionFacade,
   ReResolveMetadataOptions,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 
 /**
  * Shared Base Adapter for Library Item Curation & Scholarly Enrichment.

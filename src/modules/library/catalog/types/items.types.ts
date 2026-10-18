@@ -1,63 +1,14 @@
 import type { Prisma } from '@prisma/client';
+import type {
+  CreatorType,
+  CreatorCredit,
+  CreatorCreditInput,
+  CreatorInput,
+} from '@/modules/library/core';
 
-// ── Creator & Contributor Types ──────────────────────────────────────────────
-export type CreatorType =
-  | 'author'
-  | 'editor'
-  | 'translator'
-  | 'contributor'
-  | 'advisor'
-  | 'reviewer'
-  | 'seriesEditor'
-  | 'bookAuthor'
-  | 'reviewedAuthor'
-  | 'inventor'
-  | 'attorneyAgent'
-  | 'director'
-  | 'producer'
-  | 'scriptwriter'
-  | 'presenter'
-  | 'counsel'
-  | 'interviewee'
-  | 'interviewer'
-  | 'cartographer'
-  | 'programmer'
-  | 'artist'
-  | 'recipient'
-  | 'performer'
-  | 'composer'
-  | 'wordsBy'
-  | 'guest'
-  | 'castMember'
-  | 'podcaster'
-  | 'sponsor'
-  | 'cosponsor'
-  | 'commenter'
-  | (string & {});
+export type { CreatorType, CreatorCredit, CreatorCreditInput, CreatorInput };
 
-export interface CreatorCredit {
-  id?: string | null;
-  orderIndex: number;
-  creatorType: CreatorType;
-  firstName?: string | null;
-  lastName?: string | null;
-  fullName: string;
-}
-
-export interface CreatorCreditInput {
-  name?: string | null;
-  fullName?: string | null;
-  firstName?: string | null;
-  lastName?: string | null;
-  creatorType?: CreatorType;
-  orderIndex?: number;
-  fieldMode?: number;
-  shortName?: string | null;
-}
-
-export type CreatorInput = CreatorCreditInput;
-
-// ── Identifier Schemes ───────────────────────────────────────────────────────
+// Identifier Schemes
 export type IdentifierScheme =
   | 'doi'
   | 'arxiv'
@@ -82,7 +33,7 @@ export interface ItemIdentifierInput {
   canonicalUri?: string | null;
 }
 
-// ── Item Relations ──────────────────────────────────────────────────────────
+// Item Relations
 export type ItemRelationType =
   | 'cites'
   | 'cited_by'
@@ -109,7 +60,7 @@ export interface ItemRelationInput {
   description?: string;
 }
 
-// ── Item Domain Models & Inputs ──────────────────────────────────────────────
+// Item Domain Models & Inputs
 export interface ItemSummary {
   id: string;
   projectId?: string;
@@ -283,7 +234,7 @@ export interface UpdateItemInput {
   expectedVersion?: number;
 }
 
-// ── Item Type Conversion Types ──────────────────────────────────────────────
+// Item Type Conversion Types
 export interface ItemTypeConversionFieldDiff {
   key: string;
   label: string;
@@ -339,7 +290,7 @@ export interface ConvertTypeOptions {
   retainUnmappedInExtra?: boolean;
 }
 
-// ── Academic Type-Specific Bibliographic Fields ────────────────────────────
+// Academic Type-Specific Bibliographic Fields
 export interface AcademicTypeSpecificFields {
   edition?: string;
   numPages?: string | number;
@@ -414,7 +365,7 @@ export interface AcademicTypeSpecificFields {
   [key: string]: unknown;
 }
 
-// ── Persistence Layer Data Transfer Shapes ─────────────────────────────────
+// Persistence Layer Data Transfer Shapes
 export interface CreateItemData extends AcademicTypeSpecificFields {
   title: string;
   authors?: string[];
@@ -636,7 +587,7 @@ export interface UpdateItemData extends AcademicTypeSpecificFields {
   attachments?: CreateItemData['attachments'];
 }
 
-// ── Read / Existence / Snapshot Interfaces ──────────────────────────────────
+// Read / Existence / Snapshot Interfaces
 export interface ItemSnapshot {
   id: string;
   userId?: string;
@@ -654,9 +605,6 @@ export interface ItemSnapshot {
   url?: string | null;
   tags: string[];
 }
-
-export type SyncItemSnapshot = ItemSnapshot;
-export type SyncItemSummary = ItemSummary;
 
 export interface ItemDetail extends ItemMetadata {
   id: string;

@@ -706,3 +706,75 @@ export class CompileLogAnalyzer {
     return clean;
   }
 }
+
+export { ErrorKnowledgeBase as KnowledgeBaseExplainerAdapter };
+
+export class TexParenTreeLogParser {
+  private readonly analyzer: CompileLogAnalyzer;
+  constructor(explainer?: ErrorExplainerLike) {
+    this.analyzer = new CompileLogAnalyzer(explainer);
+  }
+  public parse(logText: string, defaultFile = 'main.tex'): DiagnosticItem[] {
+    return this.analyzer.parseTexParenTreeLog(logText, defaultFile);
+  }
+}
+
+export class TectonicLogParser {
+  private readonly analyzer: CompileLogAnalyzer;
+  constructor(explainer?: ErrorExplainerLike) {
+    this.analyzer = new CompileLogAnalyzer(explainer);
+  }
+  public parse(logText: string, defaultFile = 'main.tex'): DiagnosticItem[] {
+    return this.analyzer.parseTectonicLog(logText, defaultFile);
+  }
+}
+
+export class ParseCompileLogUseCase {
+  constructor(
+    private readonly texParser = new TexParenTreeLogParser(),
+    private readonly tectonicParser = new TectonicLogParser(),
+  ) {}
+  public execute(input: {
+    logText: string;
+    defaultFile?: string;
+    engine?: string;
+  }): DiagnosticReport {
+    if (
+      typeof input.logText !== 'string' ||
+      input.logText.trim().length === 0
+    ) {
+      throw new InvalidLogFormatException();
+    }
+    const defaultFile = input.defaultFile || 'main.tex';
+    const isTectonic = input.engine?.toLowerCase() === 'tectonic';
+    let items = isTectonic
+      ? this.tectonicParser.parse(input.logText, defaultFile)
+      : this.texParser.parse(input.logText, defaultFile);
+    if (items.length === 0 && isTectonic) {
+      items = this.texParser.parse(input.logText, defaultFile);
+    }
+    return new DiagnosticReport({
+      items,
+      rawLog: input.logText,
+    });
+  }
+}
+
+export class GetErrorExplanationUseCase {
+  constructor(
+    private readonly explainer: ErrorExplainerLike = new ErrorKnowledgeBase(),
+  ) {}
+  public execute(code: string): ErrorExplanationVo {
+    if (!code || typeof code !== 'string') {
+      throw new ExplanationNotFoundException(String(code));
+    }
+    const found = this.explainer.getByCode(code);
+    if (!found) {
+      throw new ExplanationNotFoundException(code);
+    }
+    return found;
+  }
+  public listRules(): ErrorExplanationVo[] {
+    return this.explainer.getAllRules();
+  }
+}

@@ -15,7 +15,6 @@ import {
 import {
   IngestionCommand,
   IngestionResult,
-  IngestionPort,
   IngestionRunSnapshot,
 } from '@/modules/library/ingestion/types/ingestion.types';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
@@ -24,11 +23,18 @@ import { PipelineService } from './pipeline.service';
 import { QueueService } from './queue.service';
 import { UrlCaptureService } from './url-capture.service';
 import { ConfirmCapturedUrlDto } from '@/modules/library/ingestion/dto/capture-url.dto';
-import { ItemDetail, UpdateItemData } from '@/modules/library/catalog';
 import {
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
-} from '@/modules/library/ingestion/types/catalog-gateway.types';
+  ItemDetail,
+  CATALOG_FACADE,
+  ICatalogFacade,
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+  normalizeIsbn,
+  parseCreatorString,
+  harmonizeZoteroFields,
+  resolveCanonicalCreatorRole,
+} from '@/modules/library/core';
 import { createHash, randomUUID } from 'crypto';
 import zlib from 'zlib';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
@@ -37,17 +43,6 @@ import {
   MetadataPort,
   QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
-import {
-  normalizeDoi,
-  normalizeArxivId,
-  normalizePmid,
-  normalizeIsbn,
-} from '@/modules/library/shared-kernel/domain/identifier.domain';
-import { parseCreatorString } from '@/modules/library/shared-kernel/domain/author.domain';
-import {
-  harmonizeZoteroFields,
-  resolveCanonicalCreatorRole,
-} from '@/modules/library/shared-kernel/domain/zotero-field-harmonizer.domain';
 
 interface IngestionExecutionLog {
   item?: { id?: string; title?: string };
@@ -63,7 +58,7 @@ interface IngestionExecutionLog {
 }
 
 @Injectable()
-export class IngestionService implements IngestionPort {
+export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
 
   constructor(
@@ -72,8 +67,8 @@ export class IngestionService implements IngestionPort {
     private readonly queue: QueueService,
     private readonly urlCapture: UrlCaptureService,
     @Optional()
-    @Inject(CATALOG_GATEWAY_PORT)
-    private readonly catalogGateway?: ICatalogGatewayPort,
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
@@ -499,7 +494,11 @@ export class IngestionService implements IngestionPort {
         .updateRunStatus(projectId, runId, IngestionStatus.FAILED_FINAL, {
           lastError: errMsg,
         })
-        .catch(() => {});
+        .catch((repoErr: unknown) => {
+          this.logger.error(
+            `Failed to update run status to FAILED_FINAL for run ${runId}: ${repoErr instanceof Error ? repoErr.message : String(repoErr)}`,
+          );
+        });
 
       return {
         runId,
@@ -622,7 +621,7 @@ export class IngestionService implements IngestionPort {
     };
   }
 
-  // ── Backward Compatibility Convenience Methods ────────────────────────────
+  // Backward Compatibility Convenience Methods
 
   async ingestDoi(
     projectId: string,
@@ -992,8 +991,7 @@ export class IngestionService implements IngestionPort {
       userId,
       itemId,
       updateData,
-      expectedVersion,
-      projectId,
+      { expectedVersion, projectId },
     );
 
     return {

@@ -13,8 +13,11 @@ import {
   ExportLibraryDto,
   ExportFormatType,
 } from '@/modules/library/citation/dto/exports.dto';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
+@ApiTags('Library Exports')
+@ApiBearerAuth()
 @Controller([
   'api/v1/library/exports',
   'api/v1/projects/:projectId/library/exports',

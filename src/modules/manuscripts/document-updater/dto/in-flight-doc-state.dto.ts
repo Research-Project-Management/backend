@@ -2,7 +2,7 @@
  * document-updater/dto/in-flight-doc-state.dto.ts
  */
 
-import { InFlightDoc } from '@/modules/manuscripts/document-updater/core/domain/entities/in-flight-doc.entity';
+import { InFlightDoc } from '../domain';
 
 export class InFlightDocStateDto {
   docId!: string;

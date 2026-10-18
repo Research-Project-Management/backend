@@ -11,7 +11,10 @@ import { Prisma, AttachmentType, LinkMode } from '@prisma/client';
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/shared-kernel';
+  CATALOG_FACADE,
+  ICatalogFacade,
+  extractFileIdFromUrl,
+} from '@/modules/library/core';
 import {
   CreateAttachmentInput,
   ReplaceAttachmentFileInput,
@@ -28,19 +31,15 @@ import type {
   UpsertSyncAttachmentCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
-import {
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
-} from '@/modules/library/extraction/types/catalog-gateway.types';
-import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+} from '@/modules/library/core/types/entity-commands.types';
+import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import {
   STORAGE_DRIVER,
   STORAGE_NODE_REPOSITORY,
 } from '@/modules/storage/storage.tokens';
-import { IStorageDriver } from '@/modules/storage/domain/ports/storage-driver.port';
-import { IStorageNodeRepository } from '@/modules/storage/domain/ports/storage-node.repository.port';
-import { PdfThumbnailService } from '@/modules/storage/application/services/pdf-thumbnail.service';
+import type { IStorageDriver } from '@/modules/storage/core';
+import type { IStorageNodeRepository } from '@/modules/storage/drive';
+import { PdfThumbnailService } from '@/modules/storage/worker';
 
 import {
   formatAttachmentFilename,
@@ -57,7 +56,7 @@ import {
   ItemId,
   AttachmentId,
   ProjectId,
-} from '@/modules/library/shared-kernel/core/types/branded.types';
+} from '@/modules/library/core/types/branded.types';
 
 export type { CreateAttachmentInput, ReplaceAttachmentFileInput };
 
@@ -69,8 +68,8 @@ export class AttachmentsService {
     private readonly repo: AttachmentsRepository,
     private readonly libraryTx: TransactionService,
     @Optional()
-    @Inject(CATALOG_GATEWAY_PORT)
-    private readonly catalogGateway?: ICatalogGatewayPort,
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
@@ -124,12 +123,7 @@ export class AttachmentsService {
     const userId = input.userId || 'system';
     await this.assertItemExists(userId, targetItemId, projectId);
 
-    const resolvedFileId =
-      input.fileId ||
-      input.url?.match(
-        /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?files\/([a-zA-Z0-9_-]+)/,
-      )?.[1] ||
-      null;
+    const resolvedFileId = input.fileId || extractFileIdFromUrl(input.url);
 
     const effectiveUrl =
       input.url && input.url.trim() !== ''
@@ -316,10 +310,7 @@ export class AttachmentsService {
     }
 
     const targetFileId =
-      attachment.fileId ||
-      attachment.url?.match(
-        /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?files\/([a-zA-Z0-9_-]+)/,
-      )?.[1];
+      attachment.fileId || extractFileIdFromUrl(attachment.url);
 
     const result = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
@@ -787,7 +778,7 @@ export class AttachmentsService {
           const currentMeta = storageNode.metadata || {};
           storageNode.updateMetadata?.({
             ...currentMeta,
-            thumbnail: `/api/files/r2/${encodeURIComponent(thumbKey)}`,
+            thumbnail: `/api/v1/storage/files/r2/${encodeURIComponent(thumbKey)}`,
           });
           await this.storageNodeRepo.update(storageNode);
         }
@@ -995,8 +986,8 @@ export class AttachmentsService {
     const directUrl = typeof item.url === 'string' ? item.url : undefined;
     const fieldsUrl =
       item.fields && typeof item.fields === 'object' && 'url' in item.fields
-        ? typeof (item.fields as Record<string, unknown>).url === 'string'
-          ? ((item.fields as Record<string, unknown>).url as string)
+        ? typeof item.fields.url === 'string'
+          ? item.fields.url
           : undefined
         : undefined;
     const itemUrl = directUrl || fieldsUrl;
@@ -1072,6 +1063,3 @@ export class AttachmentsService {
     );
   }
 }
-
-export const AttachmentService = AttachmentsService;
-export type AttachmentService = AttachmentsService;

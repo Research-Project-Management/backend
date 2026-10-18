@@ -331,7 +331,7 @@ describe('Wave 14 — Backend Authority Contracts (Permissions, Duplicates Hydra
       );
       expect(hydratedA.arxivId).toBe('1706.03762');
       expect(hydratedA.creators).toBeDefined();
-      expect(hydratedA.tags).toContain('Transformers');
+      expect(hydratedA.tags).toContain('transformers');
       expect(hydratedA.attachments).toHaveLength(1);
 
       const qualityDuplicates = await qualityService.getDuplicates(userId);

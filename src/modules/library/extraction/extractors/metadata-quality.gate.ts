@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import { ItemMetadata } from '@/modules/library/shared-kernel';
+﻿import { Injectable } from '@nestjs/common';
+import { ItemMetadata } from '@/modules/library/core';
 import { QualityScoreBreakdown } from '@/modules/library/extraction/types/trusted-extraction.types';
-import { isInstitutionName } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { isInstitutionName } from '@/modules/library/core';
 
 export interface EvaluationResult {
   breakdown: QualityScoreBreakdown;

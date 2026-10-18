@@ -13,7 +13,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { FileDiffVo } from '@/modules/manuscripts/project-history/core/domain/value-objects/file-diff.vo';
+import { FileDiffVo } from '../domain';
 
 export class CreateSnapshotDto {
   @ApiPropertyOptional({

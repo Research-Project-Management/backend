@@ -5,9 +5,9 @@ import { OutboxDispatchHandler } from './outbox.worker';
 import {
   IEventPublisherPort,
   DomainEventEnvelope,
-} from '@/modules/library/sync/types/event-publisher.types';
+  LIBRARY_EVENT_REGISTRY,
+} from '@/modules/library/core';
 import { OutboxMetrics } from './outbox.metrics';
-import { LIBRARY_EVENT_REGISTRY } from '@/modules/library/sync/types/outbox.events';
 
 export const EXTERNAL_BROKER_TRANSPORT = Symbol('EXTERNAL_BROKER_TRANSPORT');
 

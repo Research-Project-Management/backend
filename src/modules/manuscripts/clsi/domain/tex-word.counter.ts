@@ -3,10 +3,7 @@
  * Pure in-process academic word and structural element counter following Overleaf texcount rules.
  */
 
-import {
-  IWordCounter,
-  WordCountStats,
-} from '@/modules/manuscripts/clsi/core/ports/artifacts.port';
+import { IWordCounter, WordCountStats } from './clsi-ports';
 
 export class TexWordCounter implements IWordCounter {
   private countWords(text: string): number {
@@ -181,4 +178,38 @@ const defaultWordCounter = new TexWordCounter();
 
 export function countTexWords(source: string): WordCountStats {
   return defaultWordCounter.count(source);
+}
+
+export interface WordCountResponse {
+  success: boolean;
+  stats?: WordCountStats;
+  error?: string;
+}
+
+export class WordCountUseCase {
+  constructor(
+    private readonly wordCounter: IWordCounter = defaultWordCounter,
+  ) {}
+
+  public execute(source: string): WordCountResponse {
+    if (!source || typeof source !== 'string') {
+      return {
+        success: false,
+        error: 'Missing or invalid source code for word counting',
+      };
+    }
+
+    try {
+      const stats = this.wordCounter.count(source);
+      return {
+        success: true,
+        stats,
+      };
+    } catch (err: unknown) {
+      return {
+        success: false,
+        error: (err as Error)?.message || 'Failed to calculate word count',
+      };
+    }
+  }
 }

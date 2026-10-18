@@ -44,14 +44,14 @@ describe('StateService (Dynamic Project State)', () => {
       const template = service.getDefaultStatesTemplate();
       const stateNames = template.map((s) => s.name);
       expect(stateNames).toEqual([
-        'Thuyết minh đề cương',
-        'Thẩm định & Phê duyệt',
-        'Triển khai & Thực nghiệm',
-        'Soạn thảo & Công bố',
-        'Nghiệm thu & Đánh giá',
-        'Hoàn thành & Lưu trữ',
-        'Tạm dừng',
-        'Hủy bỏ',
+        'Proposal & Literature Review',
+        'Review & Approval',
+        'Execution & Experimentation',
+        'Drafting & Publication',
+        'Evaluation & Defense',
+        'Completed & Archived',
+        'Suspended',
+        'Cancelled',
       ]);
     });
 
@@ -115,7 +115,7 @@ describe('StateService (Dynamic Project State)', () => {
       expect(result.projectId).toBe(projectId);
       expect(result.stateId).toBeNull();
       expect(result.state).toBeNull();
-      expect(result.stateLabel).toContain('Chưa đặt trạng thái');
+      expect(result.stateLabel).toBe('Unassigned');
     });
   });
 
@@ -133,7 +133,7 @@ describe('StateService (Dynamic Project State)', () => {
       });
       mockStateRepo.findProjectStateById.mockResolvedValue({
         id: 'state-2',
-        name: 'Triển khai & Thực nghiệm',
+        name: 'Active Experimentation',
         color: '#f59e0b',
       });
       mockStateRepo.setCurrentProjectState.mockResolvedValue({
@@ -143,7 +143,7 @@ describe('StateService (Dynamic Project State)', () => {
 
       const result = await service.transitionToState(projectId, 'state-2');
       expect(result.stateId).toBe('state-2');
-      expect(result.stateLabel).toBe('Triển khai & Thực nghiệm');
+      expect(result.stateLabel).toBe('Active Experimentation');
       expect(mockStateRepo.setCurrentProjectState).toHaveBeenCalledWith(
         projectId,
         'state-2',
@@ -160,7 +160,7 @@ describe('StateService (Dynamic Project State)', () => {
       const result = await service.transitionToState(projectId, null);
       expect(result.stateId).toBeNull();
       expect(result.state).toBeNull();
-      expect(result.stateLabel).toContain('Chưa đặt trạng thái');
+      expect(result.stateLabel).toBe('Unassigned');
       expect(mockStateRepo.setCurrentProjectState).toHaveBeenCalledWith(
         projectId,
         null,
@@ -194,22 +194,22 @@ describe('StateService (Dynamic Project State)', () => {
 
       it('should return project states ordered by sequence', async () => {
         const mockStates = [
-          { id: 's1', name: 'Đề cương', sequence: 0 },
-          { id: 's2', name: 'Thực nghiệm', sequence: 1 },
+          { id: 's1', name: 'Proposal', sequence: 0 },
+          { id: 's2', name: 'Experimentation', sequence: 1 },
         ];
         mockStateRepo.findProjectStates.mockResolvedValue(mockStates);
         const states = await service.getProjectStates(projectId);
         expect(states).toHaveLength(2);
-        expect(states[0].name).toBe('Đề cương');
+        expect(states[0].name).toBe('Proposal');
       });
     });
 
     describe('createCustomState', () => {
       it('should create a custom state', async () => {
         const dto = {
-          name: 'Khảo sát thực địa',
+          name: 'Field Trip',
           color: '#0284c7',
-          description: 'Thu thập mẫu đất',
+          description: 'Soil sampling and fieldwork',
         };
         mockStateRepo.createProjectState.mockResolvedValue({
           id: 's-new',
@@ -219,7 +219,7 @@ describe('StateService (Dynamic Project State)', () => {
 
         const created = await service.createCustomState(projectId, dto);
         expect(created.id).toBe('s-new');
-        expect(created.name).toBe('Khảo sát thực địa');
+        expect(created.name).toBe('Field Trip');
       });
     });
 
@@ -250,8 +250,8 @@ describe('StateService (Dynamic Project State)', () => {
           ],
         };
         mockStateRepo.reorderProjectStates.mockResolvedValue([
-          { id: 's2', name: 'Thực nghiệm', sequence: 0 },
-          { id: 's1', name: 'Đề cương', sequence: 1 },
+          { id: 's2', name: 'Experimentation', sequence: 0 },
+          { id: 's1', name: 'Proposal', sequence: 1 },
         ]);
 
         const result = await service.reorderStates(projectId, reorderPayload);
@@ -267,7 +267,7 @@ describe('StateService (Dynamic Project State)', () => {
       it('should permanently delete state and return success', async () => {
         mockStateRepo.findProjectStateById.mockResolvedValue({
           id: 's1',
-          name: 'Đề cương',
+          name: 'Proposal',
           projectId,
         });
         mockStateRepo.deleteProjectState.mockResolvedValue(undefined);

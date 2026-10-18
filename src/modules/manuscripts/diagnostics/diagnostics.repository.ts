@@ -5,8 +5,11 @@
 
 import { Injectable, Optional } from '@nestjs/common';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
-import { IErrorExplainerPort } from './core/ports/error-explainer.port';
-import { ErrorExplanationVo, ErrorKnowledgeBase } from './domain';
+import {
+  IErrorExplainerPort,
+  ErrorExplanationVo,
+  ErrorKnowledgeBase,
+} from './domain';
 
 @Injectable()
 export class DiagnosticsRepository implements IErrorExplainerPort {

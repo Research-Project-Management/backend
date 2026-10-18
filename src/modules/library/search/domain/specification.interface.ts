@@ -24,76 +24,41 @@ export abstract class CompositeSpecification<
   abstract toPrismaWhere(): QueryCriteria;
 
   and(other: ISpecification<T>): ISpecification<T> {
-    return new AndSpecification(this, other);
+    return new DerivedSpecification<T>(
+      (c) => this.isSatisfiedBy(c) && other.isSatisfiedBy(c),
+      () => ({ AND: [this.toPrismaWhere(), other.toPrismaWhere()] }),
+    );
   }
 
   or(other: ISpecification<T>): ISpecification<T> {
-    return new OrSpecification(this, other);
+    return new DerivedSpecification<T>(
+      (c) => this.isSatisfiedBy(c) || other.isSatisfiedBy(c),
+      () => ({ OR: [this.toPrismaWhere(), other.toPrismaWhere()] }),
+    );
   }
 
   not(): ISpecification<T> {
-    return new NotSpecification(this);
+    return new DerivedSpecification<T>(
+      (c) => !this.isSatisfiedBy(c),
+      () => ({ NOT: this.toPrismaWhere() }),
+    );
   }
 }
 
-export class AndSpecification<T = unknown> extends CompositeSpecification<T> {
+/** Specification built from closures; declared after its base class. */
+class DerivedSpecification<T> extends CompositeSpecification<T> {
   constructor(
-    private readonly left: ISpecification<T>,
-    private readonly right: ISpecification<T>,
+    private readonly satisfied: (candidate: T) => boolean,
+    private readonly where: () => QueryCriteria,
   ) {
     super();
   }
 
   isSatisfiedBy(candidate: T): boolean {
-    return (
-      this.left.isSatisfiedBy(candidate) && this.right.isSatisfiedBy(candidate)
-    );
+    return this.satisfied(candidate);
   }
 
   toPrismaWhere(): QueryCriteria {
-    const leftWhere = this.left.toPrismaWhere();
-    const rightWhere = this.right.toPrismaWhere();
-    return {
-      AND: [leftWhere, rightWhere],
-    };
-  }
-}
-
-export class OrSpecification<T = unknown> extends CompositeSpecification<T> {
-  constructor(
-    private readonly left: ISpecification<T>,
-    private readonly right: ISpecification<T>,
-  ) {
-    super();
-  }
-
-  isSatisfiedBy(candidate: T): boolean {
-    return (
-      this.left.isSatisfiedBy(candidate) || this.right.isSatisfiedBy(candidate)
-    );
-  }
-
-  toPrismaWhere(): QueryCriteria {
-    const leftWhere = this.left.toPrismaWhere();
-    const rightWhere = this.right.toPrismaWhere();
-    return {
-      OR: [leftWhere, rightWhere],
-    };
-  }
-}
-
-export class NotSpecification<T = unknown> extends CompositeSpecification<T> {
-  constructor(private readonly spec: ISpecification<T>) {
-    super();
-  }
-
-  isSatisfiedBy(candidate: T): boolean {
-    return !this.spec.isSatisfiedBy(candidate);
-  }
-
-  toPrismaWhere(): QueryCriteria {
-    return {
-      NOT: this.spec.toPrismaWhere(),
-    };
+    return this.where();
   }
 }

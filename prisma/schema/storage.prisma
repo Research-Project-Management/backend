@@ -19,40 +19,21 @@ enum UploadSessionStatus {
   EXPIRED
 }
 
-enum FileAuditAction {
-  VIEW
-  STREAM
-  DOWNLOAD
-  UPLOAD
-  REVISE
-  MOVE
-  RENAME
-  SHARE
-  SHARE_REVOKE
-  TRASH
-  RESTORE
-  PURGE
-}
-
 // -------------------------
 // Logical File Node (Drive / Project / Page / Library)
 // -------------------------
 
 model File {
-  id        String  @id @default(uuid()) @db.Uuid
-  filename  String
-  size      BigInt  @default(0)
-  mimeType  String  @default("application/octet-stream") @map("mime_type")
-  url       String  @default("")
-  key       String?
-  hash      String?
-  thumbnail String?
-  isFolder  Boolean @default(false) @map("is_folder")
-  starred   Boolean @default(false)
-  metaData  Json?   @default("{}") @map("meta_data")
-  parentId  String? @map("parent_id") @db.Uuid
-  parent    File?   @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children  File[]  @relation("FolderHierarchy")
+  id       String  @id @default(uuid()) @db.Uuid
+  filename String
+  size     BigInt  @default(0)
+  mimeType String  @default("application/octet-stream") @map("mime_type")
+  isFolder Boolean @default(false) @map("is_folder")
+  starred  Boolean @default(false)
+  metaData Json?   @default("{}") @map("meta_data")
+  parentId String? @map("parent_id") @db.Uuid
+  parent   File?   @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children File[]  @relation("FolderHierarchy")
 
   // Storage Isolation (Two-Tier Scope: Personal Drive vs Project / Page Scope)
   linkedToType String? @map("linked_to_type")
@@ -73,10 +54,10 @@ model File {
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([authorId])
-  @@index([parentId])
-  @@index([url])
-  @@index([linkedToType, linkedToId])
-  @@index([linkedToType, linkedToId, trashedAt])
+  @@index([parentId, trashedAt])
+  @@index([authorId, parentId, trashedAt, isFolder(sort: Desc), filename])
+  @@index([linkedToType, linkedToId, parentId, trashedAt, isFolder(sort: Desc), filename])
+  @@index([authorId, starred, trashedAt])
   @@index([trashedAt])
   @@index([blobId])
   @@map("files")
@@ -92,7 +73,7 @@ model FileShare {
   createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([fileId, userId])
-  @@index([userId])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("file_shares")
 }
 
@@ -117,6 +98,7 @@ model StorageBlob {
   versions FileVersion[]
 
   @@unique([contentHash], map: "uq_blobs_content_hash")
+  @@index([refCount, tombstoneAt], map: "idx_blobs_orphan_gc")
   @@index([tombstoneAt], map: "idx_blobs_tombstone")
   @@index([status], map: "idx_blobs_status")
   @@map("storage_blobs")
@@ -139,6 +121,8 @@ model FileVersion {
   blob StorageBlob @relation(fields: [blobId], references: [id], onDelete: Restrict)
 
   @@unique([fileId, versionNumber], map: "uq_file_version")
+  @@index([blobId], map: "idx_file_version_blob_fk")
+  @@index([createdById], map: "idx_file_version_created_by")
   @@map("file_versions")
 }
 
@@ -159,8 +143,6 @@ model UploadSession {
   totalParts   Int                 @map("total_parts")
   expectedHash Bytes?              @map("expected_hash")
   parentId     String?             @map("parent_id") @db.Uuid
-  linkedToType String?             @map("linked_to_type")
-  linkedToId   String?             @map("linked_to_id")
   status       UploadSessionStatus @default(INITIALIZED)
   expiresAt    DateTime            @map("expires_at") @db.Timestamptz(6)
   createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -171,6 +153,7 @@ model UploadSession {
   @@index([status, expiresAt], map: "idx_upload_sessions_cleanup")
   @@index([userId], map: "idx_upload_sessions_user")
   @@index([projectId], map: "idx_upload_sessions_project")
+  @@index([parentId], map: "idx_upload_sessions_parent")
   @@map("upload_sessions")
 }
 
@@ -200,28 +183,7 @@ model StorageQuota {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([userId, projectId], map: "uq_quota_scope")
+  @@index([projectId], map: "idx_quota_project")
   @@map("storage_quotas")
 }
 
-// -------------------------
-// Tamper-Evident Audit Log
-// -------------------------
-
-model FileAuditLog {
-  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  projectId   String?         @map("project_id") @db.Uuid
-  fileId      String          @map("file_id") @db.Uuid
-  actorId     String          @map("actor_id") @db.Uuid
-  action      FileAuditAction
-  ipAddress   String          @map("ip_address") @db.VarChar(45)
-  userAgent   String          @map("user_agent") @db.VarChar(512)
-  details     Json            @default("{}") @db.JsonB
-  prevRowHash String?         @map("prev_row_hash") @db.VarChar(64)
-  rowHash     String          @map("row_hash") @db.VarChar(64)
-  timestamp   DateTime        @default(now()) @db.Timestamptz(6)
-
-  @@index([fileId, timestamp(sort: Desc)], map: "idx_audit_log_file_time")
-  @@index([actorId, action], map: "idx_audit_log_actor_action")
-  @@index([projectId], map: "idx_audit_log_project")
-  @@map("file_audit_logs")
-}

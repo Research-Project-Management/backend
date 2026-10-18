@@ -21,33 +21,31 @@ import {
   DuplicateCandidateItem,
   ItemDetail,
 } from '@/modules/library/catalog/types/items.types';
-import { sanitizeItemTitle } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { sanitizeItemTitle } from '@/modules/library/core';
 import {
   TransactionService,
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
   LibraryItemSource,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 import {
   CursorPaginatedResult,
   DocumentFulltextResponse,
 } from '@/modules/library/catalog/dto/items.dto';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/shared-kernel/core/constants/redis-keys.constants';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { TagsService } from './tags.service';
-import { TypesService } from './types.service';
 import { ItemSyncDelegate } from './item-sync.delegate';
 import { ZoteroSchemaValidatorService } from './zotero-schema-validator.service';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
-import { BibliographicReference } from '@/modules/library/shared-kernel/types/bibliographic.types';
+import { BibliographicReference } from '@/modules/library/core/types/bibliographic.types';
 
 import type {
   UpsertSyncItemCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '@/modules/library/shared-kernel/core/types/entity-commands.types';
+} from '@/modules/library/core/types/entity-commands.types';
 
 // Specialized Sub-Services (Divide & Conquer)
 import { ItemQueryService } from './item-query.service';
@@ -76,8 +74,6 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     private readonly command: CommandRepository,
     private readonly libraryTx: TransactionService,
     private readonly tagsService: TagsService,
-    private readonly typesService: TypesService,
-    private readonly transformer: ItemTransformer,
     private readonly queryService: ItemQueryService,
     @Optional()
     private readonly fulltextService?: ItemFulltextService,
@@ -160,7 +156,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     }
   }
 
-  // ── Delegated Query Operations (ItemQueryService) ──────────────────────────
+  // Delegated Query Operations (ItemQueryService)
 
   async getCounts(
     userId: string,
@@ -277,7 +273,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     return this.queryService.findCandidateItemsForDuplicateDetection(limit);
   }
 
-  // ── Delegated Fulltext Operations (ItemFulltextService) ───────────────────
+  // Delegated Fulltext Operations (ItemFulltextService)
 
   async getFulltext(
     userId: string,
@@ -290,7 +286,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     return this.fulltextService.getFulltext(userId, id, projectId);
   }
 
-  // ── Delegated Type Conversion (ItemTypeConversionService) ─────────────────
+  // Delegated Type Conversion (ItemTypeConversionService)
 
   previewTypeConversion(
     rawItem: Record<string, unknown>,
@@ -328,7 +324,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     );
   }
 
-  // ── Delegated Curation Operations (ItemCurationService) ───────────────────
+  // Delegated Curation Operations (ItemCurationService)
 
   async parseCitations(
     rawCitations: string,
@@ -357,7 +353,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     return this.curationService.getMetadataSources(userId, itemId, projectId);
   }
 
-  // ── Core Lifecycle Mutations & Transactions ───────────────────────────────
+  // Core Lifecycle Mutations & Transactions
 
   async createItem(
     userId: string,
@@ -976,7 +972,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     };
   }
 
-  // ── Sync Protocol Delegate ────────────────────────────────────────────────
+  // Sync Protocol Delegate
 
   /**
    * Sync protocol adapter: transactional upsert for a Item from an external sync batch.
@@ -1006,6 +1002,3 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     return this.syncDelegate.deleteFromSync(command, tx, helpers);
   }
 }
-
-export const ItemsService = ItemService;
-export type ItemsService = ItemService;

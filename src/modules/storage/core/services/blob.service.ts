@@ -1,0 +1,398 @@
+import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import * as crypto from 'crypto';
+import {
+  STORAGE_DRIVER,
+  STORAGE_BLOB_REPOSITORY,
+} from '@/modules/storage/storage.tokens';
+import {
+  IStorageDriver,
+  StorageObjectMetadata,
+  CompletedPart,
+  StorageLifecycleConfiguration,
+  StorageBlob,
+  BlobStatus,
+  ContentHash,
+  StorageKey,
+} from '../types';
+import { IStorageBlobRepository } from '../repositories/prisma-blob.repository';
+
+export interface StoreBufferCasResult {
+  blob: StorageBlob;
+  isDeduplicated: boolean;
+}
+
+export interface RegisterUploadedObjectInput {
+  storageKey: string;
+  sizeBytes: bigint;
+  contentHashHex?: string;
+}
+
+/**
+ * BlobService (Deep Core Seam):
+ * Encapsulates all physical driver I/O, S3 multipart / presign operations,
+ * and Content-Addressable Storage (CAS) deduplication behind a single deep interface.
+ */
+@Injectable()
+export class BlobService {
+  private readonly logger = new Logger(BlobService.name);
+
+  constructor(
+    @Inject(STORAGE_DRIVER) private readonly driver: IStorageDriver,
+    @Inject(STORAGE_BLOB_REPOSITORY)
+    private readonly blobRepo: IStorageBlobRepository,
+  ) {}
+
+  // --------------------------------------------------------------------------
+  // Content-Addressable Storage (CAS) & Reference Counting
+  // --------------------------------------------------------------------------
+
+  async storeBuffer(
+    buffer: Buffer,
+    mimeType: string,
+    onBeforeNewUpload?: (sizeBytes: bigint) => Promise<void>,
+  ): Promise<StoreBufferCasResult> {
+    const sizeBytes = BigInt(buffer.length);
+    const contentHash = ContentHash.fromBuffer(buffer);
+    const hashHex = contentHash.toHex();
+
+    const existingBlob = await this.blobRepo.findByHash(contentHash);
+    if (existingBlob && existingBlob.isReady()) {
+      if (onBeforeNewUpload) {
+        await onBeforeNewUpload(sizeBytes);
+      }
+      if (this.blobRepo.incrementRefCount) {
+        const updated = await this.blobRepo.incrementRefCount(existingBlob.id);
+        return { blob: updated ?? existingBlob, isDeduplicated: true };
+      }
+      existingBlob.incrementRef();
+      await this.blobRepo.update(existingBlob);
+      return { blob: existingBlob, isDeduplicated: true };
+    }
+
+    if (onBeforeNewUpload) {
+      await onBeforeNewUpload(sizeBytes);
+    }
+
+    const s3Key = StorageKey.forBlob(hashHex);
+    await this.driver.put(s3Key.value(), buffer, {
+      mimeType,
+      size: buffer.length,
+    });
+
+    const newBlob = new StorageBlob({
+      id: crypto.randomUUID(),
+      contentHash,
+      sizeBytes,
+      s3Key,
+      s3Bucket: process.env.R2_BUCKET_NAME || 'flux',
+      status: BlobStatus.READY,
+      refCount: 1,
+    });
+    try {
+      await this.blobRepo.create(newBlob);
+      return { blob: newBlob, isDeduplicated: false };
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        const concurrentBlob = await this.blobRepo.findByHash(contentHash);
+        if (concurrentBlob) {
+          const updated = this.blobRepo.incrementRefCount
+            ? await this.blobRepo.incrementRefCount(concurrentBlob.id)
+            : (concurrentBlob.incrementRef(),
+              await this.blobRepo.update(concurrentBlob),
+              concurrentBlob);
+          return { blob: updated ?? concurrentBlob, isDeduplicated: true };
+        }
+      }
+      throw err;
+    }
+  }
+
+  async registerUploadedObject(
+    input: RegisterUploadedObjectInput,
+  ): Promise<StoreBufferCasResult> {
+    const hashHex =
+      input.contentHashHex && /^[a-f0-9]{64}$/i.test(input.contentHashHex)
+        ? input.contentHashHex.toLowerCase()
+        : crypto
+            .createHash('sha256')
+            .update(`${input.storageKey}:${input.sizeBytes}`)
+            .digest('hex');
+    const contentHash = ContentHash.fromHex(hashHex);
+
+    const existingBlob = await this.blobRepo.findByHash(contentHash);
+    if (existingBlob && existingBlob.isReady()) {
+      const updated = this.blobRepo.incrementRefCount
+        ? await this.blobRepo.incrementRefCount(existingBlob.id)
+        : (existingBlob.incrementRef(),
+          await this.blobRepo.update(existingBlob),
+          existingBlob);
+
+      if (input.storageKey !== existingBlob.s3Key.value()) {
+        this.driver.delete(input.storageKey).catch((delErr) => {
+          this.logger.warn(
+            `Failed to clean up redundant object ${input.storageKey}: ${delErr?.message || delErr}`,
+          );
+        });
+      }
+      return { blob: updated ?? existingBlob, isDeduplicated: true };
+    }
+
+    const blob = new StorageBlob({
+      id: crypto.randomUUID(),
+      contentHash,
+      sizeBytes: input.sizeBytes,
+      s3Key: StorageKey.fromString(input.storageKey),
+      s3Bucket: process.env.R2_BUCKET_NAME || 'flux',
+      status: BlobStatus.READY,
+      refCount: 1,
+    });
+    try {
+      await this.blobRepo.create(blob);
+      return { blob, isDeduplicated: false };
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        const concurrentBlob = await this.blobRepo.findByHash(contentHash);
+        if (concurrentBlob) {
+          const updated = this.blobRepo.incrementRefCount
+            ? await this.blobRepo.incrementRefCount(concurrentBlob.id)
+            : (concurrentBlob.incrementRef(),
+              await this.blobRepo.update(concurrentBlob),
+              concurrentBlob);
+          if (input.storageKey !== concurrentBlob.s3Key.value()) {
+            this.driver.delete(input.storageKey).catch((delErr) => {
+              this.logger.warn(
+                `Failed to clean up redundant object on concurrent collision ${input.storageKey}: ${delErr?.message || delErr}`,
+              );
+            });
+          }
+          return { blob: updated ?? concurrentBlob, isDeduplicated: true };
+        }
+      }
+      throw err;
+    }
+  }
+
+  async releaseBlob(blobId: string): Promise<void> {
+    if (this.blobRepo.decrementRefCount) {
+      await this.blobRepo.decrementRefCount(blobId);
+      return;
+    }
+    const blob = await this.blobRepo.findById(blobId);
+    if (blob) {
+      blob.decrementRef();
+      await this.blobRepo.update(blob);
+    }
+  }
+
+  async openStream(
+    blobId: string,
+    range?: { start: number; end: number },
+  ): Promise<{
+    blob: StorageBlob;
+    stream: NodeJS.ReadableStream;
+    contentLength: number;
+    contentRange?: string;
+  }> {
+    const blob = await this.blobRepo.findById(blobId);
+    if (!blob) {
+      throw new NotFoundException('Physical storage blob not found');
+    }
+    const { stream, contentLength, contentRange } = range
+      ? await this.driver.getStream(blob.s3Key.value(), range)
+      : await this.driver.getStream(blob.s3Key.value());
+    return { blob, stream, contentLength, contentRange };
+  }
+
+  // --------------------------------------------------------------------------
+  // Deep Driver Operations (No external service needs to inject STORAGE_DRIVER)
+  // --------------------------------------------------------------------------
+
+  async put(
+    key: string,
+    data: Buffer | NodeJS.ReadableStream,
+    options?: { mimeType?: string; size?: number },
+  ): Promise<void> {
+    return this.driver.put(key, data as any, options);
+  }
+
+  async getStream(
+    key: string,
+    range?: { start: number; end: number },
+  ) {
+    return this.driver.getStream(key, range);
+  }
+
+  async stat(key: string): Promise<StorageObjectMetadata> {
+    return this.driver.stat(key);
+  }
+
+  async delete(key: string): Promise<void> {
+    return this.driver.delete(key);
+  }
+
+  async deleteMany(keys: string[]): Promise<void> {
+    return this.driver.deleteMany(keys);
+  }
+
+  async exists(key: string): Promise<boolean> {
+    return this.driver.exists(key);
+  }
+
+  async copy(sourceKey: string, destinationKey: string): Promise<void> {
+    return this.driver.copy(sourceKey, destinationKey);
+  }
+
+  async getPresignedUploadUrl(
+    key: string,
+    options: {
+      mimeType: string;
+      expiresInSeconds?: number;
+      sizeBytes?: number;
+    },
+  ): Promise<string> {
+    return this.driver.getPresignedUploadUrl(key, options);
+  }
+
+  async getPresignedDownloadUrl(
+    key: string,
+    options: { expiresInSeconds?: number; filename?: string },
+  ): Promise<string> {
+    return this.driver.getPresignedDownloadUrl(key, options);
+  }
+
+  async initiateMultipartUpload(
+    key: string,
+    options: { mimeType: string },
+  ): Promise<{ uploadId: string }> {
+    return this.driver.initiateMultipartUpload(key, options);
+  }
+
+  async getPresignedPartUploadUrl(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    expiresInSeconds?: number,
+  ): Promise<string> {
+    return this.driver.getPresignedPartUploadUrl(
+      key,
+      uploadId,
+      partNumber,
+      expiresInSeconds,
+    );
+  }
+
+  async completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: CompletedPart[],
+  ): Promise<{ location?: string; eTag?: string }> {
+    return this.driver.completeMultipartUpload(key, uploadId, parts);
+  }
+
+  async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+    return this.driver.abortMultipartUpload(key, uploadId);
+  }
+
+  async listUploadedParts(
+    key: string,
+    uploadId: string,
+  ): Promise<CompletedPart[]> {
+    return this.driver.listUploadedParts(key, uploadId);
+  }
+
+  async applyLifecycleRules(
+    config?: StorageLifecycleConfiguration,
+  ): Promise<void> {
+    if (typeof this.driver.applyLifecycleRules === 'function') {
+      await this.driver.applyLifecycleRules(config);
+    }
+  }
+
+  async getLifecycleRules(): Promise<StorageLifecycleConfiguration | null> {
+    if (typeof this.driver.getLifecycleRules === 'function') {
+      return this.driver.getLifecycleRules();
+    }
+    return null;
+  }
+
+  // --------------------------------------------------------------------------
+  // Deep Repository Operations (No external service needs to inject STORAGE_BLOB_REPO)
+  // --------------------------------------------------------------------------
+
+  async findBlobById(id: string): Promise<StorageBlob | null> {
+    return this.blobRepo.findById(id);
+  }
+
+  async incrementBlobRef(blobId: string): Promise<StorageBlob> {
+    if (this.blobRepo.incrementRefCount) {
+      const updated = await this.blobRepo.incrementRefCount(blobId);
+      if (!updated) {
+        throw new NotFoundException('Physical data blob not found in storage');
+      }
+      return updated;
+    }
+    const blob = await this.blobRepo.findById(blobId);
+    if (!blob) {
+      throw new NotFoundException('Physical data blob not found in storage');
+    }
+    blob.incrementRef();
+    await this.blobRepo.update(blob);
+    return blob;
+  }
+
+  async findBlobByHash(hash: ContentHash): Promise<StorageBlob | null> {
+    return this.blobRepo.findByHash(hash);
+  }
+
+  async findTombstonedBlobs(threshold: Date, limit = 100): Promise<StorageBlob[]> {
+    return this.blobRepo.findTombstonedBlobs(threshold, limit);
+  }
+
+  async deleteBlobRecord(id: string): Promise<void> {
+    return this.blobRepo.delete(id);
+  }
+
+  /**
+   * Reclaims tombstoned physical blobs and deletes their database records in batches.
+   */
+  async reclaimOrphanBlobs(limit = 100): Promise<number> {
+    const now = new Date();
+    const deadBlobs = await this.blobRepo.findTombstonedBlobs(now, limit);
+    if (deadBlobs.length === 0) return 0;
+
+    let deletedCount = 0;
+    const BATCH_SIZE = 500;
+    for (let i = 0; i < deadBlobs.length; i += BATCH_SIZE) {
+      const batch = deadBlobs.slice(i, i + BATCH_SIZE);
+      const keys = batch.map((b) => b.s3Key.value());
+      if (typeof this.driver.deleteMany === 'function' && batch.length > 1) {
+        try {
+          await this.driver.deleteMany(keys);
+          for (const b of batch) {
+            await this.blobRepo.delete(b.id).catch((delErr) => {
+              this.logger.warn(`Failed to delete orphan blob record ${b.id}: ${delErr?.message || delErr}`);
+            });
+            deletedCount++;
+          }
+          continue;
+        } catch (batchErr: unknown) {
+          this.logger.warn(
+            `driver.deleteMany failed on orphan batch, falling back to individual deletes: ${(batchErr as Error)?.message}`,
+          );
+        }
+      }
+      for (const b of batch) {
+        try {
+          await this.driver.delete(b.s3Key.value());
+          await this.blobRepo.delete(b.id);
+          deletedCount++;
+        } catch (itemErr: unknown) {
+          this.logger.warn(
+            `Failed to reclaim individual orphan blob ${b.id} (${b.s3Key.value()}): ${(itemErr as Error)?.message}`,
+          );
+        }
+      }
+    }
+    return deletedCount;
+  }
+}

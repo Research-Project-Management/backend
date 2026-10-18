@@ -1,5 +1,3 @@
-export type SupportedCitationStyle = CitationStyleId;
-
 export type CitationStyleId =
   | 'apa'
   | 'apa-7th'
@@ -142,20 +140,4 @@ export interface CatalogItemRecord {
   year?: number | null;
   contributors?: CatalogItemCreator[] | null;
   [key: string]: unknown;
-}
-
-export const CATALOG_GATEWAY_PORT = Symbol('CITATION_CATALOG_GATEWAY_PORT');
-
-export interface ICatalogGatewayPort {
-  getItem(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<CatalogItemRecord | null>;
-
-  findByIds(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-  ): Promise<CatalogItemRecord[]>;
 }

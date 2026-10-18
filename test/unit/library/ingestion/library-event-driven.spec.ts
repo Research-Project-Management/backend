@@ -1,12 +1,12 @@
 import {
   INTEGRATION_EVENT_TOPICS,
   createIntegrationEvent,
-} from '@/modules/library/shared-kernel/events/integration-events';
+} from '@/modules/library/core/events/integration-events';
 import {
   IntegrationEventBusService,
   TransactionService,
 } from '@/modules/library/sync';
-import { SearchEventsSubscriber as CatalogEventsSubscriber } from '@/modules/library/search/services/search-events.subscriber';
+import { SearchEventsSubscriber } from '@/modules/library/search/subscribers/search-events.subscriber';
 import { ItemLifecycleSubscriber } from '@/modules/library/extraction/subscribers/item-lifecycle.subscriber';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
@@ -79,13 +79,13 @@ describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', ()
     });
   });
 
-  describe('Discovery Bounded Context - CatalogEventsSubscriber', () => {
+  describe('Discovery Bounded Context - SearchEventsSubscriber', () => {
     let mockSearchService: jest.Mocked<SearchService>;
-    let subscriber: CatalogEventsSubscriber;
+    let subscriber: SearchEventsSubscriber;
 
     beforeEach(() => {
       mockSearchService = {} as any;
-      subscriber = new CatalogEventsSubscriber(mockSearchService);
+      subscriber = new SearchEventsSubscriber(mockSearchService);
     });
 
     it('should handle CATALOG_ITEM_CREATED event without throwing', async () => {

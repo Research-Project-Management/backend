@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   MetadataCandidate,
   FieldAssertion,
@@ -9,13 +9,11 @@ import {
 import {
   ALL_RECONCILABLE_METADATA_FIELDS,
   resolveBidirectionalBaseFields,
-} from '@/modules/library/shared-kernel/domain/zotero-field-harmonizer.domain';
-import { parseCreatorString } from '@/modules/library/shared-kernel/domain/author.domain';
+} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
+import { parseCreatorString } from '@/modules/library/core/domain/author.domain';
 
 @Injectable()
-export class ReconciliationService {
-  private readonly logger = new Logger(ReconciliationService.name);
-
+export class MetadataReconciliationService {
   /**
    * Field authority weighting matrix — evidence-based per-provider, per-field confidence scores.
    */
@@ -23,7 +21,7 @@ export class ReconciliationService {
     string,
     Record<string, number>
   > = {
-    // ── Identifiers ─────────────────────────────────────────────────────────
+    // Identifiers
     doi: {
       UserOverride: 1.0,
       DirectIdentifier: 1.0,
@@ -79,7 +77,7 @@ export class ReconciliationService {
       ZoteroSync: 0.9,
     },
 
-    // ── Core Bibliographic Fields ────────────────────────────────────────────
+    // Core Bibliographic Fields
     title: {
       UserOverride: 1.0,
       PubMed: 0.97,
@@ -144,7 +142,7 @@ export class ReconciliationService {
       arXiv: 0.72,
     },
 
-    // ── Publication Venue ────────────────────────────────────────────────────
+    // Publication Venue
     journal: {
       UserOverride: 1.0,
       CrossRef: 0.97,
@@ -191,7 +189,7 @@ export class ReconciliationService {
       arXiv: 0.4,
     },
 
-    // ── Enrichment Fields ────────────────────────────────────────────────────
+    // Enrichment Fields
     language: {
       UserOverride: 1.0,
       PubMed: 0.95,
@@ -581,6 +579,3 @@ export class ReconciliationService {
     return null;
   }
 }
-
-export const MetadataReconciliationService = ReconciliationService;
-export type MetadataReconciliationService = ReconciliationService;

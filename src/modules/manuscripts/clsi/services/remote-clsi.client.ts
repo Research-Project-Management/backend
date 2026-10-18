@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { RedisCacheService } from '@/core';
 import { CompileManuscriptDto } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
-import { SyncPoint, ReverseSyncPoint } from '../core/ports/artifacts.port';
+import { SyncPoint, ReverseSyncPoint } from '../domain/clsi-ports';
 import { OverleafLogParser } from '../domain/overleaf-log.parser';
 import { CompilePipelineResult } from './compile-pipeline.service';
 

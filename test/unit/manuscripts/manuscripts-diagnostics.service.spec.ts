@@ -47,7 +47,7 @@ describe('Manuscripts Diagnostics Subsystem (Log Parser, Linter & Explainer)', (
     lintUseCase = new LintDocumentSyntaxUseCase(linter);
     explainUseCase = new GetErrorExplanationUseCase(explainer);
 
-    service = new DiagnosticsService(parseUseCase, lintUseCase, explainUseCase);
+    service = new DiagnosticsService();
     controller = new DiagnosticsController(service);
   });
 

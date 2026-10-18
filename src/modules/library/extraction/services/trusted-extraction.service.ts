@@ -4,14 +4,12 @@ import {
   TrustedExtractionResult,
   ExtractionEngineKind,
 } from '@/modules/library/extraction/types/trusted-extraction.types';
-import { ItemMetadata } from '@/modules/library/shared-kernel';
-import {
-  XmpParser,
-  AcademicRegexCatalog,
-  LayoutHeuristicExtractor,
-  MeXtractExtractor,
-  MetadataQualityGate,
-} from '@/modules/library/extraction/extractors';
+import { ItemMetadata } from '@/modules/library/core';
+import { XmpParser } from '@/modules/library/extraction/extractors/xmp.parser';
+import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
+import { LayoutHeuristicExtractor } from '@/modules/library/extraction/extractors/layout-heuristic.extractor';
+import { MeXtractExtractor } from '@/modules/library/extraction/extractors/mextract.extractor';
+import { MetadataQualityGate } from '@/modules/library/extraction/extractors/metadata-quality.gate';
 import { extractText, getDocumentProxy } from 'unpdf';
 import {
   cleanAuthorName,
@@ -20,7 +18,7 @@ import {
   splitConcatenatedAuthors,
   yearFromArxivId,
   repairFragmentedTitle,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 
 /**
  * Master Service orchestrating local-first trusted academic metadata extraction.
@@ -70,7 +68,7 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
     const merged: ItemMetadata = {};
     const rawMatches: Record<string, unknown> = {};
 
-    // ── TIER 1: Fast-Path XMP Binary Packet Scan (< 0.5ms) ──────────────────
+    // TIER 1: Fast-Path XMP Binary Packet Scan (< 0.5ms)
     const xmp = XmpParser.parse(buffer);
     if (xmp) {
       rawMatches.xmpFound = true;
@@ -108,7 +106,7 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       engineUsed = 'XMP_BINARY';
     }
 
-    // ── TIER 2: Fast Text Stream & Academic Regex Catalog (< 5ms) ───────────
+    // TIER 2: Fast Text Stream & Academic Regex Catalog (< 5ms)
     // Fast-path: Front-matter and header extraction strictly bounded to first 3 pages
     let pageText = '';
     let sharedDoc: Awaited<ReturnType<typeof getDocumentProxy>> | undefined =
@@ -236,7 +234,7 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       }
     }
 
-    // ── TIER 3: Quality Gate Evaluation & Heuristic Zoning (< 20ms) ──────────
+    // TIER 3: Quality Gate Evaluation & Heuristic Zoning (< 20ms)
     let gateEvaluation = MetadataQualityGate.evaluate(merged);
 
     // If still missing essential Title or Authors, activate typographic LayoutHeuristic
@@ -290,7 +288,7 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       }
     }
 
-    // ── TIER 4: MeXtract Intelligent SLM Tier (Qwen2.5-0.5B-Instruct ONNX / Heuristic) ──
+    // TIER 4: MeXtract Intelligent SLM Tier (Qwen2.5-0.5B-Instruct ONNX / Heuristic)
     if (
       !gateEvaluation.isSelfSufficient &&
       pageText &&
@@ -365,7 +363,7 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       }
     }
 
-    // ── Accuracy refinement (year, author list, fragmented title, arXiv DOI) ──
+    // Accuracy refinement (year, author list, fragmented title, arXiv DOI)
     this.refineMetadata(merged, xmp?.year, pageText, rawMatches);
     gateEvaluation = MetadataQualityGate.evaluate(merged);
 

@@ -6,12 +6,14 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { RedisCacheService } from '@/core';
-import { ILinkedFilesRepositoryPort } from './core/ports/linked-files-repository.port';
+import { RedisCacheService } from '@/core/infrastructure/redis/redis.service';
+import type Redis from 'ioredis';
 import {
+  ILinkedFilesRepositoryPort,
   LinkedFileEntity,
   LinkedFileProps,
-} from './core/domain/entities/linked-file.entity';
+  LinkedFileJSON,
+} from './domain';
 
 @Injectable()
 export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
@@ -25,8 +27,11 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     super();
   }
 
-  private isRedisReady(): boolean {
-    return !!(this.redis && this.redis.isReady() && this.redis.getClient());
+  private getRedisClient(): Redis | null {
+    if (this.redis && this.redis.isReady()) {
+      return this.redis.getClient();
+    }
+    return null;
   }
 
   private projectKey(projectId: string): string {
@@ -41,18 +46,17 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     }
     projectMap.set(entity.id, entity);
 
-    if (this.isRedisReady()) {
+    const client = this.getRedisClient();
+    if (client) {
       try {
-        const client = this.redis!.getClient()!;
         await client.hset(
           this.projectKey(entity.projectId),
           entity.id,
           JSON.stringify(entity.toJSON()),
         );
       } catch (err: unknown) {
-        this.logger.warn(
-          `Failed to persist linked file to Redis: ${(err as Error)?.message}`,
-        );
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to persist linked file to Redis: ${msg}`);
       }
     }
 
@@ -63,15 +67,16 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     projectId: string,
     id: string,
   ): Promise<LinkedFileEntity | null> {
-    if (this.isRedisReady()) {
+    const client = this.getRedisClient();
+    if (client) {
       try {
-        const client = this.redis!.getClient()!;
         const raw = await client.hget(this.projectKey(projectId), id);
         if (raw) {
           return this.deserialize(raw);
         }
       } catch (err: unknown) {
-        this.logger.debug(`Redis read error: ${(err as Error)?.message}`);
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Redis read error: ${msg}`);
       }
     }
 
@@ -80,9 +85,9 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
   }
 
   public async findByProject(projectId: string): Promise<LinkedFileEntity[]> {
-    if (this.isRedisReady()) {
+    const client = this.getRedisClient();
+    if (client) {
       try {
-        const client = this.redis!.getClient()!;
         const all = await client.hgetall(this.projectKey(projectId));
         if (all && Object.keys(all).length > 0) {
           const list: LinkedFileEntity[] = [];
@@ -92,7 +97,8 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
           return list;
         }
       } catch (err: unknown) {
-        this.logger.debug(`Redis read error: ${(err as Error)?.message}`);
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Redis read error: ${msg}`);
       }
     }
 
@@ -109,9 +115,9 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
   }
 
   public async findAllAutoRefresh(): Promise<LinkedFileEntity[]> {
-    if (this.isRedisReady()) {
+    const client = this.getRedisClient();
+    if (client) {
       try {
-        const client = this.redis!.getClient()!;
         const keys = await client.keys('manuscript:linked_files:*');
         for (const key of keys) {
           const all = await client.hgetall(key);
@@ -128,9 +134,8 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
           }
         }
       } catch (err: unknown) {
-        this.logger.debug(
-          `Redis scan error in findAllAutoRefresh: ${(err as Error)?.message}`,
-        );
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.debug(`Redis scan error in findAllAutoRefresh: ${msg}`);
       }
     }
 
@@ -149,14 +154,13 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     const projectMap = this.memoryStore.get(projectId);
     projectMap?.delete(id);
 
-    if (this.isRedisReady()) {
+    const client = this.getRedisClient();
+    if (client) {
       try {
-        const client = this.redis!.getClient()!;
         await client.hdel(this.projectKey(projectId), id);
       } catch (err: unknown) {
-        this.logger.warn(
-          `Failed to delete linked file in Redis: ${(err as Error)?.message}`,
-        );
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to delete linked file in Redis: ${msg}`);
       }
     }
 
@@ -164,7 +168,7 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
   }
 
   private deserialize(rawJson: string): LinkedFileEntity {
-    const data = JSON.parse(rawJson);
+    const data = JSON.parse(rawJson) as LinkedFileJSON;
     const props: LinkedFileProps = {
       id: data.id,
       projectId: data.projectId,
@@ -185,3 +189,6 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     return new LinkedFileEntity(props);
   }
 }
+
+export { LinkedFilesRepository as RedisLinkedFilesRepository };
+

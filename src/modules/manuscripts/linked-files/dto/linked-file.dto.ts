@@ -12,7 +12,7 @@ import {
   IsBoolean,
   IsUUID,
 } from 'class-validator';
-import { LinkedFileProvider } from '@/modules/manuscripts/linked-files/core/domain/entities/linked-file.entity';
+import { LinkedFileProvider } from '../domain';
 
 export class CreateLinkedFileDto {
   @ApiProperty({

@@ -1,5 +1,5 @@
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
-import { buildTipTapDocFromText } from '@/modules/library/shared-kernel/domain/tiptap.domain';
+import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 
 describe('Academic Tags & Notes Synchronization', () => {
   describe('1. TipTap AST JSON Generation for Literature Notes', () => {
@@ -97,11 +97,11 @@ describe('Academic Tags & Notes Synchronization', () => {
         rawTags: ['machine learning', 'cs.AI', 'nlp'],
       });
 
-      expect(normalized).toContain('Machine Learning');
+      expect(normalized).toContain('machine learning');
       expect(normalized).toContain(
         'Computer Science - Artificial Intelligence',
       );
-      expect(normalized).toContain('NLP');
+      expect(normalized).toContain('nlp');
 
       // Tag created with type automatic
       expect(mockPrisma.tag.create).toHaveBeenCalledWith(
@@ -130,13 +130,13 @@ describe('Academic Tags & Notes Synchronization', () => {
             metadata: expect.objectContaining({
               tags: expect.arrayContaining([
                 'Existing Tag',
-                'Machine Learning',
-                'NLP',
+                'machine learning',
+                'nlp',
               ]),
               keywords: expect.arrayContaining([
                 'Existing Tag',
-                'Machine Learning',
-                'NLP',
+                'machine learning',
+                'nlp',
               ]),
             }),
           }),

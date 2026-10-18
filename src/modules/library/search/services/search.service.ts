@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
-import { SearchOptions } from '@/modules/library/search/domain';
+import { SearchOptions } from '@/modules/library/search/types/search.types';
 import {
   FullTextProvider,
   PageAnchorMatch,
@@ -42,17 +42,22 @@ export class SearchService {
     ]);
 
     const pageCount = searchResult.items.length;
+    const facetSum = Object.values(facets?.itemTypes || {}).reduce(
+      (sum, count) => sum + (typeof count === 'number' ? count : 0),
+      0,
+    );
+    const totalCount = Math.max(facetSum, pageCount);
 
     return {
       items: searchResult.items,
-      total: pageCount,
+      total: totalCount,
       facets,
       nextCursor: searchResult.nextCursor ?? null,
       meta: {
         cursor: searchResult.nextCursor,
         hasNextPage: searchResult.hasNextPage,
         pageCount,
-        totalCount: pageCount,
+        totalCount,
       },
     };
   }

@@ -1,10 +1,10 @@
 import {
+  BlobService,
   ZipPackager,
   crc32,
-} from '@/modules/storage/infrastructure/utils/zip-packager';
-import { DriveController } from '@/modules/storage/presentation/controllers/drive.controller';
-import { StreamController } from '@/modules/storage/presentation/controllers/stream.controller';
-import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
+} from '@/modules/storage/core';
+import { DriveController, StorageNode } from '@/modules/storage/drive';
+import { StreamController, StreamService } from '@/modules/storage/transfer';
 import { Readable } from 'node:stream';
 import { HttpStatus } from '@nestjs/common';
 
@@ -54,26 +54,25 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
 
   describe('DriveController Batch Move', () => {
     let driveController: DriveController;
-    let mockListUseCase: any;
-    let mockMoveUseCase: any;
-    let mockSoftDeleteUseCase: any;
-    let mockNodeRepo: any;
+    let mockDriveService: any;
+    let mockTrashService: any;
 
     beforeEach(() => {
-      mockListUseCase = { execute: jest.fn() };
-      mockMoveUseCase = { execute: jest.fn().mockResolvedValue(undefined) };
-      mockSoftDeleteUseCase = { execute: jest.fn() };
-      mockNodeRepo = {
-        findById: jest.fn(),
-        update: jest.fn(),
-        create: jest.fn(),
+      mockDriveService = {
+        list: jest.fn(),
+        move: jest.fn().mockResolvedValue(undefined),
+        batchMove: jest.fn().mockImplementation(async (ids: string[], targetFolderId: string | null) => {
+          for (const id of ids) {
+            await mockDriveService.move(id, targetFolderId);
+          }
+          return ids.length;
+        }),
       };
+      mockTrashService = { softDelete: jest.fn(), batchSoftDelete: jest.fn() };
 
       driveController = new DriveController(
-        mockListUseCase,
-        mockMoveUseCase,
-        mockSoftDeleteUseCase,
-        mockNodeRepo,
+        mockDriveService,
+        mockTrashService,
       );
     });
 
@@ -85,16 +84,16 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
 
       expect(res.success).toBe(true);
       expect(res.count).toBe(3);
-      expect(mockMoveUseCase.execute).toHaveBeenCalledTimes(3);
-      expect(mockMoveUseCase.execute).toHaveBeenCalledWith(
+      expect(mockDriveService.move).toHaveBeenCalledTimes(3);
+      expect(mockDriveService.move).toHaveBeenCalledWith(
         'file-1',
         'folder-dest-99',
       );
-      expect(mockMoveUseCase.execute).toHaveBeenCalledWith(
+      expect(mockDriveService.move).toHaveBeenCalledWith(
         'file-2',
         'folder-dest-99',
       );
-      expect(mockMoveUseCase.execute).toHaveBeenCalledWith(
+      expect(mockDriveService.move).toHaveBeenCalledWith(
         'file-3',
         'folder-dest-99',
       );
@@ -103,16 +102,13 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
 
   describe('StreamController Bulk Download ZIP', () => {
     let streamController: StreamController;
-    let mockStreamUseCase: any;
-    let mockR2Service: any;
+    let streamService: StreamService;
     let mockNodeRepo: any;
     let mockBlobRepo: any;
     let mockDriver: any;
     let mockReply: any;
 
     beforeEach(() => {
-      mockStreamUseCase = { execute: jest.fn() };
-      mockR2Service = { getObjectStream: jest.fn() };
       mockNodeRepo = {
         findById: jest.fn().mockImplementation(async (id: string) => {
           if (id === 'file-csv') {
@@ -141,6 +137,12 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
         }),
       };
 
+      const blobService = new BlobService(mockDriver, mockBlobRepo);
+      streamService = new StreamService(
+        blobService,
+        mockNodeRepo,
+      );
+
       const headersSet = new Map<string, string>();
       let responseBody: any = null;
       let statusCode = 200;
@@ -161,11 +163,7 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
       };
 
       streamController = new StreamController(
-        mockStreamUseCase,
-        mockR2Service,
-        mockNodeRepo,
-        mockBlobRepo,
-        mockDriver,
+        streamService,
         { emit: jest.fn() } as any,
       );
     });

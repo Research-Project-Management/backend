@@ -4,9 +4,8 @@ import {
   ReconciliationDecision,
   MetadataConflictDetail,
 } from '@/modules/library/ingestion/types/metadata-candidate.types';
-import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
-import { normalizeAcademicTags } from '@/modules/library/shared-kernel/domain/tag.domain';
-import { BASE_FIELD_MAPPINGS } from '@/modules/library/shared-kernel/types/schema.constants';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+import { BASE_FIELD_MAPPINGS } from '@/modules/library/core/types/schema.constants';
 
 export class ReconciliationPolicy {
   /**

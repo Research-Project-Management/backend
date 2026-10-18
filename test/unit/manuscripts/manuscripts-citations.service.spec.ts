@@ -18,10 +18,7 @@ import {
   CrossrefArxivResolverAdapter,
   PluggableLibrarySyncAdapter,
   ManuscriptBibAggregatorAdapter,
-  SearchCitationKeysUseCase,
-  ResolveIdentifierToBibUseCase,
-  ValidateProjectBibtexUseCase,
-  SyncLibraryCollectionUseCase,
+  CitationsRepository,
   CitationsService,
   CitationsController,
   CitationsUtilityController,
@@ -581,19 +578,28 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
   });
 
   // =========================================================================
-  // 3. USE CASES LAYER
+  // 3. APPLICATION SERVICE LAYER
   // =========================================================================
-  describe('Use Cases Layer', () => {
-    let mockAggregator: jest.Mocked<ICitationsAggregatorPort>;
+  describe('Application Service Layer', () => {
+    let mockRepo: any;
+    let service: CitationsService;
 
     beforeEach(() => {
-      mockAggregator = {
+      const parser = new RegexAstBibtexParser();
+      mockRepo = {
         collectBibFiles: jest.fn(),
         appendEntryToBib: jest.fn(),
+        saveBibFile: jest.fn(),
+        resolve: jest.fn(),
+        listCollections: jest.fn(),
+        fetchCollectionBibtex: jest.fn(),
+        parse: (raw: string) => parser.parse(raw),
+        format: (entries: BibEntry[]) => parser.format(entries),
       };
+      service = new CitationsService(mockRepo);
     });
 
-    describe('SearchCitationKeysUseCase', () => {
+    describe('searchCitationKeys', () => {
       it('should search across bibliography files and deduplicate keys', async () => {
         const file1 = new BibliographyFile({
           path: '/refs.bib',
@@ -627,16 +633,14 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           ],
         });
 
-        mockAggregator.collectBibFiles.mockResolvedValue([file1, file2]);
+        mockRepo.collectBibFiles.mockResolvedValue([file1, file2]);
 
-        const useCase = new SearchCitationKeysUseCase(mockAggregator);
-        const results = await useCase.execute({
-          projectId: 'proj-1',
+        const results = await service.searchCitationKeys('proj-1', {
           query: 'deep',
         });
 
         expect(results).toHaveLength(2); // goodfellow2016 and lecun2015
-        expect(results.map((r: BibEntry) => r.key.value)).toEqual([
+        expect(results.map((r) => r.key)).toEqual([
           'goodfellow2016',
           'lecun2015',
         ]);
@@ -654,21 +658,14 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           );
         }
         const file = new BibliographyFile({ path: '/refs.bib', entries });
-        mockAggregator.collectBibFiles.mockResolvedValue([file]);
+        mockRepo.collectBibFiles.mockResolvedValue([file]);
 
-        const useCase = new SearchCitationKeysUseCase(mockAggregator);
-        const results = await useCase.execute({ projectId: 'p1', limit: 3 });
+        const results = await service.searchCitationKeys('p1', { limit: 3 });
         expect(results).toHaveLength(3);
       });
     });
 
-    describe('ResolveIdentifierToBibUseCase', () => {
-      let mockResolver: any;
-
-      beforeEach(() => {
-        mockResolver = { resolve: jest.fn() };
-      });
-
+    describe('resolveIdentifier', () => {
       it('should resolve DOI and append to target bibliography file', async () => {
         const dummyEntry = new BibEntry({
           key: 'resolvedDoi',
@@ -676,44 +673,33 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           fields: { title: 'Resolved Paper', year: '2023' },
         });
 
-        mockResolver.resolve.mockResolvedValue(dummyEntry);
-        mockAggregator.appendEntryToBib.mockResolvedValue('/references.bib');
+        mockRepo.resolve.mockResolvedValue(dummyEntry);
+        mockRepo.appendEntryToBib.mockResolvedValue('/references.bib');
 
-        const useCase = new ResolveIdentifierToBibUseCase(
-          mockResolver,
-          mockAggregator,
-        );
-        const result = await useCase.execute({
-          projectId: 'p1',
+        const result = await service.resolveIdentifier('p1', {
           identifier: '10.1145/12345',
         });
 
-        expect(result.entry.key.value).toBe('resolvedDoi');
+        expect(result.entry.key).toBe('resolvedDoi');
         expect(result.filePath).toBe('/references.bib');
         expect(result.identifierType).toBe('doi');
       });
 
       it('should throw IdentifierNotFoundException on unknown identifier or null resolution', async () => {
-        const useCase = new ResolveIdentifierToBibUseCase(
-          mockResolver,
-          mockAggregator,
-        );
-
         await expect(
-          useCase.execute({
-            projectId: 'p1',
+          service.resolveIdentifier('p1', {
             identifier: 'invalid-identifier',
           }),
         ).rejects.toThrow(IdentifierNotFoundException);
 
-        mockResolver.resolve.mockResolvedValue(null);
+        mockRepo.resolve.mockResolvedValue(null);
         await expect(
-          useCase.execute({ projectId: 'p1', identifier: '10.1145/notfound' }),
+          service.resolveIdentifier('p1', { identifier: '10.1145/notfound' }),
         ).rejects.toThrow(IdentifierNotFoundException);
       });
     });
 
-    describe('ValidateProjectBibtexUseCase', () => {
+    describe('validateProjectBibtex', () => {
       it('should report valid when no duplicate keys and metadata is populated', async () => {
         const file = new BibliographyFile({
           path: '/refs.bib',
@@ -729,10 +715,9 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
             }),
           ],
         });
-        mockAggregator.collectBibFiles.mockResolvedValue([file]);
+        mockRepo.collectBibFiles.mockResolvedValue([file]);
 
-        const useCase = new ValidateProjectBibtexUseCase(mockAggregator);
-        const report = await useCase.execute('p1');
+        const report = await service.validateProjectBibtex('p1');
 
         expect(report.valid).toBe(true);
         expect(report.totalEntries).toBe(1);
@@ -762,10 +747,9 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           ],
         });
 
-        mockAggregator.collectBibFiles.mockResolvedValue([file1, file2]);
+        mockRepo.collectBibFiles.mockResolvedValue([file1, file2]);
 
-        const useCase = new ValidateProjectBibtexUseCase(mockAggregator);
-        const report = await useCase.execute('p1');
+        const report = await service.validateProjectBibtex('p1');
 
         expect(report.valid).toBe(false);
         expect(report.duplicateKeys).toContain('dup');
@@ -773,52 +757,29 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
     });
 
-    describe('SyncLibraryCollectionUseCase', () => {
-      let mockLibrarySync: any;
-      let parser: RegexAstBibtexParser;
-
-      beforeEach(() => {
-        mockLibrarySync = {
-          listCollections: jest.fn(),
-          fetchCollectionBibtex: jest.fn(),
-        };
-        parser = new RegexAstBibtexParser();
-      });
-
+    describe('syncLibraryCollection', () => {
       it('should fetch raw BibTeX from library and append each entry', async () => {
-        mockLibrarySync.fetchCollectionBibtex.mockResolvedValue(`
+        mockRepo.fetchCollectionBibtex.mockResolvedValue(`
           @article{entry1, title={Paper 1}}
           @book{entry2, title={Book 2}}
         `);
-        mockAggregator.appendEntryToBib.mockResolvedValue('/references.bib');
+        mockRepo.appendEntryToBib.mockResolvedValue('/references.bib');
 
-        const useCase = new SyncLibraryCollectionUseCase(
-          mockLibrarySync,
-          parser,
-          mockAggregator,
-        );
-        const res = await useCase.execute({
-          projectId: 'p1',
-          userId: 'u1',
+        const res = await service.syncLibraryCollection('p1', 'u1', {
           collectionId: 'coll-1',
         });
 
         expect(res.collectionId).toBe('coll-1');
         expect(res.syncedCount).toBe(2);
-        expect(mockAggregator.appendEntryToBib).toHaveBeenCalledTimes(2);
+        expect(mockRepo.appendEntryToBib).toHaveBeenCalledTimes(2);
       });
 
       it('should list collections for user', async () => {
-        mockLibrarySync.listCollections.mockResolvedValue([
+        mockRepo.listCollections.mockResolvedValue([
           { id: 'c1', name: 'Zotero Folder', itemCount: 5 },
         ]);
 
-        const useCase = new SyncLibraryCollectionUseCase(
-          mockLibrarySync,
-          parser,
-          mockAggregator,
-        );
-        const colls = await useCase.listUserCollections('u1');
+        const colls = await service.listUserLibraryCollections('u1');
         expect(colls).toHaveLength(1);
         expect(colls[0].id).toBe('c1');
       });
@@ -832,30 +793,22 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
     let service: CitationsService;
     let controller: CitationsController;
     let utilityController: CitationsUtilityController;
-
-    let mockSearchUseCase: any;
-    let mockResolveUseCase: any;
-    let mockValidateUseCase: any;
-    let mockSyncUseCase: any;
-    let parser: RegexAstBibtexParser;
+    let mockRepo: any;
 
     beforeEach(() => {
-      parser = new RegexAstBibtexParser();
-      mockSearchUseCase = { execute: jest.fn() };
-      mockResolveUseCase = { execute: jest.fn() };
-      mockValidateUseCase = { execute: jest.fn() };
-      mockSyncUseCase = {
-        execute: jest.fn(),
-        listUserCollections: jest.fn(),
+      const parser = new RegexAstBibtexParser();
+      mockRepo = {
+        collectBibFiles: jest.fn(),
+        appendEntryToBib: jest.fn(),
+        saveBibFile: jest.fn(),
+        resolve: jest.fn(),
+        listCollections: jest.fn(),
+        fetchCollectionBibtex: jest.fn(),
+        parse: (raw: string) => parser.parse(raw),
+        format: (entries: BibEntry[]) => parser.format(entries),
       };
 
-      service = new CitationsService(
-        mockSearchUseCase,
-        mockResolveUseCase,
-        mockValidateUseCase,
-        mockSyncUseCase,
-        parser,
-      );
+      service = new CitationsService(mockRepo);
 
       controller = new CitationsController(service);
       utilityController = new CitationsUtilityController(service);
@@ -868,7 +821,9 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           entryType: 'article',
           fields: { title: 'Attention', year: '2017' },
         });
-        mockSearchUseCase.execute.mockResolvedValue([dummyEntry]);
+        mockRepo.collectBibFiles.mockResolvedValue([
+          new BibliographyFile({ path: '/refs.bib', entries: [dummyEntry] }),
+        ]);
 
         const result = await controller.searchCitationKeys('p1', {
           query: 'attention',
@@ -883,11 +838,8 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           entryType: 'article',
           fields: { title: 'DOI Title' },
         });
-        mockResolveUseCase.execute.mockResolvedValue({
-          entry: dummyEntry,
-          filePath: '/references.bib',
-          identifierType: 'doi',
-        });
+        mockRepo.resolve.mockResolvedValue(dummyEntry);
+        mockRepo.appendEntryToBib.mockResolvedValue('/references.bib');
 
         const res = await controller.resolveIdentifier('p1', {
           identifier: '10.1145/123',
@@ -896,22 +848,23 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         expect(res.filePath).toBe('/references.bib');
 
         // Test not found exception
-        mockResolveUseCase.execute.mockRejectedValue(
-          new IdentifierNotFoundException('10.9999/none'),
-        );
+        mockRepo.resolve.mockResolvedValue(null);
         await expect(
           controller.resolveIdentifier('p1', { identifier: '10.9999/none' }),
         ).rejects.toThrow(NotFoundException);
       });
 
       it('GET /citations/validate should return validation summary', async () => {
-        mockValidateUseCase.execute.mockResolvedValue({
-          valid: true,
-          totalFiles: 1,
-          totalEntries: 5,
-          duplicateKeys: [],
-          warnings: [],
-        });
+        const entries = Array.from({ length: 5 }, (_, i) =>
+          new BibEntry({
+            key: `k${i}`,
+            entryType: 'article',
+            fields: { title: `T${i}`, author: 'A', year: '2020' },
+          }),
+        );
+        mockRepo.collectBibFiles.mockResolvedValue([
+          new BibliographyFile({ path: '/refs.bib', entries }),
+        ]);
 
         const res = await controller.validateBibtex('p1');
         expect(res.valid).toBe(true);
@@ -919,11 +872,10 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
 
       it('POST /citations/sync-library should sync with user context', async () => {
-        mockSyncUseCase.execute.mockResolvedValue({
-          collectionId: 'c1',
-          syncedCount: 3,
-          filePath: '/references.bib',
-        });
+        mockRepo.fetchCollectionBibtex.mockResolvedValue(
+          '@article{a, title={1}}\n@article{b, title={2}}\n@article{c, title={3}}',
+        );
+        mockRepo.appendEntryToBib.mockResolvedValue('/references.bib');
 
         const req = { user: { id: 'user-42' } };
         const res = await controller.syncLibrary(
@@ -932,24 +884,23 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           req,
         );
         expect(res.collectionId).toBe('c1');
-        expect(mockSyncUseCase.execute).toHaveBeenCalledWith(
-          expect.objectContaining({ userId: 'user-42' }),
+        expect(mockRepo.fetchCollectionBibtex).toHaveBeenCalledWith(
+          'user-42',
+          'c1',
         );
       });
     });
 
     describe('CitationsUtilityController', () => {
       it('GET /citations/library-collections should list user collections', async () => {
-        mockSyncUseCase.listUserCollections.mockResolvedValue([
+        mockRepo.listCollections.mockResolvedValue([
           { id: 'c1', name: 'Col 1', itemCount: 10 },
         ]);
 
         const req = { headers: { 'x-user-id': 'u-custom' } };
         const list = await utilityController.listLibraryCollections(req);
         expect(list).toHaveLength(1);
-        expect(mockSyncUseCase.listUserCollections).toHaveBeenCalledWith(
-          'u-custom',
-        );
+        expect(mockRepo.listCollections).toHaveBeenCalledWith('u-custom');
       });
 
       it('POST /citations/parse-raw should parse BibTeX in memory', () => {
@@ -961,3 +912,4 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
     });
   });
 });
+

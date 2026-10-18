@@ -11,12 +11,8 @@ import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.modul
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { GitBridgeController } from './git-bridge.controller';
 import { GitBridgeService } from './git-bridge.service';
-import { GitBridgeRepository } from './git-bridge.repository';
-
-// Ports & Adapters
-import { GitCliAdapter } from './core/adapters/git-cli.adapter';
-import { GIT_ACCESS_REPOSITORY_PORT } from './core/ports/git-access-repository.port';
-import { GIT_CLI_PORT } from './core/ports/git-cli.port';
+import { GitBridgeRepository, GitCliAdapter } from './git-bridge.repository';
+import { GIT_ACCESS_REPOSITORY_PORT, GIT_CLI_PORT } from './domain';
 
 import type { FastifyInstance } from 'fastify';
 

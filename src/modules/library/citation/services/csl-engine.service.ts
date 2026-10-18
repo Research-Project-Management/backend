@@ -22,7 +22,7 @@ import { CslRepositoryService } from './csl-repository.service';
 import {
   VIETNAMESE_SURNAMES_PREFIX_REGEX,
   hasVietnameseDiacritics,
-} from '@/modules/library/shared-kernel';
+} from '@/modules/library/core';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Cite, plugins } = require('@citation-js/core');
@@ -738,6 +738,12 @@ export class CslEngineService implements OnModuleInit {
     pushIf('pmcid', cslItem.PMCID);
     pushIf('url', cslItem.URL);
     pushIf('urldate', this.formatIsoDateFromCsl(cslItem.accessed));
+    if (Array.isArray(cslItem._keywords) && cslItem._keywords.length > 0) {
+      pushIf('keywords', cslItem._keywords.join(', '));
+    } else if (cslItem.keyword) {
+      pushIf('keywords', cslItem.keyword);
+    }
+    pushIf('annote', cslItem.annote);
 
     const arxivId =
       typeof cslItem._arxivId === 'string' && cslItem._arxivId
@@ -753,10 +759,20 @@ export class CslEngineService implements OnModuleInit {
     return pairs;
   }
 
-  public formatBibtex(cslItem: CslItemData): string {
+  public formatBibtex(cslInput: CslItemData | CslItemData[]): string {
+    if (Array.isArray(cslInput)) {
+      return cslInput.map((item) => this.formatBibtex(item)).join('\n\n');
+    }
+    const cslItem = cslInput;
     const targetType = this.resolveBibtexEntryType(cslItem);
     try {
-      const cite = new Cite(cslItem);
+      const {
+        annote: _annote,
+        keyword: _keyword,
+        _keywords: __keywords,
+        ...cslForCite
+      } = cslItem;
+      const cite = new Cite(cslForCite);
       let raw = cite.format('bibtex');
       if (raw && raw.trim().startsWith('@')) {
         raw = raw.replace(/^@[a-zA-Z]+\{/i, `@${targetType}{`);
@@ -874,16 +890,53 @@ export class CslEngineService implements OnModuleInit {
     if (Array.isArray(cslItem._keywords)) {
       for (const kw of cslItem._keywords) {
         if (typeof kw === 'string' && kw.trim()) {
-          pushTag('KW', kw.trim());
+          pushTag(
+            'KW',
+            kw.trim(),
+            new RegExp(
+              `^KW\\s+-\\s+${kw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+              'm',
+            ),
+          );
         }
       }
+    }
+    if (cslItem.annote && String(cslItem.annote).trim()) {
+      const annoteFirstLine = String(cslItem.annote)
+        .trim()
+        .split(/\r?\n/)[0]
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      pushTag(
+        'N1',
+        String(cslItem.annote).trim(),
+        new RegExp(`^N1\\s+-\\s+${annoteFirstLine}`, 'm'),
+      );
+    }
+    if (
+      cslItem.note &&
+      String(cslItem.note).trim() &&
+      String(cslItem.note).trim() !== String(cslItem.annote || '').trim()
+    ) {
+      const noteFirstLine = String(cslItem.note)
+        .trim()
+        .split(/\r?\n/)[0]
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      pushTag(
+        'N1',
+        String(cslItem.note).trim(),
+        new RegExp(`^N1\\s+-\\s+${noteFirstLine}`, 'm'),
+      );
     }
     pushTag('AB', cslItem.abstract);
 
     return entries;
   }
 
-  public formatRis(cslItem: CslItemData): string {
+  public formatRis(cslInput: CslItemData | CslItemData[]): string {
+    if (Array.isArray(cslInput)) {
+      return cslInput.map((item) => this.formatRis(item)).join('\n\n');
+    }
+    const cslItem = cslInput;
     const targetRisType = this.resolveRisType(cslItem);
     try {
       const cite = new Cite(cslItem);
@@ -896,6 +949,10 @@ export class CslEngineService implements OnModuleInit {
             /^SP\s+-\s+(\S+?)\s*[-–—]\s*(\S+)\s*$/m,
             'SP  - $1\nEP  - $2',
           );
+
+        if (Array.isArray(cslItem._keywords) && cslItem._keywords.length > 0) {
+          raw = raw.replace(/^KW\s+-\s+.*\r?\n?/gm, '');
+        }
 
         const extraRisLines: string[] = [];
         for (const { tag, checkRegex, value } of this.collectRisSupplementTags(
@@ -976,7 +1033,7 @@ export class CslEngineService implements OnModuleInit {
     return lines.join('\n');
   }
 
-  // ── TCVN / BỘ GIÁO DỤC & ĐÀO TẠO CITATION ENGINE ──────────────────────────
+  // TCVN / BỘ GIÁO DỤC & ĐÀO TẠO CITATION ENGINE
 
   private static readonly VN_SURNAMES_REGEX = VIETNAMESE_SURNAMES_PREFIX_REGEX;
   private static readonly ACADEMIC_DEGREES_REGEX =

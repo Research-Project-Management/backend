@@ -7,10 +7,10 @@ import { Prisma } from '@prisma/client';
 import {
   SearchOptions,
   FacetResult,
-  SearchSpecificationBuilder,
-  TextSearchSpecification,
-  sanitizeSearchQuery,
-} from '@/modules/library/search/domain';
+} from '@/modules/library/search/types/search.types';
+import { SearchSpecificationBuilder } from '@/modules/library/search/domain/search-specification.builder';
+import { TextSearchSpecification } from '@/modules/library/search/domain/item-specifications';
+import { sanitizeSearchQuery } from '@/modules/library/search/domain/search.domain';
 
 export type { SearchOptions, FacetResult };
 
@@ -96,7 +96,7 @@ export class SearchRepository implements OnModuleInit {
     limit: number,
     tx?: Prisma.TransactionClient,
   ) {
-    // ── Full-Text Search via PostgreSQL tsvector ────────────────────────────
+    // Full-Text Search via PostgreSQL tsvector
     // Uses generated column `search_vector` (GIN index) added by migration
     // `add_catalog_item_fts`. Falls back to ILIKE if migration hasn't run yet
     // or if the query consists only of punctuation/symbols that strip to empty in tsquery.
@@ -110,7 +110,7 @@ export class SearchRepository implements OnModuleInit {
         this.logger.warn(`FTS query failed, falling back to ILIKE: ${errMsg}`);
       }
     }
-    // ── ILIKE fallback (pre-migration or no text query) ────────────────────
+    // ILIKE fallback (pre-migration or no text query)
     return await this.searchItemsIlike(userId, options, limit, tx);
   }
 
@@ -292,7 +292,17 @@ export class SearchRepository implements OnModuleInit {
       ? `proj:${options.projectId}`
       : `user:${userId}`;
     const filterHash = createHash('md5')
-      .update(JSON.stringify(options))
+      .update(
+        JSON.stringify({
+          q: options.q?.trim() || '',
+          projectId: options.projectId,
+          collectionId: options.collectionId,
+          tagId: options.tagId,
+          itemType: options.itemType,
+          yearFrom: options.yearFrom,
+          yearTo: options.yearTo,
+        }),
+      )
       .digest('hex');
     const cacheKey = `library:search:facets:${scopeKey}:${filterHash}`;
 
@@ -481,7 +491,7 @@ export class SearchRepository implements OnModuleInit {
     }
   }
 
-  // ── Search Attachment Anchor Operations ──────────────────────────────────
+  // Search Attachment Anchor Operations
   async findAttachmentWithItem(attachmentId: string) {
     return this.prisma.attachment.findFirst({
       where: {
@@ -496,7 +506,7 @@ export class SearchRepository implements OnModuleInit {
     });
   }
 
-  // ── EventHandler Index Cleanup Operations ────────────────────────────────
+  // EventHandler Index Cleanup Operations
   async deleteFullTextIndexByItemId(itemId: string): Promise<void> {
     const attachments = await this.prisma.attachment.findMany({
       where: { itemId },

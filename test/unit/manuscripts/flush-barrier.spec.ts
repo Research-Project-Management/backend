@@ -5,7 +5,7 @@
  * Location: `backend/test/unit/manuscripts/flush-barrier.spec.ts`
  */
 
-import { YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/core/adapters/crdt/yjs-doc-manager.adapter';
+import { YjsService as YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/yjs.service';
 import type { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 
 describe('Pre-Compile Flush Barrier (YjsDocManagerAdapter.flushProject)', () => {

@@ -13,65 +13,65 @@ export interface DefaultProjectStateTemplate {
  */
 export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
   {
-    name: 'Thuyết minh đề cương',
+    name: 'Proposal & Literature Review',
     description:
-      'Phác thảo ý tưởng nghiên cứu, tổng quan tài liệu (Literature Review), thiết kế phương pháp và mục tiêu.',
+      'Drafting research idea, literature review, methodology design, and core objectives.',
     color: '#0284c7',
     sequence: 0,
     isDefault: true,
   },
   {
-    name: 'Thẩm định & Phê duyệt',
+    name: 'Review & Approval',
     description:
-      'Đề cương đang được hội đồng khoa học, hội đồng đạo đức hoặc tổ chức tài trợ xem xét, thẩm định tính khả thi.',
+      'Proposal undergoing evaluation by scientific committee, ethics board, or funding agency.',
     color: '#0d9488',
     sequence: 1,
     isDefault: false,
   },
   {
-    name: 'Triển khai & Thực nghiệm',
+    name: 'Execution & Experimentation',
     description:
-      'Đội ngũ đang tích cực thu thập dữ liệu, chạy mô phỏng, thí nghiệm và phân tích kết quả.',
+      'Team actively gathering data, executing simulations, laboratory experiments, and analyzing results.',
     color: '#d97706',
     sequence: 2,
     isDefault: false,
   },
   {
-    name: 'Soạn thảo & Công bố',
+    name: 'Drafting & Publication',
     description:
-      'Đã có dữ liệu cốt lõi; đang tập trung soạn thảo bài báo khoa học (LaTeX), gửi bình duyệt hoặc viết báo cáo tổng kết.',
+      'Core findings established; authoring scientific paper (LaTeX), submitting to peer review, or compiling final report.',
     color: '#3b82f6',
     sequence: 3,
     isDefault: false,
   },
   {
-    name: 'Nghiệm thu & Đánh giá',
+    name: 'Evaluation & Defense',
     description:
-      'Phản biện độc lập, đánh giá kết quả và bảo vệ trước hội đồng nghiệm thu.',
+      'Independent peer review, evaluation of research findings, and defense before examination committee.',
     color: '#4f46e5',
     sequence: 4,
     isDefault: false,
   },
   {
-    name: 'Hoàn thành & Lưu trữ',
+    name: 'Completed & Archived',
     description:
-      'Đề tài đã nghiệm thu thành công, nộp lưu chiểu báo cáo, công bố dữ liệu và bài báo chính thức.',
+      'Project successfully defended, final report archived, research data and formal manuscript published.',
     color: '#1a7f37',
     sequence: 5,
     isDefault: false,
   },
   {
-    name: 'Tạm dừng',
+    name: 'Suspended',
     description:
-      'Đề tài tạm hoãn do chờ kinh phí, thiếu mẫu vật, sự cố thiết bị hoặc thay đổi nhân sự.',
+      'Project temporarily halted awaiting funding, specimens, equipment repairs, or personnel changes.',
     color: '#f97316',
     sequence: 6,
     isDefault: false,
   },
   {
-    name: 'Hủy bỏ',
+    name: 'Cancelled',
     description:
-      'Đề tài bị đình chỉ hoặc chấm dứt do không khả thi, vi phạm quy chế hoặc thay đổi định hướng.',
+      'Project terminated due to infeasibility, policy violation, or strategic re-orientation.',
     color: '#9ca3af',
     sequence: 7,
     isDefault: false,

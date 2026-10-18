@@ -23,14 +23,14 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { PrismaService, AuthenticatedRequest } from '@/core';
 import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
 import { PageExportTranspilerService } from '../services/page-export-transpiler.service';
 import { ManuscriptUserResolverService } from '../services/manuscript-user-resolver.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { LiveCollaborationPort } from '../core/ports/live-collaboration.port';
-import { computeLineDiff } from '../core/domain/line-diff';
+import { LiveCollaborationPort, computeLineDiff } from '../domain';
 
 const isUuid = (val?: string | null): val is string =>
   typeof val === 'string' &&
@@ -39,7 +39,8 @@ const isUuid = (val?: string | null): val is string =>
 @ApiTags('Manuscripts - Pages History & Export')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@RequireRole(Role.REVIEWER)
 export class PagesHistoryExportController {
   private readonly logger = new Logger(PagesHistoryExportController.name);
   private liveCollab: LiveCollaborationPort | null | undefined;

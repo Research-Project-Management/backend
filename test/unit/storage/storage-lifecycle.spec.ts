@@ -1,20 +1,20 @@
-import { S3StorageDriver } from '@/modules/storage/infrastructure/drivers/s3.driver';
-import { LocalStorageDriver } from '@/modules/storage/infrastructure/drivers/local.driver';
-import { TrashRetentionJob } from '@/modules/storage/application/jobs/trash-retention.cron';
-import { MultipartCleanupJob } from '@/modules/storage/application/jobs/multipart-cleanup.cron';
-import { OrphanBlobJob } from '@/modules/storage/application/jobs/orphan-blob.cron';
-import { StorageLifecycleService } from '@/modules/storage/application/services/storage-lifecycle.service';
-import { StorageQueueConsumer } from '@/modules/storage/application/queues/storage-queue.consumer';
+import { S3StorageDriver } from '@/modules/storage/core';
+import { LocalStorageDriver } from '@/modules/storage/core';
+import { TrashRetentionJob } from '@/modules/storage/worker';
+import { MultipartCleanupJob } from '@/modules/storage/worker';
+import { OrphanBlobJob } from '@/modules/storage/worker';
+import { StorageLifecycleService } from '@/modules/storage/worker';
+import { StorageQueueConsumer } from '@/modules/storage/worker';
 import {
   STORAGE_JOB_MAINTENANCE_TRASH,
   STORAGE_JOB_MAINTENANCE_MULTIPART,
   STORAGE_JOB_MAINTENANCE_ORPHAN,
-} from '@/modules/storage/application/queues/storage-queue.types';
-import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
-import { StorageBlob } from '@/modules/storage/domain/entities/storage-blob.entity';
-import { ContentHash } from '@/modules/storage/domain/value-objects/content-hash.vo';
-import { StorageKey } from '@/modules/storage/domain/value-objects/storage-key.vo';
-import { UploadSession } from '@/modules/storage/domain/entities/upload-session.entity';
+} from '@/modules/storage/worker';
+import { StorageNode } from '@/modules/storage/drive';
+import { BlobService, StorageBlob } from '@/modules/storage/core';
+import { ContentHash } from '@/modules/storage/core';
+import { StorageKey } from '@/modules/storage/core';
+import { UploadSession } from '@/modules/storage/transfer';
 import {
   PutBucketLifecycleConfigurationCommand,
   GetBucketLifecycleConfigurationCommand,
@@ -151,7 +151,7 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
 
       job = new TrashRetentionJob(
         mockNodeRepo,
-        mockBlobRepo,
+        new BlobService({} as any, mockBlobRepo),
         mockQuotaRepo,
         mockCache,
       );
@@ -312,7 +312,7 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
         findTombstonedBlobs: jest.fn(),
         delete: jest.fn(),
       };
-      job = new OrphanBlobJob(mockDriver, mockBlobRepo);
+      job = new OrphanBlobJob(new BlobService(mockDriver, mockBlobRepo));
     });
 
     it('should delete zero-reference tombstoned blobs from physical storage and DB', async () => {
@@ -359,9 +359,8 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       };
 
       consumer = new StorageQueueConsumer(
-        mockDriver,
+        new BlobService(mockDriver, mockBlobRepo),
         mockNodeRepo,
-        mockBlobRepo,
         mockTrashJob,
         mockMultipartJob,
         mockOrphanJob,

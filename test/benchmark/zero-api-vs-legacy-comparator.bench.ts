@@ -1,4 +1,4 @@
-/**
+﻿/**
  * test/benchmark/zero-api-vs-legacy-comparator.bench.ts
  *
  * EMPIRICAL BENCHMARK SUITE:
@@ -26,7 +26,7 @@ import {
   cleanAbstractText,
   extractYearFromDate,
   repairFragmentedTitle,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 import { IngestionVerifierService } from '@/modules/library/ingestion/services/ingestion-verifier.service';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 

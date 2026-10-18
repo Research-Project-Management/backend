@@ -193,7 +193,11 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
         this.logger.warn(
           `OCR recognition timed out after ${timeoutMs}ms. Recycling worker pool to prevent scheduler starvation.`,
         );
-        this.recyclePool().catch(() => {});
+        this.recyclePool().catch((recycleErr: unknown) => {
+          this.logger.warn(
+            `Failed to recycle worker pool after timeout: ${recycleErr instanceof Error ? recycleErr.message : String(recycleErr)}`,
+          );
+        });
       }
       throw err;
     }

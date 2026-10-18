@@ -148,6 +148,7 @@ export class NoteController {
     @Param('id') id: string,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
+    @Query('expectedVersion') rawExpectedVersion?: string | number,
   ) {
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
@@ -160,14 +161,24 @@ export class NoteController {
       rawProjectId !== 'undefined'
         ? rawProjectId
         : undefined;
+    const parsedVersion =
+      rawExpectedVersion !== undefined && rawExpectedVersion !== ''
+        ? Number(rawExpectedVersion)
+        : undefined;
+    const expectedVersion =
+      parsedVersion !== undefined && Number.isFinite(parsedVersion)
+        ? parsedVersion
+        : undefined;
     return effectiveProjectId
       ? this.notesService.deleteNote(
           currentUserId,
           id,
-          undefined,
+          expectedVersion,
           effectiveProjectId,
         )
-      : this.notesService.deleteNote(currentUserId, id);
+      : expectedVersion !== undefined
+        ? this.notesService.deleteNote(currentUserId, id, expectedVersion)
+        : this.notesService.deleteNote(currentUserId, id);
   }
 
   @Post(['items/:itemId/extract-annotations', 'items/:itemId/from-annotations'])
@@ -229,5 +240,3 @@ export class NoteController {
     );
   }
 }
-
-export { NoteController as NotesController };

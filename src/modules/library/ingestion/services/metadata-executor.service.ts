@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { CircuitBreaker } from '@/modules/library/core';
 import {
   MetadataProvider,
   MetadataRequest,
@@ -144,101 +145,23 @@ export class ProviderFetchError extends Error {
   }
 }
 
-export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
-
-export interface CircuitBreakerOptions {
-  failureThreshold?: number;
-  cooldownMs?: number;
-}
-
-export class ProviderCircuitBreaker {
-  private state: CircuitState = 'CLOSED';
-  private consecutiveFailures = 0;
-  private lastFailureTime = 0;
-  private halfOpenInProgress = false;
-
-  private readonly failureThreshold: number;
-  private readonly cooldownMs: number;
-
-  constructor(options: CircuitBreakerOptions = {}) {
-    this.failureThreshold = options.failureThreshold ?? 5;
-    this.cooldownMs = options.cooldownMs ?? 30000;
-  }
-
-  getState(): CircuitState {
-    if (this.state === 'OPEN') {
-      const now = Date.now();
-      if (now - this.lastFailureTime >= this.cooldownMs) {
-        this.state = 'HALF_OPEN';
-        this.halfOpenInProgress = false;
-      }
-    }
-    return this.state;
-  }
-
-  canExecute(): boolean {
-    const currentState = this.getState();
-    if (currentState === 'CLOSED') {
-      return true;
-    }
-    if (currentState === 'HALF_OPEN') {
-      if (!this.halfOpenInProgress) {
-        this.halfOpenInProgress = true;
-        return true;
-      }
-      return false;
-    }
-    return false;
-  }
-
-  recordSuccess(): void {
-    this.state = 'CLOSED';
-    this.consecutiveFailures = 0;
-    this.halfOpenInProgress = false;
-  }
-
-  recordFailure(isOutage = true): void {
-    if (!isOutage) return;
-    this.consecutiveFailures++;
-    this.lastFailureTime = Date.now();
-    this.halfOpenInProgress = false;
-
-    if (
-      this.consecutiveFailures >= this.failureThreshold ||
-      this.state === 'HALF_OPEN'
-    ) {
-      this.state = 'OPEN';
-    }
-  }
-
-  reset(): void {
-    this.state = 'CLOSED';
-    this.consecutiveFailures = 0;
-    this.lastFailureTime = 0;
-    this.halfOpenInProgress = false;
-  }
-}
-
 @Injectable()
-export class ExecutorService {
+export class MetadataExecutorService {
   public static readonly MAX_RETRY_AFTER_MS = 5000;
 
-  private readonly logger = new Logger(ExecutorService.name);
+  private readonly logger = new Logger(MetadataExecutorService.name);
   private readonly globalSemaphore = new Semaphore(10);
   private readonly providerSemaphores = new Map<ProviderName, Semaphore>();
-  private readonly circuitBreakers = new Map<
-    ProviderName,
-    ProviderCircuitBreaker
-  >();
+  private readonly circuitBreakers = new Map<ProviderName, CircuitBreaker>();
 
   constructor(
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
   ) {}
 
-  public getCircuitBreaker(providerName: ProviderName): ProviderCircuitBreaker {
+  public getCircuitBreaker(providerName: ProviderName): CircuitBreaker {
     let cb = this.circuitBreakers.get(providerName);
     if (!cb) {
-      cb = new ProviderCircuitBreaker();
+      cb = new CircuitBreaker({ name: providerName });
       this.circuitBreakers.set(providerName, cb);
     }
     return cb;
@@ -407,11 +330,14 @@ export class ExecutorService {
             retryStatus = status;
             retryDelay =
               retryAfterMs && retryAfterMs > 0
-                ? Math.min(retryAfterMs, ExecutorService.MAX_RETRY_AFTER_MS)
+                ? Math.min(
+                    retryAfterMs,
+                    MetadataExecutorService.MAX_RETRY_AFTER_MS,
+                  )
                 : status === 'rate_limited'
                   ? Math.min(
                       1200 * Math.pow(1.5, attempt),
-                      ExecutorService.MAX_RETRY_AFTER_MS,
+                      MetadataExecutorService.MAX_RETRY_AFTER_MS,
                     )
                   : Math.min(200 * Math.pow(2, attempt), 2000);
           } else {
@@ -591,7 +517,3 @@ export class ExecutorService {
     });
   }
 }
-
-export { ExecutorService as ProviderExecutor };
-export const MetadataExecutorService = ExecutorService;
-export type MetadataExecutorService = ExecutorService;

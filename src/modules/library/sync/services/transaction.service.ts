@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, LibraryChange, Tombstone, OutboxStatus } from '@prisma/client';
 import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
@@ -8,7 +8,7 @@ import {
   TransactionHelpers,
   AppendChangeEntry,
   RecordTombstoneEntry,
-} from '@/modules/library/shared-kernel/ports/unit-of-work.port';
+} from '@/modules/library/core/ports/unit-of-work.port';
 import { OutboxWorker } from './outbox.worker';
 
 export type { AppendChangeEntry, RecordTombstoneEntry, TransactionHelpers };
@@ -18,8 +18,6 @@ export class TransactionService
   extends SharedTransactionService
   implements IUnitOfWork
 {
-  private readonly logger = new Logger(TransactionService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly changeLogRepo: ChangeLogRepository,

@@ -77,7 +77,7 @@ export class CoreRepository {
       })
       .catch((err) => {
         this.logger.warn(
-          `Failed to resolve project identifier ${projectId}: ${(err as Error).message}`,
+          `Failed to resolve project identifier ${projectId as string}: ${(err as Error).message}`,
         );
         return null;
       });

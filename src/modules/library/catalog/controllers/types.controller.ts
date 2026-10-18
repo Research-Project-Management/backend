@@ -7,10 +7,13 @@ import {
   UseGuards,
   NotFoundException,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 
+@ApiTags('Library Catalog Types')
+@ApiBearerAuth()
 @Controller([
   'api/v1/library/item-types',
   'api/v1/library/types',
@@ -123,5 +126,3 @@ export class TypeController {
     };
   }
 }
-
-export { TypeController as TypesController };

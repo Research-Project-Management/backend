@@ -1,24 +1,26 @@
-import { StorageFacade } from '@/modules/storage/application/facade/storage.facade';
-import { UploadDirectUseCase } from '@/modules/storage/application/use-cases/upload/upload-direct.use-case';
-import { IStorageDriver } from '@/modules/storage/domain/ports/storage-driver.port';
-import { IStorageNodeRepository } from '@/modules/storage/domain/ports/storage-node.repository.port';
-import { IStorageBlobRepository } from '@/modules/storage/domain/ports/storage-blob.repository.port';
-import { IStorageQuotaRepository } from '@/modules/storage/domain/ports/storage-quota.repository.port';
-import { StorageRedisCacheService } from '@/modules/storage/infrastructure/cache/storage-redis-cache.service';
+import { StorageFacade } from '@/modules/storage';
+import { DirectUploadService } from '@/modules/storage/transfer';
+import { PresignService } from '@/modules/storage/transfer/services/upload.service';
+import { StreamService } from '@/modules/storage/transfer/services/stream.service';
+import { BlobService, IStorageDriver } from '@/modules/storage/core';
+import { IStorageNodeRepository } from '@/modules/storage/drive';
+import { IStorageBlobRepository } from '@/modules/storage/core';
+import { IStorageQuotaRepository } from '@/modules/storage/drive';
+import { StorageRedisCacheService } from '@/modules/storage/core';
 import {
   StorageBlob,
   BlobStatus,
-} from '@/modules/storage/domain/entities/storage-blob.entity';
-import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
-import { ContentHash } from '@/modules/storage/domain/value-objects/content-hash.vo';
-import { StorageKey } from '@/modules/storage/domain/value-objects/storage-key.vo';
+} from '@/modules/storage/core';
+import { StorageNode } from '@/modules/storage/drive';
+import { ContentHash } from '@/modules/storage/core';
+import { StorageKey } from '@/modules/storage/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
 import { BadRequestException } from '@nestjs/common';
 
-describe('StorageFacade & UploadDirectUseCase Integration Suite', () => {
+describe('StorageFacade & DirectUploadService Integration Suite', () => {
   let facade: StorageFacade;
-  let uploadDirectUseCase: UploadDirectUseCase;
+  let uploadService: DirectUploadService;
   let mockDriver: jest.Mocked<IStorageDriver>;
   let mockNodeRepo: jest.Mocked<IStorageNodeRepository>;
   let mockBlobRepo: jest.Mocked<IStorageBlobRepository>;
@@ -121,7 +123,7 @@ describe('StorageFacade & UploadDirectUseCase Integration Suite', () => {
       invalidateFolder: jest.fn(),
       invalidateScopeTree: jest.fn(),
       getPresignedUrl: jest.fn(),
-      setPresignedUrl: jest.fn(),
+      setPresignedUrl: jest.fn().mockResolvedValue(undefined),
       invalidatePresignedUrl: jest.fn(),
       getCachedQuota: jest.fn(),
       setCachedQuota: jest.fn(),
@@ -132,20 +134,30 @@ describe('StorageFacade & UploadDirectUseCase Integration Suite', () => {
       emit: jest.fn(),
     } as any;
 
-    uploadDirectUseCase = new UploadDirectUseCase(
-      mockDriver,
+    const blobService = new BlobService(mockDriver, mockBlobRepo);
+    uploadService = new DirectUploadService(
+      blobService,
       mockNodeRepo,
-      mockBlobRepo,
       mockQuotaRepo,
       mockCache,
       mockEventEmitter,
     );
 
     facade = new StorageFacade(
-      mockDriver,
+      blobService,
       mockNodeRepo,
-      mockBlobRepo,
-      uploadDirectUseCase,
+      uploadService,
+      new PresignService(blobService, mockNodeRepo, mockQuotaRepo),
+      {} as any,
+      {} as any,
+      {
+        check: jest
+          .fn()
+          .mockResolvedValue({ usedBytes: 0, maxBytes: 5e9, percentage: 0 }),
+      } as any,
+      {} as any,
+      new StreamService(blobService, mockNodeRepo, mockCache),
+      {} as any,
     );
   });
 
@@ -165,7 +177,7 @@ describe('StorageFacade & UploadDirectUseCase Integration Suite', () => {
     expect(result.filename).toBe('qml_paper.pdf');
     expect(result.size).toBe(pdfContent.length);
     expect(result.url).toBe(
-      `/api/files/${encodeURIComponent(result.fileId)}/content`,
+      `/api/v1/storage/files/${encodeURIComponent(result.fileId)}/content`,
     );
 
     // Verify written to mock driver

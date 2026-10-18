@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   NotFoundException,
   Inject,
@@ -8,7 +8,7 @@ import { Prisma, ReadStatus } from '@prisma/client';
 import zlib from 'zlib';
 import { PrismaService } from '@/core';
 import { isUUID } from 'class-validator';
-import { normalizeTags } from '@/modules/library/shared-kernel/domain/tag.domain';
+import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 import {
   ItemSummary,
   ItemDetail,

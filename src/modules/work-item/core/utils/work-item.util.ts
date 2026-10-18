@@ -33,7 +33,7 @@ export interface RawWorkItemRecord {
   description?: string | null;
   content?: string | null;
   columnId?: string;
-  priority?: WorkItemPriority | string;
+  priority?: string;
   projectId?: string;
   authorId?: string;
   assigneeId?: string | null;
@@ -384,7 +384,7 @@ export const formatWorkItem = (
   const priority: WorkItemPriority =
     typeof record.priority === 'string'
       ? mapPriority(record.priority)
-      : (record.priority ?? WorkItemPriority.none);
+      : WorkItemPriority.none;
 
   return {
     ...record,

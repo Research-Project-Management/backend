@@ -3,9 +3,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { Readable } from 'stream';
 import { spawnSync } from 'child_process';
-import { GitCliAdapter } from '@/modules/manuscripts/git-bridge/core/adapters/git-cli.adapter';
-import { GitSyncUseCase } from '@/modules/manuscripts/git-bridge/core/use-cases/git-sync.use-case';
 import {
+  GitCliAdapter,
+  GitBridgeRepository,
+  GitBridgeService,
   generateToken,
   parseToken,
   tokenMatches,
@@ -15,7 +16,7 @@ import {
   isTextPath,
   parseNameStatusZ,
   canWrite,
-} from '@/modules/manuscripts/git-bridge/core/domain/git-bridge.domain';
+} from '@/modules/manuscripts/git-bridge';
 
 const PID = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
 
@@ -146,7 +147,8 @@ describe('git-bridge sync with real git', () => {
     };
 
     const git = new GitCliAdapter();
-    const sync = new GitSyncUseCase(git, docstore, filestore, structure);
+    const repo = new GitBridgeRepository(undefined, git);
+    const sync = new GitBridgeService(repo, docstore, filestore, structure);
 
     const tip1 = await sync.materialize(PID);
     expect(tip1).toMatch(/^[0-9a-f]{40}$/);

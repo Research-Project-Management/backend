@@ -1,174 +1,35 @@
 import { Module, Global } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import {
-  STORAGE_DRIVER,
-  STORAGE_NODE_REPOSITORY,
-  STORAGE_BLOB_REPOSITORY,
-  UPLOAD_SESSION_REPOSITORY,
-  STORAGE_QUOTA_REPOSITORY,
-  STORAGE_VERSION_REPOSITORY,
-  STORAGE_PORT,
-} from './storage.tokens';
+import { STORAGE_PORT } from './storage.tokens';
 
-// Infrastructure: Drivers & Persistence
-import { createStorageDriver } from './infrastructure/drivers/driver.factory';
-import { PrismaStorageNodeRepository } from './infrastructure/persistence/prisma-storage-node.repository';
-import { PrismaStorageBlobRepository } from './infrastructure/persistence/prisma-storage-blob.repository';
-import { PrismaUploadSessionRepository } from './infrastructure/persistence/prisma-upload-session.repository';
-import { PrismaStorageQuotaRepository } from './infrastructure/persistence/prisma-storage-quota.repository';
-import { PrismaStorageVersionRepository } from './infrastructure/persistence/prisma-storage-version.repository';
-import { StorageRedisCacheService } from './infrastructure/cache/storage-redis-cache.service';
+import { StorageCoreModule } from './core/core.module';
+import { StorageDriveModule } from './drive/drive.module';
+import { StorageTransferModule } from './transfer/transfer.module';
+import { StorageWorkerModule } from './worker/worker.module';
 
-// Application: Policies & Use Cases
-import { StorageAccessPolicy } from './application/policies/storage-access.policy';
-import { UploadDirectUseCase } from './application/use-cases/upload/upload-direct.use-case';
-import { PresignUploadUseCase } from './application/use-cases/upload/presign-upload.use-case';
-import { CompletePresignUseCase } from './application/use-cases/upload/complete-presign.use-case';
-import { MultipartUploadUseCase } from './application/use-cases/upload/multipart-upload.use-case';
-import { ListDriveUseCase } from './application/use-cases/drive/list-drive.use-case';
-import { MoveNodeUseCase } from './application/use-cases/drive/move-node.use-case';
-import { SoftDeleteUseCase } from './application/use-cases/trash/soft-delete.use-case';
-import { RestoreNodeUseCase } from './application/use-cases/trash/restore-node.use-case';
-import { PermanentDeleteUseCase } from './application/use-cases/trash/permanent-delete.use-case';
-import { StreamBinaryUseCase } from './application/use-cases/stream/stream-binary.use-case';
-import { CheckQuotaUseCase } from './application/use-cases/quota/check-quota.use-case';
-import { UploadNewVersionUseCase } from './application/use-cases/version/upload-new-version.use-case';
-import { GetFileVersionsUseCase } from './application/use-cases/version/get-file-versions.use-case';
-import { DownloadFileVersionUseCase } from './application/use-cases/version/download-file-version.use-case';
-import { RevertFileVersionUseCase } from './application/use-cases/version/revert-file-version.use-case';
-
-// Application: Cron Jobs & Lifecycle Management
-import { TrashRetentionJob } from './application/jobs/trash-retention.cron';
-import { MultipartCleanupJob } from './application/jobs/multipart-cleanup.cron';
-import { OrphanBlobJob } from './application/jobs/orphan-blob.cron';
-import { StorageLifecycleService } from './application/services/storage-lifecycle.service';
-import { StorageEventOutboxService } from './application/services/storage-event-outbox.service';
-import { StorageBackupService } from './application/services/storage-backup.service';
-import { PdfThumbnailService } from './application/services/pdf-thumbnail.service';
-
-// Presentation: Controllers
-import { DriveController } from './presentation/controllers/drive.controller';
-import { UploadController } from './presentation/controllers/upload.controller';
-import { StreamController } from './presentation/controllers/stream.controller';
-import { TrashController } from './presentation/controllers/trash.controller';
-import { QuotaController } from './presentation/controllers/quota.controller';
-import { VersionController } from './presentation/controllers/version.controller';
-
-// Facade (Public API)
 import { StorageFacade } from './storage.facade';
-import { R2Service } from './infrastructure/drivers/r2.service';
-
-// Asynchronous Worker & File Processing Pipeline (BullMQ)
-import { BullModule } from '@nestjs/bullmq';
-import { STORAGE_PROCESSING_QUEUE } from './application/queues/storage-queue.types';
-import { StorageQueueProducer } from './application/queues/storage-queue.producer';
-import { StorageQueueConsumer } from './application/queues/storage-queue.consumer';
-import { shouldRunWorkerConsumers } from '@/core';
-
-const storageWorkerProviders = shouldRunWorkerConsumers()
-  ? [StorageQueueConsumer]
-  : [];
 
 @Global()
 @Module({
   imports: [
-    BullModule.registerQueue({
-      name: STORAGE_PROCESSING_QUEUE,
-    }),
-  ],
-  controllers: [
-    DriveController,
-    UploadController,
-    StreamController,
-    TrashController,
-    QuotaController,
-    VersionController,
+    StorageCoreModule,
+    StorageDriveModule,
+    StorageTransferModule,
+    StorageWorkerModule,
   ],
   providers: [
-    // 1. Storage Driver Factory & Compatibility R2Service
-    {
-      provide: STORAGE_DRIVER,
-      useFactory: (config: ConfigService) => createStorageDriver(config),
-      inject: [ConfigService],
-    },
-    R2Service,
-
-    // 2. Repositories
-    {
-      provide: STORAGE_NODE_REPOSITORY,
-      useClass: PrismaStorageNodeRepository,
-    },
-    {
-      provide: STORAGE_BLOB_REPOSITORY,
-      useClass: PrismaStorageBlobRepository,
-    },
-    {
-      provide: UPLOAD_SESSION_REPOSITORY,
-      useClass: PrismaUploadSessionRepository,
-    },
-    {
-      provide: STORAGE_QUOTA_REPOSITORY,
-      useClass: PrismaStorageQuotaRepository,
-    },
-    {
-      provide: STORAGE_VERSION_REPOSITORY,
-      useClass: PrismaStorageVersionRepository,
-    },
-
-    // 3. Cache & Policy
-    StorageRedisCacheService,
-    StorageAccessPolicy,
-
-    // 4. Use Cases
-    UploadDirectUseCase,
-    PresignUploadUseCase,
-    CompletePresignUseCase,
-    MultipartUploadUseCase,
-    ListDriveUseCase,
-    MoveNodeUseCase,
-    SoftDeleteUseCase,
-    RestoreNodeUseCase,
-    PermanentDeleteUseCase,
-    StreamBinaryUseCase,
-    CheckQuotaUseCase,
-    UploadNewVersionUseCase,
-    GetFileVersionsUseCase,
-    DownloadFileVersionUseCase,
-    RevertFileVersionUseCase,
-
-    // 5. Background Jobs, Lifecycle & Event Services
-    TrashRetentionJob,
-    MultipartCleanupJob,
-    OrphanBlobJob,
-    StorageLifecycleService,
-    StorageEventOutboxService,
-    StorageBackupService,
-    PdfThumbnailService,
-
-    // 6. Public Facade & Legacy Port
     StorageFacade,
     {
       provide: STORAGE_PORT,
       useExisting: StorageFacade,
     },
-
-    // 7. Background Queue Producer & Consumer
-    StorageQueueProducer,
-    ...storageWorkerProviders,
   ],
   exports: [
+    StorageCoreModule,
+    StorageDriveModule,
+    StorageTransferModule,
+    StorageWorkerModule,
     StorageFacade,
-    R2Service,
     STORAGE_PORT,
-    STORAGE_DRIVER,
-    STORAGE_NODE_REPOSITORY,
-    STORAGE_BLOB_REPOSITORY,
-    STORAGE_VERSION_REPOSITORY,
-    StorageQueueProducer,
-    StorageLifecycleService,
-    StorageEventOutboxService,
-    StorageBackupService,
-    PdfThumbnailService,
   ],
 })
 export class StorageModule {}

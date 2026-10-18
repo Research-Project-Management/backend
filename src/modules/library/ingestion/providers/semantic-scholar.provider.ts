@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+﻿import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -17,8 +17,8 @@ import {
   normalizePmcid,
   normalizePageRange,
   parseCreatorString,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
-import { getAcademicUserAgent } from '@/modules/library/shared-kernel/core/constants/academic-client.constants';
+} from '@/modules/library/core';
+import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
 
 /**

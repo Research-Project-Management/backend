@@ -1,5 +1,4 @@
-import { Prisma } from '@prisma/client';
-import { SearchOptions } from './search.types';
+import { SearchQuery } from '@/modules/library/search/types/search.types';
 
 /**
  * Sanitizes search input to prevent SQL injection or tsquery syntax breaking.
@@ -13,53 +12,24 @@ export function sanitizeSearchQuery(query?: string): string {
 }
 
 /**
- * Converts space-separated search query into PostgreSQL tsquery syntax (term1 & term2:*).
+ * Normalizes and clamps search query parameters into a valid SearchQuery contract.
  */
-export function formatToPrefixTsQuery(query: string): string {
-  const sanitized = sanitizeSearchQuery(query);
-  if (!sanitized) return '';
-  const tokens = sanitized.split(' ').filter(Boolean);
-  if (tokens.length === 0) return '';
-  return tokens.map((token) => `${token}:*`).join(' & ');
-}
-
-/**
- * Builds Prisma WhereInput object for structured metadata filtering in search.
- */
-export function buildBaseSearchWhere(
-  userId: string,
-  options: SearchOptions,
-): Prisma.ItemWhereInput {
-  const scopeWhere: Prisma.ItemWhereInput =
-    options.projectId && options.projectId !== 'user'
-      ? { projectId: options.projectId }
-      : { userId };
+export function createSearchQuery(
+  rawQuery: string,
+  options?: { limit?: number; offset?: number; sortBy?: string },
+): SearchQuery {
+  const trimmed = (rawQuery ?? '').trim();
+  const limit = Math.min(100, Math.max(1, options?.limit ?? 20));
+  const offset = Math.max(0, options?.offset ?? 0);
+  const sortBy =
+    options?.sortBy === 'date' || options?.sortBy === 'title'
+      ? options.sortBy
+      : 'relevance';
 
   return {
-    ...scopeWhere,
-    deletedAt: null,
-    ...(options.itemType ? { itemType: options.itemType } : {}),
-    ...(options.yearFrom || options.yearTo
-      ? {
-          year: {
-            ...(options.yearFrom ? { gte: options.yearFrom } : {}),
-            ...(options.yearTo ? { lte: options.yearTo } : {}),
-          },
-        }
-      : {}),
-    ...(options.collectionId
-      ? {
-          collectionItems: {
-            some: { collectionId: options.collectionId },
-          },
-        }
-      : {}),
-    ...(options.tagId
-      ? {
-          itemTags: {
-            some: { tagId: options.tagId },
-          },
-        }
-      : {}),
+    query: trimmed,
+    limit,
+    offset,
+    sortBy,
   };
 }

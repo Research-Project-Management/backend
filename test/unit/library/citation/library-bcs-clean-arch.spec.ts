@@ -2,15 +2,15 @@ import {
   isValidFileHash,
   isValidMimeType,
   isPdfMimeType,
-} from '@/modules/library/extraction/domain';
+} from '@/modules/library/extraction';
 import { IngestionStatusVo } from '@/modules/library/ingestion/domain/ingestion-status.vo';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import { createSearchQuery } from '@/modules/library/search';
 import {
-  SearchQueryVo,
-  createSearchQuery,
-} from '@/modules/library/search/domain';
-import { CitationStyleVo } from '@/modules/library/citation/domain';
-import { compactLibraryChanges } from '@/modules/library/sync/domain';
+  normalizeCitationStyleId,
+  isSupportedCitationStyle,
+} from '@/modules/library/citation';
+import { compactLibraryChanges } from '@/modules/library/sync';
 
 describe('Library Bounded Contexts - Modular Monolith Domain Logic', () => {
   describe('Extraction Domain Logic', () => {
@@ -66,7 +66,7 @@ describe('Library Bounded Contexts - Modular Monolith Domain Logic', () => {
   });
 
   describe('Search Domain Logic', () => {
-    it('createSearchQuery and SearchQueryVo should enforce limits and sanitize parameters', () => {
+    it('createSearchQuery should enforce limits and sanitize parameters', () => {
       const sanitized = createSearchQuery('  quantum computing  ', {
         limit: 500, // Should be clamped to 100
         offset: -10, // Should be clamped to 0
@@ -77,31 +77,18 @@ describe('Library Bounded Contexts - Modular Monolith Domain Logic', () => {
       expect(sanitized.limit).toBe(100);
       expect(sanitized.offset).toBe(0);
       expect(sanitized.sortBy).toBe('date');
-
-      const queryVo = SearchQueryVo.create('  quantum computing  ', {
-        limit: 500,
-        offset: -10,
-        sortBy: 'date',
-      });
-      expect(queryVo.query).toBe('quantum computing');
-      expect(queryVo.limit).toBe(100);
-      expect(queryVo.offset).toBe(0);
-      expect(queryVo.sortBy).toBe('date');
     });
   });
 
   describe('Citation Domain Logic', () => {
-    it('CitationStyleVo should normalize and fallback styles safely', () => {
-      const apa = CitationStyleVo.create('APA');
-      expect(apa.value).toBe('apa');
+    it('normalizeCitationStyleId and isSupportedCitationStyle should normalize and fallback styles safely', () => {
+      expect(normalizeCitationStyleId('APA')).toBe('apa');
+      expect(normalizeCitationStyleId('nature')).toBe('nature');
+      expect(isSupportedCitationStyle('ieee')).toBe(true);
 
-      // CitationStyleVo uses open CSL model: any valid slug is accepted
-      const customStyle = CitationStyleVo.create('nature');
-      expect(customStyle.value).toBe('nature');
-
-      // Null/empty -> fallback 'apa'
-      expect(CitationStyleVo.create(null).value).toBe('apa');
-      expect(CitationStyleVo.create('').value).toBe('apa');
+      // Empty/invalid -> fallback 'apa-7th'
+      expect(normalizeCitationStyleId(undefined)).toBe('apa-7th');
+      expect(normalizeCitationStyleId('')).toBe('apa-7th');
     });
   });
 

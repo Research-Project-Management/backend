@@ -1,21 +1,14 @@
-/**
- * realtime/gateways/notification.gateway.ts
- * Real-Time WebSocket Gateway for System Notifications, Mentions, and Global User Alerts.
- */
-
 import {
   WebSocketGateway,
   WebSocketServer,
   OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
-  SubscribeMessage,
-  ConnectedSocket,
 } from '@nestjs/websockets';
-import { Logger, Injectable, Optional } from '@nestjs/common';
+import { Logger, Injectable } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
+import { WsAuthService } from '../core/ws-auth.guard';
+import { REALTIME_NAMESPACES } from '../core/realtime.constant';
 
 @Injectable()
 @WebSocketGateway({
@@ -23,7 +16,7 @@ import { ConfigService } from '@nestjs/config';
     origin: true,
     credentials: true,
   },
-  namespace: '/notifications',
+  namespace: REALTIME_NAMESPACES.NOTIFICATIONS,
 })
 export class NotificationGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -33,51 +26,19 @@ export class NotificationGateway
 
   private readonly logger = new Logger(NotificationGateway.name);
 
-  constructor(
-    @Optional() private readonly jwtService?: JwtService,
-    @Optional() private readonly configService?: ConfigService,
-  ) {}
+  constructor(private readonly authService: WsAuthService) {}
 
-  public afterInit(server: Server): void {
-    this.logger.log(
-      'Global Notifications WebSocket Gateway initialized (/notifications).',
-    );
+  public afterInit(_server: Server): void {
+    this.logger.log('Global Notifications WebSocket Gateway initialized (/notifications).');
   }
 
   public async handleConnection(client: Socket): Promise<void> {
-    const token = this.extractToken(client);
-    let userId =
-      (client.handshake.auth?.userId as string) ||
-      (client.handshake.query?.userId as string);
+    const session = await this.authService.authenticateSocket(client);
+    client.data = session;
 
-    if (token && this.jwtService) {
-      try {
-        const secret =
-          this.configService?.get<string>('JWT_SECRET') ||
-          process.env.JWT_SECRET ||
-          'secret';
-        const payload = await this.jwtService.verifyAsync(token, { secret });
-        userId = payload.sub || payload.id || userId;
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.debug(
-          `Socket ${client.id} notification handshake token invalid: ${message}`,
-        );
-      }
-    }
-
-    if (!userId) {
-      userId = `anon-${client.id.substring(0, 8)}`;
-    }
-
-    client.data = { userId };
-
-    // Join personal user notification room
-    const userRoom = `user:${userId}`;
-    client.join(userRoom);
-    this.logger.debug(
-      `Client ${client.id} joined notification room: ${userRoom}`,
-    );
+    const userRoom = `user:${session.userId}`;
+    await client.join(userRoom);
+    this.logger.debug(`Client ${client.id} joined notification room: ${userRoom}`);
   }
 
   public handleDisconnect(client: Socket): void {
@@ -87,37 +48,15 @@ export class NotificationGateway
     }
   }
 
-  /**
-   * Broadcast a notification event directly to a specific user.
-   */
   public sendToUser(userId: string, event: string, payload: unknown): void {
     if (this.server) {
       this.server.to(`user:${userId}`).emit(event, payload);
     }
   }
 
-  /**
-   * Broadcast a system-wide announcement to all connected users.
-   */
   public broadcastSystem(event: string, payload: unknown): void {
     if (this.server) {
       this.server.emit(event, payload);
     }
-  }
-
-  private extractToken(client: Socket): string | null {
-    const authHeader = client.handshake.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      return authHeader.substring(7);
-    }
-    const tokenAuth = client.handshake.auth?.token;
-    if (tokenAuth && typeof tokenAuth === 'string') {
-      return tokenAuth;
-    }
-    const queryToken = client.handshake.query?.token;
-    if (queryToken && typeof queryToken === 'string') {
-      return queryToken;
-    }
-    return null;
   }
 }

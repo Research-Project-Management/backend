@@ -18,7 +18,7 @@ export class ProjectCurrentStateResponseDto {
   state!: ProjectState | null;
 
   @ApiProperty({
-    example: 'Triển khai & Thực nghiệm',
+    example: 'Active Experimentation',
   })
   stateLabel!: string;
 }

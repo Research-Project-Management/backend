@@ -8,7 +8,7 @@ import {
   TagSpecification,
   TextSearchSpecification,
 } from './item-specifications';
-import { SearchOptions } from './search.types';
+import { SearchOptions } from '@/modules/library/search/types/search.types';
 
 /**
  * SearchSpecificationBuilder.

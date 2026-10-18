@@ -1,11 +1,9 @@
 import {
   Injectable,
   Inject,
-  Optional,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import * as crypto from 'crypto';
 import {
   IStoragePort,
   ReadOwnedFileInput,
@@ -16,20 +14,23 @@ import {
   getFileContentPath,
 } from './storage.port';
 import {
-  STORAGE_DRIVER,
   STORAGE_NODE_REPOSITORY,
-  STORAGE_BLOB_REPOSITORY,
 } from './storage.tokens';
-import { IStorageDriver } from './domain/ports/storage-driver.port';
-import { IStorageNodeRepository } from './domain/ports/storage-node.repository.port';
-import { IStorageBlobRepository } from './domain/ports/storage-blob.repository.port';
-import { UploadDirectUseCase } from './application/use-cases/upload/upload-direct.use-case';
-import { PresignUploadUseCase } from './application/use-cases/upload/presign-upload.use-case';
-import { CompletePresignUseCase } from './application/use-cases/upload/complete-presign.use-case';
-import { MultipartUploadUseCase } from './application/use-cases/upload/multipart-upload.use-case';
-import { CheckQuotaUseCase } from './application/use-cases/quota/check-quota.use-case';
-import { StorageRedisCacheService } from './infrastructure/cache/storage-redis-cache.service';
-import { FileScope } from './domain/value-objects/file-scope.vo';
+import { IStorageNodeRepository } from './drive';
+import { BlobService } from './core';
+import {
+  DirectUploadService,
+  PresignService,
+  CompletePresignService,
+} from './transfer/services/upload.service';
+import { MultipartService } from './transfer/services/multipart.service';
+import { StreamService } from './transfer/services/stream.service';
+import {
+  DriveService,
+  TrashService,
+  QuotaService,
+} from './drive/services/drive.service';
+import { FileScope } from './drive/types';
 
 /**
  * StorageFacade: The Single Public Reception Desk for Storage
@@ -39,22 +40,17 @@ import { FileScope } from './domain/value-objects/file-scope.vo';
 @Injectable()
 export class StorageFacade implements IStoragePort {
   constructor(
-    @Inject(STORAGE_DRIVER) private readonly driver: IStorageDriver,
+    private readonly blobService: BlobService,
     @Inject(STORAGE_NODE_REPOSITORY)
     private readonly nodeRepo: IStorageNodeRepository,
-    @Inject(STORAGE_BLOB_REPOSITORY)
-    private readonly blobRepo: IStorageBlobRepository,
-    private readonly uploadDirectUseCase: UploadDirectUseCase,
-    @Optional()
-    private readonly presignUploadUseCase?: PresignUploadUseCase,
-    @Optional()
-    private readonly completePresignUseCase?: CompletePresignUseCase,
-    @Optional()
-    private readonly multipartUploadUseCase?: MultipartUploadUseCase,
-    @Optional()
-    private readonly checkQuotaUseCase?: CheckQuotaUseCase,
-    @Optional()
-    private readonly cache?: StorageRedisCacheService,
+    private readonly uploadService: DirectUploadService,
+    private readonly presignService: PresignService,
+    private readonly completePresignService: CompletePresignService,
+    private readonly multipartService: MultipartService,
+    private readonly quotaService: QuotaService,
+    private readonly trashService: TrashService,
+    private readonly streamService: StreamService,
+    private readonly driveService: DriveService,
   ) {}
 
   private verifyNodeAccess(
@@ -79,28 +75,38 @@ export class StorageFacade implements IStoragePort {
     );
   }
 
-  async readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput> {
-    const node = await this.nodeRepo.findById(input.fileId);
+  private async resolveActiveNodeAndBlob(
+    fileId: string,
+    userId?: string,
+    projectId?: string,
+  ) {
+    const node = await this.nodeRepo.findById(fileId);
     if (!node || node.isTrashed()) {
-      throw new NotFoundException(`Storage node not found: ${input.fileId}`);
+      throw new NotFoundException(`Storage node not found: ${fileId}`);
     }
-
-    this.verifyNodeAccess(node, input.userId, input.projectId);
-
+    this.verifyNodeAccess(node, userId, projectId);
     if (!node.blobId) {
       throw new NotFoundException(
-        `File has no physical binary payload: ${input.fileId}`,
+        `File has no physical binary payload: ${fileId}`,
       );
     }
-
-    const blob = await this.blobRepo.findById(node.blobId);
+    const blob = await this.blobService.findBlobById(node.blobId);
     if (!blob) {
       throw new NotFoundException(
-        `Physical storage blob not found for node: ${input.fileId}`,
+        `Physical storage blob not found for node: ${fileId}`,
       );
     }
+    return { node, blob };
+  }
 
-    const { stream } = await this.driver.getStream(blob.s3Key.value());
+  async readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput> {
+    const { node, blob } = await this.resolveActiveNodeAndBlob(
+      input.fileId,
+      input.userId,
+      input.projectId,
+    );
+
+    const { stream } = await this.blobService.getStream(blob.s3Key.value());
     const chunks: Buffer[] = [];
     for await (const chunk of stream) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -127,30 +133,14 @@ export class StorageFacade implements IStoragePort {
     filename: string;
     contentRange?: string;
   }> {
-    const node = await this.nodeRepo.findById(input.fileId);
-    if (!node || node.isTrashed()) {
-      throw new NotFoundException(`Storage node not found: ${input.fileId}`);
-    }
-
-    this.verifyNodeAccess(node, input.userId, input.projectId);
-
-    if (!node.blobId) {
-      throw new NotFoundException(
-        `File has no physical binary payload: ${input.fileId}`,
-      );
-    }
-
-    const blob = await this.blobRepo.findById(node.blobId);
-    if (!blob) {
-      throw new NotFoundException(
-        `Physical storage blob not found for node: ${input.fileId}`,
-      );
-    }
-
-    const { stream, contentLength, contentRange } = await this.driver.getStream(
-      blob.s3Key.value(),
-      input.range,
+    const { node, blob } = await this.resolveActiveNodeAndBlob(
+      input.fileId,
+      input.userId,
+      input.projectId,
     );
+
+    const { stream, contentLength, contentRange } =
+      await this.blobService.getStream(blob.s3Key.value(), input.range);
 
     return {
       stream,
@@ -162,15 +152,15 @@ export class StorageFacade implements IStoragePort {
   }
 
   async linkFile(input: LinkFileInput): Promise<void> {
-    const node = await this.nodeRepo.findById(input.fileId);
-    if (node) {
-      node.setScope(input.linkedToType as FileScope, input.linkedToId);
-      await this.nodeRepo.update(node);
-    }
+    await this.driveService.linkScope(
+      input.fileId,
+      input.linkedToType,
+      input.linkedToId,
+    );
   }
 
   async uploadFile(input: UploadFileInput): Promise<UploadFileOutput> {
-    const res = await this.uploadDirectUseCase.execute({
+    const res = await this.uploadService.upload({
       userId: input.userId,
       filename: input.filename,
       buffer: input.buffer,
@@ -199,22 +189,22 @@ export class StorageFacade implements IStoragePort {
     buffer: Buffer,
     contentType = 'application/octet-stream',
   ): Promise<{ path: string; url: string }> {
-    await this.driver.put(key, buffer, {
+    await this.blobService.put(key, buffer, {
       mimeType: contentType,
       size: buffer.length,
     });
     return {
       path: key,
-      url: `/api/files/r2/${encodeURIComponent(key)}`,
+      url: `/api/v1/storage/files/r2/${encodeURIComponent(key)}`,
     };
   }
 
   async deleteFile(fileId: string): Promise<void> {
-    const node = await this.nodeRepo.findById(fileId);
-    if (node && !node.isTrashed()) {
-      node.trash();
-      await this.nodeRepo.update(node);
-    }
+    await this.trashService.softDelete(fileId);
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    await this.blobService.delete(key);
   }
 
   async getFileStream(
@@ -227,79 +217,25 @@ export class StorageFacade implements IStoragePort {
     filename: string;
     contentRange?: string;
   }> {
-    const node = await this.nodeRepo.findById(fileId);
-    if (!node || node.isTrashed()) {
-      throw new NotFoundException(`Storage node not found: ${fileId}`);
+    const rangeHeader = range ? `bytes=${range.start}-${range.end}` : undefined;
+    const res = await this.streamService.stream(fileId, rangeHeader);
+    if (res.stream) {
+      return {
+        stream: res.stream,
+        mimeType: res.mimeType,
+        size: res.contentLength,
+        filename: res.filename,
+        contentRange: res.contentRange,
+      };
     }
-    if (!node.blobId) {
-      throw new NotFoundException(
-        `File has no physical binary payload: ${fileId}`,
-      );
-    }
-    const blob = await this.blobRepo.findById(node.blobId);
-    if (!blob) {
-      throw new NotFoundException(
-        `Physical storage blob not found for node: ${fileId}`,
-      );
-    }
-
-    const { stream, contentLength, contentRange } = await this.driver.getStream(
-      blob.s3Key.value(),
-      range,
-    );
-
-    return {
-      stream,
-      mimeType: node.mimeType,
-      size: contentLength,
-      filename: node.name,
-      contentRange,
-    };
+    return this.getOwnedFileStream({ fileId, range });
   }
 
   async getPresignedDownloadUrl(
     fileId: string,
     expiresInSeconds = 3600,
   ): Promise<string> {
-    const node = await this.nodeRepo.findById(fileId);
-    if (!node || node.isTrashed()) {
-      throw new NotFoundException(`Storage node not found: ${fileId}`);
-    }
-    if (!node.blobId) {
-      throw new NotFoundException(
-        `File has no physical binary payload: ${fileId}`,
-      );
-    }
-    const blob = await this.blobRepo.findById(node.blobId);
-    if (!blob) {
-      throw new NotFoundException(
-        `Physical storage blob not found for node: ${fileId}`,
-      );
-    }
-
-    // Cache-aside: check Redis cache for previously generated presigned download URL
-    if (this.cache) {
-      const cachedUrl = await this.cache.getPresignedUrl(blob.id);
-      if (cachedUrl) {
-        return cachedUrl;
-      }
-    }
-
-    const signedUrl = await this.driver.getPresignedDownloadUrl(
-      blob.s3Key.value(),
-      {
-        expiresInSeconds,
-        filename: node.name,
-      },
-    );
-
-    // Cache the signed URL in Redis with safety margin (TTL = expiresInSeconds - 300s, max 3300s)
-    if (this.cache && expiresInSeconds > 300) {
-      const ttl = Math.min(expiresInSeconds - 300, 3300);
-      await this.cache.setPresignedUrl(blob.id, signedUrl, ttl).catch(() => {});
-    }
-
-    return signedUrl;
+    return this.streamService.getPresignedDownloadUrl(fileId, expiresInSeconds);
   }
 
   async getPresignedUploadUrl(input: {
@@ -323,30 +259,10 @@ export class StorageFacade implements IStoragePort {
     size?: number;
     mimeType?: string;
   }> {
-    if (this.presignUploadUseCase) {
-      return this.presignUploadUseCase.execute({
-        ...input,
-        scope: input.scope as FileScope | undefined,
-      });
-    }
-    const cleanExt = (input.filename.split('.').pop() || 'bin').replace(
-      /[^a-zA-Z0-9]/g,
-      '',
-    );
-    const fileUuid = crypto.randomUUID();
-    const storageKey = `uploads/${input.userId}/${fileUuid}.${cleanExt}`;
-    const uploadUrl = await this.driver.getPresignedUploadUrl(storageKey, {
-      mimeType: input.mimeType,
-      sizeBytes: input.sizeBytes,
-      expiresInSeconds: 300,
+    return this.presignService.presign({
+      ...input,
+      scope: input.scope as FileScope | undefined,
     });
-    return {
-      deduplicated: false,
-      uploadUrl,
-      storageKey,
-      fileUuid,
-      expiresIn: 300,
-    };
   }
 
   async completePresignedUpload(input: {
@@ -367,10 +283,7 @@ export class StorageFacade implements IStoragePort {
     size: number;
     mimeType: string;
   }> {
-    if (!this.completePresignUseCase) {
-      throw new Error('CompletePresignUseCase is not available');
-    }
-    const res = await this.completePresignUseCase.execute({
+    const res = await this.completePresignService.complete({
       userId: input.userId,
       storageKey: input.storageKey,
       filename: input.filename,
@@ -406,10 +319,10 @@ export class StorageFacade implements IStoragePort {
     partSize: number;
     totalParts: number;
   }> {
-    if (!this.multipartUploadUseCase) {
-      throw new Error('MultipartUploadUseCase is not available');
+    if (!this.multipartService) {
+      throw new Error('MultipartService is not available');
     }
-    return this.multipartUploadUseCase.initiate({
+    return this.multipartService.initiate({
       ...input,
       scope: input.scope as FileScope | undefined,
     });
@@ -420,10 +333,7 @@ export class StorageFacade implements IStoragePort {
     partNumber: number,
     actor?: { userId: string; projectId?: string | null },
   ): Promise<string> {
-    if (!this.multipartUploadUseCase) {
-      throw new Error('MultipartUploadUseCase is not available');
-    }
-    return this.multipartUploadUseCase.getPartUrl(sessionId, partNumber, actor);
+    return this.multipartService.getPartUrl(sessionId, partNumber, actor);
   }
 
   async completeMultipartUpload(input: {
@@ -437,28 +347,20 @@ export class StorageFacade implements IStoragePort {
     filename: string;
     size: number;
   }> {
-    if (!this.multipartUploadUseCase) {
-      throw new Error('MultipartUploadUseCase is not available');
-    }
-    return this.multipartUploadUseCase.complete(input);
+    return this.multipartService.complete(input);
   }
 
   async abortMultipartUpload(
     sessionId: string,
     actor?: { userId: string; projectId?: string | null },
   ): Promise<void> {
-    if (this.multipartUploadUseCase) {
-      await this.multipartUploadUseCase.abort(sessionId, actor);
-    }
+    await this.multipartService.abort(sessionId, actor);
   }
 
   async checkQuota(
     userId?: string | null,
     projectId?: string | null,
   ): Promise<{ usedBytes: number; maxBytes: number; percentage: number }> {
-    if (this.checkQuotaUseCase) {
-      return this.checkQuotaUseCase.execute(userId, projectId);
-    }
-    return { usedBytes: 0, maxBytes: 5 * 1024 * 1024 * 1024, percentage: 0 };
+    return this.quotaService.check(userId, projectId);
   }
 }

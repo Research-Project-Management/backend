@@ -1,27 +1,212 @@
 /**
  * modules/manuscripts/export-import/domain/archive-validator.ts
- * Pure in-process domain logic for ZIP archive entry validation, Zip Slip security defense,
- * OS artifact filtering, arXiv submission whitelist checks, and text vs. binary classification.
+ * Pure in-process domain logic, entities, value objects, exceptions, and ports
+ * for ZIP archive entry validation, Zip Slip security defense, OS artifact filtering,
+ * arXiv submission whitelist checks, and text vs. binary classification.
  */
 
-import { BadRequestException } from '@nestjs/common';
-import { ZipSlipSecurityException } from '../core/domain/exceptions/zip-slip-security.exception';
-import { InvalidZipArchiveException } from '../core/domain/exceptions/invalid-zip-archive.exception';
-import { ArchiveSizeExceededException } from '../core/domain/exceptions/archive-size-exceeded.exception';
-import { TemplateNotFoundException } from '../core/domain/exceptions/template-not-found.exception';
-import { ArchiveManifest } from '../core/domain/entities/archive-manifest.entity';
-import { ProjectTemplate } from '../core/domain/entities/project-template.entity';
-import { ImportSummaryVo } from '../core/domain/value-objects/import-summary.vo';
+import { Readable } from 'node:stream';
 
-export {
-  ZipSlipSecurityException,
-  InvalidZipArchiveException,
-  ArchiveSizeExceededException,
-  TemplateNotFoundException,
-  ArchiveManifest,
-  ProjectTemplate,
-  ImportSummaryVo,
-};
+export class ZipSlipSecurityException extends Error {
+  constructor(entryPath: string) {
+    super(
+      `Security Violation: Zip entry '${entryPath}' contains illegal path traversal sequences.`,
+    );
+    this.name = 'ZipSlipSecurityException';
+  }
+}
+
+export class ArchiveFileLimitExceededException extends Error {
+  constructor(maxFiles: number) {
+    super(
+      `ZIP archive exceeds the maximum project file limit of ${maxFiles.toLocaleString()} files.`,
+    );
+    this.name = 'ArchiveFileLimitExceededException';
+  }
+}
+
+export class InvalidZipArchiveException extends Error {
+  constructor(
+    message = 'The provided archive is not a valid ZIP file or contains no usable entries.',
+  ) {
+    super(message);
+    this.name = 'InvalidZipArchiveException';
+  }
+}
+
+export class ArchiveSizeExceededException extends Error {
+  constructor(sizeBytes: number, maxBytes: number) {
+    super(
+      `Archive payload exceeds maximum allowed project uncompressed size of ${Math.round(maxBytes / (1024 * 1024))}MB. Found: ${Math.round(sizeBytes / (1024 * 1024))}MB.`,
+    );
+    this.name = 'ArchiveSizeExceededException';
+  }
+}
+
+export class TemplateNotFoundException extends Error {
+  constructor(templateId: string) {
+    super(
+      `Manuscript project template '${templateId}' was not found in catalog.`,
+    );
+    this.name = 'TemplateNotFoundException';
+  }
+}
+
+export interface ArchiveManifestProps {
+  projectId: string;
+  projectName?: string;
+  generatedAt?: Date;
+  fileCount: number;
+  totalSizeBytes: number;
+  hasCompiledPdf?: boolean;
+}
+
+export class ArchiveManifest {
+  public readonly projectId: string;
+  public readonly projectName: string;
+  public readonly generatedAt: Date;
+  public readonly fileCount: number;
+  public readonly totalSizeBytes: number;
+  public readonly hasCompiledPdf: boolean;
+
+  constructor(props: ArchiveManifestProps) {
+    this.projectId = props.projectId;
+    this.projectName = props.projectName || `manuscript-${props.projectId}`;
+    this.generatedAt = props.generatedAt ?? new Date();
+    this.fileCount = props.fileCount;
+    this.totalSizeBytes = props.totalSizeBytes;
+    this.hasCompiledPdf = props.hasCompiledPdf ?? false;
+  }
+
+  public toJSON(): Record<string, unknown> {
+    return {
+      projectId: this.projectId,
+      projectName: this.projectName,
+      generatedAt: this.generatedAt.toISOString(),
+      fileCount: this.fileCount,
+      totalSizeBytes: this.totalSizeBytes,
+      hasCompiledPdf: this.hasCompiledPdf,
+    };
+  }
+}
+
+export interface TemplateFileSpec {
+  path: string;
+  content: string | Buffer;
+  isBinary?: boolean;
+}
+
+export interface CreateProjectTemplateProps {
+  id: string;
+  title: string;
+  category:
+    | 'journal'
+    | 'article'
+    | 'conference'
+    | 'thesis'
+    | 'presentation'
+    | 'report'
+    | 'book'
+    | 'letter'
+    | 'assignment'
+    | 'poster'
+    | 'cv'
+    | 'other'
+    | string;
+  description: string;
+  author: string;
+  thumbnailUrl?: string | null;
+  files: TemplateFileSpec[];
+  defaultRootDoc?: string;
+}
+
+export interface TemplateSummaryProps {
+  id: string;
+  title: string;
+  category: string;
+  description: string;
+  author: string;
+  thumbnailUrl: string | null;
+  fileCount: number;
+  defaultRootDoc: string;
+}
+
+export class ProjectTemplate {
+  public readonly id: string;
+  public readonly title: string;
+  public readonly category: string;
+  public readonly description: string;
+  public readonly author: string;
+  public readonly thumbnailUrl: string | null;
+  public readonly files: TemplateFileSpec[];
+  public readonly defaultRootDoc: string;
+
+  constructor(props: CreateProjectTemplateProps) {
+    this.id = props.id;
+    this.title = props.title;
+    this.category = props.category;
+    this.description = props.description;
+    this.author = props.author;
+    this.thumbnailUrl = props.thumbnailUrl ?? null;
+    this.files = props.files;
+    this.defaultRootDoc = props.defaultRootDoc || 'main.tex';
+  }
+
+  public toJSON(): TemplateSummaryProps {
+    return {
+      id: this.id,
+      title: this.title,
+      category: this.category,
+      description: this.description,
+      author: this.author,
+      thumbnailUrl: this.thumbnailUrl,
+      fileCount: this.files.length,
+      defaultRootDoc: this.defaultRootDoc,
+    };
+  }
+}
+
+export interface ImportSummaryProps {
+  projectId: string;
+  totalEntries: number;
+  totalDocs: number;
+  totalFiles: number;
+  totalFolders: number;
+  rootDocId: string | null;
+  rootDocPath: string | null;
+}
+
+export class ImportSummaryVo {
+  public readonly projectId: string;
+  public readonly totalEntries: number;
+  public readonly totalDocs: number;
+  public readonly totalFiles: number;
+  public readonly totalFolders: number;
+  public readonly rootDocId: string | null;
+  public readonly rootDocPath: string | null;
+
+  constructor(props: ImportSummaryProps) {
+    this.projectId = props.projectId;
+    this.totalEntries = props.totalEntries;
+    this.totalDocs = props.totalDocs;
+    this.totalFiles = props.totalFiles;
+    this.totalFolders = props.totalFolders;
+    this.rootDocId = props.rootDocId;
+    this.rootDocPath = props.rootDocPath;
+  }
+
+  public toJSON(): ImportSummaryProps {
+    return {
+      projectId: this.projectId,
+      totalEntries: this.totalEntries,
+      totalDocs: this.totalDocs,
+      totalFiles: this.totalFiles,
+      totalFolders: this.totalFolders,
+      rootDocId: this.rootDocId,
+      rootDocPath: this.rootDocPath,
+    };
+  }
+}
 
 export type EntryStorageType = 'doc' | 'file';
 
@@ -152,10 +337,8 @@ export class ArchiveEntryVo {
     data: Buffer = Buffer.alloc(0),
     isDirectory = false,
   ): ArchiveEntryVo {
-    // 1. Normalize POSIX path separators
     const normalized = rawPath.replace(/\\/g, '/');
 
-    // 2. Strict Zip Slip Vulnerability Guard (Overleaf Parity)
     const segments = normalized.split('/');
     if (
       segments.includes('..') ||
@@ -167,18 +350,13 @@ export class ArchiveEntryVo {
       throw new ZipSlipSecurityException(rawPath);
     }
 
-    // Remove leading slashes and dot prefixes like ./
     const clean = normalized.replace(/^(\.\/)+/, '').replace(/^\/+/, '');
-
     const isDir = isDirectory || clean.endsWith('/');
     const trimmedPath = clean.replace(/\/+$/, '');
 
     return new ArchiveEntryVo(trimmedPath, data, isDir);
   }
 
-  /**
-   * Overleaf Parity: Filters out macOS & Windows OS metadata artifacts
-   */
   public isIgnoredSystemArtifact(): boolean {
     const p = this.path;
     return (
@@ -193,9 +371,6 @@ export class ArchiveEntryVo {
     );
   }
 
-  /**
-   * Determine whether this file should be stored in Docstore (text line array) or Filestore (binary CAS blob).
-   */
   public getStorageType(): EntryStorageType {
     if (this.isDirectory) return 'doc';
 
@@ -210,7 +385,6 @@ export class ArchiveEntryVo {
       }
     }
 
-    // Heuristic: If size <= 2MB and contains valid UTF-8 without null bytes
     if (this.data.length <= 2 * 1024 * 1024) {
       if (this.isUtf8Text(this.data)) {
         return 'doc';
@@ -249,9 +423,80 @@ export function validateExtractedArchiveEntries(
     );
   }
   if (entries.length > maxFiles) {
-    throw new BadRequestException(
-      `ZIP archive exceeds the maximum project file limit of ${maxFiles.toLocaleString()} files.`,
-    );
+    throw new ArchiveFileLimitExceededException(maxFiles);
   }
   return entries;
 }
+
+export interface RawZipEntryInput {
+  path: string;
+  data?: Buffer | string;
+  getData?: () => Promise<Buffer | string>;
+  date?: Date;
+}
+
+export abstract class IZipEnginePort {
+  abstract buildZip(entries: RawZipEntryInput[]): Buffer;
+  abstract createZipStream(entries: RawZipEntryInput[]): Readable;
+  abstract extractZip(zipBuffer: Buffer): ArchiveEntryVo[];
+}
+
+export interface ExportableFileEntry {
+  path: string;
+  data?: Buffer;
+  getData?: () => Promise<Buffer>;
+  date?: Date;
+}
+
+export abstract class IManuscriptAggregatorPort {
+  abstract collectProjectEntries(
+    projectId: string,
+    includePdf?: boolean,
+    cleanArxiv?: boolean,
+  ): Promise<ExportableFileEntry[]>;
+
+  abstract collectLazyProjectEntries(
+    projectId: string,
+    includePdf?: boolean,
+    cleanArxiv?: boolean,
+  ): Promise<ExportableFileEntry[]>;
+}
+
+export abstract class IManuscriptHydratorPort {
+  abstract hydrateProjectEntries(
+    projectId: string,
+    entries: ArchiveEntryVo[],
+    userId?: string | null,
+    preferredRootDoc?: string,
+  ): Promise<ImportSummaryVo>;
+}
+
+export abstract class ITemplateCatalogPort {
+  abstract listTemplates(): Promise<ProjectTemplate[]>;
+  abstract getTemplateById(templateId: string): Promise<ProjectTemplate | null>;
+}
+
+export interface TranspiledProjectResult {
+  mainTex: string;
+  entries: ArchiveEntryVo[];
+  detectedTitle?: string;
+  warnings: string[];
+}
+
+export abstract class IDocumentTranspilerPort {
+  abstract transpileMarkdown(
+    content: string,
+    fileName?: string,
+  ): Promise<TranspiledProjectResult>;
+
+  abstract transpileDocx(
+    docxBuffer: Buffer,
+    fileName?: string,
+  ): Promise<TranspiledProjectResult>;
+}
+
+export const MAX_UNCOMPRESSED_PROJECT_BYTES = 500 * 1024 * 1024;
+export const MAX_PROJECT_ENTRY_COUNT = 10000;
+
+
+export { PkzipEngineAdapter } from '../services/pkzip-engine.adapter';

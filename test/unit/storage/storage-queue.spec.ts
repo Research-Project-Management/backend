@@ -1,11 +1,11 @@
-import { StorageQueueProducer } from '@/modules/storage/application/queues/storage-queue.producer';
-import { StorageQueueConsumer } from '@/modules/storage/application/queues/storage-queue.consumer';
-import { StorageProcessingJobData } from '@/modules/storage/application/queues/storage-queue.types';
-import { IStorageDriver } from '@/modules/storage/domain/ports/storage-driver.port';
-import { IStorageNodeRepository } from '@/modules/storage/domain/ports/storage-node.repository.port';
-import { IStorageBlobRepository } from '@/modules/storage/domain/ports/storage-blob.repository.port';
-import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
-import { FileScope } from '@/modules/storage/domain/value-objects/file-scope.vo';
+import { StorageQueueProducer } from '@/modules/storage/worker';
+import { StorageQueueConsumer } from '@/modules/storage/worker';
+import { StorageProcessingJobData } from '@/modules/storage/worker';
+import { BlobService, IStorageDriver } from '@/modules/storage/core';
+import { IStorageNodeRepository } from '@/modules/storage/drive';
+import { IStorageBlobRepository } from '@/modules/storage/core';
+import { StorageNode } from '@/modules/storage/drive';
+import { FileScope } from '@/modules/storage/drive';
 import { Queue, Job } from 'bullmq';
 import { Readable } from 'node:stream';
 import { PDFDocument } from 'pdf-lib';
@@ -132,9 +132,8 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
       };
 
       consumer = new StorageQueueConsumer(
-        mockDriver,
+        new BlobService(mockDriver, mockBlobRepo),
         mockNodeRepo,
-        mockBlobRepo,
       );
     });
 
@@ -214,7 +213,7 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
       // Verify node metadata updated
       expect(mockNodeRepo.update).toHaveBeenCalledTimes(1);
       expect(node.metadata?.thumbnail).toBe(
-        '/api/files/r2/thumbnails%2Fblob-img-123.webp',
+        '/api/v1/storage/files/r2/thumbnails%2Fblob-img-123.webp',
       );
       expect(node.metadata?.dimensions).toEqual({
         width: 100,

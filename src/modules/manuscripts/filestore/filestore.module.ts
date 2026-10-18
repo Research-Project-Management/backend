@@ -8,15 +8,17 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PrismaModule } from '@/core';
 import { FilestoreController } from './filestore.controller';
 import { FilestoreService } from './filestore.service';
-import { FilestoreRepository } from './filestore.repository';
-
-// Ports & Adapters
-import { IBinaryStoragePort } from './core/ports/binary-storage.port';
-import { IManuscriptFileRepository } from './core/ports/manuscript-file-repository.port';
-import { IContentHasherPort } from './core/ports/content-hasher.port';
-import { LocalDiskBinaryStorageAdapter } from './core/adapters/storage/local-disk-binary-storage.adapter';
-import { S3BinaryStorageAdapter } from './core/adapters/storage/s3-binary-storage.adapter';
-import { CryptoGitBlobHasherAdapter } from './core/adapters/engine/crypto-git-blob-hasher.adapter';
+import {
+  FilestoreRepository,
+  LocalDiskBinaryStorageAdapter,
+  S3BinaryStorageAdapter,
+  CryptoGitBlobHasherAdapter,
+} from './filestore.repository';
+import {
+  IBinaryStoragePort,
+  IManuscriptFileRepository,
+  IContentHasherPort,
+} from './filestore.types';
 
 @Module({
   imports: [ConfigModule, PrismaModule],

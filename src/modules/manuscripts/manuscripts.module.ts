@@ -4,6 +4,7 @@
  */
 
 import { Module } from '@nestjs/common';
+import { ManuscriptsCoreModule } from './core/core.module';
 import { ClsiModule } from './clsi/clsi.module';
 import { DocstoreModule } from './docstore/docstore.module';
 import { StructureModule } from './structure/structure.module';
@@ -21,6 +22,7 @@ import { GitBridgeModule } from './git-bridge/git-bridge.module';
 
 @Module({
   imports: [
+    ManuscriptsCoreModule,
     ClsiModule,
     DocstoreModule,
     StructureModule,
@@ -37,6 +39,7 @@ import { GitBridgeModule } from './git-bridge/git-bridge.module';
     GitBridgeModule,
   ],
   exports: [
+    ManuscriptsCoreModule,
     ClsiModule,
     DocstoreModule,
     StructureModule,

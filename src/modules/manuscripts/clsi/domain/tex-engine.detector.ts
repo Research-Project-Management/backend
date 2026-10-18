@@ -4,7 +4,7 @@
  * (% !TEX program = ...) and package hints (fontspec, luacode) to select the compiler.
  */
 
-import { DraftModeManager } from '../core/adapters/engines/draft-mode.manager';
+import { DraftModeManager } from './draft-mode.manager';
 
 export type SupportedEngine = 'pdflatex' | 'xelatex' | 'lualatex' | 'tectonic';
 

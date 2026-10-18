@@ -20,36 +20,29 @@
  *  5. DocumentUpdaterService & DocumentUpdaterController: REST APIs and orchestration.
  */
 
-import { DocumentUpdaterService } from '@/modules/manuscripts/document-updater/document-updater.service';
-import { DocumentUpdaterController } from '@/modules/manuscripts/document-updater/document-updater.controller';
-import { DocumentUpdaterRepository } from '@/modules/manuscripts/document-updater/document-updater.repository';
-import { DocNotFoundError } from '@/modules/manuscripts/docstore/domain';
-import { QueueDocUpdateUseCase } from '@/modules/manuscripts/document-updater/core/use-cases/queue-doc-update.use-case';
-import { FlushProjectDocsUseCase } from '@/modules/manuscripts/document-updater/core/use-cases/flush-project-docs.use-case';
-import { FlushSingleDocUseCase } from '@/modules/manuscripts/document-updater/core/use-cases/flush-single-doc.use-case';
-import { GetInFlightDocUseCase } from '@/modules/manuscripts/document-updater/core/use-cases/get-in-flight-doc.use-case';
-import { EvictDocBufferUseCase } from '@/modules/manuscripts/document-updater/core/use-cases/evict-doc-buffer.use-case';
-import { IInFlightStorePort } from '@/modules/manuscripts/document-updater/core/ports/in-flight-store.port';
 import {
+  DocumentUpdaterService,
+  DocumentUpdaterController,
+  DocumentUpdaterRepository,
+  IInFlightStorePort,
   IDocstoreWriterPort,
   BaseDocData,
   CommitResult,
-} from '@/modules/manuscripts/document-updater/core/ports/docstore-writer.port';
-import { IUpdaterLockPort } from '@/modules/manuscripts/document-updater/core/ports/updater-lock.port';
-import { IDebounceTimerPort } from '@/modules/manuscripts/document-updater/core/ports/debounce-timer.port';
-import { InMemoryInFlightStoreAdapter } from '@/modules/manuscripts/document-updater/core/adapters/storage/in-memory-in-flight-store.adapter';
-import { LocalMutexUpdaterLockAdapter } from '@/modules/manuscripts/document-updater/core/adapters/lock/local-mutex-updater-lock.adapter';
-import { NodeTimeoutDebounceAdapter } from '@/modules/manuscripts/document-updater/core/adapters/scheduler/node-timeout-debounce.adapter';
-import { InFlightDoc } from '@/modules/manuscripts/document-updater/core/domain/entities/in-flight-doc.entity';
-import { DocumentVersionVo } from '@/modules/manuscripts/document-updater/core/domain/value-objects/document-version.vo';
-import { UpdateOpVo } from '@/modules/manuscripts/document-updater/core/domain/value-objects/update-op.vo';
-import {
+  IUpdaterLockPort,
+  IDebounceTimerPort,
+  InMemoryInFlightStoreAdapter,
+  LocalMutexUpdaterLockAdapter,
+  NodeTimeoutDebounceAdapter,
+  InFlightDoc,
+  DocumentVersionVo,
+  UpdateOpVo,
   FlushStatusVo,
   FlushStatusEnum,
-} from '@/modules/manuscripts/document-updater/core/domain/value-objects/flush-status.vo';
-import { DocumentLockedException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/document-locked.exception';
-import { DocUpdaterConflictException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/doc-updater-conflict.exception';
-import { InFlightNotFoundException } from '@/modules/manuscripts/document-updater/core/domain/exceptions/in-flight-not-found.exception';
+  DocumentLockedException,
+  DocUpdaterConflictException,
+  InFlightNotFoundException,
+} from '@/modules/manuscripts/document-updater';
+import { DocNotFoundError } from '@/modules/manuscripts/docstore';
 
 /**
  * Mock Test Double for IDocstoreWriterPort simulating DocstoreService
@@ -123,11 +116,33 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
   let lock: IUpdaterLockPort;
   let debounceTimer: IDebounceTimerPort;
 
-  let queueUpdateUseCase: QueueDocUpdateUseCase;
-  let flushSingleDocUseCase: FlushSingleDocUseCase;
-  let flushProjectUseCase: FlushProjectDocsUseCase;
-  let getInFlightDocUseCase: GetInFlightDocUseCase;
-  let evictDocBufferUseCase: EvictDocBufferUseCase;
+  let queueUpdateUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+      lines: string[];
+    }) => ReturnType<DocumentUpdaterService['queueUpdate']>;
+  };
+  let flushSingleDocUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+    }) => ReturnType<DocumentUpdaterService['flushDoc']>;
+  };
+  let flushProjectUseCase: {
+    execute: (input: {
+      projectId: string;
+    }) => ReturnType<DocumentUpdaterService['flushProject']>;
+  };
+  let getInFlightDocUseCase: {
+    execute: (input: {
+      projectId: string;
+      docId: string;
+    }) => Promise<{ doc: InFlightDoc; isBuffered: boolean }>;
+  };
+  let evictDocBufferUseCase: {
+    execute: (input: { projectId: string; docId: string }) => Promise<void>;
+  };
 
   let service: DocumentUpdaterService;
   let controller: DocumentUpdaterController;
@@ -150,77 +165,54 @@ describe('Manuscripts - DocumentUpdater Subsystem (In-Flight Buffer & Docstore F
       version: 1,
     });
 
-    flushSingleDocUseCase = new FlushSingleDocUseCase(
-      inFlightStore,
-      docstoreWriter,
-      lock,
-      debounceTimer,
-    );
-    queueUpdateUseCase = new QueueDocUpdateUseCase(
-      inFlightStore,
-      docstoreWriter,
-      lock,
-      debounceTimer,
-    );
-    flushProjectUseCase = new FlushProjectDocsUseCase(
-      inFlightStore,
-      lock,
-      debounceTimer,
-      flushSingleDocUseCase,
-    );
-    getInFlightDocUseCase = new GetInFlightDocUseCase(
-      inFlightStore,
-      docstoreWriter,
-    );
-    evictDocBufferUseCase = new EvictDocBufferUseCase(
-      inFlightStore,
-      debounceTimer,
-      flushSingleDocUseCase,
-    );
+    const updaterRepo = new DocumentUpdaterRepository();
+    (updaterRepo as any).fetchBaseDoc = (projectId: string, docId: string) =>
+      docstoreWriter.fetchBaseDoc(projectId, docId);
+    (updaterRepo as any).commitDocUpdate = (
+      projectId: string,
+      docId: string,
+      lines: string[],
+      rev: number,
+    ) => docstoreWriter.commitDocUpdate(projectId, docId, lines, rev);
 
-    const mockDocstore = {
-      getDoc: jest
-        .fn()
-        .mockImplementation(async (projId: string, dId: string) => {
-          const item = docstoreWriter.docs.get(`${projId}:${dId}`);
-          if (!item) {
-            throw new DocNotFoundError(dId);
-          }
-          return {
-            _id: dId,
-            lines: item.lines,
-            rev: item.rev,
-            version: item.version,
-          };
-        }),
-      updateDoc: jest
-        .fn()
-        .mockImplementation(async (projId: string, dId: string, opts: any) => {
-          const item = docstoreWriter.docs.get(`${projId}:${dId}`);
-          const nextRev = (item?.rev ?? 0) + 1;
-          docstoreWriter.docs.set(`${projId}:${dId}`, {
-            lines: opts.lines,
-            rev: nextRev,
-            version: nextRev,
-          });
-          return {
-            doc: {
-              _id: dId,
-              lines: opts.lines,
-              rev: nextRev,
-              version: nextRev,
-              hash: 'hash',
-            },
-          };
+    inFlightStore = updaterRepo;
+    lock = updaterRepo as any;
+    debounceTimer = updaterRepo as any;
+
+    service = new DocumentUpdaterService(updaterRepo);
+
+    queueUpdateUseCase = {
+      execute: (input) =>
+        service.queueUpdate(input.projectId, input.docId, {
+          lines: input.lines,
         }),
     };
-
-    const updaterRepo = new DocumentUpdaterRepository(
-      undefined,
-      mockDocstore as any,
-    );
-    service = new DocumentUpdaterService(updaterRepo);
-    service.onModuleInit();
+    flushSingleDocUseCase = {
+      execute: (input) => service.flushDoc(input.projectId, input.docId),
+    };
+    flushProjectUseCase = {
+      execute: (input) => service.flushProject(input.projectId),
+    };
+    getInFlightDocUseCase = {
+      execute: async (input) => {
+        const state = await service.getDocState(
+          input.projectId,
+          input.docId,
+        );
+        return {
+          isBuffered: state.isBuffered,
+          doc: InFlightDoc.create({
+            docId: state.docId,
+            projectId: state.projectId,
+            lines: state.lines,
+            version: DocumentVersionVo.of(state.rev, state.inFlightSeq),
+          }),
+        };
+      },
+    };
+    evictDocBufferUseCase = {
+      execute: (input) => service.evictDoc(input.projectId, input.docId),
+    };
 
     controller = new DocumentUpdaterController(service);
   });

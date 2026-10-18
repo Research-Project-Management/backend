@@ -108,6 +108,8 @@ export class TreeEngine {
 
   /**
    * Retrieves all descendant collection IDs for a given root collection ID.
+   * Cycle-safe: Uses a visited set and index-based BFS queue to prevent infinite loops
+   * and achieve optimal O(V + E) performance without array shifts.
    */
   getDescendantIds(
     collections: Array<Pick<RawCollectionItem, 'id' | 'parentId'>>,
@@ -116,26 +118,44 @@ export class TreeEngine {
     const childrenMap = new Map<string, string[]>();
     for (const c of collections) {
       if (c.parentId) {
-        const existing = childrenMap.get(c.parentId) || [];
+        let existing = childrenMap.get(c.parentId);
+        if (!existing) {
+          existing = [];
+          childrenMap.set(c.parentId, existing);
+        }
         existing.push(c.id);
-        childrenMap.set(c.parentId, existing);
       }
     }
 
+    const visited = new Set<string>([rootId]);
     const descendants: string[] = [];
-    const queue: string[] = [...(childrenMap.get(rootId) || [])];
+    const queue: string[] = [];
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+    const rootChildren = childrenMap.get(rootId);
+    if (rootChildren) {
+      for (const childId of rootChildren) {
+        if (!visited.has(childId)) {
+          visited.add(childId);
+          queue.push(childId);
+        }
+      }
+    }
+
+    let head = 0;
+    while (head < queue.length) {
+      const current = queue[head++];
       descendants.push(current);
       const nextChildren = childrenMap.get(current);
-      if (nextChildren && nextChildren.length > 0) {
-        queue.push(...nextChildren);
+      if (nextChildren) {
+        for (const childId of nextChildren) {
+          if (!visited.has(childId)) {
+            visited.add(childId);
+            queue.push(childId);
+          }
+        }
       }
     }
 
     return descendants;
   }
 }
-
-export { TreeEngine as CollectionTreeEngine };

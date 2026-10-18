@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 
 export interface PageTextExtraction {
@@ -17,8 +17,6 @@ export interface PageAnchorMatch {
 
 @Injectable()
 export class FullTextProvider {
-  private readonly logger = new Logger(FullTextProvider.name);
-
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -110,5 +108,3 @@ export class FullTextProvider {
     return matches;
   }
 }
-
-export { FullTextProvider as FullTextIndexer };

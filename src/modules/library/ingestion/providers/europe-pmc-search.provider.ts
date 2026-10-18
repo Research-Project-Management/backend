@@ -1,11 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+﻿import { Injectable, Logger } from '@nestjs/common';
 import {
   IExternalSearchProvider,
   ExternalSearchOptions,
   ExternalSearchResult,
   ExternalSearchPaperHit,
 } from '@/modules/library/ingestion/types/external-search.types';
-import { cleanAbstractText } from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+import { cleanAbstractText } from '@/modules/library/core';
 
 const DEFAULT_TIMEOUT_MS = 6000;
 const DEFAULT_LIMIT = 5;

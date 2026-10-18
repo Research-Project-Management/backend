@@ -23,12 +23,15 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { ManuscriptFileResponseDto } from './dto/file-response.dto';
-import { FileNotFoundException } from './core/domain/exceptions/file-not-found.exception';
-import { InvalidByteRangeException } from './core/domain/exceptions/invalid-byte-range.exception';
+import {
+  FileNotFoundException,
+  InvalidByteRangeException,
+} from './filestore.types';
 import { FilestoreService } from './filestore.service';
 
 @ApiTags('Manuscripts - Filestore & Assets')
@@ -39,11 +42,13 @@ import { FilestoreService } from './filestore.service';
   'manuscripts/projects/:projectId/files',
   'project/:projectId/file',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@RequireRole(Role.REVIEWER)
 export class FilestoreController {
   constructor(private readonly filestoreService: FilestoreService) {}
 
   @Post()
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   public async uploadFile(
     @Param('projectId') projectId: string,
@@ -243,6 +248,7 @@ export class FilestoreController {
   }
 
   @Delete(':fileId')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
   public async deleteFile(
     @Param('projectId') projectId: string,

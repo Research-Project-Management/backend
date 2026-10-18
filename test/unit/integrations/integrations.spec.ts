@@ -7,7 +7,7 @@ import { MendeleyProvider } from '@/modules/integrations/providers/mendeley.prov
 import { GithubProvider } from '@/modules/integrations/providers/github.provider';
 import { IntegrationsService } from '@/modules/integrations/integrations.service';
 import { IntegrationsRepository } from '@/modules/integrations/integrations.repository';
-import { PluggableLibrarySyncAdapter } from '@/modules/manuscripts/citations/core/adapters/library/pluggable-library-sync.adapter';
+import { PluggableLibrarySyncAdapter } from '@/modules/manuscripts/citations';
 
 describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
   describe('Crypto Utils (AES-256-GCM)', () => {

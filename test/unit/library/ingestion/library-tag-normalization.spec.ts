@@ -2,57 +2,105 @@ import {
   cleanSingleTag,
   normalizeAcademicTags,
   normalizeTags,
-  toTitleCaseWithAcronyms,
+  toCanonicalTagKey,
+  resolveArxivTaxonomyTag,
   stripLatexMarkup,
   stripTagPrefixes,
-} from '@/modules/library/shared-kernel/domain/tag.domain';
+  MAX_TAG_LENGTH,
+} from '@/modules/library/core/domain/tag.domain';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import { toItemData } from '@/modules/library/ingestion/stages/commit.stage';
 
-describe('Library Academic Tag Sanitizer & Normalizer', () => {
-  describe('1. Scientific Acronyms & Casing Preservation', () => {
-    it('should preserve standard scientific acronyms in uppercase', () => {
-      expect(cleanSingleTag('ai')).toBe('AI');
-      expect(cleanSingleTag('ml')).toBe('ML');
-      expect(cleanSingleTag('nlp')).toBe('NLP');
-      expect(cleanSingleTag('cnn')).toBe('CNN');
-      expect(cleanSingleTag('llm')).toBe('LLM');
-      expect(cleanSingleTag('covid-19')).toBe('COVID-19');
-      expect(cleanSingleTag('lora')).toBe('LORA');
-      expect(cleanSingleTag('gnn')).toBe('GNN');
-      expect(cleanSingleTag('rag')).toBe('RAG');
+describe('Library Academic Tag & Subject Taxonomy Engine', () => {
+  describe('1. Case-Preserving Unicode NFC Tag Normalization', () => {
+    it('should preserve exact orthographic casing of scientific acronyms, mixed-case models, bio-terms, and author keywords', () => {
+      // Exact case preservation for acronyms & conferences
+      expect(cleanSingleTag('ICLR')).toBe('ICLR');
+      expect(cleanSingleTag('ICML')).toBe('ICML');
+      expect(cleanSingleTag('CVPR')).toBe('CVPR');
+      expect(cleanSingleTag('IEEE')).toBe('IEEE');
+      expect(cleanSingleTag('ACM')).toBe('ACM');
+      expect(cleanSingleTag('COVID-19')).toBe('COVID-19');
+
+      // Exact case preservation for mixed-case terms without relying on static whitelists
+      expect(cleanSingleTag('NeurIPS')).toBe('NeurIPS');
+      expect(cleanSingleTag('ImageNet')).toBe('ImageNet');
+      expect(cleanSingleTag('GoogLeNet')).toBe('GoogLeNet');
+      expect(cleanSingleTag('AlphaFold')).toBe('AlphaFold');
+      expect(cleanSingleTag('LoRA')).toBe('LoRA');
+      expect(cleanSingleTag('QLoRA')).toBe('QLoRA');
+      expect(cleanSingleTag('mRNA')).toBe('mRNA');
+      expect(cleanSingleTag('siRNA')).toBe('siRNA');
+      expect(cleanSingleTag('CRISPR-Cas9')).toBe('CRISPR-Cas9');
+      expect(cleanSingleTag('fMRI')).toBe('fMRI');
+      expect(cleanSingleTag('p53')).toBe('p53');
+      expect(cleanSingleTag('t-SNE')).toBe('t-SNE');
+      expect(cleanSingleTag('k-NN')).toBe('k-NN');
+      expect(cleanSingleTag('SimCLR')).toBe('SimCLR');
+      expect(cleanSingleTag('eBPF')).toBe('eBPF');
+
+      // Exact case preservation for researcher/author keywords
+      expect(cleanSingleTag('machine learning')).toBe('machine learning');
+      expect(cleanSingleTag('Machine Learning')).toBe('Machine Learning');
+      expect(cleanSingleTag('deep reinforcement learning')).toBe(
+        'deep reinforcement learning',
+      );
+      expect(cleanSingleTag('Nature')).toBe('Nature');
+      expect(cleanSingleTag('Science')).toBe('Science');
+      expect(cleanSingleTag('Must-Read')).toBe('Must-Read');
     });
 
-    it('should format terms into Title Case while keeping minor words lowercase', () => {
-      expect(cleanSingleTag('machine learning')).toBe('Machine Learning');
-      expect(cleanSingleTag('deep reinforcement learning')).toBe(
-        'Deep Reinforcement Learning',
+    it('should normalize Unicode NFC, collapse internal whitespace, and enforce maximum tag length (255 chars)', () => {
+      const decomposed = 'Cafe\u0301   Rese\u0301au';
+      expect(cleanSingleTag(decomposed)).toBe('Café Reséau');
+
+      expect(cleanSingleTag('a'.repeat(MAX_TAG_LENGTH))).toHaveLength(
+        MAX_TAG_LENGTH,
       );
-      expect(cleanSingleTag('computer vision and pattern recognition')).toBe(
-        'Computer Vision and Pattern Recognition',
-      );
-      expect(cleanSingleTag('viola-jones algorithm')).toBe(
-        'Viola-Jones Algorithm',
-      );
+      expect(cleanSingleTag('a'.repeat(MAX_TAG_LENGTH + 1))).toBeNull();
+    });
+
+    it('should compute diacritic- and case-insensitive canonical identity keys (`toCanonicalTagKey`)', () => {
+      expect(toCanonicalTagKey('Café   NeurIPS')).toBe('cafe neurips');
+      expect(toCanonicalTagKey('ICLR')).toBe('iclr');
     });
   });
 
-  describe('2. ArXiv Taxonomy Code Mapping', () => {
-    it('should expand taxonomy codes to standard human-readable academic fields', () => {
-      expect(cleanSingleTag('cs.ai')).toBe(
+  describe('2. Subject Taxonomy Code Resolution (`resolveArxivTaxonomyTag`)', () => {
+    it('should expand arXiv classification codes into structured `"<Archive> - <Sub-Discipline>"` descriptors', () => {
+      expect(cleanSingleTag('cs.AI')).toBe(
         'Computer Science - Artificial Intelligence',
       );
       expect(cleanSingleTag('cs.CL')).toBe(
         'Computer Science - Computation and Language',
       );
+      expect(cleanSingleTag('cs.CE')).toBe(
+        'Computer Science - Computational Engineering, Finance, and Science',
+      );
+      expect(cleanSingleTag('cs.DC')).toBe(
+        'Computer Science - Distributed, Parallel, and Cluster Computing',
+      );
+      expect(cleanSingleTag('cs.FL')).toBe(
+        'Computer Science - Formal Languages and Automata Theory',
+      );
       expect(cleanSingleTag('stat.ML')).toBe('Statistics - Machine Learning');
+      expect(cleanSingleTag('stat.AP')).toBe('Statistics - Applications');
+      expect(cleanSingleTag('physics.data-an')).toBe(
+        'Physics - Data Analysis, Statistics and Probability',
+      );
+      expect(cleanSingleTag('astro-ph.CO')).toBe(
+        'Astrophysics - Cosmology and Nongalactic Astrophysics',
+      );
       expect(cleanSingleTag('cs-cv')).toBe(
         'Computer Science - Computer Vision and Pattern Recognition',
+      );
+      expect(resolveArxivTaxonomyTag('math.ST')).toBe(
+        'Mathematics - Statistics Theory',
       );
     });
   });
 
-  describe('3. Compound Tag Splitting & Safe Slash Handling', () => {
+  describe('3. Compound Tag Splitting, Deduplication & Safe Slash Handling', () => {
     it('should split compound tags by comma, semicolon, bullet, pipe, or space-surrounded slashes', () => {
       const raw =
         'Machine Learning; Natural Language Processing, Computer Vision • Deep Learning | Robotics / Reinforcement Learning';
@@ -67,15 +115,27 @@ describe('Library Academic Tag Sanitizer & Normalizer', () => {
       ]);
     });
 
-    it('should preserve safe domain slashes without spaces (e.g. TCP/IP, Client/Server)', () => {
+    it('should preserve safe domain slashes without spaces (e.g. TCP/IP, Client/Server architecture)', () => {
       const raw = 'TCP/IP; Client/Server architecture';
       const result = normalizeAcademicTags([raw]);
-      expect(result).toEqual(['TCP/IP', 'Client/Server Architecture']);
+      expect(result).toEqual(['TCP/IP', 'Client/Server architecture']);
+    });
+
+    it('should deduplicate case-insensitively and upgrade all-lowercase tag if explicit uppercase/mixed-case appears in the same batch', () => {
+      const result = normalizeAcademicTags([
+        'iclr',
+        'ICLR',
+        'neurips',
+        'NeurIPS',
+        'deep learning',
+        'DEEP LEARNING',
+      ]);
+      expect(result).toEqual(['ICLR', 'NeurIPS', 'DEEP LEARNING']);
     });
   });
 
-  describe('4. LaTeX Markup Sanitization', () => {
-    it('should strip LaTeX formatting commands, macros, braces, and escaped characters', () => {
+  describe('4. LaTeX & HTML Markup Sanitization', () => {
+    it('should strip LaTeX formatting commands, macros, braces, HTML tags, and escaped characters', () => {
       expect(stripLatexMarkup('{\\bf Deep Learning}')).toBe('Deep Learning');
       expect(stripLatexMarkup('\\textit{Reinforcement Learning}')).toBe(
         'Reinforcement Learning',
@@ -93,6 +153,8 @@ describe('Library Academic Tag Sanitizer & Normalizer', () => {
       expect(cleanSingleTag('\\textbf{Neural Networks}')).toBe(
         'Neural Networks',
       );
+      expect(cleanSingleTag('<span>GraphQL</span>')).toBe('GraphQL');
+      expect(stripTagPrefixes('Keywords: Transformer')).toBe('Transformer');
     });
   });
 
@@ -135,7 +197,7 @@ describe('Library Academic Tag Sanitizer & Normalizer', () => {
       expect(cleanSingleTag('springer')).toBeNull();
     });
 
-    it('should reject pagination, volume, issue, and standalone Roman numerals', () => {
+    it('should reject pagination, volume, issue, and lowercase standalone Roman numerals', () => {
       expect(cleanSingleTag('pp. 12-15')).toBeNull();
       expect(cleanSingleTag('pages 10-20')).toBeNull();
       expect(cleanSingleTag('vol. 4')).toBeNull();
@@ -206,7 +268,6 @@ describe('Library Academic Tag Sanitizer & Normalizer', () => {
       const rawItem: any = {
         id: '123e4567-e89b-12d3-a456-426614174001',
         title: 'Cached Paper',
-        itemTags: [],
         metadata: {
           tags: ['Machine Learning', 'null', 'pp. 12-15', 'NLP'],
         },
@@ -225,7 +286,7 @@ describe('Library Academic Tag Sanitizer & Normalizer', () => {
   describe('8. AcademicRegexCatalog Keywords Boundary & ASJC Noise Filtering', () => {
     it('should not extract mid-sentence "keywords" in prose as tags, and should extract line-anchored Keywords', async () => {
       const { AcademicRegexCatalog } =
-        await import('@/modules/library/shared-kernel/domain/academic-regex.catalog');
+        await import('@/modules/library/core/domain/academic-regex.catalog');
 
       const proseWithMidSentenceKeywords =
         'Abstract: In this paper we study how search keywords in large database systems affect query latency.\n' +
@@ -251,7 +312,7 @@ describe('Library Academic Tag Sanitizer & Normalizer', () => {
           title: 'Very Deep Convolutional Networks',
           note: 'PMID: 12345678\narXiv: 1409.1556 [cs.CV]\nOriginal Date: 2014',
           annote:
-            '<p>First paragraph of Zotero note.</p><p>Second paragraph with <strong>bold</strong> text.</p>',
+            '<p>First paragraph of literature note.</p><p>Second paragraph with <strong>bold</strong> text.</p>',
           keyword: 'cs.CV; deep learning; null; multidisciplinary',
         },
       ]);
@@ -261,11 +322,11 @@ describe('Library Academic Tag Sanitizer & Normalizer', () => {
       expect(parsed[0].arxivId).toBe('1409.1556');
       expect(parsed[0].extra).toBe('Original Date: 2014');
       expect(parsed[0].notes).toEqual([
-        '<p>First paragraph of Zotero note.</p><p>Second paragraph with <strong>bold</strong> text.</p>',
+        '<p>First paragraph of literature note.</p><p>Second paragraph with <strong>bold</strong> text.</p>',
       ]);
       expect(parsed[0].tags).toEqual([
         'Computer Science - Computer Vision and Pattern Recognition',
-        'Deep Learning',
+        'deep learning',
       ]);
     });
 
@@ -276,7 +337,7 @@ describe('Library Academic Tag Sanitizer & Normalizer', () => {
       const normalized = policy.normalize({
         title: 'Test Note Formatting',
         notes: [
-          '<p>First paragraph of Zotero note.</p><p>Second paragraph with <strong>bold</strong> text.</p>',
+          '<p>First paragraph of literature note.</p><p>Second paragraph with <strong>bold</strong> text.</p>',
           { content: 'Comment: 14 pages, 6 figures', source: 'arXiv' },
           { content: 'Comment: 14 pages, 6 figures', source: 'arXiv' },
         ],
@@ -285,7 +346,7 @@ describe('Library Academic Tag Sanitizer & Normalizer', () => {
       expect(normalized.notes).toHaveLength(2);
       expect(normalized.notes?.[0]).toEqual({
         content:
-          'First paragraph of Zotero note.\n\nSecond paragraph with **bold** text.',
+          'First paragraph of literature note.\n\nSecond paragraph with **bold** text.',
       });
       expect(normalized.notes?.[1]).toEqual({
         content: 'Comment: 14 pages, 6 figures',

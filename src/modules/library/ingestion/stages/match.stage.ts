@@ -9,10 +9,7 @@ import {
 } from '@/modules/library/ingestion/policies/duplicate.policy';
 import { tokenizeTitleWords } from '@/modules/library/ingestion/domain/deduplication.domain';
 import { isUUID } from 'class-validator';
-import {
-  CATALOG_GATEWAY_PORT,
-  ICatalogGatewayPort,
-} from '@/modules/library/ingestion/types/catalog-gateway.types';
+import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
 import {
   IWorkflowStage,
   MatchStageInput,
@@ -26,33 +23,11 @@ export class MatchStage implements IWorkflowStage<
   readonly stageName = 'MATCH' as const;
   private readonly logger = new Logger(MatchStage.name);
 
-  private static readonly STOPWORDS = new Set([
-    'the',
-    'a',
-    'an',
-    'on',
-    'in',
-    'of',
-    'and',
-    'or',
-    'to',
-    'for',
-    'with',
-    'at',
-    'by',
-    'from',
-    'is',
-    'are',
-    'was',
-    'be',
-    'stop',
-  ]);
-
   constructor(
     private readonly duplicatePolicy: DuplicatePolicy,
     @Optional()
-    @Inject(CATALOG_GATEWAY_PORT)
-    private readonly catalogGateway?: ICatalogGatewayPort,
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
     @Optional()
     private readonly prisma?: PrismaService,
   ) {}
@@ -104,7 +79,7 @@ export class MatchStage implements IWorkflowStage<
             .slice(0, 3)
         : [];
 
-    // ── Primary Path: Query Catalog via Hexagonal Gateway Port ──────────────
+    // Primary Path: Query Catalog via Hexagonal Gateway Port
     if (this.catalogGateway?.findMatchCandidates) {
       const matchResult = await this.catalogGateway.findMatchCandidates(scope, {
         doi: proposedDoi,
@@ -136,7 +111,7 @@ export class MatchStage implements IWorkflowStage<
       return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
     }
 
-    // ── Fallback Path: Direct DB Query (Fallback when Gateway Port is omitted) ──
+    // Fallback Path: Direct DB Query (Fallback when Gateway Port is omitted)
     if (!this.prisma) {
       this.logger.warn(
         'MatchStage invoked without catalogGateway or prisma; skipping duplicate matching',

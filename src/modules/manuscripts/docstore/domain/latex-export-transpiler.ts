@@ -8,7 +8,7 @@ import * as path from 'path';
 import {
   buildPkZipBuffer,
   type PkZipEntry,
-} from '@/modules/manuscripts/shared/zip/pkzip-builder.util';
+} from '@/modules/manuscripts/core/utils/pkzip-builder.util';
 
 export interface IncludedProjectDoc {
   id: string;

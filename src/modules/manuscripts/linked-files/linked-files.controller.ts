@@ -22,6 +22,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
+import { ProjectRoleGuard, RequireRole, Role } from '@/modules/project/access';
 import { LinkedFilesService } from './linked-files.service';
 import {
   CreateLinkedFileDto,
@@ -31,7 +32,7 @@ import {
 @ApiTags('Manuscripts - Linked Files')
 @ApiBearerAuth('JWT-auth')
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class LinkedFilesController {
   constructor(private readonly linkedFilesService: LinkedFilesService) {}
 
@@ -43,6 +44,7 @@ export class LinkedFilesController {
     'project/:projectId/linked_file',
     'projects/:projectId/linked_file',
   ])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
@@ -65,6 +67,7 @@ export class LinkedFilesController {
     'project/:projectId/linked_file',
     'projects/:projectId/linked_file',
   ])
+  @RequireRole(Role.REVIEWER)
   @ApiOperation({ summary: 'List all linked files for a manuscript project' })
   @ApiResponse({ status: 200, type: [LinkedFileResponseDto] })
   public async listLinkedFiles(
@@ -81,6 +84,7 @@ export class LinkedFilesController {
     'project/:projectId/linked_file/:id/refresh',
     'projects/:projectId/linked_file/:id/refresh',
   ])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Refresh and re-synchronize a linked file immediately',
@@ -102,6 +106,7 @@ export class LinkedFilesController {
     'project/:projectId/linked_file/:id',
     'projects/:projectId/linked_file/:id',
   ])
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Unlink a linked file from the manuscript project' })
   public async deleteLinkedFile(

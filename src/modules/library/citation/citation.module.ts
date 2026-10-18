@@ -16,13 +16,8 @@ import { ExportsService } from './services/exports.service';
 import { PdfBakerService } from './services/pdf-baker.service';
 import { ExportsRepository } from './repositories/exports.repository';
 
-// Utils & Gateways
+// Domain
 import { CslStyleRegistry } from './domain/csl-style-registry';
-import { InProcessCatalogGatewayAdapter } from './gateways/in-process-catalog-gateway.adapter';
-import { HttpCatalogGatewayAdapter } from './gateways/http-catalog-gateway.adapter';
-
-// Ports/Types
-import { CATALOG_GATEWAY_PORT } from './types/citation.types';
 
 /**
  * Citation Bounded Context Unified Module (Supporting Domain).
@@ -52,18 +47,6 @@ import { CATALOG_GATEWAY_PORT } from './types/citation.types';
     ExportsService,
     ExportsRepository,
     PdfBakerService,
-    InProcessCatalogGatewayAdapter,
-    HttpCatalogGatewayAdapter,
-    {
-      provide: CATALOG_GATEWAY_PORT,
-      useFactory: (
-        inProcess: InProcessCatalogGatewayAdapter,
-        http: HttpCatalogGatewayAdapter,
-      ) => {
-        return process.env.LIBRARY_CATALOG_URL ? http : inProcess;
-      },
-      inject: [InProcessCatalogGatewayAdapter, HttpCatalogGatewayAdapter],
-    },
   ],
   exports: [
     CitationFacade,

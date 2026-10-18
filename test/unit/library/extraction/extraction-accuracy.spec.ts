@@ -1,9 +1,9 @@
-import {
+﻿import {
   isPlausibleAuthorName,
   splitConcatenatedAuthors,
   yearFromArxivId,
   repairFragmentedTitle,
-} from '@/modules/library/shared-kernel/domain/bibliographic.domain';
+} from '@/modules/library/core';
 
 describe('PDF first-page accuracy helpers', () => {
   describe('yearFromArxivId', () => {
