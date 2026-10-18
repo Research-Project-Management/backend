@@ -34,10 +34,16 @@ export * from './http/decorators/bypass.decorator';
 // HTTP - Filters
 export * from './http/filters/exception.filter';
 
+// HTTP - Rate Limiting
+export * from './http/rate-limit';
+
 // HTTP - Interceptors
 export * from './http/interceptors/transform.interceptor';
 export * from './http/interceptors/logger.interceptor';
 export * from './http/interceptors/idempotency.interceptor';
+
+// HTTP - Setup & Security
+export * from './http/setup/allowed-origins';
 
 // Logger
 export * from './logger/logger.module';

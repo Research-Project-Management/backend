@@ -8,12 +8,19 @@ import {
 import { Logger, Injectable } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { WsAuthService } from '../core/ws-auth.guard';
+import { createWsConnectionMiddleware } from '../core/ws-connection.middleware';
 import { REALTIME_NAMESPACES } from '../core/realtime.constant';
+import { isOriginAllowed } from '@/core/http/setup/allowed-origins';
 
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: true,
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      callback(null, isOriginAllowed(origin));
+    },
     credentials: true,
   },
   namespace: REALTIME_NAMESPACES.NOTIFICATIONS,
@@ -28,17 +35,31 @@ export class NotificationGateway
 
   constructor(private readonly authService: WsAuthService) {}
 
-  public afterInit(_server: Server): void {
-    this.logger.log('Global Notifications WebSocket Gateway initialized (/notifications).');
+  public afterInit(server: Server): void {
+    server.use(createWsConnectionMiddleware(this.authService));
+    this.logger.log(
+      'Global Notifications WebSocket Gateway initialized (/notifications).',
+    );
   }
 
   public async handleConnection(client: Socket): Promise<void> {
-    const session = await this.authService.authenticateSocket(client);
-    client.data = session;
+    try {
+      if (!client.data?.authenticated) {
+        const session = await this.authService.authenticateSocket(client);
+        client.data = session;
+      }
 
-    const userRoom = `user:${session.userId}`;
-    await client.join(userRoom);
-    this.logger.debug(`Client ${client.id} joined notification room: ${userRoom}`);
+      const userRoom = `user:${client.data.userId}`;
+      await client.join(userRoom);
+      this.logger.debug(
+        `Client ${client.id} joined notification room: ${userRoom}`,
+      );
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Unauthorized notification socket connection on ${client.id}: ${(err as Error)?.message}`,
+      );
+      client.disconnect(true);
+    }
   }
 
   public handleDisconnect(client: Socket): void {

@@ -3,6 +3,7 @@ import { Server, ServerOptions } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import { Logger } from '@nestjs/common';
+import { isOriginAllowed } from '../../http/setup/allowed-origins';
 
 /**
  * Enterprise Redis IO Adapter for Socket.IO
@@ -63,17 +64,38 @@ export class RedisIoAdapter extends IoAdapter {
     port: number,
     options?: ServerOptions,
   ): ReturnType<IoAdapter['createIOServer']> {
+    const defaultCors = {
+      origin: (
+        origin: string | undefined,
+        callback: (err: Error | null, allow?: boolean) => void,
+      ) => {
+        callback(null, isOriginAllowed(origin));
+      },
+      credentials: true,
+    };
+
     const serverOptions: ServerOptions = {
       ...(options as ServerOptions),
       path: options?.path ?? '/socket.io/',
-      cors: options?.cors ?? {
-        origin: true,
-        credentials: true,
+      cors: options?.cors ?? defaultCors,
+      allowRequest: (req, callback) => {
+        const origin = req.headers?.origin;
+        if (!isOriginAllowed(origin)) {
+          return callback('ORIGIN_NOT_ALLOWED', false);
+        }
+        if (typeof options?.allowRequest === 'function') {
+          return options.allowRequest(req, callback);
+        }
+        callback(null, true);
       },
       transports: ['websocket', 'polling'],
       pingTimeout: 60000,
       pingInterval: 25000,
-      maxHttpBufferSize: 1e7, // 10MB
+      maxHttpBufferSize:
+        options?.maxHttpBufferSize ??
+        (process.env.REALTIME_MAX_MESSAGE_SIZE_BYTES
+          ? parseInt(process.env.REALTIME_MAX_MESSAGE_SIZE_BYTES, 10)
+          : 1024 * 1024), // 1MB (RT-07, SC-004)
       connectTimeout: 45000,
       allowUpgrades: true,
     };

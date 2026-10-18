@@ -1,18 +1,22 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule, CacheModule } from '@/core';
+import { AccessModule } from '@/modules/project/access';
 import { DocumentUpdaterModule } from '@/modules/manuscripts/document-updater/document-updater.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { LiveCollaborationPort } from '@/modules/manuscripts/docstore/domain';
 
 import { CoreModule } from '../core/core.module';
+import { WsAccessGuard } from '../core/ws-access.guard';
 import { ManuscriptsGateway } from './manuscripts.gateway';
 import { ManuscriptsService } from './manuscripts.service';
+import { RealtimeAccessService } from './realtime-access.service';
 import { RoomStore } from './room.store';
 import { YjsService } from './yjs.service';
 import { ChatService } from './chat.service';
 import { LiveCollaborationProvider } from './live-collab.provider';
+import { AccessRevocationListener } from './access-revocation.listener';
 
 @Module({
   imports: [
@@ -20,6 +24,7 @@ import { LiveCollaborationProvider } from './live-collab.provider';
     JwtModule.register({}),
     PrismaModule,
     CacheModule,
+    AccessModule,
     DocumentUpdaterModule,
     DocstoreModule,
     CoreModule,
@@ -27,6 +32,9 @@ import { LiveCollaborationProvider } from './live-collab.provider';
   providers: [
     ManuscriptsGateway,
     ManuscriptsService,
+    RealtimeAccessService,
+    WsAccessGuard,
+    AccessRevocationListener,
     RoomStore,
     YjsService,
     ChatService,
@@ -39,6 +47,8 @@ import { LiveCollaborationProvider } from './live-collab.provider';
   exports: [
     ManuscriptsGateway,
     ManuscriptsService,
+    RealtimeAccessService,
+    WsAccessGuard,
     RoomStore,
     YjsService,
     ChatService,

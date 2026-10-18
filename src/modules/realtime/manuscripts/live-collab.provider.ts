@@ -1,4 +1,10 @@
-import { Injectable, Logger, Optional, forwardRef, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  forwardRef,
+  Inject,
+} from '@nestjs/common';
 import {
   LiveCollaborationPort,
   LivePresenceUser,
@@ -14,7 +20,8 @@ export class LiveCollaborationProvider extends LiveCollaborationPort {
   constructor(
     private readonly yjs: YjsService,
     private readonly rooms: RoomStore,
-    @Optional() @Inject(forwardRef(() => ManuscriptsGateway))
+    @Optional()
+    @Inject(forwardRef(() => ManuscriptsGateway))
     private readonly gateway?: ManuscriptsGateway,
   ) {
     super();
@@ -28,11 +35,13 @@ export class LiveCollaborationProvider extends LiveCollaborationPort {
     if (!this.yjs.isActive(projectId, docId)) return false;
     const frame = this.yjs.replaceTextIfActive(projectId, docId, text);
     if (frame && this.gateway?.server) {
-      this.gateway.server.to(`doc:${projectId}:${docId}`).emit('doc:sync-update', {
-        projectId,
-        docId,
-        data: frame,
-      });
+      this.gateway.server
+        .to(`doc:${projectId}:${docId}`)
+        .emit('doc:sync-update', {
+          projectId,
+          docId,
+          data: frame,
+        });
     }
     return true;
   }

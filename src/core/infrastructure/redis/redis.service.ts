@@ -1,3 +1,4 @@
+import { resolveServiceUrl } from '../../utils/public-urls';
 import {
   Injectable,
   Logger,
@@ -66,11 +67,15 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       this.configService.get<string>('REDIS_CACHE_URL') ||
       this.configService.get<string>('REDIS_URL') ||
       process.env.REDIS_CACHE_URL ||
-      process.env.REDIS_URL ||
-      'redis://localhost:6379';
+      process.env.REDIS_URL;
+    const resolvedRedisUrl = resolveServiceUrl(
+      'REDIS_URL',
+      redisUrl,
+      'redis://localhost:6379',
+    );
 
     try {
-      this.redisClient = new Redis(redisUrl, {
+      this.redisClient = new Redis(resolvedRedisUrl, {
         maxRetriesPerRequest: 1,
         retryStrategy: (times) => {
           // Bounded backoff: stop retrying after 3 attempts to prevent infinite reconnect loop
@@ -542,4 +547,3 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
-export const RedisService = RedisCacheService;

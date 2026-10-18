@@ -1,7 +1,8 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import { Socket } from 'socket.io';
+import { RealtimeConfigService } from './realtime.config';
+import { RealtimeAuthRequiredException } from './ws-errors';
 
 export interface WsUserSession {
   userId: string;
@@ -12,82 +13,72 @@ export interface WsUserSession {
 }
 
 @Injectable()
-export class WsAuthService {
+export class WsAuthService implements OnModuleInit {
   private readonly logger = new Logger(WsAuthService.name);
 
   constructor(
-    @Optional() private readonly jwtService?: JwtService,
-    @Optional() private readonly configService?: ConfigService,
+    private readonly jwtService: JwtService,
+    private readonly configService: RealtimeConfigService,
   ) {}
 
+  public onModuleInit(): void {
+    // Fail-fast on startup if signing secret is absent or empty (FR-002)
+    this.configService.getJwtSecret();
+  }
+
+  /**
+   * Extracts token strictly from the Authorization Bearer header or the handshake auth.token payload.
+   * Query string tokens are rejected to prevent credential leaks in logs (FR-003).
+   */
   public extractToken(client: Socket): string | null {
-    const authHeader = client.handshake.headers.authorization;
+    const authHeader = client.handshake.headers?.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
-      return authHeader.substring(7);
+      return authHeader.substring(7).trim();
     }
     const tokenAuth = client.handshake.auth?.token;
     if (tokenAuth && typeof tokenAuth === 'string') {
-      return tokenAuth;
+      return tokenAuth.trim();
     }
-    const queryToken = client.handshake.query?.token;
-    if (queryToken && typeof queryToken === 'string') {
-      return queryToken;
-    }
+    // Query tokens are strictly rejected
     return null;
   }
 
+  /**
+   * Authenticates a WebSocket handshake.
+   * Rejects missing, invalid, or expired credentials without fallback or anonymous sessions (FR-001, FR-004).
+   */
   public async authenticateSocket(client: Socket): Promise<WsUserSession> {
     const token = this.extractToken(client);
-    const configuredSecret =
-      this.configService?.get<string>('JWT_SECRET') || process.env.JWT_SECRET;
-    let userId: string | undefined;
-    let userName: string | undefined;
-    let tokenRejected = false;
-
-    if (token && this.jwtService) {
-      try {
-        const secret = configuredSecret || 'secret';
-        const payload = (await this.jwtService.verifyAsync(token, {
-          secret,
-        })) as { sub?: string; id?: string; name?: string; email?: string };
-        userId = payload.sub || payload.id;
-        userName = payload.name || payload.email;
-      } catch {
-        tokenRejected = true;
-        this.logger.debug(
-          `Socket ${client.id} provided invalid JWT token; ignoring unverified handshake userId.`,
-        );
-      }
+    if (!token) {
+      throw new RealtimeAuthRequiredException('Authentication required');
     }
 
-    const auth = client.handshake.auth as Record<string, unknown> | undefined;
-    const query = client.handshake.query as Record<string, unknown> | undefined;
-
-    if (!userId && !tokenRejected) {
-      const handshakeUserId =
-        (typeof auth?.userId === 'string' ? auth.userId : undefined) ||
-        (typeof query?.userId === 'string' ? query.userId : undefined);
-      if (handshakeUserId && (!configuredSecret || !this.jwtService)) {
-        userId = handshakeUserId;
-      }
+    const secret = this.configService.getJwtSecret();
+    let payload: Record<string, any>;
+    try {
+      payload = await this.jwtService.verifyAsync(token, {
+        secret,
+      });
+    } catch (err: unknown) {
+      this.logger.debug(
+        `Socket ${client.id} failed JWT verification: ${(err as Error)?.message}`,
+      );
+      throw new RealtimeAuthRequiredException('Authentication required');
     }
 
-    if (!userName) {
-      userName =
-        (typeof auth?.name === 'string' ? auth.name : undefined) ||
-        (typeof query?.name === 'string' ? query.name : undefined);
+    const userId = payload.sub || payload.id;
+    if (!userId || typeof userId !== 'string') {
+      throw new RealtimeAuthRequiredException(
+        'Authentication required: invalid token subject',
+      );
     }
 
-    if (!userId) {
-      userId = `anon-${client.id.substring(0, 8)}`;
-    }
+    const userName = payload.name || payload.email || 'Collaborator';
 
     return {
       userId,
-      name: userName || 'Collaborator',
-      color: typeof auth?.color === 'string' ? auth.color : undefined,
-      avatar: typeof auth?.avatar === 'string' ? auth.avatar : undefined,
-      authenticated: !tokenRejected && !userId.startsWith('anon-'),
+      name: userName,
+      authenticated: true,
     };
   }
 }

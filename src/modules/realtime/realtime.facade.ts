@@ -88,7 +88,11 @@ export class RealtimeFacade {
       label?: string | null;
     },
   ): void {
-    this.broadcastEvent(projectId, REALTIME_EVENTS.HISTORY_NEW_VERSION, snapshot);
+    this.broadcastEvent(
+      projectId,
+      REALTIME_EVENTS.HISTORY_NEW_VERSION,
+      snapshot,
+    );
   }
 
   /**

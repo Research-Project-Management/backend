@@ -6,7 +6,10 @@
  */
 
 import { RoomStore } from '@/modules/realtime/manuscripts/room.store';
-import { UserPresence, CursorPosition } from '@/modules/realtime/manuscripts/types/presence.type';
+import {
+  UserPresence,
+  CursorPosition,
+} from '@/modules/realtime/manuscripts/types/presence.type';
 
 describe('RoomStore (Distributed Presence)', () => {
   const projectId = 'proj-redis-test-001';

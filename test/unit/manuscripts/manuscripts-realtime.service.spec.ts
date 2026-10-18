@@ -14,6 +14,7 @@ import { ChatService } from '@/modules/realtime/manuscripts/chat.service';
 import { WsAuthService } from '@/modules/realtime/core/ws-auth.guard';
 import { REALTIME_EVENTS } from '@/modules/realtime/core/realtime.constant';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 
 // ---------------------------------------------------------------------------
 // Unit Test Suite
@@ -24,7 +25,9 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
   const docId = '01928374-beef-4000-8000-000000000002';
   const user1 = '01928374-beef-4000-8000-000000000010';
   const user2 = '01928374-beef-4000-8000-000000000020';
+  const testSecret = 'test-secret-at-least-32-chars-long-for-tests';
 
+  let jwtService: JwtService;
   let roomStore: RoomStore;
   let manuscriptsService: ManuscriptsService;
   let chatService: ChatService;
@@ -34,7 +37,12 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
 
   // Mock Socket.IO server
   let mockServer: any;
-  let emittedEvents: Array<{ room?: string; event: string; payload: any; except?: string }> = [];
+  let emittedEvents: Array<{
+    room?: string;
+    event: string;
+    payload: any;
+    except?: string;
+  }> = [];
 
   beforeEach(() => {
     emittedEvents = [];
@@ -45,7 +53,12 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
         },
         except: (exceptSocketId: string) => ({
           emit: (event: string, payload: any) => {
-            emittedEvents.push({ room, event, payload, except: exceptSocketId });
+            emittedEvents.push({
+              room,
+              event,
+              payload,
+              except: exceptSocketId,
+            });
           },
         }),
       }),
@@ -59,12 +72,40 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
       },
     };
 
+    jwtService = new JwtService({ secret: testSecret });
+    const configService = {
+      getJwtSecret: () => testSecret,
+      getMaxMessageSizeBytes: () => 1048576,
+      getMaxYjsUpdateSizeBytes: () => 524288,
+      getMaxDocumentSizeBytes: () => 20971520,
+      getAuthCacheTtlSeconds: () => 30,
+      getRateLimits: () => ({
+        cursor: { budgetPerSec: 20, burst: 40 },
+        update: { budgetPerSec: 50, burst: 100 },
+        chat: { budgetPerSec: 5, burst: 10 },
+        joinLeave: { budgetPerSec: 5, burst: 10 },
+        maxThrottledConsecutiveWindows: 5,
+      }),
+    } as any;
+
     roomStore = new RoomStore(); // in-memory fallback mode
     chatService = new ChatService();
-    authService = new WsAuthService();
+    authService = new WsAuthService(jwtService, configService);
 
-    // ManuscriptsService with mock Prisma/DocUpdater (fallback mode)
-    manuscriptsService = new ManuscriptsService(roomStore);
+    const mockRealtimeAccess = {
+      getProjectAccess: jest.fn().mockResolvedValue({
+        canRead: true,
+        canWrite: true,
+        role: 'owner',
+        decision: 'allowed',
+      }),
+      checkAccess: jest.fn().mockResolvedValue('allowed'),
+      validateDocInProject: jest.fn().mockResolvedValue(true),
+      evictCache: jest.fn(),
+    } as any;
+
+    // ManuscriptsService with mock RealtimeAccessService
+    manuscriptsService = new ManuscriptsService(roomStore, mockRealtimeAccess);
 
     gateway = new ManuscriptsGateway(
       manuscriptsService,
@@ -116,19 +157,28 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
         lastHeartbeat: Date.now(),
       });
 
-      const docSessions = await roomStore.joinDocRoom(projectId, docId, 'sock-1');
+      const docSessions = await roomStore.joinDocRoom(
+        projectId,
+        docId,
+        'sock-1',
+      );
       expect(docSessions).toHaveLength(1);
       expect(docSessions[0].activeDocId).toBe(docId);
 
       // Update cursor with coordinate clamping
-      const updated = await roomStore.updateSessionCursor(projectId, docId, 'sock-1', {
-        row: -5,
-        column: 14.6,
-        selection: {
-          anchor: { row: -1, column: 2 },
-          head: { row: 3, column: 8 },
+      const updated = await roomStore.updateSessionCursor(
+        projectId,
+        docId,
+        'sock-1',
+        {
+          row: -5,
+          column: 14.6,
+          selection: {
+            anchor: { row: -1, column: 2 },
+            head: { row: 3, column: 8 },
+          },
         },
-      });
+      );
 
       expect(updated?.cursor?.row).toBe(0);
       expect(updated?.cursor?.column).toBe(14);
@@ -170,11 +220,17 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
         socketId: 'sock-1',
       });
 
-      const joinRes = await manuscriptsService.joinDoc(projectId, docId, 'sock-1');
+      const joinRes = await manuscriptsService.joinDoc(
+        projectId,
+        docId,
+        'sock-1',
+      );
       expect(joinRes.docPresence).toHaveLength(1);
 
       await manuscriptsService.leaveDoc(projectId, docId, 'sock-1');
-      expect(await manuscriptsService.getDocPresence(projectId, docId)).toHaveLength(0);
+      expect(
+        await manuscriptsService.getDocPresence(projectId, docId),
+      ).toHaveLength(0);
     });
 
     it('joinDoc: throws NotFoundException if session does not exist', async () => {
@@ -226,7 +282,9 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
         node: { id: 'n-1', path: '/intro.tex' },
       });
 
-      expect(emittedEvents.some((e) => e.event === REALTIME_EVENTS.FILE_TREE_UPDATE)).toBe(true);
+      expect(
+        emittedEvents.some((e) => e.event === REALTIME_EVENTS.FILE_TREE_UPDATE),
+      ).toBe(true);
     });
 
     it('broadcasts LaTeX compilation progress', () => {
@@ -235,7 +293,9 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
         pdfUrl: '/api/pdf',
       });
 
-      expect(emittedEvents.some((e) => e.event === REALTIME_EVENTS.COMPILE_PROGRESS)).toBe(true);
+      expect(
+        emittedEvents.some((e) => e.event === REALTIME_EVENTS.COMPILE_PROGRESS),
+      ).toBe(true);
     });
 
     it('broadcasts snapshot creation', () => {
@@ -244,20 +304,26 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
         label: 'v1.0',
       });
 
-      expect(emittedEvents.some((e) => e.event === REALTIME_EVENTS.HISTORY_NEW_VERSION)).toBe(true);
+      expect(
+        emittedEvents.some(
+          (e) => e.event === REALTIME_EVENTS.HISTORY_NEW_VERSION,
+        ),
+      ).toBe(true);
     });
 
     it('provides unified access to stats, presence, and flush barrier', async () => {
       const stats = realtimeFacade.getStats();
       expect(stats.status).toBe('ok');
 
-      const projectPresence = await realtimeFacade.getProjectPresence(projectId);
+      const projectPresence =
+        await realtimeFacade.getProjectPresence(projectId);
       expect(Array.isArray(projectPresence)).toBe(true);
 
       const docPresence = await realtimeFacade.getDocPresence(projectId, docId);
       expect(Array.isArray(docPresence)).toBe(true);
 
-      const flushedCount = await realtimeFacade.flushProjectBeforeCompile(projectId);
+      const flushedCount =
+        await realtimeFacade.flushProjectBeforeCompile(projectId);
       expect(flushedCount).toBe(0);
     });
   });
@@ -266,39 +332,62 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
   // 5. ManuscriptsGateway Integration
   // =========================================================================
   describe('5. ManuscriptsGateway', () => {
-    it('handleConnection: assigns anonymous metadata if no token', async () => {
+    it('handleConnection: disconnects unauthenticated sockets without token', async () => {
+      let disconnected = false;
       const mockSocket: any = {
         id: 'sock-anon-999',
         handshake: { headers: {}, auth: {}, query: {} },
         data: {},
+        disconnect: () => {
+          disconnected = true;
+        },
       };
 
       await gateway.handleConnection(mockSocket);
-      expect(mockSocket.data.userId).toMatch(/^anon-/);
-      expect(mockSocket.data.name).toBe('Collaborator');
+      expect(disconnected).toBe(true);
+      expect(mockSocket.data.authenticated).toBeFalsy();
     });
 
     it('handles project join, doc join, update, cursor, and leave lifecycle', async () => {
       const joinedRooms = new Set<string>();
       const sentEvents: Array<{ event: string; payload: any }> = [];
 
+      const token = jwtService.sign(
+        { sub: user1, name: 'Alice' },
+        { secret: testSecret },
+      );
+
       const mockSocket: any = {
         id: 'sock-alice',
-        handshake: { headers: {}, auth: { userId: user1, name: 'Alice' }, query: {} },
-        data: { userId: user1, name: 'Alice' },
+        handshake: {
+          headers: {},
+          auth: { token },
+          query: {},
+        },
+        data: { userId: user1, name: 'Alice', authenticated: true },
         join: (r: string) => joinedRooms.add(r),
         leave: (r: string) => joinedRooms.delete(r),
-        emit: (ev: string, data: any) => sentEvents.push({ event: ev, payload: data }),
+        emit: (ev: string, data: any) =>
+          sentEvents.push({ event: ev, payload: data }),
       };
 
       // 1. Join project
-      const joinProj = await gateway.handleJoinProject(mockSocket, { projectId });
+      const joinProj = await gateway.handleJoinProject(mockSocket, {
+        projectId,
+      });
       expect(joinProj.success).toBe(true);
       expect(joinedRooms.has(`project:${projectId}`)).toBe(true);
-      expect(emittedEvents.some((e) => e.event === REALTIME_EVENTS.USER_JOINED_PROJECT)).toBe(true);
+      expect(
+        emittedEvents.some(
+          (e) => e.event === REALTIME_EVENTS.USER_JOINED_PROJECT,
+        ),
+      ).toBe(true);
 
       // 2. Join doc
-      const joinDoc = await gateway.handleJoinDoc(mockSocket, { projectId, docId });
+      const joinDoc = await gateway.handleJoinDoc(mockSocket, {
+        projectId,
+        docId,
+      });
       expect(joinDoc.success).toBe(true);
       expect(joinedRooms.has(`doc:${projectId}:${docId}`)).toBe(true);
 
@@ -310,8 +399,12 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
         lines: ['Live line'],
       });
       expect(updateRes.success).toBe(true);
-      expect(sentEvents.some((e) => e.event === REALTIME_EVENTS.DOC_UPDATE_ACK)).toBe(true);
-      expect(emittedEvents.some((e) => e.event === REALTIME_EVENTS.DOC_UPDATE)).toBe(true);
+      expect(
+        sentEvents.some((e) => e.event === REALTIME_EVENTS.DOC_UPDATE_ACK),
+      ).toBe(true);
+      expect(
+        emittedEvents.some((e) => e.event === REALTIME_EVENTS.DOC_UPDATE),
+      ).toBe(true);
 
       // 4. Update cursor
       const cursorRes = await gateway.handleCursorUpdate(mockSocket, {
@@ -320,7 +413,9 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
         cursor: { row: 2, column: 5 },
       });
       expect(cursorRes.success).toBe(true);
-      expect(emittedEvents.some((e) => e.event === REALTIME_EVENTS.DOC_CURSOR)).toBe(true);
+      expect(
+        emittedEvents.some((e) => e.event === REALTIME_EVENTS.DOC_CURSOR),
+      ).toBe(true);
 
       // 5. Chat message
       const chatRes = gateway.handleChatSend(mockSocket, {
@@ -328,15 +423,22 @@ describe('Manuscripts Real-Time Collaboration Subsystem (Modular Monolith)', () 
         text: 'Review looks good!',
       });
       expect(chatRes.success).toBe(true);
-      expect(emittedEvents.some((e) => e.event === REALTIME_EVENTS.CHAT_NEW)).toBe(true);
+      expect(
+        emittedEvents.some((e) => e.event === REALTIME_EVENTS.CHAT_NEW),
+      ).toBe(true);
 
       // 6. Leave doc
-      const leaveDoc = await gateway.handleLeaveDoc(mockSocket, { projectId, docId });
+      const leaveDoc = await gateway.handleLeaveDoc(mockSocket, {
+        projectId,
+        docId,
+      });
       expect(leaveDoc.success).toBe(true);
       expect(joinedRooms.has(`doc:${projectId}:${docId}`)).toBe(false);
 
       // 7. Leave project
-      const leaveProj = await gateway.handleLeaveProject(mockSocket, { projectId });
+      const leaveProj = await gateway.handleLeaveProject(mockSocket, {
+        projectId,
+      });
       expect(leaveProj.success).toBe(true);
       expect(joinedRooms.has(`project:${projectId}`)).toBe(false);
     });

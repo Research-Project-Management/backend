@@ -8,13 +8,27 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, Injectable, Optional } from '@nestjs/common';
+import {
+  Logger,
+  Injectable,
+  Optional,
+  UseGuards,
+  UsePipes,
+  UseFilters,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 
 import { WsAuthService } from '../core/ws-auth.guard';
+import { createWsConnectionMiddleware } from '../core/ws-connection.middleware';
+import { WsAccess } from '../core/ws-access.decorator';
+import { WsAccessGuard } from '../core/ws-access.guard';
+import { WsAllExceptionsFilter } from '../core/ws-exception.filter';
+import { WsRateLimiter } from '../core/ws-rate-limiter';
 import { ManuscriptsService } from './manuscripts.service';
 import { YjsService } from './yjs.service';
 import { ChatService } from './chat.service';
+import { PresenceMapper } from './presence.mapper';
 import {
   JoinProjectDto,
   JoinDocDto,
@@ -26,12 +40,30 @@ import {
   ProjectChatHistoryDto,
 } from './dto/events.dto';
 import { ClientSocketData } from './types/presence.type';
-import { REALTIME_EVENTS, REALTIME_NAMESPACES } from '../core/realtime.constant';
+import {
+  REALTIME_EVENTS,
+  REALTIME_NAMESPACES,
+} from '../core/realtime.constant';
+import { isOriginAllowed } from '@/core/http/setup/allowed-origins';
 
 @Injectable()
+@UseGuards(WsAccessGuard)
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+)
+@UseFilters(new WsAllExceptionsFilter())
 @WebSocketGateway({
   cors: {
-    origin: true,
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      callback(null, isOriginAllowed(origin));
+    },
     credentials: true,
   },
   namespace: REALTIME_NAMESPACES.MANUSCRIPTS,
@@ -49,16 +81,20 @@ export class ManuscriptsGateway
     private readonly chatService: ChatService,
     private readonly authService: WsAuthService,
     @Optional() private readonly yjs?: YjsService,
+    @Optional() private readonly rateLimiter?: WsRateLimiter,
   ) {}
 
-  public afterInit(_server: Server): void {
-    this.logger.log('Manuscripts WebSocket Gateway initialized (/manuscripts).');
+  public afterInit(server: Server): void {
+    server.use(createWsConnectionMiddleware(this.authService));
+    this.logger.log(
+      'Manuscripts WebSocket Gateway initialized (/manuscripts).',
+    );
   }
 
   private getClientData(client: Socket): ClientSocketData {
     if (!client.data) {
       client.data = {
-        userId: `anon-${client.id.substring(0, 8)}`,
+        userId: '',
         name: 'Collaborator',
         projectId: null,
         activeDocId: null,
@@ -69,14 +105,26 @@ export class ManuscriptsGateway
   }
 
   public async handleConnection(client: Socket): Promise<void> {
-    const session = await this.authService.authenticateSocket(client);
-    client.data = {
-      ...session,
-      projectId: null,
-      activeDocId: null,
-    } satisfies ClientSocketData;
+    try {
+      if (!client.data?.authenticated) {
+        const session = await this.authService.authenticateSocket(client);
+        client.data = {
+          ...client.data,
+          ...session,
+          projectId: null,
+          activeDocId: null,
+        } satisfies ClientSocketData;
+      }
 
-    this.logger.debug(`Socket connected: ${client.id} (user: ${session.userId})`);
+      this.logger.debug(
+        `Socket connected: ${client.id} (user: ${client.data.userId})`,
+      );
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Unauthorized manuscript socket connection on ${client.id}: ${(err as Error)?.message}`,
+      );
+      client.disconnect(true);
+    }
   }
 
   public async handleDisconnect(client: Socket): Promise<void> {
@@ -90,7 +138,7 @@ export class ManuscriptsGateway
           projectId,
           activeDocId,
           REALTIME_EVENTS.USER_LEFT_DOC,
-          { userId: clientData.userId, socketId: client.id },
+          PresenceMapper.toLeavePresence(clientData.userId, client.id),
           client.id,
         );
 
@@ -105,7 +153,9 @@ export class ManuscriptsGateway
           }
         }
       } catch (err) {
-        this.logger.warn(`Error on doc cleanup during disconnect ${client.id}: ${String(err)}`);
+        this.logger.warn(
+          `Error on doc cleanup during disconnect ${client.id}: ${String(err)}`,
+        );
       }
     }
 
@@ -115,17 +165,24 @@ export class ManuscriptsGateway
         this.broadcastToProject(
           projectId,
           REALTIME_EVENTS.USER_LEFT_PROJECT,
-          { userId: clientData.userId, socketId: client.id },
+          PresenceMapper.toLeavePresence(clientData.userId, client.id),
           client.id,
         );
       } catch (err) {
-        this.logger.warn(`Error on project disconnect ${client.id}: ${String(err)}`);
+        this.logger.warn(
+          `Error on project disconnect ${client.id}: ${String(err)}`,
+        );
       }
+    }
+
+    if (this.rateLimiter) {
+      this.rateLimiter.cleanupSocket(client.id);
     }
 
     this.logger.debug(`Socket disconnected: ${client.id}`);
   }
 
+  @WsAccess('member')
   @SubscribeMessage(REALTIME_EVENTS.PROJECT_JOIN)
   public async handleJoinProject(
     @ConnectedSocket() client: Socket,
@@ -133,7 +190,7 @@ export class ManuscriptsGateway
   ) {
     try {
       const clientData = this.getClientData(client);
-      const userId = clientData.userId || `anon-${client.id.substring(0, 8)}`;
+      const userId = clientData.userId;
 
       const result = await this.service.joinProject({
         projectId: dto.projectId,
@@ -151,7 +208,7 @@ export class ManuscriptsGateway
       this.broadcastToProject(
         dto.projectId,
         REALTIME_EVENTS.USER_JOINED_PROJECT,
-        result.session,
+        PresenceMapper.toPublicPresence(clientData, client.id),
         client.id,
       );
 
@@ -162,11 +219,14 @@ export class ManuscriptsGateway
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Join project error for socket ${client.id}: ${message}`);
+      this.logger.warn(
+        `Join project error for socket ${client.id}: ${message}`,
+      );
       return { success: false, error: message };
     }
   }
 
+  @WsAccess('none')
   @SubscribeMessage(REALTIME_EVENTS.PROJECT_LEAVE)
   public async handleLeaveProject(
     @ConnectedSocket() client: Socket,
@@ -174,6 +234,11 @@ export class ManuscriptsGateway
   ) {
     try {
       const clientData = this.getClientData(client);
+      // Unjoined sockets must NOT broadcast leave events (RT-03)
+      if (!clientData.projectId || clientData.projectId !== dto.projectId) {
+        return { success: true };
+      }
+
       await this.service.leaveProject(dto.projectId, client.id);
       await client.leave(`project:${dto.projectId}`);
       clientData.projectId = null;
@@ -181,16 +246,20 @@ export class ManuscriptsGateway
       this.broadcastToProject(
         dto.projectId,
         REALTIME_EVENTS.USER_LEFT_PROJECT,
-        { userId: clientData.userId, socketId: client.id },
+        PresenceMapper.toLeavePresence(clientData.userId, client.id),
         client.id,
       );
 
       return { success: true };
     } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
+  @WsAccess('read')
   @SubscribeMessage(REALTIME_EVENTS.DOC_JOIN)
   public async handleJoinDoc(
     @ConnectedSocket() client: Socket,
@@ -198,22 +267,37 @@ export class ManuscriptsGateway
   ) {
     try {
       const clientData = this.getClientData(client);
+      if (clientData.projectId && clientData.projectId !== dto.projectId) {
+        return {
+          success: false,
+          error: 'Must join project before joining doc',
+          code: 'ACCESS_DENIED',
+        };
+      }
+
       const prevDocId = clientData.activeDocId;
       const prevProjectId = clientData.projectId || dto.projectId;
 
-      if (prevDocId && (prevDocId !== dto.docId || prevProjectId !== dto.projectId)) {
+      if (
+        prevDocId &&
+        (prevDocId !== dto.docId || prevProjectId !== dto.projectId)
+      ) {
         await this.service.leaveDoc(prevProjectId, prevDocId, client.id);
         await client.leave(`doc:${prevProjectId}:${prevDocId}`);
         this.broadcastToDoc(
           prevProjectId,
           prevDocId,
           REALTIME_EVENTS.USER_LEFT_DOC,
-          { userId: clientData.userId, socketId: client.id },
+          PresenceMapper.toLeavePresence(clientData.userId, client.id),
           client.id,
         );
       }
 
-      const result = await this.service.joinDoc(dto.projectId, dto.docId, client.id);
+      const result = await this.service.joinDoc(
+        dto.projectId,
+        dto.docId,
+        client.id,
+      );
       clientData.activeDocId = dto.docId;
       clientData.projectId = dto.projectId;
       await client.join(`doc:${dto.projectId}:${dto.docId}`);
@@ -226,7 +310,7 @@ export class ManuscriptsGateway
         dto.projectId,
         dto.docId,
         REALTIME_EVENTS.USER_JOINED_DOC,
-        clientData,
+        PresenceMapper.toPublicPresence(clientData, client.id),
         client.id,
       );
 
@@ -235,26 +319,40 @@ export class ManuscriptsGateway
         docPresence: result.docPresence,
       };
     } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
+  @WsAccess('none')
   @SubscribeMessage(REALTIME_EVENTS.DOC_LEAVE)
   public async handleLeaveDoc(
     @ConnectedSocket() client: Socket,
     @MessageBody() dto: LeaveDocDto,
   ) {
     try {
+      const clientData = this.getClientData(client);
+      // Unjoined sockets must NOT broadcast leave events (RT-03)
+      if (
+        !clientData.projectId ||
+        clientData.projectId !== dto.projectId ||
+        !clientData.activeDocId ||
+        clientData.activeDocId !== dto.docId
+      ) {
+        return { success: true };
+      }
+
       await this.service.leaveDoc(dto.projectId, dto.docId, client.id);
       await client.leave(`doc:${dto.projectId}:${dto.docId}`);
-      const clientData = this.getClientData(client);
       clientData.activeDocId = null;
 
       this.broadcastToDoc(
         dto.projectId,
         dto.docId,
         REALTIME_EVENTS.USER_LEFT_DOC,
-        { userId: clientData.userId, socketId: client.id },
+        PresenceMapper.toLeavePresence(clientData.userId, client.id),
         client.id,
       );
 
@@ -271,10 +369,14 @@ export class ManuscriptsGateway
 
       return { success: true };
     } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
+  @WsAccess('write')
   @SubscribeMessage(REALTIME_EVENTS.DOC_UPDATE)
   public async handleDocUpdate(
     @ConnectedSocket() client: Socket,
@@ -322,10 +424,14 @@ export class ManuscriptsGateway
 
       return { success: true, ...updateResult };
     } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
+  @WsAccess('read')
   @SubscribeMessage(REALTIME_EVENTS.DOC_CURSOR)
   public async handleCursorUpdate(
     @ConnectedSocket() client: Socket,
@@ -360,12 +466,16 @@ export class ManuscriptsGateway
 
       return { success: true, presence: updated };
     } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
   // --- Binary Yjs Handlers ---
 
+  @WsAccess('read')
   @SubscribeMessage(REALTIME_EVENTS.YJS_SYNC_STEP_1)
   public async handleSyncStep1(
     @ConnectedSocket() client: Socket,
@@ -389,6 +499,7 @@ export class ManuscriptsGateway
     }
   }
 
+  @WsAccess('write')
   @SubscribeMessage(REALTIME_EVENTS.YJS_SYNC_STEP_2)
   public async handleSyncStep2(
     @ConnectedSocket() client: Socket,
@@ -407,6 +518,7 @@ export class ManuscriptsGateway
     }
   }
 
+  @WsAccess('write')
   @SubscribeMessage(REALTIME_EVENTS.YJS_SYNC_UPDATE)
   public async handleSyncUpdate(
     @ConnectedSocket() client: Socket,
@@ -440,6 +552,7 @@ export class ManuscriptsGateway
 
   // --- Project Chat Handlers ---
 
+  @WsAccess('member')
   @SubscribeMessage(REALTIME_EVENTS.CHAT_SEND)
   public handleChatSend(
     @ConnectedSocket() client: Socket,
@@ -457,6 +570,7 @@ export class ManuscriptsGateway
     return { success: true, message };
   }
 
+  @WsAccess('member')
   @SubscribeMessage(REALTIME_EVENTS.CHAT_HISTORY)
   public handleChatHistory(
     @ConnectedSocket() _client: Socket,

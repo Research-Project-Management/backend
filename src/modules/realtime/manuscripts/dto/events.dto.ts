@@ -6,33 +6,37 @@ import {
   IsArray,
   ValidateNested,
   Min,
+  Max,
+  MaxLength,
+  ArrayMaxSize,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // --- Inbound Client DTOs ---
 
 export class JoinProjectDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   projectId!: string;
 }
 
 export class JoinDocDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   projectId!: string;
 
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   docId!: string;
 }
 
 export class LeaveDocDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   projectId!: string;
 
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   docId!: string;
 }
@@ -48,15 +52,17 @@ export class LineSpliceDto {
 
   @IsArray()
   @IsString({ each: true })
+  @ArrayMaxSize(2000)
+  @MaxLength(20000, { each: true })
   newLines!: string[];
 }
 
 export class SendUpdateDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   projectId!: string;
 
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   docId!: string;
 
@@ -67,6 +73,8 @@ export class SendUpdateDto {
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
+  @ArrayMaxSize(2000)
+  @MaxLength(20000, { each: true })
   lines?: string[];
 
   @IsOptional()
@@ -77,6 +85,7 @@ export class SendUpdateDto {
   @IsOptional()
   @IsInt()
   @Min(100)
+  @Max(10000)
   debounceMs?: number;
 }
 
@@ -116,11 +125,11 @@ export class CursorPayloadDto {
 }
 
 export class CursorUpdateDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   projectId!: string;
 
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   docId!: string;
 
@@ -130,11 +139,11 @@ export class CursorUpdateDto {
 }
 
 export class DocSyncDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   projectId!: string;
 
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   docId!: string;
 
@@ -146,21 +155,22 @@ export class DocSyncDto {
 }
 
 export class ProjectChatSendDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   projectId!: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(4000)
   text!: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   replyToId?: string;
 }
 
 export class ProjectChatHistoryDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   projectId!: string;
 }

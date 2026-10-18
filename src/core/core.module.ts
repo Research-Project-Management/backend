@@ -6,6 +6,8 @@ import { IdempotencyModule } from './infrastructure/idempotency/idempotency.modu
 import { HealthModule } from './infrastructure/health/health.module';
 import { GlobalExceptionFilter } from './http/filters/exception.filter';
 import { TransformInterceptor } from './http/interceptors/transform.interceptor';
+import { RateLimitConfigService } from './http/rate-limit/rate-limit.config';
+import { UserRateLimitGuard } from './http/rate-limit/user-rate-limit.guard';
 
 @Global()
 @Module({
@@ -16,7 +18,12 @@ import { TransformInterceptor } from './http/interceptors/transform.interceptor'
     IdempotencyModule,
     HealthModule,
   ],
-  providers: [GlobalExceptionFilter, TransformInterceptor],
+  providers: [
+    GlobalExceptionFilter,
+    TransformInterceptor,
+    RateLimitConfigService,
+    UserRateLimitGuard,
+  ],
   exports: [
     PrismaModule,
     CacheModule,
@@ -25,6 +32,8 @@ import { TransformInterceptor } from './http/interceptors/transform.interceptor'
     HealthModule,
     GlobalExceptionFilter,
     TransformInterceptor,
+    RateLimitConfigService,
+    UserRateLimitGuard,
   ],
 })
 export class CoreModule {}

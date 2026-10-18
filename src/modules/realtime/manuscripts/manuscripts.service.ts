@@ -1,9 +1,16 @@
-import { Injectable, Logger, Optional, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { DocumentUpdaterService } from '@/modules/manuscripts/document-updater/document-updater.service';
 import { RoomStore } from './room.store';
 import { UserPresence, CursorPosition } from './types/presence.type';
 import { SendUpdateDto } from './dto/events.dto';
+import { RealtimeAccessService } from './realtime-access.service';
 
 export interface ProjectAccess {
   canRead: boolean;
@@ -24,7 +31,7 @@ export class ManuscriptsService {
 
   constructor(
     private readonly roomStore: RoomStore,
-    @Optional() private readonly prisma?: PrismaService,
+    private readonly realtimeAccess: RealtimeAccessService,
     @Optional() private readonly docUpdater?: DocumentUpdaterService,
   ) {}
 
@@ -32,56 +39,20 @@ export class ManuscriptsService {
     userId: string,
     projectId: string,
   ): Promise<ProjectAccess> {
-    if (!this.prisma) {
-      return { canRead: true, canWrite: true, role: 'contributor' };
+    const access = await this.realtimeAccess.getProjectAccess(
+      projectId,
+      userId,
+    );
+    if (access.decision === 'unavailable') {
+      throw new ServiceUnavailableException(
+        'Realtime authorization service temporarily unavailable',
+      );
     }
-
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (
-      !projectId ||
-      !userId ||
-      !uuidRegex.test(projectId) ||
-      !uuidRegex.test(userId)
-    ) {
-      return { canRead: false, canWrite: false, role: 'none' };
-    }
-
-    try {
-      const project = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: { createdById: true },
-      });
-
-      if (!project) {
-        return { canRead: false, canWrite: false, role: 'none' };
-      }
-
-      if (project.createdById === userId) {
-        return { canRead: true, canWrite: true, role: 'owner' };
-      }
-
-      const member = await this.prisma.projectMember.findUnique({
-        where: {
-          projectId_userId: { projectId, userId },
-        },
-        select: { role: true },
-      });
-
-      if (!member) {
-        return { canRead: false, canWrite: false, role: 'none' };
-      }
-
-      const isReviewer = member.role === 'reviewer';
-      return {
-        canRead: true,
-        canWrite: !isReviewer,
-        role: member.role,
-      };
-    } catch (err) {
-      this.logger.warn(`Error verifying project access: ${err}`);
-      return { canRead: false, canWrite: false, role: 'none' };
-    }
+    return {
+      canRead: access.canRead,
+      canWrite: access.canWrite,
+      role: access.role,
+    };
   }
 
   public async joinProject(input: {
@@ -91,12 +62,18 @@ export class ManuscriptsService {
     name?: string | null;
     color?: string | null;
     avatar?: string | null;
-  }): Promise<{ session: UserPresence; projectPresence: UserPresence[]; access: ProjectAccess }> {
+  }): Promise<{
+    session: UserPresence;
+    projectPresence: UserPresence[];
+    access: ProjectAccess;
+  }> {
     const { projectId, userId, socketId, name, color, avatar } = input;
 
     const access = await this.verifyAccess(userId, projectId);
     if (!access.canRead) {
-      throw new ForbiddenException(`User ${userId} lacks permission to access project ${projectId}`);
+      throw new ForbiddenException(
+        `User ${userId} lacks permission to access project ${projectId}`,
+      );
     }
 
     const session: UserPresence = {
@@ -131,10 +108,16 @@ export class ManuscriptsService {
   ): Promise<{ docPresence: UserPresence[] }> {
     const session = this.roomStore.getSession(socketId);
     if (!session) {
-      throw new NotFoundException(`Session ${socketId} not found in project ${projectId}`);
+      throw new NotFoundException(
+        `Session ${socketId} not found in project ${projectId}`,
+      );
     }
 
-    const docPresence = await this.roomStore.joinDocRoom(projectId, docId, socketId);
+    const docPresence = await this.roomStore.joinDocRoom(
+      projectId,
+      docId,
+      socketId,
+    );
     return { docPresence };
   }
 
@@ -152,7 +135,12 @@ export class ManuscriptsService {
     socketId: string,
     cursor: CursorPosition,
   ): Promise<UserPresence | null> {
-    return this.roomStore.updateSessionCursor(projectId, docId, socketId, cursor);
+    return this.roomStore.updateSessionCursor(
+      projectId,
+      docId,
+      socketId,
+      cursor,
+    );
   }
 
   public async applyDocUpdate(
@@ -161,32 +149,30 @@ export class ManuscriptsService {
   ): Promise<DocUpdateResult> {
     const access = await this.verifyAccess(userId, dto.projectId);
     if (!access.canWrite) {
-      throw new ForbiddenException(`User ${userId} lacks write permission for project ${dto.projectId}`);
+      throw new ForbiddenException(
+        `User ${userId} lacks write permission for project ${dto.projectId}`,
+      );
     }
 
-    if (this.docUpdater) {
-      const res = await this.docUpdater.queueUpdate(dto.projectId, dto.docId, {
-        lines: dto.lines,
-        splice: dto.splice,
-        clientRev: dto.clientRev,
-        userId,
-        debounceMs: dto.debounceMs,
-      });
-
-      return {
-        serverRev: res.rev,
-        clientRev: dto.clientRev,
-        version: res.inFlightSeq,
-        inFlightSeq: res.inFlightSeq,
-      };
+    if (!this.docUpdater) {
+      throw new ServiceUnavailableException(
+        'Document updater service is not available',
+      );
     }
 
-    // Fallback if docUpdater is not loaded (test environment)
-    return {
-      serverRev: dto.clientRev + 1,
+    const res = await this.docUpdater.queueUpdate(dto.projectId, dto.docId, {
+      lines: dto.lines,
+      splice: dto.splice,
       clientRev: dto.clientRev,
-      version: 1,
-      inFlightSeq: 1,
+      userId,
+      debounceMs: dto.debounceMs,
+    });
+
+    return {
+      serverRev: res.rev,
+      clientRev: dto.clientRev,
+      version: res.inFlightSeq,
+      inFlightSeq: res.inFlightSeq,
     };
   }
 
@@ -194,7 +180,10 @@ export class ManuscriptsService {
     return this.roomStore.getProjectSessions(projectId);
   }
 
-  public async getDocPresence(projectId: string, docId: string): Promise<UserPresence[]> {
+  public async getDocPresence(
+    projectId: string,
+    docId: string,
+  ): Promise<UserPresence[]> {
     return this.roomStore.getDocSessions(projectId, docId);
   }
 }

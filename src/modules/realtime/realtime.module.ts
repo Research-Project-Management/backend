@@ -8,11 +8,6 @@ import { RealtimeFacade } from './realtime.facade';
 @Module({
   imports: [CoreModule, ManuscriptsModule, NotificationsModule],
   providers: [RealtimeFacade],
-  exports: [
-    RealtimeFacade,
-    CoreModule,
-    ManuscriptsModule,
-    NotificationsModule,
-  ],
+  exports: [RealtimeFacade, CoreModule, ManuscriptsModule, NotificationsModule],
 })
 export class RealtimeModule {}

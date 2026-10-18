@@ -12,6 +12,9 @@ import * as decoding from 'lib0/decoding';
 import { RedisCacheService } from '@/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { LineArrayEngine } from '@/modules/manuscripts/docstore/domain';
+import { YjsUpdateValidator } from './yjs-update-validator';
+import { RealtimeConfigService } from '../core/realtime.config';
+import { RealtimeException } from '../core/ws-errors';
 
 export interface ActiveDocSession {
   doc: Y.Doc;
@@ -50,11 +53,15 @@ export class YjsService implements OnModuleDestroy {
   private readonly IDLE_THRESHOLD_MS = 15 * 60 * 1000;
   private readonly SWEEP_INTERVAL_MS = 5 * 60 * 1000;
   private sweepTimer: NodeJS.Timeout | null = null;
+  private readonly validator: YjsUpdateValidator;
 
   constructor(
     @Optional() private readonly redis?: RedisCacheService,
     @Optional() private readonly docstoreService?: DocstoreService,
+    @Optional() validator?: YjsUpdateValidator,
+    @Optional() private readonly config?: RealtimeConfigService,
   ) {
+    this.validator = validator ?? new YjsUpdateValidator();
     this.startIdleSweeper();
   }
 
@@ -143,21 +150,11 @@ export class YjsService implements OnModuleDestroy {
               this.redisKey(projectId, docId),
             );
             if (rawBuffer && rawBuffer.length > 0) {
-              try {
-                Y.applyUpdate(doc, rawBuffer, 'redis-init');
-                loadedFromRedis = true;
-                this.logger.debug(
-                  `Hydrated Y.Doc from Redis binary cache: ${key} (${rawBuffer.length} bytes)`,
-                );
-              } catch {
-                const base64Str = rawBuffer.toString('utf-8');
-                const legacyBuffer = Buffer.from(base64Str, 'base64');
-                Y.applyUpdate(doc, legacyBuffer, 'redis-init');
-                loadedFromRedis = true;
-                this.logger.debug(
-                  `Hydrated Y.Doc from Redis legacy base64 cache: ${key}`,
-                );
-              }
+              Y.applyUpdate(doc, rawBuffer, 'redis-init');
+              loadedFromRedis = true;
+              this.logger.debug(
+                `Hydrated Y.Doc from Redis binary cache: ${key} (${rawBuffer.length} bytes)`,
+              );
             }
           } catch (err: unknown) {
             this.logger.warn(
@@ -245,6 +242,10 @@ export class YjsService implements OnModuleDestroy {
         msgType === syncProtocol.messageYjsUpdate ||
         msgType === syncProtocol.messageYjsSyncStep2
       ) {
+        this.validator.validatePostApplySize(
+          session.doc,
+          this.config?.getMaxDocumentSizeBytes(),
+        );
         const updateEncoder = encoding.createEncoder();
         const rawUpdate = this.extractRawUpdateIfPresent(rawBytes, msgType);
         if (rawUpdate) {
@@ -259,6 +260,9 @@ export class YjsService implements OnModuleDestroy {
         msgType,
       };
     } catch (err: unknown) {
+      if (err instanceof RealtimeException) {
+        throw err;
+      }
       this.logger.warn(
         `Failed to decode or process sync message for ${projectId}:${docId}: ${(err as Error)?.message}`,
       );
@@ -315,15 +319,29 @@ export class YjsService implements OnModuleDestroy {
       ) {
         const innerUpdate = decoding.readVarUint8Array(dec);
         Y.applyUpdate(session.doc, innerUpdate, origin);
+        this.validator.validatePostApplySize(
+          session.doc,
+          this.config?.getMaxDocumentSizeBytes(),
+        );
         return;
       }
-    } catch {
-      // Direct apply
+    } catch (err: unknown) {
+      if (err instanceof RealtimeException) {
+        throw err;
+      }
+      // Direct apply fallback
     }
 
     try {
       Y.applyUpdate(session.doc, rawUpdate, origin);
+      this.validator.validatePostApplySize(
+        session.doc,
+        this.config?.getMaxDocumentSizeBytes(),
+      );
     } catch (err: unknown) {
+      if (err instanceof RealtimeException) {
+        throw err;
+      }
       this.logger.warn(`handleSyncStep2 error: ${(err as Error)?.message}`);
     }
   }
@@ -367,10 +385,18 @@ export class YjsService implements OnModuleDestroy {
         }
       }
 
+      this.validator.validatePostApplySize(
+        session.doc,
+        this.config?.getMaxDocumentSizeBytes(),
+      );
+
       const encoder = encoding.createEncoder();
       syncProtocol.writeUpdate(encoder, updateToApply);
       return Buffer.from(encoding.toUint8Array(encoder));
     } catch (err: unknown) {
+      if (err instanceof RealtimeException) {
+        throw err;
+      }
       this.logger.warn(`handleSyncUpdate error: ${(err as Error)?.message}`);
       return Buffer.alloc(0);
     }
@@ -579,22 +605,10 @@ export class YjsService implements OnModuleDestroy {
   }
 
   private normalizeToUint8Array(data: unknown): Uint8Array {
-    if (data instanceof Uint8Array) {
-      return data;
-    }
-    if (Buffer.isBuffer(data)) {
-      return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-    }
-    if (Array.isArray(data)) {
-      return new Uint8Array(data);
-    }
-    if (typeof data === 'string') {
-      return new Uint8Array(Buffer.from(data, 'base64'));
-    }
-    if (data && typeof data === 'object' && 'data' in data) {
-      return this.normalizeToUint8Array(data.data);
-    }
-    return new Uint8Array(0);
+    return this.validator.validateSyncPayload(
+      data,
+      this.config?.getMaxYjsUpdateSizeBytes() ?? 512 * 1024,
+    );
   }
 
   private extractRawUpdateIfPresent(

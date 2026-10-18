@@ -1,4 +1,9 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { RedisCacheService } from '../redis/redis.service';
 import { Prisma } from '@prisma/client';
@@ -33,6 +38,7 @@ export class IdempotencyService {
     idempotencyKey: string,
     userId: string,
     projectId?: string,
+    requestHash?: string,
   ): Promise<IdempotencyCheckResult> {
     // 1. Fast check via Redis
     const redisKey = this.getRedisKey(idempotencyKey, userId, projectId);
@@ -42,8 +48,18 @@ export class IdempotencyService {
           status: string;
           statusCode: number;
           responseBody: unknown;
+          requestHash?: string;
         }>(redisKey);
         if (cached) {
+          if (
+            requestHash &&
+            cached.requestHash &&
+            cached.requestHash !== requestHash
+          ) {
+            throw new ConflictException(
+              'Idempotency key reused with different request payload',
+            );
+          }
           if (cached.status === 'in_progress') {
             return { isDuplicate: true, inProgress: true };
           }
@@ -55,6 +71,9 @@ export class IdempotencyService {
           };
         }
       } catch (err: unknown) {
+        if (err instanceof ConflictException) {
+          throw err;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.debug(`Redis idempotency check error: ${msg}`);
       }
@@ -76,6 +95,16 @@ export class IdempotencyService {
           where: { id: record.id },
         });
         return { isDuplicate: false, inProgress: false };
+      }
+
+      if (
+        requestHash &&
+        record.requestHash &&
+        record.requestHash !== requestHash
+      ) {
+        throw new ConflictException(
+          'Idempotency key reused with different request payload',
+        );
       }
 
       if (record.status === 'in_progress') {
@@ -132,7 +161,11 @@ export class IdempotencyService {
     const redisKey = this.getRedisKey(idempotencyKey, userId, projectId);
     if (this.redisCache) {
       try {
-        await this.redisCache.set(redisKey, { status: 'in_progress' }, 300); // 5 min in-progress lock
+        await this.redisCache.set(
+          redisKey,
+          { status: 'in_progress', requestHash },
+          300,
+        ); // 5 min in-progress lock
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.debug(`Redis idempotency lock error: ${msg}`);
@@ -187,6 +220,7 @@ export class IdempotencyService {
             status: 'succeeded',
             statusCode: input.statusCode,
             responseBody: input.responseBody,
+            requestHash: input.requestHash,
           },
           ttl,
         );

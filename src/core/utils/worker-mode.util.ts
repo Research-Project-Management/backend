@@ -30,7 +30,12 @@ export type StoragePlaneMode = 'all' | 'drive' | 'transfer' | 'worker';
  */
 export function getStoragePlaneMode(): StoragePlaneMode {
   const raw = (process.env.STORAGE_PLANE || '').trim().toLowerCase();
-  if (raw === 'drive' || raw === 'transfer' || raw === 'worker' || raw === 'all') {
+  if (
+    raw === 'drive' ||
+    raw === 'transfer' ||
+    raw === 'worker' ||
+    raw === 'all'
+  ) {
     return raw;
   }
   if (process.env.WORKER_MODE === 'true') {
@@ -54,4 +59,3 @@ export function shouldMountTransferControllers(): boolean {
   const plane = getStoragePlaneMode();
   return plane === 'all' || plane === 'transfer';
 }
-

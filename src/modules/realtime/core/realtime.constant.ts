@@ -38,6 +38,7 @@ export const REALTIME_EVENTS = {
 export const REDIS_KEYS = {
   presence: (socketId: string) => `manuscript:presence:${socketId}`,
   projectRoom: (projectId: string) => `manuscript:project_rooms:${projectId}`,
-  docRoom: (projectId: string, docId: string) => `manuscript:doc_rooms:${projectId}:${docId}`,
+  docRoom: (projectId: string, docId: string) =>
+    `manuscript:doc_rooms:${projectId}:${docId}`,
   yjsDoc: (projectId: string, docId: string) => `yjs:doc:${projectId}:${docId}`,
 } as const;

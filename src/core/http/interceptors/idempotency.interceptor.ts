@@ -4,7 +4,6 @@ import {
   ExecutionContext,
   CallHandler,
   ConflictException,
-  Logger,
   Optional,
 } from '@nestjs/common';
 import { Observable, of, from } from 'rxjs';
@@ -14,14 +13,6 @@ import { createHash } from 'crypto';
 import { isUuid, NIL_UUID } from '../../utils/uuid.util';
 
 import type { FastifyRequest, FastifyReply } from 'fastify';
-
-interface LocalCacheEntry {
-  body: unknown;
-  statusCode: number;
-  expiresAt: number;
-  inProgress?: boolean;
-  requestHash?: string;
-}
 
 interface AuthenticatedRequest extends FastifyRequest {
   user?: {
@@ -37,16 +28,9 @@ interface AuthenticatedRequest extends FastifyRequest {
 
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
-  private readonly logger = new Logger(IdempotencyInterceptor.name);
-  private static readonly memoryCache = new Map<string, LocalCacheEntry>();
-
   constructor(
     @Optional() private readonly idempotencyService?: IdempotencyService,
   ) {}
-
-  static clearCacheForTesting(): void {
-    IdempotencyInterceptor.memoryCache.clear();
-  }
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const http = context.switchToHttp();
@@ -70,6 +54,10 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const cleanKey = idempotencyKey.trim();
     if (!cleanKey) return next.handle();
 
+    if (!this.idempotencyService) {
+      return next.handle();
+    }
+
     const rawUserId = req.user?.id || req.user?.sub;
     const userId = rawUserId && isUuid(rawUserId) ? rawUserId : NIL_UUID;
 
@@ -86,118 +74,70 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const projectId =
       rawProjectId && isUuid(rawProjectId) ? rawProjectId : undefined;
 
-    const requestHash = createHash('md5')
+    const requestHash = createHash('sha256')
       .update(`${method}:${req.url || ''}:${JSON.stringify(req.body || {})}`)
       .digest('hex');
 
-    // If IdempotencyService is injected (Prisma/Redis distributed setup)
-    if (this.idempotencyService) {
-      return from(
-        this.idempotencyService.checkKey(cleanKey, userId, projectId),
-      ).pipe(
-        mergeMap((check) => {
-          if (check.isDuplicate) {
-            if (check.inProgress) {
-              throw new ConflictException(
-                'A mutation request with this Idempotency-Key is currently in progress. Please retry shortly.',
-              );
-            }
-            if (typeof reply.header === 'function') {
-              reply.header('Idempotent-Replay', 'true');
-              reply.header('X-Idempotent-Key', cleanKey);
-            }
-            if (typeof reply.status === 'function') {
-              reply.status(check.statusCode || 200);
-            }
-            return of(check.responseBody);
+    return from(
+      this.idempotencyService.checkKey(
+        cleanKey,
+        userId,
+        projectId,
+        requestHash,
+      ),
+    ).pipe(
+      mergeMap((check) => {
+        if (check.isDuplicate) {
+          if (check.inProgress) {
+            throw new ConflictException(
+              'A mutation request with this Idempotency-Key is currently in progress. Please retry shortly.',
+            );
           }
-
-          return from(
-            this.idempotencyService!.lockKey(
-              cleanKey,
-              userId,
-              requestHash,
-              projectId,
-            ),
-          ).pipe(
-            mergeMap(() =>
-              next.handle().pipe(
-                tap({
-                  next: (body) => {
-                    const statusCode = reply.statusCode || 200;
-                    void this.idempotencyService?.saveResult({
-                      idempotencyKey: cleanKey,
-                      userId,
-                      projectId,
-                      requestHash,
-                      statusCode,
-                      responseBody: body,
-                    });
-                  },
-                  error: () => {
-                    void this.idempotencyService?.unlockKey(
-                      cleanKey,
-                      userId,
-                      projectId,
-                    );
-                  },
-                }),
-              ),
-            ),
-          );
-        }),
-      );
-    }
-
-    // In-memory fallback (e.g. standalone test context without DB)
-    const scopedKey = `${projectId || NIL_UUID}:${userId}:${cleanKey}`;
-    const existing = IdempotencyInterceptor.memoryCache.get(scopedKey);
-    if (existing) {
-      if (existing.expiresAt < Date.now()) {
-        IdempotencyInterceptor.memoryCache.delete(scopedKey);
-      } else if (existing.inProgress) {
-        throw new ConflictException(
-          'A mutation request with this Idempotency-Key is currently in progress. Please retry shortly.',
-        );
-      } else if (existing.requestHash && existing.requestHash !== requestHash) {
-        throw new ConflictException(
-          'Idempotency key was previously used with a different request payload',
-        );
-      } else {
-        if (typeof reply.header === 'function') {
-          reply.header('Idempotent-Replay', 'true');
-          reply.header('X-Idempotent-Key', cleanKey);
+          if (typeof reply.header === 'function') {
+            reply.header('Idempotent-Replay', 'true');
+            reply.header('X-Idempotent-Key', cleanKey);
+          }
+          if (typeof reply.status === 'function') {
+            reply.status(check.statusCode || 200);
+          }
+          return of(check.responseBody);
         }
-        if (typeof reply.status === 'function') {
-          reply.status(existing.statusCode || 200);
-        }
-        return of(existing.body);
-      }
-    }
 
-    IdempotencyInterceptor.memoryCache.set(scopedKey, {
-      body: null,
-      statusCode: 200,
-      expiresAt: Date.now() + 86400 * 1000,
-      inProgress: true,
-      requestHash,
-    });
-
-    return next.handle().pipe(
-      tap({
-        next: (body) => {
-          IdempotencyInterceptor.memoryCache.set(scopedKey, {
-            body,
-            statusCode: reply.statusCode || 200,
-            expiresAt: Date.now() + 86400 * 1000,
-            inProgress: false,
+        return from(
+          this.idempotencyService!.lockKey(
+            cleanKey,
+            userId,
             requestHash,
-          });
-        },
-        error: () => {
-          IdempotencyInterceptor.memoryCache.delete(scopedKey);
-        },
+            projectId,
+          ),
+        ).pipe(
+          mergeMap(() =>
+            next.handle().pipe(
+              tap({
+                next: (body) => {
+                  const statusCode = reply.statusCode || 200;
+                  void this.idempotencyService?.saveResult({
+                    idempotencyKey: cleanKey,
+                    userId,
+                    projectId,
+                    requestHash,
+                    statusCode,
+                    responseBody: body,
+                  });
+                },
+                error: () => {
+                  void this.idempotencyService?.unlockKey(
+                    cleanKey,
+                    userId,
+                    projectId,
+                  );
+                },
+              }),
+            ),
+          ),
+        );
       }),
     );
   }
 }
+
