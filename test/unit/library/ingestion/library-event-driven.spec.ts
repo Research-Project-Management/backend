@@ -102,7 +102,9 @@ describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', ()
         { userId: 'user-1' },
       );
 
-      await expect(subscriber.handleItemCreated(event)).resolves.not.toThrow();
+      await expect(
+        subscriber.handleIntegrationItemCreated(event),
+      ).resolves.not.toThrow();
     });
 
     it('should ignore event when payload has no itemId', async () => {
@@ -113,7 +115,9 @@ describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', ()
         { userId: 'user-1' },
       );
 
-      await expect(subscriber.handleItemCreated(event)).resolves.not.toThrow();
+      await expect(
+        subscriber.handleIntegrationItemCreated(event),
+      ).resolves.not.toThrow();
     });
   });
 

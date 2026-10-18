@@ -1142,8 +1142,6 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
         {
           invalidateTagsCache: jest.fn().mockResolvedValue(undefined),
         } as never,
-        {} as never,
-        {} as never,
         itemQueryService,
       );
 
@@ -1381,43 +1379,40 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
     });
 
     it('exports 500 items across BibTeX, RIS, CSL-JSON, and CSV deterministically with zero citation key collisions', async () => {
-      const exportItems = Array.from(
-        { length: 500 },
-        (_, idx) => ({
-          id: `item-${idx}`,
-          userId: '11111111-1111-4111-8111-111111111111',
-          projectId: null,
-          deletedAt: null,
-          itemType: 'journalArticle',
-          title: `High-Throughput Genomic Sequencing Benchmark Study #${idx + 1}`,
-          publicationTitle: 'Genome Research',
-          year: 2020 + (idx % 6),
-          doi: `10.1101/gr.2025.${idx}`,
-          url: `https://genome.cshlp.org/content/${idx}`,
-          abstract: `Abstract for genomic benchmark study ${idx + 1}.`,
-          citationKey: `lander${2020 + (idx % 6)}genomic${idx}`,
-          createdAt: new Date('2026-01-01T00:00:00Z'),
-          updatedAt: new Date('2026-01-01T00:00:00Z'),
-          metadata: {
-            volume: String(30 + (idx % 5)),
-            issue: String((idx % 12) + 1),
-            pages: `${idx * 10 + 1}-${idx * 10 + 9}`,
-            publisher: 'Cold Spring Harbor Laboratory Press',
+      const exportItems = Array.from({ length: 500 }, (_, idx) => ({
+        id: `item-${idx}`,
+        userId: '11111111-1111-4111-8111-111111111111',
+        projectId: null,
+        deletedAt: null,
+        itemType: 'journalArticle',
+        title: `High-Throughput Genomic Sequencing Benchmark Study #${idx + 1}`,
+        publicationTitle: 'Genome Research',
+        year: 2020 + (idx % 6),
+        doi: `10.1101/gr.2025.${idx}`,
+        url: `https://genome.cshlp.org/content/${idx}`,
+        abstract: `Abstract for genomic benchmark study ${idx + 1}.`,
+        citationKey: `lander${2020 + (idx % 6)}genomic${idx}`,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+        metadata: {
+          volume: String(30 + (idx % 5)),
+          issue: String((idx % 12) + 1),
+          pages: `${idx * 10 + 1}-${idx * 10 + 9}`,
+          publisher: 'Cold Spring Harbor Laboratory Press',
+        },
+        contributors: [
+          {
+            name: 'Lander, Eric S.',
+            firstName: 'Eric S.',
+            lastName: 'Lander',
+            creatorType: 'author',
+            orderIndex: 0,
           },
-          contributors: [
-            {
-              name: 'Lander, Eric S.',
-              firstName: 'Eric S.',
-              lastName: 'Lander',
-              creatorType: 'author',
-              orderIndex: 0,
-            },
-          ],
-          attachments: [],
-          collectionItems: [],
-          itemTags: [],
-        }),
-      ) as unknown as ExportItemRecord[];
+        ],
+        attachments: [],
+        collectionItems: [],
+        itemTags: [],
+      })) as unknown as ExportItemRecord[];
 
       const exportsRepoMock = {
         fetchItemsInChunks: jest.fn().mockResolvedValue({

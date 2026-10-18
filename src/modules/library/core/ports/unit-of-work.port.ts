@@ -1,11 +1,16 @@
-import { Prisma, LibraryChange, Tombstone, OutboxEvent } from '@prisma/client';
+import type {
+  Prisma,
+  LibraryChange,
+  Tombstone,
+  OutboxEvent,
+} from '@prisma/client';
 
 export const UNIT_OF_WORK_PORT = Symbol('UNIT_OF_WORK_PORT');
 
 export interface AppendChangeEntry {
   entityType: string;
   entityId: string;
-  action: 'create' | 'update' | 'delete' | string;
+  action: 'create' | 'update' | 'delete' | (string & {});
   version: number;
   data?: unknown;
 }

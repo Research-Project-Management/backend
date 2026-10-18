@@ -1,4 +1,4 @@
-﻿import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemsMapper } from './items.mapper';
 import {
@@ -395,12 +395,12 @@ export class ItemTransformer implements IItemTransformerPort {
       }
       for (const dropped of droppedFields) {
         if (
-          dropped.value !== undefined &&
-          dropped.value !== null &&
-          dropped.value !== ''
+          (typeof dropped.value === 'string' && dropped.value !== '') ||
+          typeof dropped.value === 'number' ||
+          typeof dropped.value === 'boolean'
         ) {
           extraLines.push(
-            `${dropped.label || dropped.field}: ${dropped.value}`,
+            `${dropped.label || dropped.field}: ${String(dropped.value)}`,
           );
         }
       }

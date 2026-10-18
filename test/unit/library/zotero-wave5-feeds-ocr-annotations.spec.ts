@@ -13,6 +13,7 @@ import { DuplicateService } from '@/modules/library/ingestion/services/duplicate
 import { OcrProvider } from '@/modules/library/extraction/providers/ocr.provider';
 import { OcrSandwichPdfService } from '@/modules/library/extraction/services/ocr-sandwich-pdf.service';
 import { FullTextProvider } from '@/modules/library/search/services/full-text.provider';
+import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
 import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AnnotationsService } from '@/modules/library/extraction/services/annotations.service';
@@ -403,8 +404,6 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
         commandRepo,
         mockLibraryTx,
         {} as unknown as any,
-        {} as unknown as any,
-        new ItemTransformer({} as any),
         {} as unknown as any,
       );
 
@@ -808,7 +807,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
       };
 
       const fullTextProvider = new FullTextProvider(
-        mockFullTextPrisma as unknown as PrismaService,
+        new SearchRepository(mockFullTextPrisma as unknown as PrismaService),
       );
 
       await fullTextProvider.indexAttachmentPages(ATTACHMENT_1, [
@@ -1081,9 +1080,10 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
         ),
       });
 
-      const mockItemExistencePort: IItemExistencePort = fromPartial<IItemExistencePort>({
-        exists: jest.fn(async () => true),
-      });
+      const mockItemExistencePort: IItemExistencePort =
+        fromPartial<IItemExistencePort>({
+          exists: jest.fn(async () => true),
+        });
 
       const notesService = new NotesService(
         mockNotesRepo,

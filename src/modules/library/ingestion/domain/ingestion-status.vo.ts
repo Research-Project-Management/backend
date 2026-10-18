@@ -1,3 +1,5 @@
+import { InvalidStateTransitionException } from '@/modules/library/core/errors/domain.exception';
+
 export type IngestionDomainStatus =
   | 'PENDING'
   | 'RUNNING'
@@ -32,17 +34,13 @@ export class IngestionStatusVo {
   public static create(rawStatus?: string | null): IngestionStatusVo {
     if (!rawStatus) return new IngestionStatusVo('PENDING');
     const upper = rawStatus.trim().toUpperCase();
-    // Map legacy aliases
-    let normalized = upper;
-    if (upper === 'READY') normalized = 'COMPLETED';
-    if (upper === 'FAILED') normalized = 'FAILED_FINAL';
-    if (upper === 'NEEDS_REVIEW') normalized = 'COMPLETED'; // Zotero model: completed with duplicate review flag
-    if (
-      !IngestionStatusVo.VALID_STATUSES.has(normalized as IngestionDomainStatus)
-    ) {
-      throw new Error(`Invalid Ingestion status: "${rawStatus}"`);
+    if (!IngestionStatusVo.VALID_STATUSES.has(upper as IngestionDomainStatus)) {
+      throw new InvalidStateTransitionException(
+        `Invalid Ingestion status: "${rawStatus}"`,
+        { rawStatus: rawStatus ?? 'UNKNOWN' },
+      );
     }
-    return new IngestionStatusVo(normalized as IngestionDomainStatus);
+    return new IngestionStatusVo(upper as IngestionDomainStatus);
   }
 
   public get value(): IngestionDomainStatus {

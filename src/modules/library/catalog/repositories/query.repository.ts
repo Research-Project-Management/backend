@@ -1,10 +1,10 @@
-﻿import {
+import {
   Injectable,
   NotFoundException,
   Inject,
   Optional,
 } from '@nestjs/common';
-import { Prisma, ReadStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import zlib from 'zlib';
 import { PrismaService } from '@/core';
 import { isUUID } from 'class-validator';
@@ -15,6 +15,23 @@ import {
 } from '@/modules/library/catalog/types/items.types';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
+import { ItemFilterOptions } from './item-filter-where.builder';
+import {
+  ItemMatchQueryRepository,
+  MatchCandidateResult,
+} from './item-match-query.repository';
+import { ItemRelationsQueryRepository } from './item-relations-query.repository';
+import { ItemListQueryRepository } from './item-list-query.repository';
+
+export type { ItemFilterOptions } from './item-filter-where.builder';
+export {
+  buildItemWhereClause,
+  buildItemSearchCondition,
+} from './item-filter-where.builder';
+export type { MatchCandidateResult } from './item-match-query.repository';
+export { ItemMatchQueryRepository } from './item-match-query.repository';
+export { ItemRelationsQueryRepository } from './item-relations-query.repository';
+export { ItemListQueryRepository } from './item-list-query.repository';
 
 const isUuid = (val: unknown): val is string =>
   typeof val === 'string' && isUUID(val);
@@ -22,13 +39,27 @@ const isUuid = (val: unknown): val is string =>
 @Injectable()
 export class QueryRepository {
   private readonly treeEngine = new TreeEngine();
+  private readonly matchRepo: ItemMatchQueryRepository;
+  private readonly relationsRepo: ItemRelationsQueryRepository;
+  private readonly listRepo: ItemListQueryRepository;
 
   constructor(
     private readonly prisma: PrismaService,
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
-  ) {}
+    @Optional()
+    matchRepo?: ItemMatchQueryRepository,
+    @Optional()
+    relationsRepo?: ItemRelationsQueryRepository,
+    @Optional()
+    listRepo?: ItemListQueryRepository,
+  ) {
+    this.matchRepo = matchRepo ?? new ItemMatchQueryRepository(this.prisma);
+    this.relationsRepo =
+      relationsRepo ?? new ItemRelationsQueryRepository(this.prisma);
+    this.listRepo = listRepo ?? new ItemListQueryRepository(this.prisma);
+  }
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
@@ -297,7 +328,10 @@ export class QueryRepository {
         });
         if (storageFile?.buffer) {
           const decompressed = zlib.gunzipSync(storageFile.buffer);
-          const fullData = JSON.parse(decompressed.toString('utf-8'));
+          const fullData = JSON.parse(decompressed.toString('utf-8')) as Record<
+            string,
+            unknown
+          >;
           return {
             ...record,
             rawPayload: {
@@ -353,617 +387,43 @@ export class QueryRepository {
     },
     client: Prisma.TransactionClient | PrismaService,
   ): Promise<string[] | undefined> {
-    if (options.collectionIds && options.collectionIds.length > 0) {
-      return options.collectionIds;
-    }
-
-    if (!options.collectionId) {
-      return undefined;
-    }
-
-    // Default to true matching Zotero's canonical recursiveCollections preference
-    const isRecursive =
-      options.includeSubcollections !== false && options.recursive !== false;
-
-    if (!isRecursive) {
-      return [options.collectionId];
-    }
-
-    const hasValidProject = Boolean(
-      options.projectId &&
-      options.projectId !== 'user' &&
-      options.projectId !== 'me' &&
-      options.projectId !== 'personal' &&
-      isUuid(options.projectId),
-    );
-
-    const scopeWhere: Prisma.CollectionWhereInput = hasValidProject
-      ? { projectId: options.projectId, deletedAt: null }
-      : { userId, projectId: null, deletedAt: null };
-
-    const allCollections = await client.collection.findMany({
-      where: scopeWhere,
-      select: { id: true, parentId: true },
-    });
-
-    const descendantIds = this.treeEngine.getDescendantIds(
-      allCollections,
-      options.collectionId,
-    );
-
-    return [options.collectionId, ...descendantIds];
+    return this.listRepo.resolveTargetCollectionIds(userId, options, client);
   }
 
   async findMany(
     userId: string,
-    options: {
-      view?:
-        | 'all'
-        | 'recent'
-        | 'unfiled'
-        | 'trash'
-        | 'my-publications'
-        | 'publications'
-        | 'starred'
-        | 'retracted';
-      userId?: string;
-      collectionId?: string;
-      collectionIds?: string[];
-      includeSubcollections?: boolean;
-      recursive?: boolean;
-      tagId?: string;
-      tag?: string;
-      search?: string;
-      hasFile?: boolean;
-      hasNotes?: boolean;
-      limit?: number;
-      page?: number;
-      cursor?: string;
-      projectId?: string;
-      orderBy?: string;
-      orderDirection?: 'asc' | 'desc';
-      itemType?: string;
-      type?: string;
-      fromYear?: number;
-      toYear?: number;
-      readStatus?: string;
-      includeNotes?: boolean;
-    },
+    options: Parameters<ItemListQueryRepository['findMany']>[2],
     tx?: Prisma.TransactionClient,
   ): Promise<ItemDetail[]> {
-    if (!isUuid(userId)) return [];
-    const client = this.getClient(tx);
-    const view = options.view ?? 'all';
-    const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
-
-    const effectiveUserId = options.userId || userId;
-
-    const targetCollectionIds = await this.resolveTargetCollectionIds(
-      userId,
-      options,
-      client,
-    );
-
-    const itemInclude = {
-      contributors: {
-        orderBy: { orderIndex: 'asc' as const },
-      },
-      collectionItems: {
-        include: { collection: true },
-      },
-      itemTags: {
-        include: { tag: true },
-      },
-      attachments: {
-        select: {
-          id: true,
-          itemId: true,
-          linkMode: true,
-          attachmentType: true,
-          filename: true,
-          url: true,
-          fileHash: true,
-          fileId: true,
-          storageKey: true,
-          mimeType: true,
-          size: true,
-          pageCount: true,
-          extractionStatus: true,
-          createdAt: true,
-          updatedAt: true,
-          deletedAt: true,
-        },
-      },
-      ...(options.includeNotes
-        ? {
-            notesList: {
-              where: { deletedAt: null },
-            },
-          }
-        : {}),
-      states: effectiveUserId
-        ? {
-            where: { userId: effectiveUserId },
-          }
-        : false,
-    };
-
-    if (view === 'recent' && options.userId) {
-      let cursorLastReadAt: Date | undefined;
-      if (options.cursor) {
-        const cursorState = await client.state.findFirst({
-          where: { userId: options.userId, itemId: options.cursor },
-          select: { lastReadAt: true },
-        });
-        cursorLastReadAt = cursorState?.lastReadAt ?? undefined;
-      }
-
-      const userStates = await client.state.findMany({
-        where: {
-          userId: options.userId,
-          ...(cursorLastReadAt
-            ? {
-                OR: [
-                  { lastReadAt: { lt: cursorLastReadAt } },
-                  {
-                    lastReadAt: cursorLastReadAt,
-                    itemId: { lt: options.cursor },
-                  },
-                ],
-              }
-            : { lastReadAt: { not: null } }),
-          item: {
-            ...(options.projectId
-              ? { projectId: options.projectId }
-              : { userId, projectId: null }),
-            deletedAt: null,
-            ...(options.search
-              ? {
-                  OR: this.buildSearchCondition(options.search),
-                }
-              : {}),
-            ...(targetCollectionIds && targetCollectionIds.length > 0
-              ? {
-                  collectionItems: {
-                    some: {
-                      collectionId:
-                        targetCollectionIds.length === 1
-                          ? targetCollectionIds[0]
-                          : { in: targetCollectionIds },
-                    },
-                  },
-                }
-              : options.collectionId
-                ? {
-                    collectionItems: {
-                      some: { collectionId: options.collectionId },
-                    },
-                  }
-                : {}),
-            ...(options.tagId
-              ? {
-                  itemTags: {
-                    some: { tagId: options.tagId },
-                  },
-                }
-              : {}),
-          },
-        },
-        include: {
-          item: {
-            include: itemInclude,
-          },
-        },
-        orderBy: [{ lastReadAt: 'desc' }, { itemId: 'desc' }],
-        take: limit + 1,
-        ...(options.cursor
-          ? { skip: 1 }
-          : options.page && options.page > 1
-            ? { skip: (options.page - 1) * limit }
-            : {}),
-      });
-
-      return userStates
-        .filter((us): us is typeof us & { item: NonNullable<typeof us.item> } =>
-          Boolean(us.item),
-        )
-        .map((us) => ({
-          ...us.item,
-          lastReadAt: us.lastReadAt,
-        }));
-    }
-
-    let sortField = options.orderBy || 'createdAt';
-    if (sortField === 'authors') {
-      sortField = 'firstAuthor';
-    } else if (sortField === 'publication') {
-      sortField = 'publicationTitle';
-    } else if (sortField === 'dateDeleted') {
-      sortField = 'deletedAt';
-    }
-    const sortDir = options.orderDirection === 'asc' ? 'asc' : 'desc';
-    const allowedSortFields = [
-      'title',
-      'year',
-      'createdAt',
-      'updatedAt',
-      'citationKey',
-      'publicationTitle',
-      'firstAuthor',
-      'deletedAt',
-    ];
-    const safeSortField = allowedSortFields.includes(sortField)
-      ? sortField
-      : 'createdAt';
-    const orderByClause: Prisma.ItemOrderByWithRelationInput[] = [
-      { [safeSortField]: sortDir },
-      { id: sortDir },
-    ];
-
-    const page = options.page && options.page > 0 ? options.page : 1;
-    const skip = options.cursor ? 1 : page > 1 ? (page - 1) * limit : undefined;
-
-    return client.item.findMany({
-      where: this.buildWhereClause(userId, { ...options, targetCollectionIds }),
-      take: limit + 1,
-      ...(options.cursor
-        ? { cursor: { id: options.cursor }, skip: 1 }
-        : page > 1
-          ? { skip }
-          : {}),
-      orderBy: orderByClause,
-      include: itemInclude,
-    });
+    return this.listRepo.findMany(this.getClient(tx), userId, options);
   }
 
-  /**
-   * Builds a shared CatalogItem WHERE clause from the common filter options.
-   * Used by both findMany and count to avoid duplicated logic.
-   */
   buildWhereClause(
     userId: string,
-    options: {
-      view?:
-        | 'all'
-        | 'recent'
-        | 'unfiled'
-        | 'trash'
-        | 'my-publications'
-        | 'publications'
-        | 'starred'
-        | 'retracted';
-      collectionId?: string;
-      collectionIds?: string[];
-      targetCollectionIds?: string[];
-      tagId?: string;
-      tag?: string;
-      search?: string;
-      hasFile?: boolean;
-      hasNotes?: boolean;
-      projectId?: string;
-      itemType?: string;
-      type?: string;
-      fromYear?: number;
-      toYear?: number;
-      readStatus?: string;
-    },
+    options: ItemFilterOptions,
   ): Prisma.ItemWhereInput {
-    const view = options.view ?? 'all';
-    const hasValidProject = Boolean(
-      options.projectId &&
-      options.projectId !== 'user' &&
-      options.projectId !== 'me' &&
-      options.projectId !== 'personal' &&
-      isUuid(options.projectId),
-    );
-    const where: Prisma.ItemWhereInput = hasValidProject
-      ? { projectId: options.projectId }
-      : { userId, projectId: null };
-
-    const andConditions: Prisma.ItemWhereInput[] = [];
-
-    if (view === 'trash') {
-      where.deletedAt = { not: null };
-    } else {
-      where.deletedAt = null;
-      if (view === 'unfiled') {
-        where.collectionItems = { none: {} };
-      } else if (view === 'my-publications' || view === 'publications') {
-        andConditions.push({
-          OR: [
-            { metadata: { path: ['isMyPublication'], equals: true } },
-            { publications: { some: { userId } } },
-          ],
-        });
-      } else if (view === 'starred') {
-        where.states = { some: { userId, isStarred: true } };
-      } else if (view === 'retracted') {
-        andConditions.push({
-          metadata: { path: ['isRetracted'], equals: true },
-        });
-      }
-    }
-
-    if (options.hasFile !== undefined) {
-      where.hasFile = options.hasFile;
-    }
-
-    if (options.hasNotes !== undefined) {
-      if (options.hasNotes) {
-        where.noteCount = { gt: 0 };
-      } else {
-        where.noteCount = 0;
-      }
-    }
-
-    const targetCollectionIds =
-      options.targetCollectionIds || options.collectionIds;
-    if (targetCollectionIds && targetCollectionIds.length > 0) {
-      if (targetCollectionIds.length === 1) {
-        where.collectionItems = {
-          some: { collectionId: targetCollectionIds[0] },
-        };
-      } else {
-        where.collectionItems = {
-          some: { collectionId: { in: targetCollectionIds } },
-        };
-      }
-    } else if (options.collectionId) {
-      where.collectionItems = { some: { collectionId: options.collectionId } };
-    }
-
-    if (options.tagId) {
-      where.itemTags = { some: { tagId: options.tagId } };
-    }
-
-    if (options.tag) {
-      const tagNames = options.tag
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean);
-      if (tagNames.length > 0) {
-        where.itemTags = {
-          some: {
-            tag: {
-              OR: tagNames.map((name) => ({
-                name: { equals: name, mode: 'insensitive' as const },
-              })),
-            },
-          },
-        };
-      }
-    }
-
-    const itemType = options.itemType || options.type;
-    if (itemType) {
-      if (itemType.includes(',')) {
-        const types = itemType
-          .split(',')
-          .map((t: string) => t.trim())
-          .filter(Boolean);
-        where.itemType = { in: types };
-      } else {
-        where.itemType = itemType;
-      }
-    }
-
-    if (options.fromYear !== undefined || options.toYear !== undefined) {
-      where.year = {
-        ...(options.fromYear !== undefined
-          ? { gte: Number(options.fromYear) }
-          : {}),
-        ...(options.toYear !== undefined
-          ? { lte: Number(options.toYear) }
-          : {}),
-      };
-    }
-
-    if (options.readStatus && options.readStatus !== 'all') {
-      const validStatuses: ReadStatus[] = ['unread', 'reading', 'completed'];
-      const statuses = options.readStatus
-        .split(',')
-        .map((s) => s.trim())
-        .filter((s): s is ReadStatus =>
-          validStatuses.includes(s as ReadStatus),
-        );
-      if (statuses.length > 0) {
-        where.states = {
-          some: {
-            userId,
-            readStatus: statuses.length > 1 ? { in: statuses } : statuses[0],
-          },
-        };
-      }
-    }
-
-    if (options.search) {
-      andConditions.push({
-        OR: this.buildSearchCondition(options.search),
-      });
-    }
-
-    if (andConditions.length > 0) {
-      where.AND = andConditions;
-    }
-
-    return where;
-  }
-
-  /**
-   * Constructs comprehensive search filters covering Zotero fields:
-   * title, abstract, doi, publicationTitle, publisher, citationKey, arxivId,
-   * isbn, issn, extra, and contributor names (fullName, lastName, firstName).
-   */
-  private buildSearchCondition(search: string): Prisma.ItemWhereInput[] {
-    const trimmed = search.trim();
-    return [
-      { title: { contains: trimmed, mode: 'insensitive' } },
-      { publicationTitle: { contains: trimmed, mode: 'insensitive' } },
-      { abstract: { contains: trimmed, mode: 'insensitive' } },
-      { doi: { contains: trimmed, mode: 'insensitive' } },
-      { citationKey: { contains: trimmed, mode: 'insensitive' } },
-      {
-        contributors: {
-          some: {
-            OR: [
-              { fullName: { contains: trimmed, mode: 'insensitive' } },
-              { lastName: { contains: trimmed, mode: 'insensitive' } },
-              { firstName: { contains: trimmed, mode: 'insensitive' } },
-            ],
-          },
-        },
-      },
-    ];
+    return this.listRepo.buildWhereClause(userId, options);
   }
 
   async count(
     userId: string,
-    options: {
-      view?:
-        | 'all'
-        | 'recent'
-        | 'unfiled'
-        | 'trash'
-        | 'my-publications'
-        | 'publications'
-        | 'starred'
-        | 'retracted';
-      userId?: string;
-      collectionId?: string;
-      collectionIds?: string[];
+    options: ItemFilterOptions & {
       includeSubcollections?: boolean;
       recursive?: boolean;
-      tagId?: string;
-      tag?: string;
-      search?: string;
-      hasFile?: boolean;
-      hasNotes?: boolean;
-      projectId?: string;
-      itemType?: string;
-      type?: string;
-      fromYear?: number;
-      toYear?: number;
-      readStatus?: string;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
-    if (!isUuid(userId)) return 0;
-    const client = this.getClient(tx);
-    const view = options.view ?? 'all';
-
-    const targetCollectionIds = await this.resolveTargetCollectionIds(
-      userId,
-      options,
-      client,
-    );
-
-    const effectiveUserId = options.userId || userId;
-    if (view === 'recent' && effectiveUserId) {
-      return client.state.count({
-        where: {
-          userId: effectiveUserId,
-          lastReadAt: { not: null },
-          item: {
-            userId,
-            deletedAt: null,
-            ...(options.search
-              ? {
-                  OR: this.buildSearchCondition(options.search),
-                }
-              : {}),
-            ...(targetCollectionIds && targetCollectionIds.length > 0
-              ? {
-                  collectionItems: {
-                    some: {
-                      collectionId:
-                        targetCollectionIds.length === 1
-                          ? targetCollectionIds[0]
-                          : { in: targetCollectionIds },
-                    },
-                  },
-                }
-              : options.collectionId
-                ? {
-                    collectionItems: {
-                      some: { collectionId: options.collectionId },
-                    },
-                  }
-                : {}),
-            ...(options.tagId
-              ? {
-                  itemTags: {
-                    some: { tagId: options.tagId },
-                  },
-                }
-              : {}),
-          },
-        },
-      });
-    }
-
-    return client.item.count({
-      where: this.buildWhereClause(userId, { ...options, targetCollectionIds }),
-    });
+    return this.listRepo.count(this.getClient(tx), userId, options);
   }
 
-  /**
-   * Computes non-deleted item counts grouped by itemType for the given scope.
-   * Gracefully falls back to {} if groupBy is unavailable on mock clients.
-   */
   async countByItemType(
     userId: string,
     projectId?: string,
     tx?: Prisma.TransactionClient,
   ): Promise<Record<string, number>> {
-    if (!isUuid(userId)) return {};
-    const client = this.getClient(tx);
-    if (typeof client?.item?.groupBy !== 'function') {
-      return {};
-    }
-
-    const where: Prisma.ItemWhereInput =
-      projectId && projectId !== 'user' && isUuid(projectId)
-        ? { projectId, deletedAt: null }
-        : { userId, projectId: null, deletedAt: null };
-
-    try {
-      const grouped = await client.item.groupBy({
-        by: ['itemType'],
-        where,
-        _count: { _all: true },
-      });
-
-      if (!Array.isArray(grouped)) return {};
-
-      const counts: Record<string, number> = {};
-      for (const row of grouped) {
-        const key =
-          typeof row.itemType === 'string' && row.itemType.trim()
-            ? row.itemType.trim()
-            : 'journalArticle';
-        const countVal =
-          typeof row._count === 'object' && row._count !== null
-            ? Number(
-                (row._count as { _all?: number; itemType?: number })._all ??
-                  (row._count as { itemType?: number }).itemType ??
-                  0,
-              )
-            : typeof row._count === 'number'
-              ? row._count
-              : 0;
-        if (countVal > 0) {
-          counts[key] = (counts[key] || 0) + countVal;
-        }
-      }
-      return counts;
-    } catch {
-      return {};
-    }
+    return this.listRepo.countByItemType(this.getClient(tx), userId, projectId);
   }
 
-  /**
-   * Resolves the user's role in a project directly from projectMember / project creator.
-   */
   async getProjectMemberRole(
     userId: string,
     projectId: string,
@@ -1071,52 +531,12 @@ export class QueryRepository {
     tx?: Prisma.TransactionClient,
     projectId?: string,
   ): Promise<ItemSummary | null> {
-    if (!isUuid(itemId)) return null;
-    const client = this.getClient(tx);
-    const scopeWhere =
-      projectId && projectId !== 'user' && isUuid(projectId)
-        ? { projectId }
-        : isUuid(userId)
-          ? { userId, projectId: null }
-          : null;
-    if (!scopeWhere) return null;
-    const item = await client.item.findFirst({
-      where: { id: itemId, ...scopeWhere, deletedAt: null },
-      select: {
-        id: true,
-        userId: true,
-        title: true,
-        itemType: true,
-        year: true,
-        doi: true,
-        contributors: {
-          where: { creatorType: 'author' },
-          select: { fullName: true, firstName: true, lastName: true },
-          orderBy: { orderIndex: 'asc' },
-          take: 3,
-        },
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-    if (!item) return null;
-    return {
-      id: item.id,
-      userId: item.userId,
-      title: item.title,
-      itemType: item.itemType || undefined,
-      year: item.year,
-      doi: item.doi || null,
-      primaryAuthors: item.contributors.map(
-        (c: {
-          fullName: string | null;
-          firstName: string | null;
-          lastName: string | null;
-        }) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-      ),
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-    };
+    return this.listRepo.findSummaryById(
+      this.getClient(tx),
+      userId,
+      itemId,
+      projectId,
+    );
   }
 
   async findSummariesByIds(
@@ -1125,10 +545,6 @@ export class QueryRepository {
     projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ): Promise<ItemSummary[]> {
-    if (!itemIds || itemIds.length === 0 || !isUuid(userId)) return [];
-    const validIds = itemIds.filter(isUuid);
-    if (validIds.length === 0) return [];
-
     const projectId =
       typeof projectIdOrTx === 'string' && isUuid(projectIdOrTx)
         ? projectIdOrTx
@@ -1136,168 +552,14 @@ export class QueryRepository {
     const client = this.getClient(
       typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
     );
-    const scopeWhere: Prisma.ItemWhereInput = projectId
-      ? { projectId }
-      : { userId, projectId: null };
-
-    const items = await client.item.findMany({
-      where: { id: { in: validIds }, ...scopeWhere, deletedAt: null },
-      select: {
-        id: true,
-        userId: true,
-        title: true,
-        itemType: true,
-        year: true,
-        doi: true,
-        contributors: {
-          where: { creatorType: 'author' },
-          select: { fullName: true, firstName: true, lastName: true },
-          orderBy: { orderIndex: 'asc' },
-          take: 3,
-        },
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    return items.map((item) => ({
-      id: item.id,
-      userId: item.userId,
-      title: item.title,
-      itemType: item.itemType || undefined,
-      year: item.year,
-      doi: item.doi || null,
-      primaryAuthors: item.contributors.map(
-        (c) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-      ),
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-    }));
+    return this.listRepo.findSummariesByIds(client, userId, itemIds, projectId);
   }
 
   async getRelations(
     itemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<Record<string, unknown>[]> {
-    if (!isUuid(itemId)) return [];
-    const client = this.getClient(tx);
-    const relations = await client.itemRelation.findMany({
-      where: {
-        OR: [
-          { sourceItemId: itemId, targetItem: { deletedAt: null } },
-          { targetItemId: itemId, sourceItem: { deletedAt: null } },
-        ],
-      },
-      include: {
-        sourceItem: {
-          include: {
-            contributors: {
-              where: { creatorType: 'author' },
-              orderBy: { orderIndex: 'asc' },
-            },
-          },
-        },
-        targetItem: {
-          include: {
-            contributors: {
-              where: { creatorType: 'author' },
-              orderBy: { orderIndex: 'asc' },
-            },
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (relations && relations.length > 0) {
-      const seenPeerIds = new Set<string>();
-      const result: Record<string, unknown>[] = [];
-
-      for (const r of relations) {
-        const isOutgoing = r.sourceItemId === itemId;
-        const peerItem = isOutgoing ? r.targetItem : r.sourceItem;
-        if (!peerItem || peerItem.id === itemId) continue;
-        if (seenPeerIds.has(peerItem.id)) continue;
-        seenPeerIds.add(peerItem.id);
-
-        let effectiveRelationType = r.relationType as string;
-        if (!isOutgoing) {
-          // Reciprocal semantic mapping when viewing from target perspective
-          if (r.relationType === 'cites') {
-            effectiveRelationType = 'cited_by';
-          } else if (r.relationType === 'cited_by') {
-            effectiveRelationType = 'cites';
-          } else if (r.relationType === 'is_preprint_of') {
-            effectiveRelationType = 'is_published_version_of';
-          } else if (r.relationType === 'is_published_version_of') {
-            effectiveRelationType = 'is_preprint_of';
-          } else if (r.relationType === 'rebuts') {
-            effectiveRelationType = 'rebutted_by';
-          } else if (r.relationType === 'extends') {
-            effectiveRelationType = 'extended_by';
-          } else if (r.relationType === 'replicates') {
-            effectiveRelationType = 'replicated_by';
-          } else if (r.relationType === 'uses_dataset') {
-            effectiveRelationType = 'dataset_used_by';
-          } else if (r.relationType === 'survey_of') {
-            effectiveRelationType = 'reviewed_in';
-          } else if (r.relationType === 'supplements') {
-            effectiveRelationType = 'supplemented_by';
-          } else if (r.relationType === 'is_translation_of') {
-            effectiveRelationType = 'translated_as';
-          }
-        }
-
-        const authorNames = (peerItem.contributors || [])
-          .map(
-            (c: {
-              fullName: string | null;
-              firstName: string | null;
-              lastName: string | null;
-            }) =>
-              c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-          )
-          .filter(Boolean);
-
-        result.push({
-          id: peerItem.id,
-          relationId: r.id,
-          targetItemId: peerItem.id,
-          title: peerItem.title || 'Untitled Item',
-          authors: authorNames,
-          year: peerItem.year,
-          doi: peerItem.doi,
-          itemType: peerItem.itemType,
-          citationKey: peerItem.citationKey,
-          relationType: effectiveRelationType,
-          direction: isOutgoing ? 'outgoing' : 'incoming',
-          description: r.description || '',
-          linkedAt: r.createdAt ? r.createdAt.toISOString() : undefined,
-          targetItem: peerItem,
-        });
-      }
-
-      if (result.length > 0) {
-        return result;
-      }
-    }
-
-    const item = await client.item.findUnique({
-      where: { id: itemId },
-      select: { metadata: true },
-    });
-    if (!item || !item.metadata) return [];
-    try {
-      const meta =
-        item.metadata &&
-        typeof item.metadata === 'object' &&
-        !Array.isArray(item.metadata)
-          ? (item.metadata as Record<string, unknown>)
-          : {};
-      return Array.isArray(meta.relations) ? meta.relations : [];
-    } catch {
-      return [];
-    }
+    return this.relationsRepo.getRelations(this.getClient(tx), itemId);
   }
 
   async findQualityAuditItems(
@@ -1313,32 +575,12 @@ export class QueryRepository {
     const client = this.getClient(
       typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
     );
-    let scopeWhere: Prisma.ItemWhereInput = { deletedAt: null };
-    if (projectId) {
-      scopeWhere = { projectId, deletedAt: null };
-    } else if (userId && isUuid(userId)) {
-      scopeWhere = { userId, projectId: null, deletedAt: null };
-    } else if (userId && !isUuid(userId)) {
-      return [];
-    }
-
-    return client.item.findMany({
-      where: scopeWhere,
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        title: true,
-        doi: true,
-        abstract: true,
-        year: true,
-        contributors: {
-          where: { creatorType: 'author' },
-          select: { id: true },
-        },
-        metadata: true,
-      },
-    });
+    return this.matchRepo.findQualityAuditItems(
+      client,
+      userId,
+      limit,
+      projectId,
+    );
   }
 
   async findDuplicateCandidateItems(
@@ -1354,41 +596,12 @@ export class QueryRepository {
     const client = this.getClient(
       typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
     );
-    let scopeWhere: Prisma.ItemWhereInput = { deletedAt: null };
-    if (projectId) {
-      scopeWhere = { projectId, deletedAt: null };
-    } else if (userId && isUuid(userId)) {
-      scopeWhere = { userId, projectId: null, deletedAt: null };
-    } else if (userId && !isUuid(userId)) {
-      return [];
-    }
-
-    const effectiveTake = limit && limit > 0 ? Math.min(limit, 5000) : 5000;
-
-    return client.item.findMany({
-      where: scopeWhere,
-      select: {
-        id: true,
-        title: true,
-        itemType: true,
-        doi: true,
-        metadata: true,
-        citationKey: true,
-        year: true,
-        contributors: {
-          where: { creatorType: 'author' },
-          select: {
-            fullName: true,
-            firstName: true,
-            lastName: true,
-            orderIndex: true,
-          },
-          orderBy: { orderIndex: 'asc' },
-        },
-      },
-      take: effectiveTake,
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.matchRepo.findDuplicateCandidateItems(
+      client,
+      userId,
+      limit,
+      projectId,
+    );
   }
 
   async getFulltext(
@@ -1431,12 +644,7 @@ export class QueryRepository {
     projectId: string,
     tx?: Prisma.TransactionClient,
   ) {
-    if (!isUuid(projectId)) return null;
-    const client = this.getClient(tx);
-    return client.project.findUnique({
-      where: { id: projectId },
-      include: { members: true },
-    });
+    return this.matchRepo.findProjectWithMembers(this.getClient(tx), projectId);
   }
 
   async findDuplicateInProject(
@@ -1448,21 +656,11 @@ export class QueryRepository {
     },
     tx?: Prisma.TransactionClient,
   ) {
-    if (!isUuid(projectId)) return null;
-    const client = this.getClient(tx);
-    return client.item.findFirst({
-      where: {
-        projectId,
-        deletedAt: null,
-        OR: [
-          ...(criteria.doi ? [{ doi: criteria.doi }] : []),
-          ...(criteria.citationKey
-            ? [{ citationKey: criteria.citationKey }]
-            : []),
-          { title: criteria.title },
-        ],
-      },
-    });
+    return this.matchRepo.findDuplicateInProject(
+      this.getClient(tx),
+      projectId,
+      criteria,
+    );
   }
 
   async findDuplicatesInProject(
@@ -1474,40 +672,11 @@ export class QueryRepository {
     }>,
     tx?: Prisma.TransactionClient,
   ) {
-    if (!isUuid(projectId) || !criteriaList?.length) return [];
-    const client = this.getClient(tx);
-
-    const dois = criteriaList
-      .map((c) => c.doi?.trim())
-      .filter((d): d is string => Boolean(d));
-    const citationKeys = criteriaList
-      .map((c) => c.citationKey?.trim())
-      .filter((k): k is string => Boolean(k));
-    const titles = criteriaList
-      .map((c) => c.title?.trim())
-      .filter((t): t is string => Boolean(t));
-
-    const orConditions: Prisma.ItemWhereInput[] = [];
-    if (dois.length > 0) orConditions.push({ doi: { in: dois } });
-    if (citationKeys.length > 0)
-      orConditions.push({ citationKey: { in: citationKeys } });
-    if (titles.length > 0) orConditions.push({ title: { in: titles } });
-
-    if (orConditions.length === 0) return [];
-
-    return client.item.findMany({
-      where: {
-        projectId,
-        deletedAt: null,
-        OR: orConditions,
-      },
-      select: {
-        id: true,
-        doi: true,
-        citationKey: true,
-        title: true,
-      },
-    });
+    return this.matchRepo.findDuplicatesInProject(
+      this.getClient(tx),
+      projectId,
+      criteriaList,
+    );
   }
 
   async findByCitationKey(
@@ -1516,26 +685,12 @@ export class QueryRepository {
     projectId?: string,
     tx?: Prisma.TransactionClient,
   ) {
-    if (!citationKey?.trim()) return null;
-    const client = this.getClient(tx);
-    const scopeWhere: Prisma.ItemWhereInput =
-      projectId && isUuid(projectId)
-        ? { projectId, deletedAt: null }
-        : { userId, projectId: null, deletedAt: null };
-
-    return client.item.findFirst({
-      where: {
-        citationKey: { equals: citationKey.trim(), mode: 'insensitive' },
-        ...scopeWhere,
-      },
-      include: {
-        contributors: { orderBy: { orderIndex: 'asc' } },
-        itemTags: { include: { tag: true } },
-        collectionItems: { include: { collection: true } },
-        attachments: { include: { revisions: true } },
-        notesList: { where: { deletedAt: null } },
-      },
-    });
+    return this.matchRepo.findByCitationKey(
+      this.getClient(tx),
+      userId,
+      citationKey,
+      projectId,
+    );
   }
 
   async findByCitationKeys(
@@ -1544,29 +699,12 @@ export class QueryRepository {
     projectId?: string,
     tx?: Prisma.TransactionClient,
   ) {
-    const cleanKeys = (citationKeys || [])
-      .map((k) => k?.trim())
-      .filter((k): k is string => Boolean(k));
-    if (cleanKeys.length === 0) return [];
-    const client = this.getClient(tx);
-    const scopeWhere: Prisma.ItemWhereInput =
-      projectId && isUuid(projectId)
-        ? { projectId, deletedAt: null }
-        : { userId, projectId: null, deletedAt: null };
-
-    return client.item.findMany({
-      where: {
-        citationKey: { in: cleanKeys, mode: 'insensitive' },
-        ...scopeWhere,
-      },
-      include: {
-        contributors: { orderBy: { orderIndex: 'asc' } },
-        itemTags: { include: { tag: true } },
-        collectionItems: { include: { collection: true } },
-        attachments: { include: { revisions: true } },
-        notesList: { where: { deletedAt: null } },
-      },
-    });
+    return this.matchRepo.findByCitationKeys(
+      this.getClient(tx),
+      userId,
+      citationKeys,
+      projectId,
+    );
   }
 
   async findMatchCandidates(
@@ -1580,197 +718,11 @@ export class QueryRepository {
       titlePrefix?: string;
     },
     tx?: Prisma.TransactionClient,
-  ): Promise<{
-    exactMatch?: {
-      id: string;
-      title: string;
-      matchReason: 'DOI_EXACT' | 'ARXIV_EXACT' | 'PMID_EXACT' | 'ISBN_EXACT';
-      evidence: Record<string, unknown>;
-    } | null;
-    candidateItems: Array<{
-      id: string;
-      title: string;
-      doi: string | null;
-      year: number | null;
-      citationKey: string | null;
-      authors: string[];
-    }>;
-  }> {
-    let scopeWhere: Prisma.ItemWhereInput | null = null;
-    if (typeof scope === 'object' && scope !== null) {
-      if (scope.projectId && isUuid(scope.projectId)) {
-        scopeWhere = { projectId: scope.projectId, deletedAt: null };
-      } else if (scope.userId && isUuid(scope.userId)) {
-        scopeWhere = { userId: scope.userId, projectId: null, deletedAt: null };
-      }
-    } else if (typeof scope === 'string' && isUuid(scope)) {
-      scopeWhere = {
-        deletedAt: null,
-        OR: [{ projectId: scope }, { userId: scope }],
-      };
-    }
-
-    if (!scopeWhere) {
-      return { exactMatch: null, candidateItems: [] };
-    }
-
-    const client = this.getClient(tx);
-
-    // 1–4. Exact identifier match (DOI, arXiv ID, PMID, ISBN) in a single query
-    const cleanDoi = criteria.doi?.trim()
-      ? criteria.doi.trim().toLowerCase()
-      : '';
-    const cleanArxiv = criteria.arxivId?.trim() ? criteria.arxivId.trim() : '';
-    const baseArxiv = cleanArxiv ? cleanArxiv.replace(/v\d+$/i, '') : '';
-    const cleanPmid = criteria.pmid?.trim() ? criteria.pmid.trim() : '';
-    const cleanIsbn = criteria.isbn?.trim()
-      ? criteria.isbn.replace(/[-\s]/g, '').trim()
-      : '';
-
-    const exactOrConditions: Prisma.ItemWhereInput[] = [];
-    if (cleanDoi) {
-      exactOrConditions.push({
-        doi: { equals: cleanDoi, mode: 'insensitive' },
-      });
-    }
-    if (cleanArxiv) {
-      exactOrConditions.push(
-        { metadata: { path: ['arxivId'], equals: cleanArxiv } },
-        { metadata: { path: ['arxivId'], equals: baseArxiv } },
-      );
-    }
-    if (cleanPmid) {
-      exactOrConditions.push({
-        metadata: { path: ['pmid'], equals: cleanPmid },
-      });
-    }
-    if (cleanIsbn) {
-      exactOrConditions.push({
-        metadata: { path: ['isbn'], equals: cleanIsbn },
-      });
-    }
-
-    if (exactOrConditions.length > 0) {
-      const match = await client.item.findFirst({
-        where: {
-          ...scopeWhere,
-          OR: exactOrConditions,
-        },
-        select: { id: true, title: true, doi: true, metadata: true },
-      });
-      if (match) {
-        const meta =
-          match.metadata &&
-          typeof match.metadata === 'object' &&
-          !Array.isArray(match.metadata)
-            ? (match.metadata as Record<string, unknown>)
-            : {};
-        if (
-          cleanDoi &&
-          (!match.doi || match.doi.trim().toLowerCase() === cleanDoi)
-        ) {
-          return {
-            exactMatch: {
-              id: match.id,
-              title: match.title,
-              matchReason: 'DOI_EXACT',
-              evidence: { doi: cleanDoi },
-            },
-            candidateItems: [],
-          };
-        }
-        if (
-          cleanArxiv &&
-          (!meta.arxivId ||
-            meta.arxivId === cleanArxiv ||
-            meta.arxivId === baseArxiv)
-        ) {
-          return {
-            exactMatch: {
-              id: match.id,
-              title: match.title,
-              matchReason: 'ARXIV_EXACT',
-              evidence: { arxivId: cleanArxiv },
-            },
-            candidateItems: [],
-          };
-        }
-        if (cleanPmid && (!meta.pmid || meta.pmid === cleanPmid)) {
-          return {
-            exactMatch: {
-              id: match.id,
-              title: match.title,
-              matchReason: 'PMID_EXACT',
-              evidence: { pmid: cleanPmid },
-            },
-            candidateItems: [],
-          };
-        }
-        if (cleanIsbn) {
-          return {
-            exactMatch: {
-              id: match.id,
-              title: match.title,
-              matchReason: 'ISBN_EXACT',
-              evidence: { isbn: cleanIsbn },
-            },
-            candidateItems: [],
-          };
-        }
-      }
-    }
-
-    // 5. Title candidate filter
-    const words = (criteria.titleWords || [])
-      .filter((w) => w.length >= 3)
-      .slice(0, 3);
-    let titleCondition: Prisma.ItemWhereInput | null = null;
-    if (words.length > 0) {
-      titleCondition = {
-        OR: words.map((w) => ({ title: { contains: w, mode: 'insensitive' } })),
-      };
-    } else if (criteria.titlePrefix && criteria.titlePrefix.length > 3) {
-      titleCondition = {
-        title: {
-          contains: criteria.titlePrefix.substring(0, 10),
-          mode: 'insensitive',
-        },
-      };
-    }
-
-    if (!titleCondition) {
-      return { exactMatch: null, candidateItems: [] };
-    }
-
-    const items = await client.item.findMany({
-      where: {
-        ...scopeWhere,
-        ...titleCondition,
-      },
-      select: {
-        id: true,
-        title: true,
-        doi: true,
-        year: true,
-        citationKey: true,
-        contributors: {
-          select: { fullName: true },
-          orderBy: { orderIndex: 'asc' },
-        },
-      },
-      take: 200,
-    });
-
-    return {
-      exactMatch: null,
-      candidateItems: items.map((it) => ({
-        id: it.id,
-        title: it.title,
-        doi: it.doi,
-        year: it.year,
-        citationKey: it.citationKey,
-        authors: it.contributors.map((c) => c.fullName),
-      })),
-    };
+  ): Promise<MatchCandidateResult> {
+    return this.matchRepo.findMatchCandidates(
+      this.getClient(tx),
+      scope,
+      criteria,
+    );
   }
 }

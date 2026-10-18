@@ -117,17 +117,6 @@ export class CollectionsRepository {
   }
 
   /**
-   * Alias for findTree / findAll.
-   */
-  async findTree(
-    userId: string,
-    projectIdOrTx?: string | Prisma.TransactionClient,
-    tx?: Prisma.TransactionClient,
-  ) {
-    return this.findAll(userId, projectIdOrTx, tx);
-  }
-
-  /**
    * Creates a new collection with version 1.
    */
   async create(

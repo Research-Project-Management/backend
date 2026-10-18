@@ -23,7 +23,7 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import {
   CreateAttachmentDto,
   RenameAttachmentDto,
@@ -419,7 +419,7 @@ export class AttachmentController extends BaseAttachmentController {
 @ApiTags('Library Attachments - Project Lifecycle')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/projects/:projectId/library')
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ProjectAttachmentController extends BaseAttachmentController {
   constructor(
     attachmentsService: AttachmentsService,

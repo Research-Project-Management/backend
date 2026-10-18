@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import path from 'path';
 import fs from 'fs';
 import { createScheduler, createWorker, Scheduler, Worker } from 'tesseract.js';
@@ -8,6 +8,11 @@ import {
   OcrWord,
   OcrWorkerPoolOptions,
 } from '@/modules/library/extraction/types/ocr.types';
+import {
+  SubsystemUnavailableException,
+  LibraryConfigService,
+  libraryConfig,
+} from '@/modules/library/core';
 
 export interface RawOcrRecognitionResult {
   text: string;
@@ -24,13 +29,19 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
   private initPromise?: Promise<void>;
   private isDestroyed = false;
 
+  constructor(
+    @Optional() private readonly configService?: LibraryConfigService,
+  ) {}
+
   get concurrency(): number {
-    const parsed = Number.parseInt(process.env.PDF_OCR_CONCURRENCY || '2', 10);
+    const parsed =
+      this.configService?.ocr.concurrency ?? libraryConfig().ocr.concurrency;
     return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 4) : 2;
   }
 
   get defaultLanguages(): string[] {
-    const envLangs = process.env.PDF_OCR_LANGUAGES;
+    const envLangs =
+      this.configService?.ocr.languages ?? libraryConfig().ocr.languages;
     if (envLangs) {
       return envLangs
         .split(',')
@@ -41,8 +52,11 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
   }
 
   get defaultLangPath(): string {
-    if (process.env.TESSERACT_LANG_PATH) {
-      return process.env.TESSERACT_LANG_PATH;
+    const customPath =
+      this.configService?.ocr.tesseractLangPath ??
+      libraryConfig().ocr.tesseractLangPath;
+    if (customPath) {
+      return customPath;
     }
     const localTessdata = path.resolve(process.cwd(), 'tessdata');
     if (fs.existsSync(localTessdata)) {
@@ -60,7 +74,10 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
 
   async ensureInitialized(options: OcrWorkerPoolOptions = {}): Promise<void> {
     if (this.isDestroyed) {
-      throw new Error('OcrWorkerPoolService has been destroyed');
+      throw new SubsystemUnavailableException(
+        'OcrWorkerPoolService has been destroyed',
+        { subsystem: 'OcrWorkerPoolService' },
+      );
     }
 
     if (this.scheduler && this.workers.length > 0) {
@@ -130,7 +147,10 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
     await this.ensureInitialized();
 
     if (!this.scheduler) {
-      throw new Error('Tesseract Scheduler is not initialized');
+      throw new SubsystemUnavailableException(
+        'Tesseract Scheduler is not initialized',
+        { subsystem: 'OcrWorkerPoolService' },
+      );
     }
 
     const jobPromise = this.scheduler.addJob(
@@ -151,7 +171,7 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
           ),
         );
       }, timeoutMs);
-      jobPromise.finally(() => clearTimeout(timer));
+      void jobPromise.finally(() => clearTimeout(timer));
     });
 
     let result:

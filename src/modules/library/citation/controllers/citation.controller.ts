@@ -17,7 +17,7 @@ import {
 } from '@/modules/library/citation/dto/citation.dto';
 import { normalizeCitationStyleId } from '@/modules/library/citation/domain/citation.domain';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ProjectRoleGuard } from '@/modules/project/access';
+import { ProjectAccessGuard } from '@/modules/project/access';
 
 @ApiTags('Library Citation')
 @ApiBearerAuth()
@@ -29,7 +29,7 @@ import { ProjectRoleGuard } from '@/modules/project/access';
   'api/library/citation',
   'api/library/references',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class CitationController {
   constructor(private readonly citationService: CitationService) {}
 

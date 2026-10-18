@@ -383,7 +383,7 @@ export class MetadataReconciliationService {
         const values = Array.from(
           new Set(
             fieldVariants.flatMap((variant) =>
-              Array.isArray(variant.val) ? variant.val : [],
+              Array.isArray(variant.val) ? (variant.val as string[]) : [],
             ),
           ),
         );
@@ -401,21 +401,22 @@ export class MetadataReconciliationService {
 
       if (field === 'notes') {
         const values = fieldVariants.flatMap((variant) =>
-          Array.isArray(variant.val) ? variant.val : [],
+          Array.isArray(variant.val) ? (variant.val as unknown[]) : [],
         );
         const seen = new Set<string>();
         const unique: unknown[] = [];
         for (const value of values) {
+          const noteRec =
+            value && typeof value === 'object'
+              ? (value as Record<string, unknown>)
+              : null;
+          const rawNoteText =
+            noteRec?.content ?? noteRec?.contentMd ?? noteRec?.note;
           const text =
             typeof value === 'string'
               ? value.trim()
-              : value && typeof value === 'object'
-                ? String(
-                    (value as Record<string, unknown>).content ??
-                      (value as Record<string, unknown>).contentMd ??
-                      (value as Record<string, unknown>).note ??
-                      '',
-                  ).trim()
+              : typeof rawNoteText === 'string'
+                ? rawNoteText.trim()
                 : '';
           const key = text ? text.toLowerCase() : JSON.stringify(value);
           if (key && !seen.has(key)) {
@@ -520,7 +521,7 @@ export class MetadataReconciliationService {
 
   private cloneValue(val: unknown): unknown {
     if (Array.isArray(val)) {
-      return [...val];
+      return [...(val as unknown[])];
     }
     if (val !== null && typeof val === 'object') {
       return { ...val };

@@ -8,9 +8,17 @@ import { CitationController } from './controllers/citation.controller';
 import { ExportsController } from './controllers/exports.controller';
 
 // Services
-import { CitationService } from './services/citation.service';
+import {
+  CitationService,
+  AcademicQueryResolverService,
+} from './services/citation.service';
 import { DoiContentNegotiationService } from './services/doi-content-negotiation.service';
-import { CslEngineService } from './services/csl-engine.service';
+import {
+  CslEngineService,
+  CslLocaleLoaderService,
+  CslStyleFormatterService,
+} from './services/csl-engine.service';
+import { TcvnCitationFormatterService } from './services/tcvn-citation-formatter.service';
 import { CslRepositoryService } from './services/csl-repository.service';
 import { ExportsService } from './services/exports.service';
 import { PdfBakerService } from './services/pdf-baker.service';
@@ -41,8 +49,12 @@ import { CslStyleRegistry } from './domain/csl-style-registry';
     },
     CslRepositoryService,
     CitationService,
+    AcademicQueryResolverService,
     DoiContentNegotiationService,
     CslEngineService,
+    CslLocaleLoaderService,
+    CslStyleFormatterService,
+    TcvnCitationFormatterService,
     CslStyleRegistry,
     ExportsService,
     ExportsRepository,
@@ -53,6 +65,11 @@ import { CslStyleRegistry } from './domain/csl-style-registry';
     CITATION_FACADE,
     CslRepositoryService,
     CitationService,
+    AcademicQueryResolverService,
+    CslEngineService,
+    CslLocaleLoaderService,
+    CslStyleFormatterService,
+    TcvnCitationFormatterService,
     ExportsService,
   ],
 })

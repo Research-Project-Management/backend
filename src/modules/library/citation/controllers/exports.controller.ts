@@ -14,7 +14,7 @@ import {
   ExportFormatType,
 } from '@/modules/library/citation/dto/exports.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Library Exports')
 @ApiBearerAuth()
@@ -22,7 +22,7 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
   'api/v1/library/exports',
   'api/v1/projects/:projectId/library/exports',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ExportsController {
   constructor(private readonly exportsService: ExportsService) {}
 

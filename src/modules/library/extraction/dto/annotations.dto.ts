@@ -27,8 +27,8 @@ const COLOR_MSG = 'color must be a valid hex color (e.g. #ffd400 or #fff)';
 export class CreateAnnotationDto {
   @IsEnum(AnnotationType)
   @IsOptional()
-  @Transform(({ value }) => {
-    if (typeof value !== 'string') return value;
+  @Transform(({ value }: { value: unknown }) => {
+    if (typeof value !== 'string') return value as AnnotationType | undefined;
     const lower = value.toLowerCase();
     if (lower === 'box' || lower === 'area') return AnnotationType.rect;
     if (lower === 'strikethrough') return AnnotationType.strike;
@@ -128,8 +128,8 @@ export class UpsertAnnotationItemDto {
 
   @IsEnum(AnnotationType)
   @IsOptional()
-  @Transform(({ value }) => {
-    if (typeof value !== 'string') return value;
+  @Transform(({ value }: { value: unknown }) => {
+    if (typeof value !== 'string') return value as AnnotationType | undefined;
     const lower = value.toLowerCase();
     if (lower === 'box' || lower === 'area') return AnnotationType.rect;
     if (lower === 'strikethrough') return AnnotationType.strike;

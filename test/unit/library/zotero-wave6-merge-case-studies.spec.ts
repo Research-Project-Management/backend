@@ -96,7 +96,6 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
       const catalogFacade = new CatalogFacade(
         {} as unknown as ItemQueryService,
         {} as unknown as ItemService,
-        {} as unknown as ConstructorParameters<typeof CatalogFacade>[2],
         mockCollectionsService,
         mockTagsService,
         {} as unknown as TypesService,

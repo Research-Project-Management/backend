@@ -2,8 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, TagType } from '@prisma/client';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { resolveOrCreateTags } from '@/modules/library/catalog/domain/command-payload.builder';
+import { resolveOrCreateTags } from '@/modules/library/catalog';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
+import { EntityNotFoundException } from '@/modules/library/core';
 
 @Injectable()
 export class ExtractionRepository {
@@ -268,7 +269,9 @@ export class ExtractionRepository {
     });
 
     if (!attachment) {
-      throw new Error(`Attachment ${params.attachmentId} not found`);
+      throw new EntityNotFoundException('Attachment not found', {
+        attachmentId: params.attachmentId,
+      });
     }
 
     let latestRevisionNumber = attachment.revisions?.[0]?.revisionNumber ?? 0;

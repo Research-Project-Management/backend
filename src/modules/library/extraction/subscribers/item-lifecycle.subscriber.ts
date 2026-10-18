@@ -1,4 +1,4 @@
-﻿import {
+import {
   Injectable,
   Logger,
   OnModuleInit,
@@ -54,9 +54,7 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
   }
 
   @OnEvent('library.item.purged', { async: true })
-  async handleItemPurged(
-    event: { id?: string; payload?: { id?: string } } | unknown,
-  ): Promise<void> {
+  async handleItemPurged(event: unknown): Promise<void> {
     const payload = event as
       { id?: string; payload?: { id?: string } } | null | undefined;
     const itemId = payload?.id || payload?.payload?.id;

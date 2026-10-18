@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   RetractionDetails,
   RetractionLookupResult,
@@ -8,26 +8,19 @@ import {
   getAcademicContactEmail,
   getAcademicUserAgent,
 } from '@/modules/library/core/constants/academic-client.constants';
-import { normalizeDoi, normalizePmid } from '@/modules/library/core';
+import {
+  normalizeDoi,
+  normalizePmid,
+  AcademicHttpClient,
+} from '@/modules/library/core';
 
 @Injectable()
 export class RetractionScannerProvider {
   private readonly logger = new Logger(RetractionScannerProvider.name);
-  constructor(private readonly retractionDb: RetractionDatabaseService) {}
-
-  /**
-   * Compatibility wrapper: returns retraction details, or null when the item is
-   * not (known to be) retracted. Use `lookup()` when the caller must tell
-   * "verified clean" apart from "could not be verified".
-   */
-  async scan(
-    doi?: string | null,
-    pmid?: string | null,
-    _title?: string | null,
-  ): Promise<RetractionDetails | null> {
-    const result = await this.lookup(doi, pmid);
-    return result.status === 'retracted' ? result.details : null;
-  }
+  constructor(
+    private readonly retractionDb: RetractionDatabaseService,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
+  ) {}
 
   /**
    * Looks a paper up by DOI and/or PMID only (same matching keys as Zotero).
@@ -108,13 +101,22 @@ export class RetractionScannerProvider {
 
       if (openalexTarget) {
         const oaUrl = `https://api.openalex.org/works/${encodeURIComponent(openalexTarget)}?mailto=${encodeURIComponent(mailto)}`;
-        const oaRes = await fetch(oaUrl, {
-          signal: AbortSignal.timeout(3500),
-          headers: {
-            'User-Agent': getAcademicUserAgent('RetractionScanner'),
-            Accept: 'application/json',
-          },
-        });
+        const oaHeaders = {
+          'User-Agent': getAcademicUserAgent('RetractionScanner'),
+          Accept: 'application/json',
+        };
+        const oaSignal = AbortSignal.timeout(3500);
+        const oaRes = this.httpClient
+          ? (
+              await this.httpClient.request(oaUrl, {
+                headers: oaHeaders,
+                signal: oaSignal,
+              })
+            ).response
+          : await fetch(oaUrl, {
+              signal: oaSignal,
+              headers: oaHeaders,
+            });
 
         if (oaRes.ok) {
           const oaData = (await oaRes.json()) as {
@@ -152,13 +154,22 @@ export class RetractionScannerProvider {
     if (doi) {
       try {
         const crUrl = `https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=${encodeURIComponent(mailto)}`;
-        const crRes = await fetch(crUrl, {
-          signal: AbortSignal.timeout(3500),
-          headers: {
-            'User-Agent': getAcademicUserAgent('RetractionScanner'),
-            Accept: 'application/json',
-          },
-        });
+        const crHeaders = {
+          'User-Agent': getAcademicUserAgent('RetractionScanner'),
+          Accept: 'application/json',
+        };
+        const crSignal = AbortSignal.timeout(3500);
+        const crRes = this.httpClient
+          ? (
+              await this.httpClient.request(crUrl, {
+                headers: crHeaders,
+                signal: crSignal,
+              })
+            ).response
+          : await fetch(crUrl, {
+              signal: crSignal,
+              headers: crHeaders,
+            });
 
         if (crRes.ok) {
           const crData = (await crRes.json()) as {

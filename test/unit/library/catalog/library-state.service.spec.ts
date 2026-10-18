@@ -14,10 +14,7 @@ import {
   shouldAutoAdvanceToReading,
   toStateResponse,
 } from '@/modules/library/catalog/domain/state.domain';
-import {
-  TransactionService,
-  TransactionHelpers,
-} from '@/modules/library/core';
+import { TransactionService, TransactionHelpers } from '@/modules/library/core';
 import { ITEM_EXISTENCE_PORT } from '@/modules/library/catalog/types/items.types';
 import { PrismaService } from '@/core';
 

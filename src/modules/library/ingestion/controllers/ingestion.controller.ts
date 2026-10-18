@@ -27,7 +27,7 @@ import {
 } from '@/modules/library/ingestion/dto/capture-url.dto';
 import { ReResolveMetadataDto } from '@/modules/library/ingestion/dto/curation.dto';
 import { isUUID } from 'class-validator';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
 import {
@@ -450,7 +450,7 @@ export class IngestionController extends BaseIngestionController {
 @ApiTags('Library Ingestion - Project Pipeline')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/projects/:projectId/library/ingestion')
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ProjectIngestionController extends BaseIngestionController {
   constructor(
     ingestionService: IngestionService,

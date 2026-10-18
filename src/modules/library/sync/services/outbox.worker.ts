@@ -8,14 +8,22 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { PrismaService } from '@/core';
 import { OutboxMetrics } from './outbox.metrics';
-import { OutboxStatus, OutboxEvent, Prisma } from '@prisma/client';
+import { OutboxStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import {
   LIBRARY_OUTBOX_QUEUE,
   LIBRARY_OUTBOX_JOB,
 } from '@/modules/library/sync/types/outbox.constants';
+import {
+  OutboxRepository,
+  ClaimedOutboxEvent,
+} from '../repositories/outbox.repository';
+import {
+  libraryConfig,
+  LibraryConfigService,
+} from '@/modules/library/core/config/library.config';
+import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
 
 import { OutboxDispatchHandler } from '@/modules/library/core';
 export type { OutboxDispatchHandler };
@@ -29,20 +37,30 @@ export class OutboxWorker
   private defaultHandler?: OutboxDispatchHandler;
   private readonly maxRetries = 5;
   private readonly workerId: string;
+  private readonly repo: OutboxRepository;
 
   private pollTimer: NodeJS.Timeout | null = null;
   private isProcessing = false;
   private isShuttingDown = false;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Optional() private readonly outboxRepo?: OutboxRepository,
     @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly libraryConfigService?: LibraryConfigService,
     @Optional() private readonly metricsService?: OutboxMetrics,
     @Optional()
     @InjectQueue(LIBRARY_OUTBOX_QUEUE)
     private readonly bullQueue?: Queue,
   ) {
     this.workerId = `outbox-worker-${process.pid}-${randomUUID().slice(0, 8)}`;
+    if (!this.outboxRepo) {
+      throw new SubsystemUnavailableException(
+        'OutboxWorker requires OutboxRepository',
+        { worker: 'SyncOutbox' },
+      );
+    }
+    this.repo = this.outboxRepo;
+
     if (typeof this.bullQueue?.on === 'function') {
       this.bullQueue.on('error', (err: Error) => {
         const message = err instanceof Error ? err.message : String(err);
@@ -91,27 +109,15 @@ export class OutboxWorker
             opts: jobOpts,
           })),
         )
-        .catch((err) => {
+        .catch((err: unknown) => {
           this.logger.warn(
-            `Failed to bulk-enqueue ${eventIds.length} outbox event(s) to BullMQ: ${err?.message}. Falling back to direct dispatch.`,
+            `Failed to bulk-enqueue ${eventIds.length} outbox event(s) to BullMQ: ${err instanceof Error ? err.message : String(err)}. Falling back to direct dispatch.`,
           );
           for (const eventId of eventIds) {
             void this.processEventById(eventId);
           }
         });
-    } else if (this.bullQueue && typeof this.bullQueue.add === 'function') {
-      for (const eventId of eventIds) {
-        await this.bullQueue
-          .add(LIBRARY_OUTBOX_JOB, { eventId }, jobOpts)
-          .catch((err) => {
-            this.logger.warn(
-              `Failed to enqueue outbox event ${eventId} to BullMQ: ${err?.message}. Falling back to direct dispatch.`,
-            );
-            void this.processEventById(eventId);
-          });
-      }
     } else {
-      // In-memory or test environment fallback
       for (const eventId of eventIds) {
         void this.processEventById(eventId);
       }
@@ -123,34 +129,23 @@ export class OutboxWorker
    * Idempotent: safe to run from BullMQ or in-memory runner.
    */
   async processEventById(eventId: string): Promise<boolean> {
-    const event = await this.prisma.outboxEvent.findUnique({
-      where: { id: eventId },
-    });
+    const event = await this.repo.findById(eventId);
 
     if (!event || event.status === OutboxStatus.PUBLISHED) {
       return true;
     }
 
-    // Atomic CAS claim: only move if PENDING or FAILED
     const leaseMs =
-      Number(
-        this.configService?.get('OUTBOX_LEASE_MS') ||
-          process.env.OUTBOX_LEASE_MS,
-      ) || 60000;
-    const claimResult = await this.prisma.outboxEvent.updateMany({
-      where: {
-        id: eventId,
-        status: { in: [OutboxStatus.PENDING, OutboxStatus.FAILED] },
-      },
-      data: {
-        status: OutboxStatus.PROCESSING,
-        claimedAt: new Date(),
-        leaseExpiresAt: new Date(Date.now() + leaseMs),
-        claimedBy: this.workerId,
-      },
-    });
+      this.libraryConfigService?.outbox.lockTtlMs ??
+      (Number(this.configService?.get('OUTBOX_LEASE_MS')) ||
+        libraryConfig().outbox.lockTtlMs);
 
-    if (claimResult.count === 0) {
+    const claimed = await this.repo.claimSingleEvent(
+      eventId,
+      this.workerId,
+      leaseMs,
+    );
+    if (!claimed) {
       return true;
     }
 
@@ -158,16 +153,12 @@ export class OutboxWorker
     if (!handler) {
       const newRetryCount = event.retryCount + 1;
       const isMax = newRetryCount >= this.maxRetries;
-      await this.prisma.outboxEvent.updateMany({
-        where: { id: eventId, status: OutboxStatus.PROCESSING },
-        data: {
-          status: isMax ? OutboxStatus.FAILED : OutboxStatus.PENDING,
-          retryCount: newRetryCount,
-          error: `No handler registered for event type "${event.eventType}"`,
-          claimedAt: null,
-          claimedBy: null,
-        },
-      });
+      await this.repo.markMissingHandler(
+        eventId,
+        newRetryCount,
+        isMax,
+        event.eventType,
+      );
       return false;
     }
 
@@ -176,16 +167,7 @@ export class OutboxWorker
       await handler.handle(event);
       const durationMs = Math.round(performance.now() - start);
 
-      await this.prisma.outboxEvent.updateMany({
-        where: { id: eventId, status: OutboxStatus.PROCESSING },
-        data: {
-          status: OutboxStatus.PUBLISHED,
-          processedAt: new Date(),
-          claimedAt: null,
-          claimedBy: null,
-          error: null,
-        },
-      });
+      await this.repo.markPublished(eventId, this.workerId);
 
       this.metricsService?.recordOutboxDispatch(durationMs, true);
       this.metricsService?.incrementCounter('outbox_dispatched_total');
@@ -200,16 +182,7 @@ export class OutboxWorker
         `[OutboxWorker] Event ${eventId} (${event.eventType}) failed (attempt ${newRetryCount}/${this.maxRetries}): ${errMsg}`,
       );
 
-      await this.prisma.outboxEvent.updateMany({
-        where: { id: eventId, status: OutboxStatus.PROCESSING },
-        data: {
-          status: isMax ? OutboxStatus.FAILED : OutboxStatus.PENDING,
-          retryCount: newRetryCount,
-          error: errMsg,
-          claimedAt: null,
-          claimedBy: null,
-        },
-      });
+      await this.repo.markFailed(eventId, newRetryCount, isMax, errMsg);
 
       this.metricsService?.recordOutboxDispatch(durationMs, false);
       this.metricsService?.incrementCounter('outbox_retry_total');
@@ -221,13 +194,15 @@ export class OutboxWorker
   }
 
   onApplicationBootstrap() {
-    const isTestEnv = process.env.NODE_ENV === 'test';
+    const isTestEnv =
+      this.libraryConfigService?.app.isTest ?? libraryConfig().app.isTest;
     const configEnabled = this.configService?.get<string>(
       'OUTBOX_WORKER_ENABLED',
     );
-    const envEnabled = process.env.OUTBOX_WORKER_ENABLED;
+    const envEnabled =
+      this.libraryConfigService?.outbox.workerEnabled ??
+      libraryConfig().outbox.workerEnabled;
 
-    // Do not run background polling loop in test environment unless explicitly enabled
     const isEnabled =
       configEnabled !== undefined
         ? configEnabled === 'true'
@@ -237,10 +212,9 @@ export class OutboxWorker
 
     if (isEnabled) {
       const intervalMs =
-        Number(
-          this.configService?.get('OUTBOX_POLL_INTERVAL_MS') ||
-            process.env.OUTBOX_POLL_INTERVAL_MS,
-        ) || (this.bullQueue ? 60000 : 10000);
+        this.libraryConfigService?.outbox.pollIntervalMs ??
+        (Number(this.configService?.get('OUTBOX_POLL_INTERVAL_MS')) ||
+          (this.bullQueue ? 60000 : libraryConfig().outbox.pollIntervalMs));
 
       this.logger.log(
         `Starting runtime Outbox consumer [${this.workerId}] (interval=${intervalMs}ms)...`,
@@ -249,7 +223,7 @@ export class OutboxWorker
       this.startPolling(intervalMs);
     } else {
       this.logger.log(
-        `Outbox consumer runner is disabled (NODE_ENV=${process.env.NODE_ENV || 'development'}).`,
+        `Outbox consumer runner is disabled (NODE_ENV=${this.libraryConfigService?.app.nodeEnv ?? libraryConfig().app.nodeEnv}).`,
       );
     }
   }
@@ -277,9 +251,6 @@ export class OutboxWorker
     }
   }
 
-  /**
-   * Diagnostic summary of registered handlers, pending queue depths, and oldest pending item age.
-   */
   async getDiagnosticSummary(): Promise<{
     workerId: string;
     registeredHandlers: string[];
@@ -295,88 +266,21 @@ export class OutboxWorker
     let oldestPendingAgeSeconds = 0;
     const unhandledSet = new Set<string>();
 
-    if (
-      typeof this.prisma.outboxEvent.groupBy === 'function' &&
-      typeof this.prisma.outboxEvent.findFirst === 'function'
-    ) {
-      const [groupedPending, oldestPending, processingCount] =
-        await Promise.all([
-          this.prisma.outboxEvent.groupBy({
-            by: ['eventType'],
-            where: { status: OutboxStatus.PENDING },
-            _count: { _all: true },
-          }),
-          this.prisma.outboxEvent.findFirst({
-            where: { status: OutboxStatus.PENDING },
-            select: { createdAt: true },
-            orderBy: { createdAt: 'asc' },
-          }),
-          this.prisma.outboxEvent.count({
-            where: { status: OutboxStatus.PROCESSING },
-          }),
-        ]);
+    const { groupedPending, oldestPendingCreatedAt, processingCount } =
+      await this.repo.getDiagnosticData();
 
-      if (oldestPending?.createdAt) {
-        oldestPendingAgeSeconds = Math.max(
-          0,
-          Math.floor(
-            (now.getTime() - oldestPending.createdAt.getTime()) / 1000,
-          ),
-        );
-      }
-
-      for (const group of groupedPending) {
-        const count = group._count._all;
-        pendingCountsByType[group.eventType] = count;
-        totalPending += count;
-        if (!this.handlers.has(group.eventType)) {
-          unhandledSet.add(group.eventType);
-        }
-      }
-
-      this.metricsService?.setGauge('outbox_pending_total', totalPending);
-      this.metricsService?.setGauge('outbox_processing_total', processingCount);
-      this.metricsService?.setGauge(
-        'outbox_oldest_pending_age_seconds',
-        oldestPendingAgeSeconds,
-      );
-
-      return {
-        workerId: this.workerId,
-        registeredHandlers: Array.from(this.handlers.keys()),
-        pendingCountsByType,
-        totalPending,
-        totalProcessing: processingCount,
-        oldestPendingAgeSeconds,
-        unhandledEventTypes: Array.from(unhandledSet),
-      };
-    }
-
-    const [pendingEvents, processingCount] = await Promise.all([
-      this.prisma.outboxEvent.findMany({
-        where: { status: OutboxStatus.PENDING },
-        select: { eventType: true, createdAt: true },
-        orderBy: { createdAt: 'asc' },
-      }),
-      this.prisma.outboxEvent.count({
-        where: { status: OutboxStatus.PROCESSING },
-      }),
-    ]);
-
-    totalPending = pendingEvents.length;
-    if (pendingEvents.length > 0) {
-      const oldest = pendingEvents[0].createdAt;
+    if (oldestPendingCreatedAt) {
       oldestPendingAgeSeconds = Math.max(
         0,
-        Math.floor((now.getTime() - oldest.getTime()) / 1000),
+        Math.floor((now.getTime() - oldestPendingCreatedAt.getTime()) / 1000),
       );
     }
 
-    for (const evt of pendingEvents) {
-      pendingCountsByType[evt.eventType] =
-        (pendingCountsByType[evt.eventType] || 0) + 1;
-      if (!this.handlers.has(evt.eventType)) {
-        unhandledSet.add(evt.eventType);
+    for (const group of groupedPending) {
+      pendingCountsByType[group.eventType] = group.count;
+      totalPending += group.count;
+      if (!this.handlers.has(group.eventType)) {
+        unhandledSet.add(group.eventType);
       }
     }
 
@@ -398,16 +302,14 @@ export class OutboxWorker
     };
   }
 
-  startPolling(intervalMs: number) {
-    if (this.pollTimer) return;
-
+  startPolling(intervalMs: number = 2000) {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+    }
     this.pollTimer = setInterval(() => {
-      void this.runPollCycle();
+      void this.pollAndProcess();
     }, intervalMs);
     this.pollTimer.unref();
-
-    // Initial immediate cycle
-    void this.runPollCycle();
   }
 
   stopPolling() {
@@ -417,233 +319,36 @@ export class OutboxWorker
     }
   }
 
-  async runPollCycle(): Promise<void> {
-    if (this.isProcessing || this.isShuttingDown) {
-      return;
-    }
-
+  private async pollAndProcess(): Promise<void> {
+    if (this.isProcessing || this.isShuttingDown) return;
     this.isProcessing = true;
-    const start = performance.now();
 
     try {
       const batchSize =
-        Number(
-          this.configService?.get('OUTBOX_BATCH_SIZE') ||
-            process.env.OUTBOX_BATCH_SIZE,
-        ) || 50;
+        this.libraryConfigService?.outbox.batchSize ??
+        (Number(this.configService?.get('OUTBOX_BATCH_SIZE')) ||
+          libraryConfig().outbox.batchSize);
       const leaseMs =
-        Number(
-          this.configService?.get('OUTBOX_LEASE_MS') ||
-            process.env.OUTBOX_LEASE_MS,
-        ) || 60000;
+        this.libraryConfigService?.outbox.lockTtlMs ??
+        (Number(this.configService?.get('OUTBOX_LEASE_MS')) ||
+          libraryConfig().outbox.lockTtlMs);
 
-      const result = await this.processPendingEvents(batchSize, leaseMs);
-      const durationMs = Math.round(performance.now() - start);
-
-      if (
-        result.processed > 0 ||
-        result.failed > 0 ||
-        result.deadLettered > 0
-      ) {
-        this.logger.log(
-          `[OutboxCycle] processed=${result.processed} failed=${result.failed} deadLettered=${result.deadLettered} reclaimed=${result.reclaimed} (${durationMs}ms)`,
-        );
-      }
-
-      this.metricsService?.recordOutboxDispatch(durationMs, true);
+      await this.processPendingEvents(batchSize, leaseMs);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.error(
-        `[OutboxCycle] Worker cycle encountered error: ${errMsg}`,
-      );
-      this.metricsService?.recordOutboxDispatch(
-        Math.round(performance.now() - start),
-        false,
-      );
+      this.logger.error(`Error during outbox polling run: ${errMsg}`);
     } finally {
       this.isProcessing = false;
     }
   }
 
-  /**
-   * Claims up to `batchSize` pending or expired-lease outbox events atomically.
-   * In PostgreSQL (production/integration), uses `SELECT ... FOR UPDATE SKIP LOCKED`
-   * with `UPDATE ... FROM ... RETURNING` in a single round-trip.
-   * If `$queryRaw` is not available (such as in unit tests mocking `outboxEvent`),
-   * falls back to the optimistic `findMany` + `updateMany` loop.
-   */
   async claimBatch(
     batchSize: number = 50,
     leaseMs: number = 60000,
-  ): Promise<Array<{ event: OutboxEvent; isLeaseRecovery: boolean }>> {
-    const now = new Date();
-    const newLeaseExpiresAt = new Date(Date.now() + leaseMs);
-
-    // 1. Production PostgreSQL path: Atomic batch claim with SKIP LOCKED
-    if (typeof this.prisma.$queryRaw === 'function') {
-      try {
-        const rows = await this.prisma.$queryRaw<
-          Array<{
-            id: string;
-            userId: string;
-            projectId: string | null;
-            aggregateId: string;
-            eventType: string;
-            payload: Prisma.JsonValue;
-            status: OutboxStatus;
-            retryCount: number;
-            error: string | null;
-            scheduledAt: Date | string | null;
-            claimedAt: Date | string | null;
-            leaseExpiresAt: Date | string | null;
-            claimedBy: string | null;
-            dedupeKey: string | null;
-            createdAt: Date | string;
-            updatedAt: Date | string;
-            processedAt: Date | string | null;
-            previousStatus: OutboxStatus;
-            previousLeaseExpiresAt: Date | string | null;
-          }>
-        >`
-          WITH candidates AS (
-            SELECT id, status, lease_expires_at
-            FROM outbox_events
-            WHERE (
-              (status = 'PENDING'::"OutboxStatus" AND (scheduled_at IS NULL OR scheduled_at <= ${now}))
-              OR
-              (status = 'PROCESSING'::"OutboxStatus" AND lease_expires_at <= ${now})
-            )
-            ORDER BY created_at ASC
-            LIMIT ${batchSize}
-            FOR UPDATE SKIP LOCKED
-          )
-          UPDATE outbox_events e
-          SET status = 'PROCESSING'::"OutboxStatus",
-              claimed_at = ${now},
-              lease_expires_at = ${newLeaseExpiresAt},
-              claimed_by = ${this.workerId}
-          FROM candidates c
-          WHERE e.id = c.id
-          RETURNING 
-            e.id,
-            e.user_id AS "userId",
-            e.project_id AS "projectId",
-            e.aggregate_id AS "aggregateId",
-            e.event_type AS "eventType",
-            e.payload,
-            e.status,
-            e.retry_count AS "retryCount",
-            e.error,
-            e.scheduled_at AS "scheduledAt",
-            e.claimed_at AS "claimedAt",
-            e.lease_expires_at AS "leaseExpiresAt",
-            e.claimed_by AS "claimedBy",
-            e.dedupe_key AS "dedupeKey",
-            e.created_at AS "createdAt",
-            e.updated_at AS "updatedAt",
-            e.processed_at AS "processedAt",
-            c.status AS "previousStatus",
-            c.lease_expires_at AS "previousLeaseExpiresAt";
-        `;
-
-        if (Array.isArray(rows) && rows.length > 0) {
-          return rows.map((r) => ({
-            event: {
-              id: r.id,
-              userId: r.userId,
-              projectId: r.projectId,
-              aggregateId: r.aggregateId,
-              eventType: r.eventType,
-              payload: r.payload,
-              status: r.status,
-              retryCount: r.retryCount,
-              error: r.error,
-              scheduledAt: r.scheduledAt ? new Date(r.scheduledAt) : null,
-              claimedAt: r.claimedAt ? new Date(r.claimedAt) : null,
-              leaseExpiresAt: r.leaseExpiresAt
-                ? new Date(r.leaseExpiresAt)
-                : null,
-              claimedBy: r.claimedBy,
-              dedupeKey: r.dedupeKey,
-              createdAt: new Date(r.createdAt),
-              updatedAt: new Date(r.updatedAt),
-              processedAt: r.processedAt ? new Date(r.processedAt) : null,
-            },
-            isLeaseRecovery:
-              r.previousStatus === OutboxStatus.PROCESSING &&
-              r.previousLeaseExpiresAt !== null &&
-              new Date(r.previousLeaseExpiresAt) <= now,
-          }));
-        }
-        return [];
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.debug(
-          `Atomic raw claim skipped or unavailable (${message}); falling back to ORM optimistic claim`,
-        );
-      }
-    }
-
-    // 2. Fallback path (unit test mocks without $queryRaw or non-PG env)
-    const candidates = await this.prisma.outboxEvent.findMany({
-      where: {
-        OR: [
-          {
-            status: OutboxStatus.PENDING,
-            OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
-          },
-          {
-            status: OutboxStatus.PROCESSING,
-            leaseExpiresAt: { lte: now },
-          },
-        ],
-      },
-      orderBy: [{ createdAt: 'asc' }],
-      take: batchSize,
-    });
-
-    const claimedList: Array<{ event: OutboxEvent; isLeaseRecovery: boolean }> =
-      [];
-
-    for (const event of candidates) {
-      const isLeaseRecovery =
-        event.status === OutboxStatus.PROCESSING &&
-        event.leaseExpiresAt !== null &&
-        event.leaseExpiresAt <= now;
-
-      const claimResult = await this.prisma.outboxEvent.updateMany({
-        where: {
-          id: event.id,
-          OR: [
-            {
-              status: OutboxStatus.PENDING,
-              OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
-            },
-            {
-              status: OutboxStatus.PROCESSING,
-              leaseExpiresAt: { lte: now },
-            },
-          ],
-        },
-        data: {
-          status: OutboxStatus.PROCESSING,
-          claimedAt: now,
-          leaseExpiresAt: newLeaseExpiresAt,
-          claimedBy: this.workerId,
-        },
-      });
-
-      if (claimResult.count > 0) {
-        claimedList.push({ event, isLeaseRecovery });
-      }
-    }
-
-    return claimedList;
+  ): Promise<ClaimedOutboxEvent[]> {
+    return this.repo.claimBatch(batchSize, leaseMs, this.workerId);
   }
 
-  /**
-   * Processes pending events and recovers expired processing leases with strict atomic claiming and CAS heartbeat.
-   */
   async processPendingEvents(
     batchSize: number = 50,
     leaseMs: number = 60000,
@@ -669,7 +374,6 @@ export class OutboxWorker
         );
       }
 
-      // 3. Unhandled event policy: Check registered handlers first, then default fallback handler
       const handler = this.handlers.get(event.eventType) || this.defaultHandler;
       if (!handler) {
         const newRetryCount = event.retryCount + 1;
@@ -680,66 +384,41 @@ export class OutboxWorker
             `Unrecognized event type "${event.eventType}" on event ${event.id} reached max retries (${this.maxRetries}). Moving to DLQ.`,
           );
           this.metricsService?.incrementCounter('outbox_dlq_total');
-          await this.prisma.outboxEvent.updateMany({
-            where: {
-              id: event.id,
-              status: OutboxStatus.PROCESSING,
-              claimedBy: this.workerId,
-            },
-            data: {
-              status: OutboxStatus.FAILED,
-              retryCount: newRetryCount,
-              error: `No handler registered for event type "${event.eventType}"`,
-              claimedAt: null,
-              leaseExpiresAt: null,
-              claimedBy: null,
-            },
-          });
+          await this.repo.markDeadLetter(
+            event.id,
+            newRetryCount,
+            `No handler registered for event type "${event.eventType}"`,
+            this.workerId,
+          );
           deadLettered++;
         } else {
           const delaySec = Math.pow(2, newRetryCount) * 10;
           this.logger.warn(
             `No handler registered for event type "${event.eventType}" on event ${event.id}. Retrying in ${delaySec}s (attempt ${newRetryCount}/${this.maxRetries})`,
           );
-          await this.prisma.outboxEvent.updateMany({
-            where: {
-              id: event.id,
-              status: OutboxStatus.PROCESSING,
-              claimedBy: this.workerId,
-            },
-            data: {
-              status: OutboxStatus.PENDING,
-              retryCount: newRetryCount,
-              scheduledAt: new Date(Date.now() + delaySec * 1000),
-              claimedAt: null,
-              leaseExpiresAt: null,
-              claimedBy: null,
-            },
-          });
+          await this.repo.scheduleRetry(
+            event.id,
+            newRetryCount,
+            new Date(Date.now() + delaySec * 1000),
+            undefined,
+            this.workerId,
+          );
         }
         continue;
       }
 
-      // 4. Start Heartbeat Lease Renewal Loop with AbortController for cooperative cancellation
       const abortController = new AbortController();
       let isLeaseLost = false;
       const heartbeatIntervalMs = Math.max(1000, Math.floor(leaseMs / 3));
       const heartbeatTimer = setInterval(() => {
         void (async () => {
           try {
-            const renewResult = await this.prisma.outboxEvent.updateMany({
-              where: {
-                id: event.id,
-                status: OutboxStatus.PROCESSING,
-                claimedBy: this.workerId,
-                leaseExpiresAt: { gt: new Date() },
-              },
-              data: {
-                leaseExpiresAt: new Date(Date.now() + leaseMs),
-              },
-            });
-
-            if (renewResult.count === 0) {
+            const renewed = await this.repo.renewLease(
+              event.id,
+              this.workerId,
+              leaseMs,
+            );
+            if (!renewed) {
               isLeaseLost = true;
               abortController.abort();
               this.logger.error(
@@ -758,7 +437,6 @@ export class OutboxWorker
       }, heartbeatIntervalMs);
       heartbeatTimer.unref();
 
-      // 5. Execute registered handler
       try {
         await handler.handle(event, abortController.signal);
         clearInterval(heartbeatTimer);
@@ -770,24 +448,11 @@ export class OutboxWorker
           continue;
         }
 
-        // Success: Atomic final transition confirming claimedBy matches
-        const pubResult = await this.prisma.outboxEvent.updateMany({
-          where: {
-            id: event.id,
-            status: OutboxStatus.PROCESSING,
-            claimedBy: this.workerId,
-          },
-          data: {
-            status: OutboxStatus.PUBLISHED,
-            processedAt: new Date(),
-            claimedAt: null,
-            leaseExpiresAt: null,
-            claimedBy: null,
-            error: null,
-          },
-        });
-
-        if (pubResult.count === 0) {
+        const published = await this.repo.markPublished(
+          event.id,
+          this.workerId,
+        );
+        if (!published) {
           this.logger.warn(
             `Worker [${this.workerId}] lost claim before publishing event ${event.id}.`,
           );
@@ -814,22 +479,12 @@ export class OutboxWorker
             `Event ${event.id} (${event.eventType}) reached max retries (${this.maxRetries}). Moving to FAILED / DLQ: ${errMsg}`,
           );
           this.metricsService?.incrementCounter('outbox_dlq_total');
-
-          await this.prisma.outboxEvent.updateMany({
-            where: {
-              id: event.id,
-              status: OutboxStatus.PROCESSING,
-              claimedBy: this.workerId,
-            },
-            data: {
-              status: OutboxStatus.FAILED,
-              retryCount: newRetryCount,
-              error: errMsg || 'Exceeded maximum retry attempts',
-              claimedAt: null,
-              leaseExpiresAt: null,
-              claimedBy: null,
-            },
-          });
+          await this.repo.markDeadLetter(
+            event.id,
+            newRetryCount,
+            errMsg || 'Exceeded maximum retry attempts',
+            this.workerId,
+          );
           deadLettered++;
         } else {
           const delaySec = Math.pow(2, newRetryCount);
@@ -839,22 +494,13 @@ export class OutboxWorker
             `Event ${event.id} (${event.eventType}) failed (attempt ${newRetryCount}/${this.maxRetries}). Retrying in ${delaySec}s: ${errMsg}`,
           );
 
-          await this.prisma.outboxEvent.updateMany({
-            where: {
-              id: event.id,
-              status: OutboxStatus.PROCESSING,
-              claimedBy: this.workerId,
-            },
-            data: {
-              status: OutboxStatus.PENDING,
-              retryCount: newRetryCount,
-              error: errMsg,
-              scheduledAt: nextSchedule,
-              claimedAt: null,
-              leaseExpiresAt: null,
-              claimedBy: null,
-            },
-          });
+          await this.repo.scheduleRetry(
+            event.id,
+            newRetryCount,
+            nextSchedule,
+            errMsg,
+            this.workerId,
+          );
           failed++;
         }
       }
@@ -863,26 +509,17 @@ export class OutboxWorker
     return { processed, failed, deadLettered, reclaimed };
   }
 
-  /**
-   * Purges completed outbox events older than `olderThanMs` (default 7 days).
-   * Prevents table bloat and maintains high-throughput B-tree index performance.
-   */
   async purgeCompletedEvents(
     olderThanMs: number = 7 * 24 * 60 * 60 * 1000,
   ): Promise<number> {
     const cutoff = new Date(Date.now() - olderThanMs);
-    const result = await this.prisma.outboxEvent.deleteMany({
-      where: {
-        status: OutboxStatus.PUBLISHED,
-        processedAt: { lte: cutoff },
-      },
-    });
-    if (result.count > 0) {
+    const count = await this.repo.cleanupPublished(cutoff);
+    if (count > 0) {
       this.logger.log(
-        `Purged ${result.count} completed outbox events older than ${cutoff.toISOString()}`,
+        `Purged ${count} completed outbox events older than ${cutoff.toISOString()}`,
       );
     }
-    return result.count;
+    return count;
   }
 
   onApplicationShutdown() {

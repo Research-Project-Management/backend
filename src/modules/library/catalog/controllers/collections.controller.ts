@@ -32,7 +32,7 @@ import {
 import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { isUUID } from 'class-validator';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 /**
  * Shared Base Adapter for Library Collections orchestration.
@@ -340,7 +340,7 @@ export class CollectionController extends BaseCollectionController {
 @ApiTags('Library Collections - Project')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/projects/:projectId/library/collections')
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ProjectCollectionController extends BaseCollectionController {
   constructor(collectionsService: CollectionsService) {
     super(collectionsService);

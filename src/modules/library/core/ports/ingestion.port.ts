@@ -1,11 +1,11 @@
-import {
+import type {
   IngestionSubmissionEnvelope,
   IngestionAcceptedResult,
-} from '@/modules/library/ingestion/types/submission.types';
-import { IngestionRunSnapshot } from '@/modules/library/ingestion/types/ingestion.types';
-import { DuplicateClusterResult } from '@/modules/library/ingestion/types/curation.types';
-import { RetractionCheckResult } from '@/modules/library/ingestion/types/retraction.types';
-import { QualityAuditReport } from '@/modules/library/ingestion/services/quality.service';
+  IngestionRunSnapshot,
+  DuplicateClusterResult,
+  RetractionCheckResult,
+  QualityAuditReport,
+} from '../types/ingestion.types';
 
 export const INGESTION_FACADE = 'INGESTION_FACADE';
 

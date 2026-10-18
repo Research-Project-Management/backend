@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 import { PipelineService } from './pipeline.service';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
@@ -52,7 +53,7 @@ export class QueueService implements OnModuleInit {
 
     const configuredConcurrency = Number(
       this.configService?.get('INGESTION_CONCURRENCY') ||
-        process.env.INGESTION_CONCURRENCY,
+        libraryConfig().ingestion.concurrency,
     );
     // Default pipeline concurrency: 3 concurrent pipelines prevents saturation
     this.maxConcurrency =

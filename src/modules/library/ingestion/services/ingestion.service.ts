@@ -3,7 +3,6 @@ import {
   Logger,
   Optional,
   Inject,
-  NotFoundException,
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
@@ -23,43 +22,29 @@ import { PipelineService } from './pipeline.service';
 import { QueueService } from './queue.service';
 import { UrlCaptureService } from './url-capture.service';
 import { ConfirmCapturedUrlDto } from '@/modules/library/ingestion/dto/capture-url.dto';
-import {
-  ItemDetail,
-  CATALOG_FACADE,
-  ICatalogFacade,
-  normalizeDoi,
-  normalizeArxivId,
-  normalizePmid,
-  normalizeIsbn,
-  parseCreatorString,
-  harmonizeZoteroFields,
-  resolveCanonicalCreatorRole,
-} from '@/modules/library/core';
+import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
 import { createHash, randomUUID } from 'crypto';
 import zlib from 'zlib';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   METADATA_PORT,
   MetadataPort,
-  QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
-
-interface IngestionExecutionLog {
-  item?: { id?: string; title?: string };
-  items?: Array<{ itemId?: string; title?: string; status?: string }>;
-  currentTitle?: string;
-  total?: number;
-  processed?: number;
-  succeeded?: number;
-  duplicates?: number;
-  failed?: number;
-  percentage?: number;
-  [key: string]: unknown;
-}
+import {
+  MetadataResolverService,
+  ReResolveMetadataOptions,
+  ReResolveMetadataResult,
+} from './metadata-resolver.service';
+import {
+  IngestionRunReporterService,
+  IngestionRunProgressResult,
+} from './ingestion-run-reporter.service';
 
 @Injectable()
 export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
+  private readonly metadataResolver: MetadataResolverService;
+  private readonly runReporter: IngestionRunReporterService;
 
   constructor(
     private readonly repo: IngestionRepository,
@@ -75,7 +60,17 @@ export class IngestionService {
     @Optional()
     @Inject(METADATA_PORT)
     private readonly metadataService?: MetadataPort,
-  ) {}
+    @Optional()
+    metadataResolver?: MetadataResolverService,
+    @Optional()
+    runReporter?: IngestionRunReporterService,
+  ) {
+    this.metadataResolver =
+      metadataResolver ??
+      new MetadataResolverService(this.catalogGateway, this.metadataService);
+    this.runReporter =
+      runReporter ?? new IngestionRunReporterService(this.repo, this.queue);
+  }
 
   /**
    * Primary Fast-Path Submission Entry Point (Async 202 Contract)
@@ -259,158 +254,20 @@ export class IngestionService {
     return this.pipeline.executePipeline(runId, projectId, envelope);
   }
 
-  private parseExecutionLog(executionLog: unknown): IngestionExecutionLog {
-    if (
-      executionLog &&
-      typeof executionLog === 'object' &&
-      !Array.isArray(executionLog)
-    ) {
-      return executionLog as IngestionExecutionLog;
-    }
-    return {};
-  }
-
   async getRunStatus(
     /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
     scopeId: string,
     runId: string,
   ): Promise<IngestionRunSnapshot> {
-    const run = await this.repo.findRunById(scopeId, runId);
-    if (!run) {
-      throw new NotFoundException(`Ingestion run '${runId}' not found`);
-    }
-
-    const log = this.parseExecutionLog(run.executionLog);
-    const logItem =
-      log.item ||
-      (Array.isArray(log.items) && log.items.length > 0
-        ? { id: log.items[0].itemId || run.itemId, title: log.items[0].title }
-        : null);
-    const runItem = run.item as
-      { id?: string; title?: string } | null | undefined;
-    const resolvedItem = runItem || logItem || null;
-    const title =
-      runItem?.title ||
-      log.currentTitle ||
-      (Array.isArray(log.items) && log.items[0]?.title) ||
-      log.item?.title ||
-      null;
-    const itemId =
-      run.itemId ||
-      resolvedItem?.id ||
-      (Array.isArray(log.items) && log.items[0]?.itemId) ||
-      null;
-
-    return {
-      ...run,
-      itemId,
-      item: resolvedItem
-        ? { ...resolvedItem, title: resolvedItem.title || title }
-        : null,
-      title,
-    } as unknown as IngestionRunSnapshot;
+    return this.runReporter.getRunStatus(scopeId, runId);
   }
 
   async getRunProgress(
     /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
     scopeId: string,
     runId: string,
-  ): Promise<{
-    runId: string;
-    projectId: string;
-    status: string;
-    currentStage?: string;
-    total: number;
-    processed: number;
-    percentage: number;
-    succeeded: number;
-    duplicates: number;
-    failed: number;
-    currentTitle?: string;
-    items: Array<{
-      title: string;
-      status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
-      itemId?: string;
-      error?: string;
-    }>;
-    startedAt: string;
-    completedAt?: string;
-  }> {
-    const run = await this.repo.findRunById(scopeId, runId);
-    if (!run) {
-      throw new NotFoundException(`Ingestion run '${runId}' not found`);
-    }
-
-    const log = this.parseExecutionLog(run.executionLog);
-    const total = Number(log.total) || 1;
-    const isCompleted = run.status === IngestionStatus.COMPLETED;
-    const processed = Number(log.processed) || (isCompleted ? total : 0);
-    const succeeded =
-      Number(log.succeeded) || (isCompleted && !log.duplicates ? 1 : 0);
-    const duplicates = Number(log.duplicates) || 0;
-    const failed =
-      Number(log.failed) ||
-      (run.status === IngestionStatus.FAILED_FINAL ||
-      run.status === IngestionStatus.FAILED_RETRYABLE
-        ? 1
-        : 0);
-    const percentage =
-      typeof log.percentage === 'number'
-        ? log.percentage
-        : isCompleted
-          ? 100
-          : Math.min(Math.round((processed / total) * 100), 99);
-
-    const runItem = run.item as
-      { id?: string; title?: string } | null | undefined;
-    const title =
-      runItem?.title ||
-      log.currentTitle ||
-      (Array.isArray(log.items) && log.items[0]?.title) ||
-      log.item?.title ||
-      undefined;
-
-    const items: Array<{
-      title: string;
-      status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
-      itemId?: string;
-      error?: string;
-    }> =
-      Array.isArray(log.items) && log.items.length > 0
-        ? log.items.map((it) => ({
-            title: it.title || 'Untitled Document',
-            status:
-              it.status === 'DUPLICATE' || it.status === 'FAILED'
-                ? it.status
-                : 'SUCCEEDED',
-            itemId: it.itemId,
-          }))
-        : title
-          ? [
-              {
-                title,
-                status: isCompleted ? 'SUCCEEDED' : 'FAILED',
-                itemId: run.itemId || undefined,
-              },
-            ]
-          : [];
-
-    return {
-      runId: run.id,
-      projectId: scopeId,
-      status: String(run.status),
-      currentStage: run.currentStage || undefined,
-      total,
-      processed,
-      percentage,
-      succeeded,
-      duplicates,
-      failed,
-      currentTitle: title,
-      items,
-      startedAt: run.startedAt.toISOString(),
-      completedAt: run.completedAt?.toISOString(),
-    };
+  ): Promise<IngestionRunProgressResult> {
+    return this.runReporter.getRunProgress(scopeId, runId);
   }
 
   async retryRun(
@@ -422,33 +279,7 @@ export class IngestionService {
     status: IngestionStatus;
     message: string;
   }> {
-    const run = await this.repo.findRunById(scopeId, runId);
-    if (!run) {
-      throw new NotFoundException(`Ingestion run '${runId}' not found`);
-    }
-
-    await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.PENDING);
-
-    const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
-    if (envelope && typeof envelope === 'object') {
-      void this.queue.enqueue(runId, scopeId, {
-        ...envelope,
-        projectId: scopeId,
-      });
-      this.logger.log(
-        `Retry initiated and re-enqueued for run ${runId} (scope: ${scopeId})`,
-      );
-    } else {
-      this.logger.warn(
-        `Retry requested for run ${runId}, but inputParams is missing or invalid.`,
-      );
-    }
-
-    return {
-      runId,
-      status: IngestionStatus.PENDING,
-      message: 'Ingestion run retry initiated and enqueued',
-    };
+    return this.runReporter.retryRun(scopeId, runId);
   }
 
   /**
@@ -621,77 +452,6 @@ export class IngestionService {
     };
   }
 
-  // Backward Compatibility Convenience Methods
-
-  async ingestDoi(
-    projectId: string,
-    userId: string,
-    dto: { doi: string; collectionId?: string; idempotencyKey?: string },
-  ) {
-    const res = await this.ingest({
-      source: 'doi',
-      projectId,
-      userId,
-      doi: dto.doi,
-      collectionId: dto.collectionId,
-      idempotencyKey: dto.idempotencyKey,
-    });
-    return res.item || { id: res.itemId, runId: res.runId };
-  }
-
-  async ingestBibtex(
-    projectId: string,
-    userId: string,
-    dto: {
-      bibtex?: string;
-      content?: string;
-      collectionId?: string;
-      idempotencyKey?: string;
-    },
-  ) {
-    const res = await this.ingest({
-      source: 'bibtex',
-      projectId,
-      userId,
-      content: dto.bibtex || dto.content || '',
-      collectionId: dto.collectionId,
-      idempotencyKey: dto.idempotencyKey,
-    });
-    return res.item || { id: res.itemId, runId: res.runId };
-  }
-
-  async startRun(
-    projectId: string,
-    userId: string,
-    dto: {
-      source?: 'doi' | 'url' | 'bibtex' | 'pdf' | string;
-      doi?: string;
-      content?: string;
-      idempotencyKey?: string;
-    },
-  ) {
-    const source = (dto.source || (dto.content ? 'bibtex' : 'doi')) as
-      'doi' | 'bibtex';
-    const res = await this.ingest(
-      source === 'bibtex'
-        ? {
-            source: 'bibtex',
-            projectId,
-            userId,
-            content: dto.content || '',
-            idempotencyKey: dto.idempotencyKey,
-          }
-        : {
-            source: 'doi',
-            projectId,
-            userId,
-            doi: dto.doi || '',
-            idempotencyKey: dto.idempotencyKey,
-          },
-    );
-    return { runId: res.runId, status: res.status };
-  }
-
   async captureUrl(
     url: string,
     contextOrProjectId:
@@ -723,288 +483,14 @@ export class IngestionService {
   async reResolveMetadata(
     userId: string,
     itemId: string,
-    options?: {
-      doi?: string;
-      arxivId?: string;
-      pmid?: string;
-      isbn?: string;
-      title?: string;
-      forceRefresh?: boolean;
-      aggressive?: boolean;
-      fields?: string[];
-      expectedVersion?: number;
-    },
+    options?: ReResolveMetadataOptions,
     projectId?: string,
-  ): Promise<{
-    success: boolean;
-    message: string;
-    itemId: string;
-    item: ItemDetail | null;
-    resolvedFrom?: {
-      query: string;
-      queryType: string;
-      canonicalId?: string;
-    };
-    updatedFields: string[];
-    warnings?: string[];
-  }> {
-    if (!this.catalogGateway) {
-      throw new BadRequestException(
-        'Catalog gateway is unavailable for metadata re-resolution',
-      );
-    }
-
-    const existingItem = await this.catalogGateway.getItem(
+  ): Promise<ReResolveMetadataResult> {
+    return this.metadataResolver.reResolveMetadata(
       userId,
       itemId,
+      options,
       projectId,
     );
-    if (!existingItem) {
-      throw new NotFoundException(`Item "${itemId}" not found in library`);
-    }
-
-    // Determine query & queryType
-    let query: string | undefined;
-    let queryType: QueryType | undefined;
-
-    if (options?.doi) {
-      query = normalizeDoi(options.doi) || options.doi.trim();
-      queryType = 'DOI';
-    } else if (options?.arxivId) {
-      query = normalizeArxivId(options.arxivId) || options.arxivId.trim();
-      queryType = 'ARXIV';
-    } else if (options?.pmid) {
-      query = normalizePmid(options.pmid) || options.pmid.trim();
-      queryType = 'PMID';
-    } else if (options?.isbn) {
-      query = normalizeIsbn(options.isbn) || options.isbn.trim();
-      queryType = 'ISBN';
-    } else if (options?.title) {
-      query = options.title.trim();
-      queryType = 'TITLE';
-    } else if (existingItem.doi) {
-      query = normalizeDoi(existingItem.doi) || existingItem.doi;
-      queryType = 'DOI';
-    } else if (existingItem.extraFields?.arxivId || existingItem.arxivId) {
-      const rawArxiv = String(
-        existingItem.extraFields?.arxivId || existingItem.arxivId || '',
-      );
-      query = normalizeArxivId(rawArxiv) || rawArxiv;
-      queryType = 'ARXIV';
-    } else if (existingItem.extraFields?.pmid || existingItem.pmid) {
-      const rawPmid = String(
-        existingItem.extraFields?.pmid || existingItem.pmid || '',
-      );
-      query = normalizePmid(rawPmid) || rawPmid;
-      queryType = 'PMID';
-    } else if (existingItem.isbn) {
-      query = normalizeIsbn(existingItem.isbn) || existingItem.isbn;
-      queryType = 'ISBN';
-    } else if (
-      existingItem.title &&
-      existingItem.title.trim().length >= 10 &&
-      !/^(untitled|document|uploaded document|manuscript)$/i.test(
-        existingItem.title.trim(),
-      )
-    ) {
-      query = existingItem.title.trim();
-      queryType = 'TITLE';
-    }
-
-    if (!query) {
-      throw new BadRequestException(
-        'Cannot re-resolve metadata: item has no existing identifier or credible title. Please specify a DOI, arXiv ID, or title in request body.',
-      );
-    }
-
-    if (!this.metadataService) {
-      throw new BadRequestException(
-        'MetadataService is unavailable for metadata re-resolution',
-      );
-    }
-
-    const resolved = await this.metadataService.resolve({
-      query,
-      queryType,
-      forceRefresh: options?.forceRefresh ?? options?.aggressive ?? true,
-      scopeId: projectId || 'user',
-    });
-
-    if (!resolved || !resolved.metadata) {
-      return {
-        success: false,
-        message: `No authoritative bibliographic metadata found for query "${query}".`,
-        itemId,
-        item: existingItem,
-        updatedFields: [],
-      };
-    }
-
-    const effectiveItemType =
-      resolved.metadata.itemType ||
-      existingItem.itemType ||
-      ((existingItem as Record<string, unknown>).type as string | undefined) ||
-      'journalArticle';
-    const m = harmonizeZoteroFields(
-      {
-        ...resolved.metadata,
-        extraFields: { ...(resolved.metadata.extraFields || {}) },
-      },
-      { itemType: effectiveItemType, syncExtraFields: true },
-    ) as typeof resolved.metadata;
-
-    const updateData: Record<string, unknown> = {};
-    const updatedFields: string[] = [];
-    const allowedFieldSet =
-      Array.isArray(options?.fields) && options.fields.length > 0
-        ? new Set(options.fields)
-        : null;
-
-    const applyField = (fieldName: string, value: unknown) => {
-      if (allowedFieldSet && !allowedFieldSet.has(fieldName)) {
-        return;
-      }
-      if (value !== undefined && value !== null && value !== '') {
-        updateData[fieldName] = value;
-        if (!updatedFields.includes(fieldName)) {
-          updatedFields.push(fieldName);
-        }
-      }
-    };
-
-    if (m.title && m.title !== existingItem.title) {
-      applyField('title', m.title);
-    }
-
-    if (Array.isArray(m.creators) && m.creators.length > 0) {
-      const creators = m.creators.map((c, index) => ({
-        orderIndex: index,
-        creatorType: resolveCanonicalCreatorRole(c.creatorType, {
-          itemType: effectiveItemType,
-        }),
-        firstName: c.firstName || '',
-        lastName: c.lastName || '',
-        fullName:
-          c.fullName ||
-          c.name ||
-          [c.firstName, c.lastName].filter(Boolean).join(' '),
-        ...(c.fieldMode !== undefined ? { fieldMode: c.fieldMode } : {}),
-      }));
-      applyField('creators', creators);
-    } else if (m.authors && m.authors.length > 0) {
-      const creators = m.authors.map((authorStr: string, index: number) => {
-        const parsed = parseCreatorString(authorStr, index, 'author');
-        return {
-          orderIndex: index,
-          creatorType: 'author',
-          firstName: parsed.firstName || '',
-          lastName: parsed.lastName || '',
-          fullName: parsed.fullName || authorStr,
-          ...(parsed.fieldMode !== undefined
-            ? { fieldMode: parsed.fieldMode }
-            : {}),
-        };
-      });
-      applyField('creators', creators);
-    }
-
-    if (m.publicationDate) {
-      applyField('date', m.publicationDate);
-      applyField('publicationDate', m.publicationDate);
-    } else if (m.year) {
-      applyField('date', String(m.year));
-    }
-    if (m.year) {
-      applyField('year', m.year);
-    }
-
-    if (m.journal || m.publicationTitle) {
-      applyField('publicationTitle', m.journal || m.publicationTitle);
-    }
-
-    if (m.abstract || m.abstractNote) {
-      applyField('abstractNote', m.abstract || m.abstractNote);
-      applyField('abstract', m.abstract || m.abstractNote);
-    }
-
-    const handledKeys = new Set([
-      'title',
-      'creators',
-      'authors',
-      'editors',
-      'contributors',
-      'publicationDate',
-      'date',
-      'year',
-      'publicationTitle',
-      'journal',
-      'abstract',
-      'abstractNote',
-      'extraFields',
-      'notes',
-      'provenance',
-    ]);
-
-    const mRecord = m as Record<string, unknown>;
-    for (const [key, val] of Object.entries(mRecord)) {
-      if (handledKeys.has(key)) continue;
-      if (val === undefined || val === null || val === '') continue;
-      if (Array.isArray(val) && val.length === 0) continue;
-      applyField(key, val);
-    }
-
-    if (
-      m.extraFields &&
-      typeof m.extraFields === 'object' &&
-      Object.keys(m.extraFields).length > 0
-    ) {
-      const mergedExtraFields: Record<string, unknown> = {
-        ...(existingItem.extraFields || {}),
-      };
-      for (const [efKey, efVal] of Object.entries(m.extraFields)) {
-        if (efVal !== undefined && efVal !== null && efVal !== '') {
-          mergedExtraFields[efKey] = efVal;
-          applyField(efKey, efVal);
-        }
-      }
-      updateData.extraFields = mergedExtraFields;
-    }
-
-    if (updatedFields.length === 0) {
-      return {
-        success: true,
-        message:
-          'Item metadata is already up to date with authoritative registry.',
-        itemId,
-        item: existingItem,
-        resolvedFrom: {
-          query,
-          queryType: resolved.queryType,
-          canonicalId: resolved.canonicalId,
-        },
-        updatedFields: [],
-      };
-    }
-
-    const expectedVersion = options?.expectedVersion ?? existingItem.version;
-    const updated = await this.catalogGateway.updateItem(
-      userId,
-      itemId,
-      updateData,
-      { expectedVersion, projectId },
-    );
-
-    return {
-      success: true,
-      message: `Successfully re-resolved metadata from ${resolved.canonicalId || query}. Updated ${updatedFields.length} field(s): ${updatedFields.join(', ')}.`,
-      itemId,
-      item: updated || existingItem,
-      resolvedFrom: {
-        query,
-        queryType: resolved.queryType,
-        canonicalId: resolved.canonicalId,
-      },
-      updatedFields,
-    };
   }
 }

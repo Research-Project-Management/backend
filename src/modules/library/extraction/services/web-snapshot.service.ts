@@ -10,6 +10,7 @@ import { createHash } from 'crypto';
 import { AttachmentsService } from './attachments.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
+import { ExternalProviderException } from '@/modules/library/core/errors/domain.exception';
 
 export interface SnapshotResult {
   title: string;
@@ -79,7 +80,10 @@ export class WebSnapshotService {
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        throw new ExternalProviderException(
+          `WebSnapshot failed: HTTP ${response.status} ${response.statusText}`,
+          { provider: 'WebSnapshot', status: response.status },
+        );
       }
 
       const contentLength = response.headers.get('content-length');
@@ -137,12 +141,46 @@ export class WebSnapshotService {
       clearTimeout(timer);
     }
 
+    interface JsDomWindow {
+      document: {
+        title?: string;
+        body?: { textContent?: string | null; innerHTML?: string };
+      };
+      close?: () => void;
+    }
+    interface JsDomInstance {
+      window: JsDomWindow;
+    }
+    interface ReadabilityArticle {
+      title?: string | null;
+      byline?: string | null;
+      excerpt?: string | null;
+      siteName?: string | null;
+      textContent?: string | null;
+      content?: string | null;
+    }
+    interface ReadabilityInstance {
+      parse(): ReadabilityArticle | null;
+    }
+    interface DomPurifyInstance {
+      sanitize(html: string, config?: Record<string, unknown>): string;
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { JSDOM } = require('jsdom');
+    const { JSDOM } = require('jsdom') as {
+      JSDOM: new (html: string, options?: { url?: string }) => JsDomInstance;
+    };
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { Readability } = require('@mozilla/readability');
+    const { Readability } = require('@mozilla/readability') as {
+      Readability: new (
+        doc: JsDomWindow['document'],
+        options?: { charThreshold?: number },
+      ) => ReadabilityInstance;
+    };
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const createDOMPurify = require('dompurify');
+    const createDOMPurify = require('dompurify') as (
+      win: JsDomWindow,
+    ) => DomPurifyInstance;
 
     let title = 'Web Snapshot';
     let byline: string | undefined;

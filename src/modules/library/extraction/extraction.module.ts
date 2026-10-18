@@ -25,6 +25,9 @@ import { ExtractionFacade, EXTRACTION_FACADE } from './extraction.facade';
 
 // Services
 import { AttachmentsService } from './services/attachments.service';
+import { AttachmentSyncService } from './services/attachment-sync.service';
+import { AttachmentRenamerService } from './services/attachment-renamer.service';
+import { AttachmentThumbnailService } from './services/attachment-thumbnail.service';
 import { WebSnapshotService } from './services/web-snapshot.service';
 import { OcrPreprocessorService } from './services/ocr-preprocessor.service';
 import { OcrWorkerPoolService } from './services/ocr-worker-pool.service';
@@ -41,6 +44,7 @@ import { AnnotationsRepository } from './repositories/annotations.repository';
 
 // Providers & Infrastructure
 import { PdfProvider } from './providers/pdf.provider';
+import { PdfTextMetadataExtractor } from './providers/pdf-text-metadata.extractor';
 import { OcrProvider } from './providers/ocr.provider';
 import {
   ExtractionHandler,
@@ -79,6 +83,9 @@ import { MeXtractExtractor } from './extractors/mextract.extractor';
 
     // Services
     AttachmentsService,
+    AttachmentSyncService,
+    AttachmentRenamerService,
+    AttachmentThumbnailService,
     WebSnapshotService,
     OcrPreprocessorService,
     OcrWorkerPoolService,
@@ -91,6 +98,7 @@ import { MeXtractExtractor } from './extractors/mextract.extractor';
     // Utilities & Providers
     OcrProvider,
     PdfProvider,
+    PdfTextMetadataExtractor,
     ExtractionHandler,
     ItemLifecycleSubscriber,
     AnnotationNormalizer,
@@ -104,7 +112,11 @@ import { MeXtractExtractor } from './extractors/mextract.extractor';
     ExtractionFacade,
     EXTRACTION_FACADE,
     AttachmentsService,
+    AttachmentSyncService,
+    AttachmentRenamerService,
+    AttachmentThumbnailService,
     PdfProvider,
+    PdfTextMetadataExtractor,
     OcrProvider,
     ExtractionHandler,
     ReferenceMatcherService,

@@ -19,13 +19,13 @@ import {
 } from '@/modules/library/catalog/dto/tags.dto';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { TagType } from '@prisma/client';
 
 @ApiTags('Library Tags')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/library/tags', 'api/v1/projects/:projectId/library/tags'])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class TagController {
   constructor(private readonly tagsService: TagsService) {}
 

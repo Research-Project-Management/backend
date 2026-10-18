@@ -1,258 +1,20 @@
 import { TagInput } from '@/modules/library/core/types/bibliographic.types';
 import { stripLatexBraces } from './academic-text.domain';
+import {
+  MAX_TAG_LENGTH,
+  ARXIV_CATEGORY_MAP,
+  CANONICAL_ARXIV_CATEGORIES,
+  NOISE_TAG_WORDS,
+} from './tag-taxonomy.lexicon';
 
-/**
- * Flux Library Core — Academic Tag & Subject Taxonomy Engine
- *
- * Architectural Principles:
- * 1. Case-Preserving Canonical Display (`cleanSingleTag`):
- *    - Preserves the exact orthographic casing supplied by the scholarly source or researcher
- *      (e.g., `ICLR`, `NeurIPS`, `ImageNet`, `GoogLeNet`, `AlphaFold`, `mRNA`, `p53`, `CRISPR-Cas9`, `t-SNE`)
- *      without destructive Title-Case mutations or brittle static acronym whitelists.
- *    - Sanitizes UTF-8 mojibake, LaTeX formatting macros, HTML/XML tags, and Wikipedia/Wikidata
- *      disambiguation suffixes; collapses internal whitespace and normalizes to Unicode NFC.
- * 2. Diacritic-Insensitive Search & Deduplication Key (`toCanonicalTagKey`):
- *    - Separates display representation from identity matching using Unicode NFKD decomposition,
- *      combining-mark stripping, and lowercasing so case/accent variants resolve deterministically.
- * 3. Structured Subject Taxonomy Resolution (`resolveArxivTaxonomyTag`):
- *    - Resolves raw archive classification codes (e.g., `cs.CV`, `stat.ML`, `q-bio.BM`, `astro-ph.CO`)
- *      into structured `"<Archive> - <Sub-Discipline>"` descriptors.
- */
-
-export const MAX_TAG_LENGTH = 255;
-
-// 1. Academic Archive & Sub-Discipline Taxonomy
-
-export const ARXIV_ARCHIVE_DOMAINS: Record<string, string> = {
-  cs: 'Computer Science',
-  econ: 'Economics',
-  eess: 'Electrical Engineering and Systems Science',
-  math: 'Mathematics',
-  nlin: 'Nonlinear Sciences',
-  physics: 'Physics',
-  'q-bio': 'Quantitative Biology',
-  'q-fin': 'Quantitative Finance',
-  stat: 'Statistics',
-  'astro-ph': 'Astrophysics',
-  'cond-mat': 'Condensed Matter',
-};
-
-export const ARXIV_SUBDISCIPLINE_TAXONOMY: Record<string, string> = {
-  // Computer Science
-  'cs.AI': 'Artificial Intelligence',
-  'cs.AR': 'Hardware Architecture',
-  'cs.CC': 'Computational Complexity',
-  'cs.CE': 'Computational Engineering, Finance, and Science',
-  'cs.CG': 'Computational Geometry',
-  'cs.CL': 'Computation and Language',
-  'cs.CR': 'Cryptography and Security',
-  'cs.CV': 'Computer Vision and Pattern Recognition',
-  'cs.CY': 'Computers and Society',
-  'cs.DB': 'Databases',
-  'cs.DC': 'Distributed, Parallel, and Cluster Computing',
-  'cs.DL': 'Digital Libraries',
-  'cs.DM': 'Discrete Mathematics',
-  'cs.DS': 'Data Structures and Algorithms',
-  'cs.ET': 'Emerging Technologies',
-  'cs.FL': 'Formal Languages and Automata Theory',
-  'cs.GL': 'General Literature',
-  'cs.GR': 'Graphics',
-  'cs.GT': 'Computer Science and Game Theory',
-  'cs.HC': 'Human-Computer Interaction',
-  'cs.IR': 'Information Retrieval',
-  'cs.IT': 'Information Theory',
-  'cs.LG': 'Machine Learning',
-  'cs.LO': 'Logic in Computer Science',
-  'cs.MA': 'Multiagent Systems',
-  'cs.MM': 'Multimedia',
-  'cs.MS': 'Mathematical Software',
-  'cs.NA': 'Numerical Analysis',
-  'cs.NE': 'Neural and Evolutionary Computing',
-  'cs.NI': 'Networking and Internet Architecture',
-  'cs.OH': 'Other Computer Science',
-  'cs.OS': 'Operating Systems',
-  'cs.PF': 'Performance',
-  'cs.PL': 'Programming Languages',
-  'cs.RO': 'Robotics',
-  'cs.SC': 'Symbolic Computation',
-  'cs.SD': 'Sound',
-  'cs.SE': 'Software Engineering',
-  'cs.SI': 'Social and Information Networks',
-  'cs.SY': 'Systems and Control',
-
-  // Statistics
-  'stat.AP': 'Applications',
-  'stat.CO': 'Computation',
-  'stat.ME': 'Methodology',
-  'stat.ML': 'Machine Learning',
-  'stat.OT': 'Other Statistics',
-  'stat.TH': 'Statistics Theory',
-
-  // Mathematics
-  'math.AC': 'Commutative Algebra',
-  'math.AG': 'Algebraic Geometry',
-  'math.AP': 'Analysis of PDEs',
-  'math.AT': 'Algebraic Topology',
-  'math.CA': 'Classical Analysis and ODEs',
-  'math.CO': 'Combinatorics',
-  'math.CT': 'Category Theory',
-  'math.CV': 'Complex Variables',
-  'math.DG': 'Differential Geometry',
-  'math.DS': 'Dynamical Systems',
-  'math.FA': 'Functional Analysis',
-  'math.GM': 'General Mathematics',
-  'math.GN': 'General Topology',
-  'math.GR': 'Group Theory',
-  'math.GT': 'Geometric Topology',
-  'math.HO': 'History and Overview',
-  'math.IT': 'Information Theory',
-  'math.KT': 'K-Theory and Homology',
-  'math.LO': 'Logic',
-  'math.MG': 'Metric Geometry',
-  'math.MP': 'Mathematical Physics',
-  'math.NA': 'Numerical Analysis',
-  'math.NT': 'Number Theory',
-  'math.OA': 'Operator Algebras',
-  'math.OC': 'Optimization and Control',
-  'math.PR': 'Probability',
-  'math.QA': 'Quantum Algebra',
-  'math.RA': 'Rings and Algebras',
-  'math.RT': 'Representation Theory',
-  'math.SG': 'Symplectic Geometry',
-  'math.SP': 'Spectral Theory',
-  'math.ST': 'Statistics Theory',
-
-  // Electrical Engineering and Systems Science
-  'eess.AS': 'Audio and Speech Processing',
-  'eess.IV': 'Image and Video Processing',
-  'eess.SP': 'Signal Processing',
-  'eess.SY': 'Systems and Control',
-
-  // Economics
-  'econ.EM': 'Econometrics',
-  'econ.GN': 'General Economics',
-  'econ.TH': 'Theoretical Economics',
-
-  // Quantitative Biology
-  'q-bio': 'Quantitative Biology',
-  'q-bio.BM': 'Biomolecules',
-  'q-bio.CB': 'Cell Behavior',
-  'q-bio.GN': 'Genomics',
-  'q-bio.MN': 'Molecular Networks',
-  'q-bio.NC': 'Neurons and Cognition',
-  'q-bio.OT': 'Other Quantitative Biology',
-  'q-bio.PE': 'Populations and Evolution',
-  'q-bio.QM': 'Quantitative Methods',
-  'q-bio.SC': 'Subcellular Processes',
-  'q-bio.TO': 'Tissues and Organs',
-
-  // Quantitative Finance
-  'q-fin.CP': 'Computational Finance',
-  'q-fin.EC': 'Economics',
-  'q-fin.GN': 'General Finance',
-  'q-fin.MF': 'Mathematical Finance',
-  'q-fin.PM': 'Portfolio Management',
-  'q-fin.PR': 'Pricing of Securities',
-  'q-fin.RM': 'Risk Management',
-  'q-fin.ST': 'Statistical Finance',
-  'q-fin.TR': 'Trading and Market Microstructure',
-
-  // Nonlinear Sciences
-  'nlin.AO': 'Adaptation and Self-Organizing Systems',
-  'nlin.CD': 'Chaotic Dynamics',
-  'nlin.CG': 'Cellular Automata and Lattice Gases',
-  'nlin.PS': 'Pattern Formation and Solitons',
-  'nlin.SI': 'Exactly Solvable and Integrable Systems',
-
-  // Astrophysics
-  'astro-ph': 'Astrophysics',
-  'astro-ph.CO': 'Cosmology and Nongalactic Astrophysics',
-  'astro-ph.EP': 'Earth and Planetary Astrophysics',
-  'astro-ph.GA': 'Astrophysics of Galaxies',
-  'astro-ph.HE': 'High Energy Astrophysical Phenomena',
-  'astro-ph.IM': 'Instrumentation and Methods for Astrophysics',
-  'astro-ph.SR': 'Solar and Stellar Astrophysics',
-
-  // Condensed Matter
-  'cond-mat': 'Condensed Matter',
-  'cond-mat.dis-nn': 'Disordered Systems and Neural Networks',
-  'cond-mat.mes-hall': 'Mesoscale and Nanoscale Physics',
-  'cond-mat.mtrl-sci': 'Materials Science',
-  'cond-mat.other': 'Other Condensed Matter',
-  'cond-mat.quant-gas': 'Quantum Gases',
-  'cond-mat.soft': 'Soft Condensed Matter',
-  'cond-mat.stat-mech': 'Statistical Mechanics',
-  'cond-mat.str-el': 'Strongly Correlated Electrons',
-  'cond-mat.supr-con': 'Superconductivity',
-
-  // Physics & Standalone Archives
-  'physics.acc-ph': 'Accelerator Physics',
-  'physics.ao-ph': 'Atmospheric and Oceanic Physics',
-  'physics.app-ph': 'Applied Physics',
-  'physics.atm-clus': 'Atomic and Molecular Clusters',
-  'physics.atom-ph': 'Atomic Physics',
-  'physics.bio-ph': 'Biological Physics',
-  'physics.chem-ph': 'Chemical Physics',
-  'physics.class-ph': 'Classical Physics',
-  'physics.comp-ph': 'Computational Physics',
-  'physics.data-an': 'Data Analysis, Statistics and Probability',
-  'physics.ed-ph': 'Physics Education',
-  'physics.flu-dyn': 'Fluid Dynamics',
-  'physics.gen-ph': 'General Physics',
-  'physics.geo-ph': 'Geophysics',
-  'physics.hist-ph': 'History and Philosophy of Physics',
-  'physics.ins-det': 'Instrumentation and Detectors',
-  'physics.med-ph': 'Medical Physics',
-  'physics.optics': 'Optics',
-  'physics.plasm-ph': 'Plasma Physics',
-  'physics.pop-ph': 'Popular Physics',
-  'physics.soc-ph': 'Physics and Society',
-  'physics.space-ph': 'Space Physics',
-  'gr-qc': 'General Relativity and Quantum Cosmology',
-  'hep-ex': 'High Energy Physics - Experiment',
-  'hep-lat': 'High Energy Physics - Lattice',
-  'hep-ph': 'High Energy Physics - Phenomenology',
-  'hep-th': 'High Energy Physics - Theory',
-  'math-ph': 'Mathematical Physics',
-  'nucl-ex': 'Nuclear Experiment',
-  'nucl-th': 'Nuclear Theory',
-  'quant-ph': 'Quantum Physics',
-  'acc-phys': 'Accelerator Physics',
-  'adap-org': 'Adaptation, Noise, and Self-Organizing Systems',
-  'alg-geom': 'Algebraic Geometry',
-  'ao-sci': 'Atmospheric-Oceanic Sciences',
-  'atom-ph': 'Atomic, Molecular and Optical Physics',
-  'bayes-an': 'Bayesian Analysis',
-  'chao-dyn': 'Chaotic Dynamics',
-  'chem-ph': 'Chemical Physics',
-  'cmp-lg': 'Computation and Language',
-  'comp-gas': 'Cellular Automata and Lattice Gases',
-  'dg-ga': 'Differential Geometry',
-  'funct-an': 'Functional Analysis',
-  'mtrl-th': 'Materials Theory',
-  'patt-sol': 'Pattern Formation and Solitons',
-  'plasm-ph': 'Plasma Physics',
-  'q-alg': 'Quantum Algebra and Topology',
-  'solv-int': 'Exactly Solvable and Integrable Systems',
-  'supr-con': 'Superconductivity',
-};
-
-export const ARXIV_CATEGORY_MAP: Record<string, string> = {};
-export const CANONICAL_ARXIV_CATEGORIES: Record<string, string> = {};
-
-for (const [code, subDiscipline] of Object.entries(
+export {
+  MAX_TAG_LENGTH,
+  ARXIV_ARCHIVE_DOMAINS,
   ARXIV_SUBDISCIPLINE_TAXONOMY,
-)) {
-  const lowerCode = code.toLowerCase();
-  CANONICAL_ARXIV_CATEGORIES[lowerCode] = code;
-
-  const archivePrefix = code.split('.')[0];
-  const archiveDomain =
-    archivePrefix !== code ? ARXIV_ARCHIVE_DOMAINS[archivePrefix] : undefined;
-  ARXIV_CATEGORY_MAP[lowerCode] = archiveDomain
-    ? `${archiveDomain} - ${subDiscipline}`
-    : subDiscipline;
-}
+  ARXIV_CATEGORY_MAP,
+  CANONICAL_ARXIV_CATEGORIES,
+  NOISE_TAG_WORDS,
+} from './tag-taxonomy.lexicon';
 
 /**
  * Resolves an archive classification code (e.g., `cs.CV`, `stat.ML`, `astro-ph.CO`, `cs-cv`)
@@ -274,153 +36,6 @@ export function resolveArxivTaxonomyTag(rawCode: string): string | null {
   }
   return null;
 }
-
-// 2. Structural Document Noise Blacklist (Non-Keywords / Parsing Artifacts)
-export const NOISE_TAG_WORDS = new Set([
-  // Placeholders / Empty / Null indicators
-  'undefined',
-  'null',
-  'n/a',
-  'na',
-  'n.a.',
-  'n.a',
-  'not available',
-  'not applicable',
-  'none',
-  'unknown',
-  'nil',
-  'empty',
-  'void',
-  'sample',
-  'test',
-  'draft',
-  'untitled',
-  'etc',
-  'etc.',
-  'various',
-  'others',
-  'and others',
-  'et al',
-  'et al.',
-  'et-al',
-
-  // Document sections & structural headers
-  'introduction',
-  'conclusion',
-  'conclusions',
-  'background',
-  'paper',
-  'article',
-  'study',
-  'approach',
-  'method',
-  'methods',
-  'methodology',
-  'result',
-  'results',
-  'discussion',
-  'overview',
-  'experiment',
-  'experiments',
-  'experimental',
-  'analysis',
-  'abstract',
-  'summary',
-  'contents',
-  'table of contents',
-  'references',
-  'bibliography',
-  'appendix',
-  'acknowledgments',
-  'acknowledgements',
-
-  // Metadata field headers & taxonomy labels
-  'keywords',
-  'keyword',
-  'index terms',
-  'key words',
-  'subject',
-  'subjects',
-  'topics',
-  'topic',
-  'category',
-  'categories',
-  'classification',
-  'descriptor',
-  'descriptors',
-
-  // Publisher, copyright, repository noise
-  'all rights reserved',
-  'copyright',
-  'open access',
-  'creative commons',
-  'springer',
-  'elsevier',
-  'wiley',
-  'proceedings',
-  'conference',
-  'symposium',
-  'workshop',
-  'journal',
-  'volume',
-  'issue',
-  'page',
-  'pages',
-  'pp',
-  'no',
-  'vol',
-  'pdf',
-  'full text',
-  'full-text',
-  'fulltext',
-  'available online',
-  'downloaded',
-  'downloaded from',
-  'download',
-  'preprint',
-  'manuscript',
-  'author',
-  'authors',
-  'editor',
-  'editors',
-  'peer reviewed',
-  'peer-reviewed',
-  'original article',
-  'research article',
-  'review article',
-  'short communication',
-  'case report',
-  'editorial',
-  'erratum',
-  'corrigendum',
-  'author index',
-  'subject index',
-  'toc',
-  'in press',
-  'online first',
-  'accepted manuscript',
-  'author manuscript',
-  'version of record',
-  'unassigned',
-  'uncategorized',
-  'miscellaneous',
-  'misc',
-  'general',
-  'multidisciplinary',
-  'general medicine',
-  'general engineering',
-  'general computer science',
-  'general physics and astronomy',
-  'general mathematics',
-  'general chemistry',
-  'general biochemistry, genetics and molecular biology',
-  'default',
-  'book review',
-  'letter to editor',
-  'announcement',
-  'preface',
-  'foreword',
-]);
 
 // 3. Text Sanitization & Canonical Normalization
 
@@ -731,7 +346,7 @@ export const KNOWN_CANONICAL_ARXIV_CATEGORIES: Record<string, string> = {
  */
 export function resolveCanonicalArxivCategory(
   arxivId?: string | null,
-  tags?: Array<{ name?: string; tag?: string } | string | unknown>,
+  tags?: unknown[],
   extraFields?: Record<string, unknown> | null,
   item?: Record<string, unknown> | null,
 ): string | undefined {
@@ -757,23 +372,27 @@ export function resolveCanonicalArxivCategory(
     return CANONICAL_ARXIV_CATEGORIES[raw.toLowerCase()] || raw;
   }
 
+  const extractStringCandidate = (entry: unknown): string | null => {
+    if (typeof entry === 'string') return entry;
+    if (typeof entry === 'object' && entry !== null) {
+      const rec = entry as Record<string, unknown>;
+      if (typeof rec.name === 'string') return rec.name;
+      if (typeof rec.tag === 'string') return rec.tag;
+    }
+    return null;
+  };
+
   const candidates: string[] = [];
   if (Array.isArray(tags)) {
     for (const t of tags) {
-      if (t)
-        candidates.push(
-          typeof t === 'object' && t !== null && 'name' in t
-            ? String(t.name)
-            : String(t),
-        );
+      const val = extractStringCandidate(t);
+      if (val) candidates.push(val);
     }
   }
   if (Array.isArray(item?.keywords)) {
     for (const k of item.keywords) {
-      if (k)
-        candidates.push(
-          typeof k === 'object' && k?.name ? String(k.name) : String(k),
-        );
+      const val = extractStringCandidate(k);
+      if (val) candidates.push(val);
     }
   }
 
@@ -821,8 +440,9 @@ export function resolveCanonicalArxivCategory(
   }
 
   // 5. Title / abstract fallback for arXiv preprints
-  const title = String(item?.title || '').toLowerCase();
-  const abs = String(item?.abstract || '').toLowerCase();
+  const title = typeof item?.title === 'string' ? item.title.toLowerCase() : '';
+  const abs =
+    typeof item?.abstract === 'string' ? item.abstract.toLowerCase() : '';
   if (arxivId || item?.repository === 'arXiv') {
     if (
       /reinforcement\s*learning|deep\s*q-network|atari/i.test(title) ||

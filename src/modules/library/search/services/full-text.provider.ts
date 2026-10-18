@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { Injectable, Optional } from '@nestjs/common';
+import { SearchRepository } from '../repositories/search.repository';
+import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
 
 export interface PageTextExtraction {
   pageIndex: number;
@@ -17,7 +18,26 @@ export interface PageAnchorMatch {
 
 @Injectable()
 export class FullTextProvider {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly repo: SearchRepository;
+
+  constructor(@Optional() searchRepoOrClient?: SearchRepository | object) {
+    if (!searchRepoOrClient) {
+      throw new SubsystemUnavailableException(
+        'FullTextProvider requires SearchRepository',
+        { service: 'SearchIndex' },
+      );
+    }
+    if (
+      'findAttachmentPages' in searchRepoOrClient &&
+      typeof searchRepoOrClient.findAttachmentPages === 'function'
+    ) {
+      this.repo = searchRepoOrClient;
+    } else {
+      this.repo = new SearchRepository(
+        searchRepoOrClient as ConstructorParameters<typeof SearchRepository>[0],
+      );
+    }
+  }
 
   /**
    * Indexes pages of an attachment for deep full-text search and page anchor retrieval.
@@ -26,24 +46,7 @@ export class FullTextProvider {
     attachmentId: string,
     pages: PageTextExtraction[],
   ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      // Delete existing index for this attachment
-      await tx.fullTextIndex.deleteMany({
-        where: { attachmentId },
-      });
-
-      // Batch insert new page indexes atomically
-      if (pages.length > 0) {
-        await tx.fullTextIndex.createMany({
-          data: pages.map((page) => ({
-            attachmentId,
-            pageIndex: page.pageIndex,
-            textContent: (page.textContent || '').replace(/\0/g, ''),
-            charOffset: page.charOffset ?? 0,
-          })),
-        });
-      }
-    });
+    await this.repo.replaceAttachmentPageIndex(attachmentId, pages);
   }
 
   /**
@@ -57,20 +60,7 @@ export class FullTextProvider {
     const normalizedTerm = (term ?? '').trim().toLowerCase();
     if (!normalizedTerm) return [];
 
-    const dbPages = await this.prisma.fullTextIndex.findMany({
-      where: {
-        attachmentId,
-        ...(pageIndex !== undefined ? { pageIndex } : {}),
-      },
-      orderBy: { pageIndex: 'asc' },
-    });
-
-    const pages: PageTextExtraction[] = dbPages.map((dbPage) => ({
-      pageIndex: dbPage.pageIndex,
-      textContent: dbPage.textContent || '',
-      charOffset: dbPage.charOffset,
-    }));
-
+    const pages = await this.repo.findAttachmentPages(attachmentId, pageIndex);
     const matches: PageAnchorMatch[] = [];
 
     for (const page of pages) {

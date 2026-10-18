@@ -13,7 +13,12 @@ import {
   UrlMetadataScraperService,
   ScrapedUrlResult,
 } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
-import { parseCreatorString } from '@/modules/library/core';
+import {
+  parseCreatorString,
+  SubsystemUnavailableException,
+  LibraryConfigService,
+  libraryConfig,
+} from '@/modules/library/core';
 
 // Public Interfaces
 
@@ -113,16 +118,22 @@ export class UrlCaptureProvider {
     @Optional() private readonly configService?: ConfigService,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
     @Optional() private readonly urlScraper?: UrlMetadataScraperService,
+    @Optional() private readonly libraryConfigService?: LibraryConfigService,
   ) {
     const configuredSecret =
-      (typeof this.configService?.get === 'function'
-        ? this.configService.get<string>('URL_CAPTURE_SECRET')
-        : undefined) || process.env.URL_CAPTURE_SECRET;
+      this.libraryConfigService?.capture.secret ??
+      this.configService?.get<string>('URL_CAPTURE_SECRET') ??
+      libraryConfig().capture.secret;
+
+    const isProduction =
+      this.libraryConfigService?.app.isProduction ??
+      libraryConfig().app.isProduction;
 
     if (!configuredSecret || configuredSecret.length < 32) {
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error(
+      if (isProduction) {
+        throw new SubsystemUnavailableException(
           'CRITICAL: URL_CAPTURE_SECRET is missing or less than 32 characters in configuration',
+          { subsystem: 'UrlCaptureProvider' },
         );
       }
       this.logger.warn(

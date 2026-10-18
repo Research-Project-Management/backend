@@ -8,83 +8,31 @@ import {
   decodeHtmlEntities,
   stripLatexBraces,
 } from './academic-text.domain';
+import {
+  INSTITUTION_REGEX,
+  PREFIX_PARTICLES,
+  GENERATIONAL_SUFFIX_REGEX,
+  PARTICLE_SURNAME_REGEX,
+  VIETNAMESE_DIACRITICS_REGEX,
+  VIETNAMESE_FAMILY_NAMES,
+  VIETNAMESE_MIDDLE_NAMES,
+  NOISE_AUTHOR_WORDS,
+} from './author-particles.lexicon';
 
 export type { ParsedCreator };
-
-/**
- * Whole-word keywords that mark a creator string as an organization
- * (Zotero single-field creator, fieldMode = 1). Deliberately excludes short
- * tokens that collide with person names (e.g. "who", "mit", "meta").
- */
-export const INSTITUTION_KEYWORDS = [
-  'university',
-  'universities',
-  'universität',
-  'université',
-  'universidad',
-  'universidade',
-  'università',
-  'institute',
-  'institutes',
-  'institution',
-  'institutions',
-  'consortium',
-  'consortia',
-  'collaboration',
-  'collaborations',
-  'committee',
-  'committees',
-  'organization',
-  'organizations',
-  'organisation',
-  'organisations',
-  'association',
-  'associations',
-  'society',
-  'societies',
-  'foundation',
-  'group',
-  'groups',
-  'team',
-  'council',
-  'agency',
-  'agencies',
-  'department',
-  'departments',
-  'ministry',
-  'laboratory',
-  'laboratories',
-  'center',
-  'centers',
-  'centre',
-  'centres',
-  'network',
-  'initiative',
-  'working party',
-  'investigators',
-  'commission',
-  'corporation',
-  'hospital',
-  'hospitals',
-  'inc',
-  'llc',
-  'ltd',
-  'openai',
-  'deepmind',
-  'anthropic',
-  'google',
-  'microsoft',
-  'cern',
-  'nasa',
-  'ieee',
-];
-
-const INSTITUTION_REGEX = new RegExp(
-  `(?:^|[^\\p{L}\\p{N}])(?:${INSTITUTION_KEYWORDS.map((kw) =>
-    kw.replace(/\s+/g, '\\s+'),
-  ).join('|')})(?=$|[^\\p{L}\\p{N}])`,
-  'iu',
-);
+export {
+  INSTITUTION_KEYWORDS,
+  INSTITUTION_REGEX,
+  PREFIX_PARTICLES,
+  GENERATIONAL_SUFFIX_REGEX,
+  PARTICLE_SURNAME_REGEX,
+  VIETNAMESE_DIACRITICS_REGEX,
+  VIETNAMESE_FAMILY_NAMES,
+  VIETNAMESE_COMPOUND_SURNAMES,
+  VIETNAMESE_SURNAMES_PREFIX_REGEX,
+  VIETNAMESE_MIDDLE_NAMES,
+  NOISE_AUTHOR_WORDS,
+} from './author-particles.lexicon';
 
 /**
  * Returns true when the (already cleaned) creator string looks like an
@@ -94,47 +42,6 @@ export function isInstitutionName(name?: string | null): boolean {
   if (!name || typeof name !== 'string') return false;
   return INSTITUTION_REGEX.test(name);
 }
-
-/** Lowercase name particles (only matched when written in lowercase). */
-const PREFIX_PARTICLES = new Set([
-  'von',
-  'van',
-  'vander',
-  'vanden',
-  'de',
-  'del',
-  'della',
-  'der',
-  'den',
-  'des',
-  'da',
-  'das',
-  'do',
-  'dos',
-  'di',
-  'du',
-  'la',
-  'le',
-  'las',
-  'los',
-  'ter',
-  'ten',
-  'zu',
-  'al',
-  'el',
-  'bin',
-  'ibn',
-  'st.',
-  'st',
-  'saint',
-  'sainte',
-]);
-
-const GENERATIONAL_SUFFIX_REGEX = /^(?:Jr\.?|Sr\.?|II|III|IV|V|Esq\.?)$/i;
-
-/** Surname beginning with a name particle, e.g. "van der Berg", "De Silva", "La Fontaine". */
-const PARTICLE_SURNAME_REGEX =
-  /^(?:(?:von|van|vander|vanden|de|del|della|der|den|des|da|das|do|dos|di|du|la|le|las|los|ter|ten|zu|al|el|bin|ibn|st\.?|saint|sainte|Von|Van|Vander|Vanden|De|Del|Della|Der|Den|Des|Da|Das|Do|Dos|Di|Du|La|Le|Las|Los|Ter|Ten|Zu|Al|El|Bin|Ibn|St\.?|Saint|Sainte)\s+)+\S/;
 
 /**
  * Detects Vancouver / Medline style names: "Smith JA", "van der Berg AB",
@@ -160,276 +67,12 @@ export function isVancouverName(raw?: string | null): boolean {
 }
 
 /**
- * Vietnamese Specific Diacritics Regex (NFC normalized).
- * Covers all tone marks and vowel variations unique to the Vietnamese alphabet.
- */
-export const VIETNAMESE_DIACRITICS_REGEX =
-  /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ]/u;
-
-/**
  * Returns true if the text contains Vietnamese-specific accented characters.
  */
 export function hasVietnameseDiacritics(text?: string | null): boolean {
   if (!text || typeof text !== 'string') return false;
   return VIETNAMESE_DIACRITICS_REGEX.test(text.normalize('NFC'));
 }
-
-/**
- * Common Vietnamese family names (surnames), including both diacritic
- * and common unaccented ASCII representations in English publications.
- */
-export const VIETNAMESE_FAMILY_NAMES = new Set([
-  // Accented forms
-  'nguyễn',
-  'trần',
-  'lê',
-  'phạm',
-  'hoàng',
-  'huỳnh',
-  'phan',
-  'vũ',
-  'võ',
-  'đặng',
-  'bùi',
-  'đỗ',
-  'hồ',
-  'ngô',
-  'dương',
-  'lý',
-  'đinh',
-  'đoàn',
-  'lâm',
-  'trịnh',
-  'mai',
-  'đào',
-  'cao',
-  'hà',
-  'lưu',
-  'lương',
-  'thái',
-  'phùng',
-  'tô',
-  'vương',
-  'tạ',
-  'tống',
-  'quách',
-  'nông',
-  'diệp',
-  'triệu',
-  'tiêu',
-  'khổng',
-  'nghiêm',
-  'la',
-  'tăng',
-  'trương',
-  'chu',
-  'châu',
-  'tôn',
-  'vi',
-  'lục',
-  'ma',
-  'bành',
-  'cù',
-  'cấn',
-  'thạch',
-  'bạch',
-  'sầm',
-  'lại',
-  'hứa',
-  'kiều',
-  'mạc',
-  'cáp',
-  'thân',
-  'tào',
-  'nhan',
-  'mã',
-  'chử',
-  'doãn',
-  'ân',
-  'bàng',
-  'quản',
-  'đậu',
-  'phí',
-  // Unaccented equivalents
-  'nguyen',
-  'tran',
-  'le',
-  'pham',
-  'hoang',
-  'huynh',
-  'phan',
-  'vu',
-  'vo',
-  'dang',
-  'bui',
-  'do',
-  'ho',
-  'ngo',
-  'duong',
-  'ly',
-  'dinh',
-  'doan',
-  'lam',
-  'trinh',
-  'mai',
-  'dao',
-  'cao',
-  'ha',
-  'luu',
-  'luong',
-  'thai',
-  'phung',
-  'to',
-  'vuong',
-  'ta',
-  'tong',
-  'quach',
-  'nong',
-  'diep',
-  'trieu',
-  'tieu',
-  'khong',
-  'nghiem',
-  'tang',
-  'truong',
-  'chu',
-  'chau',
-  'ton',
-  'luc',
-  'banh',
-  'cu',
-  'can',
-  'thach',
-  'bach',
-  'sam',
-  'lai',
-  'hua',
-  'kieu',
-  'mac',
-  'cap',
-  'than',
-  'tao',
-  'quan',
-  'dau',
-  'phi',
-]);
-
-/**
- * Common Compound Vietnamese Surnames (Họ kép), accented and unaccented.
- */
-export const VIETNAMESE_COMPOUND_SURNAMES = new Set([
-  'nguyễn phúc',
-  'nguyễn phước',
-  'nguyễn đình',
-  'nguyễn hữu',
-  'nguyễn huy',
-  'nguyễn bá',
-  'nguyễn đức',
-  'nguyễn cảnh',
-  'nguyễn khắc',
-  'nguyễn khoa',
-  'nguyễn trần',
-  'trần hưng',
-  'trần đắc',
-  'trần đình',
-  'phan huy',
-  'phan bội',
-  'ngô thì',
-  'ngô đình',
-  'hoàng văn',
-  'nguyen phuc',
-  'nguyen phuoc',
-  'nguyen dinh',
-  'nguyen huu',
-  'nguyen huy',
-  'nguyen ba',
-  'nguyen duc',
-  'nguyen canh',
-  'nguyen khac',
-  'nguyen khoa',
-  'nguyen tran',
-  'tran hung',
-  'tran dac',
-  'tran dinh',
-  'phan huy',
-  'phan boi',
-  'ngo thi',
-  'ngo dinh',
-  'hoang van',
-]);
-
-/**
- * Precompiled regex matching leading Vietnamese surnames (accented or unaccented).
- */
-export const VIETNAMESE_SURNAMES_PREFIX_REGEX =
-  /^(nguy[eễ]n|tr[aầ]n|l[eê]|ph[aạ]m|ho[aà]ng|hu[yỳ]nh|phan|v[uũ]|v[oõ]|đ[aặ]ng|b[uù]i|đ[oỗ]|h[oồ]|ng[oô]|d[uư][oơ]ng|l[yý]|đinh|đo[aà]n|l[aâ]m|tr[iị]nh|mai|đ[aà]o|cao|h[aà]|l[uư]u|l[uư][oơ]ng|th[aá]i|t[aạ]|ph[uù]ng|t[oô]|v[uư][oơ]ng|chu|ch[aâ]u|t[oố]ng|qu[aá]ch|tri[eệ]u|nghi[eê]m|h[uứ]a|kh[oổ]ng|di[eệ]p|nhan|t[aă]ng|th[aạ]ch|ti[eê]u|l[uụ]c|m[aã]|ch[uử]|ki[eề]u|do[aã]n|c[uù]|b[aạ]ch|[aâ]n|b[aà]ng|tr[uư][oơ]ng|t[oô]n|qu[aả]n|đ[aậ]u|n[oô]ng|l[aạ]i|ph[ií]|la)(\s|$)/i;
-
-/**
- * Common Vietnamese middle names / particles that help identify Vietnamese naming structures.
- */
-export const VIETNAMESE_MIDDLE_NAMES = new Set([
-  'văn',
-  'thị',
-  'hữu',
-  'đình',
-  'đức',
-  'ngọc',
-  'xuân',
-  'thanh',
-  'quang',
-  'trọng',
-  'minh',
-  'hoàng',
-  'anh',
-  'hải',
-  'quốc',
-  'công',
-  'kim',
-  'bảo',
-  'thu',
-  'phương',
-  'hồng',
-  'thùy',
-  'thảo',
-  'mạnh',
-  'tiến',
-  'đắc',
-  'tuấn',
-  'hùng',
-  'bá',
-  'chí',
-  // Unaccented
-  'van',
-  'thi',
-  'huu',
-  'dinh',
-  'duc',
-  'ngoc',
-  'xuan',
-  'thanh',
-  'quang',
-  'trong',
-  'minh',
-  'hoang',
-  'anh',
-  'hai',
-  'quoc',
-  'cong',
-  'kim',
-  'bao',
-  'thu',
-  'phuong',
-  'hong',
-  'thuy',
-  'thao',
-  'manh',
-  'tien',
-  'dac',
-  'tuan',
-  'hung',
-  'ba',
-  'chi',
-]);
 
 /**
  * Detects whether an author string is a Vietnamese name in traditional order (Family Name First).
@@ -475,33 +118,6 @@ export function isVietnameseName(raw?: string | null): boolean {
 
   return tokens.every(isPlausibleVnSyllable);
 }
-
-export const NOISE_AUTHOR_WORDS = new Set([
-  'abstract',
-  'introduction',
-  'indexterms',
-  'keywords',
-  'keyword',
-  'references',
-  'reference',
-  'bibliography',
-  'contents',
-  'tableofcontents',
-  'acknowledgments',
-  'acknowledgements',
-  'correspondence',
-  'correspondingauthor',
-  'allrightsreserved',
-  'copyright',
-  'unknown',
-  'none',
-  'na',
-  'nil',
-  'etal',
-  'others',
-  'andothers',
-  'visualgeometrygroup',
-]);
 
 /**
  * Validates if an extracted author name token is actually section noise, OCR artifact,
@@ -607,7 +223,7 @@ export function cleanAuthorName(raw?: string | null): string {
 
   // Strip leading list numbering, bullets, or prefix: e.g. "1. ", "[1] ", "- ", "By: "
   cleaned = cleaned.replace(
-    /^(?:(?:\[?\d+\]?[\.\)]?|[-•*])\s+|(?:by|author|authors):\s*)/i,
+    /^(?:(?:\[?\d+\]?[.)]?|[-•*])\s+|(?:by|author|authors):\s*)/i,
     '',
   );
 

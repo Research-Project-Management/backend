@@ -114,7 +114,7 @@ export class IdempotentConsumerService extends SharedIdempotentConsumerService {
         if (client) {
           const raw = await client.get(key);
           if (raw) {
-            const parsed = JSON.parse(raw);
+            const parsed = JSON.parse(raw) as { status?: string };
             return parsed.status === 'completed';
           }
         }
@@ -194,7 +194,7 @@ export class IdempotentConsumerService extends SharedIdempotentConsumerService {
           const existingRaw = await client.get(key);
           if (existingRaw) {
             try {
-              const existing = JSON.parse(existingRaw);
+              const existing = JSON.parse(existingRaw) as { status?: string };
               if (existing.status === 'completed') {
                 this.setMemoryEntry(key, 'completed', 86400);
                 return { acquired: false, reason: 'ALREADY_COMPLETED' };

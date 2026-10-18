@@ -117,9 +117,9 @@ export class SearchEventsSubscriber implements OnModuleInit {
       cleanupTasks.push(
         this.searchRepo
           .deleteFullTextIndexByItemId(itemId)
-          .catch((err) =>
+          .catch((err: unknown) =>
             this.logger.error(
-              `[SearchEvents] FTS cleanup error for item ${itemId}: ${err?.message || err}`,
+              `[SearchEvents] FTS cleanup error for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
             ),
           ),
       );
@@ -131,9 +131,9 @@ export class SearchEventsSubscriber implements OnModuleInit {
       cleanupTasks.push(
         this.searchService
           .invalidateFacetsCache(scopeId)
-          .catch((err) =>
+          .catch((err: unknown) =>
             this.logger.warn(
-              `[SearchEvents] Facet cache invalidation error: ${err?.message || err}`,
+              `[SearchEvents] Facet cache invalidation error: ${err instanceof Error ? err.message : String(err)}`,
             ),
           ),
       );
@@ -142,16 +142,7 @@ export class SearchEventsSubscriber implements OnModuleInit {
   }
 
   @OnEvent('library.item.purged', { async: true })
-  async handleItemPurged(
-    event:
-      | {
-          id?: string;
-          aggregateId?: string;
-          scopeId?: string;
-          payload?: { id?: string; projectId?: string | null; userId?: string };
-        }
-      | unknown,
-  ): Promise<void> {
+  async handleItemPurged(event: unknown): Promise<void> {
     const payload = event as
       | {
           id?: string;
@@ -192,20 +183,6 @@ export class SearchEventsSubscriber implements OnModuleInit {
         );
       }
     }
-  }
-
-  /** Backward-compatible alias for unit tests and callers */
-  async handleItemCreated(
-    event: BaseIntegrationEvent<ItemCreatedIntegrationPayload>,
-  ): Promise<void> {
-    return this.handleIntegrationItemCreated(event);
-  }
-
-  /** Backward-compatible alias for unit tests and callers */
-  async handleItemDeleted(
-    event: BaseIntegrationEvent<ItemDeletedIntegrationPayload>,
-  ): Promise<void> {
-    return this.handleIntegrationItemDeleted(event);
   }
 
   // Domain Events (Local Sync & Extraction Lifecycle)
@@ -271,9 +248,7 @@ export class SearchEventsSubscriber implements OnModuleInit {
   }
 
   private resolveScopeId(
-    event: BaseIntegrationEvent<
-      { projectId?: string | null; userId?: string } | unknown
-    >,
+    event: BaseIntegrationEvent<unknown>,
   ): string | undefined {
     const payload = event.payload as
       { projectId?: string | null; userId?: string } | undefined;

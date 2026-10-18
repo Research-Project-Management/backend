@@ -31,7 +31,7 @@ import {
   UpdateAnnotationDto,
   BatchAnnotationsDto,
 } from '@/modules/library/extraction/dto/annotations.dto';
-import { ProjectRoleGuard } from '@/modules/project/access';
+import { ProjectAccessGuard } from '@/modules/project/access';
 import { AnnotationsService } from '@/modules/library/extraction/services/annotations.service';
 
 @ApiTags('Annotations')
@@ -40,7 +40,7 @@ import { AnnotationsService } from '@/modules/library/extraction/services/annota
   'api/v1/library/attachments/:attachmentId/annotations',
   'api/v1/projects/:projectId/library/attachments/:attachmentId/annotations',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class AnnotationsController {
   constructor(
     private readonly annotationsService: AnnotationsService,

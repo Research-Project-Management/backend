@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -16,6 +16,9 @@ import {
   cleanAbstractText,
   titleSimilarity,
   TITLE_MATCH_THRESHOLD,
+  AcademicHttpClient,
+  LibraryConfigService,
+  libraryConfig,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { getAcademicContactEmail } from '@/modules/library/core/constants/academic-client.constants';
@@ -37,12 +40,49 @@ export class CrossRefProvider implements MetadataProvider {
 
   private readonly logger = new Logger(CrossRefProvider.name);
 
+  constructor(
+    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() private readonly configService?: LibraryConfigService,
+  ) {}
+
   private get mailto(): string {
-    return getAcademicContactEmail();
+    return (
+      this.configService?.providers.crossrefEmail ??
+      libraryConfig().providers.crossrefEmail ??
+      getAcademicContactEmail()
+    );
   }
 
-  supports(queryType: QueryType): boolean {
-    return this.capabilities.queryTypes.includes(queryType);
+  private async executeFetch(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    if (this.httpClient) {
+      const { response } = await this.httpClient.request(url, {
+        headers: {
+          'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
+          Accept: 'application/json',
+        },
+        signal,
+      });
+      return response;
+    }
+    return fetch(url, {
+      headers: {
+        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
+        Accept: 'application/json',
+      },
+      signal,
+    });
+  }
+
+  supports(input: QueryType | MetadataRequest): boolean {
+    const type = typeof input === 'string' ? input : input?.queryType;
+    return type ? this.capabilities.queryTypes.includes(type) : false;
+  }
+
+  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
+    return this.resolve(request);
   }
 
   async resolve(
@@ -64,13 +104,7 @@ export class CrossRefProvider implements MetadataProvider {
   ): Promise<ProviderResult | null> {
     const url = `https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=${encodeURIComponent(this.mailto)}`;
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
-        Accept: 'application/json',
-      },
-      signal,
-    });
+    const response = await this.executeFetch(url, signal);
 
     if (response.status === 404) {
       return null;
@@ -115,13 +149,7 @@ export class CrossRefProvider implements MetadataProvider {
 
     const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(cleanTitle)}&rows=5&mailto=${encodeURIComponent(this.mailto)}`;
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
-        Accept: 'application/json',
-      },
-      signal,
-    });
+    const response = await this.executeFetch(url, signal);
 
     if (response.status === 404) return null;
 

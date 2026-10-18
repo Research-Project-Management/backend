@@ -3,11 +3,10 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
-  ForbiddenException,
   Inject,
   Optional,
 } from '@nestjs/common';
-import { Prisma, AttachmentType, LinkMode } from '@prisma/client';
+import { Prisma, AttachmentType } from '@prisma/client';
 import {
   TransactionService,
   TransactionHelpers,
@@ -40,13 +39,6 @@ import {
 import type { IStorageDriver } from '@/modules/storage/core';
 import type { IStorageNodeRepository } from '@/modules/storage/drive';
 import { PdfThumbnailService } from '@/modules/storage/worker';
-
-import {
-  formatAttachmentFilename,
-  resolveFileExtension,
-  sanitizeFilenameStem,
-  DEFAULT_RENAME_PATTERN,
-} from '@/modules/library/extraction/domain/renamer.domain';
 import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
@@ -57,6 +49,9 @@ import {
   AttachmentId,
   ProjectId,
 } from '@/modules/library/core/types/branded.types';
+import { AttachmentSyncService } from './attachment-sync.service';
+import { AttachmentRenamerService } from './attachment-renamer.service';
+import { AttachmentThumbnailService } from './attachment-thumbnail.service';
 
 export type { CreateAttachmentInput, ReplaceAttachmentFileInput };
 
@@ -82,6 +77,20 @@ export class AttachmentsService {
     @Optional()
     @Inject(PdfThumbnailService)
     private readonly pdfThumbnailService?: PdfThumbnailService,
+    @Optional()
+    private readonly syncService: AttachmentSyncService = new AttachmentSyncService(),
+    @Optional()
+    private readonly renamerService: AttachmentRenamerService = new AttachmentRenamerService(
+      repo,
+      catalogGateway,
+    ),
+    @Optional()
+    private readonly thumbnailService: AttachmentThumbnailService = new AttachmentThumbnailService(
+      storageDriver,
+      storageNodeRepo,
+      storagePort,
+      pdfThumbnailService,
+    ),
   ) {}
 
   private async assertItemExists(
@@ -360,192 +369,7 @@ export class AttachmentsService {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
-    const projectId = command.projectId;
-    const userId = command.userId;
-    const actorId = userId || projectId || 'system';
-
-    if (command.existingId) {
-      const existing = await tx.attachment.findUnique({
-        where: { id: command.existingId },
-        include: { item: true },
-      });
-
-      if (!existing) {
-        throw new NotFoundException(
-          `Attachment ${command.existingId} not found`,
-        );
-      }
-
-      const item = existing.item;
-      if (projectId && item?.projectId && item.projectId !== projectId) {
-        throw new ForbiddenException(
-          `Attachment ${command.existingId} does not belong to project ${projectId}`,
-        );
-      } else if (
-        !projectId &&
-        userId &&
-        item?.userId &&
-        !item?.projectId &&
-        item.userId !== userId
-      ) {
-        throw new ForbiddenException(
-          `Attachment ${command.existingId} does not belong to user ${userId}`,
-        );
-      }
-
-      const revisionCount = await tx.attachmentRevision.count({
-        where: { attachmentId: command.existingId },
-      });
-      const nextRevisionNumber = revisionCount + 1;
-
-      const updated = await tx.attachment.update({
-        where: { id: command.existingId },
-        data: {
-          filename: command.filename,
-          url: command.url,
-          mimeType: command.mimeType,
-          fileHash: command.fileHash,
-          size: command.size !== undefined ? BigInt(command.size) : undefined,
-        },
-      });
-
-      await tx.attachmentRevision.create({
-        data: {
-          attachmentId: updated.id,
-          revisionNumber: nextRevisionNumber,
-          fileHash: command.fileHash || '',
-          sizeBytes: command.size !== undefined ? BigInt(command.size) : 0n,
-          url: command.url,
-          comment: 'Sync update',
-        },
-      });
-
-      const effectiveProjectId =
-        projectId || existing.item?.projectId || undefined;
-      const syncScope = { userId: actorId, projectId: effectiveProjectId };
-
-      await helpers.appendChange(syncScope, {
-        entityType: 'Attachment',
-        entityId: updated.id,
-        action: 'update',
-        version: nextRevisionNumber,
-      });
-
-      return { id: updated.id, isNew: false, version: nextRevisionNumber };
-    } else {
-      const parentItemId = command.itemId;
-      if (!parentItemId) {
-        throw new NotFoundException(
-          `Parent item ID required for attachment ${command.filename}`,
-        );
-      }
-
-      const item = await tx.item.findUnique({
-        where: { id: parentItemId },
-      });
-
-      if (!item) {
-        throw new NotFoundException(`Item ${parentItemId} not found`);
-      }
-
-      if (projectId && item.projectId && item.projectId !== projectId) {
-        throw new ForbiddenException(
-          `Item ${parentItemId} does not belong to project ${projectId}`,
-        );
-      } else if (
-        !projectId &&
-        userId &&
-        item.userId &&
-        !item.projectId &&
-        item.userId !== userId
-      ) {
-        throw new ForbiddenException(
-          `Item ${parentItemId} does not belong to user ${userId}`,
-        );
-      }
-
-      let resolvedLinkMode: LinkMode | undefined = command.linkMode as
-        LinkMode | undefined;
-      if (!resolvedLinkMode) {
-        if (
-          command.mimeType === 'text/html' ||
-          command.attachmentType === AttachmentType.snapshot
-        ) {
-          resolvedLinkMode = 'imported_url';
-        } else if (
-          !command.fileId &&
-          command.url &&
-          /^https?:\/\//i.test(command.url)
-        ) {
-          resolvedLinkMode = 'linked_url';
-        } else {
-          resolvedLinkMode = 'imported_file';
-        }
-      }
-
-      const created = await tx.attachment.create({
-        data: {
-          itemId: parentItemId,
-          linkMode: resolvedLinkMode,
-          filename: command.filename,
-          url: command.url,
-          fileId: command.fileId,
-          mimeType: command.mimeType,
-          fileHash: command.fileHash,
-          attachmentType: command.attachmentType
-            ? (command.attachmentType as AttachmentType)
-            : AttachmentType.primary_pdf,
-          size: command.size !== undefined ? BigInt(command.size) : 0n,
-        },
-      });
-
-      await tx.attachmentRevision.create({
-        data: {
-          attachmentId: created.id,
-          revisionNumber: 1,
-          fileHash: command.fileHash || '',
-          sizeBytes: command.size !== undefined ? BigInt(command.size) : 0n,
-          url: command.url,
-          comment: 'Initial sync',
-        },
-      });
-
-      const effectiveProjectId = projectId || item.projectId || undefined;
-      const syncScope = { userId: actorId, projectId: effectiveProjectId };
-
-      await helpers.appendChange(syncScope, {
-        entityType: 'Attachment',
-        entityId: created.id,
-        action: 'create',
-        version: 1,
-      });
-
-      await helpers.publishOutbox(
-        syncScope,
-        created.id,
-        'library.attachment.created',
-        { attachmentId: created.id, projectId: effectiveProjectId },
-      );
-
-      if (
-        command.mimeType === 'application/pdf' ||
-        command.filename?.toLowerCase().endsWith('.pdf')
-      ) {
-        await helpers.publishOutbox(
-          syncScope,
-          created.id,
-          'library.attachment.extraction_requested',
-          {
-            attachmentId: created.id,
-            itemId: created.itemId,
-            userId: actorId,
-            projectId: effectiveProjectId,
-          },
-        );
-      }
-
-      return { id: created.id, isNew: true, version: 1 };
-    }
+    return this.syncService.upsertFromSync(command, tx, helpers);
   }
 
   async deleteFromSync(
@@ -553,42 +377,7 @@ export class AttachmentsService {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const projectId = command.projectId;
-    const userId = command.userId;
-    const actorId = userId || projectId || 'system';
-
-    const itemWhere: Prisma.ItemWhereInput = {};
-    if (projectId) {
-      itemWhere.projectId = projectId;
-    } else if (userId) {
-      itemWhere.userId = userId;
-    }
-
-    const existing = await tx.attachment.findFirst({
-      where: {
-        id: command.entityId,
-        ...(Object.keys(itemWhere).length > 0 ? { item: itemWhere } : {}),
-      },
-      include: { item: true },
-    });
-    if (!existing) return;
-
-    const effectiveProjectId =
-      projectId || existing.item?.projectId || undefined;
-    const syncScope = { userId: actorId, projectId: effectiveProjectId };
-
-    await tx.attachment.delete({ where: { id: command.entityId } });
-    await helpers.appendChange(syncScope, {
-      entityType: 'Attachment',
-      entityId: command.entityId,
-      action: 'delete',
-      version: 1,
-    });
-    await helpers.recordTombstone(syncScope, {
-      entityType: 'Attachment',
-      entityId: command.entityId,
-      deletedById: userId || undefined,
-    });
+    return this.syncService.deleteFromSync(command, tx, helpers);
   }
 
   async reassignToItem(
@@ -690,110 +479,11 @@ export class AttachmentsService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    let blobId: string | null = null;
-    let storageNode: Awaited<ReturnType<IStorageNodeRepository['findById']>> =
-      null;
-
-    if (attachment.fileId && this.storageNodeRepo) {
-      try {
-        storageNode = await this.storageNodeRepo.findById(attachment.fileId);
-        if (storageNode?.blobId) {
-          blobId = storageNode.blobId;
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.debug(
-          `Could not resolve storage node for attachment ${attachmentId}: ${message}`,
-        );
-      }
-    }
-
-    if (blobId && this.storageDriver) {
-      const thumbKey = `thumbnails/${blobId}.webp`;
-      try {
-        const exists = await this.storageDriver.exists(thumbKey);
-        if (exists) {
-          const { stream } = await this.storageDriver.getStream(thumbKey);
-          const chunks: Buffer[] = [];
-          for await (const chunk of stream) {
-            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-          }
-          return {
-            buffer: Buffer.concat(chunks),
-            mimeType: 'image/webp',
-          };
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.debug(
-          `Failed reading existing thumbnail from storage driver: ${message}`,
-        );
-      }
-    }
-
-    let pdfBuffer: Buffer | null = null;
-    if (attachment.fileId && this.storagePort?.readOwnedFile) {
-      try {
-        const fileRecord = await this.storagePort.readOwnedFile({
-          fileId: attachment.fileId,
-          userId,
-        });
-        if (fileRecord?.buffer) {
-          pdfBuffer = fileRecord.buffer;
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.debug(
-          `Failed to read owned file for thumbnail: ${message}`,
-        );
-      }
-    }
-
-    if (!pdfBuffer) {
-      throw new NotFoundException(
-        `No PDF binary available for attachment ${attachmentId}`,
-      );
-    }
-
-    if (!this.pdfThumbnailService) {
-      throw new NotFoundException('Thumbnail generator service is unavailable');
-    }
-
-    const thumbBuffer =
-      await this.pdfThumbnailService.generateThumbnail(pdfBuffer);
-    if (!thumbBuffer) {
-      throw new NotFoundException(
-        `Failed to generate thumbnail for attachment ${attachmentId}`,
-      );
-    }
-
-    if (blobId && this.storageDriver) {
-      const thumbKey = `thumbnails/${blobId}.webp`;
-      try {
-        await this.storageDriver.put(thumbKey, thumbBuffer, {
-          mimeType: 'image/webp',
-          size: thumbBuffer.length,
-        });
-        if (storageNode && this.storageNodeRepo) {
-          const currentMeta = storageNode.metadata || {};
-          storageNode.updateMetadata?.({
-            ...currentMeta,
-            thumbnail: `/api/v1/storage/files/r2/${encodeURIComponent(thumbKey)}`,
-          });
-          await this.storageNodeRepo.update(storageNode);
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `Could not persist generated thumbnail to driver: ${message}`,
-        );
-      }
-    }
-
-    return {
-      buffer: thumbBuffer,
-      mimeType: 'image/webp',
-    };
+    return this.thumbnailService.getThumbnail(
+      userId,
+      attachmentId,
+      attachment.fileId,
+    );
   }
 
   async renameAttachment(
@@ -802,61 +492,12 @@ export class AttachmentsService {
     dto: RenameAttachmentDto,
     projectId?: ProjectId | string,
   ) {
-    const attachment = await this.repo.findFirst(
-      {
-        id: attachmentId,
-        deletedAt: null,
-      },
-      {
-        item: {
-          include: {
-            contributors: {
-              orderBy: { orderIndex: 'asc' },
-            },
-          },
-        },
-      },
-    );
-
-    if (!attachment) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
-    }
-
-    await this.assertItemExists(userId, attachment.itemId, projectId);
-
-    const oldFilename = attachment.filename || 'document.pdf';
-    let newFilename = '';
-
-    if (dto.filename && dto.filename.trim()) {
-      const ext = resolveFileExtension(oldFilename);
-      const extCleanupRegex = new RegExp(
-        `(?:${ext.replace('.', '\\.')}|\\.[a-zA-Z0-9]{2,5})+$`,
-        'i',
-      );
-      const cleanStem = sanitizeFilenameStem(
-        dto.filename.trim().replace(extCleanupRegex, ''),
-      );
-      newFilename = `${cleanStem}${ext}`;
-    } else {
-      const pattern = dto.pattern || DEFAULT_RENAME_PATTERN;
-      newFilename = formatAttachmentFilename(
-        pattern,
-        attachment.item,
-        oldFilename,
-      );
-    }
-
-    if (oldFilename === newFilename) {
-      return { attachment, oldFilename, newFilename };
-    }
-
-    const updated = await this.repo.renameAttachment(
+    return this.renamerService.renameAttachment(
+      userId,
       attachmentId,
-      newFilename,
-      attachment.fileId ?? undefined,
+      dto,
+      projectId,
     );
-
-    return { attachment: updated, oldFilename, newFilename };
   }
 
   async batchRenameAttachments(
@@ -872,94 +513,7 @@ export class AttachmentsService {
       newFilename: string;
     }>;
   }> {
-    const pattern = dto.pattern || DEFAULT_RENAME_PATTERN;
-    const whereClause: Prisma.AttachmentWhereInput = {
-      deletedAt: null,
-    };
-
-    if (dto.attachmentIds && dto.attachmentIds.length > 0) {
-      whereClause.id = { in: dto.attachmentIds };
-    } else if (dto.itemIds && dto.itemIds.length > 0) {
-      whereClause.itemId = { in: dto.itemIds };
-    } else {
-      throw new BadRequestException(
-        'Either itemIds or attachmentIds must be provided',
-      );
-    }
-
-    interface RenameAttachmentRecord {
-      id: string;
-      itemId: string;
-      filename?: string | null;
-      fileId?: string | null;
-      item?: Parameters<typeof formatAttachmentFilename>[1];
-    }
-    const attachments = (await this.repo.findMany(whereClause, {
-      item: {
-        include: {
-          contributors: {
-            orderBy: { orderIndex: 'asc' },
-          },
-        },
-      },
-    })) as RenameAttachmentRecord[];
-
-    const results: Array<{
-      attachmentId: string;
-      itemId: string;
-      oldFilename: string;
-      newFilename: string;
-    }> = [];
-
-    const verifiedItemIds = new Set<string>();
-    const invalidItemIds = new Set<string>();
-
-    for (const att of attachments) {
-      try {
-        if (invalidItemIds.has(att.itemId)) {
-          continue;
-        }
-        if (!verifiedItemIds.has(att.itemId)) {
-          try {
-            await this.assertItemExists(userId, att.itemId, projectId);
-            verifiedItemIds.add(att.itemId);
-          } catch (err: unknown) {
-            invalidItemIds.add(att.itemId);
-            throw err;
-          }
-        }
-        const oldFilename = att.filename || 'document.pdf';
-        const newFilename = formatAttachmentFilename(
-          pattern,
-          att.item || {},
-          oldFilename,
-        );
-
-        if (oldFilename !== newFilename) {
-          await this.repo.renameAttachment(
-            att.id,
-            newFilename,
-            att.fileId ?? undefined,
-          );
-        }
-
-        results.push({
-          attachmentId: att.id,
-          itemId: att.itemId,
-          oldFilename,
-          newFilename,
-        });
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Failed to rename attachment ${att.id}: ${message}`);
-      }
-    }
-
-    return {
-      renamedCount: results.filter((r) => r.oldFilename !== r.newFilename)
-        .length,
-      results,
-    };
+    return this.renamerService.batchRenameAttachments(userId, dto, projectId);
   }
 
   async resolveAttachmentItemId(

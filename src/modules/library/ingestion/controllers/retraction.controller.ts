@@ -17,7 +17,7 @@ import {
   SyncRetractionDto,
 } from '@/modules/library/ingestion/dto/retraction.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Library Retraction')
 @ApiBearerAuth()
@@ -25,7 +25,7 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
   'api/v1/library/retraction',
   'api/v1/projects/:projectId/library/retraction',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class RetractionController {
   constructor(private readonly service: RetractionService) {}
 

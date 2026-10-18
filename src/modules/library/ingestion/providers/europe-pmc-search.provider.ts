@@ -1,11 +1,11 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   IExternalSearchProvider,
   ExternalSearchOptions,
   ExternalSearchResult,
   ExternalSearchPaperHit,
 } from '@/modules/library/ingestion/types/external-search.types';
-import { cleanAbstractText } from '@/modules/library/core';
+import { cleanAbstractText, AcademicHttpClient } from '@/modules/library/core';
 
 const DEFAULT_TIMEOUT_MS = 6000;
 const DEFAULT_LIMIT = 5;
@@ -15,8 +15,10 @@ export class EuropePmcSearchProvider implements IExternalSearchProvider {
   readonly providerName = 'europepmc';
   private readonly logger = new Logger(EuropePmcSearchProvider.name);
 
-  async isAvailable(): Promise<boolean> {
-    return true; // Public open access academic mirror
+  constructor(@Optional() private readonly httpClient?: AcademicHttpClient) {}
+
+  isAvailable(): Promise<boolean> {
+    return Promise.resolve(true); // Public open access academic mirror
   }
 
   async search(
@@ -33,10 +35,14 @@ export class EuropePmcSearchProvider implements IExternalSearchProvider {
       )}&format=json&pageSize=${limit}&resultType=core`;
 
       const signal = AbortSignal.timeout(timeoutMs);
-      const res = await fetch(endpoint, {
-        headers: { Accept: 'application/json' },
-        signal,
-      });
+      const headers = { Accept: 'application/json' };
+      const res = this.httpClient
+        ? (await this.httpClient.request(endpoint, { headers, signal }))
+            .response
+        : await fetch(endpoint, {
+            headers,
+            signal,
+          });
 
       const latencyMs = Date.now() - startTime;
 
@@ -52,7 +58,9 @@ export class EuropePmcSearchProvider implements IExternalSearchProvider {
         };
       }
 
-      const data = await res.json();
+      const data = (await res.json()) as {
+        resultList?: { result?: unknown[] };
+      };
       const records = Array.isArray(data?.resultList?.result)
         ? data.resultList.result
         : [];
@@ -94,9 +102,8 @@ export class EuropePmcSearchProvider implements IExternalSearchProvider {
   }
 
   private mapToHit(record: Record<string, unknown>): ExternalSearchPaperHit {
-    const title = String(record.title || '')
-      .replace(/<[^>]+>/g, '')
-      .trim();
+    const rawTitle = typeof record.title === 'string' ? record.title : '';
+    const title = rawTitle.replace(/<[^>]+>/g, '').trim();
     const doi = typeof record.doi === 'string' ? record.doi : undefined;
     const pmid = typeof record.pmid === 'string' ? record.pmid : undefined;
     const pmcid = typeof record.pmcid === 'string' ? record.pmcid : undefined;
@@ -152,11 +159,19 @@ export class EuropePmcSearchProvider implements IExternalSearchProvider {
         ? cleanAbstractText(record.abstractText.replace(/<[^>]+>/g, ' '))
         : undefined;
 
+    const sourceStr =
+      typeof record.source === 'string' && record.source
+        ? record.source
+        : 'MED';
+    const idStr =
+      typeof record.id === 'string' || typeof record.id === 'number'
+        ? String(record.id)
+        : '';
     const url = doi
       ? `https://doi.org/${doi}`
       : pmid
         ? `https://pubmed.ncbi.nlm.nih.gov/${pmid}`
-        : `https://europepmc.org/article/${record.source || 'MED'}/${record.id}`;
+        : `https://europepmc.org/article/${sourceStr}/${idStr}`;
 
     // Scoring
     let confidenceScore = 0.0;

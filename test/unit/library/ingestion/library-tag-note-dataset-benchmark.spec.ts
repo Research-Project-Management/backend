@@ -39,7 +39,9 @@ export interface BenchmarkDatasetRecord {
   pmid?: string;
   pmcid?: string;
   arxivId?: string;
-  rawInputTags: (string | { tag?: string; name?: string; type?: number | string })[];
+  rawInputTags: (
+    string | { tag?: string; name?: string; type?: number | string }
+  )[];
   expectedCleanTags: string[];
   rawNote: string;
   expectedNoteSnippet: string;
@@ -57,7 +59,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     id: 'kp20k-01',
     dataset: 'KP20K',
     itemType: 'conferencePaper',
-    title: 'An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale',
+    title:
+      'An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale',
     authors: ['Alexey Dosovitskiy', 'Lucas Beyer', 'Alexander Kolesnikov'],
     year: 2021,
     venue: 'International Conference on Learning Representations (ICLR)',
@@ -79,7 +82,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'ImageNet',
       'Computer Science - Computer Vision and Pattern Recognition',
     ],
-    rawNote: '<h2>Vision Transformer (ViT)</h2><p>Splits images into <strong>16x16 patches</strong> and feeds linear embeddings to a standard Transformer encoder.</p>',
+    rawNote:
+      '<h2>Vision Transformer (ViT)</h2><p>Splits images into <strong>16x16 patches</strong> and feeds linear embeddings to a standard Transformer encoder.</p>',
     expectedNoteSnippet: '## Vision Transformer (ViT)',
   },
   {
@@ -107,7 +111,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'ImageNet',
       'IEEE',
     ],
-    rawNote: '<p>Introduces <em>1x1 bottleneck convolutions</em> for multi-scale feature extraction inside the Inception module.</p>',
+    rawNote:
+      '<p>Introduces <em>1x1 bottleneck convolutions</em> for multi-scale feature extraction inside the Inception module.</p>',
     expectedNoteSnippet: '*1x1 bottleneck convolutions*',
   },
   {
@@ -136,15 +141,23 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'DeepMind',
       'Quantitative Biology - Biomolecules',
     ],
-    rawNote: 'Breakthrough CASP14 architecture combining Evoformer blocks and equivariant 3D structure module.',
+    rawNote:
+      'Breakthrough CASP14 architecture combining Evoformer blocks and equivariant 3D structure module.',
     expectedNoteSnippet: 'Evoformer blocks',
   },
   {
     id: 'kp20k-04',
     dataset: 'KP20K',
     itemType: 'conferencePaper',
-    title: 'FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness',
-    authors: ['Tri Dao', 'Daniel Y. Fu', 'Stefano Ermon', 'Atri Rudra', 'Christopher Ré'],
+    title:
+      'FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness',
+    authors: [
+      'Tri Dao',
+      'Daniel Y. Fu',
+      'Stefano Ermon',
+      'Atri Rudra',
+      'Christopher Ré',
+    ],
     year: 2022,
     venue: 'Advances in Neural Information Processing Systems (NeurIPS)',
     arxivId: '2205.14135',
@@ -163,7 +176,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'PyTorch',
       'LLM',
     ],
-    rawNote: 'Uses tiling and online softmax recomputation in GPU SRAM to avoid HBM materialization of the N x N attention matrix.',
+    rawNote:
+      'Uses tiling and online softmax recomputation in GPU SRAM to avoid HBM materialization of the N x N attention matrix.',
     expectedNoteSnippet: 'GPU SRAM',
   },
   {
@@ -192,7 +206,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'GPT-3',
       'Computer Science - Computation and Language',
     ],
-    rawNote: 'Freezes pretrained model weights and injects trainable rank decomposition matrices into Transformer layers.',
+    rawNote:
+      'Freezes pretrained model weights and injects trainable rank decomposition matrices into Transformer layers.',
     expectedNoteSnippet: 'rank decomposition matrices',
   },
   {
@@ -219,7 +234,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Computation and Language',
       'Computer Science - Artificial Intelligence',
     ],
-    rawNote: 'Replaces recurrent and convolutional layers entirely with scaled dot-product attention.',
+    rawNote:
+      'Replaces recurrent and convolutional layers entirely with scaled dot-product attention.',
     expectedNoteSnippet: 'scaled dot-product attention',
   },
   {
@@ -247,17 +263,25 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'skip connections',
       'ieee',
     ],
-    rawNote: 'Reformulates layers as learning residual functions with reference to the layer inputs.',
+    rawNote:
+      'Reformulates layers as learning residual functions with reference to the layer inputs.',
     expectedNoteSnippet: 'residual functions',
   },
   {
     id: 'kp20k-08',
     dataset: 'KP20K',
     itemType: 'conferencePaper',
-    title: 'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding',
-    authors: ['Jacob Devlin', 'Ming-Wei Chang', 'Kenton Lee', 'Kristina Toutanova'],
+    title:
+      'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding',
+    authors: [
+      'Jacob Devlin',
+      'Ming-Wei Chang',
+      'Kenton Lee',
+      'Kristina Toutanova',
+    ],
     year: 2019,
-    venue: 'North American Chapter of the Association for Computational Linguistics (NAACL)',
+    venue:
+      'North American Chapter of the Association for Computational Linguistics (NAACL)',
     arxivId: '1810.04805',
     rawInputTags: [
       'BERT; Masked Language Model; GLUE; SQuAD; NAACL; ACL',
@@ -273,7 +297,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'ACL',
       'Computer Science - Computation and Language',
     ],
-    rawNote: 'Jointly conditions on both left and right context in all layers using MLM and NSP objectives.',
+    rawNote:
+      'Jointly conditions on both left and right context in all layers using MLM and NSP objectives.',
     expectedNoteSnippet: 'MLM and NSP objectives',
   },
   {
@@ -300,7 +325,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Computation and Language',
       'Computer Science - Information Retrieval',
     ],
-    rawNote: 'Combines parametric seq2seq memory (BART) with non-parametric dense vector index of Wikipedia.',
+    rawNote:
+      'Combines parametric seq2seq memory (BART) with non-parametric dense vector index of Wikipedia.',
     expectedNoteSnippet: 'non-parametric dense vector index',
   },
   {
@@ -327,7 +353,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Machine Learning',
       'Statistics - Machine Learning',
     ],
-    rawNote: 'Connects diffusion probabilistic models with denoising score matching over Langevin dynamics.',
+    rawNote:
+      'Connects diffusion probabilistic models with denoising score matching over Langevin dynamics.',
     expectedNoteSnippet: 'denoising score matching',
   },
   {
@@ -335,9 +362,15 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'KP20K',
     itemType: 'conferencePaper',
     title: 'High-Resolution Image Synthesis with Latent Diffusion Models',
-    authors: ['Robin Rombach', 'Andreas Blattmann', 'Dominik Lorenz', 'Björn Ommer'],
+    authors: [
+      'Robin Rombach',
+      'Andreas Blattmann',
+      'Dominik Lorenz',
+      'Björn Ommer',
+    ],
     year: 2022,
-    venue: 'IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)',
+    venue:
+      'IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)',
     doi: '10.1109/CVPR52688.2022.01042',
     rawInputTags: [
       'Latent Diffusion; Stable Diffusion; VQ-GAN; Cross-Attention; CVPR',
@@ -352,7 +385,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'CVPR',
       'Computer Science - Computer Vision and Pattern Recognition',
     ],
-    rawNote: 'Applies diffusion models in the latent space of pretrained autoencoders for high-resolution synthesis.',
+    rawNote:
+      'Applies diffusion models in the latent space of pretrained autoencoders for high-resolution synthesis.',
     expectedNoteSnippet: 'latent space of pretrained autoencoders',
   },
   {
@@ -378,15 +412,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'ICLR',
       'Computer Science - Machine Learning',
     ],
-    rawNote: 'First-order approximation of spectral graph convolutions for fast node classification.',
+    rawNote:
+      'First-order approximation of spectral graph convolutions for fast node classification.',
     expectedNoteSnippet: 'spectral graph convolutions',
   },
   {
     id: 'kp20k-13',
     dataset: 'KP20K',
     itemType: 'conferencePaper',
-    title: 'A Simple Framework for Contrastive Learning of Visual Representations',
-    authors: ['Ting Chen', 'Simon Kornblith', 'Mohammad Norouzi', 'Geoffrey Hinton'],
+    title:
+      'A Simple Framework for Contrastive Learning of Visual Representations',
+    authors: [
+      'Ting Chen',
+      'Simon Kornblith',
+      'Mohammad Norouzi',
+      'Geoffrey Hinton',
+    ],
     year: 2020,
     venue: 'International Conference on Machine Learning (ICML)',
     arxivId: '2002.05709',
@@ -405,14 +446,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Computer Vision and Pattern Recognition',
       'Computer Science - Machine Learning',
     ],
-    rawNote: 'Composition of data augmentations and a learnable nonlinear projection head dramatically improves contrastive representations.',
+    rawNote:
+      'Composition of data augmentations and a learnable nonlinear projection head dramatically improves contrastive representations.',
     expectedNoteSnippet: 'nonlinear projection head',
   },
   {
     id: 'kp20k-14',
     dataset: 'KP20K',
     itemType: 'conferencePaper',
-    title: 'NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis',
+    title:
+      'NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis',
     authors: ['Ben Mildenhall', 'Pratul P. Srinivasan', 'Matthew Tancik'],
     year: 2020,
     venue: 'European Conference on Computer Vision (ECCV)',
@@ -431,7 +474,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Computer Vision and Pattern Recognition',
       'Computer Science - Graphics',
     ],
-    rawNote: 'Optimizes a continuous 5D scene representation using differentiable volume rendering.',
+    rawNote:
+      'Optimizes a continuous 5D scene representation using differentiable volume rendering.',
     expectedNoteSnippet: 'continuous 5D scene representation',
   },
   {
@@ -439,7 +483,12 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'KP20K',
     itemType: 'journalArticle',
     title: '3D Gaussian Splatting for Real-Time Radiance Field Rendering',
-    authors: ['Bernhard Kerbl', 'Georgios Kopanas', 'Thomas Leimkühler', 'George Drettakis'],
+    authors: [
+      'Bernhard Kerbl',
+      'Georgios Kopanas',
+      'Thomas Leimkühler',
+      'George Drettakis',
+    ],
     year: 2023,
     venue: 'ACM Transactions on Graphics (SIGGRAPH)',
     doi: '10.1145/3592433',
@@ -458,15 +507,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Graphics',
       'Computer Science - Computer Vision and Pattern Recognition',
     ],
-    rawNote: 'Achieves 100+ fps at 1080p using anisotropic 3D Gaussians and tile-based rasterization.',
+    rawNote:
+      'Achieves 100+ fps at 1080p using anisotropic 3D Gaussians and tile-based rasterization.',
     expectedNoteSnippet: 'anisotropic 3D Gaussians',
   },
   {
     id: 'kp20k-16',
     dataset: 'KP20K',
     itemType: 'conferencePaper',
-    title: 'Direct Preference Optimization: Your Language Model is Secretly a Reward Model',
-    authors: ['Rafael Rafailov', 'Archit Sharma', 'Eric Mitchell', 'Stefano Ermon'],
+    title:
+      'Direct Preference Optimization: Your Language Model is Secretly a Reward Model',
+    authors: [
+      'Rafael Rafailov',
+      'Archit Sharma',
+      'Eric Mitchell',
+      'Stefano Ermon',
+    ],
     year: 2023,
     venue: 'Advances in Neural Information Processing Systems (NeurIPS)',
     arxivId: '2305.18290',
@@ -485,14 +541,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Machine Learning',
       'Computer Science - Computation and Language',
     ],
-    rawNote: 'Derives a closed-form mapping between reward functions and optimal policies, eliminating separate reward modeling.',
+    rawNote:
+      'Derives a closed-form mapping between reward functions and optimal policies, eliminating separate reward modeling.',
     expectedNoteSnippet: 'closed-form mapping',
   },
   {
     id: 'kp20k-17',
     dataset: 'KP20K',
     itemType: 'conferencePaper',
-    title: 'Efficient Memory Management for Large Language Model Serving with PagedAttention',
+    title:
+      'Efficient Memory Management for Large Language Model Serving with PagedAttention',
     authors: ['Woosuk Kwon', 'Zhuohan Li', 'Siyuan Zhuang', 'Ion Stoica'],
     year: 2023,
     venue: 'ACM Symposium on Operating Systems Principles (SOSP)',
@@ -512,7 +570,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Operating Systems',
       'Computer Science - Distributed, Parallel, and Cluster Computing',
     ],
-    rawNote: 'Partitions KV cache into non-contiguous physical blocks to eliminate internal and external memory fragmentation.',
+    rawNote:
+      'Partitions KV cache into non-contiguous physical blocks to eliminate internal and external memory fragmentation.',
     expectedNoteSnippet: 'non-contiguous physical blocks',
   },
   {
@@ -520,9 +579,15 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'KP20K',
     itemType: 'conferencePaper',
     title: 'Spanner: Google’s Globally-Distributed Database',
-    authors: ['James C. Corbett', 'Jeffrey Dean', 'Michael Epstein', 'Sanjay Ghemawat'],
+    authors: [
+      'James C. Corbett',
+      'Jeffrey Dean',
+      'Michael Epstein',
+      'Sanjay Ghemawat',
+    ],
     year: 2012,
-    venue: 'USENIX Symposium on Operating Systems Design and Implementation (OSDI)',
+    venue:
+      'USENIX Symposium on Operating Systems Design and Implementation (OSDI)',
     rawInputTags: [
       'Spanner; TrueTime; Paxos; External Consistency; 2PC; OSDI; Atomic Clock; GPS',
       'cs.DB',
@@ -540,7 +605,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Databases',
       'Computer Science - Distributed, Parallel, and Cluster Computing',
     ],
-    rawNote: 'Uses hardware-assisted TrueTime API with bounded clock uncertainty to guarantee lock-free read transactions.',
+    rawNote:
+      'Uses hardware-assisted TrueTime API with bounded clock uncertainty to guarantee lock-free read transactions.',
     expectedNoteSnippet: 'TrueTime API',
   },
   {
@@ -564,7 +630,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'USENIX ATC',
       'Computer Science - Distributed, Parallel, and Cluster Computing',
     ],
-    rawNote: 'Decomposes replicated state machine consensus into leader election, log replication, and safety.',
+    rawNote:
+      'Decomposes replicated state machine consensus into leader election, log replication, and safety.',
     expectedNoteSnippet: 'leader election, log replication',
   },
   {
@@ -574,7 +641,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     title: 'XGBoost: A Scalable Tree Boosting System',
     authors: ['Tianqi Chen', 'Carlos Guestrin'],
     year: 2016,
-    venue: 'ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (KDD)',
+    venue:
+      'ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (KDD)',
     doi: '10.1145/2939672.2939785',
     rawInputTags: [
       'XGBoost; Gradient Boosted Decision Trees; GBDT; Sparsity-Aware Split Finding; KDD; Out-of-Core Computation',
@@ -589,7 +657,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Out-of-Core Computation',
       'Computer Science - Machine Learning',
     ],
-    rawNote: 'Uses second-order Taylor expansion of the loss function and cache-aware column block structures.',
+    rawNote:
+      'Uses second-order Taylor expansion of the loss function and cache-aware column block structures.',
     expectedNoteSnippet: 'second-order Taylor expansion',
   },
 
@@ -598,7 +667,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     id: 'inspec-01',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'High-Throughput TCP/IP Packet Scheduling in Client/Server Data Centers',
+    title:
+      'High-Throughput TCP/IP Packet Scheduling in Client/Server Data Centers',
     authors: ['Mohammad Alizadeh', 'Albert Greenberg', 'David A. Maltz'],
     year: 2010,
     venue: 'ACM SIGCOMM Computer Communication Review',
@@ -618,14 +688,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'SIGCOMM',
       'ACM',
     ],
-    rawNote: 'Analyzes DCTCP congestion control using Explicit Congestion Notification (ECN) in data center switches.',
+    rawNote:
+      'Analyzes DCTCP congestion control using Explicit Congestion Notification (ECN) in data center switches.',
     expectedNoteSnippet: 'Explicit Congestion Notification (ECN)',
   },
   {
     id: 'inspec-02',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Physics-Informed Neural Networks for Nonlinear Partial Differential Equations',
+    title:
+      'Physics-Informed Neural Networks for Nonlinear Partial Differential Equations',
     authors: ['Maziar Raissi', 'Paris Perdikaris', 'George Em Karniadakis'],
     year: 2019,
     venue: 'Journal of Computational Physics',
@@ -648,14 +720,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Mathematics - Numerical Analysis',
       'Science',
     ],
-    rawNote: 'Embeds PDE residuals directly into the neural network loss function via automatic differentiation.',
+    rawNote:
+      'Embeds PDE residuals directly into the neural network loss function via automatic differentiation.',
     expectedNoteSnippet: 'automatic differentiation',
   },
   {
     id: 'inspec-03',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Robust H-Infinity Output-Feedback Control for Linear Time-Invariant MIMO Systems',
+    title:
+      'Robust H-Infinity Output-Feedback Control for Linear Time-Invariant MIMO Systems',
     authors: ['Kemin Zhou', 'John C. Doyle'],
     year: 1998,
     venue: 'IEEE Transactions on Automatic Control',
@@ -675,14 +749,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'LMI',
       'Electrical Engineering and Systems Science - Systems and Control',
     ],
-    rawNote: 'Synthesizes stabilizing H-infinity controllers via coupled algebraic Riccati equations.',
+    rawNote:
+      'Synthesizes stabilizing H-infinity controllers via coupled algebraic Riccati equations.',
     expectedNoteSnippet: 'algebraic Riccati equations',
   },
   {
     id: 'inspec-04',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Sub-Threshold CMOS Low-Noise Amplifier Design for 28-GHz 5G Millimeter-Wave Transceivers',
+    title:
+      'Sub-Threshold CMOS Low-Noise Amplifier Design for 28-GHz 5G Millimeter-Wave Transceivers',
     authors: ['Behzad Razavi'],
     year: 2020,
     venue: 'IEEE Journal of Solid-State Circuits',
@@ -702,14 +778,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'RFIC',
       'MOSFET',
     ],
-    rawNote: 'Achieves a 1.8 dB noise figure with 4.2 mW power dissipation in 28-nm bulk CMOS.',
+    rawNote:
+      'Achieves a 1.8 dB noise figure with 4.2 mW power dissipation in 28-nm bulk CMOS.',
     expectedNoteSnippet: '1.8 dB noise figure',
   },
   {
     id: 'inspec-05',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'High-Throughput FPGA Accelerator for Post-Quantum Lattice-Based Cryptography (CRYSTALS-Kyber)',
+    title:
+      'High-Throughput FPGA Accelerator for Post-Quantum Lattice-Based Cryptography (CRYSTALS-Kyber)',
     authors: ['Vadim Lyubashevsky', 'Léo Ducas', 'Eike Kiltz'],
     year: 2022,
     venue: 'IEEE Transactions on Computers',
@@ -731,14 +809,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Cryptography and Security',
       'Computer Science - Hardware Architecture',
     ],
-    rawNote: 'Implements pipelined radix-2 NTT butterflies on Xilinx UltraScale+ FPGA fabric.',
+    rawNote:
+      'Implements pipelined radix-2 NTT butterflies on Xilinx UltraScale+ FPGA fabric.',
     expectedNoteSnippet: 'radix-2 NTT butterflies',
   },
   {
     id: 'inspec-06',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Massive MIMO Hybrid Precoding for 6G Terahertz Orthogonal Time Frequency Space (OTFS) Modulation',
+    title:
+      'Massive MIMO Hybrid Precoding for 6G Terahertz Orthogonal Time Frequency Space (OTFS) Modulation',
     authors: ['Ronny Hadani', 'Shlomo Rakib', 'Andrea Goldsmith'],
     year: 2023,
     venue: 'IEEE Transactions on Wireless Communications',
@@ -759,14 +839,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Electrical Engineering and Systems Science - Signal Processing',
       'Computer Science - Information Theory',
     ],
-    rawNote: 'Transforms time-varying doubly-dispersive wireless channels into quasi-static delay-Doppler representations.',
+    rawNote:
+      'Transforms time-varying doubly-dispersive wireless channels into quasi-static delay-Doppler representations.',
     expectedNoteSnippet: 'delay-Doppler representations',
   },
   {
     id: 'inspec-07',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Model Predictive Torque Control of Permanent Magnet Synchronous Motors (PMSM) with SiC Inverters',
+    title:
+      'Model Predictive Torque Control of Permanent Magnet Synchronous Motors (PMSM) with SiC Inverters',
     authors: ['Jose Rodriguez', 'Patricio Cortes'],
     year: 2021,
     venue: 'IEEE Transactions on Power Electronics',
@@ -786,14 +868,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'PWM',
       'Electrical Engineering and Systems Science - Systems and Control',
     ],
-    rawNote: 'Reduces torque ripple and switching losses in 800V EV traction inverters.',
+    rawNote:
+      'Reduces torque ripple and switching losses in 800V EV traction inverters.',
     expectedNoteSnippet: '800V EV traction inverters',
   },
   {
     id: 'inspec-08',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Tightly-Coupled LiDAR-Inertial-Visual Odometry via Factor Graph Optimization',
+    title:
+      'Tightly-Coupled LiDAR-Inertial-Visual Odometry via Factor Graph Optimization',
     authors: ['Jiarong Lin', 'Fu Zhang'],
     year: 2022,
     venue: 'IEEE Transactions on Robotics',
@@ -814,14 +898,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'SE(3)',
       'Computer Science - Robotics',
     ],
-    rawNote: 'Fuses sparse LiDAR point clouds and high-rate IMU preintegration on manifold.',
+    rawNote:
+      'Fuses sparse LiDAR point clouds and high-rate IMU preintegration on manifold.',
     expectedNoteSnippet: 'IMU preintegration on manifold',
   },
   {
     id: 'inspec-09',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Dispersion-Managed Soliton Transmission in Erbium-Doped Fiber Amplifiers (EDFA)',
+    title:
+      'Dispersion-Managed Soliton Transmission in Erbium-Doped Fiber Amplifiers (EDFA)',
     authors: ['Govind P. Agrawal'],
     year: 2018,
     venue: 'Journal of Lightwave Technology',
@@ -840,14 +926,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Optical Fiber',
       'Physics - Optics',
     ],
-    rawNote: 'Models group-velocity dispersion and self-phase modulation in long-haul WDM optical links.',
+    rawNote:
+      'Models group-velocity dispersion and self-phase modulation in long-haul WDM optical links.',
     expectedNoteSnippet: 'self-phase modulation',
   },
   {
     id: 'inspec-10',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Discontinuous Galerkin Finite Element Methods for Compressible Magnetohydrodynamics (MHD)',
+    title:
+      'Discontinuous Galerkin Finite Element Methods for Compressible Magnetohydrodynamics (MHD)',
     authors: ['Chi-Wang Shu', 'Bernardo Cockburn'],
     year: 2019,
     venue: 'SIAM Journal on Scientific Computing',
@@ -868,14 +956,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Mathematics - Numerical Analysis',
       'Physics - Computational Physics',
     ],
-    rawNote: 'Preserves divergence-free magnetic field constraint using locally divergence-free polynomial spaces.',
+    rawNote:
+      'Preserves divergence-free magnetic field constraint using locally divergence-free polynomial spaces.',
     expectedNoteSnippet: 'divergence-free magnetic field',
   },
   {
     id: 'inspec-11',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Decentralized Secondary Frequency and Voltage Control in Islanded AC/DC Microgrids',
+    title:
+      'Decentralized Secondary Frequency and Voltage Control in Islanded AC/DC Microgrids',
     authors: [' Josep M. Guerrero', 'Juan C. Vasquez'],
     year: 2021,
     venue: 'IEEE Transactions on Smart Grid',
@@ -894,14 +984,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Smart Grid',
       'Electrical Engineering and Systems Science - Systems and Control',
     ],
-    rawNote: 'Eliminates communication single points of failure via consensus-based distributed secondary control.',
+    rawNote:
+      'Eliminates communication single points of failure via consensus-based distributed secondary control.',
     expectedNoteSnippet: 'distributed secondary control',
   },
   {
     id: 'inspec-12',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Compressed Sensing Reconstruction via Orthogonal Matching Pursuit and L1-Minimization',
+    title:
+      'Compressed Sensing Reconstruction via Orthogonal Matching Pursuit and L1-Minimization',
     authors: ['Emmanuel J. Candès', 'Terence Tao', 'David L. Donoho'],
     year: 2006,
     venue: 'IEEE Transactions on Information Theory',
@@ -922,14 +1014,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Information Theory',
       'Mathematics - Statistics Theory',
     ],
-    rawNote: 'Proves exact sparse signal recovery from sub-Nyquist random projections when RIP holds.',
+    rawNote:
+      'Proves exact sparse signal recovery from sub-Nyquist random projections when RIP holds.',
     expectedNoteSnippet: 'sub-Nyquist random projections',
   },
   {
     id: 'inspec-13',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Fault-Tolerant Topology Control for Low-Power LoRaWAN and IEEE 802.15.4 Wireless Sensor Networks',
+    title:
+      'Fault-Tolerant Topology Control for Low-Power LoRaWAN and IEEE 802.15.4 Wireless Sensor Networks',
     authors: ['Utz Roedig', 'Carlo Alberto Boano'],
     year: 2020,
     venue: 'ACM Transactions on Sensor Networks',
@@ -948,14 +1042,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Duty-Cycling MAC',
       'Computer Science - Networking and Internet Architecture',
     ],
-    rawNote: 'Maximizes network lifetime under multi-hop packet loss using adaptive spreading factors.',
+    rawNote:
+      'Maximizes network lifetime under multi-hop packet loss using adaptive spreading factors.',
     expectedNoteSnippet: 'adaptive spreading factors',
   },
   {
     id: 'inspec-14',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Surface Code Logical Qubit Routing and Syndrome Extraction on Superconducting Transmon Processors',
+    title:
+      'Surface Code Logical Qubit Routing and Syndrome Extraction on Superconducting Transmon Processors',
     authors: ['Austin G. Fowler', 'Matteo Mariantoni', 'John M. Martinis'],
     year: 2012,
     venue: 'Physical Review A',
@@ -974,14 +1070,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'MWPM',
       'Quantum Physics',
     ],
-    rawNote: 'Demonstrates ~1% threshold fault tolerance with 2D nearest-neighbor superconducting qubit coupling.',
+    rawNote:
+      'Demonstrates ~1% threshold fault tolerance with 2D nearest-neighbor superconducting qubit coupling.',
     expectedNoteSnippet: 'nearest-neighbor superconducting qubit',
   },
   {
     id: 'inspec-15',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Non-Intrusive Load Monitoring and Thermal Comfort Control in HVAC Smart Buildings',
+    title:
+      'Non-Intrusive Load Monitoring and Thermal Comfort Control in HVAC Smart Buildings',
     authors: ['Mario Bergés', 'H. Scott Matthews'],
     year: 2019,
     venue: 'Applied Energy',
@@ -1000,14 +1098,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'FHMM',
       'Electrical Engineering and Systems Science - Signal Processing',
     ],
-    rawNote: 'Disaggregates whole-building smart meter active/reactive power traces into appliance-level loads.',
+    rawNote:
+      'Disaggregates whole-building smart meter active/reactive power traces into appliance-level loads.',
     expectedNoteSnippet: 'appliance-level loads',
   },
   {
     id: 'inspec-16',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Synthetic Aperture Radar (SAR) Interferometry for Millimeter-Scale Crustal Deformation Monitoring',
+    title:
+      'Synthetic Aperture Radar (SAR) Interferometry for Millimeter-Scale Crustal Deformation Monitoring',
     authors: ['amon Hanssen', 'Howard A. Zebker'],
     year: 2017,
     venue: 'IEEE Transactions on Geoscience and Remote Sensing',
@@ -1028,14 +1128,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Physics - Geophysics',
       'Electrical Engineering and Systems Science - Image and Video Processing',
     ],
-    rawNote: 'Mitigates tropospheric phase delay artefacts in multi-temporal C-band Sentinel-1 interferograms.',
+    rawNote:
+      'Mitigates tropospheric phase delay artefacts in multi-temporal C-band Sentinel-1 interferograms.',
     expectedNoteSnippet: 'C-band Sentinel-1 interferograms',
   },
   {
     id: 'inspec-17',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Conformal Time-Domain Finite-Difference (FDTD) Modeling of Plasmonic Metamaterial Nano-Antennas',
+    title:
+      'Conformal Time-Domain Finite-Difference (FDTD) Modeling of Plasmonic Metamaterial Nano-Antennas',
     authors: ['Allen Taflove', 'Susan C. Hagness'],
     year: 2018,
     venue: 'IEEE Transactions on Antennas and Propagation',
@@ -1056,14 +1158,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Physics - Optics',
       'Physics - Computational Physics',
     ],
-    rawNote: 'Incorporates convolutional PML absorbing boundaries for dispersive metallic nanostructures.',
+    rawNote:
+      'Incorporates convolutional PML absorbing boundaries for dispersive metallic nanostructures.',
     expectedNoteSnippet: 'convolutional PML absorbing boundaries',
   },
   {
     id: 'inspec-18',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Multichannel Wiener Filtering and Conformer Beamforming for Far-Field Automatic Speech Recognition',
+    title:
+      'Multichannel Wiener Filtering and Conformer Beamforming for Far-Field Automatic Speech Recognition',
     authors: ['Shinji Watanabe', 'Emmanuel Vincent'],
     year: 2022,
     venue: 'IEEE/ACM Transactions on Audio, Speech, and Language Processing',
@@ -1085,14 +1189,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Electrical Engineering and Systems Science - Audio and Speech Processing',
       'Computer Science - Sound',
     ],
-    rawNote: 'Jointly optimizes complex spectral masking and minimum variance distortionless response beamforming.',
+    rawNote:
+      'Jointly optimizes complex spectral masking and minimum variance distortionless response beamforming.',
     expectedNoteSnippet: 'minimum variance distortionless response',
   },
   {
     id: 'inspec-19',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Electrochemical Impedance Spectroscopy and Equivalent Circuit Modeling of Solid-State Li-Ion Batteries',
+    title:
+      'Electrochemical Impedance Spectroscopy and Equivalent Circuit Modeling of Solid-State Li-Ion Batteries',
     authors: ['Yet-Ming Chiang', 'Linda F. Nazar'],
     year: 2023,
     venue: 'Journal of The Electrochemical Society',
@@ -1112,14 +1218,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Kalman Filter',
       'Condensed Matter - Materials Science',
     ],
-    rawNote: 'Tracks dendrite nucleation and interfacial charge-transfer resistance across 1,000 fast-charge cycles.',
+    rawNote:
+      'Tracks dendrite nucleation and interfacial charge-transfer resistance across 1,000 fast-charge cycles.',
     expectedNoteSnippet: 'interfacial charge-transfer resistance',
   },
   {
     id: 'inspec-20',
     dataset: 'INSPEC',
     itemType: 'journalArticle',
-    title: 'Topology Optimization of Additively Manufactured Titanium Aerospace Lattice Structures',
+    title:
+      'Topology Optimization of Additively Manufactured Titanium Aerospace Lattice Structures',
     authors: ['Ole Sigmund', 'Martin P. Bendsøe'],
     year: 2020,
     venue: 'Computer Methods in Applied Mechanics and Engineering',
@@ -1138,7 +1246,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Homogenization',
       'Mathematics - Optimization and Control',
     ],
-    rawNote: 'Minimizes structural compliance under overhang angle manufacturing constraints.',
+    rawNote:
+      'Minimizes structural compliance under overhang angle manufacturing constraints.',
     expectedNoteSnippet: 'overhang angle manufacturing constraints',
   },
 
@@ -1166,14 +1275,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'PBFT',
       'Computer Science - Distributed, Parallel, and Cluster Computing',
     ],
-    rawNote: 'Tolerates up to f = (n - 1) / 3 arbitrary Byzantine replicas with polynomial message complexity.',
+    rawNote:
+      'Tolerates up to f = (n - 1) / 3 arbitrary Byzantine replicas with polynomial message complexity.',
     expectedNoteSnippet: 'Byzantine replicas',
   },
   {
     id: 'semeval-02',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Vision-Language Pre-Training with Contrastive Cross-Modal Attention',
+    title:
+      'Vision-Language Pre-Training with Contrastive Cross-Modal Attention',
     authors: ['Alec Radford', 'Jong Wook Kim', 'Ilya Sutskever'],
     year: 2021,
     venue: 'International Conference on Machine Learning (ICML)',
@@ -1190,17 +1301,20 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'OpenAI',
       'Computer Science - Computer Vision and Pattern Recognition',
     ],
-    rawNote: 'Pretrains joint image and text encoders on 400 million web image-caption pairs.',
+    rawNote:
+      'Pretrains joint image and text encoders on 400 million web image-caption pairs.',
     expectedNoteSnippet: '400 million web image-caption pairs',
   },
   {
     id: 'semeval-03',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Polyhedral Loop Nest Vectorization and Cache-Oblivious Tiling in MLIR and LLVM',
+    title:
+      'Polyhedral Loop Nest Vectorization and Cache-Oblivious Tiling in MLIR and LLVM',
     authors: ['Chris Lattner', 'Mehdi Amini', 'Uday Bondhugula'],
     year: 2021,
-    venue: 'IEEE/ACM International Symposium on Code Generation and Optimization (CGO)',
+    venue:
+      'IEEE/ACM International Symposium on Code Generation and Optimization (CGO)',
     doi: '10.1109/CGO51591.2021.9370308',
     rawInputTags: [
       'MLIR; LLVM; Polyhedral Model; Affine Dialect; SIMD Vectorization; Loop Tiling; Register Allocation',
@@ -1216,14 +1330,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Register Allocation',
       'Computer Science - Programming Languages',
     ],
-    rawNote: 'Unifies high-level tensor algebra and low-level hardware-specific IR dialects.',
+    rawNote:
+      'Unifies high-level tensor algebra and low-level hardware-specific IR dialects.',
     expectedNoteSnippet: 'hardware-specific IR dialects',
   },
   {
     id: 'semeval-04',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Serializable Snapshot Isolation and Multi-Version Concurrency Control in Main-Memory HTAP Databases',
+    title:
+      'Serializable Snapshot Isolation and Multi-Version Concurrency Control in Main-Memory HTAP Databases',
     authors: ['Thomas Neumann', 'Alfons Kemper', 'Michael J. Cahill'],
     year: 2015,
     venue: 'ACM SIGMOD International Conference on Management of Data',
@@ -1244,14 +1360,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'VLDB',
       'Computer Science - Databases',
     ],
-    rawNote: 'Uses fine-grained undo buffers for fast in-place updates and lock-free analytical scans.',
+    rawNote:
+      'Uses fine-grained undo buffers for fast in-place updates and lock-free analytical scans.',
     expectedNoteSnippet: 'fine-grained undo buffers',
   },
   {
     id: 'semeval-05',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Symbolic Execution and Coverage-Guided Greybox Fuzzing for Smart Contract Vulnerability Detection',
+    title:
+      'Symbolic Execution and Coverage-Guided Greybox Fuzzing for Smart Contract Vulnerability Detection',
     authors: ['Cristian Cadar', 'Koushik Sen', 'Dawn Song'],
     year: 2020,
     venue: 'IEEE Symposium on Security and Privacy (S&P)',
@@ -1272,14 +1390,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Cryptography and Security',
       'Computer Science - Software Engineering',
     ],
-    rawNote: 'Combines fast mutation fuzzing with concolic SMT constraint solving to traverse deep branch guards.',
+    rawNote:
+      'Combines fast mutation fuzzing with concolic SMT constraint solving to traverse deep branch guards.',
     expectedNoteSnippet: 'concolic SMT constraint solving',
   },
   {
     id: 'semeval-06',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Succinct Non-Interactive Zero-Knowledge Arguments (zk-SNARKs) from Polynomial Commitments',
+    title:
+      'Succinct Non-Interactive Zero-Knowledge Arguments (zk-SNARKs) from Polynomial Commitments',
     authors: ['Eli Ben-Sasson', 'Alessandro Chiesa', 'Dan Boneh'],
     year: 2019,
     venue: 'Annual International Cryptology Conference (CRYPTO)',
@@ -1298,17 +1418,20 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'CRYPTO',
       'Computer Science - Cryptography and Security',
     ],
-    rawNote: 'Achieves universal and updateable structured reference strings with constant-size proofs.',
+    rawNote:
+      'Achieves universal and updateable structured reference strings with constant-size proofs.',
     expectedNoteSnippet: 'structured reference strings',
   },
   {
     id: 'semeval-07',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Sublinear-Time Approximate Nearest Neighbor Search via Hierarchical Navigable Small World (HNSW) Graphs',
+    title:
+      'Sublinear-Time Approximate Nearest Neighbor Search via Hierarchical Navigable Small World (HNSW) Graphs',
     authors: ['Yury A. Malkov', 'Dmitry A. Yashunin'],
     year: 2020,
-    venue: 'IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI)',
+    venue:
+      'IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI)',
     doi: '10.1109/TPAMI.2018.2889473',
     rawInputTags: [
       'HNSW; Approximate Nearest Neighbor; ANN; Vector Similarity Search; Locality-Sensitive Hashing; LSH; Product Quantization',
@@ -1326,17 +1449,20 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Data Structures and Algorithms',
       'Computer Science - Information Retrieval',
     ],
-    rawNote: 'Separates links by characteristic distance scales across multi-layer proximity graphs.',
+    rawNote:
+      'Separates links by characteristic distance scales across multi-layer proximity graphs.',
     expectedNoteSnippet: 'multi-layer proximity graphs',
   },
   {
     id: 'semeval-08',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Mechanized Formal Verification of a Concurrent OS Microkernel in Coq and Lean 4',
+    title:
+      'Mechanized Formal Verification of a Concurrent OS Microkernel in Coq and Lean 4',
     authors: ['Gerwin Klein', 'Xavier Leroy', 'Leonardo de Moura'],
     year: 2022,
-    venue: 'ACM SIGPLAN Symposium on Principles of Programming Languages (POPL)',
+    venue:
+      'ACM SIGPLAN Symposium on Principles of Programming Languages (POPL)',
     doi: '10.1145/3498689',
     rawInputTags: [
       'seL4; CompCert; Coq; Lean 4; Separation Logic; Iris; Dependent Types; POPL',
@@ -1355,17 +1481,24 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Logic in Computer Science',
       'Computer Science - Programming Languages',
     ],
-    rawNote: 'Establishes machine-checked functional correctness refinement from abstract spec to C implementation.',
+    rawNote:
+      'Establishes machine-checked functional correctness refinement from abstract spec to C implementation.',
     expectedNoteSnippet: 'functional correctness refinement',
   },
   {
     id: 'semeval-09',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'eBPF and XDP In-Kernel Packet Processing for Terabit-Scale Cloud Load Balancing',
-    authors: ['Toke Høiland-Jørgensen', 'Jesper Dangaard Brouer', 'David S. Miller'],
+    title:
+      'eBPF and XDP In-Kernel Packet Processing for Terabit-Scale Cloud Load Balancing',
+    authors: [
+      'Toke Høiland-Jørgensen',
+      'Jesper Dangaard Brouer',
+      'David S. Miller',
+    ],
     year: 2018,
-    venue: 'ACM International Conference on emerging Networking EXperiments and Technologies (CoNEXT)',
+    venue:
+      'ACM International Conference on emerging Networking EXperiments and Technologies (CoNEXT)',
     doi: '10.1145/3281411.3281443',
     rawInputTags: [
       'eBPF; XDP; Express Data Path; Linux Kernel; DPDK; SR-IOV; Layer-4 Load Balancing; CoNEXT',
@@ -1384,14 +1517,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Networking and Internet Architecture',
       'Computer Science - Operating Systems',
     ],
-    rawNote: 'Processes 24 million packets per second per core before SKB allocation in the Linux network driver.',
+    rawNote:
+      'Processes 24 million packets per second per core before SKB allocation in the Linux network driver.',
     expectedNoteSnippet: 'before SKB allocation',
   },
   {
     id: 'semeval-10',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Gaze-Contingent Foveated Rendering and Hand-Eye Coordination in Mixed-Reality Head-Mounted Displays',
+    title:
+      'Gaze-Contingent Foveated Rendering and Hand-Eye Coordination in Mixed-Reality Head-Mounted Displays',
     authors: ['Anjul Patney', 'Marco Salvi', 'Anton Kaplanyan'],
     year: 2016,
     venue: 'ACM Conference on Human Factors in Computing Systems (CHI)',
@@ -1413,14 +1548,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Human-Computer Interaction',
       'Computer Science - Graphics',
     ],
-    rawNote: 'Reduces shading rate in peripheral eccentricity zones without perceptible visual artifacts.',
+    rawNote:
+      'Reduces shading rate in peripheral eccentricity zones without perceptible visual artifacts.',
     expectedNoteSnippet: 'peripheral eccentricity zones',
   },
   {
     id: 'semeval-11',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'learned Cardinality Estimation and Cost-Based Query Optimization in Cloud Data Warehouses',
+    title:
+      'learned Cardinality Estimation and Cost-Based Query Optimization in Cloud Data Warehouses',
     authors: ['Tim Kraska', 'Mohammad Alizadeh', 'Alex Beutel'],
     year: 2019,
     venue: 'International Conference on Very Large Data Bases (VLDB)',
@@ -1440,14 +1577,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Databases',
       'Computer Science - Machine Learning',
     ],
-    rawNote: 'Replaces independence assumptions in multi-join histograms with autoregressive deep density estimators.',
+    rawNote:
+      'Replaces independence assumptions in multi-join histograms with autoregressive deep density estimators.',
     expectedNoteSnippet: 'autoregressive deep density estimators',
   },
   {
     id: 'semeval-12',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Counterfactual Regret Minimization and Nash Equilibria in Imperfect-Information Extensive-Form Games',
+    title:
+      'Counterfactual Regret Minimization and Nash Equilibria in Imperfect-Information Extensive-Form Games',
     authors: ['Noam Brown', 'Tuomas Sandholm', 'Martin Zinkevich'],
     year: 2019,
     venue: 'ACM Conference on Economics and Computation (EC)',
@@ -1467,14 +1606,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Computer Science and Game Theory',
       'Computer Science - Multiagent Systems',
     ],
-    rawNote: 'Combines blueprint strategies with real-time depth-limited subgame solving in multiplayer poker.',
+    rawNote:
+      'Combines blueprint strategies with real-time depth-limited subgame solving in multiplayer poker.',
     expectedNoteSnippet: 'depth-limited subgame solving',
   },
   {
     id: 'semeval-13',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Submodular Influence Maximization and Community Detection in Temporal Multiplex Networks',
+    title:
+      'Submodular Influence Maximization and Community Detection in Temporal Multiplex Networks',
     authors: ['David Kempe', 'Jon Kleinberg', 'Éva Tardos'],
     year: 2015,
     venue: 'ACM International Conference on Web Search and Data Mining (WSDM)',
@@ -1494,17 +1635,20 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Social and Information Networks',
       'Computer Science - Discrete Mathematics',
     ],
-    rawNote: 'Provides a (1 - 1/e)-approximation guarantee via reverse influence sampling sketches.',
+    rawNote:
+      'Provides a (1 - 1/e)-approximation guarantee via reverse influence sampling sketches.',
     expectedNoteSnippet: 'reverse influence sampling sketches',
   },
   {
     id: 'semeval-14',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Gröbner Bases and Cylindrical Algebraic Decomposition for Nonlinear Real Arithmetic SMT Solving',
+    title:
+      'Gröbner Bases and Cylindrical Algebraic Decomposition for Nonlinear Real Arithmetic SMT Solving',
     authors: ['Bruno Buchberger', 'Jean-Charles Faugère', 'Dejan Jovanović'],
     year: 2018,
-    venue: 'International Symposium on Symbolic and Algebraic Computation (ISSAC)',
+    venue:
+      'International Symposium on Symbolic and Algebraic Computation (ISSAC)',
     doi: '10.1145/3208976.3208999',
     rawInputTags: [
       'Gröbner Basis; F4/F5 Algorithm; Cylindrical Algebraic Decomposition; CAD; Quantifier Elimination; ISSAC',
@@ -1519,15 +1663,21 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'ISSAC',
       'Computer Science - Symbolic Computation',
     ],
-    rawNote: 'Combines conflict-driven cylindrical algebraic projection with sparse matrix F4 reductions.',
+    rawNote:
+      'Combines conflict-driven cylindrical algebraic projection with sparse matrix F4 reductions.',
     expectedNoteSnippet: 'cylindrical algebraic projection',
   },
   {
     id: 'semeval-15',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Persistent Homology and Delaunay Vietoris-Rips Filtrations for High-Dimensional Point Clouds',
-    authors: ['Herbert Edelsbrunner', 'Gunnar Carlsson', 'Jean-Daniel Boissonnat'],
+    title:
+      'Persistent Homology and Delaunay Vietoris-Rips Filtrations for High-Dimensional Point Clouds',
+    authors: [
+      'Herbert Edelsbrunner',
+      'Gunnar Carlsson',
+      'Jean-Daniel Boissonnat',
+    ],
     year: 2019,
     venue: 'International Symposium on Computational Geometry (SoCG)',
     doi: '10.4230/LIPIcs.SoCG.2019.12',
@@ -1547,15 +1697,21 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Computational Geometry',
       'Mathematics - Algebraic Topology',
     ],
-    rawNote: 'Computes persistence diagrams in O(n log n) expected time for low-doubling-dimension manifolds.',
+    rawNote:
+      'Computes persistence diagrams in O(n log n) expected time for low-doubling-dimension manifolds.',
     expectedNoteSnippet: 'persistence diagrams',
   },
   {
     id: 'semeval-16',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Circuit Lower Bounds, Fine-Grained Complexity, and the Exponential Time Hypothesis (ETH)',
-    authors: ['Ryan Williams', 'Virginia Vassilevska Williams', 'Russell Impagliazzo'],
+    title:
+      'Circuit Lower Bounds, Fine-Grained Complexity, and the Exponential Time Hypothesis (ETH)',
+    authors: [
+      'Ryan Williams',
+      'Virginia Vassilevska Williams',
+      'Russell Impagliazzo',
+    ],
     year: 2018,
     venue: 'ACM SIGACT Symposium on Theory of Computing (STOC)',
     doi: '10.1145/3188745.3188802',
@@ -1573,14 +1729,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'FOCS',
       'Computer Science - Computational Complexity',
     ],
-    rawNote: 'Establishes conditional quadratic lower bounds for edit distance and Fréchet distance under SETH.',
+    rawNote:
+      'Establishes conditional quadratic lower bounds for edit distance and Fréchet distance under SETH.',
     expectedNoteSnippet: 'conditional quadratic lower bounds',
   },
   {
     id: 'semeval-17',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Active Learning of Symbolic Visibly Pushdown Automata and Omega-Regular Languages',
+    title:
+      'Active Learning of Symbolic Visibly Pushdown Automata and Omega-Regular Languages',
     authors: ['Rajeev Alur', 'P. Madhusudan', 'Dana Angluin'],
     year: 2017,
     venue: 'International Conference on Computer Aided Verification (CAV)',
@@ -1600,14 +1758,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Formal Languages and Automata Theory',
       'Computer Science - Logic in Computer Science',
     ],
-    rawNote: 'Extends Angluin L* membership and equivalence queries to infinite-alphabet symbolic automata.',
+    rawNote:
+      'Extends Angluin L* membership and equivalence queries to infinite-alphabet symbolic automata.',
     expectedNoteSnippet: 'membership and equivalence queries',
   },
   {
     id: 'semeval-18',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Rate-Distortion Optimization and Neural Intra-Frame Coding in AV1 and VVC (H.266)',
+    title:
+      'Rate-Distortion Optimization and Neural Intra-Frame Coding in AV1 and VVC (H.266)',
     authors: ['Thomas Wiegand', 'Gary J. Sullivan'],
     year: 2021,
     venue: 'ACM International Conference on Multimedia (ACM MM)',
@@ -1630,14 +1790,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Multimedia',
       'Electrical Engineering and Systems Science - Image and Video Processing',
     ],
-    rawNote: 'Achieves 38% BD-rate savings over HEVC using quadtree plus multi-type tree block partitioning.',
+    rawNote:
+      'Achieves 38% BD-rate savings over HEVC using quadtree plus multi-type tree block partitioning.',
     expectedNoteSnippet: '38% BD-rate savings',
   },
   {
     id: 'semeval-19',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Citation Graph Entity Disambiguation and Open-Access Repository Harvesting via OAI-PMH',
+    title:
+      'Citation Graph Entity Disambiguation and Open-Access Repository Harvesting via OAI-PMH',
     authors: ['C. Lee Giles', 'Kyle Lo', 'Lucy Lu Wang'],
     year: 2020,
     venue: 'ACM/IEEE Joint Conference on Digital Libraries (JCDL)',
@@ -1658,17 +1820,20 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Digital Libraries',
       'Computer Science - Information Retrieval',
     ],
-    rawNote: 'Links 200M+ bibliographic records across Semantic Scholar, Crossref, and institutional repositories.',
+    rawNote:
+      'Links 200M+ bibliographic records across Semantic Scholar, Crossref, and institutional repositories.',
     expectedNoteSnippet: '200M+ bibliographic records',
   },
   {
     id: 'semeval-20',
     dataset: 'SEMEVAL_KRAPIVIN',
     itemType: 'conferencePaper',
-    title: 'Differential Privacy and Individual Fairness Auditing in Algorithmic Recidivism and Credit Scoring',
+    title:
+      'Differential Privacy and Individual Fairness Auditing in Algorithmic Recidivism and Credit Scoring',
     authors: ['Cynthia Dwork', 'Moritz Hardt', 'Aaron Roth'],
     year: 2021,
-    venue: 'ACM Conference on Fairness, Accountability, and Transparency (FAccT)',
+    venue:
+      'ACM Conference on Fairness, Accountability, and Transparency (FAccT)',
     doi: '10.1145/3442188.3445901',
     rawInputTags: [
       'Differential Privacy; Equalized Odds; Demographic Parity; Algorithmic Fairness; Calibration; FAccT',
@@ -1685,7 +1850,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Computers and Society',
       'Computer Science - Machine Learning',
     ],
-    rawNote: 'Characterizes the trade-off between group calibration and false positive/negative rate parity.',
+    rawNote:
+      'Characterizes the trade-off between group calibration and false positive/negative rate parity.',
     expectedNoteSnippet: 'group calibration',
   },
 
@@ -1694,7 +1860,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     id: 'arxiv-01',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning',
+    title:
+      'DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning',
     authors: ['Daya Guo', 'Dejian Yang', 'Haowei Zhang'],
     year: 2025,
     venue: 'arXiv',
@@ -1717,14 +1884,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Machine Learning',
       'Statistics - Machine Learning',
     ],
-    rawNote: 'Comment: 22 pages, 11 figures. Demonstrates emergent self-verification and reflection via pure Group Relative Policy Optimization.',
+    rawNote:
+      'Comment: 22 pages, 11 figures. Demonstrates emergent self-verification and reflection via pure Group Relative Policy Optimization.',
     expectedNoteSnippet: 'Group Relative Policy Optimization',
   },
   {
     id: 'arxiv-02',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Planck 2018 Results. VI. Cosmological Parameters and Lambda-CDM Constraints',
+    title:
+      'Planck 2018 Results. VI. Cosmological Parameters and Lambda-CDM Constraints',
     authors: ['N. Aghanim', 'Y. Akrami', 'M. Ashdown'],
     year: 2020,
     venue: 'arXiv',
@@ -1744,14 +1913,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Astrophysics - Cosmology and Nongalactic Astrophysics',
       'General Relativity and Quantum Cosmology',
     ],
-    rawNote: 'Comment: 71 pages, 44 figures, Astronomy & Astrophysics manuscript.',
+    rawNote:
+      'Comment: 71 pages, 44 figures, Astronomy & Astrophysics manuscript.',
     expectedNoteSnippet: '71 pages, 44 figures',
   },
   {
     id: 'arxiv-03',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'JWST NIRSpec Transmission Spectroscopy of the Hot Saturn Exoplanet WASP-39b',
+    title:
+      'JWST NIRSpec Transmission Spectroscopy of the Hot Saturn Exoplanet WASP-39b',
     authors: ['Zafar Rustamkulov', 'David K. Sing', 'Natalie M. Batalha'],
     year: 2023,
     venue: 'arXiv',
@@ -1772,15 +1943,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Astrophysics - Earth and Planetary Astrophysics',
       'Astrophysics - Instrumentation and Methods for Astrophysics',
     ],
-    rawNote: 'Comment: Nature 2023. First detection of photochemically produced SO2 in an exoplanet atmosphere.',
+    rawNote:
+      'Comment: Nature 2023. First detection of photochemically produced SO2 in an exoplanet atmosphere.',
     expectedNoteSnippet: 'photochemically produced SO2',
   },
   {
     id: 'arxiv-04',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Unconventional Superconductivity in Magic-Angle Twisted Bilayer Graphene Superlattices',
-    authors: ['Yuan Cao', 'Valla Fatemi', 'Shiangkai Fang', 'Pablo Jarillo-Herrero'],
+    title:
+      'Unconventional Superconductivity in Magic-Angle Twisted Bilayer Graphene Superlattices',
+    authors: [
+      'Yuan Cao',
+      'Valla Fatemi',
+      'Shiangkai Fang',
+      'Pablo Jarillo-Herrero',
+    ],
     year: 2018,
     venue: 'arXiv',
     arxivId: '1803.02342',
@@ -1800,14 +1978,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Condensed Matter - Mesoscale and Nanoscale Physics',
       'Condensed Matter - Strongly Correlated Electrons',
     ],
-    rawNote: 'Comment: Tunable zero-resistance states with critical temperature Tc up to 1.7 K at 1.1 degree twist angle.',
+    rawNote:
+      'Comment: Tunable zero-resistance states with critical temperature Tc up to 1.7 K at 1.1 degree twist angle.',
     expectedNoteSnippet: '1.1 degree twist angle',
   },
   {
     id: 'arxiv-05',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Observation of a New Boson at a Mass of 125 GeV with the CMS Experiment at the LHC',
+    title:
+      'Observation of a New Boson at a Mass of 125 GeV with the CMS Experiment at the LHC',
     authors: ['S. Chatrchyan', 'V. Khachatryan', 'A. M. Sirunyan'],
     year: 2012,
     venue: 'arXiv',
@@ -1827,14 +2007,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'High Energy Physics - Experiment',
       'High Energy Physics - Phenomenology',
     ],
-    rawNote: 'Comment: 5.0 sigma local significance excess at 125.3 +/- 0.6 GeV.',
+    rawNote:
+      'Comment: 5.0 sigma local significance excess at 125.3 +/- 0.6 GeV.',
     expectedNoteSnippet: '5.0 sigma local significance',
   },
   {
     id: 'arxiv-06',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'The Large N Limit of Superconformal Field Theories and Supergravity',
+    title:
+      'The Large N Limit of Superconformal Field Theories and Supergravity',
     authors: ['Juan Maldacena'],
     year: 1997,
     venue: 'arXiv',
@@ -1853,7 +2035,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'High Energy Physics - Theory',
       'General Relativity and Quantum Cosmology',
     ],
-    rawNote: 'Comment: 20 pages, harvmac. Foundational formulation of gauge/gravity duality.',
+    rawNote:
+      'Comment: 20 pages, harvmac. Foundational formulation of gauge/gravity duality.',
     expectedNoteSnippet: 'gauge/gravity duality',
   },
   {
@@ -1880,7 +2063,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Quantum Physics',
       'Condensed Matter - Mesoscale and Nanoscale Physics',
     ],
-    rawNote: 'Comment: Samples 1 million bitstrings from a 53-qubit pseudo-random quantum circuit in 200 seconds.',
+    rawNote:
+      'Comment: Samples 1 million bitstrings from a 53-qubit pseudo-random quantum circuit in 200 seconds.',
     expectedNoteSnippet: '53-qubit pseudo-random quantum circuit',
   },
   {
@@ -1907,14 +2091,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'General Relativity and Quantum Cosmology',
       'Astrophysics - High Energy Astrophysical Phenomena',
     ],
-    rawNote: 'Comment: 16 pages, 8 figures. Physical Review Letters 116, 061102 (2016).',
+    rawNote:
+      'Comment: 16 pages, 8 figures. Physical Review Letters 116, 061102 (2016).',
     expectedNoteSnippet: 'Physical Review Letters 116',
   },
   {
     id: 'arxiv-09',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Perfectoid Spaces and the Weight-Monodromy Conjecture in Mixed Characteristic',
+    title:
+      'Perfectoid Spaces and the Weight-Monodromy Conjecture in Mixed Characteristic',
     authors: ['Peter Scholze'],
     year: 2011,
     venue: 'arXiv',
@@ -1933,14 +2119,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Mathematics - Algebraic Geometry',
       'Mathematics - Number Theory',
     ],
-    rawNote: 'Comment: 83 pages. Transfers geometric statements from mixed characteristic (0, p) to characteristic p.',
+    rawNote:
+      'Comment: 83 pages. Transfers geometric statements from mixed characteristic (0, p) to characteristic p.',
     expectedNoteSnippet: 'mixed characteristic (0, p)',
   },
   {
     id: 'arxiv-10',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'The Entropy Formula for the Ricci Flow and its Geometric Applications',
+    title:
+      'The Entropy Formula for the Ricci Flow and its Geometric Applications',
     authors: ['Grisha Perelman'],
     year: 2002,
     venue: 'arXiv',
@@ -1957,14 +2145,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Non-Collapsing Theorem',
       'Mathematics - Differential Geometry',
     ],
-    rawNote: 'Comment: 39 pages. Introduces reduced volume and monotonic entropy functional for Hamilton Ricci flow.',
+    rawNote:
+      'Comment: 39 pages. Introduces reduced volume and monotonic entropy functional for Hamilton Ricci flow.',
     expectedNoteSnippet: 'monotonic entropy functional',
   },
   {
     id: 'arxiv-11',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Optimal Transport, Wasserstein Gradient Flows, and Schrödinger Bridges on Riemannian Manifolds',
+    title:
+      'Optimal Transport, Wasserstein Gradient Flows, and Schrödinger Bridges on Riemannian Manifolds',
     authors: ['Cédric Villani', 'figalli Alessio', 'Gabriel Peyré'],
     year: 2021,
     venue: 'arXiv',
@@ -1985,15 +2175,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Mathematics - Probability',
       'Statistics - Machine Learning',
     ],
-    rawNote: 'Comment: Connects JKO Wasserstein gradient flows with entropic Sinkhorn scaling.',
+    rawNote:
+      'Comment: Connects JKO Wasserstein gradient flows with entropic Sinkhorn scaling.',
     expectedNoteSnippet: 'entropic Sinkhorn scaling',
   },
   {
     id: 'arxiv-12',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Double/Debiased Machine Learning for Treatment and Structural Parameters',
-    authors: ['Victor Chernozhukov', 'Denis Chetverikov', 'Mert Demirer', 'Esther Duflo'],
+    title:
+      'Double/Debiased Machine Learning for Treatment and Structural Parameters',
+    authors: [
+      'Victor Chernozhukov',
+      'Denis Chetverikov',
+      'Mert Demirer',
+      'Esther Duflo',
+    ],
     year: 2018,
     venue: 'arXiv',
     arxivId: '1608.00060',
@@ -2015,14 +2212,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Statistics - Methodology',
       'Mathematics - Statistics Theory',
     ],
-    rawNote: 'Comment: Achieves root-N consistent estimation of causal effects using high-dimensional ML nuisance estimators.',
+    rawNote:
+      'Comment: Achieves root-N consistent estimation of causal effects using high-dimensional ML nuisance estimators.',
     expectedNoteSnippet: 'root-N consistent estimation',
   },
   {
     id: 'arxiv-13',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Deep Hedging and Rough Volatility Calibration under Limit Order Book Market Microstructure',
+    title:
+      'Deep Hedging and Rough Volatility Calibration under Limit Order Book Market Microstructure',
     authors: ['Hans Buehler', 'Lukas Gonon', 'Josef Teichmann', 'Ben Wood'],
     year: 2019,
     venue: 'arXiv',
@@ -2044,15 +2243,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Quantitative Finance - Trading and Market Microstructure',
       'Quantitative Finance - Mathematical Finance',
     ],
-    rawNote: 'Comment: Replaces Black-Scholes delta hedging with convex risk-measure policy optimization under transaction costs.',
+    rawNote:
+      'Comment: Replaces Black-Scholes delta hedging with convex risk-measure policy optimization under transaction costs.',
     expectedNoteSnippet: 'convex risk-measure policy optimization',
   },
   {
     id: 'arxiv-14',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Continuous Attractor Neural Networks and Grid Cell Path Integration in the Medial Entorhinal Cortex',
-    authors: ['Yoram Burak', 'Ila R. Fiete', 'May-Britt Moser', 'Edvard I. Moser'],
+    title:
+      'Continuous Attractor Neural Networks and Grid Cell Path Integration in the Medial Entorhinal Cortex',
+    authors: [
+      'Yoram Burak',
+      'Ila R. Fiete',
+      'May-Britt Moser',
+      'Edvard I. Moser',
+    ],
     year: 2020,
     venue: 'arXiv',
     arxivId: '2004.05678',
@@ -2071,14 +2277,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Quantitative Biology - Neurons and Cognition',
       'Condensed Matter - Disordered Systems and Neural Networks',
     ],
-    rawNote: 'Comment: Models toroidal manifold topology of grid cell modules from Neuropixels recordings.',
+    rawNote:
+      'Comment: Models toroidal manifold topology of grid cell modules from Neuropixels recordings.',
     expectedNoteSnippet: 'toroidal manifold topology',
   },
   {
     id: 'arxiv-15',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Koopman Operator Spectral Analysis and Reservoir Computing for Spatiotemporal Kuramoto-Sivashinsky Chaos',
+    title:
+      'Koopman Operator Spectral Analysis and Reservoir Computing for Spatiotemporal Kuramoto-Sivashinsky Chaos',
     authors: ['Jaideep Pathak', 'Brian Hunt', 'Michelle Girvan', 'Edward Ott'],
     year: 2018,
     venue: 'arXiv',
@@ -2099,15 +2307,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Nonlinear Sciences - Chaotic Dynamics',
       'Nonlinear Sciences - Pattern Formation and Solitons',
     ],
-    rawNote: 'Comment: Predicts chaotic spatiotemporal trajectories up to 8 Lyapunov times without model equations.',
+    rawNote:
+      'Comment: Predicts chaotic spatiotemporal trajectories up to 8 Lyapunov times without model equations.',
     expectedNoteSnippet: '8 Lyapunov times',
   },
   {
     id: 'arxiv-16',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'GraphCast: Learning Skillful Medium-Range Global Weather Forecasting on ERA5 Reanalysis',
-    authors: ['Remi Lam', 'Alvaro Sanchez-Gonzalez', 'Matthew Willson', 'Peter Battaglia'],
+    title:
+      'GraphCast: Learning Skillful Medium-Range Global Weather Forecasting on ERA5 Reanalysis',
+    authors: [
+      'Remi Lam',
+      'Alvaro Sanchez-Gonzalez',
+      'Matthew Willson',
+      'Peter Battaglia',
+    ],
     year: 2023,
     venue: 'arXiv',
     arxivId: '2212.12794',
@@ -2128,14 +2343,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Physics - Fluid Dynamics',
       'Computer Science - Machine Learning',
     ],
-    rawNote: 'Comment: Science 2023. Produces 10-day global 0.25-degree forecasts in under 60 seconds on a single TPU v4.',
+    rawNote:
+      'Comment: Science 2023. Produces 10-day global 0.25-degree forecasts in under 60 seconds on a single TPU v4.',
     expectedNoteSnippet: 'single TPU v4',
   },
   {
     id: 'arxiv-17',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Chiral Effective Field Theory and Ab Initio Coupled-Cluster Calculations of Neutron-Rich Nuclei',
+    title:
+      'Chiral Effective Field Theory and Ab Initio Coupled-Cluster Calculations of Neutron-Rich Nuclei',
     authors: ['G. Hagen', 'T. Papenbrock', 'M. Hjorth-Jensen', 'D. J. Dean'],
     year: 2014,
     venue: 'arXiv',
@@ -2155,15 +2372,23 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Nuclear Theory',
       'Nuclear Experiment',
     ],
-    rawNote: 'Comment: 65 pages, Reports on Progress in Physics. Connects QCD chiral symmetry breaking to nuclear structure.',
+    rawNote:
+      'Comment: 65 pages, Reports on Progress in Physics. Connects QCD chiral symmetry breaking to nuclear structure.',
     expectedNoteSnippet: 'QCD chiral symmetry breaking',
   },
   {
     id: 'arxiv-18',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Split-Step Conformal Prediction and Distribution-Free Uncertainty Quantification for Black-Box Regressors',
-    authors: ['Jing Lei', 'Max G’Sell', 'Alessandro Rinaldo', 'Ryan J. Tibshirani', 'Larry Wasserman'],
+    title:
+      'Split-Step Conformal Prediction and Distribution-Free Uncertainty Quantification for Black-Box Regressors',
+    authors: [
+      'Jing Lei',
+      'Max G’Sell',
+      'Alessandro Rinaldo',
+      'Ryan J. Tibshirani',
+      'Larry Wasserman',
+    ],
     year: 2018,
     venue: 'arXiv',
     arxivId: '1604.04173',
@@ -2182,15 +2407,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Statistics - Methodology',
       'Statistics - Statistics Theory',
     ],
-    rawNote: 'Comment: Guarantees finite-sample marginal coverage 1 - alpha under exchangeability.',
+    rawNote:
+      'Comment: Guarantees finite-sample marginal coverage 1 - alpha under exchangeability.',
     expectedNoteSnippet: 'finite-sample marginal coverage',
   },
   {
     id: 'arxiv-19',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Equivariant Message Passing Neural Networks for Universal Machine-Learning Interatomic Potentials',
-    authors: ['Ilyes Batatia', 'David P. Kovacs', 'Gregor N. C. Simm', 'Gábor Csányi'],
+    title:
+      'Equivariant Message Passing Neural Networks for Universal Machine-Learning Interatomic Potentials',
+    authors: [
+      'Ilyes Batatia',
+      'David P. Kovacs',
+      'Gregor N. C. Simm',
+      'Gábor Csányi',
+    ],
     year: 2022,
     venue: 'arXiv',
     arxivId: '2206.07697',
@@ -2210,14 +2442,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Physics - Chemical Physics',
       'Condensed Matter - Materials Science',
     ],
-    rawNote: 'Comment: Constructs higher-order body-ordered equivariant features with only two message-passing layers.',
+    rawNote:
+      'Comment: Constructs higher-order body-ordered equivariant features with only two message-passing layers.',
     expectedNoteSnippet: 'higher-order body-ordered equivariant features',
   },
   {
     id: 'arxiv-20',
     dataset: 'ARXIV',
     itemType: 'preprint',
-    title: 'Macroeconomic Heterogeneous-Agent New Keynesian (HANK) Models with Incomplete Markets and Liquid Assets',
+    title:
+      'Macroeconomic Heterogeneous-Agent New Keynesian (HANK) Models with Incomplete Markets and Liquid Assets',
     authors: ['Greg Kaplan', 'Benjamin Moll', 'Giovanni L. Violante'],
     year: 2018,
     venue: 'arXiv',
@@ -2239,7 +2473,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Economics - General Economics',
       'Quantitative Finance - Economics',
     ],
-    rawNote: 'Comment: Decomposes monetary policy rate cuts into direct intertemporal substitution and indirect general equilibrium channels.',
+    rawNote:
+      'Comment: Decomposes monetary policy rate cuts into direct intertemporal substitution and indirect general equilibrium channels.',
     expectedNoteSnippet: 'indirect general equilibrium channels',
   },
 
@@ -2248,7 +2483,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     id: 'pubmed-01',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'CRISPR-Cas9 Gene Editing in Human mRNA Therapeutics and COVID-19 Diagnostics',
+    title:
+      'CRISPR-Cas9 Gene Editing in Human mRNA Therapeutics and COVID-19 Diagnostics',
     authors: ['Jennifer A. Doudna', 'Emmanuelle Charpentier'],
     year: 2020,
     venue: 'New England Journal of Medicine',
@@ -2274,14 +2510,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'EEG',
       'PNAS',
     ],
-    rawNote: 'Demonstrates programmable Cas9 endonuclease cleavage guided by single-guide RNA (sgRNA).',
+    rawNote:
+      'Demonstrates programmable Cas9 endonuclease cleavage guided by single-guide RNA (sgRNA).',
     expectedNoteSnippet: 'single-guide RNA (sgRNA)',
   },
   {
     id: 'pubmed-02',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Search-and-Replace Genome Editing without Double-Strand Breaks or Donor DNA via Prime Editing',
+    title:
+      'Search-and-Replace Genome Editing without Double-Strand Breaks or Donor DNA via Prime Editing',
     authors: ['Andrew V. Anzalone', 'Peyton B. Randolph', 'David R. Liu'],
     year: 2019,
     venue: 'Nature',
@@ -2302,14 +2540,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Base Editing',
       'Quantitative Biology - Genomics',
     ],
-    rawNote: 'Performs all 12 possible point mutations as well as targeted insertions and deletions without double-strand DNA breaks.',
+    rawNote:
+      'Performs all 12 possible point mutations as well as targeted insertions and deletions without double-strand DNA breaks.',
     expectedNoteSnippet: 'all 12 possible point mutations',
   },
   {
     id: 'pubmed-03',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Spatial Transcriptomics and Single-Cell ATAC-Seq Atlas of the Tumor Immune Microenvironment',
+    title:
+      'Spatial Transcriptomics and Single-Cell ATAC-Seq Atlas of the Tumor Immune Microenvironment',
     authors: ['Aviv Regev', 'Sarah A. Teichmann', 'Xiaowei Zhuang'],
     year: 2022,
     venue: 'Cell',
@@ -2332,14 +2572,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Quantitative Biology - Genomics',
       'Quantitative Biology - Cell Behavior',
     ],
-    rawNote: 'Maps exhausted CD8+ T-cell niches and myeloid checkpoint interactions at subcellular resolution.',
+    rawNote:
+      'Maps exhausted CD8+ T-cell niches and myeloid checkpoint interactions at subcellular resolution.',
     expectedNoteSnippet: 'exhausted CD8+ T-cell niches',
   },
   {
     id: 'pubmed-04',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Chimeric Antigen Receptor (CAR) T-Cell Therapy Targeting CD19 in Relapsed B-Cell Acute Lymphoblastic Leukemia',
+    title:
+      'Chimeric Antigen Receptor (CAR) T-Cell Therapy Targeting CD19 in Relapsed B-Cell Acute Lymphoblastic Leukemia',
     authors: ['Carl H. June', 'Michel Sadelain', 'Stephan A. Grupp'],
     year: 2018,
     venue: 'New England Journal of Medicine',
@@ -2360,14 +2602,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Tocilizumab',
       'Adoptive Cell Transfer',
     ],
-    rawNote: 'Achieves 81% overall remission within 3 months in pediatric and young adult relapsed B-ALL.',
+    rawNote:
+      'Achieves 81% overall remission within 3 months in pediatric and young adult relapsed B-ALL.',
     expectedNoteSnippet: '81% overall remission',
   },
   {
     id: 'pubmed-05',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Cryo-EM Structure of the SARS-CoV-2 Spike Glycoprotein in the Prefusion Conformation',
+    title:
+      'Cryo-EM Structure of the SARS-CoV-2 Spike Glycoprotein in the Prefusion Conformation',
     authors: ['Daniel Wrapp', 'Nianshuang Wang', 'Jason S. McLellan'],
     year: 2020,
     venue: 'Science',
@@ -2388,14 +2632,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       '3.5-Angstrom Resolution',
       'Quantitative Biology - Biomolecules',
     ],
-    rawNote: 'Determines a 3.5-angstrom cryo-EM structure showing predominant RBD-up receptor-accessible state.',
+    rawNote:
+      'Determines a 3.5-angstrom cryo-EM structure showing predominant RBD-up receptor-accessible state.',
     expectedNoteSnippet: '3.5-angstrom cryo-EM structure',
   },
   {
     id: 'pubmed-06',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'p53 and BRCA1/BRCA2 Homologous Recombination Deficiency Confer Synthetic Lethality to PARP Inhibitors',
+    title:
+      'p53 and BRCA1/BRCA2 Homologous Recombination Deficiency Confer Synthetic Lethality to PARP Inhibitors',
     authors: ['Alan Ashworth', 'farmer Hannah', 'Clare Turnbull'],
     year: 2021,
     venue: 'Nature Medicine',
@@ -2416,14 +2662,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Homologous Recombination',
       'Quantitative Biology - Molecular Networks',
     ],
-    rawNote: 'Demonstrates PARP1 trapping on DNA single-strand breaks leading to replication fork collapse in BRCA-deficient cells.',
+    rawNote:
+      'Demonstrates PARP1 trapping on DNA single-strand breaks leading to replication fork collapse in BRCA-deficient cells.',
     expectedNoteSnippet: 'replication fork collapse',
   },
   {
     id: 'pubmed-07',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Resting-State 7T BOLD-fMRI and Default Mode Network Dysconnectivity in Early-Stage Alzheimer’s Disease',
+    title:
+      'Resting-State 7T BOLD-fMRI and Default Mode Network Dysconnectivity in Early-Stage Alzheimer’s Disease',
     authors: ['Marcus E. Raichle', 'Randy L. Buckner', 'Karl J. Friston'],
     year: 2021,
     venue: 'NeuroImage',
@@ -2444,15 +2692,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Hippocampus',
       'Quantitative Biology - Neurons and Cognition',
     ],
-    rawNote: 'Identifies posterior cingulate cortex to medial temporal lobe hypoconnectivity prior to clinical dementia onset.',
+    rawNote:
+      'Identifies posterior cingulate cortex to medial temporal lobe hypoconnectivity prior to clinical dementia onset.',
     expectedNoteSnippet: 'posterior cingulate cortex',
   },
   {
     id: 'pubmed-08',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Polygenic Risk Scores and Mendelian Randomization Across 500,000 Genomes in the UK Biobank',
-    authors: ['Clare Bycroft', 'Colin Freeman', 'Peter M. Visscher', 'Jonathan Marchini'],
+    title:
+      'Polygenic Risk Scores and Mendelian Randomization Across 500,000 Genomes in the UK Biobank',
+    authors: [
+      'Clare Bycroft',
+      'Colin Freeman',
+      'Peter M. Visscher',
+      'Jonathan Marchini',
+    ],
     year: 2018,
     venue: 'Nature',
     doi: '10.1038/s41586-018-0579-z',
@@ -2474,15 +2729,21 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Quantitative Biology - Populations and Evolution',
       'Statistics - Applications',
     ],
-    rawNote: 'Imputes 96 million genetic variants across 500,000 participants for phenome-wide association studies.',
+    rawNote:
+      'Imputes 96 million genetic variants across 500,000 participants for phenome-wide association studies.',
     expectedNoteSnippet: '96 million genetic variants',
   },
   {
     id: 'pubmed-09',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Once-Weekly Semaglutide and Tirzepatide Dual GIP/GLP-1 Receptor Agonists in Type 2 Diabetes and Obesity',
-    authors: ['John P. H. Wilding', 'Rachel L. Batterham', 'Ania M. Jastreboff'],
+    title:
+      'Once-Weekly Semaglutide and Tirzepatide Dual GIP/GLP-1 Receptor Agonists in Type 2 Diabetes and Obesity',
+    authors: [
+      'John P. H. Wilding',
+      'Rachel L. Batterham',
+      'Ania M. Jastreboff',
+    ],
     year: 2022,
     venue: 'The Lancet',
     doi: '10.1016/S0140-6736(22)01234-5',
@@ -2500,14 +2761,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Randomized Controlled Trial',
       'STEP-1',
     ],
-    rawNote: 'Produces 15% to 21% sustained body weight reduction and significant cardiometabolic risk improvement.',
+    rawNote:
+      'Produces 15% to 21% sustained body weight reduction and significant cardiometabolic risk improvement.',
     expectedNoteSnippet: '15% to 21% sustained body weight reduction',
   },
   {
     id: 'pubmed-10',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Mechanisms of NDM-1 and KPC-2 Carbapenemase Resistance in Multidrug-Resistant ESKAPE Pathogens',
+    title:
+      'Mechanisms of NDM-1 and KPC-2 Carbapenemase Resistance in Multidrug-Resistant ESKAPE Pathogens',
     authors: ['Timothy R. Walsh', 'Mark A. Toleman', 'Gerard D. Wright'],
     year: 2021,
     venue: 'The Lancet Infectious Diseases',
@@ -2525,15 +2788,21 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'ESKAPE Pathogens',
       'Horizontal Gene Transfer',
     ],
-    rawNote: 'Characterizes zinc-dependent beta-lactam hydrolysis and plasmid-borne blaNDM-1 dissemination.',
+    rawNote:
+      'Characterizes zinc-dependent beta-lactam hydrolysis and plasmid-borne blaNDM-1 dissemination.',
     expectedNoteSnippet: 'zinc-dependent beta-lactam hydrolysis',
   },
   {
     id: 'pubmed-11',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Cerebral Organoids Derived from Human Induced Pluripotent Stem Cells Model Microcephaly',
-    authors: ['Madeline A. Lancaster', 'Juergen A. Knoblich', 'Shinya Yamanaka'],
+    title:
+      'Cerebral Organoids Derived from Human Induced Pluripotent Stem Cells Model Microcephaly',
+    authors: [
+      'Madeline A. Lancaster',
+      'Juergen A. Knoblich',
+      'Shinya Yamanaka',
+    ],
     year: 2013,
     venue: 'Nature',
     doi: '10.1038/nature12517',
@@ -2552,15 +2821,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Oct4/Sox2/Klf4/c-Myc',
       'Quantitative Biology - Tissues and Organs',
     ],
-    rawNote: 'Recapitulates human cortical layer organization and outer subventricular zone progenitor expansion in 3D culture.',
+    rawNote:
+      'Recapitulates human cortical layer organization and outer subventricular zone progenitor expansion in 3D culture.',
     expectedNoteSnippet: 'outer subventricular zone',
   },
   {
     id: 'pubmed-12',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Ionizable Lipid Nanoparticles for Hepatocyte-Targeted Delivery of Base-Modified mRNA Vaccines',
-    authors: ['Katalin Karikó', 'Drew Weissman', 'Pieter R. Cullis', 'Robert Langer'],
+    title:
+      'Ionizable Lipid Nanoparticles for Hepatocyte-Targeted Delivery of Base-Modified mRNA Vaccines',
+    authors: [
+      'Katalin Karikó',
+      'Drew Weissman',
+      'Pieter R. Cullis',
+      'Robert Langer',
+    ],
     year: 2021,
     venue: 'Nature Reviews Drug Discovery',
     doi: '10.1038/s41573-021-00283-5',
@@ -2579,14 +2855,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'mRNA Vaccine',
       'Quantitative Biology - Subcellular Processes',
     ],
-    rawNote: 'Incorporation of N1-methylpseudouridine abrogates innate immune sensing by TLR7/8 and increases translational capacity.',
+    rawNote:
+      'Incorporation of N1-methylpseudouridine abrogates innate immune sensing by TLR7/8 and increases translational capacity.',
     expectedNoteSnippet: 'N1-methylpseudouridine',
   },
   {
     id: 'pubmed-13',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Gut Microbiome Short-Chain Fatty Acids Modulate Regulatory T-Cell Differentiation and Anti-PD-1 Response',
+    title:
+      'Gut Microbiome Short-Chain Fatty Acids Modulate Regulatory T-Cell Differentiation and Anti-PD-1 Response',
     authors: ['Kenya Honda', 'Dan R. Littman', 'Laurence Zitvogel'],
     year: 2021,
     venue: 'Science',
@@ -2604,14 +2882,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Foxp3+ Treg',
       'Akkermansia muciniphila',
     ],
-    rawNote: 'Shows commensal butyrate production promotes histone H3 acetylation at the Foxp3 promoter locus.',
+    rawNote:
+      'Shows commensal butyrate production promotes histone H3 acetylation at the Foxp3 promoter locus.',
     expectedNoteSnippet: 'Foxp3 promoter locus',
   },
   {
     id: 'pubmed-14',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Milasen: Patient-Customized Splice-Modulating Antisense Oligonucleotide Therapy for Batten Disease',
+    title:
+      'Milasen: Patient-Customized Splice-Modulating Antisense Oligonucleotide Therapy for Batten Disease',
     authors: ['Jinkuk Kim', 'Clement Hu', 'Timothy W. Yu'],
     year: 2019,
     venue: 'New England Journal of Medicine',
@@ -2630,14 +2910,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'CLN7 Batten Disease',
       'N-of-1 Clinical Trial',
     ],
-    rawNote: 'Developed from whole-genome sequencing of a retrotransposon insertion to FDA-authorized treatment in under 1 year.',
+    rawNote:
+      'Developed from whole-genome sequencing of a retrotransposon insertion to FDA-authorized treatment in under 1 year.',
     expectedNoteSnippet: 'retrotransposon insertion',
   },
   {
     id: 'pubmed-15',
     dataset: 'PUBMED_MESH',
     itemType: 'journalArticle',
-    title: 'Millimeter-Scale Sub-Nanosecond Time-of-Flight Positron Emission Tomography (TOF-PET) with LSO:Ce,Ca Scintillators',
+    title:
+      'Millimeter-Scale Sub-Nanosecond Time-of-Flight Positron Emission Tomography (TOF-PET) with LSO:Ce,Ca Scintillators',
     authors: ['Simon R. Cherry', 'Terry Jones', 'Ramsey D. Badawi'],
     year: 2020,
     venue: 'Journal of Nuclear Medicine',
@@ -2658,7 +2940,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'OSEM',
       'Physics - Medical Physics',
     ],
-    rawNote: 'Increases effective sensitivity by 40-fold with 194-cm axial field-of-view total-body EXPLORER scanner.',
+    rawNote:
+      'Increases effective sensitivity by 40-fold with 194-cm axial field-of-view total-body EXPLORER scanner.',
     expectedNoteSnippet: '40-fold with 194-cm axial field-of-view',
   },
 
@@ -2689,20 +2972,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'AAAI',
       'IJCAI',
     ],
-    rawNote: 'Verifies clean stripping of LaTeX formatting macros while preserving camelCase and acronym tokens.',
+    rawNote:
+      'Verifies clean stripping of LaTeX formatting macros while preserving camelCase and acronym tokens.',
     expectedNoteSnippet: 'LaTeX formatting macros',
   },
   {
     id: 'tcvn-bbt-02',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'European Diacritics and Nordic Orthography in Bibliographic Metadata',
+    title:
+      'European Diacritics and Nordic Orthography in Bibliographic Metadata',
     authors: ['Kurt Gödel', 'Paul Erdős', 'andré-marie Ampère'],
     year: 2021,
     venue: 'Journal of Symbolic Logic',
     rawInputTags: [
       'G{\\"o}del Incompleteness; Erd{\\H o}s-R{\\\'e}nyi Graph; Schr{\\"o}dinger Equation; {\\AA}ngstr{\\"o}m; B{\\\'e}zier Curve',
-      'Poincar{\\\'e} Duality; {\\L}ukasiewicz Logic',
+      "Poincar{\\'e} Duality; {\\L}ukasiewicz Logic",
     ],
     expectedCleanTags: [
       'Gödel Incompleteness',
@@ -2713,14 +2998,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Poincaré Duality',
       'Łukasiewicz Logic',
     ],
-    rawNote: 'Decodes LaTeX diacritic escapes into canonical Unicode NFC characters without character loss.',
+    rawNote:
+      'Decodes LaTeX diacritic escapes into canonical Unicode NFC characters without character loss.',
     expectedNoteSnippet: 'Unicode NFC characters',
   },
   {
     id: 'tcvn-bbt-03',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Mô hình ngôn ngữ lớn tiếng Việt PhoBERT và ứng dụng trong phân tích văn bản pháp luật',
+    title:
+      'Mô hình ngôn ngữ lớn tiếng Việt PhoBERT và ứng dụng trong phân tích văn bản pháp luật',
     authors: ['Nguyễn Quốc Đạt', 'Nguyễn Thế Anh', 'Trần Minh Quân'],
     year: 2023,
     venue: 'Tạp chí Khoa học và Công nghệ Việt Nam',
@@ -2739,15 +3026,21 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'TCVN 7289',
       'Computer Science - Computation and Language',
     ],
-    rawNote: '<h3>Ghi chú nghiên cứu</h3><p>Đánh giá hiệu năng <strong>PhoBERT-base-v2</strong> trên tập dữ liệu văn bản quy phạm pháp luật Việt Nam.</p>',
+    rawNote:
+      '<h3>Ghi chú nghiên cứu</h3><p>Đánh giá hiệu năng <strong>PhoBERT-base-v2</strong> trên tập dữ liệu văn bản quy phạm pháp luật Việt Nam.</p>',
     expectedNoteSnippet: '### Ghi chú nghiên cứu',
   },
   {
     id: 'tcvn-bbt-04',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Ứng dụng mạng nơ-ron tích chập U-Net trong phân đoạn khối u gan trên ảnh CT đa dãy tại Bệnh viện Chợ Rẫy',
-    authors: ['PGS.TS. Lê Hoàng Minh', 'TS.BS. Phạm Văn Hùng', 'ThS. Hoàng Thị Lan'],
+    title:
+      'Ứng dụng mạng nơ-ron tích chập U-Net trong phân đoạn khối u gan trên ảnh CT đa dãy tại Bệnh viện Chợ Rẫy',
+    authors: [
+      'PGS.TS. Lê Hoàng Minh',
+      'TS.BS. Phạm Văn Hùng',
+      'ThS. Hoàng Thị Lan',
+    ],
     year: 2024,
     venue: 'Tạp chí Y học Thực hành',
     rawInputTags: [
@@ -2763,14 +3056,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'DICOM',
       'Electrical Engineering and Systems Science - Image and Video Processing',
     ],
-    rawNote: 'Đạt hệ số Dice 91.4% trên 1,200 ca chụp CT ba thì động mạch - tĩnh mạch cửa - muộn.',
+    rawNote:
+      'Đạt hệ số Dice 91.4% trên 1,200 ca chụp CT ba thì động mạch - tĩnh mạch cửa - muộn.',
     expectedNoteSnippet: 'hệ số Dice 91.4%',
   },
   {
     id: 'tcvn-bbt-05',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Đánh giá tác động của xâm nhập mặn và biến đổi khí hậu đến sản xuất lúa vùng Đồng bằng sông Cửu Long',
+    title:
+      'Đánh giá tác động của xâm nhập mặn và biến đổi khí hậu đến sản xuất lúa vùng Đồng bằng sông Cửu Long',
     authors: ['GS.TS. Võ Tòng Xuân', 'Đặng Kiều Nhân', 'Lê Anh Tuấn'],
     year: 2022,
     venue: 'Tạp chí Khoa học Trường Đại học Cần Thơ',
@@ -2787,14 +3082,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Lúa ST25',
       'Physics - Atmospheric and Oceanic Physics',
     ],
-    rawNote: 'Kết hợp dữ liệu ảnh vệ tinh đa phổ Sentinel-2 và mô hình thủy lực MIKE 11 dự báo độ mặn.',
+    rawNote:
+      'Kết hợp dữ liệu ảnh vệ tinh đa phổ Sentinel-2 và mô hình thủy lực MIKE 11 dự báo độ mặn.',
     expectedNoteSnippet: 'mô hình thủy lực MIKE 11',
   },
   {
     id: 'tcvn-bbt-06',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Phân tích truyền dẫn chính sách tiền tệ của Ngân hàng Nhà nước Việt Nam qua mô hình SVAR và BVAR',
+    title:
+      'Phân tích truyền dẫn chính sách tiền tệ của Ngân hàng Nhà nước Việt Nam qua mô hình SVAR và BVAR',
     authors: ['Trương Văn Phước', 'Bùi Quang Tín', 'Đoàn Thanh Hà'],
     year: 2023,
     venue: 'Tạp chí Kinh tế và Phát triển',
@@ -2811,14 +3108,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Tỷ giá hối đoái',
       'Economics - Econometrics',
     ],
-    rawNote: 'Kiểm định hàm phản ứng đẩy (IRF) và phân rã phương sai sai số dự báo giai đoạn 2010–2023.',
+    rawNote:
+      'Kiểm định hàm phản ứng đẩy (IRF) và phân rã phương sai sai số dự báo giai đoạn 2010–2023.',
     expectedNoteSnippet: 'hàm phản ứng đẩy (IRF)',
   },
   {
     id: 'tcvn-bbt-07',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'thesis',
-    title: 'Nghiên cứu tối ưu hóa điều khiển bám quỹ đạo cho robot tự hành AGV trong nhà máy thông minh',
+    title:
+      'Nghiên cứu tối ưu hóa điều khiển bám quỹ đạo cho robot tự hành AGV trong nhà máy thông minh',
     authors: ['Vũ Minh Hiếu'],
     year: 2023,
     venue: 'Đại học Bách khoa Hà Nội',
@@ -2837,7 +3136,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Robotics',
       'Electrical Engineering and Systems Science - Systems and Control',
     ],
-    rawNote: 'Luận án tiến sĩ kỹ thuật điều khiển và tự động hóa tại Đại học Bách khoa Hà Nội.',
+    rawNote:
+      'Luận án tiến sĩ kỹ thuật điều khiển và tự động hóa tại Đại học Bách khoa Hà Nội.',
     expectedNoteSnippet: 'Đại học Bách khoa Hà Nội',
   },
   {
@@ -2861,14 +3161,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Segment Tree',
       'Computer Science - Data Structures and Algorithms',
     ],
-    rawNote: 'Tài liệu tham khảo chuẩn cho sinh viên ngành Khoa học máy tính và đội tuyển Olympic Tin học.',
+    rawNote:
+      'Tài liệu tham khảo chuẩn cho sinh viên ngành Khoa học máy tính và đội tuyển Olympic Tin học.',
     expectedNoteSnippet: 'Olympic Tin học',
   },
   {
     id: 'tcvn-bbt-09',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Casing Upgrade Verification under Mixed-Batch Lowercase and Canonical Orthography',
+    title:
+      'Casing Upgrade Verification under Mixed-Batch Lowercase and Canonical Orthography',
     authors: ['Geoffrey Hinton', 'Yann LeCun', 'Yoshua Bengio'],
     year: 2015,
     venue: 'Nature',
@@ -2889,14 +3191,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'PyTorch',
       'NeurIPS',
     ],
-    rawNote: 'When lowercase and mixed-case variants collide in the same batch, the canonical mixed-case token replaces the all-lowercase entry.',
+    rawNote:
+      'When lowercase and mixed-case variants collide in the same batch, the canonical mixed-case token replaces the all-lowercase entry.',
     expectedNoteSnippet: 'canonical mixed-case token',
   },
   {
     id: 'tcvn-bbt-10',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Wikipedia and Wikidata Disambiguation Suffix Stripping in OpenAlex Concept Ingestion',
+    title:
+      'Wikipedia and Wikidata Disambiguation Suffix Stripping in OpenAlex Concept Ingestion',
     authors: ['Jason Priem', 'Heather Piwowar', 'Richard Orr'],
     year: 2022,
     venue: 'Quantitative Science Studies',
@@ -2914,14 +3218,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'BERT',
       'OpenAlex',
     ],
-    rawNote: 'Strips trailing Wikipedia parenthetical disambiguation qualifiers while preserving legitimate technical parentheticals like O(n log n) or SE(3).',
+    rawNote:
+      'Strips trailing Wikipedia parenthetical disambiguation qualifiers while preserving legitimate technical parentheticals like O(n log n) or SE(3).',
     expectedNoteSnippet: 'Wikipedia parenthetical disambiguation',
   },
   {
     id: 'tcvn-bbt-11',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Adversarial Ingestion Noise Filtering Stress Test for Bibliographic Scrapers',
+    title:
+      'Adversarial Ingestion Noise Filtering Stress Test for Bibliographic Scrapers',
     authors: ['Martin Fenner', 'Patricia Feeney'],
     year: 2023,
     venue: 'Data Science Journal',
@@ -2950,19 +3256,17 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'all rights reserved',
       'downloaded from ieee xplore',
     ],
-    expectedCleanTags: [
-      'GraphRAG',
-      'Knowledge Graph',
-      'Neo4j',
-    ],
-    rawNote: 'Rejects all 20 classes of identifier, URL, pagination, date, license, and placeholder noise with zero false positives.',
+    expectedCleanTags: ['GraphRAG', 'Knowledge Graph', 'Neo4j'],
+    rawNote:
+      'Rejects all 20 classes of identifier, URL, pagination, date, license, and placeholder noise with zero false positives.',
     expectedNoteSnippet: 'zero false positives',
   },
   {
     id: 'tcvn-bbt-12',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Preservation of Alphanumeric Scientific Tokens Beginning with Single Letters',
+    title:
+      'Preservation of Alphanumeric Scientific Tokens Beginning with Single Letters',
     authors: ['David Baltimore', 'Harold Varmus'],
     year: 2021,
     venue: 'Proceedings of the National Academy of Sciences (PNAS)',
@@ -2988,14 +3292,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'p-Value',
       'F1-Score',
     ],
-    rawNote: 'Distinguishes biological/version tokens (p53, p21, v2) from pagination/volume markers (p. 53, v. 2, pp. 21-29).',
+    rawNote:
+      'Distinguishes biological/version tokens (p53, p21, v2) from pagination/volume markers (p. 53, v. 2, pp. 21-29).',
     expectedNoteSnippet: 'biological/version tokens',
   },
   {
     id: 'tcvn-bbt-13',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Slash-Protected Technical Compounds vs Multi-Venue Slash Delimiters',
+    title:
+      'Slash-Protected Technical Compounds vs Multi-Venue Slash Delimiters',
     authors: ['Vinton G. Cerf', 'Robert E. Kahn'],
     year: 2019,
     venue: 'Communications of the ACM',
@@ -3021,7 +3327,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'SIGCOMM',
       'OSDI',
     ],
-    rawNote: 'Preserves compound technical slash terms intact while splitting space-delimited slash lists.',
+    rawNote:
+      'Preserves compound technical slash terms intact while splitting space-delimited slash lists.',
     expectedNoteSnippet: 'compound technical slash terms',
   },
   {
@@ -3048,7 +3355,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Machine Learning',
       'Statistics - Machine Learning',
     ],
-    rawNote: 'Cross-entropy loss scales as a power-law with model size N, dataset size D, and compute C.',
+    rawNote:
+      'Cross-entropy loss scales as a power-law with model size N, dataset size D, and compute C.',
     expectedNoteSnippet: 'power-law with model size N',
   },
   {
@@ -3056,7 +3364,12 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'conferencePaper',
     title: 'Training Compute-Optimal Large Language Models (Chinchilla)',
-    authors: ['Jordan Hoffmann', 'Sebastian Borgeaud', 'Arthur Mensch', 'Laurent Sifre'],
+    authors: [
+      'Jordan Hoffmann',
+      'Sebastian Borgeaud',
+      'Arthur Mensch',
+      'Laurent Sifre',
+    ],
     year: 2022,
     venue: 'Advances in Neural Information Processing Systems (NeurIPS)',
     arxivId: '2203.15556',
@@ -3076,7 +3389,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Computation and Language',
       'Computer Science - Machine Learning',
     ],
-    rawNote: 'Model parameters and training tokens should be scaled equally: ~20 tokens per parameter.',
+    rawNote:
+      'Model parameters and training tokens should be scaled equally: ~20 tokens per parameter.',
     expectedNoteSnippet: '20 tokens per parameter',
   },
   {
@@ -3084,7 +3398,12 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'conferencePaper',
     title: 'LLaMA: Open and Efficient Foundation Language Models',
-    authors: ['Hugo Touvron', 'Thibaut Lavril', 'Gautier Izacard', 'Guillaume Lample'],
+    authors: [
+      'Hugo Touvron',
+      'Thibaut Lavril',
+      'Gautier Izacard',
+      'Guillaume Lample',
+    ],
     year: 2023,
     venue: 'arXiv',
     arxivId: '2302.13971',
@@ -3102,7 +3421,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'GQA',
       'Computer Science - Computation and Language',
     ],
-    rawNote: 'Trains 7B to 65B models exclusively on publicly available datasets outperforming GPT-3 175B.',
+    rawNote:
+      'Trains 7B to 65B models exclusively on publicly available datasets outperforming GPT-3 175B.',
     expectedNoteSnippet: 'publicly available datasets',
   },
   {
@@ -3129,7 +3449,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Computation and Language',
       'Computer Science - Machine Learning',
     ],
-    rawNote: 'Routes each token to 2 of 8 expert feedforward blocks, using 13B active parameters out of 47B total.',
+    rawNote:
+      'Routes each token to 2 of 8 expert feedforward blocks, using 13B active parameters out of 47B total.',
     expectedNoteSnippet: '13B active parameters',
   },
   {
@@ -3156,7 +3477,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Machine Learning',
       'Computer Science - Computation and Language',
     ],
-    rawNote: 'Makes SSM parameters input-dependent and computes recurrence via associative parallel scan in SRAM.',
+    rawNote:
+      'Makes SSM parameters input-dependent and computes recurrence via associative parallel scan in SRAM.',
     expectedNoteSnippet: 'associative parallel scan',
   },
   {
@@ -3164,7 +3486,12 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'conferencePaper',
     title: 'Segment Anything (SAM): Promptable Zero-Shot Image Segmentation',
-    authors: ['Alexander Kirillov', 'Eric Mintun', 'Nikhila Ravi', 'Ross Girshick'],
+    authors: [
+      'Alexander Kirillov',
+      'Eric Mintun',
+      'Nikhila Ravi',
+      'Ross Girshick',
+    ],
     year: 2023,
     venue: 'IEEE/CVF International Conference on Computer Vision (ICCV)',
     doi: '10.1109/ICCV51070.2023.00371',
@@ -3182,7 +3509,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'ViT-H',
       'Computer Science - Computer Vision and Pattern Recognition',
     ],
-    rawNote: 'Trained on 1.1 billion segmentation masks across 11 million licensed and privacy-preserving images.',
+    rawNote:
+      'Trained on 1.1 billion segmentation masks across 11 million licensed and privacy-preserving images.',
     expectedNoteSnippet: '1.1 billion segmentation masks',
   },
   {
@@ -3190,7 +3518,12 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
     title: 'DINOv2: Learning Robust Visual Features without Supervision',
-    authors: ['Maxime Oquab', 'Timothée Darcet', 'Théo Moutakanni', 'Julien Mairal'],
+    authors: [
+      'Maxime Oquab',
+      'Timothée Darcet',
+      'Théo Moutakanni',
+      'Julien Mairal',
+    ],
     year: 2024,
     venue: 'Transactions on Machine Learning Research (TMLR)',
     arxivId: '2304.07193',
@@ -3208,7 +3541,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'TMLR',
       'Computer Science - Computer Vision and Pattern Recognition',
     ],
-    rawNote: 'Produces frozen visual features that match or exceed weakly-supervised CLIP on dense prediction.',
+    rawNote:
+      'Produces frozen visual features that match or exceed weakly-supervised CLIP on dense prediction.',
     expectedNoteSnippet: 'frozen visual features',
   },
   {
@@ -3216,7 +3550,12 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'conferencePaper',
     title: 'Flow Matching for Generative Modeling with Optimal Transport Paths',
-    authors: ['Yaron Lipman', 'Ricky T. Q. Chen', 'Heli Ben-Hamu', 'Maximilian Nickel'],
+    authors: [
+      'Yaron Lipman',
+      'Ricky T. Q. Chen',
+      'Heli Ben-Hamu',
+      'Maximilian Nickel',
+    ],
     year: 2023,
     venue: 'International Conference on Learning Representations (ICLR)',
     arxivId: '2210.02747',
@@ -3235,7 +3574,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Machine Learning',
       'Statistics - Machine Learning',
     ],
-    rawNote: 'Trains continuous normalizing flows without ODE simulation using conditional probability paths.',
+    rawNote:
+      'Trains continuous normalizing flows without ODE simulation using conditional probability paths.',
     expectedNoteSnippet: 'conditional probability paths',
   },
   {
@@ -3261,15 +3601,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Machine Learning',
       'Computer Science - Computer Vision and Pattern Recognition',
     ],
-    rawNote: 'Maps any point on a probability flow ODE trajectory directly to its origin in a single network evaluation.',
+    rawNote:
+      'Maps any point on a probability flow ODE trajectory directly to its origin in a single network evaluation.',
     expectedNoteSnippet: 'probability flow ODE trajectory',
   },
   {
     id: 'tcvn-bbt-23',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'conferencePaper',
-    title: 'QLoRA: Efficient Finetuning of Quantized LLMs with 4-Bit NormalFloat',
-    authors: ['Tim Dettmers', 'Artidoro Pagnoni', 'Ari Holtzman', 'Luke Zettlemoyer'],
+    title:
+      'QLoRA: Efficient Finetuning of Quantized LLMs with 4-Bit NormalFloat',
+    authors: [
+      'Tim Dettmers',
+      'Artidoro Pagnoni',
+      'Ari Holtzman',
+      'Luke Zettlemoyer',
+    ],
     year: 2023,
     venue: 'Advances in Neural Information Processing Systems (NeurIPS)',
     arxivId: '2305.14314',
@@ -3289,14 +3636,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Machine Learning',
       'Computer Science - Computation and Language',
     ],
-    rawNote: 'Finetunes 65B parameter models on a single 48GB GPU without performance degradation relative to 16-bit finetuning.',
+    rawNote:
+      'Finetunes 65B parameter models on a single 48GB GPU without performance degradation relative to 16-bit finetuning.',
     expectedNoteSnippet: 'single 48GB GPU',
   },
   {
     id: 'tcvn-bbt-24',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'conferencePaper',
-    title: 'Speculative Decoding: Fast Inference from Transformers via Speculative Execution',
+    title:
+      'Speculative Decoding: Fast Inference from Transformers via Speculative Execution',
     authors: ['Yaniv Leviathan', 'Matan Kalman', 'Yossi Matias'],
     year: 2023,
     venue: 'International Conference on Machine Learning (ICML)',
@@ -3316,7 +3665,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Machine Learning',
       'Computer Science - Computation and Language',
     ],
-    rawNote: 'Achieves 2x-3x latency speedup while guaranteeing identical output distribution to standard autoregressive decoding.',
+    rawNote:
+      'Achieves 2x-3x latency speedup while guaranteeing identical output distribution to standard autoregressive decoding.',
     expectedNoteSnippet: 'identical output distribution',
   },
   {
@@ -3324,7 +3674,12 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'conferencePaper',
     title: 'SWE-bench: Can Language Models Resolve Real-World GitHub Issues?',
-    authors: ['Carlos E. Jimenez', 'John Yang', 'Alexander Wettig', 'Karthik Narasimhan'],
+    authors: [
+      'Carlos E. Jimenez',
+      'John Yang',
+      'Alexander Wettig',
+      'Karthik Narasimhan',
+    ],
     year: 2024,
     venue: 'International Conference on Learning Representations (ICLR)',
     arxivId: '2310.06770',
@@ -3343,15 +3698,22 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Software Engineering',
       'Computer Science - Computation and Language',
     ],
-    rawNote: 'Evaluates LLMs on 2,294 real software engineering issues across 12 popular Python repositories.',
+    rawNote:
+      'Evaluates LLMs on 2,294 real software engineering issues across 12 popular Python repositories.',
     expectedNoteSnippet: '2,294 real software engineering issues',
   },
   {
     id: 'tcvn-bbt-26',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model (MuZero)',
-    authors: ['Julian Schrittwieser', 'Ioannis Antonoglou', 'Thomas Hubert', 'David Silver'],
+    title:
+      'Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model (MuZero)',
+    authors: [
+      'Julian Schrittwieser',
+      'Ioannis Antonoglou',
+      'Thomas Hubert',
+      'David Silver',
+    ],
     year: 2020,
     venue: 'Nature',
     doi: '10.1038/s41586-020-03051-4',
@@ -3370,14 +3732,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Artificial Intelligence',
       'Computer Science - Machine Learning',
     ],
-    rawNote: 'Plans in latent space by predicting reward, policy, and value without reconstructing environment observations.',
+    rawNote:
+      'Plans in latent space by predicting reward, policy, and value without reconstructing environment observations.',
     expectedNoteSnippet: 'Plans in latent space',
   },
   {
     id: 'tcvn-bbt-27',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'AlphaGeometry: An Olympiad-Level AI System for Euclidean Plane Geometry',
+    title:
+      'AlphaGeometry: An Olympiad-Level AI System for Euclidean Plane Geometry',
     authors: ['Trieu H. Trinh', 'Yuhuai Wu', 'Quoc V. Le', 'Thang Luong'],
     year: 2024,
     venue: 'Nature',
@@ -3397,7 +3761,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Artificial Intelligence',
       'Mathematics - Metric Geometry',
     ],
-    rawNote: 'Solves 25 out of 30 IMO geometry problems using 100 million synthetic proofs and neuro-symbolic search.',
+    rawNote:
+      'Solves 25 out of 30 IMO geometry problems using 100 million synthetic proofs and neuro-symbolic search.',
     expectedNoteSnippet: '25 out of 30 IMO geometry problems',
   },
   {
@@ -3405,7 +3770,12 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
     title: 'Scaling Deep Learning for Materials Discovery (GNoME)',
-    authors: ['Amil Merchant', 'Simon Batzner', 'Samuel S. Schoenholz', 'Ekin Dogus Cubuk'],
+    authors: [
+      'Amil Merchant',
+      'Simon Batzner',
+      'Samuel S. Schoenholz',
+      'Ekin Dogus Cubuk',
+    ],
     year: 2023,
     venue: 'Nature',
     doi: '10.1038/s41586-023-06735-9',
@@ -3424,14 +3794,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Condensed Matter - Materials Science',
       'Computer Science - Machine Learning',
     ],
-    rawNote: 'Discovers 2.2 million stable crystal structures including 380,000 materials on the convex hull.',
+    rawNote:
+      'Discovers 2.2 million stable crystal structures including 380,000 materials on the convex hull.',
     expectedNoteSnippet: '380,000 materials on the convex hull',
   },
   {
     id: 'tcvn-bbt-29',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Accurate Structure Prediction of Biomolecular Interactions with AlphaFold 3',
+    title:
+      'Accurate Structure Prediction of Biomolecular Interactions with AlphaFold 3',
     authors: ['Josh Abramson', 'Jonas Adler', 'Jack Dunger', 'John Jumper'],
     year: 2024,
     venue: 'Nature',
@@ -3452,14 +3824,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Quantitative Biology - Biomolecules',
       'Quantitative Biology - Quantitative Methods',
     ],
-    rawNote: 'Replaces Evoformer with Pairformer and predicts raw atom coordinates directly via a diffusion module.',
+    rawNote:
+      'Replaces Evoformer with Pairformer and predicts raw atom coordinates directly via a diffusion module.',
     expectedNoteSnippet: 'predicts raw atom coordinates',
   },
   {
     id: 'tcvn-bbt-30',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Nobel-Winning Click Chemistry and Bioorthogonal Copper-Free Azide-Alkyne Cycloaddition',
+    title:
+      'Nobel-Winning Click Chemistry and Bioorthogonal Copper-Free Azide-Alkyne Cycloaddition',
     authors: ['Carolyn R. Bertozzi', 'Morten Meldal', 'K. Barry Sharpless'],
     year: 2022,
     venue: 'Accounts of Chemical Research',
@@ -3479,7 +3853,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Physics - Chemical Physics',
       'Quantitative Biology - Biomolecules',
     ],
-    rawNote: 'Enables selective covalent labeling of glycans inside living organisms without copper cytotoxicity.',
+    rawNote:
+      'Enables selective covalent labeling of glycans inside living organisms without copper cytotoxicity.',
     expectedNoteSnippet: 'without copper cytotoxicity',
   },
   {
@@ -3487,9 +3862,15 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'conferencePaper',
     title: 'Ray: A Distributed Framework for Emerging AI Applications',
-    authors: ['Philipp Moritz', 'Robert Nishihara', 'Stephanie Wang', 'Ion Stoica'],
+    authors: [
+      'Philipp Moritz',
+      'Robert Nishihara',
+      'Stephanie Wang',
+      'Ion Stoica',
+    ],
     year: 2018,
-    venue: 'USENIX Symposium on Operating Systems Design and Implementation (OSDI)',
+    venue:
+      'USENIX Symposium on Operating Systems Design and Implementation (OSDI)',
     rawInputTags: [
       'Ray; Distributed Actors; Task Parallelism; Global Control Store; GCS; Plasma Object Store; OSDI',
       'cs.DC',
@@ -3506,14 +3887,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Computer Science - Distributed, Parallel, and Cluster Computing',
       'Computer Science - Artificial Intelligence',
     ],
-    rawNote: 'Unifies stateless task-parallel execution and stateful actor computation under a bottom-up distributed scheduler.',
+    rawNote:
+      'Unifies stateless task-parallel execution and stateful actor computation under a bottom-up distributed scheduler.',
     expectedNoteSnippet: 'bottom-up distributed scheduler',
   },
   {
     id: 'tcvn-bbt-32',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'conferencePaper',
-    title: 'DuckDB: An Embeddable Analytical RDBMS with Vectorized Push-Based Execution',
+    title:
+      'DuckDB: An Embeddable Analytical RDBMS with Vectorized Push-Based Execution',
     authors: ['Mark Raasveldt', 'Hannes Mühleisen'],
     year: 2019,
     venue: 'ACM SIGMOD International Conference on Management of Data',
@@ -3531,14 +3914,16 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'SIGMOD',
       'Computer Science - Databases',
     ],
-    rawNote: 'Executes complex analytical SQL queries directly on Parquet and Arrow buffers in-process.',
+    rawNote:
+      'Executes complex analytical SQL queries directly on Parquet and Arrow buffers in-process.',
     expectedNoteSnippet: 'Parquet and Arrow buffers',
   },
   {
     id: 'tcvn-bbt-33',
     dataset: 'CROSS_FORMAT_TCVN',
     itemType: 'journalArticle',
-    title: 'Thiết kế bộ lọc Kalman mở rộng (EKF) kết hợp GPS/INS cho thiết bị bay không người lái UAV',
+    title:
+      'Thiết kế bộ lọc Kalman mở rộng (EKF) kết hợp GPS/INS cho thiết bị bay không người lái UAV',
     authors: ['Nguyễn Văn Khang', 'Trần Đức Thuận', 'Phạm Thượng Cát'],
     year: 2022,
     venue: 'Tạp chí Tự động hóa Ngày nay',
@@ -3557,7 +3942,8 @@ export const LARGE_SCALE_BENCHMARK_CORPUS: BenchmarkDatasetRecord[] = [
       'Electrical Engineering and Systems Science - Systems and Control',
       'Computer Science - Robotics',
     ],
-    rawNote: 'Giảm sai số ước lượng vị trí xuống dưới 0.35m khi mất tín hiệu vệ tinh GPS trong 15 giây.',
+    rawNote:
+      'Giảm sai số ước lượng vị trí xuống dưới 0.35m khi mất tín hiệu vệ tinh GPS trong 15 giây.',
     expectedNoteSnippet: 'mất tín hiệu vệ tinh GPS',
   },
 ];
@@ -3581,13 +3967,12 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
       const uniqueIds = new Set(LARGE_SCALE_BENCHMARK_CORPUS.map((r) => r.id));
       expect(uniqueIds.size).toBe(LARGE_SCALE_BENCHMARK_CORPUS.length);
 
-      const byDataset = LARGE_SCALE_BENCHMARK_CORPUS.reduce<Record<string, number>>(
-        (acc, r) => {
-          acc[r.dataset] = (acc[r.dataset] || 0) + 1;
-          return acc;
-        },
-        {},
-      );
+      const byDataset = LARGE_SCALE_BENCHMARK_CORPUS.reduce<
+        Record<string, number>
+      >((acc, r) => {
+        acc[r.dataset] = (acc[r.dataset] || 0) + 1;
+        return acc;
+      }, {});
       expect(
         byDataset.KP20K +
           byDataset.INSPEC +
@@ -3610,7 +3995,9 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
 
         const tp = actual.filter((t) => expectedSet.has(t)).length;
         const fp = actual.filter((t) => !expectedSet.has(t)).length;
-        const fn = record.expectedCleanTags.filter((t) => !actualSet.has(t)).length;
+        const fn = record.expectedCleanTags.filter(
+          (t) => !actualSet.has(t),
+        ).length;
 
         totalTruePositives += tp;
         totalFalsePositives += fp;
@@ -3690,7 +4077,9 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
           tags: record.expectedCleanTags,
         });
         expect(normalized.notes).toHaveLength(1);
-        expect(normalized.notes![0].content).toContain(record.expectedNoteSnippet);
+        expect(normalized.notes![0].content).toContain(
+          record.expectedNoteSnippet,
+        );
 
         const itemData = toItemData(normalized);
         expect(itemData.tags).toEqual(record.expectedCleanTags);
@@ -3720,7 +4109,10 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
 
         // Simulate persisted DB entity with mixed manual (type 0) and automatic (type 1) tags
         const simulatedDbEntity = {
-          id: `01900000-0000-7000-8000-${record.id.replace(/[^a-z0-9]/gi, '').padEnd(12, '0').slice(0, 12)}`,
+          id: `01900000-0000-7000-8000-${record.id
+            .replace(/[^a-z0-9]/gi, '')
+            .padEnd(12, '0')
+            .slice(0, 12)}`,
           title: itemData.title,
           itemType: record.itemType,
           year: record.year,
@@ -3769,7 +4161,9 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
         // 3. User Note Output (Clean Markdown + HTML wrapper + TipTap Editor AST)
         expect(userDto.notes).toHaveLength(1);
         expect(userDto.notes[0].content).toContain(record.expectedNoteSnippet);
-        expect(userDto.notes[0].contentMd).toContain(record.expectedNoteSnippet);
+        expect(userDto.notes[0].contentMd).toContain(
+          record.expectedNoteSnippet,
+        );
         expect(userDto.notes[0].note).toContain('<p>');
         expect(userDto.notes[0].itemType).toBe('note');
 
@@ -3852,7 +4246,9 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
 
         // 2. BibTeX Export Output for User
         const bibtexOut = cslEngine.formatBibtex(cslItem);
-        expect(bibtexOut).toContain(`@${ record.itemType === 'conferencePaper' ? 'inproceedings' : record.itemType === 'preprint' ? 'unpublished' : record.itemType === 'book' ? 'book' : record.itemType === 'thesis' ? 'phdthesis' : 'article' }{`);
+        expect(bibtexOut).toContain(
+          `@${record.itemType === 'conferencePaper' ? 'inproceedings' : record.itemType === 'preprint' ? 'unpublished' : record.itemType === 'book' ? 'book' : record.itemType === 'thesis' ? 'phdthesis' : 'article'}{`,
+        );
         expect(bibtexOut).toContain('keywords = {');
         for (const expectedTag of record.expectedCleanTags) {
           expect(bibtexOut).toContain(expectedTag);
@@ -3885,14 +4281,13 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
           id: record.id,
           risTags: record.expectedCleanTags,
         });
-        const risNoteContents = (reparsedRis[0].notes || []).map((n: unknown) =>
-          typeof n === 'string'
-            ? n
-            : ((n as { content?: string })?.content ?? ''),
+        const risNoteContents = (reparsedRis[0].notes || []).map(
+          (n: unknown) =>
+            typeof n === 'string'
+              ? n
+              : ((n as { content?: string })?.content ?? ''),
         );
-        expect(risNoteContents.join(' ')).toContain(
-          record.expectedNoteSnippet,
-        );
+        expect(risNoteContents.join(' ')).toContain(record.expectedNoteSnippet);
 
         // 4. TCVN / Vietnamese & International Citation Formatting Output for User
         const tcvnOut = cslEngine.formatTcvn(cslItem, false, 1);

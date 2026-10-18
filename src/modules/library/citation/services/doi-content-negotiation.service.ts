@@ -1,6 +1,10 @@
-﻿import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { ReferenceData } from '@/modules/library/citation/types/citation.types';
-import { cleanBibliographicText } from '@/modules/library/core';
+import {
+  cleanBibliographicText,
+  AcademicHttpClient,
+  ExternalProviderException,
+} from '@/modules/library/core';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
 
@@ -49,6 +53,8 @@ export class DoiContentNegotiationService {
   constructor(
     @Optional()
     private readonly resilienceRegistry?: ResilienceRegistryService,
+    @Optional()
+    private readonly httpClient?: AcademicHttpClient,
   ) {}
 
   // In-memory cache with TTL (24 hours) and bounded LRU pruning
@@ -156,16 +162,23 @@ export class DoiContentNegotiationService {
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
-        const response = await fetch(
-          `https://doi.org/${encodeURIComponent(doi)}`,
-          {
-            headers: {
-              Accept: acceptHeader,
-              'User-Agent': getAcademicUserAgent('Research'),
-            },
-            signal: controller.signal,
-          },
-        );
+        const url = `https://doi.org/${encodeURIComponent(doi)}`;
+        const headers = {
+          Accept: acceptHeader,
+          'User-Agent': getAcademicUserAgent('Research'),
+        };
+        const response = this.httpClient
+          ? (
+              await this.httpClient.request(url, {
+                headers,
+                signal: controller.signal,
+                timeoutMs,
+              })
+            ).response
+          : await fetch(url, {
+              headers,
+              signal: controller.signal,
+            });
 
         clearTimeout(timer);
 
@@ -174,7 +187,13 @@ export class DoiContentNegotiationService {
         }
 
         if (response.status === 429 || response.status >= 500) {
-          throw new Error(`doi.org returned HTTP ${response.status}`);
+          throw new ExternalProviderException(
+            `doi.org returned HTTP ${response.status}`,
+            {
+              status: response.status,
+              url,
+            },
+          );
         }
 
         if (!response.ok) {
@@ -210,12 +229,12 @@ export class DoiContentNegotiationService {
     try {
       if (this.resilienceRegistry) {
         return await this.resilienceRegistry.execute('doi-org', executeFetch, {
-          fallback: async (err: unknown) => {
+          fallback: (err: unknown) => {
             const errMsg = err instanceof Error ? err.message : String(err);
             this.logger.debug(
               `DOI Content Negotiation fallback for ${doi} (${normalizedStyle}): ${errMsg}`,
             );
-            return null;
+            return Promise.resolve(null);
           },
         });
       }
@@ -275,24 +294,37 @@ export class DoiContentNegotiationService {
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
-        const response = await fetch(
-          `https://doi.org/${encodeURIComponent(doi)}`,
-          {
-            headers: {
-              Accept:
-                'application/vnd.citationstyles.csl+json, application/citeproc+json, application/json',
-              'User-Agent': getAcademicUserAgent('Research'),
-            },
-            signal: controller.signal,
-          },
-        );
+        const url = `https://doi.org/${encodeURIComponent(doi)}`;
+        const headers = {
+          Accept:
+            'application/vnd.citationstyles.csl+json, application/citeproc+json, application/json',
+          'User-Agent': getAcademicUserAgent('Research'),
+        };
+        const response = this.httpClient
+          ? (
+              await this.httpClient.request(url, {
+                headers,
+                signal: controller.signal,
+                timeoutMs,
+              })
+            ).response
+          : await fetch(url, {
+              headers,
+              signal: controller.signal,
+            });
 
         clearTimeout(timer);
 
         if (response.status === 404) return null;
 
         if (response.status === 429 || response.status >= 500) {
-          throw new Error(`doi.org metadata HTTP ${response.status}`);
+          throw new ExternalProviderException(
+            `doi.org metadata HTTP ${response.status}`,
+            {
+              status: response.status,
+              url,
+            },
+          );
         }
 
         if (!response.ok) return null;
@@ -300,10 +332,13 @@ export class DoiContentNegotiationService {
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('text/html')) return null;
 
-        const json = await response.json();
+        const json = (await response.json()) as unknown;
         if (!json || typeof json !== 'object') return null;
 
-        const result = this.mapCslJsonToReferenceData(json, doi);
+        const result = this.mapCslJsonToReferenceData(
+          json as Record<string, unknown>,
+          doi,
+        );
         if (!result || !result.title || result.title === 'Untitled')
           return null;
 
@@ -320,12 +355,12 @@ export class DoiContentNegotiationService {
     try {
       if (this.resilienceRegistry) {
         return await this.resilienceRegistry.execute('doi-org', executeFetch, {
-          fallback: async (err: unknown) => {
+          fallback: (err: unknown) => {
             const errMsg = err instanceof Error ? err.message : String(err);
             this.logger.debug(
               `DOI Content Negotiation metadata fallback for ${doi}: ${errMsg}`,
             );
-            return null;
+            return Promise.resolve(null);
           },
         });
       }

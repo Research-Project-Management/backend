@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OutboxWorker } from '@/modules/library/sync/services/outbox.worker';
+import { OutboxRepository } from '@/modules/library/sync/repositories/outbox.repository';
 import { IdempotencyRepository } from '@/modules/library/ingestion/repositories/idempotency.repository';
 import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
 import { PrismaService } from '@/core';
@@ -40,6 +41,7 @@ describe('Library Phase 4: Infrastructure Hardening & Maintenance Purge', () => 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           OutboxWorker,
+          OutboxRepository,
           { provide: PrismaService, useValue: prisma },
           { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         ],

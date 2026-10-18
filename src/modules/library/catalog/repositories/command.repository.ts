@@ -322,7 +322,10 @@ export class CommandRepository {
         ? (existing.metadata as Record<string, unknown>)
         : {};
 
-    if (metadataObj.mergedIntoId) {
+    if (
+      typeof metadataObj.mergedIntoId === 'string' &&
+      metadataObj.mergedIntoId
+    ) {
       throw new BadRequestException(
         `Cannot restore item ${id}: it was merged into primary item ${metadataObj.mergedIntoId}`,
       );

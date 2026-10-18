@@ -44,13 +44,14 @@ export class ExternalSearchComparatorService {
         resultsMap[provider.providerName] = res;
         metricsMap[provider.providerName] = this.computeMetrics(res);
       } else {
+        const reason: unknown = outcome.reason;
         const errorResult: ExternalSearchResult = {
           provider: provider.providerName,
           query,
           hits: [],
           latencyMs: 0,
           isAvailable: false,
-          error: outcome.reason?.message || 'Execution failed',
+          error: reason instanceof Error ? reason.message : 'Execution failed',
         };
         resultsMap[provider.providerName] = errorResult;
         metricsMap[provider.providerName] = this.computeMetrics(errorResult);

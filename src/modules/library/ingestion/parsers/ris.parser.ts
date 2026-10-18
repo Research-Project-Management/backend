@@ -11,9 +11,24 @@ import {
   parseCreatorString,
 } from '@/modules/library/core';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
+import {
+  RisFallbackParser,
+  mapRisTypeToItemType,
+  extractIdentifiersFromText,
+  buildTypeSpecificFields,
+} from './ris-fallback.parser';
+
+export {
+  RisFallbackParser,
+  mapRisTypeToItemType,
+  extractIdentifiersFromText,
+  buildTypeSpecificFields,
+} from './ris-fallback.parser';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { Cite } = require('@citation-js/core');
+const { Cite } = require('@citation-js/core') as {
+  Cite: new (input: string) => { data?: CslRisItem[] };
+};
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 require('@citation-js/plugin-ris');
 
@@ -80,14 +95,16 @@ export class RisParser {
   /**
    * Asynchronously parses raw RIS text using standard in-process citation parser.
    */
-  async parseAsync(content: string): Promise<RisItem[]> {
+  parseAsync(content: string): Promise<RisItem[]> {
     if (!content || typeof content !== 'string' || !content.trim()) {
-      throw new IngestionValidationException(
-        'RIS content must be a non-empty string',
+      return Promise.reject(
+        new IngestionValidationException(
+          'RIS content must be a non-empty string',
+        ),
       );
     }
 
-    return this.parse(content);
+    return Promise.resolve(this.parse(content));
   }
 
   /**
@@ -114,7 +131,7 @@ export class RisParser {
         return this.fallbackParse(content);
       }
 
-      return (data as CslRisItem[]).map((csl: CslRisItem, idx: number) => {
+      return data.map((csl: CslRisItem, idx: number) => {
         const rawAuthors: string[] = [];
         const creators: CreatorInput[] = [];
 
@@ -497,25 +514,7 @@ export class RisParser {
     val: string,
     isPubMedDb?: boolean,
   ): { pmid?: string; pmcid?: string; arxivId?: string } {
-    const pmcMatch = val.match(/\b(PMC\d{5,12})\b/i);
-    const pmcid = pmcMatch ? pmcMatch[1].toUpperCase() : undefined;
-
-    let pmid: string | undefined;
-    const pmidMatch = val.match(/PMID[:\s]*(\d{5,10})\b/i);
-    if (pmidMatch) {
-      pmid = pmidMatch[1];
-    } else if (
-      tag === 'AN' &&
-      (isPubMedDb || /^\d{7,9}$/.test(val)) &&
-      /^\d{6,10}$/.test(val)
-    ) {
-      pmid = val;
-    }
-
-    const axMatch = val.match(/arXiv[:\s/]*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
-    const arxivId = axMatch ? axMatch[1] : undefined;
-
-    return { pmid, pmcid, arxivId };
+    return extractIdentifiersFromText(tag, val, isPubMedDb);
   }
 
   private buildTypeSpecificFields(params: {
@@ -529,57 +528,7 @@ export class RisParser {
     rawT2?: string;
     rawC3?: string;
   }) {
-    const {
-      itemType,
-      publisher,
-      rawM1,
-      rawM3,
-      rawU1,
-      rawIs,
-      rawSn,
-      rawT2,
-      rawC3,
-    } = params;
-    const university =
-      itemType === 'thesis' ? publisher || undefined : undefined;
-    const thesisType =
-      itemType === 'thesis' ? rawM3 || rawU1 || undefined : undefined;
-    const institution =
-      itemType === 'report' ? publisher || undefined : undefined;
-    const reportNumber =
-      itemType === 'report' ? rawM1 || rawIs || undefined : undefined;
-    const patentNumber =
-      itemType === 'patent' ? rawM1 || rawIs || rawSn || undefined : undefined;
-    const bookTitle =
-      itemType === 'bookSection' ? rawT2 || undefined : undefined;
-    const proceedingsTitle =
-      itemType === 'conferencePaper' ? rawT2 || undefined : undefined;
-    const conferenceName =
-      itemType === 'conferencePaper' ? rawC3 || undefined : undefined;
-
-    const extraFields: Record<string, unknown> = {
-      ...(university ? { university } : {}),
-      ...(institution ? { institution } : {}),
-      ...(thesisType ? { thesisType } : {}),
-      ...(reportNumber ? { reportNumber } : {}),
-      ...(patentNumber ? { patentNumber } : {}),
-      ...(bookTitle ? { bookTitle } : {}),
-      ...(proceedingsTitle ? { proceedingsTitle } : {}),
-      ...(conferenceName ? { conferenceName } : {}),
-    };
-
-    return {
-      university,
-      institution,
-      thesisType,
-      reportNumber,
-      patentNumber,
-      bookTitle,
-      proceedingsTitle,
-      conferenceName,
-      extraFields:
-        Object.keys(extraFields).length > 0 ? extraFields : undefined,
-    };
+    return buildTypeSpecificFields(params);
   }
 
   private mapCslTypeToItemType(cslType: string): string {
@@ -587,390 +536,10 @@ export class RisParser {
   }
 
   private mapRisTypeToItemType(risType: string): string {
-    const upper = (risType || '').toUpperCase().trim();
-    const map: Record<string, string> = {
-      JOUR: 'journalArticle',
-      JFULL: 'journalArticle',
-      ABST: 'journalArticle',
-      BOOK: 'book',
-      SER: 'book',
-      CONF: 'conferencePaper',
-      CPAPER: 'conferencePaper',
-      PROJ: 'conferencePaper',
-      THES: 'thesis',
-      RPRT: 'report',
-      REPORT: 'report',
-      CHAP: 'bookSection',
-      PAMP: 'document',
-      PAT: 'patent',
-      DATA: 'dataset',
-      COMP: 'computerProgram',
-      ELEC: 'webpage',
-      WEB: 'webpage',
-      ICOMM: 'webpage',
-      MGZN: 'magazineArticle',
-      NEWS: 'newspaperArticle',
-      CASE: 'case',
-      STAT: 'statute',
-      BILL: 'bill',
-      HEAR: 'hearing',
-      GEN: 'document',
-      MANSCPT: 'manuscript',
-      UNPB: 'manuscript',
-      MAP: 'map',
-      SOUND: 'audioRecording',
-      MPCT: 'film',
-      VIDEO: 'videoRecording',
-    };
-    return map[upper] || 'journalArticle';
+    return mapRisTypeToItemType(risType);
   }
 
-  /**
-   * Resilient line-by-line parser for non-standard RIS dialect variations
-   */
-  private fallbackParse(content: string): RisItem[] {
-    const lines = content.split(/\r?\n/);
-    const records: RisItem[] = [];
-    let currentRecord:
-      | (Partial<RisItem> & {
-          rawAuthors: string[];
-          rawEditors?: string[];
-          rawTags: string[];
-          rawNotes?: string[];
-          startPage?: string;
-          endPage?: string;
-          rawM1?: string;
-          rawM3?: string;
-          rawU1?: string;
-          rawSn?: string;
-          rawC3?: string;
-          isPubMedDb?: boolean;
-        })
-      | null = null;
-    let lastTag = '';
-
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line) continue;
-
-      const match = rawLine.match(/^([A-Z0-9]{2,4})\s*-\s*(.*)$/);
-      if (!match) {
-        if (currentRecord && line) {
-          if (lastTag === 'AB' || lastTag === 'N2') {
-            currentRecord.abstract =
-              (currentRecord.abstract ? currentRecord.abstract + ' ' : '') +
-              line;
-          } else if (
-            (lastTag === 'RN' || lastTag === 'N1') &&
-            currentRecord.rawNotes &&
-            currentRecord.rawNotes.length > 0
-          ) {
-            const lastIdx = currentRecord.rawNotes.length - 1;
-            currentRecord.rawNotes[lastIdx] += ' ' + line;
-          } else if (
-            (lastTag === 'TI' || lastTag === 'T1') &&
-            currentRecord.title
-          ) {
-            currentRecord.title += ' ' + line;
-          }
-        }
-        continue;
-      }
-
-      const [, tag, val] = match;
-      const value = val.trim();
-      lastTag = tag;
-
-      if (tag === 'TY') {
-        currentRecord = {
-          itemType: this.mapRisTypeToItemType(value),
-          rawAuthors: [],
-          rawEditors: [],
-          rawTags: [],
-          rawNotes: [],
-        };
-        continue;
-      }
-
-      if (tag === 'ER') {
-        if (currentRecord) {
-          records.push(this.finalizeRecord(currentRecord));
-          currentRecord = null;
-        }
-        continue;
-      }
-
-      if (!currentRecord) continue;
-
-      switch (tag) {
-        case 'TI':
-        case 'T1':
-          currentRecord.title = value;
-          break;
-        case 'ST':
-          currentRecord.shortTitle = value;
-          break;
-        case 'AU':
-        case 'A1':
-          currentRecord.rawAuthors.push(value);
-          break;
-        case 'ED':
-        case 'A2':
-          if (!currentRecord.rawEditors) currentRecord.rawEditors = [];
-          currentRecord.rawEditors.push(value);
-          break;
-        case 'PY':
-        case 'Y1': {
-          const yearMatch = value.match(/\b(19|20)\d{2}\b/);
-          if (yearMatch) currentRecord.year = parseInt(yearMatch[0], 10);
-          break;
-        }
-        case 'Y2':
-          currentRecord.accessedAt = value.replace(/\//g, '-');
-          break;
-        case 'JO':
-        case 'JF':
-        case 'T2':
-        case 'BT':
-          currentRecord.publicationTitle = value;
-          currentRecord.journal = value;
-          break;
-        case 'J2':
-        case 'JA':
-          currentRecord.journalAbbr = value;
-          break;
-        case 'VL':
-          currentRecord.volume = value;
-          break;
-        case 'IS':
-          currentRecord.issue = value;
-          break;
-        case 'SP':
-          currentRecord.startPage = value;
-          break;
-        case 'EP':
-          currentRecord.endPage = value;
-          break;
-        case 'DO':
-          currentRecord.doi = value;
-          break;
-        case 'PB':
-        case 'INST':
-          currentRecord.publisher = value;
-          break;
-        case 'CY':
-        case 'AD':
-          currentRecord.place = value;
-          break;
-        case 'LA':
-          currentRecord.language = value;
-          break;
-        case 'SN':
-          currentRecord.rawSn = value;
-          if (value.replace(/[^0-9X]/gi, '').length === 8) {
-            currentRecord.issn = value;
-          } else {
-            currentRecord.isbn = value;
-          }
-          break;
-        case 'M1':
-          currentRecord.rawM1 = value;
-          break;
-        case 'M3':
-          currentRecord.rawM3 = value;
-          break;
-        case 'U1':
-          currentRecord.rawU1 = value;
-          break;
-        case 'C3':
-          currentRecord.rawC3 = value;
-          break;
-        case 'DB':
-          if (/pubmed|medline|ncbi/i.test(value)) {
-            currentRecord.isPubMedDb = true;
-          }
-          break;
-        case 'AN':
-        case 'C2': {
-          const ids = this.extractIdentifiersFromText(
-            tag,
-            value,
-            currentRecord.isPubMedDb,
-          );
-          if (ids.pmcid) currentRecord.pmcid = ids.pmcid;
-          if (ids.pmid) currentRecord.pmid = ids.pmid;
-          if (ids.arxivId && !currentRecord.arxivId) {
-            currentRecord.arxivId = ids.arxivId;
-          }
-          break;
-        }
-        case 'UR':
-        case 'L1': {
-          if (!currentRecord.url) currentRecord.url = value;
-          const ids = this.extractIdentifiersFromText(tag, value);
-          if (ids.arxivId && !currentRecord.arxivId) {
-            currentRecord.arxivId = ids.arxivId;
-          }
-          break;
-        }
-        case 'ET':
-          currentRecord.edition = value;
-          break;
-        case 'CN':
-        case 'CA':
-        case 'C1':
-          currentRecord.callNumber = value;
-          break;
-        case 'L4':
-          currentRecord.archive = value;
-          break;
-        case 'T3':
-        case 'SE':
-          currentRecord.series = value;
-          if (!currentRecord.rawC3) currentRecord.rawC3 = value;
-          break;
-        case 'KW':
-          currentRecord.rawTags.push(value);
-          break;
-        case 'RN':
-        case 'N1': {
-          if (!currentRecord.rawNotes) currentRecord.rawNotes = [];
-          currentRecord.rawNotes.push(value);
-          const ids = this.extractIdentifiersFromText(tag, value);
-          if (ids.pmcid && !currentRecord.pmcid) {
-            currentRecord.pmcid = ids.pmcid;
-          }
-          if (ids.pmid && !currentRecord.pmid) {
-            currentRecord.pmid = ids.pmid;
-          }
-          if (ids.arxivId && !currentRecord.arxivId) {
-            currentRecord.arxivId = ids.arxivId;
-          }
-          break;
-        }
-        case 'AB':
-        case 'N2':
-          currentRecord.abstract = value;
-          break;
-      }
-    }
-
-    if (currentRecord) {
-      records.push(this.finalizeRecord(currentRecord));
-    }
-
-    return records;
-  }
-
-  private finalizeRecord(
-    record: Partial<RisItem> & {
-      rawAuthors: string[];
-      rawEditors?: string[];
-      rawTags: string[];
-      rawNotes?: string[];
-      startPage?: string;
-      endPage?: string;
-      rawM1?: string;
-      rawM3?: string;
-      rawU1?: string;
-      rawSn?: string;
-      rawC3?: string;
-    },
-  ): RisItem {
-    const creators: CreatorInput[] = record.rawAuthors.map(
-      (authorStr: string, idx: number) => {
-        const parsed = parseCreatorString(authorStr, idx, 'author');
-        return {
-          lastName: parsed.lastName,
-          firstName: parsed.firstName || undefined,
-          fullName: parsed.fullName,
-          creatorType: 'author',
-          ...(parsed.fieldMode === 1 ? { fieldMode: 1 } : {}),
-        };
-      },
-    );
-
-    if (record.rawEditors && record.rawEditors.length > 0) {
-      for (const editorStr of record.rawEditors) {
-        const parsed = parseCreatorString(editorStr, creators.length, 'editor');
-        creators.push({
-          lastName: parsed.lastName,
-          firstName: parsed.firstName || undefined,
-          fullName: parsed.fullName,
-          creatorType: 'editor',
-          ...(parsed.fieldMode === 1 ? { fieldMode: 1 } : {}),
-        });
-      }
-    }
-
-    let pages = record.pages;
-    if (!pages && (record.startPage || record.endPage)) {
-      pages =
-        record.startPage &&
-        record.endPage &&
-        record.startPage !== record.endPage
-          ? `${record.startPage}-${record.endPage}`
-          : record.startPage || record.endPage;
-    }
-
-    const itemType = record.itemType || 'journalArticle';
-    const typeSpecific = this.buildTypeSpecificFields({
-      itemType,
-      publisher: record.publisher,
-      rawM1: record.rawM1,
-      rawM3: record.rawM3,
-      rawU1: record.rawU1,
-      rawIs: record.issue,
-      rawSn: record.rawSn,
-      rawT2: record.publicationTitle,
-      rawC3: record.rawC3,
-    });
-    const normalizedTags = normalizeAcademicTags(record.rawTags);
-
-    return {
-      itemType,
-      title: record.title || 'Untitled Reference',
-      shortTitle: record.shortTitle,
-      authors: record.rawAuthors,
-      editors:
-        record.rawEditors && record.rawEditors.length > 0
-          ? record.rawEditors
-          : undefined,
-      creators,
-      year: record.year,
-      publicationDate: record.year ? String(record.year) : undefined,
-      journal: record.journal,
-      publicationTitle: record.publicationTitle,
-      journalAbbr: record.journalAbbr,
-      publisher: record.publisher,
-      ...typeSpecific,
-      place: record.place,
-      volume: record.volume,
-      issue:
-        itemType === 'report' || itemType === 'patent'
-          ? undefined
-          : record.issue,
-      pages,
-      doi: record.doi ? normalizeDoi(record.doi) || record.doi : undefined,
-      pmid: record.pmid,
-      pmcid: record.pmcid,
-      arxivId: record.arxivId,
-      isbn: itemType === 'patent' ? undefined : record.isbn,
-      issn: record.issn,
-      url: record.url,
-      accessedAt: record.accessedAt,
-      language: record.language,
-      edition: record.edition,
-      callNumber: record.callNumber,
-      archive: record.archive,
-      series: record.series,
-      tags: normalizedTags,
-      keywords: normalizedTags,
-      abstract: cleanAbstractText(record.abstract),
-      notes:
-        record.rawNotes && record.rawNotes.length > 0
-          ? record.rawNotes.map((n: string) => ({ content: n, source: 'ris' }))
-          : undefined,
-    };
+  fallbackParse(content: string): RisItem[] {
+    return RisFallbackParser.parse(content);
   }
 }

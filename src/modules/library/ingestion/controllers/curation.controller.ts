@@ -11,6 +11,7 @@ import {
 import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
 import { QualityService } from '@/modules/library/ingestion/services/quality.service';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
+import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
 import {
   MergeDuplicatesDto,
   DismissDuplicatesDto,
@@ -18,7 +19,7 @@ import {
 } from '@/modules/library/ingestion/dto/curation.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Library Curation')
 @ApiBearerAuth()
@@ -26,7 +27,7 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
   'api/v1/library/curation',
   'api/v1/projects/:projectId/library/curation',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class CurationController {
   constructor(
     private readonly duplicateService: DuplicateService,
@@ -67,7 +68,7 @@ export class CurationController {
     );
   }
 
-  @Post(['duplicates/dismiss', 'dismiss-duplicates'])
+  @Post('duplicates/dismiss')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   async dismissDuplicates(
     @CurrentUser('id') userId: string,
@@ -84,7 +85,7 @@ export class CurationController {
     );
   }
 
-  @Get(['quality-audit', 'quality', 'integrity'])
+  @Get(['quality', 'integrity'])
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getQualityAudit(
     @CurrentUser('id') userId: string,
@@ -109,8 +110,9 @@ export class CurationController {
     @Param('projectId') paramProjectId?: string,
   ) {
     if (!this.ingestionService) {
-      throw new Error(
+      throw new SubsystemUnavailableException(
         'IngestionService is not available in CurationController',
+        { subsystem: 'IngestionService' },
       );
     }
     const effectiveProjectId =

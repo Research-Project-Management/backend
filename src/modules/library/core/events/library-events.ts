@@ -21,8 +21,6 @@ export const LIBRARY_EVENT_TYPES = {
   TAG_DELETED: 'library.tag.deleted',
   ITEM_TAGGED: 'library.item.tagged',
   ITEM_UNTAGGED: 'library.item.untagged',
-  TAG_ASSIGNED: 'library.tag.assigned',
-  TAG_UNASSIGNED: 'library.tag.unassigned',
 
   // Notes
   NOTE_CREATED: 'library.note.created',
@@ -148,7 +146,7 @@ export const LIBRARY_EVENT_REGISTRY: Record<string, EventRegistryEntry> = {
   },
   [LIBRARY_EVENT_TYPES.ITEM_INGESTED_DOI]: {
     eventType: LIBRARY_EVENT_TYPES.ITEM_INGESTED_DOI,
-    producer: 'IngestionService.ingestDoi',
+    producer: 'IngestionService.ingest',
     consumer: 'EventDispatcher',
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',
@@ -157,7 +155,7 @@ export const LIBRARY_EVENT_REGISTRY: Record<string, EventRegistryEntry> = {
   },
   [LIBRARY_EVENT_TYPES.ITEM_INGESTED_BIBTEX]: {
     eventType: LIBRARY_EVENT_TYPES.ITEM_INGESTED_BIBTEX,
-    producer: 'IngestionService.ingestBibtex',
+    producer: 'IngestionService.ingest',
     consumer: 'EventDispatcher',
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',
@@ -211,22 +209,6 @@ export const LIBRARY_EVENT_REGISTRY: Record<string, EventRegistryEntry> = {
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',
     expectedSideEffect: 'Emits domain event for item untag association',
-  },
-  [LIBRARY_EVENT_TYPES.TAG_ASSIGNED]: {
-    eventType: LIBRARY_EVENT_TYPES.TAG_ASSIGNED,
-    producer: 'TagsService.assignTag',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Alias for ITEM_TAGGED',
-  },
-  [LIBRARY_EVENT_TYPES.TAG_UNASSIGNED]: {
-    eventType: LIBRARY_EVENT_TYPES.TAG_UNASSIGNED,
-    producer: 'TagsService.removeTag',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Alias for ITEM_UNTAGGED',
   },
   [LIBRARY_EVENT_TYPES.NOTE_CREATED]: {
     eventType: LIBRARY_EVENT_TYPES.NOTE_CREATED,

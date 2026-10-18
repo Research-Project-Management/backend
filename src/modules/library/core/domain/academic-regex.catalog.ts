@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { cleanAuthorName, splitAuthorString } from './author.domain';
 import {
   cleanAbstractText,
@@ -35,7 +34,6 @@ export interface ExtractedRegexFields {
  *
  * All regular expressions are bounded to prevent ReDoS (Catastrophic Backtracking).
  */
-@Injectable()
 export class AcademicRegexCatalog {
   // 1. Persistent Identifiers
 
@@ -45,7 +43,7 @@ export class AcademicRegexCatalog {
 
   /** Comprehensive arXiv pattern supporting New-Style (2007+) and Old-Style (Pre-2007) */
   public static readonly ARXIV_PATTERN =
-    /\b(?:arXiv:\s*)?(?:(\d{4}\.\d{4,5}(?:v\d+)?)|([a-z\-]+(?:\.[a-zA-Z]{2})?\/\d{7}(?:v\d+)?))(?:\s*\[([a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?)\])?(?=[\s,;.)\]]|$)/gi;
+    /\b(?:arXiv:\s*)?(?:(\d{4}\.\d{4,5}(?:v\d+)?)|([a-z-]+(?:\.[a-zA-Z]{2})?\/\d{7}(?:v\d+)?))(?:\s*\[([a-zA-Z-]+(?:\.[a-zA-Z-]+)?)\])?(?=[\s,;.)\]]|$)/gi;
 
   /** PubMed Identifier (PMID) */
   public static readonly PMID_PATTERN =

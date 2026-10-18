@@ -21,7 +21,7 @@ import {
   UpdateStateDto,
   GetBatchStatesDto,
 } from '@/modules/library/catalog/dto/state.dto';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 /**
  * Shared Base Adapter for Item Reading State Operations.
@@ -107,7 +107,7 @@ export class StateController extends BaseStateController {
 @ApiTags('Library Items - Project Reading State')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/projects/:projectId/library/items/:itemId/state')
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ProjectStateController extends BaseStateController {
   constructor(stateService: StateService) {
     super(stateService);
@@ -195,7 +195,7 @@ export class StateBatchController extends BaseStateBatchController {
 @ApiTags('Library Items - Project Batch State')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/projects/:projectId/library/items/state')
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ProjectStateBatchController extends BaseStateBatchController {
   constructor(stateService: StateService) {
     super(stateService);

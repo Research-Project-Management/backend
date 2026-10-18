@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -14,6 +14,9 @@ import {
   normalizePmid,
   cleanBibliographicText,
   cleanAbstractText,
+  AcademicHttpClient,
+  LibraryConfigService,
+  libraryConfig,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import {
@@ -33,20 +36,41 @@ export class PubMedProvider implements MetadataProvider {
   };
 
   private readonly logger = new Logger(PubMedProvider.name);
-  private readonly EUTILS_BASE_URL =
-    process.env.NCBI_EUTILS_BASE_URL ||
-    'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi';
+
+  constructor(
+    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() private readonly configService?: LibraryConfigService,
+  ) {}
+
+  private get eutilsBaseUrl(): string {
+    const base =
+      this.configService?.providers.ncbiBaseUrl ??
+      libraryConfig().providers.ncbiBaseUrl;
+    return base.endsWith('.fcgi') ? base : `${base}/esummary.fcgi`;
+  }
 
   private get email(): string {
-    return process.env.NCBI_EMAIL || getAcademicContactEmail();
+    return (
+      this.configService?.providers.ncbiEmail ??
+      libraryConfig().providers.ncbiEmail ??
+      getAcademicContactEmail()
+    );
   }
 
   private get apiKey(): string | undefined {
-    return process.env.NCBI_API_KEY;
+    return (
+      this.configService?.providers.ncbiApiKey ??
+      libraryConfig().providers.ncbiApiKey
+    );
   }
 
-  supports(queryType: QueryType): boolean {
-    return this.capabilities.queryTypes.includes(queryType);
+  supports(input: QueryType | MetadataRequest): boolean {
+    const type = typeof input === 'string' ? input : input?.queryType;
+    return type ? this.capabilities.queryTypes.includes(type) : false;
+  }
+
+  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
+    return this.resolve(request);
   }
 
   async resolve(
@@ -88,13 +112,14 @@ export class PubMedProvider implements MetadataProvider {
       url += `&api_key=${encodeURIComponent(this.apiKey)}`;
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': getAcademicUserAgent('PubMed'),
-        Accept: '*/*',
-      },
-      signal,
-    });
+    const headers = {
+      'User-Agent': getAcademicUserAgent('PubMed'),
+      Accept: '*/*',
+    };
+
+    const response = this.httpClient
+      ? (await this.httpClient.request(url, { headers, signal })).response
+      : await fetch(url, { headers, signal });
 
     if (response.status === 404) return null;
     if (!response.ok) return null;
@@ -117,18 +142,19 @@ export class PubMedProvider implements MetadataProvider {
     cleanPmid: string,
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
-    let url = `${this.EUTILS_BASE_URL}?db=pubmed&id=${encodeURIComponent(cleanPmid)}&retmode=json&tool=FluxAcademic&email=${encodeURIComponent(this.email)}`;
+    let url = `${this.eutilsBaseUrl}?db=pubmed&id=${encodeURIComponent(cleanPmid)}&retmode=json&tool=FluxAcademic&email=${encodeURIComponent(this.email)}`;
     if (this.apiKey) {
       url += `&api_key=${encodeURIComponent(this.apiKey)}`;
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': getAcademicUserAgent('PubMed'),
-        Accept: 'application/json',
-      },
-      signal,
-    });
+    const headers = {
+      'User-Agent': getAcademicUserAgent('PubMed'),
+      Accept: 'application/json',
+    };
+
+    const response = this.httpClient
+      ? (await this.httpClient.request(url, { headers, signal })).response
+      : await fetch(url, { headers, signal });
 
     if (response.status === 404) return null;
 
@@ -241,21 +267,24 @@ export class PubMedProvider implements MetadataProvider {
     let year: number | null = null;
     let publicationDate: string | undefined;
     const dateParts = [
-      (data.issued as { 'date-parts'?: unknown[][] } | undefined)?.[
-        'date-parts'
-      ]?.[0],
-      (data['epub-date'] as { 'date-parts'?: unknown[][] } | undefined)?.[
-        'date-parts'
-      ]?.[0],
+      (
+        data.issued as
+          { 'date-parts'?: Array<Array<string | number>> } | undefined
+      )?.['date-parts']?.[0],
+      (
+        data['epub-date'] as
+          { 'date-parts'?: Array<Array<string | number>> } | undefined
+      )?.['date-parts']?.[0],
     ].find((parts) => Array.isArray(parts) && Boolean(parts[0]));
-    if (dateParts && dateParts[0]) {
+    if (dateParts && dateParts[0] != null) {
       year = Number(dateParts[0]);
       const y = String(dateParts[0]).padStart(4, '0');
-      publicationDate = dateParts[1]
-        ? dateParts[2]
-          ? `${y}-${String(dateParts[1]).padStart(2, '0')}-${String(dateParts[2]).padStart(2, '0')}`
-          : `${y}-${String(dateParts[1]).padStart(2, '0')}`
-        : y;
+      publicationDate =
+        dateParts[1] != null
+          ? dateParts[2] != null
+            ? `${y}-${String(dateParts[1]).padStart(2, '0')}-${String(dateParts[2]).padStart(2, '0')}`
+            : `${y}-${String(dateParts[1]).padStart(2, '0')}`
+          : y;
     }
 
     const doi =

@@ -341,7 +341,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
     it('should invalidate facet cache when CATALOG_ITEM_CREATED integration event arrives', async () => {
       const invalidateSpy = jest.spyOn(searchService, 'invalidateFacetsCache');
 
-      await subscriber.handleItemCreated({
+      await subscriber.handleIntegrationItemCreated({
         eventId: 'evt-1',
         topic: 'library.integration.catalog.item_created',
         occurredAt: new Date().toISOString(),
@@ -364,7 +364,7 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
     it('should invalidate facet cache when CATALOG_ITEM_DELETED integration event arrives', async () => {
       const invalidateSpy = jest.spyOn(searchService, 'invalidateFacetsCache');
 
-      await subscriber.handleItemDeleted({
+      await subscriber.handleIntegrationItemDeleted({
         eventId: 'evt-2',
         topic: 'library.integration.catalog.item_deleted',
         occurredAt: new Date().toISOString(),

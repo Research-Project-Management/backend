@@ -24,7 +24,7 @@ import {
   PreviewSavedSearchDto,
   ExecuteSavedSearchQueryDto,
 } from '@/modules/library/catalog/dto/saved-search.dto';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 /**
  * Shared Base Adapter for Saved Searches / Smart Collections.
@@ -178,7 +178,7 @@ export class SavedSearchesController extends BaseSavedSearchesController {
 @ApiTags('Library Saved Searches - Project')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/projects/:projectId/library/saved-searches')
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ProjectSavedSearchesController extends BaseSavedSearchesController {
   constructor(service: SavedSearchesService) {
     super(service);

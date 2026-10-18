@@ -552,4 +552,32 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
   ): Promise<DuplicateCandidateItem[]> {
     return this.findDuplicateCandidateItems(undefined, limit);
   }
+
+  async count(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<number> {
+    return this.query.count(userId, options || { view: 'all' });
+  }
+
+  async findMany(
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<ItemDetail[]> {
+    return await this.query.findMany(userId, options || {});
+  }
+
+  async findMatchCandidates(
+    scope: { userId?: string; projectId?: string | null } | string,
+    criteria: {
+      doi?: string | null;
+      arxivId?: string | null;
+      pmid?: string | null;
+      isbn?: string | null;
+      titleWords?: string[];
+      titlePrefix?: string;
+    },
+  ) {
+    return this.query.findMatchCandidates(scope, criteria);
+  }
 }

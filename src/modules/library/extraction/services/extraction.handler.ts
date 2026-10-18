@@ -17,6 +17,7 @@ import {
   parseCreatorString,
   isNoiseAuthorName,
   extractFileIdFromUrl,
+  ExtractionProcessException,
 } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
@@ -98,7 +99,10 @@ export class ExtractionHandler implements OutboxDispatchHandler {
 
   async handle(event: OutboxEvent, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) {
-      throw new Error(`Extraction aborted for outbox event ${event.id}`);
+      throw new ExtractionProcessException(
+        `Extraction aborted for outbox event ${event.id}`,
+        { eventId: event.id },
+      );
     }
 
     const payload = (event.payload as Record<string, unknown>) || {};
@@ -141,7 +145,10 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     signal?: AbortSignal,
   ): Promise<void> {
     if (signal?.aborted) {
-      throw new Error(`Extraction aborted for outbox event ${event.id}`);
+      throw new ExtractionProcessException(
+        `Extraction aborted for outbox event ${event.id}`,
+        { eventId: event.id, attachmentId },
+      );
     }
 
     // 1. Atomically claim PENDING / FAILED_RETRYABLE -> PROCESSING

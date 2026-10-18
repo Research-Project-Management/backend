@@ -150,16 +150,13 @@ export class ReconciliationPolicy {
                 n && typeof n === 'object'
                   ? (n as Record<string, unknown>)
                   : null;
+              const rawNoteContent =
+                noteObj?.content ?? noteObj?.contentMd ?? noteObj?.note;
               const text =
                 typeof n === 'string'
                   ? n.trim()
-                  : noteObj
-                    ? String(
-                        noteObj.content ??
-                          noteObj.contentMd ??
-                          noteObj.note ??
-                          '',
-                      ).trim()
+                  : typeof rawNoteContent === 'string'
+                    ? rawNoteContent.trim()
                     : '';
               const dedupeKey = text.toLowerCase();
               if (text && !seen.has(dedupeKey)) {
@@ -286,7 +283,10 @@ export class ReconciliationPolicy {
     }
 
     // Harmonize venue and publisher per Zotero itemType schema (DRY baseField mappings)
-    const itemType = String(proposedItem.itemType || 'journalArticle');
+    const itemType =
+      typeof proposedItem.itemType === 'string' && proposedItem.itemType
+        ? proposedItem.itemType
+        : 'journalArticle';
     const baseMap = BASE_FIELD_MAPPINGS[itemType];
     if (baseMap) {
       const venueField = baseMap.publicationTitle;

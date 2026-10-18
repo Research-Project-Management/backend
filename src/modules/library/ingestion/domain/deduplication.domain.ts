@@ -57,7 +57,7 @@ function cleanAcademicTitleForDedupe(raw?: string | null): string {
     .replace(/<\/?[a-z][^>]*>/gi, ' ')
     // Strip trailing bibliographic bracket tags: [Article], (Preprint), [Review], etc.
     .replace(
-      /\s*[\[(](?:article|review|preprint|online ahead of print|author manuscript|in press|translated|abstract|english|german|french|spanish|chinese|japanese)[\])]\s*$/gi,
+      /\s*[[(](?:article|review|preprint|online ahead of print|author manuscript|in press|translated|abstract|english|german|french|spanish|chinese|japanese)[\])]\s*$/gi,
       '',
     )
     // Strip LaTeX formatting macros while keeping inner text
@@ -221,7 +221,7 @@ export function calculateTokenSortRatio(
   const m = tokensA.length;
   const n = tokensB.length;
   const dp: number[][] = Array.from({ length: m + 1 }, () =>
-    new Array(n + 1).fill(0),
+    new Array<number>(n + 1).fill(0),
   );
 
   for (let i = 0; i <= m; i++) dp[i][0] = i;

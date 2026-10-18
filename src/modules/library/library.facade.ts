@@ -9,6 +9,7 @@ import { LibraryChange, Tombstone } from '@prisma/client';
 
 import { ExtractedPdfDocument, AttachmentEntity } from './extraction';
 import { cleanSingleTag } from './core/domain/tag.domain';
+import { SubsystemUnavailableException } from './core';
 
 export interface LibraryItemSummary {
   id: string;
@@ -427,7 +428,10 @@ export class LibraryFacade implements ILibraryFacade {
     options?: { maxPages?: number; headerOnly?: boolean },
   ): Promise<ExtractedPdfDocument> {
     if (!this.extractionFacade) {
-      throw new Error('ExtractionFacade is not available');
+      throw new SubsystemUnavailableException(
+        'ExtractionFacade is not available',
+        { subsystem: 'ExtractionFacade' },
+      );
     }
     return this.extractionFacade.extractDocumentFromBuffer(buffer, options);
   }

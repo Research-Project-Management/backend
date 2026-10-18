@@ -19,12 +19,6 @@ export interface BenchmarkPayloadDto {
   filename?: string;
 }
 
-/**
- * Standard baseline latency (in ms) for unoptimized legacy multi-stage HTTP extractors,
- * used as reference point for in-process speedup benchmarking.
- */
-export const BASELINE_LEGACY_EXTRACTION_LATENCY_MS = 1200;
-
 @ApiTags('Library Extraction Telemetry')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
@@ -131,9 +125,6 @@ export class ExtractionTelemetryController {
       success: true,
       benchmark: {
         executionLatencyMs: Math.round(latencyMs * 100) / 100,
-        baselineLegacyLatencyMs: BASELINE_LEGACY_EXTRACTION_LATENCY_MS,
-        estimatedLegacyLatencyMs: BASELINE_LEGACY_EXTRACTION_LATENCY_MS,
-        estimatedSpeedupRatio: `${Math.round(BASELINE_LEGACY_EXTRACTION_LATENCY_MS / Math.max(latencyMs, 0.1))}x`,
         engineUsed: result.provenance.engineUsed,
         isSelfSufficient: result.isSelfSufficient,
         qualityScore: result.quality.totalScore,

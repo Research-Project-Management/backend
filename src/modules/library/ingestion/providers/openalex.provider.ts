@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -19,6 +19,9 @@ import {
   cleanBibliographicText,
   titleSimilarity,
   TITLE_MATCH_THRESHOLD,
+  AcademicHttpClient,
+  LibraryConfigService,
+  libraryConfig,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { normalizePageRange, parseCreatorString } from '@/modules/library/core';
@@ -36,20 +39,56 @@ export class OpenAlexProvider implements MetadataProvider {
   private readonly logger = new Logger(OpenAlexProvider.name);
   private readonly BASE_URL = 'https://api.openalex.org/works';
 
+  constructor(
+    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() private readonly configService?: LibraryConfigService,
+  ) {}
+
   private get mailto(): string {
     return (
-      process.env.OPENALEX_EMAIL ||
-      process.env.ACADEMIC_EMAIL ||
+      this.configService?.providers.openAlexEmail ??
+      libraryConfig().providers.openAlexEmail ??
       'contact@flux.academic'
     );
   }
 
   private get apiKey(): string | undefined {
-    return process.env.OPENALEX_API_KEY;
+    return (
+      this.configService?.providers.openAlexApiKey ??
+      libraryConfig().providers.openAlexApiKey
+    );
   }
 
-  supports(queryType: QueryType): boolean {
-    return this.capabilities.queryTypes.includes(queryType);
+  private async executeFetch(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    if (this.httpClient) {
+      const { response } = await this.httpClient.request(url, {
+        headers: {
+          'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
+          Accept: 'application/json',
+        },
+        signal,
+      });
+      return response;
+    }
+    return fetch(url, {
+      headers: {
+        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
+        Accept: 'application/json',
+      },
+      signal,
+    });
+  }
+
+  supports(input: QueryType | MetadataRequest): boolean {
+    const type = typeof input === 'string' ? input : input?.queryType;
+    return type ? this.capabilities.queryTypes.includes(type) : false;
+  }
+
+  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
+    return this.resolve(request);
   }
 
   async resolve(
@@ -85,13 +124,7 @@ export class OpenAlexProvider implements MetadataProvider {
       url += `&api_key=${encodeURIComponent(this.apiKey)}`;
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
-        Accept: 'application/json',
-      },
-      signal,
-    });
+    const response = await this.executeFetch(url, signal);
 
     if (response.status === 404) return null;
 
@@ -140,13 +173,7 @@ export class OpenAlexProvider implements MetadataProvider {
       url += `&api_key=${encodeURIComponent(this.apiKey)}`;
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
-        Accept: 'application/json',
-      },
-      signal,
-    });
+    const response = await this.executeFetch(url, signal);
 
     if (response.status === 404) return null;
 
@@ -202,13 +229,7 @@ export class OpenAlexProvider implements MetadataProvider {
       url += `&api_key=${encodeURIComponent(this.apiKey)}`;
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
-        Accept: 'application/json',
-      },
-      signal,
-    });
+    const response = await this.executeFetch(url, signal);
 
     if (response.status === 404) return null;
 
@@ -254,13 +275,7 @@ export class OpenAlexProvider implements MetadataProvider {
       url += `&api_key=${encodeURIComponent(this.apiKey)}`;
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
-        Accept: 'application/json',
-      },
-      signal,
-    });
+    const response = await this.executeFetch(url, signal);
 
     if (response.status === 404) return null;
 
@@ -501,8 +516,14 @@ export class OpenAlexProvider implements MetadataProvider {
     const rawKeywords: string[] = [];
 
     if (Array.isArray(item.keywords) && item.keywords.length > 0) {
-      for (const k of item.keywords.slice(0, 4)) {
-        const text = typeof k === 'string' ? k : k?.keyword || k?.display_name;
+      for (const rawK of item.keywords.slice(0, 4)) {
+        const k = rawK as
+          | string
+          | { keyword?: string; display_name?: string; score?: number }
+          | null
+          | undefined;
+        const text =
+          typeof k === 'string' ? k : k?.keyword || k?.display_name || '';
         const score =
           typeof k === 'object' && typeof k?.score === 'number' ? k.score : 1.0;
         if (text && score >= 0.5) {

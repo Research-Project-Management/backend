@@ -47,7 +47,8 @@ export class IdempotencyMiddleware implements NestMiddleware {
       return next();
     }
 
-    const userId = req.user?.id || req.headers?.['x-user-id'] || 'anon';
+    const rawUserId = req.user?.id || req.headers?.['x-user-id'] || 'anon';
+    const userId = Array.isArray(rawUserId) ? rawUserId[0] : rawUserId;
     const key = `${userId}:${req.method}:${req.path}:${idempotencyKey}`;
     const existing = idempotencyStore.get(key);
 

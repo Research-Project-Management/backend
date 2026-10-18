@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   MetadataCandidate,
   ReconciliationDecision,
@@ -25,9 +25,7 @@ export class ReconcileStage implements IWorkflowStage<
    * Executes deterministic reconciliation over candidates and performs
    * verification scoring against the PDF fingerprint or local heuristics.
    */
-  async execute(
-    candidates: MetadataCandidate[],
-  ): Promise<ReconciliationDecision> {
+  execute(candidates: MetadataCandidate[]): Promise<ReconciliationDecision> {
     // Ensure all candidates have fields populated from normalizedMetadata if empty
     for (const cand of candidates) {
       if (!cand.fields || Object.keys(cand.fields).length === 0) {
@@ -112,7 +110,7 @@ export class ReconcileStage implements IWorkflowStage<
 
     const decision = this.reconciler.reconcile(activeCandidates);
     if (!this.verifier) {
-      return decision;
+      return Promise.resolve(decision);
     }
 
     const proposed = decision.proposedItem;
@@ -153,7 +151,7 @@ export class ReconcileStage implements IWorkflowStage<
           'Source is protected by anti-bot WAF / Cloudflare Turnstile. Please upload the PDF directly.',
         ],
       };
-      return decision;
+      return Promise.resolve(decision);
     }
 
     // 2. Local PDF with external web candidate verification
@@ -180,7 +178,7 @@ export class ReconcileStage implements IWorkflowStage<
         missingFields: verifyResult.missingFields,
         warnings: verifyResult.warnings,
       };
-      return decision;
+      return Promise.resolve(decision);
     }
 
     // 3. Local PDF alone (no external enrichment or self-sufficient)
@@ -219,7 +217,7 @@ export class ReconcileStage implements IWorkflowStage<
         missingFields: verifyResult.missingFields,
         warnings: verifyResult.warnings,
       };
-      return decision;
+      return Promise.resolve(decision);
     }
 
     // 4. URL or Identifier or Record alone
@@ -245,6 +243,6 @@ export class ReconcileStage implements IWorkflowStage<
       warnings: verifyResult.warnings,
     };
 
-    return decision;
+    return Promise.resolve(decision);
   }
 }

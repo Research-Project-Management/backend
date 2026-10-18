@@ -4,6 +4,7 @@ import {
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 
@@ -45,10 +46,8 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    if (process.env.NODE_ENV === 'test') return;
-    const intervalHours = Number(
-      process.env.RETRACTION_SYNC_INTERVAL_HOURS || 12,
-    );
+    if (libraryConfig().app.isTest) return;
+    const intervalHours = libraryConfig().retraction.syncIntervalHours;
     const intervalMs = Math.max(1, intervalHours) * 60 * 60 * 1000;
     this.logger.log(
       `Initializing background Retraction Sync worker (interval: ${intervalHours}h)`,

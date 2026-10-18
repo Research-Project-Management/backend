@@ -1,10 +1,16 @@
 export * from './core.module';
 
+// Configuration
+export * from './config/library.config';
+
 // Domain
 export * from './domain/identifier.domain';
 export * from './domain/author.domain';
+export * from './domain/author-particles.lexicon';
 export * from './domain/academic-text.domain';
+export * from './domain/academic-text.lexicon';
 export * from './domain/tag.domain';
+export * from './domain/tag-taxonomy.lexicon';
 export * from './domain/academic-regex.catalog';
 export * from './domain/sort-index.domain';
 export * from './domain/tiptap.domain';
@@ -21,6 +27,7 @@ export * from './errors/version-mismatch.exception';
 // Middlewares & Services
 export * from './middlewares/idempotency.middleware';
 export * from './services/ssrf-guard.service';
+export * from './services/academic-http.client';
 
 // Types & Schemas
 export * from './types/branded.types';
@@ -28,6 +35,8 @@ export * from './types/entity-commands.types';
 export * from './types/bibliographic.types';
 export * from './types/schema.constants';
 export * from './types/schema.types';
+export * from './types/extraction.types';
+export * from './types/ingestion.types';
 
 // Events
 export * from './events/integration-events';
@@ -37,6 +46,7 @@ export * from './events/library-events';
 export * from './ports/catalog.port';
 export * from './ports/extraction.port';
 export * from './ports/ingestion.port';
+export * from './ports/strategy.port';
 export * from './ports/unit-of-work.port';
 export * from './ports/outbox.port';
 export * from './ports/event-publisher.port';

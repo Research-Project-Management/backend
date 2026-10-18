@@ -93,8 +93,6 @@ describe('ExtractionTelemetryController', () => {
       expect(res.benchmark.qualityScore).toBe(0.95);
       expect(res.benchmark.engineUsed).toBe('XMP_BINARY');
       expect(res.benchmark.executionLatencyMs).toBeGreaterThanOrEqual(0);
-      expect(res.benchmark.estimatedLegacyLatencyMs).toBe(1200);
-      expect(res.benchmark.estimatedSpeedupRatio).toMatch(/^\d+x$/);
       expect(res.extractedMetadata.title).toBe(
         'Deep Residual Learning for Image Recognition',
       );

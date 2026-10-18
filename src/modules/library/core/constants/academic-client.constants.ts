@@ -1,15 +1,12 @@
+import { libraryConfig } from '../config/library.config';
+
 /**
  * Canonical Academic Polite Pool Email and User-Agent configuration.
  * Used for CrossRef, OpenAlex, PubMed, Unpaywall, DOI content negotiation,
  * Retraction Watch, and academic crawler polite pools.
  */
 export function getAcademicContactEmail(): string {
-  return (
-    process.env.ACADEMIC_POLITE_EMAIL ||
-    process.env.ACADEMIC_EMAIL ||
-    process.env.CROSSREF_EMAIL ||
-    'support@flux.study'
-  );
+  return libraryConfig().academic.contactEmail;
 }
 
 export function getAcademicUserAgent(subsystem = 'Platform'): string {

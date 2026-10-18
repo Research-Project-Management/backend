@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { Prisma } from '@prisma/client';
+import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
 import {
   UrlCaptureProvider,
   CapturedItemMetadata,
@@ -359,8 +360,9 @@ export class UrlCaptureService {
             );
           }
 
-          throw new Error(
+          throw new SubsystemUnavailableException(
             'CatalogGateway is required to confirm captured URL item',
+            { gateway: 'CatalogGateway' },
           );
         },
       );
@@ -381,8 +383,9 @@ export class UrlCaptureService {
           projectId,
         );
       } else {
-        throw new Error(
+        throw new SubsystemUnavailableException(
           'CatalogGateway is required to confirm captured URL item',
+          { gateway: 'CatalogGateway' },
         );
       }
     }

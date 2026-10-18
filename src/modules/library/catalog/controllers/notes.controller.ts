@@ -18,7 +18,7 @@ import {
   CreateNoteDto,
   UpdateNoteDto,
 } from '@/modules/library/catalog/dto/notes.dto';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { NotesService } from '@/modules/library/catalog/services/notes.service';
 
 @ApiTags('Library Notes')
@@ -27,7 +27,7 @@ import { NotesService } from '@/modules/library/catalog/services/notes.service';
   'api/v1/library/notes',
   'api/v1/projects/:projectId/library/notes',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class NoteController {
   constructor(private readonly notesService: NotesService) {}
 
@@ -181,7 +181,7 @@ export class NoteController {
         : this.notesService.deleteNote(currentUserId, id);
   }
 
-  @Post(['items/:itemId/extract-annotations', 'items/:itemId/from-annotations'])
+  @Post('items/:itemId/from-annotations')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Extract and compile notes from PDF annotations for an item',

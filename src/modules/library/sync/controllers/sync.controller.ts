@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Query,
@@ -8,7 +8,7 @@
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 import { SyncQueryDto } from '@/modules/library/sync/dto/sync-query.dto';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
@@ -30,7 +30,7 @@ function parseSafeBigInt(val?: string): bigint | undefined {
 @ApiTags('Library Sync')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/library/sync', 'api/v1/projects/:projectId/library/sync'])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class SyncController {
   constructor(
     private readonly transactionService: TransactionService,
@@ -176,7 +176,7 @@ export class SyncController {
     description:
       'Returns real-time telemetry including Circuit Breaker states, Outbox worker status, and metrics.',
   })
-  async getDiagnostics() {
+  getDiagnostics() {
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),

@@ -110,7 +110,15 @@ export class PdfAnnotationImporterService {
       for (let p = 1; p <= numPages; p++) {
         try {
           const page = await documentProxy.getPage(p);
-          const annots = await page.getAnnotations();
+          interface PdfRawAnnotation {
+            subtype?: string;
+            rect?: number[];
+            color?: number[];
+            contents?: string;
+            contentsObj?: { str?: string } | null;
+          }
+          const annots = (await page.getAnnotations()) as
+            PdfRawAnnotation[] | null | undefined;
           if (!annots || !Array.isArray(annots) || annots.length === 0) {
             continue;
           }
@@ -202,8 +210,8 @@ export class PdfAnnotationImporterService {
             const colorHex = this.formatColor(annot.color, mappedType);
             const contentText =
               annot.contents ||
-              (typeof annot.contentsObj === 'object'
-                ? annot.contentsObj?.str
+              (typeof annot.contentsObj === 'object' && annot.contentsObj
+                ? annot.contentsObj.str || ''
                 : '') ||
               '';
 

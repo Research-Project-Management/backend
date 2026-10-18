@@ -109,7 +109,7 @@ export function isValidFileHash(hash?: string | null): boolean {
  */
 export function isValidMimeType(mimeType?: string | null): boolean {
   if (!mimeType) return false;
-  return /^[a-zA-Z0-9\.\-\+]+\/[a-zA-Z0-9\.\-\+]+$/.test(mimeType.trim());
+  return /^[a-zA-Z0-9.+_-]+\/[a-zA-Z0-9.+_-]+$/.test(mimeType.trim());
 }
 
 /**

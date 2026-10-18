@@ -169,21 +169,19 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
 
   describe('RetractionScannerProvider', () => {
     it('should detect retraction via Retraction Watch dataset without making network requests', async () => {
-      const result = await scanner.scan('10.1016/s0140-6736(97)11096-0');
-      expect(result).not.toBeNull();
-      expect(result?.nature).toBe('retraction');
-      expect(result?.source).toBe('retraction_watch');
+      const result = await scanner.lookup('10.1016/s0140-6736(97)11096-0');
+      expect(result.status).toBe('retracted');
+      if (result.status === 'retracted') {
+        expect(result.details.nature).toBe('retraction');
+        expect(result.details.source).toBe('retraction_watch');
+      }
     });
 
     it('should NOT flag an item from its title alone (DOI/PMID matching only)', async () => {
       const cleanDoi = '10.9999/unknown-clean-doi';
       await retractionDb.saveClean(cleanDoi);
-      const result = await scanner.scan(
-        cleanDoi,
-        null,
-        'RETRACTED: Deep Learning for Quantum Gravity Solvers',
-      );
-      expect(result).toBeNull();
+      const result = await scanner.lookup(cleanDoi, null);
+      expect(result.status).toBe('clean');
     });
 
     it('lookup() returns unknown when the item has no DOI or PMID', async () => {

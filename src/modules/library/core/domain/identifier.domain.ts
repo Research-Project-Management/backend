@@ -413,14 +413,14 @@ export function isValidDoi(doi?: string | null): boolean {
 }
 
 /**
- * Robust, centralized extractor for resolving storage fileId from an attachment URL or path.
- * Supports legacy `/api/files/...`, modern `/api/v1/storage/files/...`,
- * project-scoped `/api/v1/projects/:id/storage/files/...`, and `/api/v1/library/files/...`.
+ * Centralized extractor for resolving storage fileId from an attachment URL or path.
+ * Supports `/api/v1/storage/files/...`, project-scoped `/api/v1/projects/:id/storage/files/...`,
+ * and `/api/v1/library/files/...`.
  */
 export function extractFileIdFromUrl(url?: string | null): string | null {
   if (!url || typeof url !== 'string') return null;
   const match = url.match(
-    /\/api\/(?:v1\/)?(?:(?:projects\/[^/]+\/)?(?:library\/|storage\/)?)?(?:attachments\/)?files\/([a-zA-Z0-9_-]+)/,
+    /\/api\/v1\/(?:projects\/[^/]+\/)?(?:library\/|storage\/)(?:attachments\/)?files\/([a-zA-Z0-9_-]+)/,
   );
   return match ? match[1] : null;
 }

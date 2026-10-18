@@ -1,4 +1,5 @@
 import { IngestionStatusVo } from './ingestion-status.vo';
+import { InvalidStateTransitionException } from '@/modules/library/core/errors/domain.exception';
 import {
   IProcessingDomainEvent,
   IngestionRunStartedDomainEvent,
@@ -209,8 +210,9 @@ export class IngestionRunAggregate {
 
   public markStepStarted(stageName: IngestionStageName): void {
     if (this._status.value !== 'RUNNING') {
-      throw new Error(
+      throw new InvalidStateTransitionException(
         `Cannot start step "${stageName}" on run in status ${this._status.value}`,
+        { currentStatus: this._status.value, targetStage: stageName },
       );
     }
     this._currentStep = stageName;
@@ -338,8 +340,13 @@ export class IngestionRunAggregate {
   public complete(processedItems = 1): void {
     const nextStatus = IngestionStatusVo.create('COMPLETED');
     if (!this._status.canTransitionTo(nextStatus)) {
-      throw new Error(
+      throw new InvalidStateTransitionException(
         `Cannot transition from status "${this._status.value}" to "COMPLETED" for run ${this._id}`,
+        {
+          currentStatus: this._status.value,
+          targetStatus: 'COMPLETED',
+          runId: this._id,
+        },
       );
     }
 

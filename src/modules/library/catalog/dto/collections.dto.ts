@@ -33,7 +33,7 @@ export class CreateCollectionDto {
 
   @IsOptional()
   @ValidateIf(
-    (o) =>
+    (o: { parentId?: string | null }) =>
       o.parentId !== null &&
       o.parentId !== undefined &&
       o.parentId !== '' &&
@@ -73,7 +73,7 @@ export class UpdateCollectionDto {
 
   @IsOptional()
   @ValidateIf(
-    (o) =>
+    (o: { parentId?: string | null }) =>
       o.parentId !== null &&
       o.parentId !== undefined &&
       o.parentId !== '' &&

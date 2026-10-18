@@ -1,4 +1,5 @@
-﻿import { Injectable, Logger, Optional } from '@nestjs/common';
+import { resolveServiceUrl } from '../../../../core/utils/public-urls';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   IExternalSearchProvider,
@@ -11,6 +12,9 @@ import {
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
+  AcademicHttpClient,
+  LibraryConfigService,
+  libraryConfig,
 } from '@/modules/library/core';
 
 const DEFAULT_SEARXNG_TIMEOUT_MS = 5000;
@@ -40,24 +44,35 @@ export class SearxngSearchProvider implements IExternalSearchProvider {
   readonly providerName = 'searxng';
   private readonly logger = new Logger(SearxngSearchProvider.name);
 
-  constructor(@Optional() private readonly configService?: ConfigService) {}
+  constructor(
+    @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly libraryConfig?: LibraryConfigService,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
+  ) {}
 
   private get baseUrl(): string {
-    const configured = this.configService?.get<string>('SEARXNG_BASE_URL');
-    return (
-      configured ||
-      process.env.SEARXNG_BASE_URL ||
-      'http://localhost:8080'
+    const configured =
+      this.libraryConfig?.providers.searxngUrl ??
+      this.configService?.get<string>('SEARXNG_BASE_URL') ??
+      libraryConfig().providers.searxngUrl;
+    return resolveServiceUrl(
+      'SEARXNG_BASE_URL',
+      configured,
+      'http://localhost:8080',
     ).replace(/\/+$/, '');
   }
 
   async isAvailable(): Promise<boolean> {
     try {
       const signal = AbortSignal.timeout(1500);
-      const res = await fetch(`${this.baseUrl}/healthz`, {
-        method: 'GET',
-        signal,
-      });
+      const healthUrl = `${this.baseUrl}/healthz`;
+      const res = this.httpClient
+        ? (await this.httpClient.request(healthUrl, { method: 'GET', signal }))
+            .response
+        : await fetch(healthUrl, {
+            method: 'GET',
+            signal,
+          });
       return res.ok || res.status === 200 || res.status === 404; // some SearXNG versions return 200 on / or 404 on healthz but server is up
     } catch {
       return false;
@@ -80,13 +95,17 @@ export class SearxngSearchProvider implements IExternalSearchProvider {
       url.searchParams.set('categories', category);
 
       const signal = AbortSignal.timeout(timeoutMs);
-      const res = await fetch(url.toString(), {
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'Flux-Academic-Crawler/1.0',
-        },
-        signal,
-      });
+      const headers = {
+        Accept: 'application/json',
+        'User-Agent': 'Flux-Academic-Crawler/1.0',
+      };
+      const res = this.httpClient
+        ? (await this.httpClient.request(url.toString(), { headers, signal }))
+            .response
+        : await fetch(url.toString(), {
+            headers,
+            signal,
+          });
 
       const latencyMs = Date.now() - startTime;
 

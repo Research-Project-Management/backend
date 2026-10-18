@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { SearchService } from '@/modules/library/search/services/search.service';
 import { SearchItemsQueryDto } from '@/modules/library/search/dto/search.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Library Search')
 @ApiBearerAuth()
@@ -11,7 +11,7 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
   'api/v1/library/search',
   'api/v1/projects/:projectId/library/search',
 ])
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 

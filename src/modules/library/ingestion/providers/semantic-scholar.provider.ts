@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -17,6 +17,9 @@ import {
   normalizePmcid,
   normalizePageRange,
   parseCreatorString,
+  AcademicHttpClient,
+  LibraryConfigService,
+  libraryConfig,
 } from '@/modules/library/core';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
@@ -39,19 +42,30 @@ export class SemanticScholarProvider implements MetadataProvider {
   };
 
   private readonly logger = new Logger(SemanticScholarProvider.name);
-  private readonly BASE_URL =
-    process.env.SEMANTIC_SCHOLAR_API_URL ||
-    'https://api.semanticscholar.org/graph/v1/paper';
 
   private readonly FIELDS =
     'title,authors,year,publicationDate,venue,publicationVenue,journal,publicationTypes,abstract,openAccessPdf,citationCount,referenceCount,influentialCitationCount,tldr,externalIds,url';
 
   constructor(
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
-  supports(queryType: QueryType): boolean {
-    return this.capabilities.queryTypes.includes(queryType);
+  private get baseUrl(): string {
+    const base =
+      this.configService?.providers.semanticScholarBaseUrl ??
+      libraryConfig().providers.semanticScholarBaseUrl;
+    return base.endsWith('/paper') ? base : `${base}/paper`;
+  }
+
+  supports(input: QueryType | MetadataRequest): boolean {
+    const type = typeof input === 'string' ? input : input?.queryType;
+    return type ? this.capabilities.queryTypes.includes(type) : false;
+  }
+
+  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
+    return this.resolve(request);
   }
 
   async resolve(
@@ -70,20 +84,20 @@ export class SemanticScholarProvider implements MetadataProvider {
     const pmid = normalizePmid(rawQuery);
 
     if (doi) {
-      targetUrl = `${this.BASE_URL}/${encodeURIComponent(doi)}?fields=${this.FIELDS}`;
+      targetUrl = `${this.baseUrl}/${encodeURIComponent(doi)}?fields=${this.FIELDS}`;
       identifier = doi;
       isSpecificId = true;
     } else if (arxiv) {
-      targetUrl = `${this.BASE_URL}/ARXIV:${encodeURIComponent(arxiv)}?fields=${this.FIELDS}`;
+      targetUrl = `${this.baseUrl}/ARXIV:${encodeURIComponent(arxiv)}?fields=${this.FIELDS}`;
       identifier = arxiv;
       isSpecificId = true;
     } else if (pmid) {
-      targetUrl = `${this.BASE_URL}/PMID:${encodeURIComponent(pmid)}?fields=${this.FIELDS}`;
+      targetUrl = `${this.baseUrl}/PMID:${encodeURIComponent(pmid)}?fields=${this.FIELDS}`;
       identifier = pmid;
       isSpecificId = true;
     } else {
       // Title search fallback
-      targetUrl = `${this.BASE_URL}/search?query=${encodeURIComponent(rawQuery)}&limit=1&fields=${this.FIELDS}`;
+      targetUrl = `${this.baseUrl}/search?query=${encodeURIComponent(rawQuery)}&limit=1&fields=${this.FIELDS}`;
     }
 
     if (this.rateLimiter) {
@@ -92,13 +106,17 @@ export class SemanticScholarProvider implements MetadataProvider {
 
     let response: Response;
     try {
-      response = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': getAcademicUserAgent('SemanticScholar'),
-          Accept: 'application/json',
-        },
-        signal,
-      });
+      const headers = {
+        'User-Agent': getAcademicUserAgent('SemanticScholar'),
+        Accept: 'application/json',
+      };
+      response = this.httpClient
+        ? (await this.httpClient.request(targetUrl, { headers, signal }))
+            .response
+        : await fetch(targetUrl, {
+            headers,
+            signal,
+          });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.debug(`Semantic Scholar fetch failed non-fatally: ${msg}`);
@@ -133,7 +151,9 @@ export class SemanticScholarProvider implements MetadataProvider {
     identifier: string,
     isSpecificId: boolean,
   ): ProviderResult {
-    const cleanTitle = cleanBibliographicText(String(paper.title || ''));
+    const cleanTitle = cleanBibliographicText(
+      typeof paper.title === 'string' ? paper.title : '',
+    );
     const authorsList = (
       Array.isArray(paper.authors) ? paper.authors : []
     ) as Array<{ name?: string } | string>;
@@ -153,7 +173,7 @@ export class SemanticScholarProvider implements MetadataProvider {
         : undefined;
 
     let year: number | undefined;
-    if (paper.year) {
+    if (typeof paper.year === 'number' || typeof paper.year === 'string') {
       const parsedYear = parseInt(String(paper.year), 10);
       if (!isNaN(parsedYear) && parsedYear >= 1900 && parsedYear <= 2100) {
         year = parsedYear;

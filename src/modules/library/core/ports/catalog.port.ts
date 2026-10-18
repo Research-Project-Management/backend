@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';
 import {
   ItemDetail,

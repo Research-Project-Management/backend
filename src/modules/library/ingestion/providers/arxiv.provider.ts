@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -17,6 +17,9 @@ import {
   decodeHtmlEntities,
   normalizeTags,
   parseCreatorString,
+  AcademicHttpClient,
+  LibraryConfigService,
+  libraryConfig,
 } from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
@@ -31,11 +34,25 @@ export class ArxivProvider implements MetadataProvider {
     maxConcurrency: 2,
   };
 
-  private readonly BASE_URL =
-    process.env.ARXIV_API_URL || 'https://export.arxiv.org/api/query';
+  constructor(
+    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() private readonly configService?: LibraryConfigService,
+  ) {}
 
-  supports(queryType: QueryType): boolean {
-    return this.capabilities.queryTypes.includes(queryType);
+  private get baseUrl(): string {
+    return (
+      this.configService?.providers.arxivBaseUrl ??
+      libraryConfig().providers.arxivBaseUrl
+    );
+  }
+
+  supports(input: QueryType | MetadataRequest): boolean {
+    const type = typeof input === 'string' ? input : input?.queryType;
+    return type ? this.capabilities.queryTypes.includes(type) : false;
+  }
+
+  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
+    return this.resolve(request);
   }
 
   async resolve(
@@ -45,15 +62,16 @@ export class ArxivProvider implements MetadataProvider {
     const cleanId = normalizeArxivId(request.query) ?? request.query.trim();
     if (!cleanId) return null;
 
-    const url = `${this.BASE_URL}?id_list=${encodeURIComponent(cleanId)}&max_results=1`;
+    const url = `${this.baseUrl}?id_list=${encodeURIComponent(cleanId)}&max_results=1`;
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': getAcademicUserAgent('Arxiv'),
-        Accept: 'application/atom+xml, application/xml, text/xml',
-      },
-      signal,
-    });
+    const headers = {
+      'User-Agent': getAcademicUserAgent('Arxiv'),
+      Accept: 'application/atom+xml, application/xml, text/xml',
+    };
+
+    const response = this.httpClient
+      ? (await this.httpClient.request(url, { headers, signal })).response
+      : await fetch(url, { headers, signal });
 
     if (response.status === 404) return null;
 

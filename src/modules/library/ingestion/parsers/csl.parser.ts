@@ -78,9 +78,18 @@ export class CslParser {
   parse(content: unknown): ParsedCslEntry[] {
     if (!content) return [];
 
+    const toStr = (val: unknown): string =>
+      typeof val === 'string' || typeof val === 'number'
+        ? String(val).trim()
+        : '';
+    const toOptStr = (val: unknown): string | undefined => {
+      const s = toStr(val);
+      return s || undefined;
+    };
+
     let items: unknown[] = [];
     try {
-      const parsed =
+      const parsed: unknown =
         typeof content === 'string' ? JSON.parse(content) : content;
       items = Array.isArray(parsed) ? parsed : [parsed];
     } catch (err: unknown) {
@@ -140,22 +149,10 @@ export class CslParser {
         csl._keywords || csl.keyword || csl.keywords || csl.subject,
       );
 
-      const numPages =
-        csl['number-of-pages'] != null
-          ? String(csl['number-of-pages']).trim()
-          : undefined;
-      const numberOfVolumes =
-        csl['number-of-volumes'] != null
-          ? String(csl['number-of-volumes']).trim()
-          : undefined;
-      const seriesNumber =
-        csl['collection-number'] != null
-          ? String(csl['collection-number']).trim()
-          : undefined;
-      const chapterNumber =
-        csl['chapter-number'] != null
-          ? String(csl['chapter-number']).trim()
-          : undefined;
+      const numPages = toOptStr(csl['number-of-pages']);
+      const numberOfVolumes = toOptStr(csl['number-of-volumes']);
+      const seriesNumber = toOptStr(csl['collection-number']);
+      const chapterNumber = toOptStr(csl['chapter-number']);
 
       const containerTitle =
         (csl['container-title'] as string)?.trim() || undefined;
@@ -165,8 +162,7 @@ export class CslParser {
       const eventTitle =
         ((csl['event-title'] || csl.event) as string)?.trim() || undefined;
       const genre = (csl.genre as string)?.trim() || undefined;
-      const numberVal =
-        csl.number != null ? String(csl.number).trim() : undefined;
+      const numberVal = toOptStr(csl.number);
       const authority = (csl.authority as string)?.trim() || undefined;
 
       const shortTitle =
@@ -176,8 +172,7 @@ export class CslParser {
           (csl['container-title-short'] || csl.journalAbbreviation) as string
         )?.trim() || undefined;
       const section = (csl.section as string)?.trim() || undefined;
-      const versionNumber =
-        csl.version != null ? String(csl.version).trim() : undefined;
+      const versionNumber = toOptStr(csl.version);
       const callNumber = (csl['call-number'] as string)?.trim() || undefined;
       const archive = (csl.archive as string)?.trim() || undefined;
       const archiveLocation =
@@ -193,11 +188,10 @@ export class CslParser {
             typeof n === 'string'
               ? n.trim()
               : n && typeof n === 'object'
-                ? String(
+                ? toStr(
                     (n as { content?: unknown; note?: unknown }).content ??
-                      (n as { note?: unknown }).note ??
-                      '',
-                  ).trim()
+                      (n as { note?: unknown }).note,
+                  )
                 : '';
           if (text && !parsedNotes.includes(text)) {
             parsedNotes.push(text);
@@ -328,14 +322,14 @@ export class CslParser {
         reportType,
         issuingAuthority,
         patentNumber,
-        volume: csl.volume != null ? String(csl.volume) : undefined,
-        issue: csl.issue != null ? String(csl.issue) : undefined,
+        volume: toOptStr(csl.volume),
+        issue: toOptStr(csl.issue),
         pages: (csl.page as string) || undefined,
         numPages,
         numberOfVolumes,
         series: (csl['collection-title'] as string) || undefined,
         seriesNumber,
-        edition: csl.edition != null ? String(csl.edition).trim() : undefined,
+        edition: toOptStr(csl.edition),
         section,
         versionNumber,
         callNumber,
@@ -354,8 +348,8 @@ export class CslParser {
         tags: keywords,
         keywords,
         notes: parsedNotes.length > 0 ? parsedNotes : undefined,
-        language: csl.language ? String(csl.language).trim() : undefined,
-        rights: csl.rights ? String(csl.rights).trim() : undefined,
+        language: toOptStr(csl.language),
+        rights: toOptStr(csl.rights),
         extra: cleanedExtraNote,
         extraFields:
           Object.keys(extraFields).length > 0 ? extraFields : undefined,
@@ -389,14 +383,18 @@ export class CslParser {
 
   private extractPeople(people: unknown): string[] {
     if (!Array.isArray(people)) return [];
+    const toStr = (v: unknown) =>
+      typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
     return people
       .map((p: unknown) => {
         if (!p || typeof p !== 'object') return '';
         const rec = p as Record<string, unknown>;
-        if (rec.literal) return String(rec.literal).trim();
-        if (rec.given && rec.family)
-          return `${String(rec.given)} ${String(rec.family)}`.trim();
-        return String(rec.family || rec.given || '').trim();
+        const literal = toStr(rec.literal);
+        if (literal) return literal;
+        const given = toStr(rec.given);
+        const family = toStr(rec.family);
+        if (given && family) return `${given} ${family}`.trim();
+        return family || given || '';
       })
       .filter(Boolean);
   }
@@ -413,13 +411,16 @@ export class CslParser {
     fieldMode?: number;
   }> {
     if (!Array.isArray(people)) return [];
+    const toStr = (v: unknown) =>
+      typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
     return people
       .map((p: unknown) => {
         if (!p || typeof p !== 'object') return null;
         const rec = p as Record<string, unknown>;
-        if (rec.literal && !rec.given && !rec.family) {
-          const literal = String(rec.literal).trim();
-          if (!literal) return null;
+        const literal = toStr(rec.literal);
+        const rawGiven = toStr(rec.given);
+        const rawFamily = toStr(rec.family);
+        if (literal && !rawGiven && !rawFamily) {
           return {
             name: literal,
             fullName: literal,
@@ -429,21 +430,22 @@ export class CslParser {
             fieldMode: 1,
           };
         }
-        const prefix = rec['non-dropping-particle']
-          ? `${String(rec['non-dropping-particle']).trim()} `
-          : rec['dropping-particle']
-            ? `${String(rec['dropping-particle']).trim()} `
+        const nonDropping = toStr(rec['non-dropping-particle']);
+        const dropping = toStr(rec['dropping-particle']);
+        const prefix = nonDropping
+          ? `${nonDropping} `
+          : dropping
+            ? `${dropping} `
             : '';
-        const suffix = rec.suffix ? ` ${String(rec.suffix).trim()}` : '';
-        const family = rec.family
-          ? `${prefix}${String(rec.family).trim()}${suffix}`.trim()
-          : '';
-        const given = rec.given ? String(rec.given).trim() : '';
+        const suffixStr = toStr(rec.suffix);
+        const suffix = suffixStr ? ` ${suffixStr}` : '';
+        const family = rawFamily ? `${prefix}${rawFamily}${suffix}`.trim() : '';
+        const given = rawGiven;
         const name =
-          rec.literal ||
+          literal ||
           (given && family ? `${given} ${family}` : family || given || '');
         if (!name) return null;
-        const cleanName = String(name).trim();
+        const cleanName = name.trim();
         return {
           name: cleanName,
           fullName: cleanName,

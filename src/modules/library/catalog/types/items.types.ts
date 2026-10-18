@@ -4,6 +4,7 @@ import type {
   CreatorCredit,
   CreatorCreditInput,
   CreatorInput,
+  TransactionHelpers,
 } from '@/modules/library/core';
 
 export type { CreatorType, CreatorCredit, CreatorCreditInput, CreatorInput };
@@ -707,4 +708,10 @@ export interface IItemExistencePort {
     itemIds: string[],
     projectId?: string,
   ): Promise<{ valid: boolean; missingIds: string[] }>;
+}
+
+/** Transaction context passed to write methods for composing operations within a parent transaction. */
+export interface ItemTransactionContext<TTx = Prisma.TransactionClient> {
+  tx: TTx;
+  helpers: TransactionHelpers;
 }

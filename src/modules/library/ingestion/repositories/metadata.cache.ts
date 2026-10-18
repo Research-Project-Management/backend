@@ -95,7 +95,7 @@ export class MetadataCache {
 
       this.logger.debug(`L2 Redis Cache HIT: ${key}`);
       const parsed: ResolvedMetadata =
-        typeof raw === 'string' ? JSON.parse(raw) : raw;
+        typeof raw === 'string' ? (JSON.parse(raw) as ResolvedMetadata) : raw;
 
       // Populate L1 cache for subsequent 0ms hits
       this.setL1(key, parsed, 86_400);

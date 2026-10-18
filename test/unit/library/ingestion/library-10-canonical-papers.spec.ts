@@ -43,7 +43,6 @@ function rawMeta(overrides: Record<string, any>) {
   };
 }
 
-
 describe('10 Canonical Papers — Full Metadata Accuracy Regression', () => {
   let policy: NormalizationPolicy;
 

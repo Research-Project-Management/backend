@@ -1,21 +1,17 @@
-import { Prisma } from '@prisma/client';
-import {
+import type { Prisma } from '@prisma/client';
+import type {
   ExtractedPdfDocument,
   ExtractedPdfMetadata,
-} from '@/modules/library/extraction/providers/pdf.provider';
-import { TrustedExtractionResult } from '@/modules/library/extraction/types/trusted-extraction.types';
-import {
+  TrustedExtractionResult,
   AttachmentEntity,
   CreateAttachmentInput,
-} from '@/modules/library/extraction/types/attachments.types';
-import {
   AnnotationEntity,
   CreateAnnotationData,
   UpdateAnnotationData,
   BatchAnnotationsData,
   BatchAnnotationsResult,
   AnnotationType,
-} from '@/modules/library/extraction/types/annotations.types';
+} from '../types/extraction.types';
 
 export const EXTRACTION_FACADE = 'EXTRACTION_FACADE';
 

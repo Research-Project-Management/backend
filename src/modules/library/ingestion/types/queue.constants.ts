@@ -6,17 +6,16 @@
  * - STANDARD queue: Free-tier users, background sync (concurrency: 4)
  * - CAPTURE queue: URL capture jobs, isolated from pipeline (concurrency: 4)
  */
+import { libraryConfig } from '../../core/config/library.config';
+
 export const LIBRARY_INGESTION_QUEUE_PRIORITY =
-  process.env.LIBRARY_INGESTION_QUEUE_PRIORITY ||
-  'flux_library_ingestion_priority';
+  libraryConfig().ingestion.priorityQueue;
 
 export const LIBRARY_INGESTION_QUEUE_STANDARD =
-  process.env.LIBRARY_INGESTION_QUEUE_STANDARD ||
-  'flux_library_ingestion_standard';
+  libraryConfig().ingestion.standardQueue;
 
 export const LIBRARY_INGESTION_QUEUE_CAPTURE =
-  process.env.LIBRARY_INGESTION_QUEUE_CAPTURE ||
-  'flux_library_ingestion_capture';
+  libraryConfig().ingestion.captureQueue;
 
 export const LIBRARY_INGESTION_QUEUE = LIBRARY_INGESTION_QUEUE_STANDARD;
 

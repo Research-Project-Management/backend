@@ -1,4 +1,4 @@
-﻿import {
+import {
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -40,10 +40,12 @@ function getCite(): CitationJsConstructor | undefined {
   if (cachedCite === null) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { Cite } = require('@citation-js/core');
+      const { Cite } = require('@citation-js/core') as {
+        Cite: CitationJsConstructor;
+      };
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('@citation-js/plugin-bibtex');
-      cachedCite = Cite as CitationJsConstructor;
+      cachedCite = Cite;
     } catch {
       cachedCite = undefined;
     }
@@ -66,50 +68,54 @@ export class ItemCurationService {
   /**
    * Parses raw unformatted citation strings or multi-line bibliographies into structured references.
    */
-  async parseCitations(
-    rawCitations: string,
-  ): Promise<BibliographicReference[]> {
+  parseCitations(rawCitations: string): Promise<BibliographicReference[]> {
     if (
       !rawCitations ||
       typeof rawCitations !== 'string' ||
       !rawCitations.trim()
     ) {
-      return [];
+      return Promise.resolve([]);
     }
 
     try {
       const Cite = getCite();
-      if (!Cite) return [];
+      if (!Cite) return Promise.resolve([]);
 
       const cite = new Cite(rawCitations);
       const data = cite.data || [];
-      return data.map((csl: CslItemData, index: number) => ({
-        id: csl.id || `cite-${index + 1}`,
-        rawCitation: rawCitations,
-        title: csl.title || 'Untitled',
-        authors: (csl.author || [])
-          .map(
-            (author: { literal?: string; given?: string; family?: string }) => {
-              if (author.literal) return author.literal.trim();
-              if (author.given && author.family)
-                return `${author.given} ${author.family}`.trim();
-              return (author.family || author.given || '').trim();
-            },
-          )
-          .filter(Boolean),
-        year:
-          csl.issued?.['date-parts']?.[0]?.[0] != null
-            ? Number(csl.issued['date-parts'][0][0])
-            : undefined,
-        journal: csl['container-title'] || csl.journal || undefined,
-        volume: csl.volume ? String(csl.volume) : undefined,
-        issue: csl.issue ? String(csl.issue) : undefined,
-        pages: csl.page ? String(csl.page) : undefined,
-        doi: csl.DOI || undefined,
-        url: csl.URL || undefined,
-      }));
+      return Promise.resolve(
+        data.map((csl: CslItemData, index: number) => ({
+          id: csl.id || `cite-${index + 1}`,
+          rawCitation: rawCitations,
+          title: csl.title || 'Untitled',
+          authors: (csl.author || [])
+            .map(
+              (author: {
+                literal?: string;
+                given?: string;
+                family?: string;
+              }) => {
+                if (author.literal) return author.literal.trim();
+                if (author.given && author.family)
+                  return `${author.given} ${author.family}`.trim();
+                return (author.family || author.given || '').trim();
+              },
+            )
+            .filter(Boolean),
+          year:
+            csl.issued?.['date-parts']?.[0]?.[0] != null
+              ? Number(csl.issued['date-parts'][0][0])
+              : undefined,
+          journal: csl['container-title'] || csl.journal || undefined,
+          volume: csl.volume ? String(csl.volume) : undefined,
+          issue: csl.issue ? String(csl.issue) : undefined,
+          pages: csl.page ? String(csl.page) : undefined,
+          doi: csl.DOI || undefined,
+          url: csl.URL || undefined,
+        })),
+      );
     } catch {
-      return [];
+      return Promise.resolve([]);
     }
   }
 

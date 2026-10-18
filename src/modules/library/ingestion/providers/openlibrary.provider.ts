@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -8,7 +8,13 @@ import {
   ProviderResult,
   QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { normalizeIsbn, normalizeTags } from '@/modules/library/core';
+import {
+  normalizeIsbn,
+  normalizeTags,
+  AcademicHttpClient,
+  LibraryConfigService,
+  libraryConfig,
+} from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import { parseCreatorString } from '@/modules/library/core';
@@ -23,11 +29,25 @@ export class OpenLibraryProvider implements MetadataProvider {
     maxConcurrency: 2,
   };
 
-  private readonly BASE_URL =
-    process.env.OPENLIBRARY_API_URL || 'https://openlibrary.org/api/books';
+  constructor(
+    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() private readonly configService?: LibraryConfigService,
+  ) {}
 
-  supports(queryType: QueryType): boolean {
-    return this.capabilities.queryTypes.includes(queryType);
+  private get baseUrl(): string {
+    return (
+      this.configService?.providers.openLibraryBaseUrl ??
+      libraryConfig().providers.openLibraryBaseUrl
+    );
+  }
+
+  supports(input: QueryType | MetadataRequest): boolean {
+    const type = typeof input === 'string' ? input : input?.queryType;
+    return type ? this.capabilities.queryTypes.includes(type) : false;
+  }
+
+  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
+    return this.resolve(request);
   }
 
   async resolve(
@@ -38,15 +58,16 @@ export class OpenLibraryProvider implements MetadataProvider {
     if (!cleanIsbn) return null;
 
     const bibKey = `ISBN:${cleanIsbn}`;
-    const url = `${this.BASE_URL}?bibkeys=${encodeURIComponent(bibKey)}&format=json&jscmd=data`;
+    const url = `${this.baseUrl}?bibkeys=${encodeURIComponent(bibKey)}&format=json&jscmd=data`;
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': getAcademicUserAgent('OpenLibrary'),
-        Accept: 'application/json',
-      },
-      signal,
-    });
+    const headers = {
+      'User-Agent': getAcademicUserAgent('OpenLibrary'),
+      Accept: 'application/json',
+    };
+
+    const response = this.httpClient
+      ? (await this.httpClient.request(url, { headers, signal })).response
+      : await fetch(url, { headers, signal });
 
     if (response.status === 404) return null;
 

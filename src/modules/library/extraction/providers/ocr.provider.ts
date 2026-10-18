@@ -1,5 +1,9 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createCanvas } from '@napi-rs/canvas';
+import {
+  libraryConfig,
+  LibraryConfigService,
+} from '@/modules/library/core/config/library.config';
 import { OcrPreprocessorService } from '@/modules/library/extraction/services/ocr-preprocessor.service';
 import { OcrWorkerPoolService } from '@/modules/library/extraction/services/ocr-worker-pool.service';
 import { OcrSandwichPdfService } from '@/modules/library/extraction/services/ocr-sandwich-pdf.service';
@@ -37,20 +41,24 @@ export class OcrProvider {
     @Optional() private readonly workerPool?: OcrWorkerPoolService,
     @Optional() private readonly preprocessor?: OcrPreprocessorService,
     @Optional() private readonly sandwichPdf?: OcrSandwichPdfService,
+    @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
   get enabled(): boolean {
-    const value = process.env.PDF_OCR_ENABLED;
+    const value =
+      this.configService?.ocr.enabled ?? libraryConfig().ocr.enabled;
     return value !== 'false' && value !== '0';
   }
 
   get maxPages(): number {
-    const parsed = Number.parseInt(process.env.PDF_OCR_MAX_PAGES || '200', 10);
+    const parsed =
+      this.configService?.ocr.maxPages ?? libraryConfig().ocr.maxPages;
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 200;
   }
 
   get renderScale(): number {
-    const envScale = Number.parseFloat(process.env.PDF_OCR_RENDER_SCALE || '3');
+    const envScale =
+      this.configService?.ocr.renderScale ?? libraryConfig().ocr.renderScale;
     return Number.isFinite(envScale) && envScale >= 1 && envScale <= 4
       ? envScale
       : 3;

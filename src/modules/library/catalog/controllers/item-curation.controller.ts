@@ -21,7 +21,7 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { ParseCitationsDto } from '@/modules/library/catalog/dto/items.dto';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
@@ -217,12 +217,12 @@ export abstract class BaseItemCurationController {
 }
 
 /**
- * Personal Library Item Curation Controller (/api/v1/library/items, /api/v1/me/library/items).
+ * Personal Library Item Curation Controller (/api/v1/library/items).
  * Guarded purely by JwtAuthGuard — scoped to authenticated user.
  */
 @ApiTags('Library Items - Personal Curation & Enrichment')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/library/items', 'api/v1/me/library/items'])
+@Controller('api/v1/library/items')
 @UseGuards(JwtAuthGuard)
 export class ItemCurationController extends BaseItemCurationController {
   constructor(
@@ -333,7 +333,7 @@ export class ItemCurationController extends BaseItemCurationController {
     return this.executeGetRelatedItems(id, userId, projectId);
   }
 
-  @Post([':id/relations', ':id/link'])
+  @Post(':id/relations')
   @ApiOperation({ summary: 'Link personal items together' })
   async linkItems(
     @Param('id') id: string,
@@ -350,7 +350,7 @@ export class ItemCurationController extends BaseItemCurationController {
     return this.executeLinkItems(id, body, userId, projectId);
   }
 
-  @Delete([':id/relations/:targetId', ':id/link/:targetId'])
+  @Delete(':id/relations/:targetId')
   @ApiOperation({ summary: 'Unlink personal items' })
   async unlinkItems(
     @Param('id') id: string,
@@ -387,7 +387,7 @@ export class ItemCurationController extends BaseItemCurationController {
 @ApiTags('Library Items - Project Curation & Enrichment')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/projects/:projectId/library/items')
-@UseGuards(JwtAuthGuard, ProjectRoleGuard)
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ProjectItemCurationController extends BaseItemCurationController {
   constructor(
     itemService: ItemService,
@@ -508,7 +508,7 @@ export class ProjectItemCurationController extends BaseItemCurationController {
     return this.executeGetRelatedItems(id, userId, projectId);
   }
 
-  @Post([':id/relations', ':id/link'])
+  @Post(':id/relations')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Link project items together' })
   @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
@@ -527,7 +527,7 @@ export class ProjectItemCurationController extends BaseItemCurationController {
     return this.executeLinkItems(id, body, userId, projectId);
   }
 
-  @Delete([':id/relations/:targetId', ':id/link/:targetId'])
+  @Delete(':id/relations/:targetId')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Unlink project items' })
   @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })

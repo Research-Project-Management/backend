@@ -22,7 +22,7 @@ export function generateOutboxDedupeKey(
  * Safely serializes payload into JSON string, handling circular references and BigInt.
  */
 export function serializeOutboxPayload(payload: unknown): string {
-  return JSON.stringify(payload, (_key, value) =>
+  return JSON.stringify(payload, (_key, value: unknown): unknown =>
     typeof value === 'bigint' ? value.toString() : value,
   );
 }
@@ -122,10 +122,7 @@ export function compactLibraryChanges<T extends CompactableChange>(
   });
 }
 
-function mergePayloadData(
-  prev: Record<string, unknown> | unknown,
-  next: Record<string, unknown> | unknown,
-): unknown {
+function mergePayloadData(prev: unknown, next: unknown): unknown {
   if (!prev) return next;
   if (!next) return prev;
   if (typeof prev !== 'object' || typeof next !== 'object') return next;

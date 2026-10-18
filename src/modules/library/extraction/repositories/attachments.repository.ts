@@ -130,15 +130,6 @@ export class AttachmentsRepository {
 
     const client = this.getClient(tx);
 
-    // Fallback for lightweight mocks that only define updateMany
-    if (typeof client.attachment?.findMany !== 'function') {
-      await client.attachment.updateMany({
-        where: { itemId: { in: cleanSourceIds } },
-        data: { itemId: targetItemId },
-      });
-      return;
-    }
-
     const allAttachments = await client.attachment.findMany({
       where: {
         itemId: { in: [targetItemId, ...cleanSourceIds] },

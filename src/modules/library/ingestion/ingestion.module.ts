@@ -23,24 +23,36 @@ import {
 import { CurationController } from './controllers/curation.controller';
 import { RetractionController } from './controllers/retraction.controller';
 
-// Services
 import { IngestionService } from './services/ingestion.service';
 import { PipelineService } from './services/pipeline.service';
+import { PipelineSideEffectsService } from './services/pipeline-side-effects.service';
+import { PipelineBatchExecutor } from './services/pipeline-batch.executor';
+import { MetadataResolverService } from './services/metadata-resolver.service';
+import { IngestionRunReporterService } from './services/ingestion-run-reporter.service';
 import { IngestionSagaOrchestrator } from './services/ingestion-saga.orchestrator';
 import { QueueService } from './services/queue.service';
 import { UrlCaptureService } from './services/url-capture.service';
 import { UrlMetadataScraperService } from './services/url-metadata-scraper.service';
+import { PublisherDomExtractor } from './services/publisher-dom.extractor';
+import { HtmlMetaTagExtractor } from './services/html-meta-tag.extractor';
 import { IngestionQueueConsumer } from './services/ingestion-queue.consumer';
 import { MetadataReconciliationService } from './services/metadata-reconciliation.service';
 import { MetadataExecutorService } from './services/metadata-executor.service';
 import { MetadataService } from './services/metadata.service';
-import { DuplicateService } from './services/duplicate.service';
+import {
+  DuplicateService,
+  DuplicateDetectorService,
+  DuplicateMergerService,
+} from './services/duplicate.service';
 import { QualityService } from './services/quality.service';
 import { RetractionService } from './services/retraction.service';
 import { RetractionDatabaseService } from './services/retraction-database.service';
 import { RetractionSyncService } from './services/retraction-sync.service';
 import { IngestionVerifierService } from './services/ingestion-verifier.service';
-import { WebFetchLadderService } from './services/web-fetch-ladder.service';
+import {
+  WebFetchLadderService,
+  WebMirrorResolverService,
+} from './services/web-fetch-ladder.service';
 import { DomainRateLimiterService } from './services/domain-rate-limiter.service';
 import { WEB_FETCH_PORT } from './types/web-fetch.types';
 
@@ -66,6 +78,8 @@ import { NormalizationPolicy } from './policies/normalization.policy';
 import { ReconciliationPolicy } from './policies/reconciliation.policy';
 import { DuplicatePolicy } from './policies/duplicate.policy';
 import { IdentifyStage } from './stages/identify.stage';
+import { IdentifyFileResolver } from './stages/identify-file.resolver';
+import { IdentifyUrlResolver } from './stages/identify-url.resolver';
 import { NormalizeStage } from './stages/normalize.stage';
 import { EnrichStage } from './stages/enrich.stage';
 import { ReconcileStage } from './stages/reconcile.stage';
@@ -126,11 +140,18 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     // Services
     IngestionService,
     PipelineService,
+    PipelineSideEffectsService,
+    PipelineBatchExecutor,
+    MetadataResolverService,
+    IngestionRunReporterService,
     IngestionSagaOrchestrator,
     QueueService,
     UrlCaptureService,
     UrlMetadataScraperService,
+    PublisherDomExtractor,
+    HtmlMetaTagExtractor,
     IngestionVerifierService,
+    WebMirrorResolverService,
     WebFetchLadderService,
     {
       provide: WEB_FETCH_PORT,
@@ -146,6 +167,8 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     { provide: NormalizationPolicy, useClass: NormalizationPolicy },
     { provide: ReconciliationPolicy, useClass: ReconciliationPolicy },
     { provide: DuplicatePolicy, useClass: DuplicatePolicy },
+    IdentifyFileResolver,
+    IdentifyUrlResolver,
     IdentifyStage,
     NormalizeStage,
     EnrichStage,
@@ -206,6 +229,8 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
 
     // Curation
     DuplicateService,
+    DuplicateDetectorService,
+    DuplicateMergerService,
     QualityService,
 
     // Retraction Watch
@@ -226,6 +251,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     METADATA_PORT,
     IngestionSagaOrchestrator,
     IngestionVerifierService,
+    WebMirrorResolverService,
     WebFetchLadderService,
     WEB_FETCH_PORT,
     ExternalSearchComparatorService,

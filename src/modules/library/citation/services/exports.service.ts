@@ -22,159 +22,17 @@ import {
 } from '@/modules/library/citation/types/exports.types';
 import { formatCsvExport } from '@/modules/library/citation/domain/exports.domain';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import {
+  extractExportMetadata,
+  ExportMetadataResult,
+} from '@/modules/library/citation/domain/export-metadata.extractor';
+import {
+  extractItemCitationAliases,
+  resolveEmittedCitationEntries,
+} from '@/modules/library/citation/domain/citation-key-resolver.domain';
 
-export type { BurnableAnnotation, ExportResult };
-
-function extractExportMetadata(it: {
-  metadata?: Prisma.JsonValue | null;
-  itemTags?: Array<{ tag?: { name?: string | null } | null }> | null;
-}): {
-  publisher?: string;
-  volume?: string;
-  issue?: string;
-  pages?: string;
-  doi?: string;
-  isbn?: string;
-  issn?: string;
-  pmid?: string;
-  pmcid?: string;
-  arxivId?: string;
-  citationKey?: string;
-  edition?: string;
-  place?: string;
-  series?: string;
-  accessedAt?: string;
-  accessDate?: string;
-  extra?: string;
-  extraFields?: Record<string, unknown>;
-} {
-  const meta =
-    it.metadata &&
-    typeof it.metadata === 'object' &&
-    !Array.isArray(it.metadata)
-      ? (it.metadata as Record<string, unknown>)
-      : {};
-  const extraStr = typeof meta.extra === 'string' ? meta.extra : undefined;
-  const extraMap: Record<string, string> = {};
-  if (extraStr) {
-    for (const match of extraStr.matchAll(
-      /\{:\s*([a-zA-Z_][a-zA-Z0-9_.\s-]*?)\s*:\s*([^}]+?)\s*\}/g,
-    )) {
-      const k = match[1]
-        .trim()
-        .toLowerCase()
-        .replace(/[\s_]+/g, '-');
-      extraMap[k] = match[2].trim();
-    }
-    for (const line of extraStr.split(/\r?\n/)) {
-      const m = line
-        .trim()
-        .match(/^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/);
-      if (m) {
-        const k = m[1]
-          .trim()
-          .toLowerCase()
-          .replace(/[\s_]+/g, '-');
-        if (!extraMap[k]) extraMap[k] = m[2].trim();
-      }
-    }
-  }
-
-  const tagNames = Array.isArray(it.itemTags)
-    ? it.itemTags
-        .map((t) => t?.tag?.name?.trim())
-        .filter((n): n is string => Boolean(n))
-    : [];
-  const metaKeywords = Array.isArray(meta.keywords)
-    ? meta.keywords.filter((k): k is string => typeof k === 'string')
-    : [];
-  const combinedKeywords = Array.from(new Set([...metaKeywords, ...tagNames]));
-
-  return {
-    publisher:
-      (typeof meta.publisher === 'string' && meta.publisher) ||
-      (typeof meta.university === 'string' && meta.university) ||
-      (typeof meta.institution === 'string' && meta.institution) ||
-      (typeof meta.company === 'string' && meta.company) ||
-      (typeof meta.organization === 'string' && meta.organization) ||
-      extraMap['publisher'] ||
-      undefined,
-    volume:
-      (typeof meta.volume === 'string' && meta.volume) ||
-      (typeof meta.reporterVolume === 'string' && meta.reporterVolume) ||
-      (typeof meta.codeNumber === 'string' && meta.codeNumber) ||
-      extraMap['volume'] ||
-      undefined,
-    issue:
-      (typeof meta.issue === 'string' && meta.issue) ||
-      extraMap['issue'] ||
-      extraMap['number'] ||
-      undefined,
-    pages:
-      (typeof meta.pages === 'string' && meta.pages) ||
-      (typeof meta.firstPage === 'string' && meta.firstPage) ||
-      extraMap['pages'] ||
-      extraMap['page'] ||
-      undefined,
-    doi:
-      (typeof meta.doi === 'string' && meta.doi) ||
-      extraMap['doi']?.replace(
-        /^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)/i,
-        '',
-      ) ||
-      undefined,
-    isbn:
-      (typeof meta.isbn === 'string' && meta.isbn) ||
-      extraMap['isbn'] ||
-      undefined,
-    issn:
-      (typeof meta.issn === 'string' && meta.issn) ||
-      extraMap['issn'] ||
-      undefined,
-    pmid:
-      (typeof meta.pmid === 'string' && meta.pmid) ||
-      extraMap['pmid'] ||
-      undefined,
-    pmcid:
-      (typeof meta.pmcid === 'string' && meta.pmcid) ||
-      extraMap['pmcid'] ||
-      undefined,
-    arxivId:
-      (typeof meta.arxivId === 'string' && meta.arxivId) ||
-      extraMap['arxiv'] ||
-      extraMap['arxivid'] ||
-      undefined,
-    citationKey:
-      extraMap['citation-key'] ||
-      extraMap['citationkey'] ||
-      extraMap['bibtex'] ||
-      extraMap['tex.ids']?.split(/[,\s]+/)[0] ||
-      undefined,
-    edition: typeof meta.edition === 'string' ? meta.edition : undefined,
-    place:
-      (typeof meta.place === 'string' && meta.place) ||
-      (typeof meta.eventPlace === 'string' && meta.eventPlace) ||
-      (typeof meta.country === 'string' && meta.country) ||
-      extraMap['event-place'] ||
-      extraMap['publisher-place'] ||
-      extraMap['place'] ||
-      undefined,
-    series:
-      (typeof meta.series === 'string' && meta.series) ||
-      (typeof meta.seriesTitle === 'string' && meta.seriesTitle) ||
-      extraMap['collection-title'] ||
-      undefined,
-    accessedAt:
-      typeof meta.accessedAt === 'string' ? meta.accessedAt : undefined,
-    accessDate:
-      typeof meta.accessDate === 'string' ? meta.accessDate : undefined,
-    extra: extraStr,
-    extraFields: {
-      ...meta,
-      ...(combinedKeywords.length > 0 ? { keywords: combinedKeywords } : {}),
-    },
-  };
-}
+export type { BurnableAnnotation, ExportResult, ExportMetadataResult };
+export { extractExportMetadata, extractItemCitationAliases };
 
 @Injectable()
 export class ExportsService {
@@ -601,53 +459,8 @@ export class ExportsService {
     return this.exportByCitationKeys(userId, keys, projectId);
   }
 
-  /**
-   * Extracts merged citation keys (from DuplicateService.mergeDuplicates) and
-   * BetterBibTeX tex.ids / Citation Key aliases from item metadata.
-   */
   private extractItemCitationAliases(it: ExportItemRecord): string[] {
-    const aliases = new Set<string>();
-    const metaObj =
-      it.metadata &&
-      typeof it.metadata === 'object' &&
-      !Array.isArray(it.metadata)
-        ? (it.metadata as Record<string, unknown>)
-        : {};
-
-    const addKey = (val: unknown) => {
-      if (typeof val === 'string' && val.trim()) {
-        for (const token of val.split(/[,;\s]+/)) {
-          const trimmed = token.trim();
-          if (trimmed) aliases.add(trimmed);
-        }
-      }
-    };
-
-    if (Array.isArray(metaObj.mergedCitationKeys)) {
-      for (const k of metaObj.mergedCitationKeys) addKey(k);
-    }
-
-    if (
-      metaObj.extra &&
-      typeof metaObj.extra === 'object' &&
-      !Array.isArray(metaObj.extra)
-    ) {
-      const extraObj = metaObj.extra as Record<string, unknown>;
-      if (Array.isArray(extraObj.mergedCitationKeys)) {
-        for (const k of extraObj.mergedCitationKeys) addKey(k);
-      }
-      addKey(extraObj['tex.ids']);
-      addKey(extraObj['citation-key']);
-      addKey(extraObj['citationKey']);
-      addKey(extraObj['bibtex']);
-    }
-
-    const parsedMeta = extractExportMetadata(it);
-    if (parsedMeta.citationKey) {
-      addKey(parsedMeta.citationKey);
-    }
-
-    return Array.from(aliases);
+    return extractItemCitationAliases(it);
   }
 
   /**
@@ -753,77 +566,8 @@ export class ExportsService {
 
     const allCandidateItems = Array.from(itemById.values());
 
-    // Preserve original casing from requested keys when emitting alias entries
-    const originalKeyByLower = new Map<string, string>();
-    for (const rawKey of trimmedKeys) {
-      const lower = rawKey.toLowerCase();
-      if (!originalKeyByLower.has(lower)) {
-        originalKeyByLower.set(lower, rawKey);
-      }
-    }
-
-    const foundKeys: string[] = [];
-    const emittedEntries: Array<{
-      item: ExportItemRecord;
-      emitCiteKey: string;
-    }> = [];
-    const emittedCiteKeySet = new Set<string>();
-
-    for (const it of allCandidateItems) {
-      const primaryCiteKey = it.citationKey || '';
-      const itemId = it.id || '';
-      const aliases = this.extractItemCitationAliases(it);
-
-      let itemMatchedPrimary = false;
-      if (primaryCiteKey && keySet.has(primaryCiteKey.toLowerCase())) {
-        foundKeys.push(primaryCiteKey);
-        itemMatchedPrimary = true;
-        const lowerPrimary = primaryCiteKey.toLowerCase();
-        if (!emittedCiteKeySet.has(lowerPrimary)) {
-          emittedCiteKeySet.add(lowerPrimary);
-          emittedEntries.push({ item: it, emitCiteKey: primaryCiteKey });
-        }
-      } else if (itemId && keySet.has(itemId.toLowerCase())) {
-        foundKeys.push(itemId);
-        itemMatchedPrimary = true;
-        const emitKey = primaryCiteKey || itemId;
-        const lowerEmit = emitKey.toLowerCase();
-        if (!emittedCiteKeySet.has(lowerEmit)) {
-          emittedCiteKeySet.add(lowerEmit);
-          emittedEntries.push({ item: it, emitCiteKey: emitKey });
-        }
-      }
-
-      for (const alias of aliases) {
-        const lowerAlias = alias.toLowerCase();
-        if (
-          keySet.has(lowerAlias) &&
-          lowerAlias !== primaryCiteKey.toLowerCase() &&
-          lowerAlias !== itemId.toLowerCase()
-        ) {
-          const requestedKey = originalKeyByLower.get(lowerAlias) || alias;
-          foundKeys.push(requestedKey);
-          if (!emittedCiteKeySet.has(lowerAlias)) {
-            emittedCiteKeySet.add(lowerAlias);
-            emittedEntries.push({ item: it, emitCiteKey: requestedKey });
-          }
-        } else if (
-          !itemMatchedPrimary &&
-          keySet.has(lowerAlias) &&
-          !emittedCiteKeySet.has(lowerAlias)
-        ) {
-          const requestedKey = originalKeyByLower.get(lowerAlias) || alias;
-          foundKeys.push(requestedKey);
-          emittedCiteKeySet.add(lowerAlias);
-          emittedEntries.push({ item: it, emitCiteKey: requestedKey });
-        }
-      }
-    }
-
-    const foundKeySet = new Set(foundKeys.map((k: string) => k.toLowerCase()));
-    const missingKeys = keys.filter(
-      (k) => !foundKeySet.has(k.trim().toLowerCase()),
-    );
+    const { foundKeys, missingKeys, emittedEntries } =
+      resolveEmittedCitationEntries(allCandidateItems, trimmedKeys);
 
     const entries = emittedEntries.map(({ item: it, emitCiteKey }) => {
       const authors = CslJsonMapper.getAuthorNames(it);

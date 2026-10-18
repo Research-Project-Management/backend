@@ -17,20 +17,17 @@ import {
   normalizePmcid,
   normalizeIsbn,
   normalizeIssn,
-  parseCreatorString,
-  splitAuthorString,
   normalizeAcademicTitleCase,
   normalizeItemType,
   normalizePageRange,
-  isInstitutionName,
   stripLatexBraces,
   convertAcademicHtmlToMarkdown,
 } from '@/modules/library/core';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
-import {
-  resolveBidirectionalBaseFields,
-  resolveCanonicalCreatorRole,
-} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
+import { resolveBidirectionalBaseFields } from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
+import { normalizeCreators } from './creator-normalization.policy';
+
+export { normalizeCreators };
 
 const SPECIALLY_NORMALIZED_KEYS = new Set([
   'title',
@@ -103,8 +100,8 @@ const SCHEMA_DRIVEN_STRING_FIELDS: string[] = Array.from(
  * is validated by `cleanString` / dedicated normalizers before it reaches
  * `ItemMetadata`.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RawMetadataInput = Record<string, any>;
+
+type RawMetadataInput = Record<string, unknown>;
 
 export class NormalizationPolicy {
   /**
@@ -113,7 +110,7 @@ export class NormalizationPolicy {
    */
   normalize(raw: RawMetadataInput): ItemMetadata {
     const result: ItemMetadata = {};
-    const rawRecord = raw as Record<string, unknown>;
+    const rawRecord = raw;
     const rawExtra =
       raw.extraFields && typeof raw.extraFields === 'object'
         ? (raw.extraFields as Record<string, unknown>)
@@ -219,7 +216,9 @@ export class NormalizationPolicy {
       const yearNum =
         typeof raw.year === 'number'
           ? raw.year
-          : parseInt(String(raw.year), 10);
+          : typeof raw.year === 'string'
+            ? parseInt(raw.year, 10)
+            : NaN;
       if (!isNaN(yearNum) && yearNum >= 1000 && yearNum <= 2100) {
         result.year = yearNum;
       }
@@ -257,15 +256,19 @@ export class NormalizationPolicy {
       const parsed =
         rawAccessed instanceof Date
           ? rawAccessed
-          : new Date(String(rawAccessed));
+          : typeof rawAccessed === 'string' || typeof rawAccessed === 'number'
+            ? new Date(rawAccessed)
+            : new Date(NaN);
       if (!Number.isNaN(parsed.getTime())) result.accessedAt = parsed;
     }
 
     // 6. Authors & Creators
     const creators = this.normalizeCreators(
-      raw.creators,
-      raw.authors,
-      raw.editors,
+      Array.isArray(raw.creators)
+        ? (raw.creators as CreatorInput[])
+        : undefined,
+      Array.isArray(raw.authors) ? (raw.authors as string[]) : undefined,
+      Array.isArray(raw.editors) ? (raw.editors as string[]) : undefined,
       result.itemType,
     );
     if (creators.length > 0) {
@@ -321,7 +324,11 @@ export class NormalizationPolicy {
     const pageNum = raw.numberOfPages ?? raw.numPages ?? raw.pageCount;
     if (pageNum != null) {
       const cleanNum =
-        typeof pageNum === 'number' ? pageNum : parseInt(String(pageNum), 10);
+        typeof pageNum === 'number'
+          ? pageNum
+          : typeof pageNum === 'string'
+            ? parseInt(pageNum, 10)
+            : NaN;
       if (!isNaN(cleanNum) && cleanNum > 0) {
         result.numberOfPages = cleanNum;
         result.numPages = String(cleanNum);
@@ -341,15 +348,15 @@ export class NormalizationPolicy {
 
     // 8. Abstract
     const rawAbsBoth = [
-      raw.abstract,
-      raw.abstractNote,
+      typeof raw.abstract === 'string' ? raw.abstract : undefined,
+      typeof raw.abstractNote === 'string' ? raw.abstractNote : undefined,
       typeof rawExtra.abstractNote === 'string'
         ? rawExtra.abstractNote
         : undefined,
       typeof rawExtra.abstract === 'string' ? rawExtra.abstract : undefined,
     ]
-      .filter(Boolean)
-      .sort((a, b) => (b?.length ?? 0) - (a?.length ?? 0))[0];
+      .filter((s): s is string => Boolean(s))
+      .sort((a, b) => b.length - a.length)[0];
     const abstractText =
       cleanAbstractText(rawAbsBoth) || this.cleanString(rawAbsBoth);
     if (abstractText) {
@@ -374,9 +381,10 @@ export class NormalizationPolicy {
 
     // 10. Tags & Keywords (Zotero tags)
     const rawTagList: string[] = [];
-    if (Array.isArray(raw.tags)) rawTagList.push(...raw.tags);
-    if (Array.isArray(raw.keywords)) rawTagList.push(...raw.keywords);
-    if (Array.isArray(raw.labels)) rawTagList.push(...raw.labels);
+    if (Array.isArray(raw.tags)) rawTagList.push(...(raw.tags as string[]));
+    if (Array.isArray(raw.keywords))
+      rawTagList.push(...(raw.keywords as string[]));
+    if (Array.isArray(raw.labels)) rawTagList.push(...(raw.labels as string[]));
 
     if (rawTagList.length > 0) {
       const normalizedTags = normalizeTags(rawTagList);
@@ -408,9 +416,13 @@ export class NormalizationPolicy {
         if (typeof rawContent !== 'string' || !rawContent.trim()) continue;
 
         const trimmedRaw = rawContent.trim();
+        const noteSource =
+          typeof noteObj?.source === 'string'
+            ? noteObj.source.toLowerCase()
+            : '';
         const isCommentNote =
           trimmedRaw.toLowerCase().startsWith('comment:') ||
-          String(noteObj?.source || '').toLowerCase() === 'arxiv';
+          noteSource === 'arxiv';
 
         let cleanContent: string | undefined;
         if (
@@ -490,8 +502,8 @@ export class NormalizationPolicy {
         .map((s: unknown) => (typeof s === 'string' ? s.trim() : ''))
         .filter(Boolean);
     }
-    if (raw.relations) {
-      result.relations = raw.relations;
+    if (Array.isArray(raw.relations)) {
+      result.relations = raw.relations as ItemMetadata['relations'];
     }
     if (raw.libraryCatalog) {
       const cleanCat = this.cleanString(raw.libraryCatalog);
@@ -654,136 +666,11 @@ export class NormalizationPolicy {
     editorsInput?: string[],
     itemType?: string,
   ): CreatorInput[] {
-    const list: CreatorInput[] = [];
-
-    const append = (creator: CreatorInput) => {
-      const creatorType = resolveCanonicalCreatorRole(creator.creatorType, {
-        itemType,
-      });
-      let firstName = (creator.firstName || '').trim();
-      let lastName = (creator.lastName || '').trim();
-      let fullName = (creator.fullName || creator.name || '').trim();
-      let fieldMode: number | undefined = creator.fieldMode;
-      const shortName = this.cleanString(creator.shortName);
-
-      if (fieldMode === 1) {
-        const single = this.cleanString(lastName || fullName || firstName);
-        if (!single) return;
-        list.push({
-          creatorType,
-          name: single,
-          fullName: single,
-          lastName: single,
-          fieldMode: 1,
-          ...(shortName ? { shortName } : {}),
-        });
-        return;
-      }
-
-      const looksLikeOrg =
-        !firstName && !!fullName && isInstitutionName(fullName);
-
-      if (
-        fullName &&
-        !looksLikeOrg &&
-        !firstName &&
-        !lastName &&
-        (fullName.includes(';') || /\s+(?:and|&)\s+/i.test(fullName))
-      ) {
-        const parts = splitAuthorString(fullName);
-        if (parts.length > 1) {
-          for (const part of parts) {
-            append({ creatorType, fullName: part });
-          }
-          return;
-        }
-      }
-
-      if (fullName && (fullName.includes(',') || (!firstName && !lastName))) {
-        const parsed = parseCreatorString(fullName, 0, creatorType);
-        if (parsed.fieldMode === 1) {
-          fieldMode = 1;
-          firstName = '';
-          lastName = parsed.lastName || fullName;
-          fullName = parsed.fullName || fullName;
-        } else {
-          firstName = parsed.firstName || firstName;
-          lastName = parsed.lastName || lastName;
-          fullName = parsed.fullName || fullName;
-        }
-      } else if (!fullName && (firstName || lastName)) {
-        fullName = `${firstName} ${lastName}`.trim();
-      }
-
-      const cleanFirst = this.cleanString(firstName) || '';
-      const cleanLast = this.cleanString(lastName) || '';
-      const cleanFull = this.cleanString(fullName) || '';
-
-      if (!cleanFull && !cleanFirst && !cleanLast) return;
-
-      const effectiveName = cleanFull || `${cleanFirst} ${cleanLast}`.trim();
-
-      list.push({
-        creatorType,
-        name: effectiveName,
-        fullName: effectiveName,
-        firstName: fieldMode === 1 ? undefined : cleanFirst || undefined,
-        lastName: cleanLast || (fieldMode === 1 ? effectiveName : undefined),
-        fieldMode: fieldMode === 1 ? 1 : 0,
-        ...(shortName ? { shortName } : {}),
-      });
-    };
-
-    const hasStructuredCreators =
-      Array.isArray(creatorsInput) && creatorsInput.length > 0;
-
-    if (hasStructuredCreators) {
-      for (const c of creatorsInput) {
-        if (!c || typeof c !== 'object') continue;
-        append(c);
-      }
-    }
-
-    if (!hasStructuredCreators && Array.isArray(authorsInput)) {
-      for (const a of authorsInput) {
-        for (const author of splitAuthorString(a)) {
-          const cleanA = this.cleanString(author);
-          if (!cleanA) continue;
-          const parsed = parseCreatorString(cleanA, 0, 'author');
-          append({
-            creatorType: 'author',
-            name: parsed.fullName,
-            fullName: parsed.fullName,
-            firstName: parsed.firstName,
-            lastName: parsed.lastName,
-            fieldMode: parsed.fieldMode,
-          });
-        }
-      }
-    }
-
-    const hasStructuredEditors =
-      hasStructuredCreators &&
-      creatorsInput.some((c) => c && c.creatorType === 'editor');
-
-    if (!hasStructuredEditors && Array.isArray(editorsInput)) {
-      for (const editor of editorsInput) {
-        for (const singleEditor of splitAuthorString(editor)) {
-          const cleanEditor = this.cleanString(singleEditor);
-          if (!cleanEditor) continue;
-          const parsed = parseCreatorString(cleanEditor, 0, 'editor');
-          append({
-            creatorType: 'editor',
-            name: parsed.fullName,
-            fullName: parsed.fullName,
-            firstName: parsed.firstName,
-            lastName: parsed.lastName,
-            fieldMode: parsed.fieldMode,
-          });
-        }
-      }
-    }
-
-    return list;
+    return normalizeCreators(
+      creatorsInput,
+      authorsInput,
+      editorsInput,
+      itemType,
+    );
   }
 }

@@ -36,6 +36,10 @@ import { ItemQueryService } from './services/item-query.service';
 import { ItemFulltextService } from './services/item-fulltext.service';
 import { ItemTypeConversionService } from './services/item-type-conversion.service';
 import { ItemCurationService } from './services/item-curation.service';
+import { ItemRelationsService } from './services/item-relations.service';
+import { ItemBulkService } from './services/item-bulk.service';
+import { ItemCacheService } from './services/item-cache.service';
+import { ItemLifecycleService } from './services/item-lifecycle.service';
 import { ItemSyncDelegate } from './services/item-sync.delegate';
 import { CollectionsService } from './services/collections.service';
 import { TagsService } from './services/tags.service';
@@ -53,7 +57,12 @@ import { ItemTransformer } from './domain/item.transformer';
 
 // Repositories
 import { CommandRepository } from './repositories/command.repository';
-import { QueryRepository } from './repositories/query.repository';
+import {
+  QueryRepository,
+  ItemMatchQueryRepository,
+  ItemRelationsQueryRepository,
+  ItemListQueryRepository,
+} from './repositories/query.repository';
 import { CollectionsRepository } from './repositories/collections.repository';
 import { TagsRepository } from './repositories/tags.repository';
 import { StateRepository } from './repositories/state.repository';
@@ -98,6 +107,10 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     ItemFulltextService,
     ItemTypeConversionService,
     ItemCurationService,
+    ItemRelationsService,
+    ItemBulkService,
+    ItemCacheService,
+    ItemLifecycleService,
     ItemService,
     ItemSyncDelegate,
     CollectionsService,
@@ -116,6 +129,9 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
 
     // Repositories
     CommandRepository,
+    ItemMatchQueryRepository,
+    ItemRelationsQueryRepository,
+    ItemListQueryRepository,
     QueryRepository,
     CollectionsRepository,
     TagsRepository,

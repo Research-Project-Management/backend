@@ -7,12 +7,6 @@ import {
   CSL_TYPE_MAP,
   CSL_CREATOR_MAP,
   SCHEMA_V42_DATA,
-  VIETNAMESE_FAMILY_NAMES,
-  VIETNAMESE_COMPOUND_SURNAMES,
-  VIETNAMESE_MIDDLE_NAMES,
-  isVietnameseName,
-  parseCreatorString,
-  isInstitutionName,
   harmonizeZoteroFields,
   normalizeTags,
 } from '@/modules/library/core';
@@ -97,53 +91,15 @@ const PRIMARY_CREATOR_ROLES: Set<string> = new Set(
   ),
 );
 
-const EXTRA_DIRECT_CSL_STRING_KEYS: Record<string, keyof CslItemData> = {
-  'original-title': 'original-title',
-  originaltitle: 'original-title',
-  'original-publisher': 'original-publisher',
-  originalpublisher: 'original-publisher',
-  'original-publisher-place': 'original-publisher-place',
-  originalpublisherplace: 'original-publisher-place',
-  status: 'status',
-  medium: 'medium',
-  dimensions: 'dimensions',
-  jurisdiction: 'jurisdiction',
-  annote: 'annote',
-  scale: 'scale',
-  genre: 'genre',
-  'chapter-number': 'chapter-number',
-  chapternumber: 'chapter-number',
-  'collection-title': 'collection-title',
-  collectiontitle: 'collection-title',
-  'collection-number': 'collection-number',
-  collectionnumber: 'collection-number',
-  'container-title-short': 'container-title-short',
-  containertitleshort: 'container-title-short',
-  'journal-abbr': 'container-title-short',
-  'archive-place': 'archive-place',
-  archiveplace: 'archive-place',
-  'event-title': 'event-title',
-  eventtitle: 'event-title',
-  event: 'event-title',
-};
+import { CslExtraMapper } from './csl-extra.mapper';
+import { CslNameMapper } from './csl-name.mapper';
 
-const EXTRA_FALLBACK_CSL_STRING_KEYS: Record<string, keyof CslItemData> = {
-  publisher: 'publisher',
-  'publisher-place': 'publisher-place',
-  publisherplace: 'publisher-place',
-  place: 'publisher-place',
-  'container-title': 'container-title',
-  containertitle: 'container-title',
-  'title-short': 'title-short',
-  'short-title': 'title-short',
-  archive: 'archive',
-  'call-number': 'call-number',
-  callnumber: 'call-number',
-  isbn: 'ISBN',
-  issn: 'ISSN',
-  url: 'URL',
-  version: 'version',
-};
+export {
+  EXTRA_DIRECT_CSL_STRING_KEYS,
+  EXTRA_FALLBACK_CSL_STRING_KEYS,
+  CslExtraMapper,
+} from './csl-extra.mapper';
+export { CslNameMapper } from './csl-name.mapper';
 
 export class CslJsonMapper {
   static getAuthorNames(item: {
@@ -274,7 +230,10 @@ export class CslJsonMapper {
       }
     } else if (item.year) {
       csl.issued = { 'date-parts': [[Number(item.year)]] };
-    } else if (effectiveExtra.date) {
+    } else if (
+      typeof effectiveExtra.date === 'string' ||
+      typeof effectiveExtra.date === 'number'
+    ) {
       const parsedYear = parseInt(String(effectiveExtra.date), 10);
       if (!isNaN(parsedYear)) {
         csl.issued = { 'date-parts': [[parsedYear]] };
@@ -292,7 +251,11 @@ export class CslJsonMapper {
       item.accessDate ||
       effectiveExtra.accessedAt ||
       effectiveExtra.accessDate;
-    if (rawAccessDate) {
+    if (
+      rawAccessDate instanceof Date ||
+      typeof rawAccessDate === 'string' ||
+      typeof rawAccessDate === 'number'
+    ) {
       const isoStr =
         rawAccessDate instanceof Date
           ? rawAccessDate.toISOString()
@@ -473,9 +436,8 @@ export class CslJsonMapper {
             if (typeof n === 'string') return n.trim();
             if (n && typeof n === 'object') {
               const obj = n as Record<string, unknown>;
-              return String(
-                obj.contentMd || obj.content || obj.note || '',
-              ).trim();
+              const candidate = obj.contentMd ?? obj.content ?? obj.note;
+              return typeof candidate === 'string' ? candidate.trim() : '';
             }
             return '';
           })
@@ -510,7 +472,10 @@ export class CslJsonMapper {
       item.versionNumber ||
       effectiveExtra.versionNumber ||
       effectiveExtra.version;
-    if (versionNumber) {
+    if (
+      typeof versionNumber === 'string' ||
+      typeof versionNumber === 'number'
+    ) {
       csl.version = String(versionNumber);
     }
 
@@ -599,313 +564,21 @@ export class CslJsonMapper {
   }
 
   private static formatCslName(contrib: ContributorLike): CslName {
-    const attachShort = (target: CslName): CslName => {
-      if (contrib.shortName && contrib.shortName.trim()) {
-        target.short = contrib.shortName.trim();
-      }
-      return target;
-    };
-
-    if (contrib.fieldMode === 1 || contrib.fieldMode === '1') {
-      const name =
-        contrib.fullName?.trim() ||
-        contrib.name?.trim() ||
-        contrib.lastName?.trim() ||
-        'Anonymous';
-      return attachShort({ literal: name });
-    }
-
-    if (contrib.lastName && contrib.lastName.trim()) {
-      const stripDegrees = (s: string) =>
-        s
-          .replace(
-            /^(?:(?:p?gs|ts(?:kh)?|ths|cn|ks|bs|dr|prof|ph\.?d)\.?\s*)+/gi,
-            '',
-          )
-          .trim();
-      const rawLast = stripDegrees(contrib.lastName.trim());
-      const rawFirst = contrib.firstName
-        ? stripDegrees(contrib.firstName.trim())
-        : '';
-
-      if (!rawFirst && rawLast.includes(' ')) {
-        return attachShort(this.parseStringName(rawLast));
-      }
-
-      if (rawFirst && !rawFirst.includes(',')) {
-        const firstParts = rawFirst.split(/\s+/);
-        const lastParts = rawLast.split(/\s+/);
-        if (
-          firstParts.length >= 1 &&
-          lastParts.length === 1 &&
-          this.VIETNAMESE_SURNAMES.has(firstParts[0].toLowerCase()) &&
-          !this.VIETNAMESE_SURNAMES.has(lastParts[0].toLowerCase())
-        ) {
-          return attachShort(this.parseStringName(`${rawFirst} ${rawLast}`));
-        }
-      }
-
-      return attachShort({
-        family: rawLast,
-        given: rawFirst || undefined,
-      });
-    }
-
-    const fallbackFull =
-      contrib.fullName?.trim() ||
-      contrib.name?.trim() ||
-      contrib.firstName?.trim();
-    if (fallbackFull) {
-      return attachShort(this.parseStringName(fallbackFull));
-    }
-
-    return { family: 'Anonymous' };
-  }
-
-  private static readonly VIETNAMESE_SURNAMES = VIETNAMESE_FAMILY_NAMES;
-  private static readonly VIETNAMESE_COMPOUND_SURNAMES =
-    VIETNAMESE_COMPOUND_SURNAMES;
-
-  private static isVietnameseName(parts: string[]): boolean {
-    if (parts.length < 2) return false;
-    const joined = parts.join(' ');
-    if (isVietnameseName(joined)) return true;
-    const firstLower = parts[0].toLowerCase();
-    if (!this.VIETNAMESE_SURNAMES.has(firstLower)) return false;
-    return (
-      parts.length >= 3 ||
-      (parts.length === 2 &&
-        VIETNAMESE_MIDDLE_NAMES.has(parts[1].toLowerCase()))
-    );
+    return CslNameMapper.formatCslName(contrib);
   }
 
   public static parseStringName(raw: string): CslName {
-    const trimmed = (raw || '')
-      .trim()
-      .replace(
-        /^(?:(?:p?gs|ts(?:kh)?|ths|cn|ks|bs|dr|prof|ph\.?d)\.?\s*)+/gi,
-        '',
-      )
-      .trim()
-      .replace(/\s+/g, ' ');
-    if (!trimmed) return { family: 'Anonymous' };
-
-    const institutionalPattern =
-      /(organization|consortium|association|institute|university|laboratory|committee|team|group|corporation|inc\.|llc|agency|department|ministry|academy|bureau|council|center|centre|foundation|society|openai|google|microsoft|meta|deepmind|who|unesco|ieee|acm|đại học|học viện|viện|trung tâm|bộ giáo dục|bộ y tế|bộ khoa học|tổng cục|cục|sở|ngân hàng|ban quản lý|hội đồng|liên minh)/i;
-    if (
-      (isInstitutionName(trimmed) || institutionalPattern.test(trimmed)) &&
-      !trimmed.includes(',')
-    ) {
-      return { literal: trimmed };
-    }
-
-    if (trimmed.includes(',')) {
-      const parts = trimmed.split(',').map((p) => p.trim());
-      return {
-        family: parts[0] || 'Anonymous',
-        given: parts.slice(1).join(' ') || undefined,
-      };
-    }
-
-    const parts = trimmed.split(' ');
-    if (parts.length === 1) {
-      return { family: parts[0] };
-    }
-
-    if (this.isVietnameseName(parts)) {
-      if (parts.length >= 3) {
-        const potentialCompound = `${parts[0]} ${parts[1]}`.toLowerCase();
-        if (this.VIETNAMESE_COMPOUND_SURNAMES.has(potentialCompound)) {
-          return {
-            family: `${parts[0]} ${parts[1]}`,
-            given: parts.slice(2).join(' ') || undefined,
-          };
-        }
-      }
-      return {
-        family: parts[0],
-        given: parts.slice(1).join(' ') || undefined,
-      };
-    }
-
-    if (
-      parts.length >= 3 &&
-      /^(?:jr\.?|sr\.?|ii|iii|iv|v)$/i.test(parts[parts.length - 1])
-    ) {
-      const suffix = parts.pop()!;
-      const fam = parts.pop() || 'Anonymous';
-      const giv = parts.join(' ');
-      return { family: fam, given: giv ? `${giv} ${suffix}` : suffix };
-    }
-
-    const parsedCreator = parseCreatorString(trimmed, 0, 'author');
-    if (parsedCreator.fieldMode === 1) {
-      return { literal: parsedCreator.fullName || trimmed };
-    }
-    if (parsedCreator.lastName) {
-      return {
-        family: parsedCreator.lastName,
-        given: parsedCreator.firstName || undefined,
-      };
-    }
-
-    const family = parts.pop() || 'Anonymous';
-    const given = parts.join(' ');
-    return { family, given };
+    return CslNameMapper.parseStringName(raw);
   }
 
   public static parseCslDate(dateStr: string): CslDate | undefined {
-    if (!dateStr) return undefined;
-    const match = dateStr.trim().match(/^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?/);
-    if (match) {
-      const parts: number[] = [Number(match[1])];
-      if (match[2]) parts.push(Number(match[2]));
-      if (match[3]) parts.push(Number(match[3]));
-      return { 'date-parts': [parts] };
-    }
-    return undefined;
+    return CslNameMapper.parseCslDate(dateStr);
   }
 
-  /**
-   * Parses CSL variables and identifiers embedded in Zotero's Extra field
-   * using declarative lookup tables.
-   */
   public static parseExtraCslVariables(
     extraStr: string,
     csl: CslItemData,
   ): void {
-    if (!extraStr || !extraStr.trim()) return;
-    const cslRec = csl as Record<string, unknown>;
-
-    const applyKeyValue = (
-      rawKeyInput: string,
-      rawValInput: string,
-    ): boolean => {
-      const val = rawValInput.trim();
-      if (!val) return false;
-      const rawKey = rawKeyInput
-        .trim()
-        .toLowerCase()
-        .replace(/[\s_]+/g, '-');
-
-      if (rawKey === 'original-date' || rawKey === 'originaldate') {
-        const parsed = this.parseCslDate(val);
-        if (parsed) csl['original-date'] = parsed;
-        return true;
-      }
-      if (rawKey === 'event-date' || rawKey === 'eventdate') {
-        const parsed = this.parseCslDate(val);
-        if (parsed) csl['event-date'] = parsed;
-        return true;
-      }
-      if (rawKey === 'issued' && !csl.issued) {
-        const parsed = this.parseCslDate(val);
-        if (parsed) csl.issued = parsed;
-        return true;
-      }
-      if (rawKey === 'accessed' && !csl.accessed) {
-        const parsed = this.parseCslDate(val);
-        if (parsed) csl.accessed = parsed;
-        return true;
-      }
-      if (rawKey === 'event-place' || rawKey === 'eventplace') {
-        csl['event-place'] = val;
-        if (!csl['publisher-place']) csl['publisher-place'] = val;
-        return true;
-      }
-      if (
-        rawKey === 'article-number' ||
-        rawKey === 'articlenumber' ||
-        rawKey === 'number'
-      ) {
-        if (!csl.number) csl.number = val;
-        if (rawKey !== 'number') csl['article-number'] = val;
-        return true;
-      }
-      if (rawKey === 'type' || rawKey === 'csl-type') {
-        csl.type = ITEM_TYPE_TO_CSL_TYPE[val] || val;
-        return true;
-      }
-      if (
-        (rawKey === 'archive-location' || rawKey === 'archivelocation') &&
-        !csl['archive-location']
-      ) {
-        csl['archive-location'] = val;
-        csl.archive_location = val;
-        return true;
-      }
-      if (rawKey === 'doi') {
-        if (!csl.DOI) {
-          csl.DOI = val
-            .replace(/^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)/i, '')
-            .trim();
-        }
-        return true;
-      }
-      if (rawKey === 'pmid') {
-        if (!csl.PMID) csl.PMID = val.replace(/^pmid:\s*/i, '').trim();
-        return true;
-      }
-      if (rawKey === 'pmcid' || rawKey === 'pmc') {
-        if (!csl.PMCID) {
-          const cleanPmc = val.replace(/^(?:pmcid|pmc):\s*/i, '').trim();
-          csl.PMCID = /^PMC/i.test(cleanPmc)
-            ? cleanPmc.toUpperCase()
-            : `PMC${cleanPmc}`;
-        }
-        return true;
-      }
-      if (
-        rawKey === 'citation-key' ||
-        rawKey === 'citationkey' ||
-        rawKey === 'citekey' ||
-        rawKey === 'cite-key' ||
-        rawKey === 'bibtex' ||
-        rawKey === 'tex.ids'
-      ) {
-        const cleanKey = val.split(/[,\s]+/)[0]?.trim();
-        if (cleanKey && !csl['citation-key']) {
-          csl.id = cleanKey;
-          csl['citation-key'] = cleanKey;
-        }
-        return true;
-      }
-
-      const directTarget = EXTRA_DIRECT_CSL_STRING_KEYS[rawKey];
-      if (directTarget) {
-        cslRec[directTarget] = val;
-        return true;
-      }
-
-      const fallbackTarget = EXTRA_FALLBACK_CSL_STRING_KEYS[rawKey];
-      if (fallbackTarget) {
-        if (!cslRec[fallbackTarget]) cslRec[fallbackTarget] = val;
-        return true;
-      }
-
-      return false;
-    };
-
-    const strippedBraced = extraStr.replace(
-      /\{:\s*([a-zA-Z_][a-zA-Z0-9_.\s-]*?)\s*:\s*([^}]+?)\s*\}/g,
-      (fullMatch, k: string, v: string) =>
-        applyKeyValue(k, v) ? '' : fullMatch,
-    );
-
-    const remainingNotes: string[] = [];
-    for (const line of strippedBraced.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const match = trimmed.match(
-        /^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/,
-      );
-      if (!match || !applyKeyValue(match[1], match[2])) {
-        remainingNotes.push(trimmed);
-      }
-    }
-
-    if (remainingNotes.length > 0) {
-      csl.note = remainingNotes.join('\n');
-    }
+    CslExtraMapper.parseExtraCslVariables(extraStr, csl);
   }
 }

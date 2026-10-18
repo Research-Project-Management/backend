@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, Item } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { isUUID } from 'class-validator';
+import { libraryConfig } from '@/modules/library/core/config/library.config';
 import {
   RetractionDetails,
   RetractionNature,
@@ -11,7 +12,7 @@ import {
 const isValidId = (val?: unknown): val is string =>
   typeof val === 'string' &&
   Boolean(val) &&
-  (process.env.NODE_ENV === 'test' || isUUID(val));
+  (libraryConfig().app.isTest || isUUID(val));
 
 interface ItemRetractionMetadata {
   pmid?: string | null;

@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ItemService } from './services/items.service';
 import { ItemQueryService } from './services/item-query.service';
-import { QueryRepository } from './repositories/query.repository';
 import { CollectionsService } from './services/collections.service';
 import { TagsService } from './services/tags.service';
 import { TypesService } from './services/types.service';
@@ -37,7 +36,6 @@ export class CatalogFacade {
   constructor(
     private readonly queryService: ItemQueryService,
     private readonly itemService: ItemService,
-    private readonly queryRepo: QueryRepository,
     private readonly collectionsService: CollectionsService,
     private readonly tagsService: TagsService,
     private readonly typesService: TypesService,
@@ -140,16 +138,16 @@ export class CatalogFacade {
 
   async countItems(
     userId: string,
-    options?: Parameters<QueryRepository['count']>[1],
+    options?: Record<string, unknown>,
   ): Promise<number> {
-    return this.queryRepo.count(userId, options || { view: 'all' });
+    return this.queryService.count(userId, options || { view: 'all' });
   }
 
   async findMany(
     userId: string,
-    options?: Parameters<QueryRepository['findMany']>[1],
+    options?: Record<string, unknown>,
   ): Promise<ItemDetail[]> {
-    return this.queryRepo.findMany(userId, options || {});
+    return this.queryService.findMany(userId, options || {});
   }
 
   validateItemType(type: string): Promise<boolean> {
@@ -239,7 +237,7 @@ export class CatalogFacade {
       titlePrefix?: string;
     },
   ) {
-    return this.queryRepo.findMatchCandidates(scope, criteria);
+    return this.queryService.findMatchCandidates(scope, criteria);
   }
 }
 

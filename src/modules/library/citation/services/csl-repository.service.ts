@@ -7,6 +7,11 @@ import {
 } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 import {
+  AcademicHttpClient,
+  ExtractionProcessException,
+  ExternalProviderException,
+} from '@/modules/library/core';
+import {
   IEEE_CSL,
   NATURE_CSL,
   CHICAGO_CSL,
@@ -268,6 +273,8 @@ export class CslRepositoryService implements OnModuleInit {
     @Optional()
     @Inject(RedisCacheService)
     private readonly redisCache?: RedisCacheService,
+    @Optional()
+    private readonly httpClient?: AcademicHttpClient,
   ) {}
 
   onModuleInit() {
@@ -382,14 +389,23 @@ export class CslRepositoryService implements OnModuleInit {
       const zoteroUrl = `${CslRepositoryService.ZOTERO_STYLE_XML_BASE}${encodeURIComponent(normalized)}`;
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 6000);
+      const headers = {
+        Accept:
+          'application/vnd.citationstyles.style+xml, application/xml, text/xml',
+      };
 
-      const res = await fetch(zoteroUrl, {
-        headers: {
-          Accept:
-            'application/vnd.citationstyles.style+xml, application/xml, text/xml',
-        },
-        signal: controller.signal,
-      });
+      const res = this.httpClient
+        ? (
+            await this.httpClient.request(zoteroUrl, {
+              headers,
+              signal: controller.signal,
+              timeoutMs: 6000,
+            })
+          ).response
+        : await fetch(zoteroUrl, {
+            headers,
+            signal: controller.signal,
+          });
       clearTimeout(timeout);
 
       if (res.ok) {
@@ -415,7 +431,14 @@ export class CslRepositoryService implements OnModuleInit {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 6000);
 
-      const res = await fetch(githubUrl, { signal: controller.signal });
+      const res = this.httpClient
+        ? (
+            await this.httpClient.request(githubUrl, {
+              signal: controller.signal,
+              timeoutMs: 6000,
+            })
+          ).response
+        : await fetch(githubUrl, { signal: controller.signal });
       clearTimeout(timeout);
 
       if (res.ok) {
@@ -446,12 +469,13 @@ export class CslRepositoryService implements OnModuleInit {
     scopeId?: string,
   ): Promise<CslStyleMetadata> {
     if (!cslXml || typeof cslXml !== 'string' || cslXml.length > 512 * 1024) {
-      throw new Error(
+      throw new ExtractionProcessException(
         'Invalid CSL XML content: must be a non-empty string under 512KB',
+        { cslXmlLength: typeof cslXml === 'string' ? cslXml.length : 0 },
       );
     }
     if (!this.isValidCslXml(cslXml)) {
-      throw new Error(
+      throw new ExtractionProcessException(
         'Invalid CSL XML content: must contain valid <style> definition with required <title>, <id>, and <citation> or <bibliography> elements',
       );
     }
@@ -558,13 +582,26 @@ export class CslRepositoryService implements OnModuleInit {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 12000);
 
-      const res = await fetch(CslRepositoryService.ZOTERO_STYLES_JSON_URL, {
-        signal: controller.signal,
-      });
+      const res = this.httpClient
+        ? (
+            await this.httpClient.request(
+              CslRepositoryService.ZOTERO_STYLES_JSON_URL,
+              { signal: controller.signal, timeoutMs: 12000 },
+            )
+          ).response
+        : await fetch(CslRepositoryService.ZOTERO_STYLES_JSON_URL, {
+            signal: controller.signal,
+          });
       clearTimeout(timeout);
 
       if (!res.ok) {
-        throw new Error(`Zotero styles.json responded with HTTP ${res.status}`);
+        throw new ExternalProviderException(
+          `Zotero styles.json responded with HTTP ${res.status}`,
+          {
+            url: CslRepositoryService.ZOTERO_STYLES_JSON_URL,
+            status: res.status,
+          },
+        );
       }
 
       const rawList = (await res.json()) as Array<{
@@ -576,7 +613,9 @@ export class CslRepositoryService implements OnModuleInit {
       }>;
 
       if (!Array.isArray(rawList) || rawList.length === 0) {
-        throw new Error('Received empty styles list');
+        throw new ExternalProviderException('Received empty styles list', {
+          url: CslRepositoryService.ZOTERO_STYLES_JSON_URL,
+        });
       }
 
       const parsed: CslStyleMetadata[] = rawList.map((item) => {

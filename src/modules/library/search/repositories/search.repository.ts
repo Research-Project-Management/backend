@@ -137,7 +137,7 @@ export class SearchRepository implements OnModuleInit {
     let paramIdx = 3;
 
     if (options.itemType) {
-      baseFilters.push(`item_type = $${paramIdx++}`);
+      baseFilters.push(`"type" = $${paramIdx++}`);
       params.push(options.itemType);
     }
     if (options.yearFrom) {
@@ -541,5 +541,52 @@ export class SearchRepository implements OnModuleInit {
         },
       },
     });
+  }
+
+  async replaceAttachmentPageIndex(
+    attachmentId: string,
+    pages: Array<{
+      pageIndex: number;
+      textContent: string;
+      charOffset?: number;
+    }>,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.fullTextIndex.deleteMany({
+        where: { attachmentId },
+      });
+
+      if (pages.length > 0) {
+        await tx.fullTextIndex.createMany({
+          data: pages.map((page) => ({
+            attachmentId,
+            pageIndex: page.pageIndex,
+            textContent: (page.textContent || '').replace(/\0/g, ''),
+            charOffset: page.charOffset ?? 0,
+          })),
+        });
+      }
+    });
+  }
+
+  async findAttachmentPages(
+    attachmentId: string,
+    pageIndex?: number,
+  ): Promise<
+    Array<{ pageIndex: number; textContent: string; charOffset: number }>
+  > {
+    const dbPages = await this.prisma.fullTextIndex.findMany({
+      where: {
+        attachmentId,
+        ...(pageIndex !== undefined ? { pageIndex } : {}),
+      },
+      orderBy: { pageIndex: 'asc' },
+    });
+
+    return dbPages.map((dbPage) => ({
+      pageIndex: dbPage.pageIndex,
+      textContent: dbPage.textContent || '',
+      charOffset: dbPage.charOffset ?? 0,
+    }));
   }
 }

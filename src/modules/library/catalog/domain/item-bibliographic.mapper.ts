@@ -1,0 +1,496 @@
+import { cleanAbstractText, splitAuthorString } from '@/modules/library/core';
+import { resolveCanonicalArxivCategory } from '@/modules/library/core/domain/tag.domain';
+import {
+  getEffectiveBaseFieldMap,
+  resolveBidirectionalBaseFields,
+  resolveCanonicalCreatorRole,
+  resolveFieldAliases,
+} from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
+import {
+  ITEM_COLUMN_METADATA_FIELDS,
+  TYPE_SPECIFIC_EXTRA_FIELDS,
+} from '@/modules/library/catalog/types/items.constants';
+import type { CreatorCreditInput } from '@/modules/library/catalog/types/items.types';
+import type { MutableItemPayload } from './item-mapper.types';
+
+function toStr(val: unknown): string {
+  return typeof val === 'string' || typeof val === 'number' ? String(val) : '';
+}
+
+/**
+ * Normalizes creators, authors, and editors.
+ */
+export function mapCreatorsPartial(it: MutableItemPayload): void {
+  const rawStructured =
+    Array.isArray(it.contributors) && it.contributors.length > 0
+      ? it.contributors
+      : Array.isArray(it.creators) && it.creators.length > 0
+        ? it.creators
+        : null;
+
+  if (rawStructured) {
+    it.creators = rawStructured.map((c: CreatorCreditInput, idx: number) => {
+      const full =
+        c.fullName ||
+        [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+        c.name ||
+        '';
+      return {
+        id: (c as { id?: string }).id,
+        orderIndex: c.orderIndex ?? idx,
+        creatorType: resolveCanonicalCreatorRole(c.creatorType, {
+          itemType: it.itemType,
+        }),
+        fieldMode: (c as { fieldMode?: number }).fieldMode ?? 0,
+        firstName: c.firstName || undefined,
+        lastName: c.lastName || undefined,
+        shortName: (c as { shortName?: string }).shortName || undefined,
+        fullName: full,
+        name: full,
+      };
+    });
+  } else if (Array.isArray(it.authors) && it.authors.length > 0) {
+    it.creators = (it.authors as string[]).map((name: string, idx: number) => ({
+      orderIndex: idx,
+      creatorType: 'author',
+      fullName: name,
+      name,
+    }));
+  } else {
+    it.creators = [];
+  }
+
+  if (Array.isArray(it.creators) && it.creators.length > 0) {
+    const authorCreators = it.creators.filter(
+      (c: CreatorCreditInput) => (c.creatorType || 'author') === 'author',
+    );
+    it.authors = (authorCreators.length > 0 ? authorCreators : it.creators)
+      .map(
+        (c: CreatorCreditInput) =>
+          c.fullName ||
+          c.name ||
+          [c.firstName, c.lastName].filter(Boolean).join(' '),
+      )
+      .filter(Boolean);
+  } else if (Array.isArray(it.authors) && it.authors.length > 0) {
+    it.authors = (it.authors as string[]).flatMap((a: string) =>
+      splitAuthorString(a),
+    );
+  } else {
+    it.authors = [];
+  }
+
+  it.editors = (it.creators || [])
+    .filter((c: CreatorCreditInput) => c.creatorType === 'editor')
+    .map((c: CreatorCreditInput) => c.fullName || c.name || '')
+    .filter(Boolean);
+}
+
+/**
+ * Harmonizes Zotero v42 fields, dates, numbers, and identifiers.
+ */
+export function harmonizeDomainMetadataAndIdentifiersPartial(
+  it: MutableItemPayload,
+): void {
+  const extraFields = it.extraFields || {};
+
+  const parsePositiveIntOrNull = (
+    val: unknown,
+    fallback: unknown,
+  ): number | null => {
+    const candidate =
+      val === undefined || val === null || val === 0 || val === '0'
+        ? fallback
+        : val;
+    const num = candidate ? Number(candidate) : null;
+    return num && num > 0 ? num : null;
+  };
+
+  it.citationCount = parsePositiveIntOrNull(
+    it.citationCount,
+    extraFields.citationCount,
+  );
+  it.referenceCount = parsePositiveIntOrNull(
+    it.referenceCount,
+    extraFields.referenceCount,
+  );
+  if (!it.openAccessPdfUrl) {
+    it.openAccessPdfUrl =
+      (extraFields.openAccessPdfUrl as string | null | undefined) ?? null;
+  }
+  if (!it.arxivId) {
+    it.arxivId =
+      (extraFields.arxivId as string | null | undefined) ??
+      (extraFields.archiveId as string | null | undefined) ??
+      null;
+  }
+
+  if (
+    !it.proceedingsTitle &&
+    (extraFields.proceedingsTitle ||
+      (it.itemType === 'conferencePaper' && it.publicationTitle))
+  ) {
+    it.proceedingsTitle = toStr(
+      extraFields.proceedingsTitle || it.publicationTitle,
+    );
+  }
+  if (
+    !it.conferenceName &&
+    extraFields.conferenceName &&
+    extraFields.conferenceName !== it.proceedingsTitle &&
+    extraFields.conferenceName !== it.publicationTitle
+  ) {
+    it.conferenceName = toStr(extraFields.conferenceName);
+  }
+
+  if (it.abstract || extraFields.abstract || extraFields.abstractNote) {
+    const rawAbstract = toStr(
+      it.abstract || extraFields.abstract || extraFields.abstractNote,
+    );
+    it.abstract = cleanAbstractText(rawAbstract) ?? (it.abstract || null);
+  }
+  it.abstractNote = it.abstract ?? null;
+
+  if (
+    it.year !== undefined &&
+    it.year !== null &&
+    (it.year === 0 || String(it.year) === '0' || Number(it.year) <= 0)
+  ) {
+    it.year = null;
+  }
+  it.date = it.date || it.publicationDate || (it.year ? String(it.year) : null);
+  if (it.date === '0' || it.date === '0000') {
+    it.date = null;
+  }
+
+  for (const field of ['volume', 'issue', 'pages', 'edition'] as const) {
+    if (it[field] !== undefined && it[field] !== null) {
+      const str = toStr(it[field]).trim();
+      it[field] = str === '0' || str === '' ? null : str;
+    }
+  }
+
+  const normalizePageCount = (val: unknown): number | string | null => {
+    if (val === undefined || val === null) return null;
+    const str = toStr(val).trim();
+    if (str === '0' || str === '') return null;
+    const num = Number(str);
+    return isNaN(num) ? str : num > 0 ? num : null;
+  };
+  if (it.numPages !== undefined) it.numPages = normalizePageCount(it.numPages);
+  if (it.numberOfPages !== undefined) {
+    it.numberOfPages = normalizePageCount(it.numberOfPages);
+  }
+
+  if (it.callNumber && /^arxiv:\s*\d{4}\.\d{4,5}/i.test(toStr(it.callNumber))) {
+    if (!it.arxivId) {
+      it.arxivId = toStr(it.callNumber)
+        .replace(/^arxiv:\s*/i, '')
+        .trim();
+    }
+    it.callNumber = null;
+  }
+
+  if (it.arxivId || it.archiveId) {
+    const rawId = toStr(it.arxivId || it.archiveId);
+    const cleanArxivId = rawId
+      .replace(/^arxiv:\s*/i, '')
+      .replace(/\s*\[.*?\]\s*$/, '')
+      .trim();
+    it.arxivId = cleanArxivId;
+    const canonicalCleanId = cleanArxivId.replace(/v\d+$/i, '');
+    if (it.itemType === 'preprint') {
+      it.archiveId = `arXiv:${canonicalCleanId}`;
+      it.repository = it.repository || 'arXiv';
+    }
+
+    const existingExtra = typeof it.extra === 'string' ? it.extra.trim() : '';
+    const catStr = resolveCanonicalArxivCategory(
+      canonicalCleanId,
+      Array.isArray(it.tags) ? (it.tags as string[]) : undefined,
+      extraFields,
+      it,
+    );
+
+    if (!existingExtra.toLowerCase().includes('arxiv:')) {
+      const arxivLine = catStr
+        ? `arXiv: ${canonicalCleanId} [${catStr}]`
+        : `arXiv: ${canonicalCleanId}`;
+      it.extra = existingExtra ? `${arxivLine}\n${existingExtra}` : arxivLine;
+    } else {
+      it.extra = existingExtra.replace(
+        /^arxiv:\s*([^\s[]+)(?:v\d+)?(?:\s*\[([^\]]+)\])?/im,
+        (_: string, id: string, cat?: string) => {
+          const canonicalId = id.replace(/v\d+$/i, '').trim();
+          const finalCat = (cat ? cat.trim() : '') || catStr;
+          return finalCat
+            ? `arXiv: ${canonicalId} [${finalCat}]`
+            : `arXiv: ${canonicalId}`;
+        },
+      );
+    }
+  }
+
+  // Zotero v42 Base Field & Alias Harmonization via Single-Source-of-Truth Harmonizer
+  const baseMap = it.itemType
+    ? getEffectiveBaseFieldMap(it.itemType)
+    : undefined;
+  resolveBidirectionalBaseFields(it, it.itemType, [it.extraFields], false);
+  resolveFieldAliases(it, [it.extraFields]);
+
+  if (baseMap) {
+    for (const [baseField, mappedField] of Object.entries(baseMap)) {
+      if (!mappedField || mappedField === baseField) continue;
+      if (baseField === 'type' || baseField === 'medium') {
+        const currentSubtype =
+          it.type && it.type.toLowerCase() !== (it.itemType || '').toLowerCase()
+            ? it.type
+            : undefined;
+        it[mappedField] =
+          it[mappedField] ||
+          (baseField === 'medium' ? it.medium : undefined) ||
+          currentSubtype ||
+          '';
+        if (baseField === 'type' && it[mappedField] && !currentSubtype) {
+          it.type = it[mappedField] as string;
+        }
+        continue;
+      }
+      if (it[mappedField] === undefined || it[mappedField] === null) {
+        it[mappedField] = '';
+      }
+      if (
+        (it[baseField] === undefined || it[baseField] === null) &&
+        baseField !== 'status' &&
+        baseField !== 'authority' &&
+        baseField !== 'originalDate' &&
+        baseField !== 'number'
+      ) {
+        it[baseField] = '';
+      }
+    }
+  }
+
+  it.publicationTitle = it.publicationTitle ?? '';
+  it.publisher = it.publisher ?? '';
+  it.place = it.place ?? '';
+  it.volume = it.volume ?? '';
+  it.issue = it.issue ?? '';
+  it.pages = it.pages ?? '';
+
+  if (it.itemType === 'journalArticle' || !it.itemType) {
+    it.journal = it.journal || it.publicationTitle || '';
+    it.publicationTitle = it.publicationTitle || it.journal || '';
+  }
+
+  if (it.itemType === 'preprint') {
+    const isArxiv = Boolean(
+      it.arxivId ||
+      it.archiveId ||
+      it.archiveID ||
+      (it.doi && toStr(it.doi).includes('arXiv')) ||
+      (it.publicationTitle && /arxiv/i.test(it.publicationTitle)),
+    );
+    it.genre = it.genre || it.type || 'Preprint';
+    const cleanArxivNum = it.arxivId
+      ? toStr(it.arxivId)
+          .replace(/^arxiv:\s*/i, '')
+          .replace(/v\d+$/i, '')
+          .trim()
+      : '';
+    it.archiveID =
+      it.archiveID || (cleanArxivNum ? `arXiv:${cleanArxivNum}` : '') || '';
+    it.archiveId = it.archiveID;
+    it.repository =
+      it.repository ||
+      (it.publisher && !/^arxiv$/i.test(toStr(it.publisher).trim())
+        ? (it.publisher as string)
+        : '') ||
+      (isArxiv ? 'arXiv' : '') ||
+      '';
+    delete it.publisher;
+    delete it.publicationTitle;
+    delete it.journal;
+  } else if (it.itemType === 'thesis') {
+    it.thesisType =
+      it.thesisType ||
+      (it.type && it.type.toLowerCase() !== 'thesis' ? it.type : undefined) ||
+      it.genre ||
+      '';
+  } else if (it.itemType === 'patent') {
+    it.issuingAuthority =
+      it.issuingAuthority || it.country || it.authority || '';
+    it.authority = it.authority || it.issuingAuthority || '';
+    it.country = it.country || it.issuingAuthority || '';
+    it.patentNumber = it.patentNumber || it.number || '';
+    it.issueDate = it.issueDate || it.date || it.publicationDate || '';
+    it.priorityDate = it.priorityDate || it.originalDate || '';
+    it.assignee = it.assignee || '';
+  }
+
+  if (
+    it.year === undefined ||
+    it.year === null ||
+    isNaN(Number(it.year)) ||
+    Number(it.year) === 0
+  ) {
+    const dateCandidate =
+      it.date ||
+      it.publicationDate ||
+      it.issueDate ||
+      it.dateDecided ||
+      it.dateEnacted ||
+      it.filingDate;
+    if (dateCandidate) {
+      const yearMatch = toStr(dateCandidate).match(
+        /(?:^|[^\d])(1[7-9]\d{2}|20\d{2})(?:[^\d]|$)/,
+      );
+      if (yearMatch) {
+        it.year = parseInt(yearMatch[1], 10);
+      }
+    }
+  } else if (typeof it.year === 'string') {
+    const parsedNum = parseInt(it.year, 10);
+    it.year = isNaN(parsedNum) ? null : parsedNum;
+  }
+
+  it.publicationDate =
+    it.publicationDate || it.date || (it.year ? String(it.year) : '');
+  it.date = it.date || it.publicationDate || (it.year ? String(it.year) : '');
+  it.abstract = it.abstract || it.abstractNote || '';
+  it.abstractNote = it.abstract;
+  it.journalAbbreviation = it.journalAbbreviation || it.journalAbbr || '';
+  it.journalAbbr = it.journalAbbr || it.journalAbbreviation || '';
+  it.accessDate =
+    it.accessDate ||
+    (it.accessedAt
+      ? it.accessedAt instanceof Date
+        ? it.accessedAt.toISOString()
+        : toStr(it.accessedAt)
+      : '');
+  it.citationKey = it.citationKey || it.citeKey || '';
+  it.citeKey = it.citeKey || it.citationKey || '';
+  it.url = it.url || it.URL || '';
+  it.URL = it.url;
+
+  // Identifier Projections
+  if (Array.isArray(it.identifiers)) {
+    const idTypeToField: Record<string, keyof MutableItemPayload> = {
+      arxiv: 'arxivId',
+      doi: 'doi',
+      pmid: 'pmid',
+      pmcid: 'pmcid',
+      isbn: 'isbn',
+      issn: 'issn',
+    };
+    for (const ident of it.identifiers) {
+      const type = (ident.type || ident.identifierType || '').toLowerCase();
+      const targetKey = idTypeToField[type];
+      if (targetKey && !it[targetKey]) {
+        it[targetKey] = ident.value;
+      }
+    }
+  }
+
+  for (const [lowerKey, upperKey] of [
+    ['doi', 'DOI'],
+    ['isbn', 'ISBN'],
+    ['issn', 'ISSN'],
+    ['pmid', 'PMID'],
+    ['pmcid', 'PMCID'],
+  ] as const) {
+    if (!it[lowerKey] && (extraFields[lowerKey] || extraFields[upperKey])) {
+      it[lowerKey] = toStr(extraFields[lowerKey] || extraFields[upperKey]);
+    }
+    const canonicalVal =
+      (it[lowerKey] as string) || (it[upperKey] as string) || '';
+    it[lowerKey] = canonicalVal;
+    it[upperKey] = canonicalVal;
+  }
+
+  const canonicalArxivId =
+    it.arxivId ||
+    it.archiveId ||
+    it.archiveID ||
+    extraFields.arxivId ||
+    extraFields.archiveId ||
+    extraFields.archiveID ||
+    '';
+  const cleanArxiv = canonicalArxivId
+    ? toStr(canonicalArxivId)
+        .replace(/^arxiv:\s*/i, '')
+        .replace(/\s*\[.*?\]\s*$/, '')
+        .trim()
+    : '';
+  it.arxivId = cleanArxiv;
+  it.archiveId = cleanArxiv
+    ? it.itemType === 'preprint'
+      ? `arXiv:${cleanArxiv.replace(/v\d+$/i, '')}`
+      : cleanArxiv
+    : it.archiveId || '';
+  it.archiveID = it.archiveID || it.archiveId;
+
+  // Sync non-column Zotero v42 fields into extraFields
+  if (it.extraFields && typeof it.extraFields === 'object') {
+    for (const fieldKey of TYPE_SPECIFIC_EXTRA_FIELDS) {
+      const topVal = it[fieldKey];
+      if (
+        topVal !== undefined &&
+        topVal !== null &&
+        topVal !== '' &&
+        it.extraFields[fieldKey] === undefined
+      ) {
+        it.extraFields[fieldKey] = topVal;
+      }
+    }
+    if (baseMap) {
+      for (const mappedField of Object.values(baseMap)) {
+        const topVal = it[mappedField];
+        if (
+          mappedField &&
+          topVal !== undefined &&
+          topVal !== null &&
+          topVal !== '' &&
+          !ITEM_COLUMN_METADATA_FIELDS.has(mappedField) &&
+          it.extraFields[mappedField] === undefined
+        ) {
+          it.extraFields[mappedField] = topVal;
+        }
+      }
+    }
+  }
+
+  if (!Array.isArray(it.identifiers) || it.identifiers.length === 0) {
+    const idDefs: ReadonlyArray<{
+      type: string;
+      val: string | null | undefined;
+      uri: (v: string) => string;
+    }> = [
+      { type: 'doi', val: it.doi, uri: (v) => `https://doi.org/${v}` },
+      {
+        type: 'arxiv',
+        val: it.arxivId,
+        uri: (v) => `https://arxiv.org/abs/${v}`,
+      },
+      {
+        type: 'pmid',
+        val: it.pmid,
+        uri: (v) => `https://pubmed.ncbi.nlm.nih.gov/${v}/`,
+      },
+      {
+        type: 'pmcid',
+        val: it.pmcid,
+        uri: (v) => `https://pmc.ncbi.nlm.nih.gov/articles/${v}/`,
+      },
+      { type: 'isbn', val: it.isbn, uri: (v) => `urn:isbn:${v}` },
+      { type: 'issn', val: it.issn, uri: (v) => `urn:issn:${v}` },
+    ];
+    it.identifiers = idDefs
+      .filter((d): d is typeof d & { val: string } => Boolean(d.val))
+      .map((d) => ({
+        type: d.type,
+        value: d.val,
+        canonicalUri: d.uri(d.val),
+      }));
+  }
+}

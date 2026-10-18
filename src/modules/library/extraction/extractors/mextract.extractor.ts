@@ -1,4 +1,5 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { ItemMetadata } from '@/modules/library/core';
 import {
   cleanAuthorName,
@@ -27,8 +28,7 @@ export interface MeXtractResult {
 @Injectable()
 export class MeXtractExtractor {
   private static readonly logger = new Logger(MeXtractExtractor.name);
-  public static readonly MODEL_NAME =
-    process.env.MEXTRACT_MODEL_NAME || 'Xenova/Qwen2.5-0.5B-Instruct';
+  public static readonly MODEL_NAME = libraryConfig().mextract.modelName;
   public static readonly MAX_INPUT_CHARS = 3500;
   private static readonly MAX_CONCURRENT_ONNX = 2;
 
@@ -72,7 +72,7 @@ Return ONLY valid JSON without markdown fences.`;
     const timeoutMs = options?.timeoutMs ?? 1500;
 
     // 1. Optional dedicated external SLM microservice (MEXTRACT_API_URL or MEXTRACT_URL)
-    const slmApiUrl = process.env.MEXTRACT_API_URL || process.env.MEXTRACT_URL;
+    const slmApiUrl = libraryConfig().mextract.apiUrl;
     if (slmApiUrl) {
       try {
         const response = await fetch(`${slmApiUrl}/v1/mextract/extract`, {
@@ -87,7 +87,7 @@ Return ONLY valid JSON without markdown fences.`;
         });
 
         if (response.ok) {
-          const json = await response.json();
+          const json = (await response.json()) as Record<string, unknown>;
           const durationMs = Math.round((performance.now() - start) * 10) / 10;
           const normalized = this.normalizeModelOutput(json);
           if (normalized) {
@@ -230,8 +230,22 @@ Return ONLY valid JSON without markdown fences.`;
     if (!this.pipelinePromise) {
       this.pipelinePromise = (async () => {
         try {
+          type OnnxPipelineFn = (
+            prompt: string,
+            options?: Record<string, unknown>,
+          ) => Promise<Array<{ generated_text?: string }>>;
+          interface XenovaModule {
+            pipeline: (
+              task: string,
+              model: string,
+              opts: { quantized: boolean },
+            ) => Promise<OnnxPipelineFn>;
+            env: { allowLocalModels: boolean };
+          }
           // eslint-disable-next-line @typescript-eslint/no-implied-eval
-          const dynamicImport = new Function('s', 'return import(s)');
+          const dynamicImport = new Function('s', 'return import(s)') as (
+            s: string,
+          ) => Promise<XenovaModule>;
           const { pipeline, env } = await dynamicImport('@xenova/transformers');
           env.allowLocalModels = true;
           return await pipeline('text-generation', this.MODEL_NAME, {
@@ -272,8 +286,11 @@ Return ONLY valid JSON without markdown fences.`;
           cleanAuthorName(
             typeof a === 'string'
               ? a
-              : typeof a === 'object' && a !== null && 'name' in a
-                ? String(a.name || '')
+              : typeof a === 'object' &&
+                  a !== null &&
+                  'name' in a &&
+                  typeof a.name === 'string'
+                ? a.name
                 : '',
           ),
         )

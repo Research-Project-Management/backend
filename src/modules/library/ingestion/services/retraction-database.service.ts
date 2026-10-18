@@ -44,10 +44,9 @@ export class RetractionDatabaseService implements OnModuleInit {
 
   onModuleInit(): void {
     // Non-blocking initialization of seed data and memory cache
-    this.initializeDataset().catch((err) => {
-      this.logger.warn(
-        `Failed to initialize Retraction Watch dataset: ${err.message}`,
-      );
+    this.initializeDataset().catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to initialize Retraction Watch dataset: ${msg}`);
     });
   }
 

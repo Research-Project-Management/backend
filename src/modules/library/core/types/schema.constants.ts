@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Official Zotero Bibliographic Item-Type Definitions — Schema v42
  * Canonical Ground Truth for the Flux Library Domain, dynamically loaded from official
  * api.zotero.org/schema specifications. Eliminates manual maintenance and guesswork.
@@ -327,7 +327,7 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
         )) {
           if (Array.isArray(zoteroFields)) {
             for (const zf of zoteroFields) {
-              if (!cslFieldMap[zf]) {
+              if (typeof zf === 'string' && !cslFieldMap[zf]) {
                 cslFieldMap[zf] = cslField;
               }
             }

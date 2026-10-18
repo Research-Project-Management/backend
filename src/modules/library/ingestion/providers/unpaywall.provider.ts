@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   MetadataProvider,
@@ -8,7 +8,12 @@ import {
   ProviderResult,
   QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { normalizeDoi } from '@/modules/library/core';
+import {
+  normalizeDoi,
+  AcademicHttpClient,
+  LibraryConfigService,
+  libraryConfig,
+} from '@/modules/library/core';
 import { ProviderFetchError } from '@/modules/library/ingestion/services/metadata-executor.service';
 import {
   getAcademicContactEmail,
@@ -25,15 +30,33 @@ export class UnpaywallProvider implements MetadataProvider {
     maxConcurrency: 2,
   };
 
-  private readonly BASE_URL =
-    process.env.UNPAYWALL_API_URL || 'https://api.unpaywall.org/v2';
+  constructor(
+    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() private readonly configService?: LibraryConfigService,
+  ) {}
 
-  private get email(): string {
-    return process.env.UNPAYWALL_EMAIL || getAcademicContactEmail();
+  private get baseUrl(): string {
+    return (
+      this.configService?.providers.unpaywallBaseUrl ??
+      libraryConfig().providers.unpaywallBaseUrl
+    );
   }
 
-  supports(queryType: QueryType): boolean {
-    return this.capabilities.queryTypes.includes(queryType);
+  private get email(): string {
+    return (
+      this.configService?.providers.unpaywallEmail ??
+      libraryConfig().providers.unpaywallEmail ??
+      getAcademicContactEmail()
+    );
+  }
+
+  supports(input: QueryType | MetadataRequest): boolean {
+    const type = typeof input === 'string' ? input : input?.queryType;
+    return type ? this.capabilities.queryTypes.includes(type) : false;
+  }
+
+  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
+    return this.resolve(request);
   }
 
   async resolve(
@@ -43,15 +66,16 @@ export class UnpaywallProvider implements MetadataProvider {
     const cleanDoi = normalizeDoi(request.query);
     if (!cleanDoi) return null;
 
-    const url = `${this.BASE_URL}/${encodeURIComponent(cleanDoi)}?email=${encodeURIComponent(this.email)}`;
+    const url = `${this.baseUrl}/${encodeURIComponent(cleanDoi)}?email=${encodeURIComponent(this.email)}`;
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': getAcademicUserAgent('Unpaywall'),
-        Accept: 'application/json',
-      },
-      signal,
-    });
+    const headers = {
+      'User-Agent': getAcademicUserAgent('Unpaywall'),
+      Accept: 'application/json',
+    };
+
+    const response = this.httpClient
+      ? (await this.httpClient.request(url, { headers, signal })).response
+      : await fetch(url, { headers, signal });
 
     if (response.status === 404) return null;
 

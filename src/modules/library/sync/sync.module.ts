@@ -10,6 +10,7 @@ import { TransactionService as SharedTransactionService } from '@/modules/librar
 import { TransactionService } from './services/transaction.service';
 import { ChangeLogRepository } from './repositories/changelog.repository';
 import { ChangeLogService } from './services/changelog.service';
+import { OutboxRepository } from './repositories/outbox.repository';
 import { OutboxWorker } from './services/outbox.worker';
 import { OutboxDispatcher } from './services/outbox.dispatcher';
 import { IntegrationEventBusService } from './services/integration-event-bus.service';
@@ -57,6 +58,7 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
     },
     ChangeLogRepository,
     ChangeLogService,
+    OutboxRepository,
     OutboxWorker,
     {
       provide: OUTBOX_REGISTRY_PORT,
@@ -73,6 +75,7 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
     SharedTransactionService,
     ChangeLogRepository,
     ChangeLogService,
+    OutboxRepository,
     OutboxWorker,
     OUTBOX_REGISTRY_PORT,
     OutboxDispatcher,

@@ -13,6 +13,9 @@ import {
   normalizeDoi,
   normalizePageRange,
   parseCreatorString,
+  AcademicHttpClient,
+  LibraryConfigService,
+  libraryConfig,
 } from '@/modules/library/core';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
@@ -35,15 +38,27 @@ export class DblpProvider implements MetadataProvider {
   };
 
   private readonly logger = new Logger(DblpProvider.name);
-  private readonly BASE_URL =
-    process.env.DBLP_API_URL || 'https://dblp.org/search/publ/api';
 
   constructor(
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
+    @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
-  supports(queryType: QueryType): boolean {
-    return this.capabilities.queryTypes.includes(queryType);
+  private get baseUrl(): string {
+    return (
+      this.configService?.providers.dblpBaseUrl ??
+      libraryConfig().providers.dblpBaseUrl
+    );
+  }
+
+  supports(input: QueryType | MetadataRequest): boolean {
+    const type = typeof input === 'string' ? input : input?.queryType;
+    return type ? this.capabilities.queryTypes.includes(type) : false;
+  }
+
+  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
+    return this.resolve(request);
   }
 
   async resolve(
@@ -57,7 +72,7 @@ export class DblpProvider implements MetadataProvider {
     const isDoiQuery = Boolean(cleanDoi) || request.queryType === 'DOI';
 
     const searchQuery = isDoiQuery && cleanDoi ? `doi:${cleanDoi}` : rawQuery;
-    const url = `${this.BASE_URL}?q=${encodeURIComponent(searchQuery)}&format=json&h=3`;
+    const url = `${this.baseUrl}?q=${encodeURIComponent(searchQuery)}&format=json&h=3`;
 
     if (this.rateLimiter) {
       await this.rateLimiter.acquire('dblp', signal);
@@ -65,13 +80,13 @@ export class DblpProvider implements MetadataProvider {
 
     let response: Response;
     try {
-      response = await fetch(url, {
-        headers: {
-          'User-Agent': getAcademicUserAgent('Dblp'),
-          Accept: 'application/json, text/json',
-        },
-        signal,
-      });
+      const headers = {
+        'User-Agent': getAcademicUserAgent('Dblp'),
+        Accept: 'application/json, text/json',
+      };
+      response = this.httpClient
+        ? (await this.httpClient.request(url, { headers, signal })).response
+        : await fetch(url, { headers, signal });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.debug(`DBLP fetch skipped/failed non-fatally: ${message}`);
@@ -155,17 +170,20 @@ export class DblpProvider implements MetadataProvider {
       parseCreatorString(a, idx, 'author'),
     );
 
+    const toStr = (v: unknown) =>
+      typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
+
     // 3. Year
     let year: number | undefined;
     if (info.year) {
-      const parsedYear = parseInt(String(info.year).trim(), 10);
+      const parsedYear = parseInt(toStr(info.year), 10);
       if (!isNaN(parsedYear) && parsedYear >= 1900 && parsedYear <= 2100) {
         year = parsedYear;
       }
     }
 
     // 4. Item Type & Venue
-    const rawType = String(info.type || '').toLowerCase();
+    const rawType = toStr(info.type).toLowerCase();
     const venue =
       typeof info.venue === 'string' ? info.venue.trim() : undefined;
     const isConference =
@@ -174,11 +192,10 @@ export class DblpProvider implements MetadataProvider {
     const itemType = isConference ? 'conferencePaper' : 'journalArticle';
     const doi =
       typeof info.doi === 'string' ? normalizeDoi(info.doi) : undefined;
-    const pages = info.pages
-      ? normalizePageRange(String(info.pages))
-      : undefined;
-    const volume = info.volume ? String(info.volume).trim() : undefined;
-    const issue = info.number ? String(info.number).trim() : undefined;
+    const pagesStr = toStr(info.pages);
+    const pages = pagesStr ? normalizePageRange(pagesStr) : undefined;
+    const volume = toStr(info.volume) || undefined;
+    const issue = toStr(info.number) || undefined;
     const url =
       typeof info.ee === 'string'
         ? info.ee

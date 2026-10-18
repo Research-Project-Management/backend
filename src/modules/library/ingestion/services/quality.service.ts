@@ -63,7 +63,7 @@ export class QualityService {
 
     // Check title (Core: 25 pts)
     const hasTitle = Boolean(
-      item.title && String(item.title).trim().length > 0,
+      typeof item.title === 'string' && item.title.trim().length > 0,
     );
     if (hasTitle) {
       totalScore += 25;
@@ -140,7 +140,7 @@ export class QualityService {
       item.extra.trim().startsWith('{')
     ) {
       try {
-        extraFields = JSON.parse(item.extra);
+        extraFields = JSON.parse(item.extra) as Record<string, unknown>;
       } catch {
         // ignore
       }
