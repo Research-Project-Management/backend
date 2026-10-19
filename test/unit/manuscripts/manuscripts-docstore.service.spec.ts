@@ -18,8 +18,8 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@/core';
 import {
   DocstoreService,
-  PrismaDocRepository,
-  S3DocPersistorAdapter,
+  DocstoreRepository,
+  DocArchiveRepository,
   DocHasherAdapter,
   IDocRepository,
   IDocPersistor,
@@ -161,11 +161,11 @@ describe('Manuscripts - Docstore Subsystem (Overleaf Parity)', () => {
         DocstoreService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ConfigService, useValue: mockConfigService },
-        { provide: IDocRepository, useClass: PrismaDocRepository },
-        { provide: IDocPersistor, useClass: S3DocPersistorAdapter },
+        { provide: IDocRepository, useClass: DocstoreRepository },
+        { provide: IDocPersistor, useClass: DocArchiveRepository },
         { provide: IDocHasher, useClass: DocHasherAdapter },
-        PrismaDocRepository,
-        S3DocPersistorAdapter,
+        DocstoreRepository,
+        DocArchiveRepository,
         DocHasherAdapter,
       ],
     }).compile();

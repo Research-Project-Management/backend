@@ -5,6 +5,7 @@
 
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
+import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
 import { StructureController } from './structure.controller';
 import { StructureService } from './structure.service';
@@ -12,7 +13,7 @@ import { StructureRepository } from './structure.repository';
 import { IStructureRepository } from './domain';
 
 @Module({
-  imports: [PrismaModule, FilestoreModule],
+  imports: [PrismaModule, DocstoreModule, FilestoreModule],
   controllers: [StructureController],
   providers: [
     StructureService,

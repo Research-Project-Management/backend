@@ -802,7 +802,7 @@ describe('Global Notifications & Mentions Subsystem', () => {
         expect(notif.userId).toBe('target-author');
         expect(notif.type).toBe('mention');
         expect(notif.messageOpts.snippet).toBe('Please verify lemma 1');
-        expect(notif.key).toBe('comment-mention-c-1-target-author');
+        expect(notif.key).toBe('comment-mention-th-1-c-1-target-author');
       });
 
       it('should dispatch comment reply via specialized submodule service', async () => {
@@ -819,18 +819,28 @@ describe('Global Notifications & Mentions Subsystem', () => {
 
         expect(notif.userId).toBe('thread-starter');
         expect(notif.type).toBe('comment_reply');
-        expect(notif.key).toBe('comment-reply-rep-9-thread-starter');
+        expect(notif.key).toBe('comment-reply-th-1-rep-9-thread-starter');
       });
 
       it('should dispatch thread resolved and dismiss notifications', async () => {
-        // Create a mention first
+        // Create a mention and a reply first
         await service.manuscripts!.notifyCommentMention({
           recipientUserId: 'target-author',
           actorId: 'commenter-1',
           actorName: 'Bob',
           projectId: 'p-1',
           threadId: 'th-resolve-test',
+          commentId: 'c-resolve-test',
           snippet: 'test',
+        });
+        await service.manuscripts!.notifyCommentReply({
+          recipientUserId: 'thread-starter',
+          actorId: 'replier-1',
+          actorName: 'Alice',
+          projectId: 'p-1',
+          threadId: 'th-resolve-test',
+          replyId: 'rep-resolve-test',
+          snippet: 'reply test',
         });
 
         const notif = await service.manuscripts!.notifyThreadResolved({
@@ -845,12 +855,12 @@ describe('Global Notifications & Mentions Subsystem', () => {
 
         expect(notif.type).toBe('thread_resolved');
 
-        // Dismiss thread mentions
+        // Dismiss thread mentions & replies
         const dismissedCount =
           await service.manuscripts!.dismissThreadNotifications(
             'th-resolve-test',
           );
-        expect(dismissedCount).toBe(1);
+        expect(dismissedCount).toBe(2);
       });
     });
 

@@ -15,8 +15,6 @@ export interface EngineDetectionResult {
   bibProgramHint?: 'biber' | 'bibtex';
   /** Detected constructs for user advisory diagnostics; never used to enable shell escape. */
   shellEscapeAdvisories?: string[];
-  /** @deprecated Advisory only. */
-  requiresShellEscape?: boolean;
 }
 
 export class TexEngineDetector {
@@ -36,7 +34,6 @@ export class TexEngineDetector {
     const shellEscapeAdvisories = DraftModeManager.detectShellEscapeUsage(
       source || '',
     );
-    const requiresShellEscape = shellEscapeAdvisories.length > 0;
 
     if (requestedEngine && requestedEngine !== 'auto') {
       const normalized = requestedEngine.toLowerCase();
@@ -50,7 +47,6 @@ export class TexEngineDetector {
           engine: normalized,
           detectedFrom: 'explicit',
           shellEscapeAdvisories,
-          requiresShellEscape,
         };
       }
     }
@@ -60,7 +56,6 @@ export class TexEngineDetector {
         engine: 'pdflatex',
         detectedFrom: 'default',
         shellEscapeAdvisories: [],
-        requiresShellEscape: false,
       };
     }
 
@@ -100,7 +95,6 @@ export class TexEngineDetector {
         mainFileHint,
         bibProgramHint,
         shellEscapeAdvisories,
-        requiresShellEscape,
       };
     }
 
@@ -114,7 +108,6 @@ export class TexEngineDetector {
         mainFileHint,
         bibProgramHint,
         shellEscapeAdvisories,
-        requiresShellEscape,
       };
     }
 
@@ -128,7 +121,6 @@ export class TexEngineDetector {
         mainFileHint,
         bibProgramHint,
         shellEscapeAdvisories,
-        requiresShellEscape,
       };
     }
 
@@ -138,7 +130,6 @@ export class TexEngineDetector {
       mainFileHint,
       bibProgramHint,
       shellEscapeAdvisories,
-      requiresShellEscape,
     };
   }
 

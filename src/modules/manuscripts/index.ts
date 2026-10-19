@@ -5,6 +5,7 @@
  */
 
 export * from './manuscripts.module';
+export * from './manuscripts.facade';
 export * from './core';
 
 // Subsystems
@@ -12,7 +13,6 @@ export * from './clsi';
 export * from './docstore';
 export * from './structure';
 export * from './filestore';
-export * from './document-updater';
 export * from './project-history';
 export * from './track-changes';
 export * from './export-import';
@@ -21,5 +21,4 @@ export * from './citations';
 export * from './spelling';
 export * from './templates';
 export * from './linked-files';
-export { escapeLatex } from './citations';
-export { TemplateNotFoundException } from './templates';
+export * from './git-bridge';

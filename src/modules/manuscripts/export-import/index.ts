@@ -11,6 +11,10 @@ export * from './dto/export-import.dto';
 // Repositories
 export * from './repositories/manuscript-aggregator.repository';
 
+// Services & Adapters
+export { PkzipEngineAdapter } from './services/pkzip-engine.adapter';
+export { DocumentTranspilerAdapter } from './services/document-transpiler.adapter';
+
 // Domain (Pure in-process computation, validation, & ports)
 export {
   ArchiveEntryVo,
@@ -20,35 +24,35 @@ export {
   isArxivAllowed,
   validateExtractedArchiveEntries,
   ImportSummaryVo,
-  ProjectTemplate,
   ArchiveManifest,
   InvalidZipArchiveException,
   ZipSlipSecurityException,
   ArchiveSizeExceededException,
-  TemplateNotFoundException as ProjectArchiveTemplateNotFoundException,
-  TemplateNotFoundException,
   IZipEnginePort,
   IManuscriptAggregatorPort,
   IManuscriptHydratorPort,
-  ITemplateCatalogPort,
   IDocumentTranspilerPort,
-  PkzipEngineAdapter,
   MAX_UNCOMPRESSED_PROJECT_BYTES,
   MAX_PROJECT_ENTRY_COUNT,
-  DocumentTranspilerAdapter,
-  DocumentTranspiler,
   escapeLatex,
   unescapeXml,
+  escapeXml,
+  convertLatexToMarkdown,
+  convertLatexToHtml,
+  buildMinimalZip,
+  convertLatexToDocxBuffer,
+  resolveIncludedLatexContent,
+  transpileLatexDocumentForExport,
+  LatexExportTranspiler,
 } from './domain';
 export type {
   EntryStorageType,
   ArchiveEntryProps,
   ArchiveManifestProps,
-  TemplateFileSpec,
-  CreateProjectTemplateProps,
-  TemplateSummaryProps,
   ImportSummaryProps,
   RawZipEntryInput,
   ExportableFileEntry,
   TranspiledProjectResult,
+  IncludedProjectDoc,
+  ExportFormattedDocResult,
 } from './domain';

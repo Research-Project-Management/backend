@@ -28,8 +28,8 @@ import { PrismaService } from '@/core';
 // Docstore Subsystem
 import {
   DocstoreService,
-  PrismaDocRepository,
-  S3DocPersistorAdapter,
+  DocstoreRepository,
+  DocArchiveRepository,
   DocHasherAdapter,
   IDocRepository,
   IDocPersistor,
@@ -43,7 +43,6 @@ import {
 // Track Changes Subsystem
 import {
   TextRangeVo,
-  ChangeMetadataVo,
   TrackChange,
   CommentReply,
   CommentThread,
@@ -62,7 +61,6 @@ import {
   CreateNodeParams,
   StructureService,
   HeuristicRootDocDetector,
-  InMemoryTreePublisher,
 } from '@/modules/manuscripts/structure';
 
 // CLSI & Diagnostics Subsystem
@@ -72,10 +70,8 @@ import {
   TexWordCounter,
 } from '@/modules/manuscripts/clsi';
 import {
-  TexParenTreeLogParser,
-  TectonicLogParser,
-  KnowledgeBaseExplainerAdapter,
-  ParseCompileLogUseCase,
+  CompileLogAnalyzer,
+  ErrorKnowledgeBase,
 } from '@/modules/manuscripts/diagnostics';
 
 // ---------------------------------------------------------------------------
@@ -621,11 +617,11 @@ describe('Multi-User Collaborative Simulation & Full-Scale Stress Test', () => {
         DocstoreService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ConfigService, useValue: mockConfigService },
-        { provide: IDocRepository, useClass: PrismaDocRepository },
-        { provide: IDocPersistor, useClass: S3DocPersistorAdapter },
+        { provide: IDocRepository, useClass: DocstoreRepository },
+        { provide: IDocPersistor, useClass: DocArchiveRepository },
         { provide: IDocHasher, useClass: DocHasherAdapter },
-        PrismaDocRepository,
-        S3DocPersistorAdapter,
+        DocstoreRepository,
+        DocArchiveRepository,
         DocHasherAdapter,
       ],
     }).compile();
@@ -634,13 +630,7 @@ describe('Multi-User Collaborative Simulation & Full-Scale Stress Test', () => {
 
     // Structure setup
     structureRepo = new InMemoryStructureRepo();
-    const treePublisher = new InMemoryTreePublisher();
-    structureService = new StructureService(
-      structureRepo,
-      undefined,
-      undefined,
-      treePublisher as any,
-    );
+    structureService = new StructureService(structureRepo);
     createNodeUseCase = {
       execute: (projectId, dto) => structureService.createNode(projectId, dto),
     };
@@ -1365,13 +1355,8 @@ Baseline accuracy achieved 87.4\\%.`;
     });
 
     it('Scenario 4.5: Catastrophic LaTeX Compiler Storm (150+ errors, warnings, badboxes) parsed in < 30ms', () => {
-      const explainer = new KnowledgeBaseExplainerAdapter();
-      const texParser = new TexParenTreeLogParser(explainer);
-      const tectonicParser = new TectonicLogParser(explainer);
-      const parseUseCase = new ParseCompileLogUseCase(
-        texParser,
-        tectonicParser,
-      );
+      const explainer = new ErrorKnowledgeBase();
+      const analyzer = new CompileLogAnalyzer(explainer);
 
       // Construct a catastrophic 1,500-line LaTeX compiler log simulating severe syntax collapse
       const logLines: string[] = [
@@ -1406,11 +1391,11 @@ Baseline accuracy achieved 87.4\\%.`;
       const rawCatastrophicLog = logLines.join('\n');
 
       const t0 = performance.now();
-      const report = parseUseCase.execute({
-        logText: rawCatastrophicLog,
-        defaultFile: 'main.tex',
-        engine: 'tex',
-      });
+      const report = analyzer.analyzeLog(
+        rawCatastrophicLog,
+        'main.tex',
+        'tex',
+      );
       const elapsed = performance.now() - t0;
 
       expect(

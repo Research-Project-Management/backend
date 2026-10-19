@@ -46,15 +46,7 @@ import {
 
 @ApiTags('Manuscripts Diagnostics')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/manuscripts/diagnostics',
-  'v1/manuscripts/diagnostics',
-  'manuscripts/diagnostics',
-  'api/v1/manuscripts/projects',
-  'v1/manuscripts/projects',
-  'manuscripts/projects',
-  'projects',
-])
+@Controller('api/v1/manuscripts/diagnostics')
 @UseGuards(JwtAuthGuard)
 export class DiagnosticsController {
   private readonly logger = new Logger(DiagnosticsController.name);
@@ -84,26 +76,7 @@ export class DiagnosticsController {
       const msg = err instanceof Error ? err.message : String(err);
       const stack = err instanceof Error ? err.stack : undefined;
       this.logger.error(`Failed to parse compilation log: ${msg}`, stack);
-      return {
-        id: `report-${Date.now()}`,
-        isSuccess: false,
-        errorsCount: 1,
-        warningsCount: 0,
-        badboxesCount: 0,
-        infoCount: 0,
-        totalCount: 1,
-        items: [
-          {
-            id: `diag-parse-err-${Date.now()}`,
-            file: dto.defaultFile || 'main.tex',
-            line: 1,
-            column: null,
-            severity: 'error',
-            code: 'PARSE_ERROR',
-            message: 'Log parser error: Unable to parse compilation log',
-          },
-        ],
-      };
+      throw err;
     }
   }
 
@@ -118,7 +91,7 @@ export class DiagnosticsController {
     return this.diagnosticsService.lintDocument(dto);
   }
 
-  @Post([':projectId/lint', 'project/:projectId/lint'])
+  @Post('projects/:projectId/lint')
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
@@ -129,10 +102,11 @@ export class DiagnosticsController {
   @ApiResponse({ status: 200, type: DiagnosticReportDto })
   public async lintProject(
     @Param('projectId') routeProjectId: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ): Promise<DiagnosticReportDto> {
-    const projectId = project?.id || routeProjectId;
-    return await this.diagnosticsService.lintProject(projectId);
+    const targetProjectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
+    return await this.diagnosticsService.lintProject(targetProjectId);
   }
 
   @Post('autofix')
@@ -144,23 +118,6 @@ export class DiagnosticsController {
   })
   @ApiResponse({ status: 200, type: AutoFixResponseDto })
   public autoFixDocument(@Body() dto: AutoFixRequestDto): AutoFixResponseDto {
-    return this.diagnosticsService.autoFix(dto.source);
-  }
-
-  @Post([':projectId/autofix', 'project/:projectId/autofix'])
-  @UseGuards(ProjectAccessGuard)
-  @RequireRole(Role.CONTRIBUTOR)
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary:
-      'Automatically repair common LaTeX syntax errors within a project context',
-  })
-  @ApiResponse({ status: 200, type: AutoFixResponseDto })
-  public autoFixProjectDocument(
-    @Param('projectId') routeProjectId: string,
-    @Body() dto: AutoFixRequestDto,
-    @ResolvedProject() project?: { id: string },
-  ): AutoFixResponseDto {
     return this.diagnosticsService.autoFix(dto.source);
   }
 

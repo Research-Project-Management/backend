@@ -6,6 +6,5 @@
 export * from './diagnostics.module';
 export * from './diagnostics.service';
 export * from './diagnostics.controller';
-export * from './diagnostics.repository';
 export * from './dto/diagnostics.dto';
 export * from './domain';

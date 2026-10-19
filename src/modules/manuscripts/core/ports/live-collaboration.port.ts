@@ -39,4 +39,13 @@ export abstract class LiveCollaborationPort {
    * @returns ids of docs that had an active live session and were flushed.
    */
   abstract flushDocs(projectId: string, docIds: string[]): Promise<string[]>;
+
+  /**
+   * Flushes a single in-memory live session for the given doc to Docstore.
+   */
+  flushDoc(projectId: string, docId: string): Promise<string[]> {
+    return this.flushDocs(projectId, [docId]);
+  }
 }
+
+export const LIVE_COLLABORATION_PORT = LiveCollaborationPort;

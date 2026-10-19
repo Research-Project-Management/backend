@@ -49,12 +49,7 @@ interface RequestWithUser {
 
 @ApiTags('Manuscripts - Spelling & Dictionaries')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/manuscripts/projects/:projectId/spelling',
-  'v1/manuscripts/projects/:projectId/spelling',
-  'manuscripts/projects/:projectId/spelling',
-  'projects/:projectId/spelling',
-])
+@Controller('api/v1/manuscripts/projects/:projectId/spelling')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class SpellingController {
@@ -78,17 +73,18 @@ export class SpellingController {
   @ApiResponse({ status: 200, type: SpellingReportDto })
   @ApiResponse({ status: 400, description: 'Unsupported language' })
   async checkSpelling(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string,
     @Body() dto: CheckSpellingDto,
     @Req() req: RequestWithUser,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ): Promise<SpellingReportDto> {
     try {
       const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
       if (!userId) {
         throw new UnauthorizedException('Authentication required');
       }
-      const targetProjectId = project?.id || projectId;
+      const targetProjectId =
+        (typeof project === 'string' ? project : project?.id) || routeProjectId;
       return await this.spellingService.checkDocumentSpelling(
         targetProjectId,
         userId,
@@ -103,9 +99,12 @@ export class SpellingController {
   @ApiOperation({ summary: 'List custom words learned in this project' })
   @ApiResponse({ status: 200, type: CustomDictionaryResponseDto })
   async listProjectDictionary(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string,
+    @ResolvedProject() project?: string | { id?: string },
   ): Promise<CustomDictionaryResponseDto> {
-    return this.spellingService.listProjectWords(projectId);
+    const targetProjectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
+    return this.spellingService.listProjectWords(targetProjectId);
   }
 
   @Post('dictionary/learn')
@@ -114,11 +113,14 @@ export class SpellingController {
   @ApiOperation({ summary: 'Add a custom word to the project dictionary' })
   @ApiResponse({ status: 200, description: 'Word added to project dictionary' })
   async learnProjectWord(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string,
     @Body() dto: LearnWordDto,
+    @ResolvedProject() project?: string | { id?: string },
   ) {
     try {
-      await this.spellingService.learnProjectWord(projectId, dto.word);
+      const targetProjectId =
+        (typeof project === 'string' ? project : project?.id) || routeProjectId;
+      await this.spellingService.learnProjectWord(targetProjectId, dto.word);
       return { success: true, word: dto.word };
     } catch (err) {
       this.handleError(err);
@@ -130,11 +132,14 @@ export class SpellingController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Remove a custom word from the project dictionary' })
   async unlearnProjectWord(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string,
     @Param('word') word: string,
+    @ResolvedProject() project?: string | { id?: string },
   ) {
+    const targetProjectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
     const removed = await this.spellingService.unlearnProjectWord(
-      projectId,
+      targetProjectId,
       word,
     );
     return { success: true, removed, word };
@@ -143,12 +148,7 @@ export class SpellingController {
 
 @ApiTags('Manuscripts - Spelling & Dictionaries')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/manuscripts/spelling',
-  'v1/manuscripts/spelling',
-  'manuscripts/spelling',
-  'spelling',
-])
+@Controller('api/v1/manuscripts/spelling')
 @UseGuards(JwtAuthGuard)
 @NoProjectContext()
 export class SpellingUtilityController {

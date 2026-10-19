@@ -46,7 +46,6 @@ import {
 } from './dto/citations.dto';
 import {
   IdentifierNotFoundException,
-  DuplicateCitationKeyException,
   InvalidBibtexException,
 } from './domain';
 
@@ -57,12 +56,7 @@ interface RequestWithUser {
 
 @ApiTags('Manuscripts - Citations & Bibliography')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/manuscripts/projects/:projectId/citations',
-  'v1/manuscripts/projects/:projectId/citations',
-  'manuscripts/projects/:projectId/citations',
-  'projects/:projectId/citations',
-])
+@Controller('api/v1/manuscripts/projects/:projectId/citations')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class CitationsController {
@@ -71,9 +65,6 @@ export class CitationsController {
   private handleError(error: unknown): never {
     if (error instanceof IdentifierNotFoundException) {
       throw new NotFoundException(error.message);
-    }
-    if (error instanceof DuplicateCitationKeyException) {
-      throw new ConflictException(error.message);
     }
     if (error instanceof InvalidBibtexException) {
       throw new BadRequestException(error.message);
@@ -89,12 +80,13 @@ export class CitationsController {
   })
   @ApiResponse({ status: 200, type: [BibEntryDto] })
   async searchCitationKeys(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string,
     @Query() queryDto: CitationQueryDto,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ): Promise<BibEntryDto[]> {
     try {
-      const targetProjectId = project?.id || projectId;
+      const targetProjectId =
+        (typeof project === 'string' ? project : project?.id) || routeProjectId;
       return await this.citationsService.searchCitationKeys(
         targetProjectId,
         queryDto,
@@ -120,12 +112,13 @@ export class CitationsController {
     description: 'Academic identifier not found or unsupported',
   })
   async resolveIdentifier(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string,
     @Body() dto: ResolveIdentifierDto,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ) {
     try {
-      const targetProjectId = project?.id || projectId;
+      const targetProjectId =
+        (typeof project === 'string' ? project : project?.id) || routeProjectId;
       return await this.citationsService.resolveIdentifier(
         targetProjectId,
         dto,
@@ -143,11 +136,12 @@ export class CitationsController {
   })
   @ApiResponse({ status: 200, type: CitationValidationDto })
   async validateBibtex(
-    @Param('projectId') projectId: string,
-    @ResolvedProject() project?: { id: string },
+    @Param('projectId') routeProjectId: string,
+    @ResolvedProject() project?: string | { id?: string },
   ): Promise<CitationValidationDto> {
     try {
-      const targetProjectId = project?.id || projectId;
+      const targetProjectId =
+        (typeof project === 'string' ? project : project?.id) || routeProjectId;
       return await this.citationsService.validateProjectBibtex(targetProjectId);
     } catch (err) {
       this.handleError(err);
@@ -162,17 +156,18 @@ export class CitationsController {
   })
   @ApiResponse({ status: 200, type: SyncLibraryResultDto })
   async syncLibrary(
-    @Param('projectId') projectId: string,
+    @Param('projectId') routeProjectId: string,
     @Body() dto: SyncLibraryDto,
     @Req() req: RequestWithUser,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ): Promise<SyncLibraryResultDto> {
     try {
       const userId = req?.user?.id || req?.user?.sub;
       if (!userId) {
         throw new UnauthorizedException('Authentication required');
       }
-      const targetProjectId = project?.id || projectId;
+      const targetProjectId =
+        (typeof project === 'string' ? project : project?.id) || routeProjectId;
       return await this.citationsService.syncLibraryCollection(
         targetProjectId,
         userId,
@@ -186,11 +181,7 @@ export class CitationsController {
 
 @ApiTags('Manuscripts - Citations & Bibliography')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/manuscripts/citations',
-  'manuscripts/citations',
-  'citations',
-])
+@Controller('api/v1/manuscripts/citations')
 @UseGuards(JwtAuthGuard)
 @NoProjectContext()
 export class CitationsUtilityController {

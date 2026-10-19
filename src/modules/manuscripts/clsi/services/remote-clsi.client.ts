@@ -9,14 +9,14 @@ import { RedisCacheService } from '@/core';
 import { CompileManuscriptDto } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import { SyncPoint, ReverseSyncPoint } from '../domain/clsi-ports';
-import { OverleafLogParser } from '../domain/overleaf-log.parser';
+import { CompileLogAnalyzer } from '@/modules/manuscripts/diagnostics/domain';
 import { CompilePipelineResult } from './compile-pipeline.service';
 
 @Injectable()
 export class RemoteClsiClientAdapter {
   private readonly logger = new Logger(RemoteClsiClientAdapter.name);
   private readonly remoteClsiUrl: string;
-  private readonly logParser = new OverleafLogParser();
+  private readonly logParser = new CompileLogAnalyzer();
 
   constructor(
     @Optional() private readonly configService?: ConfigService,
@@ -69,26 +69,6 @@ export class RemoteClsiClientAdapter {
       /* ignore artifact fetch errors */
     }
     return '';
-  }
-
-  public async compileViaRemoteClsi(
-    projectId: string,
-    mainFile: string,
-    source: string,
-    mergedFiles: Record<string, string | Buffer>,
-    dto: CompileManuscriptDto,
-    engine: string | undefined,
-    cacheKey: string,
-  ): Promise<CompilePipelineResult | null> {
-    return this.tryRemoteClsiCompile(
-      projectId,
-      mainFile,
-      source,
-      mergedFiles,
-      dto,
-      engine,
-      cacheKey,
-    );
   }
 
   public async tryRemoteClsiCompile(
@@ -299,5 +279,3 @@ export class RemoteClsiClientAdapter {
     return null;
   }
 }
-
-export { RemoteClsiClientAdapter as RemoteClsiClient };

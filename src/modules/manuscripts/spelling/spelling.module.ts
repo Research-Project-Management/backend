@@ -15,14 +15,8 @@ import {
 import { SpellingService } from './spelling.service';
 import { SpellingRepository } from './spelling.repository';
 
-// Ports & Adapters
-import {
-  LATEX_TOKENIZER_PORT,
-  SPELL_ENGINE_PORT,
-  CUSTOM_DICTIONARY_REPOSITORY_PORT,
-  RegexLatexTokenizerAdapter,
-  AcademicSpellEngineAdapter,
-} from './domain';
+// Domain
+import { LatexProseTokenizer, AcademicSpellEngine } from './domain';
 
 @Module({
   imports: [PrismaModule, DocstoreModule],
@@ -30,25 +24,14 @@ import {
   providers: [
     SpellingService,
     SpellingRepository,
-    {
-      provide: LATEX_TOKENIZER_PORT,
-      useClass: RegexLatexTokenizerAdapter,
-    },
-    {
-      provide: SPELL_ENGINE_PORT,
-      useClass: AcademicSpellEngineAdapter,
-    },
-    {
-      provide: CUSTOM_DICTIONARY_REPOSITORY_PORT,
-      useExisting: SpellingRepository,
-    },
+    LatexProseTokenizer,
+    AcademicSpellEngine,
   ],
   exports: [
     SpellingService,
     SpellingRepository,
-    LATEX_TOKENIZER_PORT,
-    SPELL_ENGINE_PORT,
-    CUSTOM_DICTIONARY_REPOSITORY_PORT,
+    LatexProseTokenizer,
+    AcademicSpellEngine,
   ],
 })
 export class SpellingModule {}

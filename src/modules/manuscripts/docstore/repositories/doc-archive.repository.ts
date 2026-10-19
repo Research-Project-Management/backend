@@ -61,6 +61,10 @@ export class InMemoryDocArchiveRepository implements IDocPersistor {
   public async deleteObject(key: string): Promise<void> {
     this.store.delete(key);
   }
+
+  public isDurableStorageConfigured(): boolean {
+    return true;
+  }
 }
 
 /**
@@ -68,19 +72,30 @@ export class InMemoryDocArchiveRepository implements IDocPersistor {
  */
 @Injectable()
 export class DocArchiveRepository implements IDocPersistor {
+  private static readonly MAX_IN_MEMORY_ENTRIES = 500;
   private readonly logger = new Logger(DocArchiveRepository.name);
   private readonly bucket: string;
   private readonly storageDir: string;
+  private readonly durableConfigured: boolean;
   private readonly inMemoryStore = new Map<
     string,
     { buffer: Buffer; md5: string }
   >();
 
   constructor(@Optional() private readonly configService?: ConfigService) {
-    this.bucket =
-      this.configService?.get<string>('S3_BUCKET_NAME') ||
-      'flux-docstore-archive';
-    this.storageDir = path.join(os.tmpdir(), 'flux-docstore-archive');
+    const configuredBucket = this.configService?.get<string>('S3_BUCKET_NAME');
+    const configuredDurable = this.configService?.get<string>(
+      'DOCSTORE_ARCHIVE_DURABLE',
+    );
+    const configuredDir = this.configService?.get<string>(
+      'DOCSTORE_ARCHIVE_DIR',
+    );
+    this.durableConfigured = Boolean(
+      configuredBucket || configuredDurable || configuredDir,
+    );
+    this.bucket = configuredBucket || 'flux-docstore-archive';
+    this.storageDir =
+      configuredDir || path.join(os.tmpdir(), 'flux-docstore-archive');
     try {
       fs.mkdirSync(this.storageDir, { recursive: true });
     } catch (err) {
@@ -88,6 +103,27 @@ export class DocArchiveRepository implements IDocPersistor {
         `Could not create archive directory ${this.storageDir}: ${err}`,
       );
     }
+  }
+
+  public isDurableStorageConfigured(): boolean {
+    return this.durableConfigured;
+  }
+
+  private setInMemoryItem(
+    key: string,
+    item: { buffer: Buffer; md5: string },
+  ): void {
+    if (this.inMemoryStore.has(key)) {
+      this.inMemoryStore.delete(key);
+    } else if (
+      this.inMemoryStore.size >= DocArchiveRepository.MAX_IN_MEMORY_ENTRIES
+    ) {
+      const oldestKey = this.inMemoryStore.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.inMemoryStore.delete(oldestKey);
+      }
+    }
+    this.inMemoryStore.set(key, item);
   }
 
   private resolveDiskPath(key: string): string {
@@ -119,7 +155,7 @@ export class DocArchiveRepository implements IDocPersistor {
       });
     }
 
-    this.inMemoryStore.set(key, { buffer, md5: actualMd5 });
+    this.setInMemoryItem(key, { buffer, md5: actualMd5 });
     try {
       const filePath = this.resolveDiskPath(key);
       await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
@@ -138,6 +174,9 @@ export class DocArchiveRepository implements IDocPersistor {
   ): Promise<{ buffer: Buffer; md5: string }> {
     const cached = this.inMemoryStore.get(key);
     if (cached) {
+      // Refresh LRU order
+      this.inMemoryStore.delete(key);
+      this.inMemoryStore.set(key, cached);
       return cached;
     }
 
@@ -146,7 +185,7 @@ export class DocArchiveRepository implements IDocPersistor {
       const buffer = await fs.promises.readFile(filePath);
       const md5 = computeContentMd5(buffer);
       const item = { buffer, md5 };
-      this.inMemoryStore.set(key, item);
+      this.setInMemoryItem(key, item);
       return item;
     } catch {
       throw new Error(`Archive object not found: ${key}`);
@@ -170,5 +209,4 @@ export class DocArchiveRepository implements IDocPersistor {
   }
 }
 
-export { DocArchiveRepository as S3DocPersistorAdapter };
 export { IDocPersistor } from '../domain';

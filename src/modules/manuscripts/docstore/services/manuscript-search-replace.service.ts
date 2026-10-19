@@ -12,14 +12,15 @@ import {
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { DocstoreService } from '../docstore.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { LiveCollaborationPort } from '@/modules/manuscripts/core';
 import {
-  LiveCollaborationPort,
   buildSearchRegex,
   replaceInText,
 } from '../domain';
+
 
 export interface SearchDocumentsParams {
   query: string;
@@ -38,10 +39,6 @@ export interface ReplaceDocumentsParams {
   wholeWord?: boolean;
   useRegex?: boolean;
 }
-
-const isUuid = (val?: string | null): val is string =>
-  typeof val === 'string' &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 @Injectable()
 export class ManuscriptSearchReplaceService {
@@ -84,6 +81,29 @@ export class ManuscriptSearchReplaceService {
     }
   }
 
+  private async getHydratedDocLines(
+    projectId: string,
+    doc: { id: string; lines: unknown; inStorage?: boolean },
+  ): Promise<string[]> {
+    if (doc.inStorage) {
+      try {
+        const hydrated = await this.docstoreService.getDoc(projectId, doc.id);
+        if (Array.isArray(hydrated.lines)) {
+          return hydrated.lines;
+        }
+      } catch {
+        // Fallback to raw lines if hydration fails
+      }
+    }
+    if (Array.isArray(doc.lines)) {
+      return doc.lines as string[];
+    }
+    if (typeof doc.lines === 'string') {
+      return doc.lines.split('\n');
+    }
+    return [];
+  }
+
   public async searchDocuments(projectId: string, body: SearchDocumentsParams) {
     const query = body?.query || '';
     if (!query || !isUuid(projectId)) {
@@ -114,7 +134,7 @@ export class ManuscriptSearchReplaceService {
       const [docs, rootNodes] = await Promise.all([
         this.prisma.manuscriptDoc.findMany({
           where,
-          select: { id: true, path: true, lines: true },
+          select: { id: true, path: true, lines: true, inStorage: true },
         }),
         this.prisma.manuscriptNode
           .findMany({
@@ -138,7 +158,7 @@ export class ManuscriptSearchReplaceService {
 
       for (const doc of docs) {
         if (truncated) break;
-        const lines = (doc.lines as string[]) || [];
+        const lines = await this.getHydratedDocLines(projectId, doc);
         const matches = [];
 
         for (let i = 0; i < lines.length; i++) {
@@ -240,7 +260,7 @@ export class ManuscriptSearchReplaceService {
 
     const docs = await this.prisma.manuscriptDoc.findMany({
       where: { id: { in: candidateIds } },
-      select: { id: true, lines: true, version: true },
+      select: { id: true, lines: true, version: true, inStorage: true },
     });
 
     let totalOccurrencesReplaced = 0;
@@ -248,9 +268,8 @@ export class ManuscriptSearchReplaceService {
     const failedFileIds: string[] = [];
 
     for (const doc of docs) {
-      const rawContent = Array.isArray(doc.lines)
-        ? (doc.lines as string[]).join('\n')
-        : String(doc.lines ?? '');
+      const docLines = await this.getHydratedDocLines(projectId, doc);
+      const rawContent = docLines.join('\n');
       const { text: newContent, count } = replaceInText(
         rawContent,
         query,

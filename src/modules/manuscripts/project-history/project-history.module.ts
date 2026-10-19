@@ -8,13 +8,11 @@ import { PrismaModule } from '@/core';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
-import { DocumentUpdaterModule } from '@/modules/manuscripts/document-updater/document-updater.module';
 
 import { ProjectHistoryController } from './project-history.controller';
 import { ProjectHistoryService } from './project-history.service';
 import {
   ProjectHistoryRepository,
-  MyersDiffEngineAdapter,
   ManuscriptCollectorAdapter,
   ManuscriptRestorerAdapter,
 } from './project-history.repository';
@@ -23,6 +21,7 @@ import {
   IDiffEnginePort,
   IProjectCollectorPort,
   IProjectRestorerPort,
+  MyersDiffEngine,
 } from './domain';
 
 @Module({
@@ -31,7 +30,6 @@ import {
     StructureModule,
     DocstoreModule,
     FilestoreModule,
-    DocumentUpdaterModule,
   ],
   controllers: [ProjectHistoryController],
   providers: [
@@ -39,7 +37,10 @@ import {
     ProjectHistoryRepository,
 
     // Driven Adapters
-    MyersDiffEngineAdapter,
+    {
+      provide: MyersDiffEngine,
+      useFactory: () => new MyersDiffEngine(),
+    },
     ManuscriptCollectorAdapter,
     ManuscriptRestorerAdapter,
 
@@ -50,7 +51,7 @@ import {
     },
     {
       provide: IDiffEnginePort,
-      useExisting: MyersDiffEngineAdapter,
+      useExisting: MyersDiffEngine,
     },
     {
       provide: IProjectCollectorPort,

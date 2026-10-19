@@ -11,11 +11,11 @@ import {
   ManuscriptRestorerAdapter,
 } from './project-history.repository';
 import {
-  MyersDiffEngine,
   Snapshot,
   VersionLabel,
   VersionNotFoundException,
   DuplicateLabelException,
+  MyersDiffEngine,
 } from './domain';
 import {
   CreateSnapshotDto,
@@ -30,7 +30,7 @@ import { ManuscriptUserResolverService } from '@/modules/manuscripts/docstore/se
 @Injectable()
 export class ProjectHistoryService {
   private readonly logger = new Logger(ProjectHistoryService.name);
-  private readonly diffEngine = new MyersDiffEngine();
+  private readonly diffEngine: MyersDiffEngine;
 
   constructor(
     private readonly repository: ProjectHistoryRepository,
@@ -38,7 +38,10 @@ export class ProjectHistoryService {
     private readonly restorer: ManuscriptRestorerAdapter,
     @Optional() private readonly realtimeService?: RealtimeFacade,
     @Optional() private readonly userResolver?: ManuscriptUserResolverService,
-  ) {}
+    @Optional() diffEngine?: MyersDiffEngine,
+  ) {
+    this.diffEngine = diffEngine ?? new MyersDiffEngine();
+  }
 
   public async createSnapshot(
     projectId: string,
@@ -234,37 +237,48 @@ export class ProjectHistoryService {
       }
     }
 
-    const latestVersion = await this.repository.getLatestVersion(projectId);
-    const nextVersion = latestVersion + 1;
     const files = await this.collector.collectCurrentState(projectId);
+    const maxAttempts = 3;
 
-    const snapshot = Snapshot.create({
-      projectId,
-      version: nextVersion,
-      summary: summary || null,
-      createdById: createdById || null,
-      isAutomatic,
-      files,
-    });
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const latestVersion = await this.repository.getLatestVersion(projectId);
+      const nextVersion = latestVersion + 1;
 
-    let versionLabel: VersionLabel | null = null;
-    if (label && label.trim()) {
-      versionLabel = VersionLabel.create({
+      const snapshot = Snapshot.create({
         projectId,
-        snapshotId: snapshot.id,
         version: nextVersion,
-        label: label.trim(),
-        createdById,
+        summary: summary || null,
+        createdById: createdById || null,
+        isAutomatic,
+        files,
       });
-      snapshot.addLabel(versionLabel);
+
+      try {
+        const saved = await this.repository.saveSnapshot(snapshot);
+        if (label && label.trim()) {
+          const versionLabel = VersionLabel.create({
+            projectId,
+            snapshotId: saved.id,
+            version: saved.version,
+            label: label.trim(),
+            createdById,
+          });
+          await this.repository.saveLabel(versionLabel);
+          saved.addLabel(versionLabel);
+        }
+        return saved;
+      } catch (err: unknown) {
+        const code = (err as { code?: string })?.code;
+        if (code === 'P2002' && attempt < maxAttempts - 1) {
+          continue;
+        }
+        throw err;
+      }
     }
 
-    const saved = await this.repository.saveSnapshot(snapshot);
-    if (versionLabel) {
-      await this.repository.saveLabel(versionLabel);
-    }
-
-    return saved;
+    throw new Error(
+      `Failed to create snapshot for project ${projectId} after ${maxAttempts} attempts`,
+    );
   }
 
   public toLabelDto(label: VersionLabel): VersionLabelDto {

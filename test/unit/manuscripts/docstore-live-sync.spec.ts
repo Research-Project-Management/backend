@@ -1,8 +1,8 @@
 import {
-  computeLineDiff,
   buildSearchRegex,
   replaceInText,
 } from '@/modules/manuscripts/docstore';
+import { computeLineDiff } from '@/modules/manuscripts/project-history/domain';
 import { YjsService as YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/yjs.service';
 import * as Y from 'yjs';
 import * as decoding from 'lib0/decoding';

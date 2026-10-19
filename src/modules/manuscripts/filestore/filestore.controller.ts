@@ -37,12 +37,7 @@ import { FilestoreService } from './filestore.service';
 
 @ApiTags('Manuscripts - Filestore & Assets')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/manuscripts/projects/:projectId/files',
-  'v1/manuscripts/projects/:projectId/files',
-  'manuscripts/projects/:projectId/files',
-  'project/:projectId/file',
-])
+@Controller('api/v1/manuscripts/projects/:projectId/files')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class FilestoreController {
@@ -150,34 +145,10 @@ export class FilestoreController {
         'Query parameter "path" or "name" is required.',
       );
     }
-    const cleanPath = rawPath.replace(/^\//, '').trim();
-    const leafName = cleanPath.split('/').pop() || cleanPath;
-
-    let file = await this.filestoreService.findByProjectAndName(
+    const file = await this.filestoreService.findFileByPathFlexible(
       projectId,
-      cleanPath,
+      rawPath,
     );
-    if (!file && leafName !== cleanPath) {
-      file = await this.filestoreService.findByProjectAndName(
-        projectId,
-        leafName,
-      );
-    }
-    if (!file) {
-      const extensions = ['.png', '.jpg', '.jpeg', '.pdf', '.svg', '.eps'];
-      for (const ext of extensions) {
-        file = await this.filestoreService.findByProjectAndName(
-          projectId,
-          cleanPath + ext,
-        );
-        if (file) break;
-        file = await this.filestoreService.findByProjectAndName(
-          projectId,
-          leafName + ext,
-        );
-        if (file) break;
-      }
-    }
     if (!file) {
       throw new NotFoundException(
         `File asset "${rawPath}" not found in project ${projectId}.`,
@@ -258,7 +229,7 @@ export class FilestoreController {
     @Param('fileId') fileId: string,
   ): Promise<void> {
     try {
-      await this.filestoreService.deleteFile(projectId, fileId);
+      await this.filestoreService.deleteFile(projectId, fileId, true);
     } catch (err) {
       if (err instanceof FileNotFoundException) {
         throw new NotFoundException(err.message);

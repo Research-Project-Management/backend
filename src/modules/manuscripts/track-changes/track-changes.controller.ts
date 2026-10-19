@@ -44,12 +44,7 @@ import { AuthenticatedRequest } from '@/core';
 
 @ApiTags('Manuscripts - Review Mode (Track Changes & Comments)')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/manuscripts/projects/:projectId/docs/:docId/review',
-  'v1/manuscripts/projects/:projectId/docs/:docId/review',
-  'manuscripts/projects/:projectId/docs/:docId/review',
-  'projects/:projectId/docs/:docId/review',
-])
+@Controller('api/v1/manuscripts/projects/:projectId/docs/:docId/review')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class TrackChangesController {

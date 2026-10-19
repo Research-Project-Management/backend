@@ -6,10 +6,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { ManuscriptDictionaryScope } from '@prisma/client';
-import { ICustomDictionaryRepositoryPort } from './domain';
 
 @Injectable()
-export class SpellingRepository implements ICustomDictionaryRepositoryPort {
+export class SpellingRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   public async listProjectWords(projectId: string): Promise<string[]> {
@@ -85,34 +84,5 @@ export class SpellingRepository implements ICustomDictionaryRepositoryPort {
       where: { userId, word: clean, scope: ManuscriptDictionaryScope.user },
     });
     return res.count > 0;
-  }
-
-  public async isCustomWord(
-    word: string,
-    projectId?: string,
-    userId?: string,
-  ): Promise<boolean> {
-    const clean = word.toLowerCase().trim();
-    if (!clean) return false;
-
-    if (projectId) {
-      const count = await this.prisma.manuscriptCustomWord.count({
-        where: {
-          projectId,
-          word: clean,
-          scope: ManuscriptDictionaryScope.project,
-        },
-      });
-      if (count > 0) return true;
-    }
-
-    if (userId) {
-      const count = await this.prisma.manuscriptCustomWord.count({
-        where: { userId, word: clean, scope: ManuscriptDictionaryScope.user },
-      });
-      if (count > 0) return true;
-    }
-
-    return false;
   }
 }

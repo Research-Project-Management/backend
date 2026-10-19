@@ -3,9 +3,11 @@
  * Direct Injectable Repository and Adapters for Project History Snapshots & Version Labels.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import * as pathPosix from 'node:path/posix';
 import { PrismaService, mapWithConcurrency } from '@/core';
+import { LiveCollaborationPort } from '@/modules/manuscripts/core';
 import {
   Prisma,
   ManuscriptSnapshot as PrismaSnapshot,
@@ -29,7 +31,6 @@ import {
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
-import { DocumentUpdaterService } from '@/modules/manuscripts/document-updater/document-updater.service';
 import type { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
 
 export type { RawSnapshotFileEntry };
@@ -58,7 +59,7 @@ export class ManuscriptHistoryMapper {
     return SnapshotNormalizer.parseSnapshotFiles(rawFiles);
   }
 
-  public static toDomainSnapshot(prisma: PrismaSnapshotWithLabels): Snapshot {
+  public static toDomain(prisma: PrismaSnapshotWithLabels): Snapshot {
     const filesMap = SnapshotNormalizer.parseSnapshotFiles(prisma.files);
     const labels = prisma.labels
       ? prisma.labels.map((l) => this.toDomainLabel(l))
@@ -76,26 +77,6 @@ export class ManuscriptHistoryMapper {
       createdAt: prisma.createdAt,
     });
   }
-
-  public static toDomain(prisma: PrismaSnapshotWithLabels): Snapshot {
-    return this.toDomainSnapshot(prisma);
-  }
-}
-
-@Injectable()
-export class MyersDiffEngineAdapter extends IDiffEnginePort {
-  private readonly engine = new MyersDiffEngine();
-
-  public compareSnapshots(
-    baseSnapshot: Snapshot,
-    targetSnapshot: Snapshot,
-  ): FileDiffVo[] {
-    return this.engine.compareSnapshots(baseSnapshot, targetSnapshot);
-  }
-
-  public diffText(oldLines: string[], newLines: string[]): TextDiffResult {
-    return this.engine.diffText(oldLines, newLines);
-  }
 }
 
 const COLLECT_CONCURRENCY = 6;
@@ -108,7 +89,7 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
     private readonly structureService: StructureService,
     private readonly docstoreService: DocstoreService,
     private readonly filestoreService: FilestoreService,
-    private readonly documentUpdaterService: DocumentUpdaterService,
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {
     super();
   }
@@ -116,15 +97,18 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
   public async collectCurrentState(
     projectId: string,
   ): Promise<Map<string, FileSnapshotVo>> {
+    const nodes = await this.structureService.getAllNodes(projectId);
+
     try {
-      await this.documentUpdaterService.flushProject(projectId, true);
-    } catch (err) {
-      this.logger.warn(
-        `Failed to flush project ${projectId} prior to snapshot collection: ${err}`,
-      );
+      const live = this.moduleRef?.get(LiveCollaborationPort, { strict: false });
+      if (live) {
+        const docIds = nodes.filter((n) => n.docId).map((n) => n.docId as string);
+        await live.flushDocs(projectId, docIds);
+      }
+    } catch {
+      // non-blocking live flush fallback
     }
 
-    const nodes = await this.structureService.getAllNodes(projectId);
     const filesMap = new Map<string, FileSnapshotVo>();
 
     const collected = await mapWithConcurrency<
@@ -191,7 +175,8 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
   constructor(
     private readonly structureService: StructureService,
     private readonly docstoreService: DocstoreService,
-    private readonly documentUpdaterService: DocumentUpdaterService,
+    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly prisma?: PrismaService,
   ) {
     super();
   }
@@ -201,7 +186,10 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     snapshot: Snapshot,
   ): Promise<RestoreResult> {
     try {
-      await this.documentUpdaterService.flushProject(projectId, true);
+      const live = this.moduleRef?.get(LiveCollaborationPort, { strict: false });
+      if (live) {
+        await live.flushDocs(projectId, []);
+      }
     } catch (err) {
       this.logger.warn(
         `Failed to flush project ${projectId} prior to restore: ${err}`,
@@ -270,10 +258,28 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
       const existingNode = currentByPath.get(filePath);
 
       if (fileVo.type === 'doc') {
+        let docIdToSync: string | null = null;
+        if (fileVo.docId && this.prisma?.manuscriptDoc?.updateMany) {
+          await this.prisma.manuscriptDoc
+            .updateMany({
+              where: { id: fileVo.docId, projectId },
+              data: { deleted: false, deletedAt: null },
+            })
+            .catch(() => {});
+        }
         if (existingNode && existingNode.isDoc() && existingNode.docId) {
+          if (this.prisma?.manuscriptDoc?.updateMany) {
+            await this.prisma.manuscriptDoc
+              .updateMany({
+                where: { id: existingNode.docId, projectId },
+                data: { deleted: false, deletedAt: null },
+              })
+              .catch(() => {});
+          }
           await this.docstoreService.updateDoc(projectId, existingNode.docId, {
             lines: fileVo.lines || [''],
           });
+          docIdToSync = existingNode.docId;
           restoredDocIds.push(existingNode.docId);
 
           if (fileVo.isRootDoc) {
@@ -288,6 +294,7 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
             path: filePath,
             lines: fileVo.lines || [''],
           });
+          docIdToSync = createdDoc._id;
           restoredDocIds.push(createdDoc._id);
 
           const newNode = await this.structureService.createNode(projectId, {
@@ -302,7 +309,32 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
             await this.structureService.setRootDoc(projectId, newNode.id);
           }
         }
+
+        if (docIdToSync) {
+          try {
+            const live = this.moduleRef?.get(LiveCollaborationPort, {
+              strict: false,
+            });
+            if (live) {
+              await live.applyExternalText(
+                projectId,
+                docIdToSync,
+                (fileVo.lines || ['']).join('\n'),
+              );
+            }
+          } catch {
+            // non-blocking fallback
+          }
+        }
       } else if (fileVo.type === 'file' && fileVo.fileId) {
+        if (this.prisma?.manuscriptFile?.updateMany) {
+          await this.prisma.manuscriptFile
+            .updateMany({
+              where: { id: fileVo.fileId, projectId },
+              data: { deleted: false, deletedAt: null },
+            })
+            .catch(() => {});
+        }
         if (existingNode) {
           if (
             existingNode.type !== 'FILE' ||
@@ -341,37 +373,62 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
   }
 
   public toDomain(record: PrismaSnapshotWithLabels): Snapshot {
-    return ManuscriptHistoryMapper.toDomainSnapshot(record);
+    return ManuscriptHistoryMapper.toDomain(record);
+  }
+
+  private async resolveNextVersion(
+    projectId: string,
+    fallbackVersion: number,
+  ): Promise<number> {
+    if (typeof this.prisma.manuscriptSnapshot.aggregate === 'function') {
+      const agg = await this.prisma.manuscriptSnapshot.aggregate({
+        where: { projectId },
+        _max: { version: true },
+      });
+      return Math.max(fallbackVersion, (agg?._max?.version ?? 0) + 1);
+    }
+    const latest = await this.getLatestVersion(projectId);
+    return Math.max(fallbackVersion, latest + 1);
   }
 
   public async saveSnapshot(snapshot: Snapshot): Promise<Snapshot> {
-    const created = await this.prisma.manuscriptSnapshot.upsert({
-      where: {
-        projectId_version: {
-          projectId: snapshot.projectId,
-          version: snapshot.version,
-        },
-      },
-      create: {
-        id: snapshot.id,
-        projectId: snapshot.projectId,
-        version: snapshot.version,
-        summary: snapshot.summary,
-        createdById: snapshot.createdById,
-        isAutomatic: snapshot.isAutomatic,
-        files: snapshot.toFilesJson() as Prisma.InputJsonValue,
-        createdAt: snapshot.createdAt,
-      },
-      update: {
-        summary: snapshot.summary,
-        files: snapshot.toFilesJson() as Prisma.InputJsonValue,
-      },
-      include: {
-        labels: true,
-      },
-    });
+    let candidateVersion = snapshot.version;
+    const maxAttempts = 3;
 
-    return ManuscriptHistoryMapper.toDomainSnapshot(created);
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const created = await this.prisma.manuscriptSnapshot.create({
+          data: {
+            id: snapshot.id,
+            projectId: snapshot.projectId,
+            version: candidateVersion,
+            summary: snapshot.summary,
+            createdById: snapshot.createdById,
+            isAutomatic: snapshot.isAutomatic,
+            files: snapshot.toFilesJson() as Prisma.InputJsonValue,
+            createdAt: snapshot.createdAt,
+          },
+          include: {
+            labels: true,
+          },
+        });
+        return ManuscriptHistoryMapper.toDomain(created);
+      } catch (err: unknown) {
+        const code = (err as { code?: string })?.code;
+        if (code === 'P2002' && attempt < maxAttempts - 1) {
+          candidateVersion = await this.resolveNextVersion(
+            snapshot.projectId,
+            candidateVersion + 1,
+          );
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw new Error(
+      `Failed to save immutable snapshot for project ${snapshot.projectId} after ${maxAttempts} attempts`,
+    );
   }
 
   public async findByVersion(
@@ -391,10 +448,19 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
     });
 
     if (!found) return null;
-    return ManuscriptHistoryMapper.toDomainSnapshot(found);
+    return ManuscriptHistoryMapper.toDomain(found);
   }
 
   public async getLatestVersion(projectId: string): Promise<number> {
+    if (typeof this.prisma.manuscriptSnapshot.aggregate === 'function') {
+      const agg = await this.prisma.manuscriptSnapshot.aggregate({
+        where: { projectId },
+        _max: { version: true },
+      });
+      if (agg?._max?.version !== undefined) {
+        return agg._max.version ?? 0;
+      }
+    }
     const latest = await this.prisma.manuscriptSnapshot.findFirst({
       where: { projectId },
       orderBy: { version: 'desc' },
@@ -414,7 +480,7 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
     });
 
     return records.map((r) =>
-      ManuscriptHistoryMapper.toDomainSnapshot(r as PrismaSnapshotWithLabels),
+      ManuscriptHistoryMapper.toDomain(r as PrismaSnapshotWithLabels),
     );
   }
 

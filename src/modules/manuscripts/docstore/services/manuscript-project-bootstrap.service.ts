@@ -5,7 +5,8 @@
  */
 
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
+import { escapeLatex } from '@/modules/manuscripts/core';
 import { DocstoreService } from '../docstore.service';
 
 export interface CreateProjectPageParams {
@@ -17,28 +18,12 @@ export interface CreateProjectPageParams {
   templateType?: string;
 }
 
-const isUuid = (val?: string | null): val is string =>
-  typeof val === 'string' &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-
 @Injectable()
 export class ManuscriptProjectBootstrapService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly docstoreService: DocstoreService,
   ) {}
-
-  private escapeTex(s: string): string {
-    return s.replace(/([\\{}$&#%_^~])/g, (m) =>
-      m === '\\'
-        ? '\\textbackslash{}'
-        : m === '~'
-          ? '\\textasciitilde{}'
-          : m === '^'
-            ? '\\textasciicircum{}'
-            : `\\${m}`,
-    );
-  }
 
   private async resolveProjectAndAuthorMetadata(
     projectId: string,
@@ -76,8 +61,8 @@ export class ManuscriptProjectBootstrapService {
     const month = now.toLocaleString('en-US', { month: 'long' });
 
     return {
-      docTitle: this.escapeTex(docTitle),
-      authorName: this.escapeTex(authorName),
+      docTitle: escapeLatex(docTitle),
+      authorName: escapeLatex(authorName),
       dateStr: `${month} ${now.getFullYear()}`,
     };
   }
@@ -262,7 +247,10 @@ export class ManuscriptProjectBootstrapService {
     if (labelIds.length > 0) {
       try {
         const found = await this.prisma.label.findMany({
-          where: { id: { in: labelIds } },
+          where: {
+            id: { in: labelIds },
+            projects: { some: { projectId } },
+          },
         });
         if (found.length > 0) {
           attachedLabels = found.map((l) => ({
@@ -272,7 +260,7 @@ export class ManuscriptProjectBootstrapService {
           }));
         } else {
           const foundWork = await this.prisma.workItemLabel.findMany({
-            where: { id: { in: labelIds } },
+            where: { id: { in: labelIds }, projectId },
           });
           attachedLabels = foundWork.map((l) => ({
             id: l.id,

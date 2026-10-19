@@ -5,25 +5,27 @@
  * and embedded template catalog management.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
 import { mapWithConcurrency } from '@/core';
 import {
+  LIVE_COLLABORATION_PORT,
+  LiveCollaborationPort,
+} from '@/modules/manuscripts/core';
+import {
   IManuscriptAggregatorPort,
   ExportableFileEntry,
   IManuscriptHydratorPort,
-  ITemplateCatalogPort,
   ArchiveEntryVo,
   ImportSummaryVo,
-  ProjectTemplate,
   isArxivAllowed,
 } from '../domain';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
-import { ClsiService } from '@/modules/manuscripts/clsi/clsi.service';
-import { OFFICIAL_TEMPLATE_CATALOG } from '@/modules/manuscripts/templates/domain';
+import { ClsiService } from '@/modules/manuscripts/clsi';
 import type { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
 
 const COLLECT_CONCURRENCY = 6;
@@ -58,18 +60,39 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     private readonly docstoreService: DocstoreService,
     private readonly filestoreService: FilestoreService,
     @Optional() private readonly clsiService?: ClsiService,
+    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    private readonly liveCollab?: LiveCollaborationPort,
   ) {
     super();
   }
 
-  public async collectProjectEntries(
+  private async flushAndResolveCandidates(
     projectId: string,
-    includePdf = false,
-    cleanArxiv = false,
-  ): Promise<ExportableFileEntry[]> {
+    cleanArxiv: boolean,
+  ): Promise<{
+    nodes: ManuscriptNodeEntity[];
+    candidates: Array<{ node: ManuscriptNodeEntity; relPath: string }>;
+  }> {
     const nodes = await this.structureService.getAllNodes(projectId);
     const nonFolderNodes = nodes.filter((n) => n.type !== 'FOLDER');
-    const results: ExportableFileEntry[] = [];
+
+    try {
+      const live =
+        this.liveCollab ??
+        this.moduleRef?.get(LiveCollaborationPort, { strict: false });
+      if (live) {
+        const docIds = nonFolderNodes
+          .filter((n) => n.docId)
+          .map((n) => n.docId as string);
+        if (docIds.length > 0) {
+          await live.flushDocs(projectId, docIds);
+        }
+      }
+    } catch {
+      // non-blocking fallback
+    }
 
     const candidates = nonFolderNodes
       .map((node) => ({
@@ -79,6 +102,21 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
       .filter(
         ({ relPath }) => relPath && (!cleanArxiv || isArxivAllowed(relPath)),
       );
+
+    return { nodes, candidates };
+  }
+
+  public async collectProjectEntries(
+    projectId: string,
+    includePdf = false,
+    cleanArxiv = false,
+  ): Promise<ExportableFileEntry[]> {
+    const { nodes, candidates } = await this.flushAndResolveCandidates(
+      projectId,
+      cleanArxiv,
+    );
+
+    const results: ExportableFileEntry[] = [];
 
     const collected = await mapWithConcurrency<
       { node: ManuscriptNodeEntity; relPath: string },
@@ -179,18 +217,12 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     includePdf = false,
     cleanArxiv = false,
   ): Promise<ExportableFileEntry[]> {
-    const nodes = await this.structureService.getAllNodes(projectId);
-    const nonFolderNodes = nodes.filter((n) => n.type !== 'FOLDER');
-    const results: ExportableFileEntry[] = [];
+    const { candidates } = await this.flushAndResolveCandidates(
+      projectId,
+      cleanArxiv,
+    );
 
-    const candidates = nonFolderNodes
-      .map((node) => ({
-        node,
-        relPath: node.path.replace(/^\/+/, ''),
-      }))
-      .filter(
-        ({ relPath }) => relPath && (!cleanArxiv || isArxivAllowed(relPath)),
-      );
+    const results: ExportableFileEntry[] = [];
 
     for (const { node, relPath } of candidates) {
       if (node.type === 'DOC' && node.docId) {
@@ -270,6 +302,9 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     private readonly structureService: StructureService,
     private readonly docstoreService: DocstoreService,
     private readonly filestoreService: FilestoreService,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    private readonly liveCollab?: LiveCollaborationPort,
   ) {
     super();
   }
@@ -325,6 +360,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
           .replace(/\r\n/g, '\n')
           .replace(/\r/g, '\n')
           .split('\n');
+        const textContent = lines.join('\n');
 
         if (existingNode && existingNode.type === 'DOC' && existingNode.docId) {
           const current = await this.docstoreService
@@ -334,6 +370,9 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
             lines,
             version: (current?.version ?? 0) + 1,
           });
+          await this.liveCollab
+            ?.applyExternalText(projectId, existingNode.docId, textContent)
+            .catch(() => {});
           docContentsMap.set(existingNode.docId, lines);
           totalDocs++;
           continue;
@@ -468,70 +507,3 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     return hasRootTexInsideWrapper ? commonTopFolder : null;
   }
 }
-
-@Injectable()
-export class EmbeddedTemplateCatalogAdapter extends ITemplateCatalogPort {
-  private readonly templates: Map<string, ProjectTemplate> = new Map();
-  private readonly aliasIndex: Map<string, ProjectTemplate> = new Map();
-
-  constructor() {
-    super();
-    this.seedDefaultTemplates();
-  }
-
-  public async listTemplates(): Promise<ProjectTemplate[]> {
-    return Array.from(this.templates.values());
-  }
-
-  public async getTemplateById(
-    templateId: string,
-  ): Promise<ProjectTemplate | null> {
-    if (!templateId) return null;
-    const direct = this.templates.get(templateId);
-    if (direct) return direct;
-    return (
-      this.aliasIndex.get(templateId) ||
-      this.aliasIndex.get(templateId.toLowerCase().trim()) ||
-      null
-    );
-  }
-
-  private seedDefaultTemplates(): void {
-    for (const def of OFFICIAL_TEMPLATE_CATALOG) {
-      const files = Object.entries(def.files).map(([filePath, content]) => ({
-        path: filePath,
-        content,
-      }));
-      if (!files.some((f) => f.path === 'main.tex')) {
-        const rootContent =
-          def.files[def.mainFile] || Object.values(def.files)[0] || '';
-        files.push({ path: 'main.tex', content: rootContent });
-      }
-
-      const template = new ProjectTemplate({
-        id: def.slug,
-        title: def.title,
-        category: def.category,
-        description: def.description,
-        author: def.author,
-        defaultRootDoc:
-          def.slug === 'ieee-transactions'
-            ? 'main.tex'
-            : def.mainFile || 'main.tex',
-        files,
-      });
-
-      this.templates.set(def.slug, template);
-      this.aliasIndex.set(def.slug.toLowerCase(), template);
-      this.aliasIndex.set(def.id, template);
-      this.aliasIndex.set(def.id.toLowerCase(), template);
-      this.aliasIndex.set(def.versionId, template);
-      this.aliasIndex.set(def.versionId.toLowerCase(), template);
-      for (const alias of def.aliases) {
-        this.aliasIndex.set(alias.toLowerCase(), template);
-      }
-    }
-  }
-}
-
-export { ManuscriptAggregatorAdapter as ManuscriptAggregatorRepository };

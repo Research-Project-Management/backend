@@ -12,40 +12,26 @@ import {
   ErrorExplanationVo,
   InvalidLogFormatException,
   ExplanationNotFoundException,
-  KnowledgeBaseExplainerAdapter,
-  TexParenTreeLogParser,
-  TectonicLogParser,
-  FastSyntaxLinterAdapter,
-  ParseCompileLogUseCase,
-  LintDocumentSyntaxUseCase,
-  GetErrorExplanationUseCase,
+  ErrorKnowledgeBase,
+  CompileLogAnalyzer,
+  FastSyntaxLinter,
   DiagnosticsService,
   DiagnosticsController,
 } from '@/modules/manuscripts/diagnostics';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 describe('Manuscripts Diagnostics Subsystem (Log Parser, Linter & Explainer)', () => {
-  let explainer: KnowledgeBaseExplainerAdapter;
-  let texParser: TexParenTreeLogParser;
-  let tectonicParser: TectonicLogParser;
-  let linter: FastSyntaxLinterAdapter;
-
-  let parseUseCase: ParseCompileLogUseCase;
-  let lintUseCase: LintDocumentSyntaxUseCase;
-  let explainUseCase: GetErrorExplanationUseCase;
+  let explainer: ErrorKnowledgeBase;
+  let logAnalyzer: CompileLogAnalyzer;
+  let linter: FastSyntaxLinter;
 
   let service: DiagnosticsService;
   let controller: DiagnosticsController;
 
   beforeEach(() => {
-    explainer = new KnowledgeBaseExplainerAdapter();
-    texParser = new TexParenTreeLogParser(explainer);
-    tectonicParser = new TectonicLogParser(explainer);
-    linter = new FastSyntaxLinterAdapter(explainer);
-
-    parseUseCase = new ParseCompileLogUseCase(texParser, tectonicParser);
-    lintUseCase = new LintDocumentSyntaxUseCase(linter);
-    explainUseCase = new GetErrorExplanationUseCase(explainer);
+    explainer = new ErrorKnowledgeBase();
+    logAnalyzer = new CompileLogAnalyzer(explainer);
+    linter = new FastSyntaxLinter(explainer);
 
     service = new DiagnosticsService();
     controller = new DiagnosticsController(service);
@@ -175,7 +161,7 @@ describe('Manuscripts Diagnostics Subsystem (Log Parser, Linter & Explainer)', (
   // =========================================================================
   // 2. KNOWLEDGE-BASE EXPLAINER ADAPTER
   // =========================================================================
-  describe('KnowledgeBaseExplainerAdapter', () => {
+  describe('ErrorKnowledgeBase', () => {
     it('should match undefined control sequence error and provide fix snippet', () => {
       const exp = explainer.explain(
         '! Undefined control sequence.',
@@ -249,7 +235,7 @@ describe('Manuscripts Diagnostics Subsystem (Log Parser, Linter & Explainer)', (
   // =========================================================================
   // 3. TEX PAREN-TREE LOG PARSER (FILE TRACKER STATE MACHINE)
   // =========================================================================
-  describe('TexParenTreeLogParser (Overleaf Parity)', () => {
+  describe('CompileLogAnalyzer - TeX Paren-Tree Log Parser (Overleaf Parity)', () => {
     it('should parse single file error with accurate line number from l.<num>', () => {
       const log = `
 This is pdfTeX, Version 3.141592653-2.6-1.40.24 (TeX Live 2022)
@@ -261,7 +247,7 @@ l.15 \\unknownCommand
 Here is how much of TeX's memory you used:
 )
 `;
-      const items = texParser.parse(log, 'main.tex');
+      const items = logAnalyzer.parseTexParenTreeLog(log, 'main.tex');
       expect(items.length).toBe(1);
 
       const err = items[0];
@@ -287,7 +273,7 @@ l.42 The formula calculates value_x
 )
 )
 `;
-      const items = texParser.parse(log, 'main.tex');
+      const items = logAnalyzer.parseTexParenTreeLog(log, 'main.tex');
       expect(items.length).toBe(1);
 
       const err = items[0];
@@ -307,7 +293,7 @@ l.108 \\begin{myenv}
  )
 )
 `;
-      const items = texParser.parse(log, 'main.tex');
+      const items = logAnalyzer.parseTexParenTreeLog(log, 'main.tex');
       expect(items.length).toBe(1);
       // Because diagram.tex closed before the error, the error belongs to ch1.tex
       expect(items[0].file).toBe('chapters/ch1.tex');
@@ -323,7 +309,7 @@ Package hyperref Warning: Token not allowed in a PDF string (PDFDocEncoding):
 (hyperref)                removing \`math shift' on input line 85.
 )
 `;
-      const items = texParser.parse(log, 'main.tex');
+      const items = logAnalyzer.parseTexParenTreeLog(log, 'main.tex');
       expect(items.length).toBe(2);
 
       const warn1 = items.find((i) =>
@@ -347,7 +333,7 @@ Overfull \\hbox (21.345pt too wide) in paragraph at lines 102--115
 Underfull \\hbox (badness 10000) in paragraph at lines 200--205
 )
 `;
-      const items = texParser.parse(log, 'main.tex');
+      const items = logAnalyzer.parseTexParenTreeLog(log, 'main.tex');
       expect(items.length).toBe(2);
 
       expect(items[0].severity.isBadbox()).toBe(true);
@@ -363,14 +349,14 @@ Underfull \\hbox (badness 10000) in paragraph at lines 200--205
   // =========================================================================
   // 4. TECTONIC LOG PARSER
   // =========================================================================
-  describe('TectonicLogParser', () => {
+  describe('CompileLogAnalyzer - Tectonic Log Parser', () => {
     it('should parse modern Tectonic rust cli error output', () => {
       const log = `
 note: running tectonic
 error: chapters/intro.tex:34: undefined control sequence \\badmacro
 note: target halted
 `;
-      const items = tectonicParser.parse(log, 'main.tex');
+      const items = logAnalyzer.parseTectonicLog(log, 'main.tex');
       expect(items.length).toBe(1);
 
       const err = items[0];
@@ -385,7 +371,7 @@ note: target halted
 warning: main.tex:12: label 'sec:method' multiply defined
 error: main.tex:50: missing $ inserted
 `;
-      const items = tectonicParser.parse(log, 'main.tex');
+      const items = logAnalyzer.parseTectonicLog(log, 'main.tex');
       expect(items.length).toBe(2);
 
       expect(items[0].severity.isWarning()).toBe(true);
@@ -400,7 +386,7 @@ error: main.tex:50: missing $ inserted
   // =========================================================================
   // 5. FAST SYNTAX LINTER ADAPTER (PRE-COMPILATION)
   // =========================================================================
-  describe('FastSyntaxLinterAdapter', () => {
+  describe('FastSyntaxLinter', () => {
     it('should detect unbalanced opening brace', () => {
       const source = `\\documentclass{article}\n\\begin{document}\n\\textbf{hello\n\\end{document}`;
       const items = linter.lint(source, 'main.tex');
@@ -522,16 +508,13 @@ Normal text.
   });
 
   // =========================================================================
-  // 6. INBOUND USE CASES
+  // 6. DOMAIN ANALYZER & KNOWLEDGE BASE REPORT METHODS
   // =========================================================================
-  describe('Inbound Use Cases', () => {
-    describe('ParseCompileLogUseCase', () => {
+  describe('Domain Report Methods', () => {
+    describe('CompileLogAnalyzer.analyzeLog', () => {
       it('should parse log and return DiagnosticReport', () => {
         const log = `(./main.tex\n! Undefined control sequence.\nl.10 \\foo\n)`;
-        const report = parseUseCase.execute({
-          logText: log,
-          defaultFile: 'main.tex',
-        });
+        const report = logAnalyzer.analyzeLog(log, 'main.tex');
 
         expect(report.isSuccess).toBe(false);
         expect(report.errorsCount).toBe(1);
@@ -539,52 +522,48 @@ Normal text.
       });
 
       it('should throw InvalidLogFormatException if logText is empty', () => {
-        expect(() => parseUseCase.execute({ logText: '' })).toThrow(
+        expect(() => logAnalyzer.analyzeLog('')).toThrow(
           InvalidLogFormatException,
         );
-        expect(() => parseUseCase.execute({ logText: '   ' })).toThrow(
+        expect(() => logAnalyzer.analyzeLog('   ')).toThrow(
           InvalidLogFormatException,
         );
       });
 
-      it('should route to tectonicParser when engine is tectonic', () => {
+      it('should route to tectonic parser when engine is tectonic', () => {
         const log = `error: main.tex:5: undefined control sequence \\bar`;
-        const report = parseUseCase.execute({
-          logText: log,
-          defaultFile: 'main.tex',
-          engine: 'tectonic',
-        });
+        const report = logAnalyzer.analyzeLog(log, 'main.tex', 'tectonic');
 
         expect(report.errorsCount).toBe(1);
         expect(report.items[0].line).toBe(5);
       });
     });
 
-    describe('LintDocumentSyntaxUseCase', () => {
+    describe('FastSyntaxLinter.lintToReport', () => {
       it('should lint document and return DiagnosticReport', () => {
         const source = `\\begin{itemize}\n\\item Item`;
-        const report = lintUseCase.execute({ source, filename: 'main.tex' });
+        const report = linter.lintToReport(source, 'main.tex');
 
         expect(report.isSuccess).toBe(false);
         expect(report.errorsCount).toBeGreaterThanOrEqual(1);
       });
     });
 
-    describe('GetErrorExplanationUseCase', () => {
+    describe('ErrorKnowledgeBase.requireByCode', () => {
       it('should return error explanation for valid code', () => {
-        const exp = explainUseCase.execute('UNDEFINED_CONTROL_SEQUENCE');
+        const exp = explainer.requireByCode('UNDEFINED_CONTROL_SEQUENCE');
         expect(exp.code).toBe('UNDEFINED_CONTROL_SEQUENCE');
         expect(exp.title).toContain('Undefined Control Sequence');
       });
 
       it('should throw ExplanationNotFoundException for unknown code', () => {
-        expect(() => explainUseCase.execute('TOTALLY_BOGUS_CODE')).toThrow(
+        expect(() => explainer.requireByCode('TOTALLY_BOGUS_CODE')).toThrow(
           ExplanationNotFoundException,
         );
       });
 
       it('should list all available rules', () => {
-        const rules = explainUseCase.listRules();
+        const rules = explainer.getAllRules();
         expect(rules.length).toBeGreaterThan(10);
       });
     });

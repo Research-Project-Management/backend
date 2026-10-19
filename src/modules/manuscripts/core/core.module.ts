@@ -7,7 +7,14 @@
  */
 
 import { Global, Module } from '@nestjs/common';
+import { PrismaModule } from '@/core';
+import { ProjectWorkspaceCollectorService } from './services/project-workspace-collector.service';
+import { ManuscriptUserResolverService } from '@/modules/manuscripts/docstore/services/manuscript-user-resolver.service';
 
 @Global()
-@Module({})
+@Module({
+  imports: [PrismaModule],
+  providers: [ProjectWorkspaceCollectorService, ManuscriptUserResolverService],
+  exports: [ProjectWorkspaceCollectorService, ManuscriptUserResolverService],
+})
 export class ManuscriptsCoreModule {}

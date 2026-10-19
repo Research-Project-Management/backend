@@ -6,6 +6,12 @@
  */
 
 import { Readable } from 'node:stream';
+import {
+  KNOWN_TEXT_EXTENSIONS,
+  KNOWN_BINARY_EXTENSIONS,
+} from '@/modules/manuscripts/core';
+
+export { KNOWN_TEXT_EXTENSIONS, KNOWN_BINARY_EXTENSIONS };
 
 export class ZipSlipSecurityException extends Error {
   constructor(entryPath: string) {
@@ -43,15 +49,6 @@ export class ArchiveSizeExceededException extends Error {
   }
 }
 
-export class TemplateNotFoundException extends Error {
-  constructor(templateId: string) {
-    super(
-      `Manuscript project template '${templateId}' was not found in catalog.`,
-    );
-    this.name = 'TemplateNotFoundException';
-  }
-}
-
 export interface ArchiveManifestProps {
   projectId: string;
   projectName?: string;
@@ -86,82 +83,6 @@ export class ArchiveManifest {
       fileCount: this.fileCount,
       totalSizeBytes: this.totalSizeBytes,
       hasCompiledPdf: this.hasCompiledPdf,
-    };
-  }
-}
-
-export interface TemplateFileSpec {
-  path: string;
-  content: string | Buffer;
-  isBinary?: boolean;
-}
-
-export interface CreateProjectTemplateProps {
-  id: string;
-  title: string;
-  category:
-    | 'journal'
-    | 'article'
-    | 'conference'
-    | 'thesis'
-    | 'presentation'
-    | 'report'
-    | 'book'
-    | 'letter'
-    | 'assignment'
-    | 'poster'
-    | 'cv'
-    | 'other'
-    | string;
-  description: string;
-  author: string;
-  thumbnailUrl?: string | null;
-  files: TemplateFileSpec[];
-  defaultRootDoc?: string;
-}
-
-export interface TemplateSummaryProps {
-  id: string;
-  title: string;
-  category: string;
-  description: string;
-  author: string;
-  thumbnailUrl: string | null;
-  fileCount: number;
-  defaultRootDoc: string;
-}
-
-export class ProjectTemplate {
-  public readonly id: string;
-  public readonly title: string;
-  public readonly category: string;
-  public readonly description: string;
-  public readonly author: string;
-  public readonly thumbnailUrl: string | null;
-  public readonly files: TemplateFileSpec[];
-  public readonly defaultRootDoc: string;
-
-  constructor(props: CreateProjectTemplateProps) {
-    this.id = props.id;
-    this.title = props.title;
-    this.category = props.category;
-    this.description = props.description;
-    this.author = props.author;
-    this.thumbnailUrl = props.thumbnailUrl ?? null;
-    this.files = props.files;
-    this.defaultRootDoc = props.defaultRootDoc || 'main.tex';
-  }
-
-  public toJSON(): TemplateSummaryProps {
-    return {
-      id: this.id,
-      title: this.title,
-      category: this.category,
-      description: this.description,
-      author: this.author,
-      thumbnailUrl: this.thumbnailUrl,
-      fileCount: this.files.length,
-      defaultRootDoc: this.defaultRootDoc,
     };
   }
 }
@@ -209,70 +130,6 @@ export class ImportSummaryVo {
 }
 
 export type EntryStorageType = 'doc' | 'file';
-
-export const KNOWN_TEXT_EXTENSIONS = new Set([
-  '.tex',
-  '.bib',
-  '.cls',
-  '.sty',
-  '.bbl',
-  '.bst',
-  '.txt',
-  '.md',
-  '.latex',
-  '.dtx',
-  '.ins',
-  '.csv',
-  '.tsv',
-  '.json',
-  '.yaml',
-  '.yml',
-  '.xml',
-  '.lua',
-  '.py',
-  '.sh',
-  '.gitignore',
-  '.latexmkrc',
-]);
-
-export const KNOWN_BINARY_EXTENSIONS = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.bmp',
-  '.tiff',
-  '.webp',
-  '.ico',
-  '.pdf',
-  '.eps',
-  '.ai',
-  '.psd',
-  '.zip',
-  '.tar',
-  '.gz',
-  '.tgz',
-  '.bz2',
-  '.xz',
-  '.7z',
-  '.rar',
-  '.ttf',
-  '.otf',
-  '.woff',
-  '.woff2',
-  '.eot',
-  '.mp4',
-  '.webm',
-  '.mp3',
-  '.wav',
-  '.ogg',
-  '.exe',
-  '.dll',
-  '.so',
-  '.dylib',
-  '.bin',
-  '.dat',
-]);
 
 export const ARXIV_ALLOWED_EXTENSIONS = new Set([
   'tex',
@@ -471,11 +328,6 @@ export abstract class IManuscriptHydratorPort {
   ): Promise<ImportSummaryVo>;
 }
 
-export abstract class ITemplateCatalogPort {
-  abstract listTemplates(): Promise<ProjectTemplate[]>;
-  abstract getTemplateById(templateId: string): Promise<ProjectTemplate | null>;
-}
-
 export interface TranspiledProjectResult {
   mainTex: string;
   entries: ArchiveEntryVo[];
@@ -495,7 +347,7 @@ export abstract class IDocumentTranspilerPort {
   ): Promise<TranspiledProjectResult>;
 }
 
+export const MAX_SINGLE_FILE_BYTES = 50 * 1024 * 1024;
 export const MAX_UNCOMPRESSED_PROJECT_BYTES = 500 * 1024 * 1024;
 export const MAX_PROJECT_ENTRY_COUNT = 10000;
-
-export { PkzipEngineAdapter } from '../services/pkzip-engine.adapter';
+export { ArchiveSizeExceededException as ArchiveQuotaExceededException };

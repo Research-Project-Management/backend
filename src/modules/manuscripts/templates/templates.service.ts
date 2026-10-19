@@ -15,7 +15,6 @@ import {
   QueryTemplatesDto,
   SearchTemplatesDto,
   InstantiateTemplateDto,
-  OverleafInstantiateTemplateDto,
   CreateTemplateDto,
 } from './dto/template.dto';
 
@@ -93,13 +92,13 @@ export class TemplatesService {
     userId: string,
     dto:
       | InstantiateTemplateDto
-      | OverleafInstantiateTemplateDto
       | {
           templateId?: string;
           template_id?: string;
           templateVersionId?: string;
           id?: string;
           projectName?: string;
+          project_name?: string;
           name?: string;
         },
   ) {

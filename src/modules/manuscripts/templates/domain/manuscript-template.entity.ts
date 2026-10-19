@@ -1,8 +1,68 @@
-import {
-  TemplateCategoryString,
-  TemplateCategoryVo,
-} from './template-category.vo';
-import { CompilerType, CompilerTypeVo } from './compiler-type.vo';
+export type CompilerType = 'pdflatex' | 'latex' | 'xelatex' | 'lualatex';
+
+export class CompilerTypeVo {
+  private static readonly VALID_COMPILERS = new Set<string>([
+    'pdflatex',
+    'latex',
+    'xelatex',
+    'lualatex',
+  ]);
+
+  static isValid(compiler: string): compiler is CompilerType {
+    return this.VALID_COMPILERS.has(compiler.toLowerCase());
+  }
+
+  static fromString(compiler?: string): CompilerType {
+    if (!compiler) return 'pdflatex';
+    const clean = compiler.toLowerCase().trim();
+    if (this.isValid(clean)) {
+      return clean;
+    }
+    return 'pdflatex';
+  }
+}
+
+export type TemplateCategoryString =
+  | 'journal'
+  | 'book'
+  | 'letter'
+  | 'assignment'
+  | 'poster'
+  | 'presentation'
+  | 'report'
+  | 'cv'
+  | 'thesis'
+  | 'conference'
+  | 'other';
+
+export class TemplateCategoryVo {
+  private static readonly VALID_CATEGORIES = new Set<string>([
+    'journal',
+    'book',
+    'letter',
+    'assignment',
+    'poster',
+    'presentation',
+    'report',
+    'cv',
+    'thesis',
+    'conference',
+    'other',
+  ]);
+
+  static isValid(category: string): category is TemplateCategoryString {
+    return this.VALID_CATEGORIES.has(category.toLowerCase());
+  }
+
+  static fromString(category?: string): TemplateCategoryString {
+    if (!category) return 'other';
+    const clean = category.toLowerCase().trim();
+    if (this.isValid(clean)) {
+      return clean;
+    }
+    return 'other';
+  }
+}
 
 export interface TemplateFileBlueprint {
   path: string;

@@ -29,22 +29,28 @@ import {
   Role,
   ResolvedProject,
 } from '@/modules/project/access';
-import { PrismaService, AuthenticatedRequest } from '@/core';
+import { PrismaService, AuthenticatedRequest, isUuid } from '@/core';
 import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
-import { PageExportTranspilerService } from '../services/page-export-transpiler.service';
 import { ManuscriptUserResolverService } from '../services/manuscript-user-resolver.service';
 import { ManuscriptPageScopeRepository } from '../repositories/manuscript-page-scope.repository';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { LiveCollaborationPort, computeLineDiff } from '../domain';
-
-const isUuid = (val?: string | null): val is string =>
-  typeof val === 'string' &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+import { LiveCollaborationPort } from '@/modules/manuscripts/core';
+import {
+  convertLatexToDocxBuffer,
+  convertLatexToHtml,
+  convertLatexToMarkdown,
+  resolveIncludedLatexContent,
+} from '@/modules/manuscripts/export-import/domain';
+import {
+  computeLineDiff,
+  FileSnapshotVo,
+  SnapshotNormalizer,
+} from '@/modules/manuscripts/project-history/domain';
 
 @ApiTags('Manuscripts - Pages History & Export')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
+@Controller('api/v1/manuscripts')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class PagesHistoryExportController {
@@ -55,7 +61,6 @@ export class PagesHistoryExportController {
     private readonly docstoreService: DocstoreService,
     private readonly prisma: PrismaService,
     private readonly pageScopeRepo: ManuscriptPageScopeRepository,
-    private readonly pageExportTranspiler: PageExportTranspilerService,
     private readonly userResolver: ManuscriptUserResolverService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
@@ -110,64 +115,75 @@ export class PagesHistoryExportController {
     return node?.projectId ?? null;
   }
 
-  /** Extracts raw text from a snapshot file entry (string or structured FileSnapshotVo/CLSI object). */
-  private extractSnapshotEntryText(entry: unknown): string | null {
-    if (typeof entry === 'string') return entry;
-    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
-      const obj = entry as {
-        lines?: unknown;
-        content?: unknown;
-        textContent?: unknown;
-      };
-      if (Array.isArray(obj.lines)) {
-        return obj.lines.map((l) => String(l ?? '')).join('\n');
-      }
-      if (typeof obj.textContent === 'string') return obj.textContent;
-      if (typeof obj.content === 'string') return obj.content;
-    }
-    return null;
-  }
-
-  /** Selects the snapshot entry for a doc path (handles leading-slash variants and structured/legacy shapes). */
+  /** Selects the snapshot entry for a doc path using canonical SnapshotNormalizer. */
   private pickSnapshotText(
     files: Record<string, unknown>,
     docPath?: string | null,
   ): string {
-    const fileKeys = Object.keys(files).filter((k) => !k.startsWith('__'));
+    if (!files || Object.keys(files).length === 0) return '';
+    const filesMap = SnapshotNormalizer.parseSnapshotFiles(files);
     if (docPath) {
-      const bare = docPath.replace(/^\//, '');
-      const hit = files[docPath] ?? files[bare] ?? files[`/${bare}`];
-      const extracted = this.extractSnapshotEntryText(hit);
-      if (extracted !== null) return extracted;
-      if (
-        fileKeys.length === 1 &&
-        (fileKeys[0] === 'main.tex' || fileKeys[0] === '/main.tex')
-      ) {
-        return this.extractSnapshotEntryText(files[fileKeys[0]]) ?? '';
+      const normalized = docPath.startsWith('/') ? docPath : `/${docPath}`;
+      const hit = filesMap.get(normalized);
+      if (hit?.lines) return hit.lines.join('\n');
+      if (filesMap.size === 1 && filesMap.has('/main.tex')) {
+        return filesMap.get('/main.tex')?.lines?.join('\n') ?? '';
       }
       return '';
     }
     const mainHit =
-      files['main.tex'] ??
-      files['/main.tex'] ??
-      (fileKeys.length > 0 ? files[fileKeys[0]] : undefined);
-    return this.extractSnapshotEntryText(mainHit) ?? '';
+      filesMap.get('/main.tex') ?? filesMap.values().next().value;
+    return mainHit?.lines ? mainHit.lines.join('\n') : '';
+  }
+
+  private resolveActiveProjectId(
+    project?: string | { id: string } | null,
+  ): string | undefined {
+    if (!project) return undefined;
+    return typeof project === 'string' ? project : project.id;
+  }
+
+  private async getHydratedDocLines(doc: {
+    id: string;
+    projectId: string;
+    lines: unknown;
+    inStorage?: boolean;
+  }): Promise<string[]> {
+    if (doc.inStorage) {
+      try {
+        const hydrated = await this.docstoreService.getDoc(
+          doc.projectId,
+          doc.id,
+        );
+        if (Array.isArray(hydrated.lines)) {
+          return hydrated.lines;
+        }
+      } catch {
+        // Fallback to raw lines if hydration fails
+      }
+    }
+    if (Array.isArray(doc.lines)) {
+      return doc.lines as string[];
+    }
+    if (typeof doc.lines === 'string') {
+      return doc.lines.split('\n');
+    }
+    return [];
   }
 
   // ─── 1. VERSION HISTORY & SNAPSHOTS ──────────────────────────────────────────
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/versions
-   * GET /api/pages/:pageId/versions
    */
-  @Get(['docs/:pageId/versions', 'pages/:pageId/versions'])
+  @Get('docs/:pageId/versions')
   async getVersions(
     @Param('pageId') pageId: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) return { versions: [] };
     try {
-      const activeProjectId = project?.id;
+      const activeProjectId = this.resolveActiveProjectId(project);
       const doc = activeProjectId
         ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
         : await this.prisma.manuscriptDoc.findUnique({
@@ -212,41 +228,43 @@ export class PagesHistoryExportController {
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/versions/diff
-   * GET /api/pages/:pageId/versions/diff
    * GET /api/v1/manuscripts/docs/:pageId/diff
-   * GET /api/pages/:pageId/diff
    */
-  @Get([
-    'docs/:pageId/versions/diff',
-    'pages/:pageId/versions/diff',
-    'docs/:pageId/diff',
-    'pages/:pageId/diff',
-  ])
+  @Get(['docs/:pageId/versions/diff', 'docs/:pageId/diff'])
   async getDiff(
     @Param('pageId') pageId: string,
     @Query('from') from: string,
     @Query('to') to: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
-    const activeProjectId = project?.id;
+    const activeProjectId = this.resolveActiveProjectId(project);
     const doc = isUuid(pageId)
       ? activeProjectId
         ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
         : await this.prisma.manuscriptDoc.findUnique({
             where: { id: pageId },
-            select: { id: true, path: true, lines: true, projectId: true },
+            select: {
+              id: true,
+              path: true,
+              lines: true,
+              projectId: true,
+              inStorage: true,
+            },
           })
       : null;
 
+    const targetProjectId = activeProjectId || doc?.projectId;
+    if (!targetProjectId) {
+      throw new NotFoundException(`Document or project context not found`);
+    }
+
     const loadSnap = async (id: string) => {
       if (!isUuid(id)) return null;
-      const targetProjectId = activeProjectId || doc?.projectId;
-      const snap = targetProjectId
-        ? await this.pageScopeRepo.findSnapshotInProject(targetProjectId, id)
-        : await this.prisma.manuscriptSnapshot.findUnique({
-            where: { id },
-          });
-      if (!snap) {
+      const snap = await this.pageScopeRepo.findSnapshotInProject(
+        targetProjectId,
+        id,
+      );
+      if (!snap || snap.projectId !== targetProjectId) {
         throw new NotFoundException(`Version ${id} not found`);
       }
       if (doc && snap.projectId !== doc.projectId) {
@@ -265,11 +283,8 @@ export class PagesHistoryExportController {
       );
     }
 
-    const currentText = doc
-      ? Array.isArray(doc.lines)
-        ? (doc.lines as string[]).join('\n')
-        : String(doc.lines ?? '')
-      : '';
+    const currentLines = doc ? await this.getHydratedDocLines(doc) : [];
+    const currentText = currentLines.join('\n');
     const pick = (files: Record<string, unknown> | undefined | null) =>
       this.pickSnapshotText(files || {}, doc?.path);
 
@@ -313,20 +328,16 @@ export class PagesHistoryExportController {
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/versions/:versionId
-   * GET /api/pages/:pageId/versions/:versionId
    */
-  @Get([
-    'docs/:pageId/versions/:versionId',
-    'pages/:pageId/versions/:versionId',
-  ])
+  @Get('docs/:pageId/versions/:versionId')
   async getVersionById(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
     if (!isUuid(versionId)) return { version: null };
     try {
-      const activeProjectId = project?.id;
+      const activeProjectId = this.resolveActiveProjectId(project);
       const [s, doc] = await Promise.all([
         activeProjectId
           ? this.pageScopeRepo.findSnapshotInProject(activeProjectId, versionId)
@@ -384,19 +395,18 @@ export class PagesHistoryExportController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/versions
-   * POST /api/pages/:pageId/versions
    */
-  @Post(['docs/:pageId/versions', 'pages/:pageId/versions'])
+  @Post('docs/:pageId/versions')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   async createVersion(
     @Param('pageId') pageId: string,
     @Body() body: { label?: string; content?: string },
     @Req() req: AuthenticatedRequest,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
-    let projectId: string | undefined = project?.id;
+    let projectId: string | undefined = this.resolveActiveProjectId(project);
     let docPath = 'main.tex';
     let currentContent = '';
     if (isUuid(pageId)) {
@@ -404,13 +414,20 @@ export class PagesHistoryExportController {
         ? await this.pageScopeRepo.findDocInProject(projectId, pageId)
         : await this.prisma.manuscriptDoc.findUnique({
             where: { id: pageId },
-            select: { projectId: true, path: true, lines: true },
+            select: {
+              id: true,
+              projectId: true,
+              path: true,
+              lines: true,
+              inStorage: true,
+            },
           });
       projectId = doc?.projectId || projectId;
       if (doc?.path) docPath = doc.path.replace(/^\//, '') || docPath;
-      currentContent = Array.isArray(doc?.lines)
-        ? (doc.lines as string[]).join('\n')
-        : String(doc?.lines ?? '');
+      if (doc) {
+        const docLines = await this.getHydratedDocLines(doc);
+        currentContent = docLines.join('\n');
+      }
     }
 
     if (!projectId || !isUuid(projectId)) {
@@ -421,26 +438,63 @@ export class PagesHistoryExportController {
       typeof body.content === 'string' ? body.content : currentContent;
 
     try {
-      const [count, allDocs, userMap] = await Promise.all([
-        this.prisma.manuscriptSnapshot.count({
-          where: { projectId },
-        }),
+      const [aggOrCount, allDocs, userMap] = await Promise.all([
+        typeof this.prisma.manuscriptSnapshot.aggregate === 'function'
+          ? this.prisma.manuscriptSnapshot.aggregate({
+              where: { projectId },
+              _max: { version: true },
+            })
+          : this.prisma.manuscriptSnapshot
+              .count({ where: { projectId } })
+              .then((c) => ({ _max: { version: c } })),
         this.prisma.manuscriptDoc.findMany({
           where: { projectId, deleted: false },
-          select: { id: true, path: true, lines: true },
+          select: { id: true, projectId: true, path: true, lines: true, inStorage: true },
         }),
         this.resolveUserNames([userId]),
       ]);
+      const nextVersion = (aggOrCount?._max?.version ?? 0) + 1;
 
-      const snapshotFiles: Record<string, string> = {};
+      const snapshotFiles: Record<string, Record<string, unknown>> = {};
+      let addedTargetDoc = false;
       for (const d of allDocs) {
         const cleanPath = (d.path || '').replace(/^\//, '') || 'main.tex';
-        const dText = Array.isArray(d.lines)
-          ? (d.lines as string[]).join('\n')
-          : String(d.lines ?? '');
-        snapshotFiles[cleanPath] = d.id === pageId ? content : dText;
+        const normalizedPath = `/${cleanPath}`;
+        let finalText: string;
+        if (d.id === pageId) {
+          finalText = content;
+        } else {
+          const dLines = await this.getHydratedDocLines({
+            id: d.id,
+            projectId: d.projectId || projectId,
+            lines: d.lines,
+            inStorage: d.inStorage,
+          });
+          finalText = dLines.join('\n');
+        }
+        if (d.id === pageId || cleanPath === docPath) {
+          addedTargetDoc = true;
+        }
+        const vo = FileSnapshotVo.createDoc(
+          normalizedPath,
+          d.id,
+          finalText.split('\n'),
+          '',
+          normalizedPath === '/main.tex',
+        );
+        snapshotFiles[vo.path] = vo.toJSON();
       }
-      snapshotFiles[docPath] = content;
+      if (!addedTargetDoc) {
+        const normalizedTarget = `/${docPath.replace(/^\//, '')}`;
+        const vo = FileSnapshotVo.createDoc(
+          normalizedTarget,
+          isUuid(pageId) ? pageId : '',
+          content.split('\n'),
+          '',
+          normalizedTarget === '/main.tex',
+        );
+        snapshotFiles[vo.path] = vo.toJSON();
+      }
 
       const resolvedUser = userId ? userMap.get(userId) : undefined;
       const authorName =
@@ -452,10 +506,10 @@ export class PagesHistoryExportController {
       const snap = await this.prisma.manuscriptSnapshot.create({
         data: {
           projectId,
-          version: count + 1,
+          version: nextVersion,
           summary: body.label || 'Manual Snapshot',
           createdById: isUuid(userId) ? userId : null,
-          files: snapshotFiles,
+          files: snapshotFiles as any,
         },
       });
       return {
@@ -478,21 +532,17 @@ export class PagesHistoryExportController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/versions/:versionId/restore
-   * POST /api/pages/:pageId/versions/:versionId/restore
    */
-  @Post([
-    'docs/:pageId/versions/:versionId/restore',
-    'pages/:pageId/versions/:versionId/restore',
-  ])
+  @Post('docs/:pageId/versions/:versionId/restore')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async restoreVersion(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
     if (!isUuid(versionId)) throw new BadRequestException('Invalid version ID');
-    const activeProjectId = project?.id;
+    const activeProjectId = this.resolveActiveProjectId(project);
     const snap = activeProjectId
       ? await this.pageScopeRepo.findSnapshotInProject(
           activeProjectId,
@@ -538,25 +588,21 @@ export class PagesHistoryExportController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/versions/:versionId/label
-   * POST /api/pages/:pageId/versions/:versionId/label
    */
-  @Post([
-    'docs/:pageId/versions/:versionId/label',
-    'pages/:pageId/versions/:versionId/label',
-  ])
+  @Post('docs/:pageId/versions/:versionId/label')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async labelVersion(
     @Param('versionId') versionId: string,
     @Body() body: { label: string; title?: string },
     @Req() req: AuthenticatedRequest,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
     const labelName = body?.label?.trim();
     if (!labelName) throw new BadRequestException('Label cannot be empty');
     if (!isUuid(versionId)) throw new BadRequestException('Invalid version ID');
 
-    const activeProjectId = project?.id;
+    const activeProjectId = this.resolveActiveProjectId(project);
     const snap = activeProjectId
       ? await this.pageScopeRepo.findSnapshotInProject(
           activeProjectId,
@@ -593,14 +639,13 @@ export class PagesHistoryExportController {
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/timeline
-   * GET /api/pages/:pageId/timeline
    */
-  @Get(['docs/:pageId/timeline', 'pages/:pageId/timeline'])
+  @Get('docs/:pageId/timeline')
   async getTimeline(
     @Param('pageId') pageId: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
-    let projectId: string | undefined = project?.id;
+    let projectId: string | undefined = this.resolveActiveProjectId(project);
     if (isUuid(pageId)) {
       const doc = projectId
         ? await this.pageScopeRepo.findDocInProject(projectId, pageId)
@@ -657,20 +702,19 @@ export class PagesHistoryExportController {
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/at
-   * GET /api/pages/:pageId/at
    */
-  @Get(['docs/:pageId/at', 'pages/:pageId/at'])
+  @Get('docs/:pageId/at')
   async getAt(
     @Param('pageId') pageId: string,
     @Query('timestamp') timestamp?: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
     let targetTime = timestamp
       ? new Date(Number(timestamp) || timestamp)
       : new Date();
     if (isNaN(targetTime.getTime())) targetTime = new Date();
 
-    const activeProjectId = project?.id;
+    const activeProjectId = this.resolveActiveProjectId(project);
     const doc = isUuid(pageId)
       ? activeProjectId
         ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
@@ -688,14 +732,14 @@ export class PagesHistoryExportController {
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
-    const bare = (doc.path || '').replace(/^\//, '');
+    const normalizedPath = `/${(doc.path || '').replace(/^\//, '')}`;
     const snap = snaps.find((s) => {
-      const files = (s.files as Record<string, unknown>) || {};
-      const fileKeys = Object.keys(files).filter((k) => !k.startsWith('__'));
+      const files = s.files as Record<string, unknown> | null;
+      if (!files || Object.keys(files).length === 0) return false;
+      const filesMap = SnapshotNormalizer.parseSnapshotFiles(files);
       return (
-        bare in files ||
-        `/${bare}` in files ||
-        (('main.tex' in files || '/main.tex' in files) && fileKeys.length === 1)
+        filesMap.has(normalizedPath) ||
+        (filesMap.size === 1 && filesMap.has('/main.tex'))
       );
     });
 
@@ -716,14 +760,13 @@ export class PagesHistoryExportController {
 
   /**
    * GET /api/v1/manuscripts/projects/:projectId/history
-   * GET /api/pages/:projectId/history
    */
-  @Get(['projects/:projectId/history', 'pages/:projectId/history'])
+  @Get('projects/:projectId/history')
   async getProjectHistory(
     @Param('projectId') routeProjectId: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
-    const projectId = project?.id || routeProjectId;
+    const projectId = this.resolveActiveProjectId(project) || routeProjectId;
     if (!isUuid(projectId)) return { events: [], history: [] };
 
     const snapshots = await this.prisma.manuscriptSnapshot.findMany({
@@ -749,23 +792,19 @@ export class PagesHistoryExportController {
 
   /**
    * POST /api/v1/manuscripts/docs/:rootPageId/sync-incremental
-   * POST /api/pages/:rootPageId/sync-incremental
    */
-  @Post([
-    'docs/:rootPageId/sync-incremental',
-    'pages/:rootPageId/sync-incremental',
-  ])
+  @Post('docs/:rootPageId/sync-incremental')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async syncIncremental(
     @Param('rootPageId') rootPageId: string,
     @Body() body: { dirtyFileIds?: string[]; forceAll?: boolean },
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
     if (!isUuid(rootPageId)) {
       throw new BadRequestException('A valid UUID is required for rootPageId');
     }
-    const activeProjectId = project?.id;
+    const activeProjectId = this.resolveActiveProjectId(project);
     const doc = activeProjectId
       ? await this.pageScopeRepo.findDocInProject(activeProjectId, rootPageId)
       : null;
@@ -802,6 +841,7 @@ export class PagesHistoryExportController {
         },
       });
     }
+
     return {
       synced: docIds,
       total: docIds.length,
@@ -816,14 +856,13 @@ export class PagesHistoryExportController {
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/export
-   * GET /api/pages/:pageId/export
    */
-  @Get(['docs/:pageId/export', 'pages/:pageId/export'])
+  @Get('docs/:pageId/export')
   async exportPage(
     @Param('pageId') pageId: string,
     @Query('format') format?: string,
     @Query('includeChildren') includeChildren?: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
     return this.exportDocument(
       pageId,
@@ -842,9 +881,8 @@ export class PagesHistoryExportController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/export
-   * POST /api/pages/:pageId/export
    */
-  @Post(['docs/:pageId/export', 'pages/:pageId/export'])
+  @Post('docs/:pageId/export')
   @HttpCode(HttpStatus.OK)
   async exportDocument(
     @Param('pageId') pageId: string,
@@ -852,13 +890,13 @@ export class PagesHistoryExportController {
     body?: { format?: string; includeChildren?: boolean | string },
     @Query('format') queryFormat?: string,
     @Query('includeChildren') queryIncludeChildren?: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) {
       throw new BadRequestException('A valid UUID is required for pageId');
     }
 
-    const activeProjectId = project?.id;
+    const activeProjectId = this.resolveActiveProjectId(project);
     const doc = activeProjectId
       ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
       : await this.prisma.manuscriptDoc.findUnique({
@@ -871,12 +909,8 @@ export class PagesHistoryExportController {
     const format = (body?.format || queryFormat || 'tex').toLowerCase();
     const rawFilename = doc.path?.replace(/^\//, '') || 'document.tex';
     const baseName = rawFilename.replace(/\.[^/.]+$/, '');
-    const lines = doc.lines as string[] | undefined;
-    let content = Array.isArray(lines)
-      ? lines.join('\n')
-      : typeof doc.lines === 'string'
-        ? doc.lines
-        : '';
+    const hydratedLines = await this.getHydratedDocLines(doc);
+    let content = hydratedLines.join('\n');
 
     const rawIncludeFlag = body?.includeChildren ?? queryIncludeChildren;
     const explicitExclude =
@@ -899,13 +933,31 @@ export class PagesHistoryExportController {
       try {
         const projectDocs = await this.prisma.manuscriptDoc.findMany({
           where: { projectId: doc.projectId, deleted: false },
-          select: { id: true, path: true, lines: true },
+          select: {
+            id: true,
+            projectId: true,
+            path: true,
+            lines: true,
+            inStorage: true,
+          },
         });
         if (projectDocs.length > 0) {
+          const hydratedProjectDocs = await Promise.all(
+            projectDocs.map(async (pd) => ({
+              id: pd.id,
+              path: pd.path,
+              lines: await this.getHydratedDocLines({
+                id: pd.id,
+                projectId: pd.projectId || doc.projectId,
+                lines: pd.lines,
+                inStorage: pd.inStorage,
+              }),
+            })),
+          );
           const rootKey = rawFilename.toLowerCase();
-          content = this.pageExportTranspiler.resolveIncludedLatexContent(
+          content = resolveIncludedLatexContent(
             content,
-            projectDocs,
+            hydratedProjectDocs,
             new Set([rootKey, rootKey.replace(/\.tex$/i, '')]),
           );
         }
@@ -915,10 +967,7 @@ export class PagesHistoryExportController {
     }
 
     if (format === 'docx') {
-      const docxBuffer = this.pageExportTranspiler.convertLatexToDocxBuffer(
-        content,
-        baseName,
-      );
+      const docxBuffer = convertLatexToDocxBuffer(content, baseName);
       return {
         filename: `${baseName}.docx`,
         mimeType:
@@ -930,10 +979,7 @@ export class PagesHistoryExportController {
     }
 
     if (format === 'md' || format === 'markdown') {
-      const mdContent = this.pageExportTranspiler.convertLatexToMarkdown(
-        content,
-        baseName,
-      );
+      const mdContent = convertLatexToMarkdown(content, baseName);
       return {
         filename: `${baseName}.md`,
         mimeType: 'text/markdown',
@@ -944,10 +990,7 @@ export class PagesHistoryExportController {
     }
 
     if (format === 'html') {
-      const htmlContent = this.pageExportTranspiler.convertLatexToHtml(
-        content,
-        baseName,
-      );
+      const htmlContent = convertLatexToHtml(content, baseName);
       return {
         filename: `${baseName}.html`,
         mimeType: 'text/html',
@@ -963,6 +1006,30 @@ export class PagesHistoryExportController {
       content,
       isBase64: false,
       sizeBytes: Buffer.byteLength(content, 'utf8'),
+    };
+  }
+
+  /**
+   * POST /api/v1/manuscripts/projects/:projectId/updater/flush
+   * Lightweight Yjs flush barrier endpoint for compatibility with pre-compile flush callers.
+   */
+  @Post('projects/:projectId/updater/flush')
+  @RequireRole(Role.CONTRIBUTOR)
+  @HttpCode(HttpStatus.OK)
+  async flushProject(@Param('projectId') projectId: string) {
+    const startedAt = Date.now();
+    const live = this.getLiveCollaboration();
+    const flushed = live ? await live.flushDocs(projectId, []) : [];
+    return {
+      projectId,
+      flushedDocs: flushed.length,
+      flushedDocsCount: flushed.length,
+      flushedDocIds: flushed,
+      docIds: flushed,
+      skippedDocIds: [],
+      errors: [],
+      durationMs: Date.now() - startedAt,
+      timestamp: Date.now(),
     };
   }
 }

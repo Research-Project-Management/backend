@@ -10,7 +10,6 @@
  */
 
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { PrismaService } from '@/core';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
@@ -19,41 +18,33 @@ import { ZoteroProvider } from '@/modules/integrations/providers/zotero.provider
 import { MendeleyProvider } from '@/modules/integrations/providers/mendeley.provider';
 import { decryptToken } from '@/modules/integrations/utils/integration-crypto.utils';
 import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
+import {
+  LIVE_COLLABORATION_PORT,
+  LiveCollaborationPort,
+} from '@/modules/manuscripts/core';
 
 import {
   ICitationsAggregatorPort,
   ILibrarySyncPort,
   LibraryCollectionSummary,
-  IIdentifierResolverPort,
   IBibtexParserPort,
   BibliographyFile,
   BibEntry,
-  AcademicIdentifierVo,
   RegexAstBibtexParser,
-  CrossrefArxivResolverAdapter,
-  DbLibraryItem,
-  formatLibraryItemToBibtex,
 } from './domain';
 
 @Injectable()
 export class CitationsRepository
-  implements
-    ICitationsAggregatorPort,
-    ILibrarySyncPort,
-    IIdentifierResolverPort,
-    IBibtexParserPort
+  implements ICitationsAggregatorPort, ILibrarySyncPort
 {
   private readonly logger = new Logger(CitationsRepository.name);
-  protected bibParser: IBibtexParserPort = new RegexAstBibtexParser();
-  private readonly identifierResolver = new CrossrefArxivResolverAdapter();
+  protected bibParser: IBibtexParserPort;
 
   constructor(
     @Optional()
     private readonly structureService?: StructureService,
     @Optional()
     private readonly docstoreService?: DocstoreService,
-    @Optional()
-    private readonly prisma?: PrismaService,
     @Optional()
     private readonly integrationsRepo?: IntegrationsRepository,
     @Optional()
@@ -63,24 +54,13 @@ export class CitationsRepository
     @Optional()
     @Inject(LIBRARY_FACADE)
     private readonly libraryFacade?: ILibraryFacade,
-  ) {}
-
-  // ─── BibTeX Parser ──────────────────────────────────────────────────────────
-
-  public parse(rawBibtex: string): BibEntry[] {
-    return this.bibParser.parse(rawBibtex);
-  }
-
-  public format(entries: BibEntry[]): string {
-    return this.bibParser.format(entries);
-  }
-
-  // ─── Identifier Resolution (DOI / arXiv) ────────────────────────────────────
-
-  public async resolve(
-    identifier: AcademicIdentifierVo,
-  ): Promise<BibEntry | null> {
-    return this.identifierResolver.resolve(identifier);
+    @Optional()
+    bibParser?: RegexAstBibtexParser,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    private readonly liveCollab?: LiveCollaborationPort,
+  ) {
+    this.bibParser = bibParser ?? new RegexAstBibtexParser();
   }
 
   // ─── Project .bib File Aggregation & Upsert ─────────────────────────────────
@@ -130,12 +110,24 @@ export class CitationsRepository
     entry: BibEntry,
     targetFilename = 'references.bib',
   ): Promise<string> {
+    return this.appendEntriesToBib(projectId, [entry], targetFilename);
+  }
+
+  public async appendEntriesToBib(
+    projectId: string,
+    entries: BibEntry[],
+    targetFilename = 'references.bib',
+  ): Promise<string> {
     const cleanFilename = targetFilename
       .replace(/^(\.\/)+/, '')
       .replace(/^\/+/, '');
     const cleanPath = `/${cleanFilename}`;
 
-    if (!this.structureService || !this.docstoreService) {
+    if (
+      entries.length === 0 ||
+      !this.structureService ||
+      !this.docstoreService
+    ) {
       return cleanPath;
     }
 
@@ -145,34 +137,52 @@ export class CitationsRepository
         n.path === cleanPath || n.name === cleanFilename,
     );
 
-    const bibString = entry.toBibtexString();
-    const entryLines = bibString.split('\n');
-
     if (targetNode && targetNode.docId) {
-      const doc = await this.docstoreService.getDoc(
-        projectId,
-        targetNode.docId,
-      );
+      const docId = targetNode.docId;
+      await (
+        this.liveCollab?.flushDoc?.(projectId, docId) ??
+        this.liveCollab?.flushDocs?.(projectId, [docId])
+      )?.catch(() => {});
+
+      const doc = await this.docstoreService.getDoc(projectId, docId);
       const currentLines = doc.lines || [];
       const currentText = currentLines.join('\n');
-      const updatedText = this.upsertEntryText(
-        currentText,
-        entry.key.value,
-        bibString,
-      );
+      let updatedText = currentText;
+      for (const entry of entries) {
+        updatedText = this.upsertEntryText(
+          updatedText,
+          entry.key.value,
+          entry.toBibtexString(),
+        );
+      }
 
       if (updatedText === currentText) {
         return targetNode.path;
       }
 
-      await this.docstoreService.updateDoc(projectId, targetNode.docId, {
-        lines: updatedText.split('\n'),
+      const nextLines = updatedText.split('\n');
+      await this.docstoreService.updateDoc(projectId, docId, {
+        lines: nextLines,
         version: (doc.version ?? 0) + 1,
         expectedRev: doc.rev,
       });
 
+      await this.liveCollab
+        ?.applyExternalText(projectId, docId, nextLines.join('\n'))
+        .catch(() => {});
+
       return targetNode.path;
     }
+
+    let initialText = '';
+    for (const entry of entries) {
+      initialText = this.upsertEntryText(
+        initialText,
+        entry.key.value,
+        entry.toBibtexString(),
+      );
+    }
+    const entryLines = initialText.replace(/\n$/, '').split('\n');
 
     const createdDoc = await this.docstoreService.createDoc(projectId, {
       path: cleanPath,
@@ -190,51 +200,7 @@ export class CitationsRepository
     return newNode.path;
   }
 
-  public async saveBibFile(
-    projectId: string,
-    targetFilename: string,
-    content: string,
-  ): Promise<string> {
-    const cleanFilename = targetFilename
-      .replace(/^(\.\/)+/, '')
-      .replace(/^\/+/, '');
-    const cleanPath = `/${cleanFilename}`;
-
-    if (!this.structureService || !this.docstoreService) {
-      return cleanPath;
-    }
-
-    const nodes = await this.structureService.getAllNodes(projectId);
-    const targetNode = nodes.find(
-      (n: ManuscriptNodeEntity) =>
-        n.path === cleanPath || n.name === cleanFilename,
-    );
-    const lines = content.split('\n');
-
-    if (targetNode && targetNode.docId) {
-      await this.docstoreService.updateDoc(projectId, targetNode.docId, {
-        lines,
-      });
-      return targetNode.path;
-    }
-
-    const createdDoc = await this.docstoreService.createDoc(projectId, {
-      path: cleanPath,
-      lines,
-    });
-
-    const newNode = await this.structureService.createNode(projectId, {
-      path: cleanPath,
-      name: cleanFilename,
-      type: 'DOC',
-      docId: createdDoc._id,
-      parentId: null,
-    });
-
-    return newNode.path;
-  }
-
-  // ─── Library Sync (Zotero, Mendeley, Flux Library, Prisma) ──────────────────
+  // ─── Library Sync (Zotero, Mendeley, Flux Library) ──────────────────────────
 
   public async listCollections(
     userId: string,
@@ -301,10 +267,9 @@ export class CitationsRepository
       }
     }
 
-    if (this.libraryFacade?.catalog) {
+    if (this.libraryFacade) {
       try {
-        const collections =
-          await this.libraryFacade.catalog.listCollections(userId);
+        const collections = await this.libraryFacade.listCollections(userId);
         for (const c of collections || []) {
           results.push({
             id: c.id,
@@ -315,37 +280,6 @@ export class CitationsRepository
       } catch (err: unknown) {
         this.logger.warn(
           `Failed to list collections via LibraryFacade: ${(err as Error)?.message}`,
-        );
-      }
-    } else if (this.prisma) {
-      try {
-        const collections = await this.prisma.collection.findMany({
-          where: {
-            userId,
-            deletedAt: null,
-          },
-          select: {
-            id: true,
-            name: true,
-            _count: {
-              select: { collectionItems: true },
-            },
-          },
-          orderBy: {
-            sortOrder: 'asc',
-          },
-        });
-
-        for (const c of collections) {
-          results.push({
-            id: c.id,
-            name: c.name,
-            itemCount: c._count.collectionItems,
-          });
-        }
-      } catch (err) {
-        this.logger.warn(
-          `Failed to fetch collections from database for user ${userId}: ${(err as Error).message}`,
         );
       }
     }
@@ -409,15 +343,12 @@ export class CitationsRepository
       );
     }
 
-    if (this.libraryFacade?.citation) {
+    if (this.libraryFacade) {
       try {
-        const exportRes = await this.libraryFacade.citation.exportLibrary(
-          userId,
-          {
-            format: 'bibtex',
-            collectionId,
-          },
-        );
+        const exportRes = await this.libraryFacade.exportLibrary(userId, {
+          format: 'bibtex',
+          collectionId,
+        });
         if (exportRes?.content !== undefined) {
           return exportRes.content;
         }
@@ -428,40 +359,7 @@ export class CitationsRepository
       }
     }
 
-    if (!this.prisma) {
-      throw new Error(`Collection ${collectionId} not found`);
-    }
-
-    const collection = await this.prisma.collection.findFirst({
-      where: { id: collectionId, userId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!collection) {
-      throw new Error(`Collection ${collectionId} not found`);
-    }
-
-    const collectionItems = await this.prisma.collectionItem.findMany({
-      where: {
-        collectionId,
-        item: { deletedAt: null },
-      },
-      include: {
-        item: {
-          include: {
-            contributors: {
-              orderBy: { orderIndex: 'asc' },
-            },
-          },
-        },
-      },
-    });
-
-    return collectionItems
-      .map((ci) =>
-        formatLibraryItemToBibtex(ci.item as unknown as DbLibraryItem),
-      )
-      .filter(Boolean)
-      .join('\n\n');
+    throw new Error(`Collection ${collectionId} not found`);
   }
 
   private upsertEntryText(
@@ -469,100 +367,6 @@ export class CitationsRepository
     key: string,
     bibString: string,
   ): string {
-    const targetKey = key.trim().toLowerCase();
-    const ranges: Array<{ start: number; end: number }> = [];
-    const entryStartRegex = /@([a-zA-Z]+)\s*\{\s*([^,\s]+)\s*,/g;
-
-    let match: RegExpExecArray | null;
-    while ((match = entryStartRegex.exec(text)) !== null) {
-      const entryType = match[1].toLowerCase();
-      if (
-        entryType === 'comment' ||
-        entryType === 'preamble' ||
-        entryType === 'string'
-      ) {
-        continue;
-      }
-      const openIdx = match.index + match[0].indexOf('{');
-      const closeIdx = this.findMatchingClosingBrace(text, openIdx);
-      if (closeIdx === -1) break;
-
-      if (match[2].trim().toLowerCase() === targetKey) {
-        ranges.push({ start: match.index, end: closeIdx + 1 });
-      }
-      entryStartRegex.lastIndex = closeIdx + 1;
-    }
-
-    if (ranges.length === 0) {
-      const trimmed = text.replace(/\s+$/, '');
-      return trimmed ? `${trimmed}\n\n${bibString}\n` : `${bibString}\n`;
-    }
-
-    let result = '';
-    let cursor = 0;
-    ranges.forEach((r, idx) => {
-      result += text.slice(cursor, r.start);
-      if (idx === 0) {
-        result += bibString;
-        cursor = r.end;
-      } else {
-        const after = text.slice(r.end);
-        const ws = after.match(/^\s*/)?.[0].length ?? 0;
-        cursor = r.end + ws;
-      }
-    });
-    result += text.slice(cursor);
-    return result;
-  }
-
-  private findMatchingClosingBrace(text: string, openBraceIdx: number): number {
-    let depth = 0;
-    for (let i = openBraceIdx; i < text.length; i++) {
-      const ch = text[i];
-      if (ch === '\\') {
-        i++;
-        continue;
-      }
-      if (ch === '{') {
-        depth++;
-      } else if (ch === '}') {
-        depth--;
-        if (depth === 0) return i;
-      }
-    }
-    return -1;
-  }
-}
-
-export class PluggableLibrarySyncAdapter extends CitationsRepository {
-  constructor(
-    prisma?: PrismaService,
-    integrationsRepo?: IntegrationsRepository,
-    zoteroProvider?: ZoteroProvider,
-    mendeleyProvider?: MendeleyProvider,
-    libraryFacade?: ILibraryFacade,
-  ) {
-    super(
-      undefined,
-      undefined,
-      prisma,
-      integrationsRepo,
-      zoteroProvider,
-      mendeleyProvider,
-      libraryFacade,
-    );
-  }
-}
-
-export class ManuscriptBibAggregatorAdapter extends CitationsRepository {
-  constructor(
-    structureService?: StructureService,
-    docstoreService?: DocstoreService,
-    parser?: IBibtexParserPort,
-  ) {
-    super(structureService, docstoreService);
-    if (parser) {
-      this.bibParser = parser;
-    }
+    return RegexAstBibtexParser.upsertEntry(text, key, bibString);
   }
 }

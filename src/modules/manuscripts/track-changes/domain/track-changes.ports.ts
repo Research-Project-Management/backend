@@ -36,10 +36,6 @@ export abstract class ITrackChangesRepositoryPort {
     threadId: string,
     reply: CommentReply,
   ): Promise<CommentReply>;
-  abstract deleteCommentThread(
-    projectId: string,
-    threadId: string,
-  ): Promise<void>;
 }
 
 export abstract class IDocstorePatcherPort {

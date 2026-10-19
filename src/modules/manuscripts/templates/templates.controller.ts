@@ -29,17 +29,11 @@ import {
   QueryTemplatesDto,
   SearchTemplatesDto,
   InstantiateTemplateDto,
-  OverleafInstantiateTemplateDto,
   CreateTemplateDto,
 } from './dto/template.dto';
 
 @ApiTags('Manuscripts - Templates')
-@Controller([
-  'api/v1/manuscripts/templates',
-  'v1/manuscripts/templates',
-  'manuscripts/templates',
-  'templates',
-])
+@Controller('api/v1/manuscripts/templates')
 @NoProjectContext()
 export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
@@ -106,67 +100,5 @@ export class TemplatesController {
   @ApiResponse({ status: 201, description: 'Custom template created' })
   async createCustomTemplate(@Body() dto: CreateTemplateDto) {
     return this.templatesService.createCustomTemplate(dto);
-  }
-}
-
-@ApiTags('Manuscripts - Overleaf Parity')
-@ApiBearerAuth('JWT-auth')
-@Controller([
-  'project',
-  'projects',
-  'api/project',
-  'api/projects',
-  'api/v1/manuscripts/project',
-  'v1/manuscripts/project',
-])
-@UseGuards(JwtAuthGuard)
-@NoProjectContext()
-export class OverleafTemplatesParityController {
-  constructor(private readonly templatesService: TemplatesService) {}
-
-  private extractUserId(req?: AuthenticatedRequest): string {
-    const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
-    if (!userId) {
-      throw new UnauthorizedException('Authentication required');
-    }
-    return userId;
-  }
-
-  @Post('new/template')
-  @NoProjectContext()
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({
-    summary: 'Overleaf 1:1 API Parity: Instantiate project from template',
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'Created project object with project_id',
-  })
-  async instantiateOverleaf(
-    @Req() req: AuthenticatedRequest,
-    @Body() dto: OverleafInstantiateTemplateDto,
-  ) {
-    const userId = this.extractUserId(req);
-    const templateId = dto.template_id || dto.templateVersionId || '';
-    const projectName = dto.project_name || dto.projectName;
-
-    const result = await this.templatesService.instantiateTemplate(userId, {
-      templateId,
-      projectName,
-    });
-
-    return {
-      project_id: result.projectId,
-      project: {
-        _id: result.projectId,
-        name: result.projectName,
-        owner_ref: result.ownerId,
-        rootDoc_id: result.mainFile,
-        compiler: result.compiler,
-        fromTemplateId: result.fromTemplateId,
-        fromTemplateVersionId: result.fromTemplateVersionId,
-        files: result.files,
-      },
-    };
   }
 }

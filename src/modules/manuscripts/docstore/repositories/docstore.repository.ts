@@ -7,37 +7,19 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, ManuscriptDoc } from '@prisma/client';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import {
   TextDoc,
   DocModifiedError,
   DocNotFoundError,
   DocRanges,
   DocstoreMetrics,
+  CreateDocData,
+  UpdateDocData,
+  PatchDocData,
 } from '../domain';
 
-export interface CreateDocData {
-  projectId: string;
-  path: string;
-  lines: string[];
-  version?: number;
-  ranges?: DocRanges;
-  hash?: string;
-}
-
-export interface UpdateDocData {
-  lines: string[];
-  version: number;
-  ranges?: DocRanges;
-  hash?: string;
-  expectedRev?: number;
-}
-
-export interface PatchDocData {
-  deleted?: boolean;
-  name?: string;
-  deletedAt?: Date | null;
-}
+export type { CreateDocData, UpdateDocData, PatchDocData };
 
 @Injectable()
 export class DocstoreRepository {
@@ -75,14 +57,7 @@ export class DocstoreRepository {
     projectId: string,
     docId: string,
   ): Promise<TextDoc | null> {
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (
-      !projectId ||
-      !docId ||
-      !uuidRegex.test(projectId) ||
-      !uuidRegex.test(docId)
-    ) {
+    if (!isUuid(projectId) || !isUuid(docId)) {
       return null;
     }
 
@@ -99,9 +74,7 @@ export class DocstoreRepository {
   }
 
   public async getDocById(docId: string): Promise<TextDoc | null> {
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!docId || !uuidRegex.test(docId)) {
+    if (!isUuid(docId)) {
       return null;
     }
 
@@ -164,8 +137,11 @@ export class DocstoreRepository {
 
   public async createDoc(data: CreateDocData): Promise<TextDoc> {
     const cleanPath = data.path.replace(/\\/g, '/').replace(/^\/+/, '');
-    const chars = data.lines.reduce((acc, l) => acc + l.length, 0);
-    const sizeBytes = chars + Math.max(0, data.lines.length - 1);
+    const bytes = data.lines.reduce(
+      (acc, l) => acc + Buffer.byteLength(l, 'utf8'),
+      0,
+    );
+    const sizeBytes = bytes + Math.max(0, data.lines.length - 1);
 
     const record = await this.prisma.manuscriptDoc.create({
       data: {
@@ -194,12 +170,12 @@ export class DocstoreRepository {
     docId: string,
     data: UpdateDocData,
   ): Promise<{ doc: TextDoc; modified: boolean }> {
-    let chars = 0;
+    let bytes = 0;
     const lines = data.lines;
     for (let i = 0; i < lines.length; i++) {
-      chars += lines[i].length;
+      bytes += Buffer.byteLength(lines[i], 'utf8');
     }
-    const sizeBytes = chars + Math.max(0, lines.length - 1);
+    const sizeBytes = bytes + Math.max(0, lines.length - 1);
 
     // 1. Optimistic Concurrency Control (OCC) check if expectedRev specified
     if (data.expectedRev !== undefined) {
@@ -339,6 +315,7 @@ export class DocstoreRepository {
     docId: string,
     storageKey: string,
     rev: number,
+    clearLines = true,
   ): Promise<void> {
     await this.prisma.manuscriptDoc.updateMany({
       where: {
@@ -349,7 +326,7 @@ export class DocstoreRepository {
       data: {
         inStorage: true,
         storageKey,
-        lines: [],
+        ...(clearLines ? { lines: [] } : {}),
       },
     });
   }
@@ -360,8 +337,11 @@ export class DocstoreRepository {
     lines: string[],
     ranges?: DocRanges,
   ): Promise<TextDoc> {
-    const chars = lines.reduce((acc, l) => acc + l.length, 0);
-    const sizeBytes = chars + Math.max(0, lines.length - 1);
+    const bytes = lines.reduce(
+      (acc, l) => acc + Buffer.byteLength(l, 'utf8'),
+      0,
+    );
+    const sizeBytes = bytes + Math.max(0, lines.length - 1);
 
     const updated = await this.prisma.manuscriptDoc.update({
       where: { id: docId },
@@ -392,5 +372,3 @@ export class DocstoreRepository {
     return result.count;
   }
 }
-
-export { DocstoreRepository as PrismaDocRepository };

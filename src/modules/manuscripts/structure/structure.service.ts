@@ -1,18 +1,13 @@
-/**
- * modules/manuscripts/structure/structure.service.ts
- * Deep module facade orchestrating Manuscript Project File Tree & Hierarchy operations.
- * Executes directly via StructureRepository / IStructureRepository and pure domain FileTreeBuilder.
- */
-
 import {
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import {
   IStructureRepository,
-  ITreePublisher,
   ManuscriptNodeEntity,
   NodePathVo,
   FileTreeBuilder,
@@ -21,17 +16,20 @@ import {
   CannotDeleteRootFolderError,
   RootDocNotFoundError,
 } from './domain';
-import { StructureRepository } from './structure.repository';
 import {
   CreateNodeDto,
   MoveNodeDto,
   RenameNodeDto,
   TreeNodeDto,
 } from './dto/node.dto';
-import { WorkspaceFile, CompilationPayload } from '@/modules/manuscripts/core';
+import {
+  WorkspaceFile,
+  CompilationPayload,
+  LiveCollaborationPort,
+} from '@/modules/manuscripts/core';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
-import { PrismaService } from '@/core';
 
 export type { CompilationPayload };
 
@@ -40,20 +38,25 @@ export class StructureService {
   private readonly logger = new Logger(StructureService.name);
 
   constructor(
-    @Optional() private readonly structureRepository?: IStructureRepository,
+    @Inject(IStructureRepository)
+    private readonly repository: IStructureRepository,
     @Optional() private readonly realtimeService?: RealtimeFacade,
-    @Optional() private readonly directRepository?: StructureRepository,
-    @Optional() private readonly treePublisher?: ITreePublisher,
     @Optional() private readonly filestoreService?: FilestoreService,
-    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly docstoreService?: DocstoreService,
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
   private get repo(): IStructureRepository {
-    const r = this.structureRepository ?? this.directRepository;
-    if (!r) {
-      throw new Error('StructureService is not configured with a repository');
+    return this.repository;
+  }
+
+  private getLiveCollab(): LiveCollaborationPort | null {
+    if (!this.moduleRef) return null;
+    try {
+      return this.moduleRef.get(LiveCollaborationPort, { strict: false });
+    } catch {
+      return null;
     }
-    return r;
   }
 
   public async getFileTree(projectId: string): Promise<TreeNodeDto[]> {
@@ -115,24 +118,51 @@ export class StructureService {
       throw new DuplicateNodePathError(computedPath);
     }
 
-    if (dto.docId && this.prisma) {
-      const doc = await this.prisma.manuscriptDoc.findFirst({
-        where: { id: dto.docId, projectId, deleted: false },
-      });
-      if (!doc) {
+    let resolvedDocId = dto.docId;
+    let resolvedSizeBytes: number | undefined;
+    let resolvedHash: string | null | undefined;
+
+    if (resolvedDocId && this.repo.docExistsInProject) {
+      const exists = await this.repo.docExistsInProject(
+        projectId,
+        resolvedDocId,
+      );
+      if (!exists) {
         throw new NotFoundException({
           statusCode: 404,
           code: 'RESOURCE_NOT_FOUND',
           message: 'Document not found in project',
         });
       }
+    } else if (dto.type === 'DOC' && !resolvedDocId) {
+      if (this.docstoreService) {
+        const initialLines =
+          dto.content && dto.content.length > 0
+            ? dto.content.split(/\r?\n/)
+            : [''];
+        const createdDoc = await this.docstoreService.createDoc(projectId, {
+          path: computedPath.replace(/^\/+/, ''),
+          lines: initialLines,
+        });
+        resolvedDocId = createdDoc.id;
+        resolvedSizeBytes = createdDoc.sizeBytes;
+        resolvedHash = createdDoc.hash;
+      } else if (this.repo.createBackingDoc) {
+        const createdDoc = await this.repo.createBackingDoc(
+          projectId,
+          dto.name,
+          computedPath,
+          dto.content,
+        );
+        resolvedDocId = createdDoc.id;
+        resolvedSizeBytes = createdDoc.sizeBytes;
+        resolvedHash = createdDoc.hash;
+      }
     }
 
-    if (dto.fileId && this.prisma) {
-      const file = await this.prisma.manuscriptFile.findFirst({
-        where: { id: dto.fileId, projectId, deleted: false },
-      });
-      if (!file) {
+    if (dto.fileId && this.repo.fileExistsInProject) {
+      const exists = await this.repo.fileExistsInProject(projectId, dto.fileId);
+      if (!exists) {
         throw new NotFoundException({
           statusCode: 404,
           code: 'RESOURCE_NOT_FOUND',
@@ -148,22 +178,18 @@ export class StructureService {
         type: dto.type,
         name: dto.name,
         path: computedPath,
-        docId: dto.docId,
+        docId: resolvedDocId,
         fileId: dto.fileId,
         isRootDoc: dto.isRootDoc ?? false,
+        ...(resolvedSizeBytes !== undefined
+          ? { sizeBytes: resolvedSizeBytes }
+          : {}),
+        ...(resolvedHash !== undefined ? { hash: resolvedHash } : {}),
       });
 
       if (dto.isRootDoc && dto.type === 'DOC') {
         await this.repo.setRootDoc(projectId, node.id);
       }
-
-      await this.treePublisher?.publishTreeMutation({
-        projectId,
-        action: 'create',
-        nodeId: node.id,
-        path: node.path,
-        entityType: node.type,
-      });
 
       this.realtimeService?.broadcastFileTreeChange(projectId, {
         action: 'create',
@@ -207,14 +233,6 @@ export class StructureService {
           type: 'FOLDER',
           name: segment,
           path: currentPath,
-        });
-
-        await this.treePublisher?.publishTreeMutation({
-          projectId,
-          action: 'create',
-          nodeId: found.id,
-          path: found.path,
-          entityType: 'FOLDER',
         });
       }
 
@@ -292,15 +310,6 @@ export class StructureService {
 
     const node = (await this.repo.findById(projectId, targetNode.id))!;
 
-    await this.treePublisher?.publishTreeMutation({
-      projectId,
-      action: 'move',
-      nodeId: node.id,
-      path: node.path,
-      oldPath,
-      entityType: node.type,
-    });
-
     this.realtimeService?.broadcastFileTreeChange(projectId, {
       action: 'move',
       node,
@@ -353,16 +362,6 @@ export class StructureService {
           newPath,
         );
       }
-
-      await this.treePublisher?.publishTreeMutation({
-        projectId,
-        action: 'rename',
-        nodeId: node.id,
-        path: node.path,
-        oldPath,
-        entityType: node.type,
-        data: { oldName: existingNode.name, newName },
-      });
     }
 
     this.realtimeService?.broadcastFileTreeChange(projectId, {
@@ -386,19 +385,57 @@ export class StructureService {
 
     const deletedNodes = await this.repo.deleteSubtree(projectId, node.path);
 
+    const docIds = Array.from(
+      new Set(
+        deletedNodes
+          .map((n) => n.docId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    );
+    const fileIds = Array.from(
+      new Set(
+        deletedNodes
+          .map((n) => n.fileId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    );
+
+    const liveCollab = this.getLiveCollab();
+
+    for (const docId of docIds) {
+      if (this.docstoreService) {
+        try {
+          await this.docstoreService.patchDoc(projectId, docId, {
+            deleted: true,
+            deletedAt: new Date().toISOString(),
+          });
+        } catch {
+          // Already marked deleted by deleteSubtree or not found
+        }
+      }
+      if (liveCollab) {
+        try {
+          await liveCollab.applyExternalText(projectId, docId, '');
+        } catch {
+          // Ignore liveCollab cleanup errors
+        }
+      }
+    }
+
+    for (const fileId of fileIds) {
+      if (this.filestoreService) {
+        try {
+          await this.filestoreService.deleteFile(projectId, fileId, true);
+        } catch {
+          // Already marked deleted by deleteSubtree or not found
+        }
+      }
+    }
+
     const hadRootDoc = deletedNodes.some((n) => n.isRootDoc);
     if (hadRootDoc) {
       await this.repo.unsetRootDoc(projectId);
     }
-
-    await this.treePublisher?.publishTreeMutation({
-      projectId,
-      action: 'delete',
-      nodeId: node.id,
-      path: node.path,
-      entityType: node.type,
-      data: { deletedCount: deletedNodes.length, hadRootDoc },
-    });
 
     this.realtimeService?.broadcastFileTreeChange(projectId, {
       action: 'delete',
@@ -430,14 +467,6 @@ export class StructureService {
     await this.repo.setRootDoc(projectId, found.id);
     const node = (await this.repo.findById(projectId, found.id))!;
 
-    await this.treePublisher?.publishTreeMutation({
-      projectId,
-      action: 'root_doc_changed',
-      nodeId: node.id,
-      path: node.path,
-      entityType: node.type,
-    });
-
     this.realtimeService?.broadcastFileTreeChange(projectId, {
       action: 'set-root',
       node,
@@ -448,13 +477,16 @@ export class StructureService {
   public async autoDetectRootDoc(
     projectId: string,
     docContents: Map<string, string[]>,
+    existingNodes?: ManuscriptNodeEntity[],
   ): Promise<ManuscriptNodeEntity | null> {
-    const existing = await this.repo.getRootDoc(projectId);
+    const existing = existingNodes
+      ? (existingNodes.find((n) => n.isRootDoc) ?? null)
+      : await this.repo.getRootDoc(projectId);
     if (existing) {
       return existing;
     }
 
-    const allNodes = await this.repo.getAllNodes(projectId);
+    const allNodes = existingNodes ?? (await this.repo.getAllNodes(projectId));
     const detected = FileTreeBuilder.detectRootDoc(allNodes, docContents);
 
     if (detected) {
@@ -463,15 +495,7 @@ export class StructureService {
         `Auto-detected root document '${detected.path}' for project ${projectId}`,
       );
 
-      await this.treePublisher?.publishTreeMutation({
-        projectId,
-        action: 'root_doc_changed',
-        nodeId: detected.id,
-        path: detected.path,
-        entityType: detected.type,
-      });
-
-      return (await this.repo.findById(projectId, detected.id))!;
+      return (await this.repo.findById(projectId, detected.id)) ?? detected;
     }
 
     return null;
@@ -483,13 +507,13 @@ export class StructureService {
   ): Promise<CompilationPayload> {
     const nodes = await this.repo.getAllNodes(projectId);
 
-    let rootNode = await this.getRootDoc(projectId);
+    let rootNode = nodes.find((n) => n.isRootDoc) ?? null;
     if (!rootNode) {
       const linesMap = new Map<string, string[]>();
       for (const [id, val] of docContentsMap.entries()) {
         linesMap.set(id, val.lines);
       }
-      rootNode = await this.autoDetectRootDoc(projectId, linesMap);
+      rootNode = await this.autoDetectRootDoc(projectId, linesMap, nodes);
     }
 
     if (!rootNode) {

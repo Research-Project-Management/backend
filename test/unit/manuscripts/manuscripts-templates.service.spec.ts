@@ -14,7 +14,6 @@ import {
   TemplatesRepository,
   TemplatesService,
   TemplatesController,
-  OverleafTemplatesParityController,
   OFFICIAL_TEMPLATE_CATALOG,
 } from '@/modules/manuscripts/templates';
 import { AuthenticatedRequest } from '@/core';
@@ -285,10 +284,10 @@ describe('Manuscripts Templates Subsystem', () => {
         adapter = createMockTemplatesRepo().repo;
       });
 
-      it('should initialize with 7 official starter templates', async () => {
+      it('should initialize with 12 official starter templates', async () => {
         const { templates, total } = await adapter.findAll();
-        expect(total).toBe(7);
-        expect(templates.length).toBe(7);
+        expect(total).toBe(12);
+        expect(templates.length).toBe(12);
 
         const names = templates.map((t: ManuscriptTemplateEntity) => t.name);
         expect(names).toContain('IEEE Transactions Article');
@@ -320,7 +319,7 @@ describe('Manuscripts Templates Subsystem', () => {
         const { templates: officials } = await adapter.findAll({
           isOfficial: true,
         });
-        expect(officials.length).toBe(7);
+        expect(officials.length).toBe(12);
 
         // Add a non-official template
         const custom = ManuscriptTemplateEntity.create({
@@ -582,7 +581,7 @@ describe('Manuscripts Templates Subsystem', () => {
 
     it('should list all templates and return plain objects', async () => {
       const res = await service.listTemplates();
-      expect(res.total).toBe(7);
+      expect(res.total).toBe(12);
       expect(res.templates[0].id).toBeDefined();
       expect(res.templates[0].name).toBeDefined();
     });
@@ -624,24 +623,22 @@ describe('Manuscripts Templates Subsystem', () => {
   });
 
   // =========================================================================
-  // 5. CONTROLLERS & OVERLEAF PARITY
+  // 5. CONTROLLERS
   // =========================================================================
-  describe('Controllers & Overleaf 1:1 Parity', () => {
+  describe('Controllers', () => {
     let service: TemplatesService;
     let templatesController: TemplatesController;
-    let overleafController: OverleafTemplatesParityController;
 
     beforeEach(() => {
       const { repo } = createMockTemplatesRepo();
       service = new TemplatesService(repo);
 
       templatesController = new TemplatesController(service);
-      overleafController = new OverleafTemplatesParityController(service);
     });
 
     it('TemplatesController should list templates', async () => {
       const res = await templatesController.listTemplates({});
-      expect(res.total).toBe(7);
+      expect(res.total).toBe(12);
     });
 
     it('TemplatesController should search templates', async () => {
@@ -667,24 +664,6 @@ describe('Manuscripts Templates Subsystem', () => {
       expect(res.projectId).toBe('proj-parity-1');
       expect(res.ownerId).toBe('prof-oak');
       expect(res.projectName).toBe('Pokedex Research');
-    });
-
-    it('OverleafTemplatesParityController should match Overleaf POST /project/new/template response format', async () => {
-      const req = {
-        user: { id: 'overleaf-user-99' },
-      } as unknown as AuthenticatedRequest;
-      const res = await overleafController.instantiateOverleaf(req, {
-        template_id: 'tmpl-acm-sigconf-v1',
-        project_name: 'Overleaf Compatible Project',
-      });
-
-      expect(res.project_id).toBe('proj-parity-1');
-      expect(res.project).toBeDefined();
-      expect(res.project._id).toBe('proj-parity-1');
-      expect(res.project.name).toBe('Overleaf Compatible Project');
-      expect(res.project.owner_ref).toBe('overleaf-user-99');
-      expect(res.project.compiler).toBe('pdflatex');
-      expect(res.project.fromTemplateVersionId).toBe('tmpl-acm-sigconf-v1');
     });
   });
 });

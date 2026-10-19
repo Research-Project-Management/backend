@@ -212,12 +212,3 @@ export class HeuristicRootDocDetector {
   }
 }
 
-export class InMemoryTreePublisher {
-  public readonly events: Array<Record<string, unknown>> = [];
-
-  public async publishTreeMutation(
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    this.events.push(payload);
-  }
-}

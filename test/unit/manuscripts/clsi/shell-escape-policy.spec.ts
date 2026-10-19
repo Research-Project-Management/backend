@@ -69,14 +69,6 @@ describe('Shell-Escape Policy & Advisory Detection (Slice S1 / US1)', () => {
         expect.arrayContaining(['minted', 'svg', 'tikz-external', 'write18']),
       );
     });
-
-    it('should keep requiresShellEscape as an advisory helper returning boolean', () => {
-      const docWithMinted = '\\documentclass{article}\\usepackage{minted}';
-      const cleanDoc = '\\documentclass{article}\\usepackage{amsmath}';
-
-      expect(DraftModeManager.requiresShellEscape(docWithMinted)).toBe(true);
-      expect(DraftModeManager.requiresShellEscape(cleanDoc)).toBe(false);
-    });
   });
 
   describe('TexEngineDetector shell-escape isolation', () => {

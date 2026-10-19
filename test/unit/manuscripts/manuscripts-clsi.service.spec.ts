@@ -19,10 +19,9 @@ import {
   DraftModeManager,
   DiskUsageCleaner,
   ClsiMetrics,
-  buildZipArchive,
-  createZipStream,
   createZipStreamFromDisk,
 } from '@/modules/manuscripts/clsi';
+import { PkzipEngineAdapter } from '@/modules/manuscripts/export-import';
 
 describe('Manuscripts - ClsiService', () => {
   let service: ClsiService;
@@ -372,10 +371,12 @@ describe('Manuscripts - ClsiService', () => {
       const sourceWithoutMinted =
         '\\documentclass{article}\n\\usepackage{listings}\n\\begin{document}\\end{document}';
 
-      expect(DraftModeManager.requiresShellEscape(sourceWithMinted)).toBe(true);
-      expect(DraftModeManager.requiresShellEscape(sourceWithoutMinted)).toBe(
-        false,
+      expect(DraftModeManager.detectShellEscapeUsage(sourceWithMinted)).toEqual(
+        ['minted'],
       );
+      expect(
+        DraftModeManager.detectShellEscapeUsage(sourceWithoutMinted),
+      ).toEqual([]);
     });
   });
 
@@ -471,8 +472,10 @@ describe('Manuscripts - ClsiService', () => {
   });
 
   describe('Zip Artifact Builder (Artifacts Packaging)', () => {
+    const zipEngine = new PkzipEngineAdapter();
+
     it('should create valid PKZIP archive from files', () => {
-      const zipBuffer = buildZipArchive([
+      const zipBuffer = zipEngine.buildZip([
         { path: 'output.pdf', data: Buffer.from('fake pdf content') },
         { path: 'output.log', data: 'compile log text' },
       ]);
@@ -484,7 +487,7 @@ describe('Manuscripts - ClsiService', () => {
     });
 
     it('should create streamable PKZIP archive from in-memory entries', async () => {
-      const stream = createZipStream([
+      const stream = zipEngine.createZipStream([
         { path: 'doc.tex', data: '\\documentclass{article}' },
         { path: 'figures/plot.svg', data: '<svg></svg>' },
       ]);

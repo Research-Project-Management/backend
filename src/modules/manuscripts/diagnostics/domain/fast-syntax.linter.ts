@@ -4,9 +4,8 @@
  * Zero I/O, zero NestJS imports.
  */
 
-import { DiagnosticItem } from './diagnostic-item.entity';
+import { DiagnosticItem, DiagnosticSeverityVo } from './diagnostic-item.entity';
 import { DiagnosticReport } from './diagnostic-report.entity';
-import { DiagnosticSeverityVo } from './diagnostic-severity.vo';
 import { ErrorExplainerLike, ErrorKnowledgeBase } from './compile-log.analyzer';
 
 const MATH_ENVIRONMENTS = new Set([
@@ -866,22 +865,5 @@ export class FastSyntaxLinter {
       result += line[i];
     }
     return result;
-  }
-}
-
-export { FastSyntaxLinter as FastSyntaxLinterAdapter };
-
-export class LintDocumentSyntaxUseCase {
-  constructor(private readonly linter = new FastSyntaxLinter()) {}
-  public execute(input: {
-    source: string;
-    filename?: string;
-    knownBibKeys?: Set<string>;
-  }): DiagnosticReport {
-    return this.linter.lintToReport(
-      input.source,
-      input.filename,
-      input.knownBibKeys,
-    );
   }
 }

@@ -8,7 +8,7 @@
  * - Git-blob Content-Addressable Storage (CAS) stream hashing
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -472,27 +472,12 @@ export class FilestoreRepository extends IManuscriptFileRepository {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Optional() configService?: ConfigService,
-    @Optional() storageOverride?: IBinaryStoragePort,
-    @Optional() hasherOverride?: CryptoGitBlobHasherAdapter,
+    @Optional() @Inject(IBinaryStoragePort) storage?: IBinaryStoragePort,
+    @Optional() @Inject(IContentHasherPort) hasher?: CryptoGitBlobHasherAdapter,
   ) {
     super();
-    this.hasher = hasherOverride ?? new CryptoGitBlobHasherAdapter();
-    if (storageOverride) {
-      this.storage = storageOverride;
-    } else if (configService) {
-      const s3Key = configService.get<string>('AWS_ACCESS_KEY_ID');
-      const s3Endpoint = configService.get<string>('AWS_ENDPOINT');
-      const forceLocal =
-        configService.get<string>('MANUSCRIPTS_FILESTORE_DRIVER') === 'local';
-
-      this.storage =
-        forceLocal || (!s3Key && !s3Endpoint)
-          ? new LocalDiskBinaryStorageAdapter()
-          : new S3BinaryStorageAdapter(configService);
-    } else {
-      this.storage = new LocalDiskBinaryStorageAdapter();
-    }
+    this.storage = storage ?? new LocalDiskBinaryStorageAdapter();
+    this.hasher = hasher ?? new CryptoGitBlobHasherAdapter();
   }
 
   public async hashStream(stream: Readable): Promise<StreamHashResult> {
@@ -581,7 +566,136 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       },
     });
 
+    await this.syncFileNode(data);
+
     return ManuscriptFileMapper.toDomain(upserted);
+  }
+
+  private async syncFileNode(data: {
+    id: string;
+    projectId: string;
+    name: string;
+    sizeBytes: number;
+    hash: string;
+    deleted: boolean;
+  }): Promise<void> {
+    if (!this.prisma?.manuscriptNode) {
+      return;
+    }
+
+    try {
+      if (data.deleted) {
+        await this.prisma.manuscriptNode.deleteMany?.({
+          where: {
+            projectId: data.projectId,
+            fileId: data.id,
+          },
+        });
+        return;
+      }
+
+      const rawPath = (data.name || 'unnamed.bin')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '');
+      const segments = rawPath.split('/').filter(Boolean);
+      const leafName = segments[segments.length - 1] || 'unnamed.bin';
+      const normalizedPath = '/' + segments.join('/');
+      const depth = Math.max(0, segments.length - 1);
+
+      const existingByFileId = await this.prisma.manuscriptNode.findFirst?.({
+        where: {
+          projectId: data.projectId,
+          fileId: data.id,
+        },
+      });
+
+      if (existingByFileId) {
+        await this.prisma.manuscriptNode.updateMany?.({
+          where: { id: existingByFileId.id, projectId: data.projectId },
+          data: {
+            sizeBytes: data.sizeBytes,
+            hash: data.hash,
+          },
+        });
+        return;
+      }
+
+      let parentId: string | null = null;
+      if (segments.length > 1) {
+        let currentFolderPath = '';
+        for (let i = 0; i < segments.length - 1; i++) {
+          const folderSegment = segments[i];
+          currentFolderPath = `${currentFolderPath}/${folderSegment}`;
+          let folderNode = await this.prisma.manuscriptNode.findUnique?.({
+            where: {
+              projectId_path: {
+                projectId: data.projectId,
+                path: currentFolderPath,
+              },
+            },
+          });
+          if (!folderNode && this.prisma.manuscriptNode.create) {
+            folderNode = await this.prisma.manuscriptNode.create({
+              data: {
+                projectId: data.projectId,
+                parentId,
+                type: 'FOLDER',
+                name: folderSegment,
+                path: currentFolderPath,
+                depth: i,
+                isRootDoc: false,
+                sizeBytes: 0,
+                sortOrder: 0,
+              },
+            });
+          }
+          parentId = folderNode?.id ?? parentId;
+        }
+      }
+
+      const existingByPath = await this.prisma.manuscriptNode.findUnique?.({
+        where: {
+          projectId_path: {
+            projectId: data.projectId,
+            path: normalizedPath,
+          },
+        },
+      });
+
+      if (existingByPath) {
+        if (existingByPath.type === 'FILE') {
+          await this.prisma.manuscriptNode.updateMany?.({
+            where: { id: existingByPath.id, projectId: data.projectId },
+            data: {
+              fileId: data.id,
+              sizeBytes: data.sizeBytes,
+              hash: data.hash,
+            },
+          });
+        }
+        return;
+      }
+
+      await this.prisma.manuscriptNode.create?.({
+        data: {
+          projectId: data.projectId,
+          parentId,
+          type: 'FILE',
+          name: leafName,
+          path: normalizedPath,
+          depth,
+          fileId: data.id,
+          isRootDoc: false,
+          sizeBytes: data.sizeBytes,
+          hash: data.hash,
+          sortOrder: 0,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to sync ManuscriptNode for file '${data.id}' in project '${data.projectId}': ${(err as Error).message}`,
+      );
+    }
   }
 
   public async findById(id: string): Promise<ManuscriptFile | null> {
@@ -618,6 +732,47 @@ export class FilestoreRepository extends IManuscriptFileRepository {
     return record ? ManuscriptFileMapper.toDomain(record) : null;
   }
 
+  public async findFileByPathFlexible(
+    projectId: string,
+    rawPath: string,
+  ): Promise<ManuscriptFile | null> {
+    const cleanPath = rawPath.replace(/^\//, '').trim();
+    const leafName = cleanPath.split('/').pop() || cleanPath;
+    const extensions = ['.png', '.jpg', '.jpeg', '.pdf', '.svg', '.eps'];
+
+    const candidates: string[] = [cleanPath];
+    if (leafName !== cleanPath) {
+      candidates.push(leafName);
+    }
+    for (const ext of extensions) {
+      candidates.push(`${cleanPath}${ext}`);
+      if (leafName !== cleanPath) {
+        candidates.push(`${leafName}${ext}`);
+      }
+    }
+
+    const records = await this.prisma.manuscriptFile.findMany({
+      where: {
+        projectId,
+        deleted: false,
+        name: { in: candidates },
+      },
+    });
+
+    if (records.length === 0) {
+      return null;
+    }
+
+    for (const candidate of candidates) {
+      const match = records.find((r) => r.name === candidate);
+      if (match) {
+        return ManuscriptFileMapper.toDomain(match);
+      }
+    }
+
+    return ManuscriptFileMapper.toDomain(records[0]);
+  }
+
   public async findByHash(hash: string): Promise<ManuscriptFile[]> {
     const records = await this.prisma.manuscriptFile.findMany({
       where: {
@@ -649,6 +804,9 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         deleted: true,
         deletedAt: new Date(),
       },
+    });
+    await this.prisma.manuscriptNode?.deleteMany?.({
+      where: { fileId: id },
     });
   }
 

@@ -12,9 +12,10 @@ import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { LiveCollaborationPort } from '@/modules/manuscripts/core';
-import { GitBridgeRepository } from './git-bridge.repository';
+import { GitBridgeRepository, GitCliAdapter } from './git-bridge.repository';
 import {
   generateToken,
+  GIT_DEFAULT_BRANCH,
   GitChange,
   GitRunResult,
   GitService,
@@ -52,6 +53,7 @@ function splitLines(text: string): string[] {
 export class GitBridgeService {
   private readonly logger = new Logger(GitBridgeService.name);
   private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly gitCli: GitCliAdapter;
 
   constructor(
     private readonly repository: GitBridgeRepository,
@@ -59,7 +61,10 @@ export class GitBridgeService {
     private readonly filestore: FilestoreService,
     private readonly structure: StructureService,
     @Optional() private readonly moduleRef?: ModuleRef,
-  ) {}
+    @Optional() gitCli?: GitCliAdapter,
+  ) {
+    this.gitCli = gitCli ?? new GitCliAdapter();
+  }
 
   // ─── Token & Access Management ──────────────────────────────────────────────
 
@@ -146,7 +151,7 @@ export class GitBridgeService {
   }
 
   advertiseRefs(projectId: string, service: GitService): Promise<Buffer> {
-    return this.repository.advertiseRefs(projectId, service);
+    return this.gitCli.advertiseRefs(projectId, service);
   }
 
   serviceRpc(
@@ -154,19 +159,19 @@ export class GitBridgeService {
     service: GitService,
     body: Readable,
   ): Promise<GitRunResult> {
-    return this.repository.serviceRpc(projectId, service, body);
+    return this.gitCli.serviceRpc(projectId, service, body);
   }
 
   resolveRef(projectId: string, ref?: string): Promise<string | null> {
-    return this.repository.resolveRef(projectId, ref);
+    return this.gitCli.resolveRef(projectId, ref);
   }
 
   listRefs(projectId: string): Promise<string[]> {
-    return this.repository.listRefs(projectId);
+    return this.gitCli.listRefs(projectId);
   }
 
   deleteRef(projectId: string, ref: string): Promise<void> {
-    return this.repository.deleteRef(projectId, ref);
+    return this.gitCli.deleteRef(projectId, ref);
   }
 
   setMainRef(
@@ -174,7 +179,54 @@ export class GitBridgeService {
     sha: string,
     expectedOld: string | null,
   ): Promise<void> {
-    return this.repository.setMainRef(projectId, sha, expectedOld);
+    return this.gitCli.setMainRef(projectId, sha, expectedOld);
+  }
+
+  /**
+   * Executes git-receive-pack under project lock, prunes non-default branch refs,
+   * and applies pushed commits into the manuscript project.
+   */
+  async handleReceivePack(
+    projectId: string,
+    requestBody: Readable,
+  ): Promise<{ stdout: Buffer } | { rejected: string }> {
+    return this.withProjectLock(projectId, async () => {
+      const before = await this.materialize(projectId);
+      const result = await this.serviceRpc(
+        projectId,
+        'git-receive-pack',
+        requestBody,
+      );
+      const after = await this.resolveRef(projectId);
+
+      const mainRef = `refs/heads/${GIT_DEFAULT_BRANCH}`;
+      const extra = (await this.listRefs(projectId)).filter(
+        (r) => r !== mainRef,
+      );
+      for (const ref of extra) {
+        await this.deleteRef(projectId, ref);
+      }
+
+      if (after && after !== before) {
+        try {
+          const applied = await this.applyPush(projectId, before, after);
+          this.logger.log(
+            `git push ${projectId}: +${applied.created.length} ~${applied.updated.length} -${applied.deleted.length}`,
+          );
+          await this.materialize(projectId);
+        } catch (applyErr) {
+          await this.setMainRef(projectId, before, after).catch(
+            () => undefined,
+          );
+          throw applyErr;
+        }
+      } else if (extra.length > 0 && after === before) {
+        return {
+          rejected: `Only the '${GIT_DEFAULT_BRANCH}' branch can be pushed`,
+        };
+      }
+      return { stdout: result.stdout };
+    });
   }
 
   private live(): LiveCollaborationPort | null {
@@ -189,7 +241,7 @@ export class GitBridgeService {
 
   /** Commits the current project state to `main`; returns tip sha. Caller holds lock. */
   async materialize(projectId: string): Promise<string> {
-    await this.repository.ensureRepo(projectId);
+    await this.gitCli.ensureRepo(projectId);
     const nodes = await this.structure.getAllNodes(projectId);
 
     const live = this.live();
@@ -233,7 +285,7 @@ export class GitBridgeService {
         }
       }
     }
-    return this.repository.commitSnapshot(
+    return this.gitCli.commitSnapshot(
       projectId,
       files,
       `Flux snapshot ${new Date().toISOString()}`,
@@ -246,33 +298,206 @@ export class GitBridgeService {
     oldSha: string | null,
     newSha: string,
   ): Promise<PushApplyResult> {
-    const changes: GitChange[] = parseNameStatusZ(
-      await this.repository.diffNameStatus(projectId, oldSha, newSha),
-    );
-    for (const c of changes) toProjectPath(c.path);
+    const MAX_PUSH_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB per file limit
+    const MAX_PUSH_TOTAL_BYTES = 200 * 1024 * 1024; // 200MB total push limit
 
-    const result: PushApplyResult = { created: [], updated: [], deleted: [] };
+    const changes: GitChange[] = parseNameStatusZ(
+      await this.gitCli.diffNameStatus(projectId, oldSha, newSha),
+    );
+
     const ordered = [
       ...changes.filter((c) => c.status === 'D'),
       ...changes.filter((c) => c.status !== 'D'),
     ];
+
+    // 1. Pre-validate all paths, read all blobs, and validate sizes before mutating any state
+    const stagedChanges: Array<{
+      status: GitChange['status'];
+      repoPath: string;
+      projectPath: string;
+      content?: Buffer;
+    }> = [];
+    let totalBytes = 0;
+
     for (const change of ordered) {
       const projectPath = toProjectPath(change.path);
       if (change.status === 'D') {
-        if (await this.removeEntry(projectId, projectPath)) {
-          result.deleted.push(projectPath);
-        }
+        stagedChanges.push({
+          status: 'D',
+          repoPath: change.path,
+          projectPath,
+        });
         continue;
       }
-      const content = await this.repository.readBlob(
+
+      const content = await this.gitCli.readBlob(
         projectId,
         newSha,
         change.path,
       );
-      const outcome = await this.upsertEntry(projectId, projectPath, content);
-      result[outcome].push(projectPath);
+      if (content.length > MAX_PUSH_FILE_SIZE_BYTES) {
+        throw new Error(
+          `File "${projectPath}" exceeds maximum permitted push size of 50MB (${content.length} bytes)`,
+        );
+      }
+      totalBytes += content.length;
+      if (totalBytes > MAX_PUSH_TOTAL_BYTES) {
+        throw new Error(
+          `Push payload exceeds maximum permitted total size of 200MB`,
+        );
+      }
+      stagedChanges.push({
+        status: change.status,
+        repoPath: change.path,
+        projectPath,
+        content,
+      });
     }
-    return result;
+
+    // 2. Capture pre-push snapshot of affected nodes/docs for transactional rollback
+    interface PrePushEntrySnapshot {
+      projectPath: string;
+      existed: boolean;
+      nodeId?: string;
+      name?: string;
+      parentId?: string | null;
+      type?: 'DOC' | 'FILE' | 'FOLDER';
+      docId?: string | null;
+      fileId?: string | null;
+      isRootDoc?: boolean;
+      docLines?: string[];
+      docVersion?: number;
+    }
+
+    const prePushSnapshots = new Map<string, PrePushEntrySnapshot>();
+    for (const item of stagedChanges) {
+      if (prePushSnapshots.has(item.projectPath)) continue;
+      const existing = await this.structure
+        .getNodeByPath(projectId, item.projectPath)
+        .catch(() => null);
+      if (!existing) {
+        prePushSnapshots.set(item.projectPath, {
+          projectPath: item.projectPath,
+          existed: false,
+        });
+      } else {
+        let docLines: string[] | undefined;
+        let docVersion: number | undefined;
+        if (existing.docId) {
+          const doc = await this.docstore
+            .getDoc(projectId, existing.docId)
+            .catch(() => null);
+          if (doc) {
+            docLines = doc.lines ? [...doc.lines] : [''];
+            docVersion = doc.version;
+          }
+        }
+        prePushSnapshots.set(item.projectPath, {
+          projectPath: item.projectPath,
+          existed: true,
+          nodeId: existing.id,
+          name: existing.name,
+          parentId: existing.parentId ?? null,
+          type: existing.type as 'DOC' | 'FILE' | 'FOLDER',
+          docId: existing.docId ?? null,
+          fileId: existing.fileId ?? null,
+          isRootDoc: existing.isRootDoc,
+          docLines,
+          docVersion,
+        });
+      }
+    }
+
+    const result: PushApplyResult = { created: [], updated: [], deleted: [] };
+    const touchedPaths: string[] = [];
+
+    try {
+      for (const item of stagedChanges) {
+        touchedPaths.push(item.projectPath);
+        if (item.status === 'D') {
+          if (await this.removeEntry(projectId, item.projectPath)) {
+            result.deleted.push(item.projectPath);
+          }
+          continue;
+        }
+        const outcome = await this.upsertEntry(
+          projectId,
+          item.projectPath,
+          item.content!,
+        );
+        result[outcome].push(item.projectPath);
+      }
+      return result;
+    } catch (err) {
+      // Roll back mutated/deleted docs and nodes in reverse order
+      for (const touchedPath of touchedPaths.reverse()) {
+        const snap = prePushSnapshots.get(touchedPath);
+        if (!snap) continue;
+        try {
+          const current = await this.structure
+            .getNodeByPath(projectId, touchedPath)
+            .catch(() => null);
+
+          if (!snap.existed) {
+            if (current) {
+              await this.removeEntry(projectId, touchedPath).catch(
+                () => undefined,
+              );
+            }
+            continue;
+          }
+
+          if (snap.docId) {
+            await this.docstore
+              .patchDoc(projectId, snap.docId, { deleted: false })
+              .catch(() => undefined);
+            if (snap.docLines) {
+              await this.docstore
+                .updateDoc(projectId, snap.docId, {
+                  lines: snap.docLines,
+                  version: (snap.docVersion ?? 0) + 1,
+                })
+                .catch(() => undefined);
+              await this.live()
+                ?.applyExternalText(
+                  projectId,
+                  snap.docId,
+                  snap.docLines.join('\n'),
+                )
+                .catch(() => false);
+            }
+          }
+
+          if (!current && snap.name && snap.type && snap.type !== 'FOLDER') {
+            const recreated = await this.structure
+              .createNode(projectId, {
+                name: snap.name,
+                path: snap.projectPath,
+                parentId: snap.parentId ?? null,
+                type: snap.type,
+                docId: snap.docId ?? undefined,
+                fileId: snap.fileId ?? undefined,
+                isRootDoc: snap.isRootDoc,
+              })
+              .catch(() => null);
+            if (recreated && snap.isRootDoc) {
+              await this.structure
+                .setRootDoc(projectId, recreated.id)
+                .catch(() => undefined);
+            }
+          }
+        } catch (rollbackErr: unknown) {
+          const msg =
+            rollbackErr instanceof Error
+              ? rollbackErr.message
+              : String(rollbackErr);
+          this.logger.warn(
+            `Rollback failed for ${touchedPath} in project ${projectId}: ${msg}`,
+          );
+        }
+      }
+      throw err;
+    }
   }
 
   private async removeEntry(

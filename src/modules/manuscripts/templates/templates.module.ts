@@ -4,17 +4,14 @@ import { StructureModule } from '@/modules/manuscripts/structure/structure.modul
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 
 // Controllers & Services
-import {
-  TemplatesController,
-  OverleafTemplatesParityController,
-} from './templates.controller';
+import { TemplatesController } from './templates.controller';
 import { TemplatesService } from './templates.service';
 import { TemplatesRepository } from './templates.repository';
 import { TEMPLATE_REPOSITORY_PORT, PROJECT_INSTANTIATOR_PORT } from './domain';
 
 @Module({
   imports: [PrismaModule, StructureModule, DocstoreModule],
-  controllers: [TemplatesController, OverleafTemplatesParityController],
+  controllers: [TemplatesController],
   providers: [
     TemplatesRepository,
     TemplatesService,

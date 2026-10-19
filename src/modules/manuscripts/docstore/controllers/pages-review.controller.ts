@@ -33,17 +33,16 @@ import {
   CurrentRole,
 } from '@/modules/project/access';
 import { Prisma, ManuscriptChangeType } from '@prisma/client';
-import { PrismaService, AuthenticatedRequest } from '@/core';
+import { PrismaService, AuthenticatedRequest, isUuid } from '@/core';
 import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
 import { ManuscriptUserResolverService } from '../services/manuscript-user-resolver.service';
-import { ManuscriptTextMutatorService } from '../services/manuscript-text-mutator.service';
 import {
   applySuggestionToLines,
   applyBatchSuggestionsToLines,
-} from '../domain/text-suggestion-mutator';
+} from '@/modules/manuscripts/track-changes/domain';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { LiveCollaborationPort } from '../domain';
+import { LiveCollaborationPort } from '@/modules/manuscripts/core';
 import { ManuscriptPageScopeRepository } from '../repositories/manuscript-page-scope.repository';
 
 export interface CreateSuggestionBody {
@@ -58,13 +57,9 @@ export interface CreateSuggestionBody {
   [key: string]: unknown;
 }
 
-const isUuid = (val?: string | null): boolean =>
-  typeof val === 'string' &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-
 @ApiTags('Manuscripts - Pages Review & Comments')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
+@Controller('api/v1/manuscripts')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class PagesReviewController {
@@ -76,7 +71,6 @@ export class PagesReviewController {
     private readonly docstoreService: DocstoreService,
     private readonly prisma: PrismaService,
     private readonly userResolver: ManuscriptUserResolverService,
-    @Optional() private readonly textMutator?: ManuscriptTextMutatorService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() pageScopeRepo?: ManuscriptPageScopeRepository,
@@ -137,20 +131,89 @@ export class PagesReviewController {
     return this.userResolver.resolveUserNames(userIds);
   }
 
+  private resolveActiveProjectId(
+    project?: string | { id: string } | null,
+  ): string | undefined {
+    if (!project) return undefined;
+    return typeof project === 'string' ? project : project.id;
+  }
+
+  private async resolveDocAndProject(
+    pageId: string,
+    authorizedProjectId?: string | { id: string } | null,
+  ): Promise<{ docId?: string; projectId?: string }> {
+    const activeProjectId = this.resolveActiveProjectId(authorizedProjectId);
+    if (!isUuid(pageId)) {
+      return { projectId: activeProjectId };
+    }
+    const doc = activeProjectId
+      ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
+      : await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+          select: { id: true, projectId: true },
+        });
+    if (doc) {
+      return { docId: doc.id, projectId: doc.projectId || activeProjectId };
+    }
+    const node = await this.prisma.manuscriptNode.findUnique({
+      where: { id: pageId },
+      select: { docId: true, projectId: true },
+    });
+    if (node) {
+      return {
+        docId: node.docId || pageId,
+        projectId: node.projectId || activeProjectId,
+      };
+    }
+    return { docId: pageId, projectId: activeProjectId };
+  }
+
+  private async getHydratedDocLines(doc: {
+    id: string;
+    projectId: string;
+    lines: unknown;
+    inStorage?: boolean;
+  }): Promise<string[]> {
+    if (doc.inStorage) {
+      try {
+        const hydrated = await this.docstoreService.getDoc(
+          doc.projectId,
+          doc.id,
+        );
+        if (Array.isArray(hydrated.lines)) {
+          return hydrated.lines;
+        }
+      } catch {
+        // Fallback to raw lines if hydration fails
+      }
+    }
+    if (Array.isArray(doc.lines)) {
+      return (doc.lines as string[]).map((l) => String(l ?? ''));
+    }
+    if (typeof doc.lines === 'string') {
+      return doc.lines.split('\n');
+    }
+    return [];
+  }
+
   // ─── 1. INLINE COMMENTS & THREADS ─────────────────────────────────────────────
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/comments
-   * GET /api/pages/:pageId/comments
    */
-  @Get(['docs/:pageId/comments', 'pages/:pageId/comments'])
+  @Get('docs/:pageId/comments')
   async getComments(
     @Param('pageId') pageId: string,
     @Query('status') status?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) return { comments: [] };
     try {
-      const where: Prisma.ManuscriptCommentThreadWhereInput = { docId: pageId };
+      const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
+      const where: Prisma.ManuscriptCommentThreadWhereInput = {
+        docId: pageId,
+        ...(targetProjectId ? { projectId: targetProjectId } : {}),
+      };
       if (status === 'resolved') {
         where.isResolved = true;
       } else if (status === 'open') {
@@ -216,9 +279,8 @@ export class PagesReviewController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/comments
-   * POST /api/pages/:pageId/comments
    */
-  @Post(['docs/:pageId/comments', 'pages/:pageId/comments'])
+  @Post('docs/:pageId/comments')
   @HttpCode(HttpStatus.CREATED)
   async createComment(
     @Param('pageId') pageId: string,
@@ -230,9 +292,11 @@ export class PagesReviewController {
       projectId?: string;
     },
     @Req() req: AuthenticatedRequest,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
-    let projectId: string | null = null;
+    let projectId: string | null =
+      this.resolveActiveProjectId(authorizedProjectId) || null;
     let targetDocId = pageId;
 
     if (isUuid(pageId)) {
@@ -323,18 +387,14 @@ export class PagesReviewController {
 
   /**
    * PATCH /api/v1/manuscripts/docs/:pageId/comments/:commentId
-   * PATCH /api/pages/:pageId/comments/:commentId
    */
-  @Patch([
-    'docs/:pageId/comments/:commentId',
-    'pages/:pageId/comments/:commentId',
-  ])
+  @Patch('docs/:pageId/comments/:commentId')
   async updateComment(
     @Param('pageId') pageId: string,
     @Param('commentId') commentId: string,
     @Body() body: { content?: string; status?: 'open' | 'resolved' },
     @Req() req: AuthenticatedRequest,
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
     @CurrentRole() role?: Role,
   ) {
     if (!isUuid(commentId)) {
@@ -342,7 +402,7 @@ export class PagesReviewController {
     }
 
     const userId = req?.user?.id || req?.user?.sub;
-    const targetProjectId = authorizedProjectId;
+    const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
 
     const thread = targetProjectId
       ? await this.pageScopeRepo.findThreadInProject(
@@ -355,7 +415,7 @@ export class PagesReviewController {
           include: { replies: true },
         });
 
-    if (!thread) {
+    if (!thread || (isUuid(pageId) && thread.docId && thread.docId !== pageId)) {
       throw new NotFoundException({
         statusCode: 404,
         code: 'RESOURCE_NOT_FOUND',
@@ -461,18 +521,14 @@ export class PagesReviewController {
 
   /**
    * DELETE /api/v1/manuscripts/docs/:pageId/comments/:commentId
-   * DELETE /api/pages/:pageId/comments/:commentId
    */
-  @Delete([
-    'docs/:pageId/comments/:commentId',
-    'pages/:pageId/comments/:commentId',
-  ])
+  @Delete('docs/:pageId/comments/:commentId')
   @HttpCode(HttpStatus.OK)
   async deleteComment(
     @Param('pageId') pageId: string,
     @Param('commentId') commentId: string,
     @Req() req: AuthenticatedRequest,
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
     @CurrentRole() role?: Role,
   ) {
     if (!isUuid(commentId)) {
@@ -480,7 +536,7 @@ export class PagesReviewController {
     }
 
     const userId = req?.user?.id || req?.user?.sub;
-    const targetProjectId = authorizedProjectId;
+    const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
 
     const existing = targetProjectId
       ? await this.pageScopeRepo.findThreadInProject(
@@ -493,7 +549,10 @@ export class PagesReviewController {
           select: { projectId: true, docId: true, createdById: true },
         });
 
-    if (!existing) {
+    if (
+      !existing ||
+      (isUuid(pageId) && existing.docId && existing.docId !== pageId)
+    ) {
       throw new NotFoundException({
         statusCode: 404,
         code: 'RESOURCE_NOT_FOUND',
@@ -534,19 +593,18 @@ export class PagesReviewController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/comments/:commentId/reply
-   * POST /api/pages/:pageId/comments/:commentId/reply
    */
   @Post([
     'docs/:pageId/comments/:commentId/reply',
     'docs/:pageId/comments/:commentId/replies',
-    'pages/:pageId/comments/:commentId/reply',
-    'pages/:pageId/comments/:commentId/replies',
   ])
   @HttpCode(HttpStatus.CREATED)
   async addCommentReply(
+    @Param('pageId') pageId: string,
     @Param('commentId') commentId: string,
     @Body() body: { content: string },
     @Req() req: AuthenticatedRequest,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
     if (!isUuid(commentId)) {
@@ -554,6 +612,32 @@ export class PagesReviewController {
     }
 
     try {
+      const { docId: resolvedDocId, projectId: targetProjectId } =
+        await this.resolveDocAndProject(pageId, authorizedProjectId);
+
+      const existingThread = targetProjectId
+        ? await this.pageScopeRepo.findThreadInProject(
+            targetProjectId,
+            commentId,
+            resolvedDocId && isUuid(resolvedDocId) ? resolvedDocId : undefined,
+          )
+        : await this.prisma.manuscriptCommentThread.findUnique({
+            where: { id: commentId },
+          });
+
+      if (
+        !existingThread ||
+        (resolvedDocId &&
+          isUuid(resolvedDocId) &&
+          existingThread.docId &&
+          existingThread.docId !== resolvedDocId) ||
+        (targetProjectId &&
+          existingThread.projectId &&
+          existingThread.projectId !== targetProjectId)
+      ) {
+        throw new NotFoundException(`Comment thread ${commentId} not found`);
+      }
+
       await this.prisma.manuscriptCommentReply.create({
         data: {
           threadId: commentId,
@@ -636,44 +720,87 @@ export class PagesReviewController {
 
   /**
    * DELETE /api/v1/manuscripts/docs/:pageId/comments/:commentId/replies/:replyId
-   * DELETE /api/pages/:pageId/comments/:commentId/replies/:replyId
    */
-  @Delete([
-    'docs/:pageId/comments/:commentId/replies/:replyId',
-    'pages/:pageId/comments/:commentId/replies/:replyId',
-  ])
+  @Delete('docs/:pageId/comments/:commentId/replies/:replyId')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async deleteCommentReply(
+    @Param('pageId') pageId: string,
     @Param('commentId') commentId: string,
     @Param('replyId') replyId: string,
+    @Req() req?: AuthenticatedRequest,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
+    @CurrentRole() role?: Role,
   ) {
-    if (isUuid(replyId)) {
-      const existingReply = await this.prisma.manuscriptCommentReply.findUnique(
-        {
-          where: { id: replyId },
-          include: {
-            thread: { select: { projectId: true, docId: true, id: true } },
-          },
-        },
-      );
-      await this.prisma.manuscriptCommentReply
-        .delete({ where: { id: replyId } })
-        .catch(() => null);
+    if (!isUuid(replyId) || !isUuid(commentId)) {
+      throw new BadRequestException('Valid UUIDs are required for commentId and replyId');
+    }
 
-      if (this.eventEmitter && existingReply?.thread?.projectId) {
-        try {
-          this.broadcastEvent(
-            existingReply.thread.projectId,
-            'comment:reply-deleted',
-            {
-              docId: existingReply.thread.docId,
-              commentId: existingReply.thread.id,
-              replyId,
-            },
-          );
-        } catch {
-          // ignore non-blocking error
-        }
+    const { docId: resolvedDocId, projectId: targetProjectId } =
+      await this.resolveDocAndProject(pageId, authorizedProjectId);
+    const userId = req?.user?.id || req?.user?.sub;
+
+    const existingReply = await this.prisma.manuscriptCommentReply.findUnique({
+      where: { id: replyId },
+      include: {
+        thread: { select: { projectId: true, docId: true, id: true, createdById: true } },
+      },
+    });
+
+    if (
+      !existingReply ||
+      (existingReply.threadId && existingReply.threadId !== commentId) ||
+      (existingReply.thread?.id && existingReply.thread.id !== commentId) ||
+      (resolvedDocId &&
+        isUuid(resolvedDocId) &&
+        existingReply.thread?.docId &&
+        existingReply.thread.docId !== resolvedDocId) ||
+      (targetProjectId &&
+        existingReply.thread?.projectId &&
+        existingReply.thread.projectId !== targetProjectId)
+    ) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: `Comment reply ${replyId} not found`,
+      });
+    }
+
+    if (userId || role) {
+      const isReplyAuthor = existingReply.createdById === userId;
+      const isPrivileged = role === Role.COORDINATOR || role === Role.OWNER;
+      if (
+        existingReply.createdById &&
+        userId &&
+        !isReplyAuthor &&
+        !isPrivileged
+      ) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'ROLE_INSUFFICIENT',
+          message:
+            'Only the reply author or a coordinator/owner can delete this reply',
+        });
+      }
+    }
+
+    await this.prisma.manuscriptCommentReply
+      .delete({ where: { id: replyId } })
+      .catch(() => null);
+
+    if (this.eventEmitter && existingReply?.thread?.projectId) {
+      try {
+        this.broadcastEvent(
+          existingReply.thread.projectId,
+          'comment:reply-deleted',
+          {
+            docId: existingReply.thread.docId,
+            commentId: existingReply.thread.id,
+            replyId,
+          },
+        );
+      } catch {
+        // ignore non-blocking error
       }
     }
 
@@ -732,15 +859,14 @@ export class PagesReviewController {
 
   /**
    * PATCH /api/v1/manuscripts/docs/:pageId/comments/:commentId/resolve
-   * PATCH /api/pages/:pageId/comments/:commentId/resolve
    */
-  @Patch([
-    'docs/:pageId/comments/:commentId/resolve',
-    'pages/:pageId/comments/:commentId/resolve',
-  ])
+  @Patch('docs/:pageId/comments/:commentId/resolve')
+  @RequireRole(Role.CONTRIBUTOR)
   async resolveComment(
+    @Param('pageId') pageId: string,
     @Param('commentId') commentId: string,
     @Body() body: { resolved?: boolean },
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     const isResolved = body.resolved ?? true;
     if (!isUuid(commentId)) {
@@ -748,6 +874,32 @@ export class PagesReviewController {
     }
 
     try {
+      const { docId: resolvedDocId, projectId: targetProjectId } =
+        await this.resolveDocAndProject(pageId, authorizedProjectId);
+
+      const existing = targetProjectId
+        ? await this.pageScopeRepo.findThreadInProject(
+            targetProjectId,
+            commentId,
+            resolvedDocId && isUuid(resolvedDocId) ? resolvedDocId : undefined,
+          )
+        : await this.prisma.manuscriptCommentThread.findUnique({
+            where: { id: commentId },
+          });
+
+      if (
+        !existing ||
+        (resolvedDocId &&
+          isUuid(resolvedDocId) &&
+          existing.docId &&
+          existing.docId !== resolvedDocId) ||
+        (targetProjectId &&
+          existing.projectId &&
+          existing.projectId !== targetProjectId)
+      ) {
+        throw new NotFoundException(`Comment thread ${commentId} not found`);
+      }
+
       const thread = await this.prisma.manuscriptCommentThread.update({
         where: { id: commentId },
         data: { isResolved },
@@ -807,7 +959,8 @@ export class PagesReviewController {
       }
 
       return { comment: commentPayload };
-    } catch {
+    } catch (err) {
+      if (err instanceof NotFoundException) throw err;
       throw new NotFoundException(`Comment thread ${commentId} not found`);
     }
   }
@@ -816,16 +969,20 @@ export class PagesReviewController {
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/suggestions
-   * GET /api/pages/:pageId/suggestions
    */
-  @Get(['docs/:pageId/suggestions', 'pages/:pageId/suggestions'])
+  @Get('docs/:pageId/suggestions')
   async getSuggestions(
     @Param('pageId') pageId: string,
     @Query('status') status?: 'pending' | 'accepted' | 'rejected',
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) return { suggestions: [] };
     try {
-      const where: Prisma.ManuscriptTrackChangeWhereInput = { docId: pageId };
+      const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
+      const where: Prisma.ManuscriptTrackChangeWhereInput = {
+        docId: pageId,
+        ...(targetProjectId ? { projectId: targetProjectId } : {}),
+      };
       if (status) where.status = status;
       const records = await this.prisma.manuscriptTrackChange.findMany({
         where,
@@ -875,17 +1032,18 @@ export class PagesReviewController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/suggestions
-   * POST /api/pages/:pageId/suggestions
    */
-  @Post(['docs/:pageId/suggestions', 'pages/:pageId/suggestions'])
+  @Post('docs/:pageId/suggestions')
   @HttpCode(HttpStatus.CREATED)
   async createSuggestion(
     @Param('pageId') pageId: string,
     @Body() body: CreateSuggestionBody,
     @Req() req: AuthenticatedRequest,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
-    let projectId: string | null = null;
+    let projectId: string | null =
+      this.resolveActiveProjectId(authorizedProjectId) || null;
     let targetDocId = pageId;
 
     if (isUuid(pageId)) {
@@ -990,18 +1148,14 @@ export class PagesReviewController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/suggestions/:suggestionId/accept
-   * POST /api/pages/:pageId/suggestions/:suggestionId/accept
    */
-  @Post([
-    'docs/:pageId/suggestions/:suggestionId/accept',
-    'pages/:pageId/suggestions/:suggestionId/accept',
-  ])
+  @Post('docs/:pageId/suggestions/:suggestionId/accept')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async acceptSuggestion(
     @Param('pageId') pageId: string,
     @Param('suggestionId') suggestionId: string,
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     if (!isUuid(suggestionId)) {
       throw new BadRequestException(
@@ -1009,23 +1163,37 @@ export class PagesReviewController {
       );
     }
 
-    const targetProjectId = authorizedProjectId;
+    const { docId: resolvedDocId, projectId: targetProjectId } =
+      await this.resolveDocAndProject(pageId, authorizedProjectId);
     const existing = targetProjectId
       ? await this.pageScopeRepo.findTrackChangeInProject(
           targetProjectId,
           suggestionId,
-          isUuid(pageId) ? pageId : undefined,
+          resolvedDocId && isUuid(resolvedDocId) ? resolvedDocId : undefined,
         )
       : await this.prisma.manuscriptTrackChange.findUnique({
           where: { id: suggestionId },
         });
 
-    if (!existing) {
+    if (
+      !existing ||
+      (resolvedDocId &&
+        isUuid(resolvedDocId) &&
+        existing.docId &&
+        existing.docId !== resolvedDocId) ||
+      (targetProjectId &&
+        existing.projectId &&
+        existing.projectId !== targetProjectId)
+    ) {
       throw new NotFoundException({
         statusCode: 404,
         code: 'RESOURCE_NOT_FOUND',
         message: 'Suggestion not found',
       });
+    }
+
+    if (existing.status && existing.status !== 'pending') {
+      return { ok: true, suggestion: existing };
     }
 
     try {
@@ -1044,22 +1212,35 @@ export class PagesReviewController {
       // Apply accepted mutation to docstore lines with column and multi-line precision
       if (record && record.docId) {
         try {
+          const live = this.getLiveCollaboration();
+          if (live && (record.projectId || targetProjectId)) {
+            await live
+              .flushDocs(record.projectId || targetProjectId!, [record.docId])
+              .catch(() => []);
+          }
+
           const doc = await this.prisma.manuscriptDoc.findUnique({
             where: { id: record.docId },
             select: {
+              id: true,
               lines: true,
               rev: true,
               version: true,
               projectId: true,
+              inStorage: true,
             },
           });
-          if (doc && Array.isArray(doc.lines)) {
-            const lines: string[] = doc.lines.map((l) => String(l ?? ''));
-            if (this.textMutator) {
-              this.textMutator.applySuggestionToLines(lines, record);
-            } else {
-              applySuggestionToLines(lines, record);
-            }
+          if (doc && record.projectId && doc.projectId && record.projectId !== doc.projectId) {
+            return { ok: true, suggestion: record };
+          }
+          if (doc && (Array.isArray(doc.lines) || doc.inStorage)) {
+            const lines: string[] = await this.getHydratedDocLines({
+              id: doc.id || record.docId,
+              projectId: doc.projectId || record.projectId || targetProjectId || '',
+              lines: doc.lines,
+              inStorage: doc.inStorage,
+            });
+            applySuggestionToLines(lines, record);
 
             if (doc.projectId) {
               await this.docstoreService.updateDoc(
@@ -1097,18 +1278,14 @@ export class PagesReviewController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/suggestions/:suggestionId/reject
-   * POST /api/pages/:pageId/suggestions/:suggestionId/reject
    */
-  @Post([
-    'docs/:pageId/suggestions/:suggestionId/reject',
-    'pages/:pageId/suggestions/:suggestionId/reject',
-  ])
+  @Post('docs/:pageId/suggestions/:suggestionId/reject')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async rejectSuggestion(
     @Param('pageId') pageId: string,
     @Param('suggestionId') suggestionId: string,
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     if (!isUuid(suggestionId)) {
       throw new BadRequestException(
@@ -1116,23 +1293,37 @@ export class PagesReviewController {
       );
     }
 
-    const targetProjectId = authorizedProjectId;
+    const { docId: resolvedDocId, projectId: targetProjectId } =
+      await this.resolveDocAndProject(pageId, authorizedProjectId);
     const existing = targetProjectId
       ? await this.pageScopeRepo.findTrackChangeInProject(
           targetProjectId,
           suggestionId,
-          isUuid(pageId) ? pageId : undefined,
+          resolvedDocId && isUuid(resolvedDocId) ? resolvedDocId : undefined,
         )
       : await this.prisma.manuscriptTrackChange.findUnique({
           where: { id: suggestionId },
         });
 
-    if (!existing) {
+    if (
+      !existing ||
+      (resolvedDocId &&
+        isUuid(resolvedDocId) &&
+        existing.docId &&
+        existing.docId !== resolvedDocId) ||
+      (targetProjectId &&
+        existing.projectId &&
+        existing.projectId !== targetProjectId)
+    ) {
       throw new NotFoundException({
         statusCode: 404,
         code: 'RESOURCE_NOT_FOUND',
         message: 'Suggestion not found',
       });
+    }
+
+    if (existing.status && existing.status !== 'pending') {
+      return { ok: true, suggestion: existing };
     }
 
     try {
@@ -1171,26 +1362,23 @@ export class PagesReviewController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/suggestions/accept-all
-   * POST /api/pages/:pageId/suggestions/accept-all
    */
-  @Post([
-    'docs/:pageId/suggestions/accept-all',
-    'pages/:pageId/suggestions/accept-all',
-  ])
+  @Post('docs/:pageId/suggestions/accept-all')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async acceptAllSuggestions(
     @Param('pageId') pageId: string,
     @Body() body?: { suggestionIds?: string[] },
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     let acceptedCount = 0;
+    const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
     if (isUuid(pageId)) {
       try {
         const whereClause: Prisma.ManuscriptTrackChangeWhereInput = {
           docId: pageId,
           status: 'pending',
-          ...(authorizedProjectId ? { projectId: authorizedProjectId } : {}),
+          ...(targetProjectId ? { projectId: targetProjectId } : {}),
         };
         if (
           body?.suggestionIds &&
@@ -1207,21 +1395,31 @@ export class PagesReviewController {
         );
 
         if (pendingChanges.length > 0) {
+          const live = this.getLiveCollaboration();
+          if (live && targetProjectId) {
+            await live.flushDocs(targetProjectId, [pageId]).catch(() => []);
+          }
+
           const doc = await this.prisma.manuscriptDoc.findUnique({
             where: { id: pageId },
-            select: { lines: true, rev: true, version: true, projectId: true },
+            select: {
+              id: true,
+              lines: true,
+              rev: true,
+              version: true,
+              projectId: true,
+              inStorage: true,
+            },
           });
 
-          if (doc && Array.isArray(doc.lines)) {
-            const lines: string[] = doc.lines.map((l) => String(l ?? ''));
-            if (this.textMutator) {
-              this.textMutator.applyBatchSuggestionsToLines(
-                lines,
-                pendingChanges,
-              );
-            } else {
-              applyBatchSuggestionsToLines(lines, pendingChanges);
-            }
+          if (doc && (Array.isArray(doc.lines) || doc.inStorage)) {
+            const lines: string[] = await this.getHydratedDocLines({
+              id: doc.id || pageId,
+              projectId: doc.projectId || targetProjectId || '',
+              lines: doc.lines,
+              inStorage: doc.inStorage,
+            });
+            applyBatchSuggestionsToLines(lines, pendingChanges);
 
             if (doc.projectId) {
               await this.docstoreService.updateDoc(doc.projectId, pageId, {
@@ -1256,26 +1454,23 @@ export class PagesReviewController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/suggestions/reject-all
-   * POST /api/pages/:pageId/suggestions/reject-all
    */
-  @Post([
-    'docs/:pageId/suggestions/reject-all',
-    'pages/:pageId/suggestions/reject-all',
-  ])
+  @Post('docs/:pageId/suggestions/reject-all')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async rejectAllSuggestions(
     @Param('pageId') pageId: string,
     @Body() body?: { suggestionIds?: string[] },
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     let rejectedCount = 0;
+    const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
     if (isUuid(pageId)) {
       try {
         const whereClause: Prisma.ManuscriptTrackChangeWhereInput = {
           docId: pageId,
           status: 'pending',
-          ...(authorizedProjectId ? { projectId: authorizedProjectId } : {}),
+          ...(targetProjectId ? { projectId: targetProjectId } : {}),
         };
         if (
           body?.suggestionIds &&

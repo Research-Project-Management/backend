@@ -3,11 +3,99 @@
  * Domain Entity modeling an individual compiler diagnostic, warning, or static lint issue.
  */
 
-import {
-  DiagnosticSeverityVo,
-  DiagnosticSeverityType,
-} from './diagnostic-severity.vo';
-import { ErrorExplanationVo } from './error-explanation.vo';
+export type DiagnosticSeverityType = 'error' | 'warning' | 'info' | 'badbox';
+
+export class DiagnosticSeverityVo {
+  private constructor(public readonly value: DiagnosticSeverityType) {}
+
+  public static error(): DiagnosticSeverityVo {
+    return new DiagnosticSeverityVo('error');
+  }
+
+  public static warning(): DiagnosticSeverityVo {
+    return new DiagnosticSeverityVo('warning');
+  }
+
+  public static info(): DiagnosticSeverityVo {
+    return new DiagnosticSeverityVo('info');
+  }
+
+  public static badbox(): DiagnosticSeverityVo {
+    return new DiagnosticSeverityVo('badbox');
+  }
+
+  public static fromString(val: string): DiagnosticSeverityVo {
+    const normalized = val.trim().toLowerCase();
+    switch (normalized) {
+      case 'error':
+        return DiagnosticSeverityVo.error();
+      case 'warning':
+      case 'warn':
+        return DiagnosticSeverityVo.warning();
+      case 'badbox':
+      case 'overfull':
+      case 'underfull':
+        return DiagnosticSeverityVo.badbox();
+      case 'info':
+      default:
+        return DiagnosticSeverityVo.info();
+    }
+  }
+
+  public isError(): boolean {
+    return this.value === 'error';
+  }
+
+  public isWarning(): boolean {
+    return this.value === 'warning';
+  }
+
+  public isBadbox(): boolean {
+    return this.value === 'badbox';
+  }
+}
+
+export interface ErrorExplanationProps {
+  code: string;
+  title: string;
+  explanation: string;
+  commonCauses: string[];
+  suggestedFix?: string;
+  exampleSnippet?: string;
+  documentationUrl?: string;
+}
+
+export class ErrorExplanationVo {
+  public readonly code: string;
+  public readonly title: string;
+  public readonly explanation: string;
+  public readonly commonCauses: readonly string[];
+  public readonly suggestedFix?: string;
+  public readonly exampleSnippet?: string;
+  public readonly documentationUrl?: string;
+
+  constructor(props: ErrorExplanationProps) {
+    this.code = props.code;
+    this.title = props.title;
+    this.explanation = props.explanation;
+    this.commonCauses = Object.freeze([...props.commonCauses]);
+    this.suggestedFix = props.suggestedFix;
+    this.exampleSnippet = props.exampleSnippet;
+    this.documentationUrl = props.documentationUrl;
+  }
+
+  public toJSON() {
+    return {
+      code: this.code,
+      title: this.title,
+      explanation: this.explanation,
+      commonCauses: [...this.commonCauses],
+      suggestedFix: this.suggestedFix,
+      exampleSnippet: this.exampleSnippet,
+      documentationUrl: this.documentationUrl,
+    };
+  }
+}
 
 export interface QuickFixVo {
   description: string;

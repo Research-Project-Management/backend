@@ -25,12 +25,39 @@ export class DockerSandboxRunner implements ISandboxRunner {
     this.localRunner = localRunner ?? new LocalProcessRunner();
   }
 
+  private parseMemoryLimitBytes(limit: string): number {
+    const trimmed = limit.trim().toLowerCase();
+    const match = /^(\d+(?:\.\d+)?)\s*([kmg]b?)?$/.exec(trimmed);
+    if (!match) {
+      return DEFAULT_SANDBOX_PROFILE.memoryBytes;
+    }
+    const val = parseFloat(match[1]);
+    const unit = match[2] || '';
+    if (unit.startsWith('g')) return Math.round(val * 1024 * 1024 * 1024);
+    if (unit.startsWith('m')) return Math.round(val * 1024 * 1024);
+    if (unit.startsWith('k')) return Math.round(val * 1024);
+    return Math.round(val);
+  }
+
+  private resolveDefaultProfile(): SandboxProfile {
+    const parsedCpus = parseFloat(this.cpuLimit);
+    return Object.freeze({
+      ...DEFAULT_SANDBOX_PROFILE,
+      memoryBytes: this.parseMemoryLimitBytes(this.memoryLimit),
+      cpus:
+        Number.isFinite(parsedCpus) && parsedCpus > 0
+          ? parsedCpus
+          : DEFAULT_SANDBOX_PROFILE.cpus,
+    });
+  }
+
   public async run(
     command: string,
     args: string[],
     options: ProcessExecutionOptions,
   ): Promise<ProcessExecutionResult> {
-    const profile: SandboxProfile = options.profile ?? DEFAULT_SANDBOX_PROFILE;
+    const profile: SandboxProfile =
+      options.profile ?? this.resolveDefaultProfile();
     const runId = options.runId || randomUUID();
     const containerName = `flux-clsi-${runId}`;
 

@@ -125,44 +125,4 @@ describe('CLSI Sandbox Configuration & Fail-Closed Rules (Slice S4 / US2 & US5)'
       expect(config.image).toBe('sharelatex/clsi:latest');
     });
   });
-
-  describe('Legacy Environment Variable Compatibility', () => {
-    it('should map USE_DOCKER_SANDBOX=true to container mode', () => {
-      const config = parseSandboxConfig({
-        env: {
-          USE_DOCKER_SANDBOX: 'true',
-          DOCKER_IMAGE: 'sharelatex/clsi:test-tag',
-          NODE_ENV: 'development',
-        },
-        isProduction: false,
-      });
-
-      expect(config.mode).toBe('container');
-      expect(config.image).toBe('sharelatex/clsi:test-tag');
-    });
-
-    it('should map USE_DOCKER_SANDBOX=false to local-unsafe in development', () => {
-      const config = parseSandboxConfig({
-        env: {
-          USE_DOCKER_SANDBOX: 'false',
-          NODE_ENV: 'development',
-        },
-        isProduction: false,
-      });
-
-      expect(config.mode).toBe('local-unsafe');
-    });
-
-    it('should fail closed in production even if legacy USE_DOCKER_SANDBOX=false is passed', () => {
-      expect(() =>
-        parseSandboxConfig({
-          env: {
-            USE_DOCKER_SANDBOX: 'false',
-            NODE_ENV: 'production',
-          },
-          isProduction: true,
-        }),
-      ).toThrow(SandboxConfigurationException);
-    });
-  });
 });

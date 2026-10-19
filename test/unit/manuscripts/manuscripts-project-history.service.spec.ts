@@ -44,7 +44,7 @@ import {
   IProjectCollectorPort,
   IProjectRestorerPort,
   RestoreResult,
-  MyersDiffEngineAdapter,
+  MyersDiffEngine,
   Snapshot,
   VersionLabel,
   FileSnapshotVo,
@@ -194,7 +194,7 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
   const projectId = '01928374-beef-4000-8000-000000000001';
   const userId = '01928374-beef-4000-8000-000000000002';
 
-  let diffEngine: MyersDiffEngineAdapter;
+  let diffEngine: MyersDiffEngine;
   let historyRepo: InMemoryHistoryRepository;
   let collector: MockProjectCollector;
   let restorer: MockProjectRestorer;
@@ -248,7 +248,7 @@ describe('Manuscripts Project History Subsystem (Overleaf Parity)', () => {
   let historyController: ProjectHistoryController;
 
   beforeEach(() => {
-    diffEngine = new MyersDiffEngineAdapter();
+    diffEngine = new MyersDiffEngine();
     historyRepo = new InMemoryHistoryRepository();
     collector = new MockProjectCollector();
     restorer = new MockProjectRestorer();

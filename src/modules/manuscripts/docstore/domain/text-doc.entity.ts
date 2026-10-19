@@ -107,8 +107,11 @@ export class TextDoc {
 
   public calculateSizeBytes(): number {
     if (this._lines.length === 0) return 0;
-    const chars = this._lines.reduce((acc, line) => acc + line.length, 0);
-    return chars + Math.max(0, this._lines.length - 1);
+    const bytes = this._lines.reduce(
+      (acc, line) => acc + Buffer.byteLength(line, 'utf8'),
+      0,
+    );
+    return bytes + Math.max(0, this._lines.length - 1);
   }
 
   public toRawText(): string {

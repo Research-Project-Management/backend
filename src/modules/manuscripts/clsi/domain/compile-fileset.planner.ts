@@ -5,6 +5,7 @@
  */
 
 import * as crypto from 'crypto';
+import { TexEngineDetector } from './tex-engine.detector';
 
 export type FileSource =
   | {
@@ -88,40 +89,13 @@ export function fingerprintFileSet(files: Map<string, FileSource>): string {
 function detectDocumentClassFromInline(
   files: Map<string, FileSource>,
 ): string | null {
-  const primaryCandidates: string[] = [];
-  const subfileCandidates: string[] = [];
+  const inlineTexFiles: Record<string, string> = {};
   for (const [filename, src] of files.entries()) {
-    if (src.kind !== 'inline' || !filename.endsWith('.tex')) continue;
-    const uncommented = src.content
-      .split(/\r?\n/)
-      .map((l) => l.split(/(?<!\\)%/)[0])
-      .join('\n')
-      .replace(/\\iffalse\b[\s\S]*?\\fi\b/g, '');
-    const match = uncommented.match(
-      /\\documentclass\s*(?:\[[\s\S]*?\])?\s*\{([^}]+)\}/i,
-    );
-    if (match && match[1]) {
-      if (match[1].trim().toLowerCase() === 'subfiles') {
-        subfileCandidates.push(filename);
-      } else {
-        primaryCandidates.push(filename);
-      }
+    if (src.kind === 'inline' && filename.endsWith('.tex')) {
+      inlineTexFiles[filename] = src.content;
     }
   }
-  const candidates =
-    primaryCandidates.length > 0 ? primaryCandidates : subfileCandidates;
-  if (candidates.length === 1) return candidates[0];
-  for (const name of [
-    'main.tex',
-    'ms.tex',
-    'document.tex',
-    'paper.tex',
-    'thesis.tex',
-    'index.tex',
-  ]) {
-    if (candidates.includes(name)) return name;
-  }
-  return candidates[0] || null;
+  return TexEngineDetector.detectMainFile(inlineTexFiles);
 }
 
 /** Plan for a project persisted in the database (metadata-only, no content read). */

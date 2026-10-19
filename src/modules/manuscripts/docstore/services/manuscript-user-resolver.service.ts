@@ -4,11 +4,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core';
-
-const isUuid = (val?: string | null): val is string =>
-  typeof val === 'string' &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+import { PrismaService, isUuid } from '@/core';
 
 export interface ResolvedManuscriptUser {
   id: string;

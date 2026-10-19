@@ -19,6 +19,7 @@ import {
   linesToText,
   PlannedFileSet,
 } from '../domain/compile-fileset.planner';
+import { FileSnapshotVo } from '@/modules/manuscripts/project-history/domain/file-snapshot.vo';
 
 @Injectable()
 export class ClsiWorkspacePlannerService {
@@ -41,9 +42,6 @@ export class ClsiWorkspacePlannerService {
     pageId?: string;
     page_id?: string;
   }): Promise<string> {
-    const projectId = dto.projectId || dto.project_id || '';
-    if (projectId) return projectId;
-
     const pageId = dto.pageId || dto.page_id;
     if (pageId && this.prisma) {
       try {
@@ -53,9 +51,13 @@ export class ClsiWorkspacePlannerService {
         });
         if (pageDoc?.projectId) return pageDoc.projectId;
       } catch {
-        /* fall through to default project */
+        /* fall through */
       }
     }
+
+    const projectId = dto.projectId || dto.project_id || '';
+    if (projectId) return projectId;
+
     return 'default';
   }
 
@@ -247,31 +249,69 @@ export class ClsiWorkspacePlannerService {
     if (Date.now() - lastTime < 30000) return;
 
     try {
-      const latest = await this.prisma.manuscriptSnapshot.findFirst({
-        where: { projectId },
-        orderBy: { version: 'desc' },
-        select: { version: true },
-      });
+      const [latest, projectDocs, projectNodes] = await Promise.all([
+        this.prisma.manuscriptSnapshot.findFirst({
+          where: { projectId },
+          orderBy: { version: 'desc' },
+          select: { version: true },
+        }),
+        this.prisma.manuscriptDoc?.findMany
+          ? this.prisma.manuscriptDoc
+              .findMany({
+                where: { projectId, deleted: false },
+                select: { id: true, path: true },
+              })
+              .catch(() => [])
+          : Promise.resolve([]),
+        this.prisma.manuscriptNode?.findMany
+          ? this.prisma.manuscriptNode
+              .findMany({
+                where: { projectId },
+                select: { docId: true, path: true, isRootDoc: true },
+              })
+              .catch(() => [])
+          : Promise.resolve([]),
+      ]);
+
+      const docIdByNormalizedPath = new Map<string, string>();
+      const rootDocPaths = new Set<string>();
+      for (const d of projectDocs || []) {
+        if (d.path && d.id) {
+          const norm = d.path.startsWith('/') ? d.path : `/${d.path}`;
+          docIdByNormalizedPath.set(norm, d.id);
+        }
+      }
+      for (const n of projectNodes || []) {
+        if (n.path) {
+          const norm = n.path.startsWith('/') ? n.path : `/${n.path}`;
+          if (n.docId) {
+            docIdByNormalizedPath.set(norm, n.docId);
+          }
+          if (n.isRootDoc) {
+            rootDocPaths.add(norm);
+          }
+        }
+      }
+
       const nextVersion = (latest?.version ?? 0) + 1;
       const filesJson: Record<string, unknown> = {};
       for (const [p, content] of Object.entries(mergedFiles)) {
         if (typeof content !== 'string') continue;
         const normalizedPath = p.startsWith('/') ? p : `/${p}`;
         const hash = crypto.createHash('sha256').update(content).digest('hex');
-        const sizeBytes = Buffer.byteLength(content, 'utf8');
         const lines = content.split('\n');
-        filesJson[normalizedPath] = {
-          path: normalizedPath,
-          type: 'doc',
+        const resolvedDocId = docIdByNormalizedPath.get(normalizedPath) || '';
+        const isRootDoc =
+          rootDocPaths.size > 0
+            ? rootDocPaths.has(normalizedPath)
+            : normalizedPath === '/main.tex';
+        filesJson[normalizedPath] = FileSnapshotVo.createDoc(
+          normalizedPath,
+          resolvedDocId,
           lines,
-          content,
-          textContent: content,
           hash,
-          contentHash: hash,
-          sizeBytes,
-          sizeInBytes: sizeBytes,
-          isRootDoc: normalizedPath === '/main.tex',
-        };
+          isRootDoc,
+        ).toJSON();
       }
       if (Object.keys(filesJson).length === 0) return;
       await this.prisma.manuscriptSnapshot.create({
@@ -297,5 +337,3 @@ export class ClsiWorkspacePlannerService {
     }
   }
 }
-
-export { ClsiWorkspacePlannerService as WorkspacePlannerService };

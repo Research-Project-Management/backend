@@ -250,12 +250,20 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
   /**
    * Finds the closing brace corresponding to an opening brace at openBraceIdx.
    */
-  private findMatchingClosingBrace(text: string, openBraceIdx: number): number {
+  public static findMatchingClosingBrace(
+    text: string,
+    openBraceIdx: number,
+  ): number {
     let depth = 0;
     for (let i = openBraceIdx; i < text.length; i++) {
-      if (text[i] === '{' && (i === 0 || text[i - 1] !== '\\')) {
+      const ch = text[i];
+      if (ch === '\\') {
+        i++;
+        continue;
+      }
+      if (ch === '{') {
         depth++;
-      } else if (text[i] === '}' && (i === 0 || text[i - 1] !== '\\')) {
+      } else if (ch === '}') {
         depth--;
         if (depth === 0) {
           return i;
@@ -263,6 +271,64 @@ export class RegexAstBibtexParser implements IBibtexParserPort {
       }
     }
     return -1;
+  }
+
+  public static upsertEntry(
+    text: string,
+    key: string,
+    bibString: string,
+  ): string {
+    const targetKey = key.trim().toLowerCase();
+    const ranges: Array<{ start: number; end: number }> = [];
+    const entryStartRegex = /@([a-zA-Z]+)\s*\{\s*([^,\s]+)\s*,/g;
+
+    let match: RegExpExecArray | null;
+    while ((match = entryStartRegex.exec(text)) !== null) {
+      const entryType = match[1].toLowerCase();
+      if (
+        entryType === 'comment' ||
+        entryType === 'preamble' ||
+        entryType === 'string'
+      ) {
+        continue;
+      }
+      const openIdx = match.index + match[0].indexOf('{');
+      const closeIdx = RegexAstBibtexParser.findMatchingClosingBrace(
+        text,
+        openIdx,
+      );
+      if (closeIdx === -1) break;
+
+      if (match[2].trim().toLowerCase() === targetKey) {
+        ranges.push({ start: match.index, end: closeIdx + 1 });
+      }
+      entryStartRegex.lastIndex = closeIdx + 1;
+    }
+
+    if (ranges.length === 0) {
+      const trimmed = text.replace(/\s+$/, '');
+      return trimmed ? `${trimmed}\n\n${bibString}\n` : `${bibString}\n`;
+    }
+
+    let result = '';
+    let cursor = 0;
+    ranges.forEach((r, idx) => {
+      result += text.slice(cursor, r.start);
+      if (idx === 0) {
+        result += bibString;
+        cursor = r.end;
+      } else {
+        const after = text.slice(r.end);
+        const ws = after.match(/^\s*/)?.[0].length ?? 0;
+        cursor = r.end + ws;
+      }
+    });
+    result += text.slice(cursor);
+    return result;
+  }
+
+  private findMatchingClosingBrace(text: string, openBraceIdx: number): number {
+    return RegexAstBibtexParser.findMatchingClosingBrace(text, openBraceIdx);
   }
 
   /**

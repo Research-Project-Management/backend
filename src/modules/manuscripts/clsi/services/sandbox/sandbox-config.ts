@@ -1,10 +1,9 @@
 /**
  * modules/manuscripts/clsi/services/sandbox/sandbox-config.ts
  * Strongly typed configuration for CLSI compile sandbox isolation.
- * Enforces production fail-closed invariants and warns on legacy configuration options.
+ * Enforces production fail-closed invariants.
  */
 
-import { Logger } from '@nestjs/common';
 import * as os from 'os';
 import * as path from 'path';
 import { SandboxConfigurationException } from '../../domain/sandbox-errors';
@@ -33,7 +32,6 @@ export interface ParseSandboxConfigOptions {
   isProduction?: boolean;
 }
 
-const logger = new Logger('ClsiSandboxConfig');
 const DIGEST_REGEX = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
 export function parseSandboxConfig(
@@ -44,7 +42,7 @@ export function parseSandboxConfig(
     options.isProduction ??
     (env.NODE_ENV === 'production' || process.env.NODE_ENV === 'production');
 
-  // Mode resolution (with legacy fallback)
+  // Mode resolution
   let mode: SandboxMode;
   if (env.CLSI_SANDBOX_MODE) {
     const rawMode = env.CLSI_SANDBOX_MODE.toLowerCase();
@@ -55,11 +53,6 @@ export function parseSandboxConfig(
         `Invalid CLSI_SANDBOX_MODE "${env.CLSI_SANDBOX_MODE}". Must be "container" or "local-unsafe".`,
       );
     }
-  } else if (env.USE_DOCKER_SANDBOX !== undefined) {
-    logger.warn(
-      'USE_DOCKER_SANDBOX is deprecated; use CLSI_SANDBOX_MODE="container" | "local-unsafe" instead.',
-    );
-    mode = env.USE_DOCKER_SANDBOX === 'true' ? 'container' : 'local-unsafe';
   } else {
     // Default is container mode
     mode = 'container';
@@ -72,12 +65,8 @@ export function parseSandboxConfig(
     );
   }
 
-  // Image resolution (with legacy fallback)
+  // Image resolution
   let image = env.CLSI_SANDBOX_IMAGE;
-  if (!image && env.DOCKER_IMAGE) {
-    logger.warn('DOCKER_IMAGE is deprecated; use CLSI_SANDBOX_IMAGE instead.');
-    image = env.DOCKER_IMAGE;
-  }
 
   if (mode === 'container') {
     if (!image) {

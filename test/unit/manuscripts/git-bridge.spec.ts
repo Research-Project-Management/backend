@@ -147,8 +147,15 @@ describe('git-bridge sync with real git', () => {
     };
 
     const git = new GitCliAdapter();
-    const repo = new GitBridgeRepository(undefined, git);
-    const sync = new GitBridgeService(repo, docstore, filestore, structure);
+    const repo = new GitBridgeRepository(undefined);
+    const sync = new GitBridgeService(
+      repo,
+      docstore,
+      filestore,
+      structure,
+      undefined,
+      git,
+    );
 
     const tip1 = await sync.materialize(PID);
     expect(tip1).toMatch(/^[0-9a-f]{40}$/);

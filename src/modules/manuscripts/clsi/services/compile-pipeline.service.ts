@@ -7,6 +7,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { BadRequestException } from '@nestjs/common';
 import {
   IWorkspaceManager,
   WorkspaceFile,
@@ -26,10 +27,29 @@ import {
   OverleafOutputFileFinder,
 } from '../repositories/incremental-workspace.repository';
 import { TexEngineDetector } from '../domain/tex-engine.detector';
-import { OverleafLogParser } from '../domain/overleaf-log.parser';
+import { CompileLogAnalyzer } from '@/modules/manuscripts/diagnostics/domain';
 import { BibBackendDetector } from '../domain/bib-backend.detector';
 import { DraftModeManager } from '../domain/draft-mode.manager';
 import { SandboxPolicyViolationException } from '../domain/sandbox-errors';
+
+function assertSafeMainFile(mainFile: string): string {
+  const clean = (mainFile || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^(\.\/)+/, '')
+    .replace(/^\/+/, '');
+  if (
+    !clean ||
+    clean.startsWith('-') ||
+    clean.includes('..') ||
+    /[\x00-\x1f\x7f]/.test(clean)
+  ) {
+    throw new BadRequestException(
+      `Invalid or unsafe mainFile path: "${mainFile}"`,
+    );
+  }
+  return clean;
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Process Watchdog & Sandbox Runners (re-exported from ./sandbox/*)
@@ -85,6 +105,8 @@ export class LatexmkEngine implements ILatexEngine {
       );
     }
 
+    const safeMainFile = assertSafeMainFile(options.mainFile);
+
     const args: string[] = [
       compilerFlag,
       '-cd',
@@ -95,7 +117,8 @@ export class LatexmkEngine implements ILatexEngine {
       options.stopOnFirstError ? '-halt-on-error' : '-interaction=batchmode',
       ...(options.stopOnFirstError ? [] : ['-f']),
       ...(options.syntaxOnly ? ['-draftmode'] : []),
-      options.mainFile,
+      '--',
+      safeMainFile,
     ];
 
     const cwdPath = path.resolve(options.cwd);
@@ -126,7 +149,7 @@ export class LatexmkEngine implements ILatexEngine {
     const durationMs = Date.now() - startTime;
 
     const pdfPath = path.join(options.cwd, 'output.pdf');
-    const mainBase = path.parse(options.mainFile).name;
+    const mainBase = path.parse(safeMainFile).name;
     const altPdfPath = path.join(options.cwd, `${mainBase}.pdf`);
     const synctexGzPath = path.join(options.cwd, 'output.synctex.gz');
     const synctexPlainPath = path.join(options.cwd, 'output.synctex');
@@ -223,13 +246,16 @@ export class TectonicEngine implements ILatexEngine {
       );
     }
 
+    const safeMainFile = assertSafeMainFile(options.mainFile);
+
     const args: string[] = [
       '-X',
       'compile',
       '--synctex',
       '--outdir',
       options.cwd,
-      options.mainFile,
+      '--',
+      safeMainFile,
     ];
 
     const execResult = await this.runner.run(this.binaryPath, args, {
@@ -241,7 +267,7 @@ export class TectonicEngine implements ILatexEngine {
 
     const durationMs = Date.now() - startTime;
 
-    const baseName = options.mainFile.replace(/\.[^/.]+$/, '');
+    const baseName = safeMainFile.replace(/\.[^/.]+$/, '');
     const generatedPdf = path.join(options.cwd, `${baseName}.pdf`);
     const targetPdf = path.join(options.cwd, 'output.pdf');
     try {
@@ -536,7 +562,7 @@ export class CompilePipeline {
     private readonly workspace: IWorkspaceManager,
     private readonly latexmkEngine: ILatexEngine,
     private readonly tectonicEngine: ILatexEngine,
-    private readonly logParser: ILogParser = new OverleafLogParser(),
+    private readonly logParser: ILogParser = new CompileLogAnalyzer(),
     private readonly projectLockManager: ProjectLockManager = new ProjectLockManager(),
     private readonly outputFileFinder: IOutputFileFinder = new OverleafOutputFileFinder(),
   ) {}
@@ -554,6 +580,17 @@ export class CompilePipeline {
         .replace(/^\/+/, '');
 
     let mainFile = dto.mainFile ? cleanRelPath(dto.mainFile) : '';
+    if (
+      mainFile &&
+      (mainFile.startsWith('-') ||
+        mainFile.includes('..') ||
+        /[\x00-\x1f\x7f]/.test(mainFile))
+    ) {
+      throw new BadRequestException(
+        `Invalid or unsafe mainFile path: "${dto.mainFile}"`,
+      );
+    }
+
     if (!mainFile && dto.files) {
       const textFiles: Record<string, string> = {};
       for (const [k, v] of Object.entries(dto.files)) {
@@ -565,6 +602,14 @@ export class CompilePipeline {
     }
 
     mainFile = cleanRelPath(mainFile);
+    if (
+      !mainFile ||
+      mainFile.startsWith('-') ||
+      mainFile.includes('..') ||
+      /[\x00-\x1f\x7f]/.test(mainFile)
+    ) {
+      mainFile = 'main.tex';
+    }
     if (!mainFile.endsWith('.tex')) {
       mainFile = `${mainFile}.tex`;
     }
@@ -584,8 +629,15 @@ export class CompilePipeline {
     const shellEscapeAdvisories = engineDetect.shellEscapeAdvisories || [];
 
     if (!dto.mainFile && engineDetect.mainFileHint) {
-      mainFile = cleanRelPath(engineDetect.mainFileHint);
-      if (!mainFile.endsWith('.tex')) mainFile = `${mainFile}.tex`;
+      const hinted = cleanRelPath(engineDetect.mainFileHint);
+      if (
+        hinted &&
+        !hinted.startsWith('-') &&
+        !hinted.includes('..') &&
+        !/[\x00-\x1f\x7f]/.test(hinted)
+      ) {
+        mainFile = hinted.endsWith('.tex') ? hinted : `${hinted}.tex`;
+      }
     }
 
     if (dto.draft || dto.syntaxOnly) {
@@ -981,4 +1033,3 @@ export class CompilePipeline {
   }
 }
 
-export { CompilePipeline as CompilePipelineService };

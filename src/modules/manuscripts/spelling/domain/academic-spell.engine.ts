@@ -4,11 +4,8 @@
  * Zero I/O, zero NestJS imports.
  */
 
-import { LanguageCodeVo } from './language-code.vo';
-import { WordTokenVo } from './word-token.vo';
-import { MisspelledWord } from './misspelled-word.entity';
-import { SpellingReport } from './spelling-report.entity';
 import { InvalidWordException } from './invalid-word.exception';
+import { UnsupportedLanguageException } from './unsupported-language.exception';
 import {
   ACADEMIC_SHARED_WORDS,
   ENGLISH_COMMON_WORDS,
@@ -17,6 +14,159 @@ import {
   GERMAN_ACADEMIC_WORDS,
   SPANISH_ACADEMIC_WORDS,
 } from './academic-dictionaries';
+
+export class LanguageCodeVo {
+  private static readonly SUPPORTED_CODES = new Set([
+    'en',
+    'en-us',
+    'en-gb',
+    'en-ca',
+    'vi',
+    'vi-vn',
+    'fr',
+    'fr-fr',
+    'de',
+    'de-de',
+    'es',
+    'es-es',
+  ]);
+
+  public readonly code: string;
+  public readonly baseLanguage: string;
+
+  private constructor(normalizedCode: string) {
+    this.code = normalizedCode;
+    this.baseLanguage = normalizedCode.split('-')[0] || normalizedCode;
+  }
+
+  public static create(raw?: string): LanguageCodeVo {
+    if (!raw || raw.trim() === '') {
+      return new LanguageCodeVo('en-us');
+    }
+
+    const normalized = raw.trim().toLowerCase().replace('_', '-');
+    if (!LanguageCodeVo.SUPPORTED_CODES.has(normalized)) {
+      throw new UnsupportedLanguageException(raw);
+    }
+
+    return new LanguageCodeVo(normalized);
+  }
+
+  public isEnglish(): boolean {
+    return this.baseLanguage === 'en';
+  }
+
+  public equals(other: LanguageCodeVo): boolean {
+    return this.code === other.code;
+  }
+
+  public toString(): string {
+    return this.code;
+  }
+}
+
+export interface WordTokenProps {
+  word: string;
+  line: number;
+  col: number;
+  length?: number;
+}
+
+export class WordTokenVo {
+  public readonly word: string;
+  public readonly normalized: string;
+  public readonly line: number;
+  public readonly col: number;
+  public readonly length: number;
+
+  constructor(props: WordTokenProps) {
+    if (!props.word || props.word.trim() === '') {
+      throw new InvalidWordException(props.word, 'Word token cannot be empty');
+    }
+
+    this.word = props.word;
+    this.normalized = props.word.toLowerCase();
+    this.line = Math.max(1, props.line);
+    this.col = Math.max(1, props.col);
+    this.length = props.length || props.word.length;
+  }
+
+  public toJSON() {
+    return {
+      word: this.word,
+      line: this.line,
+      col: this.col,
+      length: this.length,
+    };
+  }
+}
+
+export type WordToken = WordTokenVo;
+
+export interface MisspelledWordProps {
+  word: string;
+  line: number;
+  col: number;
+  length: number;
+  suggestions?: string[];
+}
+
+export class MisspelledWord {
+  public readonly word: string;
+  public readonly line: number;
+  public readonly col: number;
+  public readonly length: number;
+  public readonly suggestions: readonly string[];
+
+  constructor(props: MisspelledWordProps) {
+    this.word = props.word;
+    this.line = props.line;
+    this.col = props.col;
+    this.length = props.length;
+    this.suggestions = Object.freeze(
+      props.suggestions ? [...props.suggestions] : [],
+    );
+  }
+
+  public toJSON() {
+    return {
+      word: this.word,
+      line: this.line,
+      col: this.col,
+      length: this.length,
+      suggestions: [...this.suggestions],
+    };
+  }
+}
+
+export interface SpellingReportProps {
+  language: string;
+  totalWordsChecked: number;
+  errors: MisspelledWord[];
+}
+
+export class SpellingReport {
+  public readonly language: string;
+  public readonly totalWordsChecked: number;
+  public readonly misspelledCount: number;
+  public readonly errors: readonly MisspelledWord[];
+
+  constructor(props: SpellingReportProps) {
+    this.language = props.language;
+    this.totalWordsChecked = props.totalWordsChecked;
+    this.errors = Object.freeze([...props.errors]);
+    this.misspelledCount = this.errors.length;
+  }
+
+  public toJSON() {
+    return {
+      language: this.language,
+      totalWordsChecked: this.totalWordsChecked,
+      misspelledCount: this.misspelledCount,
+      errors: this.errors.map((e) => e.toJSON()),
+    };
+  }
+}
 
 export class LatexProseTokenizer {
   private static readonly TECHNICAL_ARG_COMMANDS = [
@@ -198,36 +348,57 @@ export class AcademicSpellEngine {
   private readonly frenchDictionary: Set<string>;
   private readonly germanDictionary: Set<string>;
   private readonly spanishDictionary: Set<string>;
-  private readonly tokenizer = new LatexProseTokenizer();
+  private readonly lengthBuckets = new Map<
+    Set<string>,
+    Map<number, string[]>
+  >();
+  private readonly tokenizer: LatexProseTokenizer;
 
-  constructor() {
+  constructor(tokenizer?: LatexProseTokenizer) {
     this.englishDictionary = new Set<string>();
     this.vietnameseDictionary = new Set<string>();
     this.frenchDictionary = new Set<string>();
     this.germanDictionary = new Set<string>();
     this.spanishDictionary = new Set<string>();
+    this.tokenizer = tokenizer ?? new LatexProseTokenizer();
     this.seedDictionaries();
   }
 
-  public static validateCustomWord(word: string): string {
-    const raw = word ? word.trim() : '';
-    if (!raw || /\s/.test(raw) || !/^[a-zA-ZÀ-ÿ0-9_:.\\-]+$/.test(raw)) {
+  public static validateCustomWord(raw: string): string {
+    const trimmed = (raw ?? '').trim();
+    if (trimmed.length < 2) {
       throw new InvalidWordException(
-        word,
-        'Word must not contain whitespace or invalid symbols',
+        raw,
+        'Learned word must be at least 2 characters long.',
       );
     }
-    return raw;
-  }
-
-  public tokenizeLatex(text: string): WordTokenVo[] {
-    return this.tokenizer.tokenize(text);
+    if (trimmed.length > 64) {
+      throw new InvalidWordException(
+        raw,
+        'Learned word cannot exceed 64 characters.',
+      );
+    }
+    if (/\s/.test(trimmed)) {
+      throw new InvalidWordException(
+        raw,
+        'Learned word must be a single token without whitespace.',
+      );
+    }
+    if (!/^[\p{L}\p{M}'’-]+$/u.test(trimmed)) {
+      throw new InvalidWordException(
+        raw,
+        'Learned word may only contain letters, hyphens, or apostrophes.',
+      );
+    }
+    return trimmed.toLowerCase();
   }
 
   public checkText(
     rawText: string,
     language?: string,
     customWords: Iterable<string> = [],
+    maxSuggestions = 5,
+    tokenizerOverride?: LatexProseTokenizer,
   ): SpellingReport {
     const langVo = LanguageCodeVo.create(language);
 
@@ -239,7 +410,8 @@ export class AcademicSpellEngine {
       });
     }
 
-    const tokens = this.tokenizer.tokenize(rawText);
+    const activeTokenizer = tokenizerOverride ?? this.tokenizer;
+    const tokens = activeTokenizer.tokenize(rawText);
     const customSet = new Set<string>();
     for (const w of customWords) {
       customSet.add(w.toLowerCase());
@@ -253,13 +425,17 @@ export class AcademicSpellEngine {
       if (customSet.has(lower)) {
         continue;
       }
-      if (this.isCorrect(token.word, langVo)) {
+      if (this.isCorrect(token.word, langVo) || this.isCorrect(lower, langVo)) {
         continue;
       }
 
       let suggestions = suggestionsCache.get(lower);
       if (!suggestions) {
-        suggestions = this.getSuggestions(token.word, langVo, 5);
+        suggestions = this.getSuggestions(
+          token.word,
+          langVo,
+          maxSuggestions,
+        );
         suggestionsCache.set(lower, suggestions);
       }
 
@@ -330,9 +506,6 @@ export class AcademicSpellEngine {
           return true;
         }
       }
-      if (!this.isLikelyTypoInCompactDictionary(clean, dict)) {
-        return true;
-      }
     }
 
     return false;
@@ -360,15 +533,31 @@ export class AcademicSpellEngine {
 
     const candidates: Candidate[] = [];
     const dict = this.getDictionaryForLanguage(language);
+    const buckets = this.lengthBuckets.get(dict);
 
-    for (const dictWord of dict) {
-      if (Math.abs(dictWord.length - clean.length) > 2) {
-        continue;
+    if (buckets) {
+      const minLen = Math.max(1, clean.length - 2);
+      const maxLen = clean.length + 2;
+      for (let len = minLen; len <= maxLen; len++) {
+        const bucket = buckets.get(len);
+        if (!bucket) continue;
+        for (const dictWord of bucket) {
+          const dist = this.levenshteinDamerau(clean, dictWord);
+          if (dist <= 2) {
+            candidates.push({ word: dictWord, dist });
+          }
+        }
       }
+    } else {
+      for (const dictWord of dict) {
+        if (Math.abs(dictWord.length - clean.length) > 2) {
+          continue;
+        }
 
-      const dist = this.levenshteinDamerau(clean, dictWord);
-      if (dist <= 2) {
-        candidates.push({ word: dictWord, dist });
+        const dist = this.levenshteinDamerau(clean, dictWord);
+        if (dist <= 2) {
+          candidates.push({ word: dictWord, dist });
+        }
       }
     }
 
@@ -526,28 +715,6 @@ export class AcademicSpellEngine {
     return stems;
   }
 
-  private isLikelyTypoInCompactDictionary(
-    clean: string,
-    dict: Set<string>,
-  ): boolean {
-    if (/(.)\1\1/.test(clean)) return true;
-    if (clean.length >= 3 && !/[aeiouyàâäéèêëîïôöùûüÿœæáíóúñ]/i.test(clean)) {
-      return true;
-    }
-
-    if (clean.length >= 4) {
-      for (const dictWord of dict) {
-        if (dictWord.length < 4) continue;
-        if (Math.abs(dictWord.length - clean.length) > 1) continue;
-        if (this.levenshteinDamerau(clean, dictWord) === 1) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
   private getMorphologicalStems(word: string): string[] {
     const stems: string[] = [];
 
@@ -678,10 +845,25 @@ export class AcademicSpellEngine {
     for (const w of SPANISH_ACADEMIC_WORDS) {
       this.spanishDictionary.add(w.toLowerCase().normalize('NFC'));
     }
+
+    for (const dict of [
+      this.englishDictionary,
+      this.vietnameseDictionary,
+      this.frenchDictionary,
+      this.germanDictionary,
+      this.spanishDictionary,
+    ]) {
+      const bucketMap = new Map<number, string[]>();
+      for (const word of dict) {
+        const len = word.length;
+        let list = bucketMap.get(len);
+        if (!list) {
+          list = [];
+          bucketMap.set(len, list);
+        }
+        list.push(word);
+      }
+      this.lengthBuckets.set(dict, bucketMap);
+    }
   }
 }
-
-export {
-  LatexProseTokenizer as RegexLatexTokenizerAdapter,
-  AcademicSpellEngine as AcademicSpellEngineAdapter,
-};

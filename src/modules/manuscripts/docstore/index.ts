@@ -6,8 +6,6 @@
 
 export * from './docstore.module';
 export * from './docstore.service';
-export * from './docstore.controller';
-export * from './pages-bridge.controller';
 export * from './controllers';
 export * from './dto/doc.dto';
 
@@ -15,12 +13,8 @@ export * from './dto/doc.dto';
 export * from './domain';
 
 // Repositories
-export {
-  DocstoreRepository,
-  PrismaDocRepository,
-} from './repositories/docstore.repository';
+export { DocstoreRepository } from './repositories/docstore.repository';
 export {
   DocArchiveRepository,
   InMemoryDocArchiveRepository,
-  S3DocPersistorAdapter,
 } from './repositories/doc-archive.repository';

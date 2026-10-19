@@ -23,7 +23,6 @@ import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import {
   FilestoreService,
-  IFilestoreServiceRepository,
   FilestoreController,
   IBinaryStoragePort,
   IManuscriptFileRepository,
@@ -123,7 +122,7 @@ class InMemoryManuscriptFileRepository implements IManuscriptFileRepository {
   }
 }
 
-class TestFilestoreRepository implements IFilestoreServiceRepository {
+class TestFilestoreRepository {
   constructor(
     private readonly repo: InMemoryManuscriptFileRepository,
     private readonly storage: IBinaryStoragePort,

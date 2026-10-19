@@ -8,13 +8,12 @@
 import {
   LanguageCodeVo,
   WordTokenVo,
-  DictionaryScopeVo,
   MisspelledWord,
   SpellingReport,
   UnsupportedLanguageException,
   InvalidWordException,
-  RegexLatexTokenizerAdapter,
-  AcademicSpellEngineAdapter,
+  LatexProseTokenizer,
+  AcademicSpellEngine,
   SpellingRepository,
   SpellingService,
   SpellingController,
@@ -46,11 +45,6 @@ function createMockSpellingRepository(): SpellingRepository {
         const set = store.get(key);
         const deleted = set ? set.delete(where.word) : false;
         return { count: deleted ? 1 : 0 };
-      }),
-      count: jest.fn(async ({ where }: any) => {
-        const key = where.projectId ? `p:${where.projectId}` : `u:${where.userId}`;
-        const set = store.get(key);
-        return set && set.has(where.word) ? 1 : 0;
       }),
     },
   };
@@ -112,24 +106,6 @@ describe('Manuscripts Spelling Subsystem (LaTeX Tokenizer, Engine & Custom Dicti
       });
     });
 
-    describe('DictionaryScopeVo', () => {
-      it('should instantiate project and user scopes correctly', () => {
-        const projectScope = DictionaryScopeVo.project();
-        expect(projectScope.isProject()).toBe(true);
-        expect(projectScope.isUser()).toBe(false);
-
-        const userScope = DictionaryScopeVo.user();
-        expect(userScope.isUser()).toBe(true);
-        expect(userScope.isProject()).toBe(false);
-      });
-
-      it('should parse case-insensitively from string', () => {
-        expect(DictionaryScopeVo.fromString('user').isUser()).toBe(true);
-        expect(DictionaryScopeVo.fromString('PROJECT').isProject()).toBe(true);
-        expect(DictionaryScopeVo.fromString('unknown').isProject()).toBe(true);
-      });
-    });
-
     describe('MisspelledWord & SpellingReport Entities', () => {
       it('should create MisspelledWord and serialize to JSON', () => {
         const err = new MisspelledWord({
@@ -180,11 +156,11 @@ describe('Manuscripts Spelling Subsystem (LaTeX Tokenizer, Engine & Custom Dicti
   // 2. ADAPTERS LAYER
   // =========================================================================
   describe('Adapters Layer', () => {
-    describe('RegexLatexTokenizerAdapter', () => {
-      let tokenizer: RegexLatexTokenizerAdapter;
+    describe('LatexProseTokenizer', () => {
+      let tokenizer: LatexProseTokenizer;
 
       beforeEach(() => {
-        tokenizer = new RegexLatexTokenizerAdapter();
+        tokenizer = new LatexProseTokenizer();
       });
 
       it('should extract plain prose words with accurate 1-indexed coordinates', () => {
@@ -300,12 +276,12 @@ The result is valid.
       });
     });
 
-    describe('AcademicSpellEngineAdapter', () => {
-      let engine: AcademicSpellEngineAdapter;
+    describe('AcademicSpellEngine', () => {
+      let engine: AcademicSpellEngine;
       const langEn = LanguageCodeVo.create('en-US');
 
       beforeEach(() => {
-        engine = new AcademicSpellEngineAdapter();
+        engine = new AcademicSpellEngine();
       });
 
       it('should recognize academic and standard English vocabulary', () => {
@@ -368,9 +344,6 @@ The result is valid.
 
         const list = await dict.listProjectWords('proj-1');
         expect(list).toEqual(['biobert', 'resnet']);
-
-        expect(await dict.isCustomWord('resnet', 'proj-1')).toBe(true);
-        expect(await dict.isCustomWord('unknown', 'proj-1')).toBe(false);
       });
 
       it('should add, list, and verify user words', async () => {
@@ -378,16 +351,12 @@ The result is valid.
 
         const list = await dict.listUserWords('user-1');
         expect(list).toEqual(['mycustomterm']);
-
-        expect(
-          await dict.isCustomWord('mycustomterm', undefined, 'user-1'),
-        ).toBe(true);
       });
 
       it('should remove words from project and user scopes', async () => {
         await dict.addProjectWord('proj-1', 'dropme');
         expect(await dict.removeProjectWord('proj-1', 'dropme')).toBe(true);
-        expect(await dict.isCustomWord('dropme', 'proj-1')).toBe(false);
+        expect(await dict.listProjectWords('proj-1')).toEqual([]);
       });
     });
   });
@@ -455,12 +424,14 @@ The result is valid.
     describe('learnProjectWord & unlearnProjectWord', () => {
       it('should learn and unlearn project words', async () => {
         await service.learnProjectWord('p1', 'TransformerXL');
-        expect(await customDict.isCustomWord('transformerxl', 'p1')).toBe(true);
+        expect(await customDict.listProjectWords('p1')).toContain(
+          'transformerxl',
+        );
 
         const removed = await service.unlearnProjectWord('p1', 'TransformerXL');
         expect(removed).toBe(true);
-        expect(await customDict.isCustomWord('transformerxl', 'p1')).toBe(
-          false,
+        expect(await customDict.listProjectWords('p1')).not.toContain(
+          'transformerxl',
         );
       });
 

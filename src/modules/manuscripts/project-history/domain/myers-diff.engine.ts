@@ -5,9 +5,13 @@
  */
 
 import { Snapshot } from './snapshot.entity';
-import { FileDiffVo } from './file-diff.vo';
-import { DiffHunkVo, DiffLine, WordDiffToken } from './diff-hunk.vo';
-import type { TextDiffResult } from './diff-engine.port';
+import {
+  DiffHunkVo,
+  DiffLine,
+  FileDiffVo,
+  TextDiffResult,
+  WordDiffToken,
+} from './project-history.ports';
 
 export class MyersDiffEngine {
   /**
@@ -216,7 +220,7 @@ export class MyersDiffEngine {
     };
   }
 
-  private computeMyersLCS(
+  public computeMyersLCS(
     a: string[],
     b: string[],
   ): Array<{ type: 'added' | 'deleted' | 'unchanged'; text: string }> {
@@ -545,4 +549,125 @@ export class MyersDiffEngine {
 
     return hunks;
   }
+}
+
+export type DiffOp = { type: 'equal' | 'add' | 'remove'; line: string };
+
+export interface DiffHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
+}
+
+export interface LineDiffResult {
+  ops: DiffOp[];
+  hunks: DiffHunk[];
+  unified: string;
+  stats: { additions: number; deletions: number; unchanged: number };
+}
+
+const sharedMyersEngine = new MyersDiffEngine();
+
+function splitLines(text: string): string[] {
+  return text.length === 0 ? [] : text.split('\n');
+}
+
+export function diffLines(a: string[], b: string[]): DiffOp[] {
+  return sharedMyersEngine.computeMyersLCS(a, b).map((op) => ({
+    type:
+      op.type === 'added' ? 'add' : op.type === 'deleted' ? 'remove' : 'equal',
+    line: op.text,
+  }));
+}
+
+export function buildHunks(ops: DiffOp[], context = 3): DiffHunk[] {
+  const hunks: DiffHunk[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+  let current: DiffHunk | null = null;
+  let trailingEqual = 0;
+
+  for (let k = 0; k < ops.length; k++) {
+    const op = ops[k];
+    if (op.type === 'equal') {
+      if (current) {
+        if (trailingEqual < context) {
+          current.lines.push(` ${op.line}`);
+          current.oldLines++;
+          current.newLines++;
+          trailingEqual++;
+        } else {
+          let nextChange = -1;
+          for (let q = k; q < Math.min(ops.length, k + context + 1); q++) {
+            if (ops[q].type !== 'equal') {
+              nextChange = q;
+              break;
+            }
+          }
+          if (nextChange === -1) {
+            hunks.push(current);
+            current = null;
+          } else {
+            current.lines.push(` ${op.line}`);
+            current.oldLines++;
+            current.newLines++;
+          }
+        }
+      }
+      oldLine++;
+      newLine++;
+      continue;
+    }
+    if (!current) {
+      const lead: string[] = [];
+      for (let q = Math.max(0, k - context); q < k; q++) {
+        if (ops[q].type === 'equal') lead.push(` ${ops[q].line}`);
+      }
+      current = {
+        oldStart: oldLine - lead.length,
+        newStart: newLine - lead.length,
+        oldLines: lead.length,
+        newLines: lead.length,
+        lines: lead,
+      };
+    }
+    trailingEqual = 0;
+    if (op.type === 'remove') {
+      current.lines.push(`-${op.line}`);
+      current.oldLines++;
+      oldLine++;
+    } else {
+      current.lines.push(`+${op.line}`);
+      current.newLines++;
+      newLine++;
+    }
+  }
+  if (current) hunks.push(current);
+  return hunks;
+}
+
+export function computeLineDiff(
+  oldText: string,
+  newText: string,
+  labels: { from: string; to: string } = { from: 'a', to: 'b' },
+): LineDiffResult {
+  const ops = diffLines(splitLines(oldText), splitLines(newText));
+  const hunks = buildHunks(ops);
+  const stats = { additions: 0, deletions: 0, unchanged: 0 };
+  for (const op of ops) {
+    if (op.type === 'add') stats.additions++;
+    else if (op.type === 'remove') stats.deletions++;
+    else stats.unchanged++;
+  }
+  const unified = [
+    `--- ${labels.from}`,
+    `+++ ${labels.to}`,
+    ...hunks.flatMap((h) => [
+      `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`,
+      ...h.lines,
+    ]),
+  ].join('\n');
+  return { ops, hunks, unified, stats };
 }

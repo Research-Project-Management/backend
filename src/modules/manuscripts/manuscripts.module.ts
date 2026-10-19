@@ -9,7 +9,6 @@ import { ClsiModule } from './clsi/clsi.module';
 import { DocstoreModule } from './docstore/docstore.module';
 import { StructureModule } from './structure/structure.module';
 import { FilestoreModule } from './filestore/filestore.module';
-import { DocumentUpdaterModule } from './document-updater/document-updater.module';
 import { ProjectHistoryModule } from './project-history/project-history.module';
 import { TrackChangesModule } from './track-changes/track-changes.module';
 import { ExportImportModule } from './export-import/export-import.module';
@@ -19,6 +18,7 @@ import { SpellingModule } from './spelling/spelling.module';
 import { TemplatesModule } from './templates/templates.module';
 import { LinkedFilesModule } from './linked-files/linked-files.module';
 import { GitBridgeModule } from './git-bridge/git-bridge.module';
+import { ManuscriptsFacade } from './manuscripts.facade';
 
 @Module({
   imports: [
@@ -27,7 +27,6 @@ import { GitBridgeModule } from './git-bridge/git-bridge.module';
     DocstoreModule,
     StructureModule,
     FilestoreModule,
-    DocumentUpdaterModule,
     ProjectHistoryModule,
     TrackChangesModule,
     ExportImportModule,
@@ -38,13 +37,14 @@ import { GitBridgeModule } from './git-bridge/git-bridge.module';
     LinkedFilesModule,
     GitBridgeModule,
   ],
+  providers: [ManuscriptsFacade],
   exports: [
+    ManuscriptsFacade,
     ManuscriptsCoreModule,
     ClsiModule,
     DocstoreModule,
     StructureModule,
     FilestoreModule,
-    DocumentUpdaterModule,
     ProjectHistoryModule,
     TrackChangesModule,
     ExportImportModule,
@@ -53,6 +53,7 @@ import { GitBridgeModule } from './git-bridge/git-bridge.module';
     SpellingModule,
     TemplatesModule,
     LinkedFilesModule,
+    GitBridgeModule,
   ],
 })
 export class ManuscriptsModule {}

@@ -11,6 +11,7 @@ import {
   NotFoundException,
   Logger,
   Optional,
+  Inject,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
@@ -25,23 +26,11 @@ import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { CitationsService } from '@/modules/manuscripts/citations/citations.service';
 import { LineArrayEngine } from '@/modules/manuscripts/docstore/domain';
-
-const TEXT_EXTENSIONS = new Set([
-  'tex',
-  'bib',
-  'csv',
-  'txt',
-  'json',
-  'md',
-  'tsv',
-  'yaml',
-  'yml',
-  'xml',
-  'r',
-  'py',
-  'sty',
-  'cls',
-]);
+import {
+  TEXT_EXTENSIONS,
+  LIVE_COLLABORATION_PORT,
+  LiveCollaborationPort,
+} from '@/modules/manuscripts/core';
 
 @Injectable()
 export class LinkedFilesService {
@@ -55,6 +44,9 @@ export class LinkedFilesService {
     @Optional() private readonly filestoreService?: FilestoreService,
     @Optional() private readonly citationsService?: CitationsService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    private readonly liveCollab?: LiveCollaborationPort,
   ) {}
 
   private broadcastFileTreeChange(
@@ -234,6 +226,9 @@ export class LinkedFilesService {
             lines,
             version: nextVersion,
           });
+          await this.liveCollab
+            ?.applyExternalText(projectId, linkedFile.docId, textContent)
+            .catch(() => {});
 
           this.eventEmitter?.emit('manuscripts.project.event', {
             projectId,
@@ -243,6 +238,7 @@ export class LinkedFilesService {
             },
           });
         } else if (linkedFile.fileId) {
+          const previousFileId = linkedFile.fileId;
           const newFile = await this.filestoreService!.uploadFileFromBuffer(
             projectId,
             linkedFile.name,
@@ -259,6 +255,11 @@ export class LinkedFilesService {
               newFile.hash?.getValue() ?? null,
             );
           }
+          if (previousFileId && previousFileId !== newFile.id) {
+            await this.filestoreService
+              ?.deleteFile(projectId, previousFileId, true)
+              .catch(() => {});
+          }
         }
       } else if (
         (linkedFile.provider === 'zotero' ||
@@ -274,11 +275,21 @@ export class LinkedFilesService {
           },
         );
 
+        if (!linkedFile.docId && this.structureService) {
+          const existingNode = await this.structureService
+            .getNodeByPath(projectId, linkedFile.name)
+            .catch(() => null);
+          if (existingNode) {
+            linkedFile.nodeId = existingNode.id;
+            linkedFile.docId = existingNode.docId;
+          }
+        }
+
         if (linkedFile.docId) {
-          this.eventEmitter?.emit('manuscripts.track-changes.event', {
+          this.eventEmitter?.emit('manuscripts.project.event', {
             projectId,
-            eventName: 'doc:content-updated',
-            data: {
+            event: 'doc:content-updated',
+            payload: {
               docId: linkedFile.docId,
             },
           });
@@ -376,18 +387,54 @@ export class LinkedFilesService {
   private async downloadUrl(
     url: string,
   ): Promise<{ buffer: Buffer; mimeType: string }> {
-    const validatedUrl = await assertSafeExternalUrl(url);
+    const MAX_REDIRECTS = 3;
+    let currentUrl = url;
+    let response: Response | null = null;
 
-    const response = await fetch(validatedUrl.toString(), {
-      signal: AbortSignal.timeout(30000),
-      headers: {
-        'User-Agent': 'Flux-Manuscript-LinkedFiles/1.0',
-      },
-    });
+    for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
+      const validatedUrl = await assertSafeExternalUrl(currentUrl);
 
-    if (!response.ok) {
+      response = await fetch(validatedUrl.toString(), {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(30000),
+        headers: {
+          'User-Agent': 'Flux-Manuscript-LinkedFiles/1.0',
+        },
+      });
+
+      if (
+        response.status === 301 ||
+        response.status === 302 ||
+        response.status === 303 ||
+        response.status === 307 ||
+        response.status === 308
+      ) {
+        if (redirectCount >= MAX_REDIRECTS) {
+          throw new Error(
+            `Maximum redirect limit (${MAX_REDIRECTS}) exceeded`,
+          );
+        }
+        const location = response.headers.get('location');
+        if (!location) {
+          throw new Error(
+            `Redirect response HTTP ${response.status} missing Location header`,
+          );
+        }
+        const resolvedRedirectUrl = new URL(
+          location,
+          validatedUrl.toString(),
+        ).toString();
+        await assertSafeExternalUrl(resolvedRedirectUrl);
+        currentUrl = resolvedRedirectUrl;
+        continue;
+      }
+
+      break;
+    }
+
+    if (!response || !response.ok) {
       throw new Error(
-        `Remote server returned HTTP ${response.status} ${response.statusText}`,
+        `Remote server returned HTTP ${response?.status ?? 0} ${response?.statusText ?? 'Unknown'}`,
       );
     }
 
@@ -400,11 +447,35 @@ export class LinkedFilesService {
 
     const mimeType =
       response.headers.get('content-type') || 'application/octet-stream';
-    const arrayBuf = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuf);
 
-    if (buffer.length > this.MAX_DOWNLOAD_SIZE_BYTES) {
-      throw new Error(`File exceeds maximum permitted size of 50MB`);
+    let buffer: Buffer;
+    if (response.body && typeof response.body.getReader === 'function') {
+      const reader = response.body.getReader();
+      const chunks: Buffer[] = [];
+      let totalBytes = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            totalBytes += value.byteLength;
+            if (totalBytes > this.MAX_DOWNLOAD_SIZE_BYTES) {
+              await reader.cancel().catch(() => {});
+              throw new Error(`File exceeds maximum permitted size of 50MB`);
+            }
+            chunks.push(Buffer.from(value));
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      buffer = Buffer.concat(chunks, totalBytes);
+    } else {
+      const arrayBuf = await response.arrayBuffer();
+      buffer = Buffer.from(arrayBuf);
+      if (buffer.length > this.MAX_DOWNLOAD_SIZE_BYTES) {
+        throw new Error(`File exceeds maximum permitted size of 50MB`);
+      }
     }
 
     return { buffer, mimeType };

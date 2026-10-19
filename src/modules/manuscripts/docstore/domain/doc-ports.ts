@@ -55,6 +55,7 @@ export abstract class IDocRepository {
     docId: string,
     storageKey: string,
     rev: number,
+    clearLines?: boolean,
   ): Promise<void>;
   abstract unarchiveDoc(
     projectId: string,
@@ -84,6 +85,8 @@ export abstract class IDocPersistor {
   abstract getObjectMd5Hash(key: string): Promise<string>;
 
   abstract deleteObject(key: string): Promise<void>;
+
+  isDurableStorageConfigured?(): boolean;
 }
 
 export interface DocstoreMetricsSummary {

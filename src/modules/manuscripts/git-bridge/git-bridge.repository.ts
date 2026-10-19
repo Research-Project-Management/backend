@@ -295,19 +295,11 @@ export class GitCliAdapter implements IGitCliPort {
 }
 
 @Injectable()
-export class GitBridgeRepository
-  implements IGitAccessRepositoryPort, IGitCliPort
-{
-  private readonly gitCli: IGitCliPort;
-
+export class GitBridgeRepository implements IGitAccessRepositoryPort {
   constructor(
     @Optional()
     private readonly prisma?: PrismaService,
-    @Optional()
-    gitCliOverride?: GitCliAdapter,
-  ) {
-    this.gitCli = gitCliOverride ?? new GitCliAdapter();
-  }
+  ) {}
 
   async readConfig(userId: string): Promise<UserEditorGitConfig> {
     if (!this.prisma) {
@@ -365,80 +357,5 @@ export class GitBridgeRepository
       select: { createdById: true },
     });
     return project?.createdById === userId ? 'owner' : null;
-  }
-
-  bareDir(projectId: string): string {
-    return this.gitCli.bareDir(projectId);
-  }
-
-  workDir(projectId: string): string {
-    return this.gitCli.workDir(projectId);
-  }
-
-  run(
-    args: string[],
-    opts?: { env?: NodeJS.ProcessEnv; cwd?: string; input?: Buffer },
-  ): Promise<GitRunResult> {
-    return this.gitCli.run(args, opts);
-  }
-
-  ensureRepo(projectId: string): Promise<void> {
-    return this.gitCli.ensureRepo(projectId);
-  }
-
-  resolveRef(projectId: string, ref?: string): Promise<string | null> {
-    return this.gitCli.resolveRef(projectId, ref);
-  }
-
-  listRefs(projectId: string): Promise<string[]> {
-    return this.gitCli.listRefs(projectId);
-  }
-
-  deleteRef(projectId: string, ref: string): Promise<void> {
-    return this.gitCli.deleteRef(projectId, ref);
-  }
-
-  setMainRef(
-    projectId: string,
-    sha: string,
-    expectedOld: string | null,
-  ): Promise<void> {
-    return this.gitCli.setMainRef(projectId, sha, expectedOld);
-  }
-
-  commitSnapshot(
-    projectId: string,
-    files: Array<{ path: string; content: Buffer }>,
-    message: string,
-  ): Promise<string> {
-    return this.gitCli.commitSnapshot(projectId, files, message);
-  }
-
-  advertiseRefs(projectId: string, service: GitService): Promise<Buffer> {
-    return this.gitCli.advertiseRefs(projectId, service);
-  }
-
-  serviceRpc(
-    projectId: string,
-    service: GitService,
-    body: Readable,
-  ): Promise<GitRunResult> {
-    return this.gitCli.serviceRpc(projectId, service, body);
-  }
-
-  diffNameStatus(
-    projectId: string,
-    from: string | null,
-    to: string,
-  ): Promise<string> {
-    return this.gitCli.diffNameStatus(projectId, from, to);
-  }
-
-  readBlob(
-    projectId: string,
-    commit: string,
-    repoPath: string,
-  ): Promise<Buffer> {
-    return this.gitCli.readBlob(projectId, commit, repoPath);
   }
 }

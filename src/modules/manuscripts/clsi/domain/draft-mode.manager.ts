@@ -110,11 +110,4 @@ export class DraftModeManager {
 
     return detected;
   }
-
-  /**
-   * @deprecated Advisory only. Never used to enable compiler flags or shell escape.
-   */
-  public static requiresShellEscape(source: string): boolean {
-    return this.detectShellEscapeUsage(source).length > 0;
-  }
 }

@@ -72,8 +72,6 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
               'CLSI_SANDBOX_RUNTIME',
             ),
             CLSI_SCRATCH_DIR: configService.get<string>('CLSI_SCRATCH_DIR'),
-            USE_DOCKER_SANDBOX: configService.get<string>('USE_DOCKER_SANDBOX'),
-            DOCKER_IMAGE: configService.get<string>('DOCKER_IMAGE'),
             NODE_ENV: configService.get<string>('NODE_ENV'),
           },
           isProduction: configService.get<string>('NODE_ENV') === 'production',

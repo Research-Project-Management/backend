@@ -8,10 +8,7 @@ import {
   StructureService,
   IStructureRepository,
   CreateNodeParams,
-  IRootDocDetector,
-  ITreePublisher,
   HeuristicRootDocDetector,
-  InMemoryTreePublisher,
   ManuscriptNodeEntity,
   NodePathVo,
   CyclicMoveError,
@@ -203,14 +200,6 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
         {
           provide: IStructureRepository,
           useValue: repository,
-        },
-        {
-          provide: IRootDocDetector,
-          useValue: detector,
-        },
-        {
-          provide: ITreePublisher,
-          useClass: InMemoryTreePublisher,
         },
       ],
     }).compile();

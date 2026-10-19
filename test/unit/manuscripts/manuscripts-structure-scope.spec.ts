@@ -42,14 +42,7 @@ describe('Structure Repository & Service Project Scoping (SEC-02 / US5)', () => 
     };
 
     repository = new StructureRepository(mockPrisma);
-    service = new StructureService(
-      repository,
-      undefined,
-      repository,
-      undefined,
-      undefined,
-      mockPrisma,
-    );
+    service = new StructureService(repository);
   });
 
   describe('StructureRepository Scope Isolation', () => {

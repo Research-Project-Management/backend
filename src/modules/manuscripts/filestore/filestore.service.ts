@@ -15,53 +15,7 @@ import {
   StorageObjectMetadata,
   StreamManuscriptFileOutput,
   GetFileHeadOutput,
-  StreamHashResult,
-  StorageKey,
-  ContentHash,
-  StorageUploadOptions,
-  StorageRangeOptions,
 } from './filestore.types';
-
-export interface IFilestoreServiceRepository {
-  findByProjectAndId(
-    projectId: string,
-    id: string,
-  ): Promise<ManuscriptFile | null>;
-  findByProjectAndName(
-    projectId: string,
-    name: string,
-  ): Promise<ManuscriptFile | null>;
-  listByProject(
-    projectId: string,
-    includeDeleted?: boolean,
-  ): Promise<ManuscriptFile[]>;
-  save(file: ManuscriptFile): Promise<ManuscriptFile>;
-  countReferencesByHash(hash: string): Promise<number>;
-  hashStream(stream: Readable): Promise<StreamHashResult>;
-  buildStorageKey(hash: ContentHash, prefix?: string): StorageKey;
-  checkObjectExists(bucket: string, key: string): Promise<boolean>;
-  sendStream(
-    bucket: string,
-    key: string,
-    stream: Readable,
-    options?: StorageUploadOptions,
-  ): Promise<void>;
-  getObjectStream(
-    bucket: string,
-    key: string,
-    range?: StorageRangeOptions,
-  ): Promise<Readable>;
-  getObjectMetadata?(
-    bucket: string,
-    key: string,
-  ): Promise<StorageObjectMetadata>;
-  deleteObject(bucket: string, key: string): Promise<void>;
-  getSignedDownloadUrl(
-    bucket: string,
-    key: string,
-    expiresInSeconds: number,
-  ): Promise<string | null>;
-}
 
 @Injectable()
 export class FilestoreService {
@@ -238,6 +192,25 @@ export class FilestoreService {
     name: string,
   ): Promise<ManuscriptFile | null> {
     return await this.repository.findByProjectAndName(projectId, name);
+  }
+
+  /**
+   * Resolve file by exact path, leaf basename, or implicit LaTeX graphics extension in a single query.
+   */
+  public async findFileByPathFlexible(
+    projectId: string,
+    rawPath: string,
+  ): Promise<ManuscriptFile | null> {
+    if (typeof this.repository.findFileByPathFlexible === 'function') {
+      return await this.repository.findFileByPathFlexible(projectId, rawPath);
+    }
+    const cleanPath = rawPath.replace(/^\//, '').trim();
+    const leafName = cleanPath.split('/').pop() || cleanPath;
+    let file = await this.repository.findByProjectAndName(projectId, cleanPath);
+    if (!file && leafName !== cleanPath) {
+      file = await this.repository.findByProjectAndName(projectId, leafName);
+    }
+    return file;
   }
 
   /**

@@ -4,7 +4,12 @@
  * and pure domain LinePatcher, while preserving backward compatibility for legacy use-case tests.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import {
   ITrackChangesRepositoryPort,
@@ -36,32 +41,35 @@ import {
 @Injectable()
 export class TrackChangesService {
   private readonly logger = new Logger(TrackChangesService.name);
+  private readonly docstorePatcher?: DocstorePatcherAdapter;
 
   constructor(
     private readonly repository: ITrackChangesRepositoryPort,
     @Optional() private readonly docstoreService?: DocstoreService,
-    @Optional() private readonly docstorePatcher?: DocstorePatcherAdapter,
+    @Optional() docstorePatcher?: DocstorePatcherAdapter,
     @Optional() private readonly realtimeNotifier?: RealtimeNotifierAdapter,
-  ) {}
+  ) {
+    this.docstorePatcher =
+      docstorePatcher ??
+      (docstoreService
+        ? new DocstorePatcherAdapter(docstoreService)
+        : undefined);
+  }
 
   public async resolveProjectId(
     projectId: string,
     docId: string,
   ): Promise<string> {
-    const isSpecial =
-      !projectId ||
-      projectId === 'default' ||
-      projectId === 'personal' ||
-      projectId === 'me';
-    if (this.docstoreService && isSpecial && docId) {
-      try {
-        const doc = await this.docstoreService.getDocById(docId);
-        if (doc?.projectId) return doc.projectId;
-      } catch {
-        // Fallback
-      }
+    if (projectId && projectId.trim()) {
+      return projectId;
     }
-    return projectId || 'default';
+    if (this.docstoreService && docId) {
+      const doc = await this.docstoreService.getDocById(docId);
+      if (doc?.projectId) return doc.projectId;
+    }
+    throw new NotFoundException(
+      `Could not resolve project for document '${docId}'.`,
+    );
   }
 
   public async recordChange(
@@ -73,9 +81,9 @@ export class TrackChangesService {
     const resolvedProjId = await this.resolveProjectId(projectId, docId);
     const range = dto.range || {
       startLine: dto.startLine ?? 0,
-      startCol: dto.startCol ?? dto.fromIndex ?? 0,
+      startCol: dto.startCol ?? 0,
       endLine: dto.endLine ?? dto.startLine ?? 0,
-      endCol: dto.endCol ?? dto.toIndex ?? 0,
+      endCol: dto.endCol ?? 0,
     };
 
     const change = TrackChange.create({
@@ -145,12 +153,23 @@ export class TrackChangesService {
     const sorted = LinePatcher.sortChangesBottomUp(filtered);
     const isAccept = action === 'accept_all' || action === 'accept_selected';
 
+    if (sorted.length > 0 && this.docstorePatcher) {
+      await this.docstorePatcher.applyBatchChanges(
+        resolvedProjId,
+        docId,
+        sorted,
+        isAccept,
+      );
+    }
+
     for (const change of sorted) {
       if (isAccept) {
-        await this.acceptChangeDirect(resolvedProjId, docId, change.id, userId);
+        change.accept(userId);
       } else {
-        await this.rejectChangeDirect(resolvedProjId, docId, change.id, userId);
+        change.reject(userId);
       }
+      const saved = await this.repository.saveChange(change);
+      this.realtimeNotifier?.notifyChangeResolved(resolvedProjId, docId, saved);
     }
 
     return {
@@ -288,22 +307,14 @@ export class TrackChangesService {
       throw new ChangeNotFoundException(changeId);
     }
 
+    if (change.status !== 'pending') {
+      return change;
+    }
+
     change.accept(userId);
 
     if (this.docstorePatcher) {
       await this.docstorePatcher.applyChange(projectId, docId, change);
-    } else if (this.docstoreService) {
-      const doc = await this.docstoreService.getDoc(projectId, docId);
-      const { lines, mutated } = LinePatcher.computeAcceptedPatch(
-        doc.lines,
-        change,
-      );
-      if (mutated) {
-        await this.docstoreService.updateDoc(projectId, docId, {
-          lines,
-          version: doc.version,
-        });
-      }
     }
 
     const saved = await this.repository.saveChange(change);
@@ -322,17 +333,14 @@ export class TrackChangesService {
       throw new ChangeNotFoundException(changeId);
     }
 
+    if (change.status !== 'pending') {
+      return change;
+    }
+
     change.reject(userId);
 
     if (this.docstorePatcher) {
       await this.docstorePatcher.revertChange(projectId, docId, change);
-    } else if (this.docstoreService) {
-      const doc = await this.docstoreService.getDoc(projectId, docId);
-      const { lines } = LinePatcher.computeRejectedPatch(doc.lines, change);
-      await this.docstoreService.updateDoc(projectId, docId, {
-        lines,
-        version: doc.version,
-      });
     }
 
     const saved = await this.repository.saveChange(change);

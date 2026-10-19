@@ -36,7 +36,7 @@ import {
   createZipStreamFromDisk,
   ZipDiskEntry,
 } from '../repositories/incremental-workspace.repository';
-import { OverleafLogParser } from '../domain/overleaf-log.parser';
+import { CompileLogAnalyzer } from '@/modules/manuscripts/diagnostics/domain';
 import { SyncTexProcessor } from '../domain/synctex.parser';
 import { TexWordCounter } from '../domain/tex-word.counter';
 import { PlannedFileSet } from '../domain/compile-fileset.planner';
@@ -49,11 +49,12 @@ import {
   TectonicEngine,
   ClsiHealthCheck,
 } from './compile-pipeline.service';
-import { CompileFairQueue } from '../domain/compile-fair-queue';
+import { CompileFairQueue } from './compile-fair-queue.service';
 import { ClsiMetrics } from '../domain/clsi.metrics';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { RemoteClsiClientAdapter } from './remote-clsi.client';
 import { ClsiWorkspacePlannerService } from './workspace-planner.service';
+import { parseSandboxConfig } from './sandbox/sandbox-config';
 
 export type ClsiCompileResult = CompilePipelineResult;
 
@@ -62,7 +63,7 @@ export class ClsiService {
   private readonly logger = new Logger(ClsiService.name);
   private readonly workspace: OverleafIncrementalWorkspace;
   private readonly pipeline: CompilePipeline;
-  private readonly logParser: OverleafLogParser;
+  private readonly logParser: CompileLogAnalyzer;
   private readonly synctexParser: SyncTexProcessor;
   private readonly wordCounter: TexWordCounter;
   private readonly fairQueue = new CompileFairQueue();
@@ -85,22 +86,54 @@ export class ClsiService {
     @Optional() workspace?: OverleafIncrementalWorkspace,
     @Optional() latexmkEngine?: LatexmkEngine,
     @Optional() tectonicEngine?: TectonicEngine,
-    @Optional() logParser?: OverleafLogParser,
+    @Optional() logParser?: CompileLogAnalyzer,
     @Optional() synctexProcessor?: SyncTexProcessor,
     @Optional() wordCounter?: TexWordCounter,
     @Optional() diskUsageCleaner?: DiskUsageCleaner,
     @Optional() healthCheck?: ClsiHealthCheck,
     @Optional() pipeline?: CompilePipeline,
   ) {
-    const scratchDir =
-      this.configService.get<string>('CLSI_SCRATCH_DIR') ||
-      this.configService.get<string>('SCRATCH_DIR') ||
-      path.join(os.tmpdir(), 'clsi-scratch');
-    const useDocker =
-      this.configService.get<string>('USE_DOCKER_SANDBOX') === 'true';
-    const dockerImage =
-      this.configService.get<string>('DOCKER_IMAGE') ||
-      'sharelatex/clsi:latest';
+    const rawMode = this.configService.get<string>('CLSI_SANDBOX_MODE')?.toLowerCase();
+    const normalizedMode =
+      rawMode === 'local-unsafe' || rawMode === 'local'
+        ? 'local-unsafe'
+        : 'container';
+    const sandboxConfig = parseSandboxConfig({
+      env: {
+        CLSI_SANDBOX_MODE: normalizedMode,
+        CLSI_SANDBOX_IMAGE:
+          this.configService.get<string>('CLSI_SANDBOX_IMAGE') ||
+          this.configService.get<string>('CLSI_DOCKER_IMAGE') ||
+          undefined,
+        CLSI_SANDBOX_USER:
+          this.configService.get<string>('CLSI_SANDBOX_USER') || undefined,
+        CLSI_SANDBOX_MEMORY_MB:
+          this.configService.get<string>('CLSI_SANDBOX_MEMORY_MB') || undefined,
+        CLSI_SANDBOX_CPUS:
+          this.configService.get<string>('CLSI_SANDBOX_CPUS') || undefined,
+        CLSI_SANDBOX_PIDS:
+          this.configService.get<string>('CLSI_SANDBOX_PIDS') || undefined,
+        CLSI_SANDBOX_FSIZE_MB:
+          this.configService.get<string>('CLSI_SANDBOX_FSIZE_MB') || undefined,
+        CLSI_SANDBOX_NOFILE:
+          this.configService.get<string>('CLSI_SANDBOX_NOFILE') || undefined,
+        CLSI_SANDBOX_TMPFS_MB:
+          this.configService.get<string>('CLSI_SANDBOX_TMPFS_MB') || undefined,
+        CLSI_SANDBOX_TIMEOUT_MS:
+          this.configService.get<string>('CLSI_SANDBOX_TIMEOUT_MS') ||
+          undefined,
+        CLSI_SANDBOX_RUNTIME:
+          this.configService.get<string>('CLSI_SANDBOX_RUNTIME') || undefined,
+        CLSI_SCRATCH_DIR:
+          this.configService.get<string>('CLSI_SCRATCH_DIR') ||
+          this.configService.get<string>('SCRATCH_DIR') ||
+          undefined,
+        NODE_ENV: this.configService.get<string>('NODE_ENV') || undefined,
+      },
+      isProduction: this.configService.get<string>('NODE_ENV') === 'production',
+    });
+
+    const scratchDir = sandboxConfig.scratchDir;
     const latexmkBin =
       this.configService.get<string>('LATEXMK_BIN') || 'latexmk';
     const tectonicBin =
@@ -119,7 +152,7 @@ export class ClsiService {
       );
 
     // Pure in-process domain logic
-    this.logParser = logParser ?? new OverleafLogParser();
+    this.logParser = logParser ?? new CompileLogAnalyzer();
     this.synctexParser = synctexProcessor ?? new SyncTexProcessor();
     this.wordCounter = wordCounter ?? new TexWordCounter();
 
@@ -128,8 +161,12 @@ export class ClsiService {
 
     const needsRunner = !latexmkEngine || !tectonicEngine || !healthCheck;
     const runner = needsRunner
-      ? useDocker
-        ? new DockerSandboxRunner(dockerImage)
+      ? sandboxConfig.mode === 'container'
+        ? new DockerSandboxRunner(
+            sandboxConfig.image,
+            `${sandboxConfig.memoryMb}m`,
+            `${sandboxConfig.cpus}`,
+          )
         : new LocalProcessRunner()
       : undefined;
 
@@ -193,18 +230,23 @@ export class ClsiService {
 
     const requestedEngine = dto.engine;
     const texLiveVersion = dto.tex_live_version || dto.texLiveVersion || '2024';
+    const explicitDtoProjectId = dto.projectId || dto.project_id;
     const resolvedFromDto = await this.workspacePlanner.resolveProjectId(dto);
 
-    if (
-      authorizedProjectId &&
-      resolvedFromDto &&
-      authorizedProjectId !== resolvedFromDto
-    ) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'PROJECT_CONTEXT_MISMATCH',
-        message: 'Authorized project context does not match compile payload',
-      });
+    if (authorizedProjectId) {
+      if (
+        (explicitDtoProjectId &&
+          explicitDtoProjectId !== authorizedProjectId) ||
+        (resolvedFromDto &&
+          resolvedFromDto !== 'default' &&
+          resolvedFromDto !== authorizedProjectId)
+      ) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'PROJECT_CONTEXT_MISMATCH',
+          message: 'Authorized project context does not match compile payload',
+        });
+      }
     }
     const projectId = authorizedProjectId || resolvedFromDto;
 
@@ -229,7 +271,7 @@ export class ClsiService {
         texLiveVersion,
         dto.draft ?? false,
         dto.syntax_only ?? dto.syntaxOnly ?? false,
-        dto.stop_on_first_error ?? false,
+        dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
       ].join('|'),
     )}`;
     const cacheable = !!(dto.use_cache && plan.hasMainContent);
@@ -244,7 +286,7 @@ export class ClsiService {
           isCached: true,
           isTimeout: false,
           pdfSizeBytes: cached.pdf
-            ? Buffer.from(cached.pdf, 'base64').length
+            ? Buffer.byteLength(cached.pdf, 'base64')
             : 0,
         });
         return cached;
@@ -326,7 +368,8 @@ export class ClsiService {
             texLiveVersion,
             draft: dto.draft,
             syntaxOnly: dto.syntax_only ?? dto.syntaxOnly,
-            stopOnFirstError: dto.stop_on_first_error,
+            stopOnFirstError:
+              dto.stopOnFirstError ?? dto.stop_on_first_error ?? false,
             timeoutMs: effectiveTimeoutMs,
             source,
             files: mergedFiles,
@@ -341,7 +384,7 @@ export class ClsiService {
           isCached: false,
           isTimeout: pipelineResult.durationMs >= effectiveTimeoutMs,
           pdfSizeBytes: pipelineResult.pdf
-            ? Buffer.from(pipelineResult.pdf, 'base64').length
+            ? Buffer.byteLength(pipelineResult.pdf, 'base64')
             : 0,
         });
 
@@ -416,6 +459,7 @@ export class ClsiService {
     const remoteRes = await this.remoteClient.tryRemoteForwardSync(dto);
     if (remoteRes) return remoteRes;
 
+    const explicitDtoProjectId = dto.projectId || dto.project_id;
     const resolvedFromDto = await this.workspacePlanner.resolveProjectId({
       projectId: dto.projectId,
       project_id: dto.project_id,
@@ -423,16 +467,20 @@ export class ClsiService {
       page_id: dto.page_id,
     });
 
-    if (
-      authorizedProjectId &&
-      resolvedFromDto &&
-      authorizedProjectId !== resolvedFromDto
-    ) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'PROJECT_CONTEXT_MISMATCH',
-        message: 'Authorized project context does not match synctex payload',
-      });
+    if (authorizedProjectId) {
+      if (
+        (explicitDtoProjectId &&
+          explicitDtoProjectId !== authorizedProjectId) ||
+        (resolvedFromDto &&
+          resolvedFromDto !== 'default' &&
+          resolvedFromDto !== authorizedProjectId)
+      ) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'PROJECT_CONTEXT_MISMATCH',
+          message: 'Authorized project context does not match synctex payload',
+        });
+      }
     }
     const projectId = authorizedProjectId || resolvedFromDto;
 
@@ -476,6 +524,7 @@ export class ClsiService {
     const remoteRes = await this.remoteClient.tryRemoteReverseSync(dto);
     if (remoteRes) return remoteRes;
 
+    const explicitDtoProjectId = dto.projectId || dto.project_id;
     const resolvedFromDto = await this.workspacePlanner.resolveProjectId({
       projectId: dto.projectId,
       project_id: dto.project_id,
@@ -483,16 +532,20 @@ export class ClsiService {
       page_id: dto.page_id,
     });
 
-    if (
-      authorizedProjectId &&
-      resolvedFromDto &&
-      authorizedProjectId !== resolvedFromDto
-    ) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'PROJECT_CONTEXT_MISMATCH',
-        message: 'Authorized project context does not match synctex payload',
-      });
+    if (authorizedProjectId) {
+      if (
+        (explicitDtoProjectId &&
+          explicitDtoProjectId !== authorizedProjectId) ||
+        (resolvedFromDto &&
+          resolvedFromDto !== 'default' &&
+          resolvedFromDto !== authorizedProjectId)
+      ) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'PROJECT_CONTEXT_MISMATCH',
+          message: 'Authorized project context does not match synctex payload',
+        });
+      }
     }
     const projectId = authorizedProjectId || resolvedFromDto;
 

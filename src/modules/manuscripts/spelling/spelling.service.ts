@@ -9,10 +9,8 @@ import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service
 import { SpellingRepository } from './spelling.repository';
 import {
   AcademicSpellEngine,
-  InvalidWordException,
   LanguageCodeVo,
   LatexProseTokenizer,
-  MisspelledWord,
   SpellingReport,
 } from './domain';
 import {
@@ -33,13 +31,18 @@ export interface CheckSpellingQuery {
 
 @Injectable()
 export class SpellingService {
-  private readonly tokenizer = new LatexProseTokenizer();
-  private readonly spellEngine = new AcademicSpellEngine();
+  private readonly tokenizer: LatexProseTokenizer;
+  private readonly spellEngine: AcademicSpellEngine;
 
   constructor(
     @Optional() private readonly repository?: SpellingRepository,
     @Optional() private readonly docstoreService?: DocstoreService,
-  ) {}
+    @Optional() tokenizer?: LatexProseTokenizer,
+    @Optional() spellEngine?: AcademicSpellEngine,
+  ) {
+    this.tokenizer = tokenizer ?? new LatexProseTokenizer();
+    this.spellEngine = spellEngine ?? new AcademicSpellEngine(this.tokenizer);
+  }
 
   private get repo(): SpellingRepository {
     if (!this.repository) {
@@ -54,7 +57,8 @@ export class SpellingService {
   public async checkSpelling(
     query: CheckSpellingQuery,
   ): Promise<SpellingReport> {
-    const language = LanguageCodeVo.create(query.language);
+    // Validate language upfront so callers receive UnsupportedLanguageException even on blank text
+    LanguageCodeVo.create(query.language);
     const maxSuggestions = query.maxSuggestions ?? 5;
 
     let sourceText = query.text ?? '';
@@ -66,8 +70,6 @@ export class SpellingService {
       sourceText = (doc.lines || []).join('\n');
     }
 
-    const tokens = this.tokenizer.tokenize(sourceText);
-
     const customWordSet = new Set<string>();
     if (query.projectId) {
       const pWords = await this.repo.listProjectWords(query.projectId);
@@ -78,47 +80,13 @@ export class SpellingService {
       for (const w of uWords) customWordSet.add(w.toLowerCase());
     }
 
-    const suggestionCache = new Map<string, string[]>();
-    const errors: MisspelledWord[] = [];
-
-    for (const token of tokens) {
-      const normalized = token.normalized;
-      if (customWordSet.has(normalized)) {
-        continue;
-      }
-
-      const isCorrect =
-        this.spellEngine.isCorrect(token.word, language) ||
-        this.spellEngine.isCorrect(normalized, language);
-
-      if (!isCorrect) {
-        let suggestions = suggestionCache.get(normalized);
-        if (!suggestions) {
-          suggestions = this.spellEngine.getSuggestions(
-            token.word,
-            language,
-            maxSuggestions,
-          );
-          suggestionCache.set(normalized, suggestions);
-        }
-
-        errors.push(
-          new MisspelledWord({
-            word: token.word,
-            line: token.line,
-            col: token.col,
-            length: token.length,
-            suggestions,
-          }),
-        );
-      }
-    }
-
-    return new SpellingReport({
-      language: language.code,
-      totalWordsChecked: tokens.length,
-      errors,
-    });
+    return this.spellEngine.checkText(
+      sourceText,
+      query.language,
+      customWordSet,
+      maxSuggestions,
+      this.tokenizer,
+    );
   }
 
   /**
@@ -163,7 +131,7 @@ export class SpellingService {
     projectId: string,
     word: string,
   ): Promise<void> {
-    const cleaned = this.validateAndNormalizeWord(word);
+    const cleaned = AcademicSpellEngine.validateCustomWord(word);
     await this.repo.addProjectWord(projectId, cleaned);
   }
 
@@ -197,7 +165,7 @@ export class SpellingService {
    * Adds a custom word to the user dictionary.
    */
   public async learnUserWord(userId: string, word: string): Promise<void> {
-    const cleaned = this.validateAndNormalizeWord(word);
+    const cleaned = AcademicSpellEngine.validateCustomWord(word);
     await this.repo.addUserWord(userId, cleaned);
   }
 
@@ -222,34 +190,5 @@ export class SpellingService {
       words,
       count: words.length,
     };
-  }
-
-  private validateAndNormalizeWord(raw: string): string {
-    const trimmed = (raw ?? '').trim();
-    if (trimmed.length < 2) {
-      throw new InvalidWordException(
-        raw,
-        'Learned word must be at least 2 characters long.',
-      );
-    }
-    if (trimmed.length > 64) {
-      throw new InvalidWordException(
-        raw,
-        'Learned word cannot exceed 64 characters.',
-      );
-    }
-    if (/\s/.test(trimmed)) {
-      throw new InvalidWordException(
-        raw,
-        'Learned word must be a single token without whitespace.',
-      );
-    }
-    if (!/^[\p{L}\p{M}'’-]+$/u.test(trimmed)) {
-      throw new InvalidWordException(
-        raw,
-        'Learned word may only contain letters, hyphens, or apostrophes.',
-      );
-    }
-    return trimmed.toLowerCase();
   }
 }

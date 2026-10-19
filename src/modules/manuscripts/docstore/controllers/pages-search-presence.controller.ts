@@ -39,7 +39,7 @@ import { ManuscriptSearchReplaceService } from '../services/manuscript-search-re
 
 @ApiTags('Manuscripts - Pages Search & Presence')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
+@Controller('api/v1/manuscripts')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class PagesSearchPresenceController {
@@ -52,16 +52,9 @@ export class PagesSearchPresenceController {
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/collaboration/presence
-   * GET /api/pages/:pageId/collaboration/presence
    * GET /api/v1/manuscripts/docs/:pageId/presence
-   * GET /api/pages/:pageId/presence
    */
-  @Get([
-    'docs/:pageId/collaboration/presence',
-    'pages/:pageId/collaboration/presence',
-    'docs/:pageId/presence',
-    'pages/:pageId/presence',
-  ])
+  @Get(['docs/:pageId/collaboration/presence', 'docs/:pageId/presence'])
   async getPresence(@Param('pageId') pageId: string) {
     const { users, realtimeAvailable } =
       await this.presenceService.collectPresence(pageId);
@@ -70,15 +63,11 @@ export class PagesSearchPresenceController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/collaboration/heartbeat
-   * POST /api/pages/:pageId/collaboration/heartbeat
    * POST /api/v1/manuscripts/docs/:pageId/presence/heartbeat
-   * POST /api/pages/:pageId/presence/heartbeat
    */
   @Post([
     'docs/:pageId/collaboration/heartbeat',
-    'pages/:pageId/collaboration/heartbeat',
     'docs/:pageId/presence/heartbeat',
-    'pages/:pageId/presence/heartbeat',
   ])
   @HttpCode(HttpStatus.OK)
   async sendHeartbeat(
@@ -94,16 +83,9 @@ export class PagesSearchPresenceController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/collaboration/leave
-   * POST /api/pages/:pageId/collaboration/leave
    * POST /api/v1/manuscripts/docs/:pageId/presence/leave
-   * POST /api/pages/:pageId/presence/leave
    */
-  @Post([
-    'docs/:pageId/collaboration/leave',
-    'pages/:pageId/collaboration/leave',
-    'docs/:pageId/presence/leave',
-    'pages/:pageId/presence/leave',
-  ])
+  @Post(['docs/:pageId/collaboration/leave', 'docs/:pageId/presence/leave'])
   @HttpCode(HttpStatus.OK)
   async leaveRoom(
     @Param('pageId') pageId: string,
@@ -120,18 +102,12 @@ export class PagesSearchPresenceController {
    *
    * GET /api/v1/manuscripts/docs/:pageId/collaboration/stream
    * GET /api/v1/manuscripts/projects/:projectId/docs/:pageId/collaboration/stream
-   * GET /api/pages/:pageId/collaboration/stream
-   * GET /api/projects/:projectId/pages/:pageId/collaboration/stream
    * GET /api/v1/manuscripts/docs/:pageId/stream
-   * GET /api/pages/:pageId/stream
    */
   @Get([
     'docs/:pageId/collaboration/stream',
     'projects/:projectId/docs/:pageId/collaboration/stream',
-    'pages/:pageId/collaboration/stream',
-    'projects/:projectId/pages/:pageId/collaboration/stream',
     'docs/:pageId/stream',
-    'pages/:pageId/stream',
   ])
   async getStream(
     @Param('pageId') pageId: string,
@@ -158,16 +134,9 @@ export class PagesSearchPresenceController {
 
   /**
    * POST /api/v1/manuscripts/projects/:projectId/search
-   * POST /api/projects/:projectId/documents/search
    * POST /api/v1/manuscripts/docs/search
-   * POST /api/pages/search
    */
-  @Post([
-    'projects/:projectId/search',
-    'projects/:projectId/documents/search',
-    'docs/search',
-    'pages/search',
-  ])
+  @Post(['projects/:projectId/search', 'docs/search'])
   @UseGuards(UserRateLimitGuard)
   @UserRateLimit('search-replace')
   @HttpCode(HttpStatus.OK)
@@ -183,10 +152,12 @@ export class PagesSearchPresenceController {
       fileIds?: string[];
       maxResults?: number;
     },
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
+    const resolvedProjectId =
+      typeof project === 'string' ? project : project?.id;
     const targetProjectId =
-      project?.id || routeProjectId || body?.projectId || '';
+      resolvedProjectId || routeProjectId || body?.projectId || '';
     if (!targetProjectId) {
       throw new BadRequestException('Project context required');
     }
@@ -195,16 +166,9 @@ export class PagesSearchPresenceController {
 
   /**
    * POST /api/v1/manuscripts/projects/:projectId/replace
-   * POST /api/projects/:projectId/documents/replace
    * POST /api/v1/manuscripts/docs/replace
-   * POST /api/pages/replace
    */
-  @Post([
-    'projects/:projectId/replace',
-    'projects/:projectId/documents/replace',
-    'docs/replace',
-    'pages/replace',
-  ])
+  @Post(['projects/:projectId/replace', 'docs/replace'])
   @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('search-replace')
@@ -221,10 +185,12 @@ export class PagesSearchPresenceController {
       wholeWord?: boolean;
       useRegex?: boolean;
     },
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id: string } | null,
   ) {
+    const resolvedProjectId =
+      typeof project === 'string' ? project : project?.id;
     const targetProjectId =
-      project?.id || routeProjectId || body?.projectId || '';
+      resolvedProjectId || routeProjectId || body?.projectId || '';
     if (!targetProjectId) {
       throw new BadRequestException('Project context required');
     }

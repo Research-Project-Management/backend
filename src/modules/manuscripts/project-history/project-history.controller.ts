@@ -48,12 +48,7 @@ import { AuthenticatedRequest } from '@/core';
 
 @ApiTags('Manuscripts - Project History & Snapshots')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/manuscripts/projects/:projectId/history',
-  'v1/manuscripts/projects/:projectId/history',
-  'manuscripts/projects/:projectId/history',
-  'projects/:projectId/history',
-])
+@Controller('api/v1/manuscripts/projects/:projectId/history')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class ProjectHistoryController {

@@ -34,7 +34,12 @@ import { createGunzip } from 'zlib';
 import { Readable } from 'stream';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { NoProjectContext, RequireRole, Role } from '@/modules/project/access';
+import {
+  NoProjectContext,
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+} from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { GitBridgeService } from './git-bridge.service';
 import { CreateGitTokenDto } from './dto/git-bridge.dto';
@@ -214,49 +219,9 @@ export class GitBridgeController {
     );
     if (!projectId) return;
     try {
-      const outcome = await this.gitBridgeService.withProjectLock(
+      const outcome = await this.gitBridgeService.handleReceivePack(
         projectId,
-        async () => {
-          const before = await this.gitBridgeService.materialize(projectId);
-          const result = await this.gitBridgeService.serviceRpc(
-            projectId,
-            'git-receive-pack',
-            this.requestBody(req),
-          );
-          const after = await this.gitBridgeService.resolveRef(projectId);
-
-          const mainRef = `refs/heads/${GIT_DEFAULT_BRANCH}`;
-          const extra = (
-            await this.gitBridgeService.listRefs(projectId)
-          ).filter((r) => r !== mainRef);
-          for (const ref of extra) {
-            await this.gitBridgeService.deleteRef(projectId, ref);
-          }
-
-          if (after && after !== before) {
-            try {
-              const applied = await this.gitBridgeService.applyPush(
-                projectId,
-                before,
-                after,
-              );
-              this.logger.log(
-                `git push ${projectId}: +${applied.created.length} ~${applied.updated.length} -${applied.deleted.length}`,
-              );
-              await this.gitBridgeService.materialize(projectId);
-            } catch (applyErr) {
-              await this.gitBridgeService
-                .setMainRef(projectId, before, after)
-                .catch(() => undefined);
-              throw applyErr;
-            }
-          } else if (extra.length > 0 && after === before) {
-            return {
-              rejected: `Only the '${GIT_DEFAULT_BRANCH}' branch can be pushed`,
-            };
-          }
-          return { stdout: result.stdout };
-        },
+        this.requestBody(req),
       );
 
       if ('rejected' in outcome) {
@@ -286,11 +251,8 @@ export class GitBridgeController {
     return `${String(base).replace(/\/+$/, '')}/git/${projectId}.git`;
   }
 
-  @Get([
-    'api/v1/manuscripts/projects/:projectId/git',
-    'v1/manuscripts/projects/:projectId/git',
-  ])
-  @UseGuards(JwtAuthGuard)
+  @Get('api/v1/manuscripts/projects/:projectId/git')
+  @UseGuards(JwtAuthGuard, ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @ApiBearerAuth('JWT-auth')
   async repoInfo(
@@ -311,7 +273,7 @@ export class GitBridgeController {
     };
   }
 
-  @Get(['api/v1/manuscripts/git/tokens', 'v1/manuscripts/git/tokens'])
+  @Get('api/v1/manuscripts/git/tokens')
   @UseGuards(JwtAuthGuard)
   @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
@@ -319,7 +281,7 @@ export class GitBridgeController {
     return { tokens: await this.gitBridgeService.listTokens(userId) };
   }
 
-  @Post(['api/v1/manuscripts/git/tokens', 'v1/manuscripts/git/tokens'])
+  @Post('api/v1/manuscripts/git/tokens')
   @UseGuards(JwtAuthGuard)
   @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
@@ -340,10 +302,7 @@ export class GitBridgeController {
     }
   }
 
-  @Delete([
-    'api/v1/manuscripts/git/tokens/:tokenId',
-    'v1/manuscripts/git/tokens/:tokenId',
-  ])
+  @Delete('api/v1/manuscripts/git/tokens/:tokenId')
   @UseGuards(JwtAuthGuard)
   @NoProjectContext()
   @ApiBearerAuth('JWT-auth')

@@ -155,7 +155,7 @@ export class StructureRepository extends IStructureRepository {
     const sourcePrefix = normSource + '/';
 
     await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.manuscriptNode.update({
+      const movedRoot = await tx.manuscriptNode.update({
         where: {
           projectId_path: {
             projectId,
@@ -170,6 +170,13 @@ export class StructureRepository extends IStructureRepository {
         },
       });
 
+      if (movedRoot?.docId) {
+        await tx.manuscriptDoc?.updateMany({
+          where: { id: movedRoot.docId, projectId },
+          data: { path: normDest.replace(/^\/+/, '') },
+        });
+      }
+
       const descendants = await tx.manuscriptNode.findMany({
         where: {
           projectId,
@@ -177,19 +184,28 @@ export class StructureRepository extends IStructureRepository {
         },
       });
 
-      for (const descendant of descendants) {
-        const relative = descendant.path.substring(normSource.length);
-        const newChildPath = normDest + relative;
-        const newDepth = NodePathVo.depth(newChildPath);
+      await Promise.all(
+        descendants.map(async (descendant) => {
+          const relative = descendant.path.substring(normSource.length);
+          const newChildPath = normDest + relative;
+          const newDepth = NodePathVo.depth(newChildPath);
 
-        await tx.manuscriptNode.update({
-          where: { id: descendant.id },
-          data: {
-            path: newChildPath,
-            depth: newDepth,
-          },
-        });
-      }
+          await tx.manuscriptNode.update({
+            where: { id: descendant.id },
+            data: {
+              path: newChildPath,
+              depth: newDepth,
+            },
+          });
+
+          if (descendant.docId) {
+            await tx.manuscriptDoc?.updateMany({
+              where: { id: descendant.docId, projectId },
+              data: { path: newChildPath.replace(/^\/+/, '') },
+            });
+          }
+        }),
+      );
     });
   }
 
@@ -218,6 +234,12 @@ export class StructureRepository extends IStructureRepository {
     const updated = await this.prisma.manuscriptNode.findFirst({
       where: { id: nodeId, projectId },
     });
+    if (updated?.docId) {
+      await this.prisma.manuscriptDoc?.updateMany({
+        where: { id: updated.docId, projectId },
+        data: { path: newPath.replace(/^\/+/, '') },
+      });
+    }
     return this.mapToEntity(updated!);
   }
 
@@ -236,10 +258,39 @@ export class StructureRepository extends IStructureRepository {
     });
 
     const targetIds = targets.map((t) => t.id);
+    const docIds = Array.from(
+      new Set(
+        targets
+          .map((t) => t.docId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    );
+    const fileIds = Array.from(
+      new Set(
+        targets
+          .map((t) => t.fileId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    );
 
     if (targetIds.length > 0) {
       await this.prisma.manuscriptNode.deleteMany({
         where: { id: { in: targetIds }, projectId },
+      });
+    }
+
+    const now = new Date();
+    if (docIds.length > 0 && this.prisma.manuscriptDoc?.updateMany) {
+      await this.prisma.manuscriptDoc.updateMany({
+        where: { id: { in: docIds }, projectId, deleted: false },
+        data: { deleted: true, deletedAt: now },
+      });
+    }
+
+    if (fileIds.length > 0 && this.prisma.manuscriptFile?.updateMany) {
+      await this.prisma.manuscriptFile.updateMany({
+        where: { id: { in: fileIds }, projectId, deleted: false },
+        data: { deleted: true, deletedAt: now },
       });
     }
 
@@ -296,5 +347,62 @@ export class StructureRepository extends IStructureRepository {
     return await this.prisma.manuscriptNode.count({
       where: { projectId },
     });
+  }
+
+  public async docExistsInProject(
+    projectId: string,
+    docId: string,
+  ): Promise<boolean> {
+    const doc = await this.prisma.manuscriptDoc.findFirst({
+      where: { id: docId, projectId, deleted: false },
+      select: { id: true },
+    });
+    return Boolean(doc);
+  }
+
+  public async fileExistsInProject(
+    projectId: string,
+    fileId: string,
+  ): Promise<boolean> {
+    const file = await this.prisma.manuscriptFile.findFirst({
+      where: { id: fileId, projectId, deleted: false },
+      select: { id: true },
+    });
+    return Boolean(file);
+  }
+
+  public async createBackingDoc(
+    projectId: string,
+    _name: string,
+    path: string,
+    content?: string,
+  ): Promise<{ id: string; sizeBytes: number; hash: string }> {
+    const rawContent = content ?? '';
+    const lines = rawContent.length > 0 ? rawContent.split(/\r?\n/) : [''];
+    const normalizedText = lines.join('\n');
+    const sizeBytes = Buffer.byteLength(normalizedText, 'utf8');
+    const { createHash } = await import('node:crypto');
+    const hash = createHash('sha1')
+      .update(`blob ${sizeBytes}\0${normalizedText}`, 'utf8')
+      .digest('hex');
+
+    const created = await this.prisma.manuscriptDoc.create({
+      data: {
+        projectId,
+        path: path.replace(/^\/+/, ''),
+        lines,
+        rev: 1,
+        hash,
+        sizeBytes,
+        inStorage: false,
+        deleted: false,
+      },
+    });
+
+    return {
+      id: created.id,
+      sizeBytes: Number(created.sizeBytes || sizeBytes),
+      hash: created.hash || hash,
+    };
   }
 }

@@ -4,6 +4,7 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   Prisma,
@@ -12,6 +13,7 @@ import {
   ManuscriptCommentReply as PrismaCommentReply,
 } from '@prisma/client';
 import { PrismaService } from '@/core';
+import { LiveCollaborationPort } from '@/modules/manuscripts/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
 import {
@@ -94,7 +96,10 @@ export class TrackChangesMapper {
 
 @Injectable()
 export class DocstorePatcherAdapter extends IDocstorePatcherPort {
-  constructor(private readonly docstoreService: DocstoreService) {
+  constructor(
+    private readonly docstoreService: DocstoreService,
+    @Optional() private readonly moduleRef?: ModuleRef,
+  ) {
     super();
   }
 
@@ -121,6 +126,21 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
       version: doc.version,
     });
 
+    try {
+      const live = this.moduleRef?.get(LiveCollaborationPort, {
+        strict: false,
+      });
+      if (live) {
+        await live.applyExternalText(
+          projectId,
+          docId,
+          (updated.doc.lines || ['']).join('\n'),
+        );
+      }
+    } catch {
+      // non-blocking fallback
+    }
+
     return {
       lines: updated.doc.lines,
       newRev: updated.doc.rev,
@@ -140,22 +160,84 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
       version: doc.version,
     });
 
+    try {
+      const live = this.moduleRef?.get(LiveCollaborationPort, {
+        strict: false,
+      });
+      if (live) {
+        await live.applyExternalText(
+          projectId,
+          docId,
+          (updated.doc.lines || ['']).join('\n'),
+        );
+      }
+    } catch {
+      // non-blocking fallback
+    }
+
     return {
       lines: updated.doc.lines,
       newRev: updated.doc.rev,
     };
   }
 
-  public removeRange(lines: string[], range: TextRangeVo): string[] {
-    return LinePatcher.removeRange(lines, range);
-  }
+  public async applyBatchChanges(
+    projectId: string,
+    docId: string,
+    changes: TrackChange[],
+    isAccept: boolean,
+  ): Promise<PatcherResult | null> {
+    if (changes.length === 0) {
+      return null;
+    }
 
-  public insertRange(
-    lines: string[],
-    range: TextRangeVo,
-    textToInsert: string,
-  ): string[] {
-    return LinePatcher.insertRange(lines, range, textToInsert);
+    const doc = await this.docstoreService.getDoc(projectId, docId);
+    let currentLines = doc.lines;
+    let anyMutated = false;
+
+    for (const change of changes) {
+      if (isAccept) {
+        const res = LinePatcher.computeAcceptedPatch(currentLines, change);
+        currentLines = res.lines;
+        if (res.mutated) anyMutated = true;
+      } else {
+        const res = LinePatcher.computeRejectedPatch(currentLines, change);
+        currentLines = res.lines;
+        if (res.mutated) anyMutated = true;
+      }
+    }
+
+    if (!anyMutated) {
+      return {
+        lines: currentLines,
+        newRev: doc.rev,
+      };
+    }
+
+    const updated = await this.docstoreService.updateDoc(projectId, docId, {
+      lines: currentLines,
+      version: doc.version,
+    });
+
+    try {
+      const live = this.moduleRef?.get(LiveCollaborationPort, {
+        strict: false,
+      });
+      if (live) {
+        await live.applyExternalText(
+          projectId,
+          docId,
+          (updated.doc.lines || ['']).join('\n'),
+        );
+      }
+    } catch {
+      // non-blocking fallback
+    }
+
+    return {
+      lines: updated.doc.lines,
+      newRev: updated.doc.rev,
+    };
   }
 }
 
@@ -290,14 +372,15 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     });
 
     if (
-      this.notificationsService &&
+      this.notificationsService?.manuscripts &&
       thread.replies &&
       thread.replies.length > 0
     ) {
       const firstReply = thread.replies[0];
+      const manuscriptsNotifications = this.notificationsService.manuscripts;
       this.getCollaboratorContext(projectId, thread.createdById)
         .then(async (ctx) => {
-          await this.notificationsService?.parseAndNotifyMentions({
+          await manuscriptsNotifications.parseAndNotifyMentions({
             text: firstReply.content,
             actorId: thread.createdById || 'anonymous',
             actorName: ctx.actorName,
@@ -330,31 +413,25 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
       reply: reply.toJSON(),
     });
 
-    if (this.notificationsService) {
+    if (this.notificationsService?.manuscripts) {
+      const manuscriptsNotifications = this.notificationsService.manuscripts;
       this.getCollaboratorContext(projectId, reply.createdById)
         .then(async (ctx) => {
           if (threadOwnerId && threadOwnerId !== reply.createdById) {
-            await this.notificationsService?.createNotification({
-              userId: threadOwnerId,
-              key: `comment-reply-${reply.id}-${threadOwnerId}`,
-              templateKey: 'comment_reply',
-              type: 'comment_reply',
+            await manuscriptsNotifications.notifyCommentReply({
+              recipientUserId: threadOwnerId,
+              actorId: reply.createdById || 'anonymous',
+              actorName: ctx.actorName,
               projectId,
+              projectName: ctx.projectName,
               docId,
-              actorId: reply.createdById || undefined,
-              messageOpts: {
-                actorId: reply.createdById,
-                actorName: ctx.actorName,
-                projectId,
-                projectName: ctx.projectName,
-                threadId,
-                commentId: reply.id,
-                snippet: reply.content.slice(0, 140),
-              },
+              threadId,
+              replyId: reply.id,
+              snippet: reply.content.slice(0, 140),
             });
           }
 
-          await this.notificationsService?.parseAndNotifyMentions({
+          await manuscriptsNotifications.parseAndNotifyMentions({
             text: reply.content,
             actorId: reply.createdById || 'anonymous',
             actorName: ctx.actorName,
@@ -384,33 +461,25 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
       thread: thread.toJSON(),
     });
 
-    if (this.notificationsService) {
+    if (this.notificationsService?.manuscripts) {
+      const manuscriptsNotifications = this.notificationsService.manuscripts;
       this.getCollaboratorContext(projectId, thread.resolvedById)
         .then(async (ctx) => {
-          await this.notificationsService?.deleteByKey(
-            `comment-mention-${thread.id}`,
-          );
+          await manuscriptsNotifications.dismissThreadNotifications(thread.id);
 
           if (
             thread.createdById &&
             thread.createdById !== thread.resolvedById
           ) {
-            await this.notificationsService?.createNotification({
-              userId: thread.createdById,
-              key: `thread-resolved-${thread.id}-${thread.createdById}`,
-              templateKey: 'thread_resolved',
-              type: 'thread_resolved',
+            await manuscriptsNotifications.notifyThreadResolved({
+              recipientUserId: thread.createdById,
+              actorId: thread.resolvedById || 'anonymous',
+              actorName: ctx.actorName,
               projectId,
+              projectName: ctx.projectName,
               docId,
-              actorId: thread.resolvedById || undefined,
-              messageOpts: {
-                actorId: thread.resolvedById,
-                actorName: ctx.actorName,
-                projectId,
-                projectName: ctx.projectName,
-                threadId: thread.id,
-                quote: thread.quote,
-              },
+              threadId: thread.id,
+              quote: thread.quote ?? undefined,
             });
           }
         })
@@ -583,17 +652,5 @@ export class TrackChangesRepository extends ITrackChangesRepositoryPort {
     });
 
     return TrackChangesMapper.toDomainReply(record);
-  }
-
-  public async deleteCommentThread(
-    projectId: string,
-    threadId: string,
-  ): Promise<void> {
-    await this.prisma.manuscriptCommentThread.deleteMany({
-      where: {
-        id: threadId,
-        projectId,
-      },
-    });
   }
 }

@@ -404,10 +404,6 @@ Summary of contributions and recommendations for further research.
 `,
       },
     },
-  ];
-
-export const EXTENDED_TEMPLATE_CATALOG: readonly OfficialTemplateDefinition[] =
-  [
     {
       id: '10000000-0000-0000-0000-000000000008',
       slug: 'academic-book',

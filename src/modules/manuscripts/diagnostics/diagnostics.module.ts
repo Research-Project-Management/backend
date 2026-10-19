@@ -6,11 +6,8 @@
 import { Module } from '@nestjs/common';
 import { DiagnosticsController } from './diagnostics.controller';
 import { DiagnosticsService } from './diagnostics.service';
-import { DiagnosticsRepository } from './diagnostics.repository';
 import {
-  LATEX_LOG_PARSER_PORT,
-  SYNTAX_LINTER_PORT,
-  ERROR_EXPLAINER_PORT,
+  ErrorKnowledgeBase,
   CompileLogAnalyzer,
   FastSyntaxLinter,
 } from './domain';
@@ -20,37 +17,24 @@ import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
   imports: [DocstoreModule],
   controllers: [DiagnosticsController],
   providers: [
+    ErrorKnowledgeBase,
+    {
+      provide: CompileLogAnalyzer,
+      inject: [ErrorKnowledgeBase],
+      useFactory: (kb: ErrorKnowledgeBase) => new CompileLogAnalyzer(kb),
+    },
+    {
+      provide: FastSyntaxLinter,
+      inject: [ErrorKnowledgeBase],
+      useFactory: (kb: ErrorKnowledgeBase) => new FastSyntaxLinter(kb),
+    },
     DiagnosticsService,
-    DiagnosticsRepository,
-    {
-      provide: ERROR_EXPLAINER_PORT,
-      useExisting: DiagnosticsRepository,
-    },
-    {
-      provide: LATEX_LOG_PARSER_PORT,
-      inject: [DiagnosticsRepository],
-      useFactory: (repo: DiagnosticsRepository) => {
-        const analyzer = new CompileLogAnalyzer(repo);
-        return {
-          parse: (logText: string, defaultFile?: string) =>
-            analyzer.parseTexParenTreeLog(logText, defaultFile),
-        };
-      },
-    },
-    {
-      provide: SYNTAX_LINTER_PORT,
-      inject: [DiagnosticsRepository],
-      useFactory: (repo: DiagnosticsRepository) => {
-        return new FastSyntaxLinter(repo);
-      },
-    },
   ],
   exports: [
     DiagnosticsService,
-    DiagnosticsRepository,
-    LATEX_LOG_PARSER_PORT,
-    SYNTAX_LINTER_PORT,
-    ERROR_EXPLAINER_PORT,
+    ErrorKnowledgeBase,
+    CompileLogAnalyzer,
+    FastSyntaxLinter,
   ],
 })
 export class DiagnosticsModule {}

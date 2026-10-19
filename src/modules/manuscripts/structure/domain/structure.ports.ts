@@ -65,26 +65,18 @@ export abstract class IStructureRepository {
     hash?: string | null,
   ): Promise<ManuscriptNodeEntity>;
   abstract countNodes(projectId: string): Promise<number>;
-}
-
-export abstract class IRootDocDetector {
-  abstract detectRootDoc(
-    nodes: ManuscriptNodeEntity[],
-    docContents: Map<string, string[]>,
-  ): ManuscriptNodeEntity | null;
-}
-
-export interface TreeMutationPayload {
-  projectId: string;
-  action:
-    'create' | 'move' | 'rename' | 'delete' | 'root_doc_changed' | 'reorder';
-  nodeId: string;
-  path?: string;
-  oldPath?: string;
-  entityType?: string;
-  data?: Record<string, unknown>;
-}
-
-export abstract class ITreePublisher {
-  abstract publishTreeMutation(payload: TreeMutationPayload): Promise<void>;
+  abstract docExistsInProject?(
+    projectId: string,
+    docId: string,
+  ): Promise<boolean>;
+  abstract fileExistsInProject?(
+    projectId: string,
+    fileId: string,
+  ): Promise<boolean>;
+  abstract createBackingDoc?(
+    projectId: string,
+    name: string,
+    path: string,
+    content?: string,
+  ): Promise<{ id: string; sizeBytes: number; hash: string }>;
 }

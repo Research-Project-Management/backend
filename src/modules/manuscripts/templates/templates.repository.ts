@@ -12,7 +12,7 @@ import {
   Optional,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import {
   Prisma,
   ManuscriptTemplateCategory,
@@ -30,13 +30,10 @@ import {
   InstantiatedProjectResult,
   ManuscriptTemplateEntity,
   TemplateCategoryString,
+  TemplateCategoryVo,
   CompilerType,
   OFFICIAL_TEMPLATE_CATALOG,
 } from './domain';
-
-const isUuid = (val?: string | null): val is string =>
-  typeof val === 'string' &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 @Injectable()
 export class TemplatesRepository
@@ -100,19 +97,23 @@ export class TemplatesRepository
 
   async findById(id: string): Promise<ManuscriptTemplateEntity | null> {
     if (!id) return null;
-    if (isUuid(id)) {
-      const record = await this.prisma.manuscriptTemplate.findUnique({
-        where: { id },
-      });
-      if (record) {
-        return this.mapToEntity(record);
-      }
-    } else {
-      const recordByVersion = await this.prisma.manuscriptTemplate.findUnique({
-        where: { versionId: id },
-      });
-      if (recordByVersion) {
-        return this.mapToEntity(recordByVersion);
+    if (this.prisma) {
+      if (isUuid(id)) {
+        const record = await this.prisma.manuscriptTemplate.findUnique({
+          where: { id },
+        });
+        if (record) {
+          return this.mapToEntity(record);
+        }
+      } else {
+        const recordByVersion = await this.prisma.manuscriptTemplate.findUnique(
+          {
+            where: { versionId: id },
+          },
+        );
+        if (recordByVersion) {
+          return this.mapToEntity(recordByVersion);
+        }
       }
     }
     return this.resolveOfficialCatalogTemplate(id);
@@ -122,19 +123,25 @@ export class TemplatesRepository
     versionId: string,
   ): Promise<ManuscriptTemplateEntity | null> {
     if (!versionId) return null;
-    const record = await this.prisma.manuscriptTemplate.findUnique({
-      where: { versionId },
-    });
-    if (record) {
-      return this.mapToEntity(record);
+    if (this.prisma) {
+      const record = await this.prisma.manuscriptTemplate.findUnique({
+        where: { versionId },
+      });
+      if (record) {
+        return this.mapToEntity(record);
+      }
     }
     return this.resolveOfficialCatalogTemplate(versionId);
   }
 
   async findAll(filter?: FindTemplatesFilter): Promise<FindTemplatesResult> {
     const where: Prisma.ManuscriptTemplateWhereInput = {};
-    if (filter?.category && filter.category !== 'all') {
-      where.category = filter.category as ManuscriptTemplateCategory;
+    if (
+      filter?.category &&
+      filter.category !== 'all' &&
+      TemplateCategoryVo.isValid(filter.category)
+    ) {
+      where.category = this.toPrismaCategory(filter.category);
     }
     if (filter?.isOfficial !== undefined) {
       where.isOfficial = filter.isOfficial;
@@ -153,17 +160,71 @@ export class TemplatesRepository
       }),
     ]);
 
+    const matchingOfficial = Array.from(this.officialCatalog.values()).filter(
+      (t) => {
+        if (
+          filter?.category &&
+          filter.category !== 'all' &&
+          t.category !== filter.category
+        ) {
+          return false;
+        }
+        if (
+          filter?.isOfficial !== undefined &&
+          t.isOfficial !== filter.isOfficial
+        ) {
+          return false;
+        }
+        if (filter?.tag && !t.tags.includes(filter.tag)) {
+          return false;
+        }
+        return true;
+      },
+    );
+
+    const offset = filter?.offset ?? 0;
+    const limit = filter?.limit ?? 50;
+
+    if (total === 0) {
+      return {
+        templates: matchingOfficial.slice(offset, offset + limit),
+        total: matchingOfficial.length,
+      };
+    }
+
+    const dbEntities = records.map((r: ManuscriptTemplate) =>
+      this.mapToEntity(r),
+    );
+    const dbIdsAndSlugs = new Set<string>();
+    for (const e of dbEntities) {
+      dbIdsAndSlugs.add(e.id.toLowerCase());
+      dbIdsAndSlugs.add(e.versionId.toLowerCase());
+    }
+    const nonDuplicateOfficial = matchingOfficial.filter((t) => {
+      const def = OFFICIAL_TEMPLATE_CATALOG.find((d) => d.id === t.id);
+      return (
+        !dbIdsAndSlugs.has(t.id.toLowerCase()) &&
+        !dbIdsAndSlugs.has(t.versionId.toLowerCase()) &&
+        !(def && dbIdsAndSlugs.has(def.slug.toLowerCase()))
+      );
+    });
+    const merged = [...dbEntities, ...nonDuplicateOfficial];
+
     return {
-      templates: records.map((r: ManuscriptTemplate) => this.mapToEntity(r)),
-      total,
+      templates: merged.slice(0, limit),
+      total: total + nonDuplicateOfficial.length,
     };
   }
 
   async search(filter: SearchTemplatesFilter): Promise<FindTemplatesResult> {
     const q = filter.query.trim();
     const where: Prisma.ManuscriptTemplateWhereInput = {};
-    if (filter.category && filter.category !== 'all') {
-      where.category = filter.category as ManuscriptTemplateCategory;
+    if (
+      filter.category &&
+      filter.category !== 'all' &&
+      TemplateCategoryVo.isValid(filter.category)
+    ) {
+      where.category = this.toPrismaCategory(filter.category);
     }
     if (q) {
       where.OR = [
@@ -184,9 +245,57 @@ export class TemplatesRepository
       }),
     ]);
 
+    const qLower = q.toLowerCase();
+    const matchingOfficial = Array.from(this.officialCatalog.values()).filter(
+      (t) => {
+        if (
+          filter.category &&
+          filter.category !== 'all' &&
+          t.category !== filter.category
+        ) {
+          return false;
+        }
+        if (!qLower) return true;
+        return (
+          t.name.toLowerCase().includes(qLower) ||
+          (t.description ?? '').toLowerCase().includes(qLower) ||
+          t.author.toLowerCase().includes(qLower) ||
+          t.tags.some((tag) => tag.toLowerCase().includes(qLower))
+        );
+      },
+    );
+
+    const offset = filter.offset ?? 0;
+    const limit = filter.limit ?? 50;
+
+    if (total === 0) {
+      return {
+        templates: matchingOfficial.slice(offset, offset + limit),
+        total: matchingOfficial.length,
+      };
+    }
+
+    const dbEntities = records.map((r: ManuscriptTemplate) =>
+      this.mapToEntity(r),
+    );
+    const dbIdsAndSlugs = new Set<string>();
+    for (const e of dbEntities) {
+      dbIdsAndSlugs.add(e.id.toLowerCase());
+      dbIdsAndSlugs.add(e.versionId.toLowerCase());
+    }
+    const nonDuplicateOfficial = matchingOfficial.filter((t) => {
+      const def = OFFICIAL_TEMPLATE_CATALOG.find((d) => d.id === t.id);
+      return (
+        !dbIdsAndSlugs.has(t.id.toLowerCase()) &&
+        !dbIdsAndSlugs.has(t.versionId.toLowerCase()) &&
+        !(def && dbIdsAndSlugs.has(def.slug.toLowerCase()))
+      );
+    });
+    const merged = [...dbEntities, ...nonDuplicateOfficial];
+
     return {
-      templates: records.map((r: ManuscriptTemplate) => this.mapToEntity(r)),
-      total,
+      templates: merged.slice(0, limit),
+      total: total + nonDuplicateOfficial.length,
     };
   }
 
@@ -257,37 +366,46 @@ export class TemplatesRepository
     let finalProjectId: string = generatedProjectId;
 
     try {
-      const project = await this.prisma.project.create({
-        data: {
-          id: generatedProjectId,
-          name: cleanName,
-          identifier,
-          description: `Created from template: ${template.name}`,
-          createdById: userId,
-          modules: ['overview', 'work-items', 'pages'],
-          settings: {
-            manuscript: {
-              compiler: template.compiler,
-              mainFile: template.mainFile,
-              imageName: template.imageName,
-              fromTemplateId: template.id,
-              fromTemplateVersionId: template.versionId,
+      const createProjectAndOwner = async (
+        tx: Prisma.TransactionClient | PrismaService,
+      ) => {
+        const project = await tx.project.create({
+          data: {
+            id: generatedProjectId,
+            name: cleanName,
+            identifier,
+            description: `Created from template: ${template.name}`,
+            createdById: userId,
+            modules: ['overview', 'work-items', 'pages'],
+            settings: {
+              manuscript: {
+                compiler: template.compiler,
+                mainFile: template.mainFile,
+                imageName: template.imageName,
+                fromTemplateId: template.id,
+                fromTemplateVersionId: template.versionId,
+              },
             },
           },
-        },
-      });
+        });
 
-      if (project?.id) {
-        finalProjectId = project.id;
-        await this.prisma.projectMember
-          .create({
-            data: {
-              projectId: finalProjectId,
-              userId,
-              role: 'owner',
-            },
-          })
-          .catch(() => {});
+        const projectId = project?.id || generatedProjectId;
+        await tx.projectMember.create({
+          data: {
+            projectId,
+            userId,
+            role: 'owner',
+          },
+        });
+        return projectId;
+      };
+
+      if (typeof this.prisma.$transaction === 'function') {
+        finalProjectId = await this.prisma.$transaction(async (tx) =>
+          createProjectAndOwner(tx),
+        );
+      } else {
+        finalProjectId = await createProjectAndOwner(this.prisma);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -300,12 +418,15 @@ export class TemplatesRepository
     if (this.structureService && this.docstoreService) {
       for (const [filePath, content] of fileEntries) {
         try {
-          const parts = filePath.split('/');
+          const normalizedPath = filePath.startsWith('/')
+            ? filePath
+            : `/${filePath}`;
+          const parts = normalizedPath.split('/').filter(Boolean);
           const fileName = parts.pop() || filePath;
           let parentFolderId: string | undefined = undefined;
 
           if (parts.length > 0) {
-            const dirPath = parts.join('/');
+            const dirPath = `/${parts.join('/')}`;
             const dirNode = await this.structureService.mkdirp(
               finalProjectId,
               dirPath,
@@ -314,14 +435,12 @@ export class TemplatesRepository
           }
 
           const isRootDoc =
-            filePath === template.mainFile ||
-            `/${filePath.replace(/^\//, '')}` ===
-              `/${template.mainFile.replace(/^\//, '')}`;
+            normalizedPath === `/${template.mainFile.replace(/^\//, '')}`;
 
           const createdDoc = await this.docstoreService.createDoc(
             finalProjectId,
             {
-              path: filePath.startsWith('/') ? filePath : `/${filePath}`,
+              path: normalizedPath,
               lines: content.split('\n'),
               version: 1,
             },
@@ -329,6 +448,7 @@ export class TemplatesRepository
 
           await this.structureService.createNode(finalProjectId, {
             name: fileName,
+            path: normalizedPath,
             type: 'DOC',
             parentId: parentFolderId,
             docId: createdDoc._id,

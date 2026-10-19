@@ -1,13 +1,11 @@
 /**
  * citations/domain/citations.ports.ts
- * Domain port interfaces & DI tokens for Citations & Bibliography.
+ * Domain port interfaces for Citations & Bibliography.
  */
 
 import { BibEntry } from './entities/bib-entry.entity';
 import { BibliographyFile } from './entities/bibliography-file.entity';
 import { AcademicIdentifierVo } from './value-objects/academic-identifier.vo';
-
-export const BIBTEX_PARSER_PORT = Symbol('BIBTEX_PARSER_PORT');
 
 export interface IBibtexParserPort {
   /**
@@ -20,8 +18,6 @@ export interface IBibtexParserPort {
    */
   format(entries: BibEntry[]): string;
 }
-
-export const CITATIONS_AGGREGATOR_PORT = Symbol('CITATIONS_AGGREGATOR_PORT');
 
 export interface ICitationsAggregatorPort {
   /**
@@ -41,8 +37,6 @@ export interface ICitationsAggregatorPort {
   ): Promise<string>;
 }
 
-export const IDENTIFIER_RESOLVER_PORT = Symbol('IDENTIFIER_RESOLVER_PORT');
-
 export interface IIdentifierResolverPort {
   /**
    * Resolves a DOI or arXiv identifier against CrossRef / arXiv public APIs.
@@ -50,8 +44,6 @@ export interface IIdentifierResolverPort {
    */
   resolve(identifier: AcademicIdentifierVo): Promise<BibEntry | null>;
 }
-
-export const LIBRARY_SYNC_PORT = Symbol('LIBRARY_SYNC_PORT');
 
 export interface LibraryCollectionSummary {
   id: string;

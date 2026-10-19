@@ -3,13 +3,10 @@
  * Barrel export for pure domain logic in diagnostics.
  */
 
-export * from './diagnostics.ports';
 export * from './compile-log.analyzer';
 export * from './fast-syntax.linter';
 export * from './diagnostic-item.entity';
 export * from './diagnostic-report.entity';
-export * from './diagnostic-severity.vo';
-export * from './error-explanation.vo';
 export * from './log-line.vo';
 export * from './invalid-log-format.exception';
 export * from './explanation-not-found.exception';

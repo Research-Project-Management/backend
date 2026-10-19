@@ -23,15 +23,17 @@ import {
   Md5MismatchError,
   NullByteDetectedError,
   computeDocSha256,
+} from './domain';
+import {
   TrackChangeSuggestionSpec,
   applySuggestionToLines,
   applyBatchSuggestionsToLines,
+} from '@/modules/manuscripts/track-changes/domain';
+import {
   IncludedProjectDoc,
-  resolveIncludedLatexContent,
-  convertLatexToMarkdown,
-  convertLatexToHtml,
-  convertLatexToDocxBuffer,
-} from './domain';
+  ExportFormattedDocResult,
+  transpileLatexDocumentForExport,
+} from '@/modules/manuscripts/export-import/domain';
 import {
   CreateDocDto,
   UpdateDocDto,
@@ -52,13 +54,7 @@ export interface UpdateDocResult {
   rev: number;
 }
 
-export interface ExportFormattedDocResult {
-  filename: string;
-  mimeType: string;
-  content: string;
-  isBase64: boolean;
-  sizeBytes: number;
-}
+export type { ExportFormattedDocResult };
 
 @Injectable()
 export class DocstoreService {
@@ -363,61 +359,7 @@ export class DocstoreService {
     format: string;
     projectDocs?: IncludedProjectDoc[];
   }): ExportFormattedDocResult {
-    const format = (params.format || 'tex').toLowerCase();
-    const rawFilename = params.rawFilename || 'document.tex';
-    const baseName = rawFilename.replace(/\.[^/.]+$/, '');
-    let content = params.content;
-
-    if (params.projectDocs && params.projectDocs.length > 0) {
-      const rootKey = rawFilename.toLowerCase();
-      content = resolveIncludedLatexContent(
-        content,
-        params.projectDocs,
-        new Set([rootKey, rootKey.replace(/\.tex$/i, '')]),
-      );
-    }
-
-    if (format === 'docx') {
-      const docxBuffer = convertLatexToDocxBuffer(content, baseName);
-      return {
-        filename: `${baseName}.docx`,
-        mimeType:
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        content: docxBuffer.toString('base64'),
-        isBase64: true,
-        sizeBytes: docxBuffer.length,
-      };
-    }
-
-    if (format === 'md' || format === 'markdown') {
-      const mdContent = convertLatexToMarkdown(content, baseName);
-      return {
-        filename: `${baseName}.md`,
-        mimeType: 'text/markdown',
-        content: mdContent,
-        isBase64: false,
-        sizeBytes: Buffer.byteLength(mdContent, 'utf8'),
-      };
-    }
-
-    if (format === 'html') {
-      const htmlContent = convertLatexToHtml(content, baseName);
-      return {
-        filename: `${baseName}.html`,
-        mimeType: 'text/html',
-        content: htmlContent,
-        isBase64: false,
-        sizeBytes: Buffer.byteLength(htmlContent, 'utf8'),
-      };
-    }
-
-    return {
-      filename: rawFilename,
-      mimeType: 'application/x-tex',
-      content,
-      isBase64: false,
-      sizeBytes: Buffer.byteLength(content, 'utf8'),
-    };
+    return transpileLatexDocumentForExport(params);
   }
 
   public async archiveDoc(projectId: string, docId: string): Promise<void> {
@@ -442,9 +384,18 @@ export class DocstoreService {
     const key = `${projectId}/${doc.id}.json`;
     const sourceMd5 = crypto.createHash('md5').update(payload).digest('hex');
     const stream = Readable.from(Buffer.from(payload, 'utf8'));
+    const clearLines = this.docPersistor.isDurableStorageConfigured
+      ? this.docPersistor.isDurableStorageConfigured()
+      : true;
 
     await this.docPersistor.sendStream(key, stream, { sourceMd5 });
-    await this.docRepository.markAsArchived(projectId, doc.id, key, doc.rev);
+    await this.docRepository.markAsArchived(
+      projectId,
+      doc.id,
+      key,
+      doc.rev,
+      clearLines,
+    );
     this.logger.log(`Archived single document ${docId} to S3 cold tier`);
   }
 
@@ -471,6 +422,9 @@ export class DocstoreService {
   public async archiveAllDocs(projectId: string): Promise<number> {
     const docs = await this.docRepository.getAllDocs(projectId);
     let count = 0;
+    const clearLines = this.docPersistor.isDurableStorageConfigured
+      ? this.docPersistor.isDurableStorageConfigured()
+      : true;
 
     for (const doc of docs) {
       if (doc.inStorage) continue;
@@ -492,7 +446,13 @@ export class DocstoreService {
       const stream = Readable.from(Buffer.from(payload, 'utf8'));
 
       await this.docPersistor.sendStream(key, stream, { sourceMd5 });
-      await this.docRepository.markAsArchived(projectId, doc.id, key, doc.rev);
+      await this.docRepository.markAsArchived(
+        projectId,
+        doc.id,
+        key,
+        doc.rev,
+        clearLines,
+      );
       count++;
     }
 

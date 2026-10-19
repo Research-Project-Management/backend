@@ -3,11 +3,13 @@
  * Deep Service orchestrating Citations, BibTeX, DOI/arXiv resolution & Library sync.
  */
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { CitationsRepository } from './citations.repository';
 import {
   AcademicIdentifierVo,
   BibEntry,
+  CrossrefArxivResolverAdapter,
+  IIdentifierResolverPort,
   IdentifierNotFoundException,
   RegexAstBibtexParser,
 } from './domain';
@@ -22,9 +24,18 @@ import {
 
 @Injectable()
 export class CitationsService {
-  private readonly bibParser = new RegexAstBibtexParser();
+  private readonly bibParser: RegexAstBibtexParser;
+  private readonly identifierResolver: IIdentifierResolverPort;
 
-  constructor(private readonly repository: CitationsRepository) {}
+  constructor(
+    private readonly repository: CitationsRepository,
+    @Optional() bibParser?: RegexAstBibtexParser,
+    @Optional() identifierResolver?: CrossrefArxivResolverAdapter,
+  ) {
+    this.bibParser = bibParser ?? new RegexAstBibtexParser();
+    this.identifierResolver =
+      identifierResolver ?? new CrossrefArxivResolverAdapter();
+  }
 
   /**
    * Search citation keys in the project to power \cite{...} autocomplete.
@@ -71,7 +82,7 @@ export class CitationsService {
       throw new IdentifierNotFoundException(dto.identifier);
     }
 
-    const resolvedEntry = await this.repository.resolve(idVo);
+    const resolvedEntry = await this.identifierResolver.resolve(idVo);
     if (!resolvedEntry) {
       throw new IdentifierNotFoundException(dto.identifier);
     }
@@ -176,14 +187,11 @@ export class CitationsService {
     const targetFile =
       dto.targetFilename || dto.targetBibFile || 'references.bib';
 
-    let lastPath = targetFile;
-    for (const entry of entries) {
-      lastPath = await this.repository.appendEntryToBib(
-        projectId,
-        entry,
-        targetFile,
-      );
-    }
+    const lastPath = await this.repository.appendEntriesToBib(
+      projectId,
+      entries,
+      targetFile,
+    );
 
     return {
       collectionId: dto.collectionId,

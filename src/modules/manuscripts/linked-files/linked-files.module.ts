@@ -5,6 +5,7 @@
 
 import { Module } from '@nestjs/common';
 import { CacheModule } from '@/core';
+import { ManuscriptsCoreModule } from '@/modules/manuscripts/core';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
@@ -19,6 +20,7 @@ import { ILinkedFilesRepositoryPort } from './domain';
 
 @Module({
   imports: [
+    ManuscriptsCoreModule,
     CacheModule,
     StructureModule,
     DocstoreModule,

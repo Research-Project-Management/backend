@@ -16,7 +16,6 @@ import {
   DraftModeManager,
   TexWordCounter,
   SyncTexProcessor,
-  OverleafLogParser,
 } from '@/modules/manuscripts/clsi';
 import {
   HeuristicRootDocDetector,
@@ -25,10 +24,10 @@ import {
   InvalidNodeNameError,
 } from '@/modules/manuscripts/structure';
 import {
-  TexParenTreeLogParser,
-  FastSyntaxLinterAdapter,
+  CompileLogAnalyzer,
+  FastSyntaxLinter,
 } from '@/modules/manuscripts/diagnostics';
-import { RegexLatexTokenizerAdapter } from '@/modules/manuscripts/spelling';
+import { LatexProseTokenizer } from '@/modules/manuscripts/spelling';
 import {
   DocstorePatcherAdapter,
   TrackChangesService,
@@ -37,7 +36,7 @@ import {
 } from '@/modules/manuscripts/track-changes';
 import { YjsService as YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/yjs.service';
 import {
-  MyersDiffEngineAdapter,
+  MyersDiffEngine,
   ManuscriptRestorerAdapter,
   Snapshot,
   FileSnapshotVo,
@@ -253,12 +252,12 @@ describe('Backend Manuscripts / CLSI / Yjs Gateway - Real-World Dataset Evaluati
       ')',
     ].join('\n');
 
-    it('maintains accurate file stack across non-file parentheses and extracts multi-line warning line numbers in OverleafLogParser & TexParenTreeLogParser', () => {
-      const clsiParser = new OverleafLogParser();
-      const diagParser = new TexParenTreeLogParser();
+    it('maintains accurate file stack across non-file parentheses and extracts multi-line warning line numbers in CompileLogAnalyzer', () => {
+      const clsiParser = new CompileLogAnalyzer();
+      const diagParser = new CompileLogAnalyzer();
 
       const clsiDiags = clsiParser.parse(sampleLog, 'ms.tex');
-      const treeDiags = diagParser.parse(sampleLog, 'ms.tex');
+      const treeDiags = diagParser.parseTexParenTreeLog(sampleLog, 'ms.tex');
 
       // 1. Badbox at line 18 in Sections/background.tex
       const clsiBadbox = clsiDiags.find((d) => d.line === 18);
@@ -283,7 +282,7 @@ describe('Backend Manuscripts / CLSI / Yjs Gateway - Real-World Dataset Evaluati
   });
 
   describe('CS-32 (Bug 29): Fast Syntax Linter & Auto-Fixer on Real Conference Papers', () => {
-    const linter = new FastSyntaxLinterAdapter();
+    const linter = new FastSyntaxLinter();
 
     it('produces zero false-positive MISSING_MATH_DELIMITER or EXTRA_ALIGNMENT_TAB errors on real Attention & TinT files with underscores in labels/paths/citations', () => {
       const modelArchSource = fs.readFileSync(
@@ -360,7 +359,7 @@ describe('Backend Manuscripts / CLSI / Yjs Gateway - Real-World Dataset Evaluati
   });
 
   describe('CS-34 (Bug 31): Academic Spell Tokenizer on Conference Papers', () => {
-    const tokenizer = new RegexLatexTokenizerAdapter();
+    const tokenizer = new LatexProseTokenizer();
 
     it('masks \\iffalse...\\fi blocks, \\newcite/\\shortcite/\\cref arguments, \\verb spans, and multi-% comments while preserving exact column offsets', () => {
       const sample = [
@@ -545,7 +544,7 @@ describe('Backend Manuscripts / CLSI / Yjs Gateway - Real-World Dataset Evaluati
   });
 
   describe('CS-37 (Bug 34): History Snapshot Myers Diff — Duplicate Rename Collisions & Multi-Line Block Word Diff', () => {
-    const diffEngine = new MyersDiffEngineAdapter();
+    const diffEngine = new MyersDiffEngine();
 
     it('prevents two deleted files with identical hashes from claiming the same renamed target file', () => {
       const baseSnap = Snapshot.create({

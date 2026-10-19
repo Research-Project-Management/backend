@@ -46,19 +46,21 @@ import {
   ArchiveEntryVo,
   KNOWN_TEXT_EXTENSIONS,
   ImportSummaryVo,
-  ProjectTemplate,
   ArchiveManifest,
   InvalidZipArchiveException,
   ZipSlipSecurityException,
   ArchiveSizeExceededException,
-  TemplateNotFoundException,
   PkzipEngineAdapter,
   ManuscriptAggregatorAdapter,
   ManuscriptHydratorAdapter,
-  EmbeddedTemplateCatalogAdapter,
   ExportImportService,
   ExportImportController,
 } from '@/modules/manuscripts/export-import';
+import {
+  TemplatesService,
+  TemplatesRepository,
+  TemplateNotFoundException,
+} from '@/modules/manuscripts/templates';
 
 // --- In-Memory Mocks for External Subsystems ---
 
@@ -302,7 +304,7 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
 
   let aggregatorAdapter: ManuscriptAggregatorAdapter;
   let hydratorAdapter: ManuscriptHydratorAdapter;
-  let catalogAdapter: EmbeddedTemplateCatalogAdapter;
+  let templatesService: TemplatesService;
 
   let exportUseCase: {
     execute: (input: {
@@ -325,9 +327,6 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
       userId?: string | null;
       preferredRootDoc?: string;
     }) => ReturnType<ExportImportService['importProjectZip']>;
-  };
-  let listTemplatesUseCase: {
-    execute: ExportImportService['listTemplates'];
   };
   let scaffoldTemplateUseCase: {
     execute: (input: {
@@ -360,13 +359,18 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
       mockFilestore as any,
     );
 
-    catalogAdapter = new EmbeddedTemplateCatalogAdapter();
+    const templatesRepo = new TemplatesRepository(
+      undefined as any,
+      mockStructure as any,
+      mockDocstore as any,
+    );
+    templatesService = new TemplatesService(templatesRepo);
 
     service = new ExportImportService(
       aggregatorAdapter,
       zipEngine,
       hydratorAdapter,
-      catalogAdapter,
+      templatesService,
     );
 
     exportUseCase = {
@@ -382,9 +386,6 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
           input.userId,
           input.preferredRootDoc,
         ),
-    };
-    listTemplatesUseCase = {
-      execute: () => service.listTemplates(),
     };
     scaffoldTemplateUseCase = {
       execute: (input) =>
@@ -518,24 +519,6 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
           rootDocId: 'node-main',
           rootDocPath: '/main.tex',
         });
-      });
-    });
-
-    describe('ProjectTemplate', () => {
-      it('should instantiate project template entity and serialize to JSON', () => {
-        const t = new ProjectTemplate({
-          id: 'test-template',
-          title: 'Test Template',
-          category: 'article',
-          description: 'A test template',
-          author: 'Tester',
-          files: [{ path: 'main.tex', content: 'hello' }],
-        });
-
-        expect(t.id).toBe('test-template');
-        expect(t.files.length).toBe(1);
-        expect(t.defaultRootDoc).toBe('main.tex');
-        expect(t.toJSON().fileCount).toBe(1);
       });
     });
 
@@ -778,38 +761,7 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
   });
 
   // =========================================================================
-  // 4. TEMPLATE CATALOG ADAPTER
-  // =========================================================================
-  describe('EmbeddedTemplateCatalogAdapter', () => {
-    it('should return all default academic templates', async () => {
-      const templates = await catalogAdapter.listTemplates();
-      expect(templates.length).toBeGreaterThanOrEqual(5);
-
-      const ids = templates.map((t) => t.id);
-      expect(ids).toContain('ieee-transactions');
-      expect(ids).toContain('acm-sigconf');
-      expect(ids).toContain('arxiv-preprint');
-      expect(ids).toContain('springer-lncs');
-      expect(ids).toContain('beamer-presentation');
-    });
-
-    it('should retrieve specific template by id', async () => {
-      const ieee = await catalogAdapter.getTemplateById('ieee-transactions');
-      expect(ieee).not.toBeNull();
-      expect(ieee!.title).toContain('IEEE Transactions');
-      expect(ieee!.files.some((f) => f.path === 'main.tex')).toBe(true);
-    });
-
-    it('should return null for unknown template id', async () => {
-      const unknown = await catalogAdapter.getTemplateById(
-        'non-existent-template',
-      );
-      expect(unknown).toBeNull();
-    });
-  });
-
-  // =========================================================================
-  // 5. USE CASES LAYER
+  // 4. USE CASES LAYER
   // =========================================================================
   describe('Inbound Use Cases', () => {
     describe('ExportProjectZipUseCase', () => {
@@ -895,15 +847,8 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
       });
     });
 
-    describe('ListTemplatesUseCase', () => {
-      it('should return list of templates', async () => {
-        const templates = await listTemplatesUseCase.execute();
-        expect(templates.length).toBeGreaterThanOrEqual(5);
-      });
-    });
-
     describe('ScaffoldTemplateUseCase', () => {
-      it('should scaffold project from IEEE Transactions template', async () => {
+      it('should scaffold project from IEEE Transactions template via TemplatesService', async () => {
         const summary = await scaffoldTemplateUseCase.execute({
           projectId: 'proj-ieee',
           templateId: 'ieee-transactions',
@@ -912,7 +857,7 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
 
         expect(summary.projectId).toBe('proj-ieee');
         expect(summary.totalDocs).toBeGreaterThanOrEqual(1);
-        expect(summary.rootDocPath).toBe('/main.tex');
+        expect(summary.rootDocPath).toBe('/bare_jrnl.tex');
       });
 
       it('should throw TemplateNotFoundException for invalid template id', async () => {
@@ -927,7 +872,7 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
   });
 
   // =========================================================================
-  // 6. REST CONTROLLER & SERVICE INTEGRATION
+  // 5. REST CONTROLLER & SERVICE INTEGRATION
   // =========================================================================
   describe('Service & REST Controller Integration', () => {
     it('should export project zip and set proper HTTP headers', async () => {
@@ -971,13 +916,6 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
         mockReq,
       );
       expect(result.totalDocs).toBe(1);
-    });
-
-    it('should list all templates from catalog', async () => {
-      const templates = await controller.listTemplates();
-      expect(templates.length).toBeGreaterThanOrEqual(5);
-      expect(templates[0].id).toBeDefined();
-      expect(templates[0].title).toBeDefined();
     });
 
     it('should scaffold from template via controller', async () => {

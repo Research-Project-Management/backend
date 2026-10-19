@@ -79,24 +79,6 @@ export class InstantiateTemplateDto {
   projectName?: string;
 }
 
-export class OverleafInstantiateTemplateDto {
-  @IsOptional()
-  @IsString()
-  template_id?: string;
-
-  @IsOptional()
-  @IsString()
-  templateVersionId?: string;
-
-  @IsOptional()
-  @IsString()
-  project_name?: string;
-
-  @IsOptional()
-  @IsString()
-  projectName?: string;
-}
-
 export class CreateTemplateDto {
   @IsString()
   name!: string;

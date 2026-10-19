@@ -13,13 +13,10 @@ import {
 } from '@/modules/manuscripts/citations/citations.controller';
 import { ClsiController } from '@/modules/manuscripts/clsi/clsi.controller';
 import { DiagnosticsController } from '@/modules/manuscripts/diagnostics/diagnostics.controller';
-import { DocstoreController } from '@/modules/manuscripts/docstore/docstore.controller';
-import { PagesBridgeController } from '@/modules/manuscripts/docstore/pages-bridge.controller';
 import { PagesDocController } from '@/modules/manuscripts/docstore/controllers/pages-doc.controller';
 import { PagesHistoryExportController } from '@/modules/manuscripts/docstore/controllers/pages-history-export.controller';
 import { PagesReviewController } from '@/modules/manuscripts/docstore/controllers/pages-review.controller';
 import { PagesSearchPresenceController } from '@/modules/manuscripts/docstore/controllers/pages-search-presence.controller';
-import { DocumentUpdaterController } from '@/modules/manuscripts/document-updater/document-updater.controller';
 import { ExportImportController } from '@/modules/manuscripts/export-import/export-import.controller';
 import { FilestoreController } from '@/modules/manuscripts/filestore/filestore.controller';
 import { GitBridgeController } from '@/modules/manuscripts/git-bridge/git-bridge.controller';
@@ -30,10 +27,7 @@ import {
   SpellingUtilityController,
 } from '@/modules/manuscripts/spelling/spelling.controller';
 import { StructureController } from '@/modules/manuscripts/structure/structure.controller';
-import {
-  TemplatesController,
-  OverleafTemplatesParityController,
-} from '@/modules/manuscripts/templates/templates.controller';
+import { TemplatesController } from '@/modules/manuscripts/templates/templates.controller';
 import { TrackChangesController } from '@/modules/manuscripts/track-changes/track-changes.controller';
 
 const MANUSCRIPT_CONTROLLERS = [
@@ -41,13 +35,10 @@ const MANUSCRIPT_CONTROLLERS = [
   CitationsUtilityController,
   ClsiController,
   DiagnosticsController,
-  DocstoreController,
-  PagesBridgeController,
   PagesDocController,
   PagesHistoryExportController,
   PagesReviewController,
   PagesSearchPresenceController,
-  DocumentUpdaterController,
   ExportImportController,
   FilestoreController,
   GitBridgeController,
@@ -57,7 +48,6 @@ const MANUSCRIPT_CONTROLLERS = [
   SpellingUtilityController,
   StructureController,
   TemplatesController,
-  OverleafTemplatesParityController,
   TrackChangesController,
 ];
 

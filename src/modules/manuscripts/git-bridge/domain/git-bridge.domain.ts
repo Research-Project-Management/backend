@@ -25,57 +25,9 @@ export function parseRepoName(repo: string): string | null {
   return UUID_RE.test(id) ? id.toLowerCase() : null;
 }
 
-/** Extensions stored as editable Docstore documents (everything else -> Filestore). */
-const TEXT_EXTENSIONS = new Set([
-  'tex',
-  'bib',
-  'cls',
-  'sty',
-  'bst',
-  'bbx',
-  'cbx',
-  'lbx',
-  'dtx',
-  'ins',
-  'txt',
-  'md',
-  'markdown',
-  'rtex',
-  'ltx',
-  'tikz',
-  'pgf',
-  'csv',
-  'tsv',
-  'json',
-  'yaml',
-  'yml',
-  'xml',
-  'cfg',
-  'def',
-  'clo',
-  'fd',
-  'ist',
-  'gls',
-  'nlo',
-  'latexmkrc',
-  'gitignore',
-  'r',
-  'py',
-  'lua',
-  'asy',
-  'mp',
-  'bbl',
-]);
+import { TEXT_EXTENSIONS, isTextPath } from '@/modules/manuscripts/core';
 
-export function isTextPath(path: string, content?: Buffer): boolean {
-  const base = path.split('/').pop() || path;
-  const dot = base.lastIndexOf('.');
-  const ext = (dot >= 0 ? base.slice(dot + 1) : base).toLowerCase();
-  if (!TEXT_EXTENSIONS.has(ext)) return false;
-  if (!content) return true;
-  if (content.includes(0)) return false;
-  return Buffer.from(content.toString('utf8'), 'utf8').equals(content);
-}
+export { TEXT_EXTENSIONS, isTextPath };
 
 /**
  * Normalizes a repo-relative path to the project's "/a/b.tex" form.

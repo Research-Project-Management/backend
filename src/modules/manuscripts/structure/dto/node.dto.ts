@@ -58,6 +58,13 @@ export class CreateNodeDto {
   @IsBoolean()
   @IsOptional()
   isRootDoc?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Initial text content when creating a DOC node',
+  })
+  @IsString()
+  @IsOptional()
+  content?: string;
 }
 
 export class MoveNodeDto {

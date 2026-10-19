@@ -29,25 +29,19 @@ import {
 } from '@/modules/project/access';
 import { FastifyReply } from 'fastify';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
-import { ClsiService } from './clsi.service';
+import { ClsiService } from './services/clsi.service';
 import { CompileManuscriptDto, ClsiWordCountDto } from './dto/clsi.dto';
+
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 
 @ApiTags('Manuscripts - CLSI')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller('api/v1/manuscripts')
 @UseGuards(JwtAuthGuard)
 export class ClsiController {
   constructor(private readonly clsiService: ClsiService) {}
 
-  @Post([
-    'v1/manuscripts/compile',
-    'v1/manuscripts/projects/:projectId/compile',
-    'manuscripts/compile',
-    'clsi/compile',
-    'compiler/compile',
-    'latex/compile',
-  ])
+  @Post(['compile', 'projects/:projectId/compile'])
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('compile')
@@ -59,9 +53,10 @@ export class ClsiController {
     @Body() dto: CompileManuscriptDto,
     @CurrentUser('id') userId: string,
     @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ) {
-    const authorizedProjectId = project?.id || routeProjectId;
+    const authorizedProjectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
     if (authorizedProjectId && !dto.projectId && !dto.project_id) {
       dto.projectId = authorizedProjectId;
       dto.project_id = authorizedProjectId;
@@ -69,32 +64,22 @@ export class ClsiController {
     return this.clsiService.compile(dto, userId, authorizedProjectId);
   }
 
-  @Post([
-    'v1/manuscripts/projects/:projectId/compile/cancel',
-    'projects/:projectId/clsi/compile/cancel',
-    'projects/:projectId/compiler/compile/cancel',
-  ])
+  @Post('projects/:projectId/compile/cancel')
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Cancel an ongoing compilation for a project' })
   async cancelCompile(
     @Param('projectId') routeProjectId: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ) {
-    const projectId = project?.id || routeProjectId;
+    const projectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
     const cancelled = this.clsiService.cancelCompile(projectId);
     return { success: true, cancelled };
   }
 
-  @Post([
-    'v1/manuscripts/word-count',
-    'v1/manuscripts/clsi/word-count',
-    'manuscripts/word-count',
-    'clsi/word-count',
-    'compiler/word-count',
-    'latex/word-count',
-  ])
+  @Post(['word-count', 'clsi/word-count'])
   @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -104,14 +89,7 @@ export class ClsiController {
     return this.clsiService.getWordCount(dto);
   }
 
-  @Post([
-    'v1/manuscripts/synctex/forward',
-    'synctex/forward',
-    'manuscripts/synctex/forward',
-    'clsi/synctex/forward',
-    'latex/synctex/forward',
-    'projects/:projectId/clsi/synctex/forward',
-  ])
+  @Post(['synctex/forward', 'projects/:projectId/clsi/synctex/forward'])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
@@ -121,9 +99,10 @@ export class ClsiController {
   async forwardSync(
     @Body() dto: ForwardSyncDto,
     @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ) {
-    const authorizedProjectId = project?.id || routeProjectId;
+    const authorizedProjectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
     if (authorizedProjectId && !dto.projectId && !dto.project_id) {
       dto.projectId = authorizedProjectId;
       dto.project_id = authorizedProjectId;
@@ -131,14 +110,7 @@ export class ClsiController {
     return this.clsiService.forwardSync(dto, authorizedProjectId);
   }
 
-  @Post([
-    'v1/manuscripts/synctex/reverse',
-    'synctex/reverse',
-    'manuscripts/synctex/reverse',
-    'clsi/synctex/reverse',
-    'latex/synctex/reverse',
-    'projects/:projectId/clsi/synctex/reverse',
-  ])
+  @Post(['synctex/reverse', 'projects/:projectId/clsi/synctex/reverse'])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
@@ -149,9 +121,10 @@ export class ClsiController {
   async reverseSync(
     @Body() dto: ReverseSyncDto,
     @Param('projectId') routeProjectId?: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ) {
-    const authorizedProjectId = project?.id || routeProjectId;
+    const authorizedProjectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
     if (authorizedProjectId && !dto.projectId && !dto.project_id) {
       dto.projectId = authorizedProjectId;
       dto.project_id = authorizedProjectId;
@@ -159,12 +132,7 @@ export class ClsiController {
     return this.clsiService.reverseSync(dto, authorizedProjectId);
   }
 
-  @Get([
-    'v1/manuscripts/projects/:projectId/artifacts',
-    'projects/:projectId/artifacts',
-    ':projectId/clsi/artifacts',
-    ':projectId/compiler/artifacts',
-  ])
+  @Get('projects/:projectId/artifacts')
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @ApiOperation({
@@ -172,18 +140,14 @@ export class ClsiController {
   })
   async listAuxFiles(
     @Param('projectId') routeProjectId: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ) {
-    const projectId = project?.id || routeProjectId;
+    const projectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
     return this.clsiService.listAuxFiles(projectId);
   }
 
-  @Get([
-    'v1/manuscripts/projects/:projectId/artifacts/:filename',
-    'projects/:projectId/artifacts/:filename',
-    ':projectId/clsi/artifacts/:filename',
-    ':projectId/compiler/artifacts/:filename',
-  ])
+  @Get('projects/:projectId/artifacts/:filename')
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @ApiOperation({ summary: 'Download a specific auxiliary file' })
@@ -191,18 +155,14 @@ export class ClsiController {
     @Param('projectId') routeProjectId: string,
     @Param('filename') filename: string,
     @Res() res: FastifyReply,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ) {
-    const projectId = project?.id || routeProjectId;
+    const projectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
     return this.clsiService.downloadAuxFile(projectId, filename, res);
   }
 
-  @Get([
-    'v1/manuscripts/projects/:projectId/artifacts-zip',
-    'projects/:projectId/artifacts-zip',
-    ':projectId/clsi/artifacts-zip',
-    ':projectId/compiler/artifacts-zip',
-  ])
+  @Get('projects/:projectId/artifacts-zip')
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @ApiOperation({
@@ -211,23 +171,15 @@ export class ClsiController {
   async downloadAllArtifactsZip(
     @Param('projectId') routeProjectId: string,
     @Res() res: FastifyReply,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ) {
-    const projectId = project?.id || routeProjectId;
+    const projectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
     return this.clsiService.downloadAllArtifactsZip(projectId, res);
   }
 
-  @Post([
-    'v1/manuscripts/projects/:projectId/clean-aux',
-    'projects/:projectId/clean-aux',
-    'projects/:projectId/clsi/clean-aux',
-    'projects/:projectId/compiler/clean-aux',
-  ])
-  @Delete([
-    'v1/manuscripts/projects/:projectId/artifacts',
-    'projects/:projectId/artifacts',
-    'projects/:projectId/clsi/artifacts',
-  ])
+  @Post('projects/:projectId/clean-aux')
+  @Delete('projects/:projectId/artifacts')
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
@@ -237,13 +189,14 @@ export class ClsiController {
   })
   async cleanAuxFiles(
     @Param('projectId') routeProjectId: string,
-    @ResolvedProject() project?: { id: string },
+    @ResolvedProject() project?: string | { id?: string },
   ) {
-    const projectId = project?.id || routeProjectId;
+    const projectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
     return this.clsiService.cleanProjectScratch(projectId);
   }
 
-  @Get(['v1/manuscripts/clsi/status', 'clsi/status', 'manuscripts/clsi/status'])
+  @Get('clsi/status')
   @UseGuards(OperatorGuard)
   @RequireOperator()
   @NoProjectContext()
@@ -254,11 +207,7 @@ export class ClsiController {
     return this.clsiService.getHealthReport();
   }
 
-  @Get([
-    'v1/manuscripts/clsi/metrics',
-    'clsi/metrics',
-    'manuscripts/clsi/metrics',
-  ])
+  @Get('clsi/metrics')
   @UseGuards(OperatorGuard)
   @RequireOperator()
   @NoProjectContext()
@@ -271,11 +220,7 @@ export class ClsiController {
     return res.send(metricsText);
   }
 
-  @Get([
-    'v1/manuscripts/clsi/metrics/summary',
-    'clsi/metrics/summary',
-    'manuscripts/clsi/metrics/summary',
-  ])
+  @Get('clsi/metrics/summary')
   @UseGuards(OperatorGuard)
   @RequireOperator()
   @NoProjectContext()

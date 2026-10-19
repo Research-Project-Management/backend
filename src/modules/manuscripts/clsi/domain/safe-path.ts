@@ -137,5 +137,3 @@ export class SafePath {
   }
 }
 
-/** Backwards compatibility alias */
-export const SafePathUtil = SafePath;

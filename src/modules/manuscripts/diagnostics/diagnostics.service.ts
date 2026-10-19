@@ -19,19 +19,31 @@ import {
   FastSyntaxLinter,
   ErrorKnowledgeBase,
 } from './domain';
-import { DiagnosticsRepository } from './diagnostics.repository';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import { RegexAstBibtexParser } from '@/modules/manuscripts/citations/domain';
 
 @Injectable()
 export class DiagnosticsService {
   private readonly logger = new Logger(DiagnosticsService.name);
-  private readonly knowledgeBase = new ErrorKnowledgeBase();
-  private readonly logAnalyzer = new CompileLogAnalyzer(this.knowledgeBase);
-  private readonly syntaxLinter = new FastSyntaxLinter(this.knowledgeBase);
+  private readonly knowledgeBase: ErrorKnowledgeBase;
+  private readonly logAnalyzer: CompileLogAnalyzer;
+  private readonly syntaxLinter: FastSyntaxLinter;
+  private readonly bibParser = new RegexAstBibtexParser();
 
   constructor(
     @Optional()
-    private readonly repository?: DiagnosticsRepository,
-  ) {}
+    private readonly docstoreService?: DocstoreService,
+    @Optional()
+    knowledgeBase?: ErrorKnowledgeBase,
+    @Optional()
+    logAnalyzer?: CompileLogAnalyzer,
+    @Optional()
+    syntaxLinter?: FastSyntaxLinter,
+  ) {
+    this.knowledgeBase = knowledgeBase ?? new ErrorKnowledgeBase();
+    this.logAnalyzer = logAnalyzer ?? new CompileLogAnalyzer(this.knowledgeBase);
+    this.syntaxLinter = syntaxLinter ?? new FastSyntaxLinter(this.knowledgeBase);
+  }
 
   /**
    * Parse a raw compilation log and return an enriched diagnostic report.
@@ -69,16 +81,20 @@ export class DiagnosticsService {
     const allItems: DiagnosticItem[] = [];
     const knownBibKeys = new Set<string>();
 
-    if (this.repository) {
+    if (this.docstoreService) {
       try {
-        const docs = await this.repository.getProjectDocuments(projectId);
+        const docs = await this.docstoreService.getAllDocs(projectId);
 
         for (const doc of docs) {
           if (doc.path?.endsWith('.bib')) {
             const rawText = doc.lines?.join('\n') || '';
-            const keyMatches = rawText.matchAll(/@[a-zA-Z]+\s*\{\s*([^,\s]+)/g);
-            for (const km of keyMatches) {
-              if (km[1]) knownBibKeys.add(km[1].trim());
+            const entries = this.bibParser.parse(rawText);
+            for (const entry of entries) {
+              const rawKey =
+                typeof entry.key === 'string'
+                  ? entry.key
+                  : (entry.key?.value ?? '');
+              if (rawKey) knownBibKeys.add(rawKey.trim());
             }
           }
         }
@@ -125,9 +141,6 @@ export class DiagnosticsService {
    * Look up detailed explanation and remedy for an error code.
    */
   public getErrorExplanation(code: string): ErrorExplanationDto {
-    if (this.repository) {
-      return this.repository.requireByCode(code).toJSON();
-    }
     return this.knowledgeBase.requireByCode(code).toJSON();
   }
 
@@ -135,9 +148,8 @@ export class DiagnosticsService {
    * List all error explanation rules in the knowledge base.
    */
   public listAllRules(): ErrorExplanationDto[] {
-    const rules = this.repository
-      ? this.repository.getAllRules()
-      : this.knowledgeBase.getAllRules();
-    return rules.map((r) => r.toJSON() as ErrorExplanationDto);
+    return this.knowledgeBase
+      .getAllRules()
+      .map((r) => r.toJSON() as ErrorExplanationDto);
   }
 }

@@ -28,10 +28,7 @@ export interface RawSnapshotFileEntry {
 
 export class SnapshotNormalizer {
   /**
-   * Normalizes any of the 3 database snapshot `files` JSON shapes into a canonical `Map<string, FileSnapshotVo>`:
-   *   1. Structured `Record<string, FileSnapshotProps>` (`{ path, type, hash, sizeBytes, lines, ... }`)
-   *   2. Variant structured `Record<string, FileSnapshotVoProps>` (`{ path, type, contentHash, sizeInBytes, textContent }`)
-   *   3. Legacy/Bridge `Record<string, string>` (where values are raw file text strings and `__` keys are metadata)
+   * Normalizes database snapshot `files` JSON into a canonical `Map<string, FileSnapshotVo>`.
    */
   public static parseSnapshotFiles(
     rawFiles: unknown,
@@ -44,19 +41,6 @@ export class SnapshotNormalizer {
 
     const entries = rawFiles as Record<string, unknown>;
 
-    const legacyDocIdsByPath = new Map<string, string>();
-    for (const [key, val] of Object.entries(entries)) {
-      if (key.startsWith('__doc_id__:')) {
-        const targetPath = key.slice('__doc_id__:'.length);
-        if (typeof val === 'string' && targetPath) {
-          const normalized = targetPath.startsWith('/')
-            ? targetPath
-            : `/${targetPath}`;
-          legacyDocIdsByPath.set(normalized, val);
-        }
-      }
-    }
-
     for (const [rawKey, rawVal] of Object.entries(entries)) {
       if (rawKey.startsWith('__')) {
         continue;
@@ -65,23 +49,15 @@ export class SnapshotNormalizer {
       const normalizedPath = rawKey.startsWith('/') ? rawKey : `/${rawKey}`;
 
       if (typeof rawVal === 'string') {
-        const lines = rawVal.split('\n');
-        const hash = crypto.createHash('sha256').update(rawVal).digest('hex');
-        const sizeBytes = Buffer.byteLength(rawVal, 'utf8');
-        const docId = legacyDocIdsByPath.get(normalizedPath) ?? null;
-        const isRootDoc = normalizedPath === '/main.tex' || filesMap.size === 0;
-
         filesMap.set(
           normalizedPath,
-          FileSnapshotVo.fromProps({
-            path: normalizedPath,
-            type: 'doc',
-            docId,
-            hash,
-            sizeBytes,
-            lines,
-            isRootDoc,
-          }),
+          FileSnapshotVo.createDoc(
+            normalizedPath,
+            null,
+            rawVal.split('\n'),
+            crypto.createHash('sha256').update(rawVal).digest('hex'),
+            normalizedPath === '/main.tex' || filesMap.size === 0,
+          ),
         );
         continue;
       }
@@ -96,22 +72,17 @@ export class SnapshotNormalizer {
             : normalizedPath;
         const type: FileSnapshotType = obj.type === 'file' ? 'file' : 'doc';
 
-        let lines: string[] | null = null;
-        let rawText: string | null = null;
+        const lines = Array.isArray(obj.lines)
+          ? obj.lines.map((l) => String(l ?? ''))
+          : typeof obj.content === 'string'
+            ? obj.content.split('\n')
+            : typeof obj.textContent === 'string'
+              ? obj.textContent.split('\n')
+              : type === 'doc'
+                ? ['']
+                : null;
 
-        if (Array.isArray(obj.lines)) {
-          lines = obj.lines.map((l) => String(l ?? ''));
-          rawText = lines.join('\n');
-        } else if (typeof obj.textContent === 'string') {
-          rawText = obj.textContent;
-          lines = rawText.split('\n');
-        } else if (typeof obj.content === 'string') {
-          rawText = obj.content;
-          lines = rawText.split('\n');
-        } else if (type === 'doc') {
-          lines = [''];
-          rawText = '';
-        }
+        const rawText = lines !== null ? lines.join('\n') : null;
 
         const hash =
           typeof obj.hash === 'string' && obj.hash
@@ -135,7 +106,7 @@ export class SnapshotNormalizer {
         const props: FileSnapshotProps = {
           path: resolvedPath,
           type,
-          docId: obj.docId ?? legacyDocIdsByPath.get(resolvedPath) ?? null,
+          docId: obj.docId ?? null,
           fileId: obj.fileId ?? null,
           hash,
           sizeBytes,
@@ -154,15 +125,7 @@ export class SnapshotNormalizer {
     if (filesMap.size === 0) {
       filesMap.set(
         '/main.tex',
-        FileSnapshotVo.fromProps({
-          path: '/main.tex',
-          type: 'doc',
-          docId: null,
-          hash: crypto.createHash('sha256').update('').digest('hex'),
-          sizeBytes: 0,
-          lines: [''],
-          isRootDoc: true,
-        }),
+        FileSnapshotVo.createDoc('/main.tex', null, [''], '', true),
       );
     }
 

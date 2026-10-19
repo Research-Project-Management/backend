@@ -65,29 +65,3 @@ export class ImportSummaryResponseDto {
   @ApiPropertyOptional({ nullable: true })
   rootDocPath!: string | null;
 }
-
-export class TemplateResponseDto {
-  @ApiProperty()
-  id!: string;
-
-  @ApiProperty()
-  title!: string;
-
-  @ApiProperty()
-  category!: string;
-
-  @ApiProperty()
-  description!: string;
-
-  @ApiProperty()
-  author!: string;
-
-  @ApiPropertyOptional({ nullable: true })
-  thumbnailUrl!: string | null;
-
-  @ApiProperty()
-  fileCount!: number;
-
-  @ApiProperty()
-  defaultRootDoc!: string;
-}

@@ -11,13 +11,10 @@ import {
   AuthorListVo,
   BibEntry,
   BibliographyFile,
-  DuplicateCitationKeyException,
   IdentifierNotFoundException,
   InvalidBibtexException,
   RegexAstBibtexParser,
   CrossrefArxivResolverAdapter,
-  PluggableLibrarySyncAdapter,
-  ManuscriptBibAggregatorAdapter,
   CitationsRepository,
   CitationsService,
   CitationsController,
@@ -400,11 +397,11 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
     });
 
-    describe('PluggableLibrarySyncAdapter', () => {
-      let adapter: PluggableLibrarySyncAdapter;
+    describe('CitationsRepository (Library Sync)', () => {
+      let adapter: CitationsRepository;
 
       beforeEach(() => {
-        adapter = new PluggableLibrarySyncAdapter();
+        adapter = new CitationsRepository();
       });
 
       it('should not return mock collections when no library is wired', async () => {
@@ -425,11 +422,11 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       });
     });
 
-    describe('ManuscriptBibAggregatorAdapter', () => {
+    describe('CitationsRepository (Bib Aggregator)', () => {
       let structureServiceMock: any;
       let docstoreServiceMock: any;
       let parserMock: any;
-      let aggregator: ManuscriptBibAggregatorAdapter;
+      let aggregator: CitationsRepository;
 
       beforeEach(() => {
         structureServiceMock = {
@@ -446,9 +443,13 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
           format: jest.fn(),
         };
 
-        aggregator = new ManuscriptBibAggregatorAdapter(
+        aggregator = new CitationsRepository(
           structureServiceMock,
           docstoreServiceMock,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
           parserMock,
         );
       });
@@ -589,14 +590,12 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       mockRepo = {
         collectBibFiles: jest.fn(),
         appendEntryToBib: jest.fn(),
-        saveBibFile: jest.fn(),
+        appendEntriesToBib: jest.fn(),
         resolve: jest.fn(),
         listCollections: jest.fn(),
         fetchCollectionBibtex: jest.fn(),
-        parse: (raw: string) => parser.parse(raw),
-        format: (entries: BibEntry[]) => parser.format(entries),
       };
-      service = new CitationsService(mockRepo);
+      service = new CitationsService(mockRepo, parser, mockRepo);
     });
 
     describe('searchCitationKeys', () => {
@@ -758,12 +757,12 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
     });
 
     describe('syncLibraryCollection', () => {
-      it('should fetch raw BibTeX from library and append each entry', async () => {
+      it('should fetch raw BibTeX from library and append entries', async () => {
         mockRepo.fetchCollectionBibtex.mockResolvedValue(`
           @article{entry1, title={Paper 1}}
           @book{entry2, title={Book 2}}
         `);
-        mockRepo.appendEntryToBib.mockResolvedValue('/references.bib');
+        mockRepo.appendEntriesToBib.mockResolvedValue('/references.bib');
 
         const res = await service.syncLibraryCollection('p1', 'u1', {
           collectionId: 'coll-1',
@@ -771,7 +770,7 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
 
         expect(res.collectionId).toBe('coll-1');
         expect(res.syncedCount).toBe(2);
-        expect(mockRepo.appendEntryToBib).toHaveBeenCalledTimes(2);
+        expect(mockRepo.appendEntriesToBib).toHaveBeenCalledTimes(1);
       });
 
       it('should list collections for user', async () => {
@@ -800,15 +799,13 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
       mockRepo = {
         collectBibFiles: jest.fn(),
         appendEntryToBib: jest.fn(),
-        saveBibFile: jest.fn(),
+        appendEntriesToBib: jest.fn(),
         resolve: jest.fn(),
         listCollections: jest.fn(),
         fetchCollectionBibtex: jest.fn(),
-        parse: (raw: string) => parser.parse(raw),
-        format: (entries: BibEntry[]) => parser.format(entries),
       };
 
-      service = new CitationsService(mockRepo);
+      service = new CitationsService(mockRepo, parser, mockRepo);
 
       controller = new CitationsController(service);
       utilityController = new CitationsUtilityController(service);
@@ -877,7 +874,7 @@ describe('Manuscripts Citations Subsystem (BibTeX, DOI/arXiv & Library Sync)', (
         mockRepo.fetchCollectionBibtex.mockResolvedValue(
           '@article{a, title={1}}\n@article{b, title={2}}\n@article{c, title={3}}',
         );
-        mockRepo.appendEntryToBib.mockResolvedValue('/references.bib');
+        mockRepo.appendEntriesToBib.mockResolvedValue('/references.bib');
 
         const req = { user: { id: 'user-42' } };
         const res = await controller.syncLibrary(

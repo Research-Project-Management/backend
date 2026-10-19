@@ -3,9 +3,7 @@
  * Barrel export for pure in-process CLSI domain logic and types.
  */
 
-export * from './workspace-file.interface';
 export * from './clsi-ports';
-export * from './overleaf-log.parser';
 export * from './synctex.parser';
 export * from './tex-engine.detector';
 export * from './compile-fileset.planner';
@@ -14,7 +12,8 @@ export * from './draft-mode.manager';
 export * from './bib-backend.detector';
 export * from './safe-path';
 export * from './clsi.metrics';
-export * from './compile-fair-queue';
+export * from './fair-semaphore.domain';
 export * from './sandbox-errors';
 export * from './sandbox-profile';
 export * from './sandbox-env.builder';
+

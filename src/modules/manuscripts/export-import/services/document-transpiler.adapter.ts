@@ -5,20 +5,19 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { escapeLatex } from '@/modules/manuscripts/core';
 import {
   ArchiveEntryVo,
   IDocumentTranspilerPort,
   IZipEnginePort,
-  PkzipEngineAdapter,
   TranspiledProjectResult,
 } from '../domain/archive-validator';
+import { PkzipEngineAdapter } from './pkzip-engine.adapter';
 
-export function escapeLatex(text: string): string {
-  return text
-    .replace(/\\/g, '\\textbackslash{}')
-    .replace(/([&%$#_{}])/g, '\\$1')
-    .replace(/~/g, '\\textasciitilde{}')
-    .replace(/\^/g, '\\textasciicircum{}');
+export { escapeLatex };
+
+export function sanitizeLatexUrl(url: string): string {
+  return (url || '').replace(/[{}\\%#\r\n\0]/g, '').trim();
 }
 
 export function unescapeXml(text: string): string {
@@ -270,14 +269,14 @@ ${
       /!\[([^\]]*)\]\(([^)]+)\)/g,
       (_, alt: string, url: string) =>
         shield(
-          `\\begin{figure}[htbp]\\centering\\includegraphics[width=0.8\\textwidth]{${url}}\\caption{${escapeLatex(alt)}}\\end{figure}`,
+          `\\begin{figure}[htbp]\\centering\\includegraphics[width=0.8\\textwidth]{${sanitizeLatexUrl(url)}}\\caption{${escapeLatex(alt)}}\\end{figure}`,
         ),
     );
 
     out = out.replace(
       /\[([^\]]+)\]\(([^)]+)\)/g,
       (_, linkText: string, url: string) =>
-        shield(`\\href{${url}}{${escapeLatex(linkText)}}`),
+        shield(`\\href{${sanitizeLatexUrl(url)}}{${escapeLatex(linkText)}}`),
     );
 
     out = out.replace(/(\*\*\*|___)(.+?)\1/g, (_, __, body: string) =>
@@ -483,9 +482,10 @@ ${latexBody.join('\n')}
       const rId = blipMatch[1];
       const target = relsMap.get(rId);
       if (target) {
-        const cleanPath = target.startsWith('media/')
+        const rawPath = target.startsWith('media/')
           ? target
           : `media/${target.replace(/^.*[\\\/]/, '')}`;
+        const cleanPath = sanitizeLatexUrl(rawPath);
         parts.push(
           `\n\\begin{figure}[htbp]\\centering\\includegraphics[width=0.75\\textwidth]{${cleanPath}}\\end{figure}\n`,
         );
@@ -532,5 +532,4 @@ ${latexBody.join('\n')}
   }
 }
 
-export { DocumentTranspilerAdapter as DocumentTranspiler };
 export type { TranspiledProjectResult };

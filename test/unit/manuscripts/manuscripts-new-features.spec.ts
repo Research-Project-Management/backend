@@ -13,7 +13,7 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 
 import { YjsService as YjsDocManagerAdapter } from '@/modules/realtime/manuscripts/yjs.service';
-import { FastSyntaxLinterAdapter } from '@/modules/manuscripts/diagnostics';
+import { FastSyntaxLinter } from '@/modules/manuscripts/diagnostics';
 import { CompileFairQueue } from '@/modules/manuscripts/clsi';
 import {
   LinkedFileEntity,
@@ -283,10 +283,10 @@ describe('Manuscripts 4 Major Backend Capabilities (Overleaf Parity)', () => {
   // 3. Static Linter & Pre-compile Auto-Fixer Tests
   // =========================================================================
   describe('3. Static Linter & Pre-compile Auto-Fixer', () => {
-    let linter: FastSyntaxLinterAdapter;
+    let linter: FastSyntaxLinter;
 
     beforeEach(() => {
-      linter = new FastSyntaxLinterAdapter();
+      linter = new FastSyntaxLinter();
     });
 
     it('should detect unclosed environment and suggest quickFix', () => {

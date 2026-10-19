@@ -3,8 +3,9 @@
  * Domain contracts and port interfaces for CLSI artifacts, engines, sandbox runners, and workspaces.
  */
 
-import { WorkspaceFile } from './workspace-file.interface';
+import { WorkspaceFile } from '@/modules/manuscripts/core';
 import { SandboxProfile } from './sandbox-profile';
+
 
 export interface CompilerDiagnostic {
   file?: string;

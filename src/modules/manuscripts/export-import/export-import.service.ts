@@ -16,21 +16,22 @@ import {
   IManuscriptAggregatorPort,
   IZipEnginePort,
   IManuscriptHydratorPort,
-  ITemplateCatalogPort,
   IDocumentTranspilerPort,
-  PkzipEngineAdapter,
-  DocumentTranspilerAdapter,
   ArchiveEntryVo,
   ArchiveManifest,
   ImportSummaryVo,
-  TemplateNotFoundException,
   validateExtractedArchiveEntries,
+  IncludedProjectDoc,
+  ExportFormattedDocResult,
+  transpileLatexDocumentForExport,
 } from './domain';
-import { EmbeddedTemplateCatalogAdapter } from './repositories/manuscript-aggregator.repository';
+import { PkzipEngineAdapter } from './services/pkzip-engine.adapter';
+import { DocumentTranspilerAdapter } from './services/document-transpiler.adapter';
+import { TemplatesService } from '@/modules/manuscripts/templates/templates.service';
+import { TemplateNotFoundException } from '@/modules/manuscripts/templates/domain';
 import {
   ExportZipQueryDto,
   ImportSummaryResponseDto,
-  TemplateResponseDto,
 } from './dto/export-import.dto';
 
 export interface ExportProjectZipInput {
@@ -79,21 +80,20 @@ export class ExportImportService {
   private readonly aggregator: IManuscriptAggregatorPort;
   private readonly zipEngine: IZipEnginePort;
   private readonly hydrator: IManuscriptHydratorPort;
-  private readonly catalog: ITemplateCatalogPort;
+  private readonly templatesService?: TemplatesService;
   private readonly transpiler: IDocumentTranspilerPort;
 
   constructor(
     aggregator: IManuscriptAggregatorPort,
     zipEngine: IZipEnginePort = new PkzipEngineAdapter(),
     hydrator: IManuscriptHydratorPort,
-    @Optional()
-    catalog: ITemplateCatalogPort = new EmbeddedTemplateCatalogAdapter(),
+    @Optional() templatesService?: TemplatesService,
     @Optional() transpiler?: IDocumentTranspilerPort,
   ) {
     this.aggregator = aggregator;
     this.zipEngine = zipEngine;
     this.hydrator = hydrator;
-    this.catalog = catalog;
+    this.templatesService = templatesService;
     this.transpiler =
       transpiler ?? new DocumentTranspilerAdapter(this.zipEngine);
   }
@@ -228,41 +228,34 @@ export class ExportImportService {
     return summary.toJSON();
   }
 
-  public async listTemplates(): Promise<TemplateResponseDto[]> {
-    const templates = await this.catalog.listTemplates();
-    return templates.map((t) => t.toJSON());
-  }
-
-  public async getTemplate(
-    templateId: string,
-  ): Promise<TemplateResponseDto | null> {
-    const templates = await this.catalog.listTemplates();
-    const found = templates.find((t) => t.id === templateId);
-    return found ? found.toJSON() : null;
-  }
-
   public async scaffoldTemplate(
     projectId: string,
     templateId: string,
     userId?: string | null,
   ): Promise<ImportSummaryResponseDto> {
-    const template = await this.catalog.getTemplateById(templateId);
+    if (!this.templatesService) {
+      throw new TemplateNotFoundException(templateId);
+    }
+
+    const template = await this.templatesService.getTemplate(templateId);
     if (!template) {
       throw new TemplateNotFoundException(templateId);
     }
 
-    const entries: ArchiveEntryVo[] = template.files.map((file) => {
-      const data = Buffer.isBuffer(file.content)
-        ? file.content
-        : Buffer.from(file.content, 'utf8');
-      return ArchiveEntryVo.create(file.path, data, false);
-    });
+    const entries: ArchiveEntryVo[] = Object.entries(template.files || {}).map(
+      ([filePath, content]) => {
+        const data = Buffer.isBuffer(content)
+          ? content
+          : Buffer.from(String(content), 'utf8');
+        return ArchiveEntryVo.create(filePath, data, false);
+      },
+    );
 
     const summary = await this.hydrator.hydrateProjectEntries(
       projectId,
       entries,
       userId,
-      template.defaultRootDoc,
+      template.mainFile || 'main.tex',
     );
     return summary.toJSON();
   }
@@ -304,5 +297,14 @@ export class ExportImportService {
       'main.tex',
     );
     return summary.toJSON();
+  }
+
+  public exportDocumentFormat(params: {
+    rawFilename: string;
+    content: string;
+    format: string;
+    projectDocs?: IncludedProjectDoc[];
+  }): ExportFormattedDocResult {
+    return transpileLatexDocumentForExport(params);
   }
 }

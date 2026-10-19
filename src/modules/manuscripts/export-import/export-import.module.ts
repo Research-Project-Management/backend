@@ -5,25 +5,28 @@
  */
 
 import { Module } from '@nestjs/common';
+import { ManuscriptsCoreModule } from '@/modules/manuscripts/core';
 import { StructureModule } from '@/modules/manuscripts/structure/structure.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.module';
 import { ClsiModule } from '@/modules/manuscripts/clsi/clsi.module';
+import { TemplatesModule } from '@/modules/manuscripts/templates/templates.module';
+import { TemplatesService } from '@/modules/manuscripts/templates/templates.service';
 
 // Ports & Engines
 import {
   IZipEnginePort,
   IManuscriptAggregatorPort,
   IManuscriptHydratorPort,
-  ITemplateCatalogPort,
-  PkzipEngineAdapter,
+  IDocumentTranspilerPort,
 } from './domain';
+import { PkzipEngineAdapter } from './services/pkzip-engine.adapter';
+import { DocumentTranspilerAdapter } from './services/document-transpiler.adapter';
 
 // Repositories
 import {
   ManuscriptAggregatorAdapter,
   ManuscriptHydratorAdapter,
-  EmbeddedTemplateCatalogAdapter,
 } from './repositories/manuscript-aggregator.repository';
 
 // Service & Controller
@@ -31,16 +34,27 @@ import { ExportImportService } from './export-import.service';
 import { ExportImportController } from './export-import.controller';
 
 @Module({
-  imports: [StructureModule, DocstoreModule, FilestoreModule, ClsiModule],
+  imports: [
+    ManuscriptsCoreModule,
+    StructureModule,
+    DocstoreModule,
+    FilestoreModule,
+    ClsiModule,
+    TemplatesModule,
+  ],
   controllers: [ExportImportController],
   providers: [
     PkzipEngineAdapter,
+    DocumentTranspilerAdapter,
     ManuscriptAggregatorAdapter,
     ManuscriptHydratorAdapter,
-    EmbeddedTemplateCatalogAdapter,
     {
       provide: IZipEnginePort,
       useExisting: PkzipEngineAdapter,
+    },
+    {
+      provide: IDocumentTranspilerPort,
+      useExisting: DocumentTranspilerAdapter,
     },
     {
       provide: IManuscriptAggregatorPort,
@@ -51,22 +65,27 @@ import { ExportImportController } from './export-import.controller';
       useExisting: ManuscriptHydratorAdapter,
     },
     {
-      provide: ITemplateCatalogPort,
-      useExisting: EmbeddedTemplateCatalogAdapter,
-    },
-    {
       provide: ExportImportService,
       useFactory: (
         aggregator: IManuscriptAggregatorPort,
         zipEngine: IZipEnginePort,
         hydrator: IManuscriptHydratorPort,
-        catalog: ITemplateCatalogPort,
-      ) => new ExportImportService(aggregator, zipEngine, hydrator, catalog),
+        templatesService: TemplatesService,
+        transpiler: IDocumentTranspilerPort,
+      ) =>
+        new ExportImportService(
+          aggregator,
+          zipEngine,
+          hydrator,
+          templatesService,
+          transpiler,
+        ),
       inject: [
         IManuscriptAggregatorPort,
         IZipEnginePort,
         IManuscriptHydratorPort,
-        ITemplateCatalogPort,
+        TemplatesService,
+        IDocumentTranspilerPort,
       ],
     },
   ],
@@ -74,9 +93,9 @@ import { ExportImportController } from './export-import.controller';
     ExportImportService,
     ManuscriptAggregatorAdapter,
     IZipEnginePort,
+    IDocumentTranspilerPort,
     IManuscriptAggregatorPort,
     IManuscriptHydratorPort,
-    ITemplateCatalogPort,
   ],
 })
 export class ExportImportModule {}

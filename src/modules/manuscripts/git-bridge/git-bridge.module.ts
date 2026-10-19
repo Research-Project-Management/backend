@@ -30,7 +30,7 @@ const GIT_CONTENT_TYPES = [
     GitBridgeService,
     {
       provide: GIT_CLI_PORT,
-      useExisting: GitBridgeRepository,
+      useExisting: GitCliAdapter,
     },
     {
       provide: GIT_ACCESS_REPOSITORY_PORT,
@@ -40,6 +40,7 @@ const GIT_CONTENT_TYPES = [
   exports: [
     GitBridgeService,
     GitBridgeRepository,
+    GitCliAdapter,
     GIT_CLI_PORT,
     GIT_ACCESS_REPOSITORY_PORT,
   ],

@@ -29,7 +29,6 @@ import {
   ProjectAccessGuard,
   RequireRole,
   Role,
-  NoProjectContext,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { FastifyRequest, FastifyReply } from 'fastify';
@@ -37,7 +36,6 @@ import { ExportImportService } from './export-import.service';
 import {
   ExportZipQueryDto,
   ImportSummaryResponseDto,
-  TemplateResponseDto,
   ScaffoldTemplateDto,
 } from './dto/export-import.dto';
 import {
@@ -45,17 +43,12 @@ import {
   ZipSlipSecurityException,
   ArchiveSizeExceededException,
   ArchiveFileLimitExceededException,
-  TemplateNotFoundException,
 } from './domain';
+import { TemplateNotFoundException } from '@/modules/manuscripts/templates/domain';
 
 @ApiTags('Manuscripts - Project Archive & Templates')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/manuscripts/projects',
-  'v1/manuscripts/projects',
-  'manuscripts/projects',
-  'projects',
-])
+@Controller('api/v1/manuscripts/projects')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class ExportImportController {
   constructor(private readonly service: ExportImportService) {}
@@ -172,57 +165,6 @@ export class ExportImportController {
         undefined,
         preferredRootDoc,
       );
-    } catch (err) {
-      this.handleError(err);
-    }
-  }
-
-  @Get('templates')
-  @NoProjectContext()
-  @ApiOperation({
-    summary: 'List all academic starter templates in the catalog',
-  })
-  @ApiResponse({ status: 200, type: [TemplateResponseDto] })
-  public async listTemplates(
-    @Query('category') category?: string,
-    @Query('search') search?: string,
-  ): Promise<TemplateResponseDto[]> {
-    try {
-      let templates = await this.service.listTemplates();
-      if (category && category !== 'all') {
-        const cat = category.toLowerCase().trim();
-        templates = templates.filter((t) => t.category?.toLowerCase() === cat);
-      }
-      if (search && search.trim()) {
-        const q = search.toLowerCase().trim();
-        templates = templates.filter(
-          (t) =>
-            t.title?.toLowerCase().includes(q) ||
-            t.description?.toLowerCase().includes(q) ||
-            t.author?.toLowerCase().includes(q),
-        );
-      }
-      return templates;
-    } catch (err) {
-      this.handleError(err);
-    }
-  }
-
-  @Get('templates/:templateId')
-  @NoProjectContext()
-  @ApiOperation({
-    summary: 'Get details and files of an academic starter template',
-  })
-  @ApiResponse({ status: 200, type: TemplateResponseDto })
-  public async getTemplate(
-    @Param('templateId') templateId: string,
-  ): Promise<TemplateResponseDto> {
-    try {
-      const template = await this.service.getTemplate(templateId);
-      if (!template) {
-        throw new NotFoundException(`Template '${templateId}' not found.`);
-      }
-      return template;
     } catch (err) {
       this.handleError(err);
     }

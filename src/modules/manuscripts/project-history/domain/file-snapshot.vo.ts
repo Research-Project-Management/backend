@@ -39,7 +39,7 @@ export class FileSnapshotVo {
 
   public static createDoc(
     path: string,
-    docId: string,
+    docId: string | null,
     lines: string[],
     hash: string,
     isRootDoc = false,

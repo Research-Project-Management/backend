@@ -39,19 +39,12 @@ import {
 
 @ApiTags('Manuscripts - Linked Files')
 @ApiBearerAuth('JWT-auth')
-@Controller()
+@Controller('api/v1/manuscripts')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class LinkedFilesController {
   constructor(private readonly linkedFilesService: LinkedFilesService) {}
 
-  @Post([
-    'api/v1/manuscripts/projects/:projectId/linked-files',
-    'v1/manuscripts/projects/:projectId/linked-files',
-    'manuscripts/projects/:projectId/linked-files',
-    'projects/:projectId/linked-files',
-    'project/:projectId/linked_file',
-    'projects/:projectId/linked_file',
-  ])
+  @Post('projects/:projectId/linked-files')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -67,14 +60,7 @@ export class LinkedFilesController {
     return await this.linkedFilesService.create(projectId, dto, userId);
   }
 
-  @Get([
-    'api/v1/manuscripts/projects/:projectId/linked-files',
-    'v1/manuscripts/projects/:projectId/linked-files',
-    'manuscripts/projects/:projectId/linked-files',
-    'projects/:projectId/linked-files',
-    'project/:projectId/linked_file',
-    'projects/:projectId/linked_file',
-  ])
+  @Get('projects/:projectId/linked-files')
   @RequireRole(Role.REVIEWER)
   @ApiOperation({ summary: 'List all linked files for a manuscript project' })
   @ApiResponse({ status: 200, type: [LinkedFileResponseDto] })
@@ -84,14 +70,7 @@ export class LinkedFilesController {
     return await this.linkedFilesService.list(projectId);
   }
 
-  @Post([
-    'api/v1/manuscripts/projects/:projectId/linked-files/:id/refresh',
-    'v1/manuscripts/projects/:projectId/linked-files/:id/refresh',
-    'manuscripts/projects/:projectId/linked-files/:id/refresh',
-    'projects/:projectId/linked-files/:id/refresh',
-    'project/:projectId/linked_file/:id/refresh',
-    'projects/:projectId/linked_file/:id/refresh',
-  ])
+  @Post('projects/:projectId/linked-files/:id/refresh')
   @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('linked-file')
@@ -108,14 +87,7 @@ export class LinkedFilesController {
     return await this.linkedFilesService.refresh(projectId, id, userId);
   }
 
-  @Delete([
-    'api/v1/manuscripts/projects/:projectId/linked-files/:id',
-    'v1/manuscripts/projects/:projectId/linked-files/:id',
-    'manuscripts/projects/:projectId/linked-files/:id',
-    'projects/:projectId/linked-files/:id',
-    'project/:projectId/linked_file/:id',
-    'projects/:projectId/linked_file/:id',
-  ])
+  @Delete('projects/:projectId/linked-files/:id')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Unlink a linked file from the manuscript project' })
@@ -127,11 +99,7 @@ export class LinkedFilesController {
     await this.linkedFilesService.delete(projectId, id, deleteNode === 'true');
   }
 
-  @Post([
-    'api/v1/manuscripts/linked-files/refresh-all',
-    'v1/manuscripts/linked-files/refresh-all',
-    'manuscripts/linked-files/refresh-all',
-  ])
+  @Post('linked-files/refresh-all')
   @UseGuards(OperatorGuard, UserRateLimitGuard)
   @RequireOperator()
   @NoProjectContext()

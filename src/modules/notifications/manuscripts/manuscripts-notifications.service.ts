@@ -8,12 +8,12 @@ import {
   ParseAndNotifyMentionsUseCase,
   ParseAndNotifyMentionsCommand,
   ParseMentionsResult,
-} from './core/use-cases/parse-and-notify-mentions.use-case';
+} from '../core/use-cases/parse-and-notify-mentions.use-case';
 import {
   IMentionParserPort,
   MENTION_PARSER_PORT,
-} from './core/ports/mention-parser.port';
-import { MentionToken } from './core/domain/value-objects/mention-token.vo';
+} from '../core/ports/mention-parser.port';
+import { MentionToken } from '../core/domain/value-objects/mention-token.vo';
 import { CreateNotificationUseCase } from '../core/use-cases/create-notification.use-case';
 import { DeleteNotificationUseCase } from '../core/use-cases/delete-notification.use-case';
 import { NotificationEntity } from '../core/domain/entities/notification.entity';
@@ -85,10 +85,12 @@ export class ManuscriptsNotificationsService {
   async notifyCommentMention(
     dto: CommentMentionNotificationDto,
   ): Promise<NotificationEntity> {
-    const refId = dto.commentId || dto.threadId;
+    const refKey = dto.commentId
+      ? `${dto.threadId}-${dto.commentId}`
+      : dto.threadId;
     return this.createNotificationUseCase.execute({
       userId: dto.recipientUserId,
-      key: `comment-mention-${refId}-${dto.recipientUserId}`,
+      key: `comment-mention-${refKey}-${dto.recipientUserId}`,
       templateKey: 'notification_comment_mention',
       type: 'mention',
       projectId: dto.projectId,
@@ -114,7 +116,7 @@ export class ManuscriptsNotificationsService {
   ): Promise<NotificationEntity> {
     return this.createNotificationUseCase.execute({
       userId: dto.recipientUserId,
-      key: `comment-reply-${dto.replyId}-${dto.recipientUserId}`,
+      key: `comment-reply-${dto.threadId}-${dto.replyId}-${dto.recipientUserId}`,
       templateKey: 'comment_reply',
       type: 'comment_reply',
       projectId: dto.projectId,
@@ -161,8 +163,12 @@ export class ManuscriptsNotificationsService {
    * Dismisses mention and reply notifications when thread is resolved.
    */
   async dismissThreadNotifications(threadId: string): Promise<number> {
-    return this.deleteNotificationUseCase.deleteByKey(
-      `comment-mention-${threadId}`,
-    );
+    const [deletedMentions, deletedReplies] = await Promise.all([
+      this.deleteNotificationUseCase.deleteByKey(
+        `comment-mention-${threadId}`,
+      ),
+      this.deleteNotificationUseCase.deleteByKey(`comment-reply-${threadId}`),
+    ]);
+    return deletedMentions + deletedReplies;
   }
 }

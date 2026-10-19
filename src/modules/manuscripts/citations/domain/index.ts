@@ -7,6 +7,5 @@ export * from './entities/bibliography-file.entity';
 export * from './value-objects/citation-key.vo';
 export * from './value-objects/academic-identifier.vo';
 export * from './value-objects/author-list.vo';
-export * from './exceptions/duplicate-citation-key.exception';
 export * from './exceptions/identifier-not-found.exception';
 export * from './exceptions/invalid-bibtex.exception';

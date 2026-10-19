@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/domain/latex-export-transpiler.ts
+ * modules/manuscripts/export-import/domain/latex-export-transpiler.ts
  * Pure in-process domain functions for resolving LaTeX child document macros
  * (\input, \include, \subfile) and transpiling LaTeX into Markdown, HTML, and DOCX buffers.
  */
@@ -14,6 +14,14 @@ export interface IncludedProjectDoc {
   id: string;
   path: string;
   lines: unknown;
+}
+
+export interface ExportFormattedDocResult {
+  filename: string;
+  mimeType: string;
+  content: string;
+  isBase64: boolean;
+  sizeBytes: number;
 }
 
 /**
@@ -344,6 +352,73 @@ export function resolveIncludedLatexContent(
   );
 }
 
+/**
+ * Pure transpilation of a LaTeX document (with optional child document resolution)
+ * into the requested export format (tex, md, html, docx).
+ */
+export function transpileLatexDocumentForExport(params: {
+  rawFilename: string;
+  content: string;
+  format: string;
+  projectDocs?: IncludedProjectDoc[];
+}): ExportFormattedDocResult {
+  const format = (params.format || 'tex').toLowerCase();
+  const rawFilename = params.rawFilename || 'document.tex';
+  const baseName = rawFilename.replace(/\.[^/.]+$/, '');
+  let content = params.content;
+
+  if (params.projectDocs && params.projectDocs.length > 0) {
+    const rootKey = rawFilename.toLowerCase();
+    content = resolveIncludedLatexContent(
+      content,
+      params.projectDocs,
+      new Set([rootKey, rootKey.replace(/\.tex$/i, '')]),
+    );
+  }
+
+  if (format === 'docx') {
+    const docxBuffer = convertLatexToDocxBuffer(content, baseName);
+    return {
+      filename: `${baseName}.docx`,
+      mimeType:
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      content: docxBuffer.toString('base64'),
+      isBase64: true,
+      sizeBytes: docxBuffer.length,
+    };
+  }
+
+  if (format === 'md' || format === 'markdown') {
+    const mdContent = convertLatexToMarkdown(content, baseName);
+    return {
+      filename: `${baseName}.md`,
+      mimeType: 'text/markdown',
+      content: mdContent,
+      isBase64: false,
+      sizeBytes: Buffer.byteLength(mdContent, 'utf8'),
+    };
+  }
+
+  if (format === 'html') {
+    const htmlContent = convertLatexToHtml(content, baseName);
+    return {
+      filename: `${baseName}.html`,
+      mimeType: 'text/html',
+      content: htmlContent,
+      isBase64: false,
+      sizeBytes: Buffer.byteLength(htmlContent, 'utf8'),
+    };
+  }
+
+  return {
+    filename: rawFilename,
+    mimeType: 'application/x-tex',
+    content,
+    isBase64: false,
+    sizeBytes: Buffer.byteLength(content, 'utf8'),
+  };
+}
+
 export const LatexExportTranspiler = {
   escapeXml,
   convertLatexToMarkdown,
@@ -351,4 +426,5 @@ export const LatexExportTranspiler = {
   buildMinimalZip,
   convertLatexToDocxBuffer,
   resolveIncludedLatexContent,
+  transpileLatexDocumentForExport,
 } as const;

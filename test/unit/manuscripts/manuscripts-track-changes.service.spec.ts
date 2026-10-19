@@ -39,7 +39,6 @@ import { NotFoundException, BadRequestException } from '@nestjs/common';
 
 import {
   TextRangeVo,
-  ChangeMetadataVo,
   TrackChange,
   ChangeType,
   ChangeStatus,
@@ -548,30 +547,6 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
       });
     });
 
-    describe('ChangeMetadataVo', () => {
-      it('should initialize metadata with author and client timestamp', () => {
-        const now = new Date();
-        const meta = new ChangeMetadataVo({
-          createdById: 'user-bob',
-          authorName: 'Bob',
-          authorColor: '#ff0000',
-          createdAt: now,
-        });
-
-        expect(meta.createdById).toBe('user-bob');
-        expect(meta.authorName).toBe('Bob');
-        expect(meta.authorColor).toBe('#ff0000');
-        expect(meta.createdAt).toBe(now);
-      });
-
-      it('should provide default values when omitted', () => {
-        const meta = new ChangeMetadataVo({});
-        expect(meta.authorName).toBe('Collaborator');
-        expect(meta.authorColor).toBe('#3b82f6');
-        expect(meta.createdById).toBeNull();
-      });
-    });
-
     describe('TrackChange Entity', () => {
       it('should instantiate a pending insert change', () => {
         const change = TrackChange.create({
@@ -806,108 +781,6 @@ describe('Manuscripts Track Changes & Comments Subsystem', () => {
   // 2. ADAPTER LAYER: DOCSTORE PATCHER (SPLICE & MUTATION MATH)
   // =========================================================================
   describe('DocstorePatcherAdapter (Text Splicing & Mutex)', () => {
-    describe('removeRange', () => {
-      it('should splice out character range on the same line', () => {
-        const lines = ['The quick brown fox jumps over the lazy dog'];
-        const range = TextRangeVo.create({
-          startLine: 0,
-          startCol: 4,
-          endLine: 0,
-          endCol: 16,
-        });
-
-        const result = patcherAdapter.removeRange(lines, range);
-        expect(result).toEqual(['The fox jumps over the lazy dog']);
-      });
-
-      it('should splice across multiple lines merging first prefix with last suffix', () => {
-        const lines = [
-          'First line keep this - REMOVE ME',
-          'ENTIRE LINE 2 REMOVED',
-          'ENTIRE LINE 3 REMOVED',
-          'REMOVE START - and keep this last part',
-        ];
-
-        const range = TextRangeVo.create({
-          startLine: 0,
-          startCol: 22,
-          endLine: 3,
-          endCol: 15,
-        });
-        const result = patcherAdapter.removeRange(lines, range);
-
-        expect(result).toEqual([
-          'First line keep this -and keep this last part',
-        ]);
-      });
-
-      it('should return original lines if startLine is out of bounds', () => {
-        const lines = ['Line 1', 'Line 2'];
-        const range = TextRangeVo.create({
-          startLine: 10,
-          startCol: 0,
-          endLine: 12,
-          endCol: 5,
-        });
-
-        const result = patcherAdapter.removeRange(lines, range);
-        expect(result).toEqual(['Line 1', 'Line 2']);
-      });
-    });
-
-    describe('insertRange', () => {
-      it('should insert single line text into line at column', () => {
-        const lines = ['Hello world!'];
-        const range = TextRangeVo.create({
-          startLine: 0,
-          startCol: 5,
-          endLine: 0,
-          endCol: 5,
-        });
-
-        const result = patcherAdapter.insertRange(lines, range, ' beautiful');
-        expect(result).toEqual(['Hello beautiful world!']);
-      });
-
-      it('should expand lines array when inserting multiline text with newlines', () => {
-        const lines = ['Start of doc.', 'End of doc.'];
-        const range = TextRangeVo.create({
-          startLine: 0,
-          startCol: 13,
-          endLine: 0,
-          endCol: 13,
-        });
-
-        const inserted = '\nMiddle line 1\nMiddle line 2\n';
-        const result = patcherAdapter.insertRange(lines, range, inserted);
-
-        expect(result).toEqual([
-          'Start of doc.',
-          'Middle line 1',
-          'Middle line 2',
-          '',
-          'End of doc.',
-        ]);
-      });
-
-      it('should pad lines with empty strings if startLine exceeds length', () => {
-        const lines = ['Line 0'];
-        const range = TextRangeVo.create({
-          startLine: 2,
-          startCol: 0,
-          endLine: 2,
-          endCol: 0,
-        });
-
-        const result = patcherAdapter.insertRange(
-          lines,
-          range,
-          'New line at 2',
-        );
-        expect(result).toEqual(['Line 0', '', 'New line at 2']);
-      });
-    });
-
     describe('applyChange (Accepting Changes)', () => {
       it('should not mutate docstore lines when accepting insert (already typed by user)', async () => {
         const change = TrackChange.create({

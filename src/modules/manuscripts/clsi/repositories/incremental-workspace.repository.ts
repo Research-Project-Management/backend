@@ -20,10 +20,8 @@ import {
 } from '../domain/clsi-ports';
 import { SafePath } from '../domain/safe-path';
 import {
-  buildPkZipBuffer,
   createPkZipStream,
   PkZipEntry,
-  sanitizePkZipPath,
 } from '@/modules/manuscripts/core';
 
 export interface ProjectManifest {
@@ -368,8 +366,6 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
     }
   }
 }
-
-export { OverleafIncrementalWorkspace as IncrementalWorkspaceRepository };
 
 // ─────────────────────────────────────────────────────────────────
 // Project Lock Manager (.project-lock)
@@ -745,14 +741,8 @@ export class OverleafOutputFileFinder implements IOutputFileFinder {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// PKZIP Artifact Stream Helpers
+// PKZIP Disk Artifact Stream Helper
 // ─────────────────────────────────────────────────────────────────
-
-export interface ZipFileEntry {
-  path: string;
-  data: string | Buffer;
-  date?: Date;
-}
 
 export interface ZipDiskEntry {
   fullPath: string;
@@ -760,45 +750,18 @@ export interface ZipDiskEntry {
   date?: Date;
 }
 
-export type ZipEntry = ZipFileEntry | ZipDiskEntry;
-
-function isDiskEntry(entry: ZipEntry): entry is ZipDiskEntry {
-  return 'fullPath' in entry && 'relPath' in entry;
-}
-
-export function sanitizeZipPath(relPath: string): string {
-  return sanitizePkZipPath(relPath);
-}
-
 export function createZipStreamFromDisk(files: ZipDiskEntry[]): Readable {
-  return createZipStream(files);
-}
-
-export function createZipStream(entries: ZipEntry[]): Readable {
-  const pkEntries: PkZipEntry[] = entries.map((entry) => {
-    if (isDiskEntry(entry)) {
-      return {
-        path: entry.relPath,
-        date: entry.date,
-        getData: async () => {
-          try {
-            return await fs.readFile(entry.fullPath);
-          } catch {
-            return null;
-          }
-        },
-      };
-    }
-    return {
-      path: entry.path,
-      data: entry.data,
-      date: entry.date,
-    };
-  });
+  const pkEntries: PkZipEntry[] = files.map((entry) => ({
+    path: entry.relPath,
+    date: entry.date,
+    getData: async () => {
+      try {
+        return await fs.readFile(entry.fullPath);
+      } catch {
+        return null;
+      }
+    },
+  }));
 
   return createPkZipStream(pkEntries);
-}
-
-export function buildZipArchive(entries: ZipFileEntry[]): Buffer {
-  return buildPkZipBuffer(entries);
 }

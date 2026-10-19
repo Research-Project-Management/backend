@@ -11,10 +11,12 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { PrismaService } from '@/core';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PrismaService, isUuid } from '@/core';
 import { isOriginAllowed } from '@/core/http/setup/allowed-origins';
 import type { FastifyReply } from 'fastify';
-import { LiveCollaborationPort, LivePresenceUser } from '../domain';
+import { LiveCollaborationPort, LivePresenceUser } from '@/modules/manuscripts/core';
+
 
 export interface ActivePresenceUser {
   id: string;
@@ -36,10 +38,6 @@ export interface HeartbeatBody {
   [key: string]: unknown;
 }
 
-const isUuid = (val?: string | null): val is string =>
-  typeof val === 'string' &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-
 @Injectable()
 export class ManuscriptPresenceService {
   private readonly logger = new Logger(ManuscriptPresenceService.name);
@@ -50,6 +48,7 @@ export class ManuscriptPresenceService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
   private getLiveCollaboration(): LiveCollaborationPort | null {
@@ -180,8 +179,22 @@ export class ManuscriptPresenceService {
     };
 
     let lastPresenceKey = '';
-    let lastVersion: number | null = null;
     let closed = false;
+
+    const onProjectEvent = (evt: {
+      event?: string;
+      payload?: { docId?: string; version?: number };
+    }) => {
+      if (closed) return;
+      if (
+        evt?.event === 'doc:content-updated' &&
+        evt.payload?.docId === pageId
+      ) {
+        send({ type: 'content-updated', version: evt.payload.version });
+      }
+    };
+
+    this.eventEmitter?.on('manuscripts.project.event', onProjectEvent);
 
     const tick = async () => {
       if (closed) return;
@@ -197,18 +210,6 @@ export class ManuscriptPresenceService {
         if (key !== lastPresenceKey) {
           lastPresenceKey = key;
           send({ type: 'presence', users });
-        }
-        if (isUuid(pageId)) {
-          const doc = await this.prisma.manuscriptDoc.findUnique({
-            where: { id: pageId },
-            select: { version: true },
-          });
-          if (doc) {
-            if (lastVersion !== null && doc.version !== lastVersion) {
-              send({ type: 'content-updated', version: doc.version });
-            }
-            lastVersion = doc.version;
-          }
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -228,6 +229,7 @@ export class ManuscriptPresenceService {
       closed = true;
       clearInterval(poll);
       clearInterval(keepalive);
+      this.eventEmitter?.off('manuscripts.project.event', onProjectEvent);
     });
   }
 }

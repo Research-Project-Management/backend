@@ -15,6 +15,9 @@ import {
   RawZipEntryInput,
   ArchiveEntryVo,
   InvalidZipArchiveException,
+  ArchiveQuotaExceededException,
+  MAX_SINGLE_FILE_BYTES,
+  MAX_UNCOMPRESSED_PROJECT_BYTES,
 } from '../domain/archive-validator';
 
 @Injectable()
@@ -58,6 +61,7 @@ export class PkzipEngineAdapter extends IZipEnginePort {
     const cdOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
 
     let offset = cdOffset;
+    let totalUncompressedBytes = 0;
     const entries: ArchiveEntryVo[] = [];
 
     for (let i = 0; i < cdTotalEntries; i++) {
@@ -116,11 +120,26 @@ export class PkzipEngineAdapter extends IZipEnginePort {
         );
 
         if (compressionMethod === 0) {
+          if (compressedSlice.length > MAX_SINGLE_FILE_BYTES) {
+            throw new ArchiveQuotaExceededException(
+              compressedSlice.length,
+              MAX_SINGLE_FILE_BYTES,
+            );
+          }
           uncompressedData = Buffer.from(compressedSlice);
         } else if (compressionMethod === 8) {
           try {
-            uncompressedData = zlib.inflateRawSync(compressedSlice);
+            uncompressedData = zlib.inflateRawSync(compressedSlice, {
+              maxOutputLength: MAX_SINGLE_FILE_BYTES,
+            });
           } catch (inflateErr: unknown) {
+            const errCode = (inflateErr as { code?: string })?.code;
+            if (errCode === 'ERR_BUFFER_TOO_LARGE') {
+              throw new ArchiveQuotaExceededException(
+                MAX_SINGLE_FILE_BYTES + 1,
+                MAX_SINGLE_FILE_BYTES,
+              );
+            }
             const inflateMsg =
               inflateErr instanceof Error
                 ? inflateErr.message
@@ -138,6 +157,14 @@ export class PkzipEngineAdapter extends IZipEnginePort {
           );
           continue;
         }
+      }
+
+      totalUncompressedBytes += uncompressedData.length;
+      if (totalUncompressedBytes > MAX_UNCOMPRESSED_PROJECT_BYTES) {
+        throw new ArchiveQuotaExceededException(
+          totalUncompressedBytes,
+          MAX_UNCOMPRESSED_PROJECT_BYTES,
+        );
       }
 
       const entryVo = ArchiveEntryVo.create(

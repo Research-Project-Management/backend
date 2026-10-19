@@ -4,4 +4,5 @@
  */
 
 export * from './archive-validator';
-export * from './document-transpiler';
+export * from './latex-export-transpiler';
+export { escapeLatex, unescapeXml } from '../services/document-transpiler.adapter';

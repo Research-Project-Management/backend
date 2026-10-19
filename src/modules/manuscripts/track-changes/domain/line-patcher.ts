@@ -122,13 +122,47 @@ export class LinePatcher {
 
   /**
    * Pure computation of the resulting document lines when a change is accepted.
-   * Accepting an 'insert' keeps the lines as-is; accepting a 'delete' removes the range.
+   * If an 'insert' is not yet present at its target range (e.g. out-of-band review suggestion),
+   * inserts the text; if already present, keeps the lines as-is.
+   * Accepting a 'delete' removes the range.
    */
   public static computeAcceptedPatch(
     sourceLines: readonly string[],
     change: TrackChange,
   ): LinePatchComputation {
     if (change.type === 'insert') {
+      const range = change.range;
+      const useOneBased =
+        range.startLine > 0 &&
+        range.startLine === sourceLines.length &&
+        range.endLine >= range.startLine;
+      const lineIdx = LinePatcher.clampLineIndex(
+        range.startLine,
+        sourceLines.length,
+        useOneBased,
+      );
+      const currentLine = sourceLines[lineIdx] || '';
+      const startCol = Math.max(0, Math.min(range.startCol, currentLine.length));
+      if (
+        change.text &&
+        !currentLine.slice(startCol).startsWith(change.text.split('\n')[0])
+      ) {
+        return {
+          lines: LinePatcher.insertRange(
+            sourceLines,
+            useOneBased
+              ? {
+                  startLine: range.startLine - 1,
+                  startCol: range.startCol,
+                  endLine: Math.max(0, range.endLine - 1),
+                  endCol: range.endCol,
+                }
+              : range,
+            change.text,
+          ),
+          mutated: true,
+        };
+      }
       return { lines: [...sourceLines], mutated: false };
     }
     return {
@@ -139,17 +173,38 @@ export class LinePatcher {
 
   /**
    * Pure computation of the resulting document lines when a change is rejected.
-   * Rejecting an 'insert' removes the range; rejecting a 'delete' re-inserts the deleted text.
+   * Rejecting an 'insert' removes the range (if the inserted text is present in the lines);
+   * rejecting a 'delete' re-inserts the deleted text (if not already present at the range).
    */
   public static computeRejectedPatch(
     sourceLines: readonly string[],
     change: TrackChange,
   ): LinePatchComputation {
     if (change.type === 'insert') {
+      const range = change.range;
+      if (range.startLine === range.endLine && range.startCol === range.endCol) {
+        return { lines: [...sourceLines], mutated: false };
+      }
       return {
         lines: LinePatcher.removeRange(sourceLines, change.range),
         mutated: true,
       };
+    }
+    const range = change.range;
+    const useOneBased =
+      range.startLine > 0 && range.startLine === sourceLines.length;
+    const lineIdx = LinePatcher.clampLineIndex(
+      range.startLine,
+      sourceLines.length,
+      useOneBased,
+    );
+    const currentLine = sourceLines[lineIdx] || '';
+    const startCol = Math.max(0, Math.min(range.startCol, currentLine.length));
+    if (
+      change.text &&
+      currentLine.slice(startCol).startsWith(change.text.split('\n')[0])
+    ) {
+      return { lines: [...sourceLines], mutated: false };
     }
     return {
       lines: LinePatcher.insertRange(sourceLines, change.range, change.text),
@@ -171,4 +226,148 @@ export class LinePatcher {
       return b.range.startCol - a.range.startCol;
     });
   }
+
+  public static applySuggestionToLines(
+    lines: string[],
+    record: TrackChangeSuggestionSpec,
+  ): string[] {
+    return applySuggestionToLines(lines, record);
+  }
+
+  public static applyBatchSuggestionsToLines(
+    lines: string[],
+    changes: readonly TrackChangeSuggestionSpec[],
+  ): string[] {
+    return applyBatchSuggestionsToLines(lines, changes);
+  }
 }
+
+export interface TrackChangeSuggestionSpec {
+  type: string;
+  text: string;
+  startLine?: number | null;
+  endLine?: number | null;
+  startCol?: number | null;
+  endCol?: number | null;
+}
+
+/**
+ * Pure computation that applies a single accepted track-change suggestion to a document's lines array.
+ * Supports both 1-based and 0-based line coordinates and multi-line insertions/deletions.
+ */
+export function applySuggestionToLines(
+  lines: string[],
+  record: TrackChangeSuggestionSpec,
+): string[] {
+  const rawStartLine =
+    record.startLine !== null && record.startLine !== undefined
+      ? record.startLine
+      : 1;
+  const rawEndLine =
+    record.endLine !== null && record.endLine !== undefined
+      ? record.endLine
+      : rawStartLine;
+  const startCol = Math.max(
+    0,
+    record.startCol !== null && record.startCol !== undefined
+      ? record.startCol
+      : 0,
+  );
+  const endCol = Math.max(
+    0,
+    record.endCol !== null && record.endCol !== undefined ? record.endCol : 0,
+  );
+  const changeType = String(record.type);
+  const isZeroBased = rawStartLine === 0;
+  const sIdx = isZeroBased ? 0 : Math.max(0, rawStartLine - 1);
+  const eIdx = isZeroBased
+    ? Math.max(0, rawEndLine)
+    : Math.max(sIdx, rawEndLine - 1);
+
+  if (changeType === 'insert') {
+    if (sIdx < lines.length) {
+      const currentLine = lines[sIdx] || '';
+      const col = Math.min(startCol, currentLine.length);
+      const prefix = currentLine.slice(0, col);
+      const suffix = currentLine.slice(col);
+      if (!record.text.includes('\n')) {
+        lines[sIdx] = prefix + record.text + suffix;
+      } else {
+        const insertedLines = record.text.split('\n');
+        const firstLine = prefix + insertedLines[0];
+        const lastLine = insertedLines[insertedLines.length - 1] + suffix;
+        const middle = insertedLines.slice(1, -1);
+        lines.splice(sIdx, 1, firstLine, ...middle, lastLine);
+      }
+    } else {
+      if (!record.text.includes('\n')) {
+        lines.push(record.text);
+      } else {
+        lines.push(...record.text.split('\n'));
+      }
+    }
+  } else if (changeType === 'delete' || changeType === 'replace') {
+    const replacement = changeType === 'replace' ? record.text : '';
+    if (sIdx < lines.length) {
+      const line = lines[sIdx] || '';
+      const sc = Math.min(startCol, line.length);
+      const clampedEndIdx = Math.min(eIdx, lines.length - 1);
+      if (sIdx === clampedEndIdx) {
+        const ec =
+          record.endCol !== null &&
+          record.endCol !== undefined &&
+          record.endCol > sc
+            ? Math.min(endCol, line.length)
+            : Math.min(sc + record.text.length, line.length);
+        const newLine = line.slice(0, sc) + replacement + line.slice(ec);
+        if (!replacement.includes('\n')) {
+          lines[sIdx] = newLine;
+        } else {
+          lines.splice(sIdx, 1, ...newLine.split('\n'));
+        }
+      } else {
+        const first = line.slice(0, sc);
+        const lastLine = lines[clampedEndIdx] || '';
+        const ec = Math.min(endCol, lastLine.length);
+        const last = lastLine.slice(ec);
+        const merged = first + replacement + last;
+        if (!replacement.includes('\n')) {
+          lines.splice(sIdx, clampedEndIdx - sIdx + 1, merged);
+        } else {
+          lines.splice(sIdx, clampedEndIdx - sIdx + 1, ...merged.split('\n'));
+        }
+      }
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Pure computation that applies a batch of pending track-change suggestions
+ * sorted from bottom line/offset to top so earlier line mutations do not shift later offsets.
+ */
+export function applyBatchSuggestionsToLines(
+  lines: string[],
+  changes: readonly TrackChangeSuggestionSpec[],
+): string[] {
+  const sortedChanges = [...changes].sort((a, b) => {
+    const aLine = a.startLine ?? 1;
+    const bLine = b.startLine ?? 1;
+    if (bLine !== aLine) return bLine - aLine;
+    const aCol = a.startCol ?? 0;
+    const bCol = b.startCol ?? 0;
+    return bCol - aCol;
+  });
+
+  for (const record of sortedChanges) {
+    applySuggestionToLines(lines, record);
+  }
+
+  return lines;
+}
+
+export const TextSuggestionMutator = {
+  applySuggestionToLines,
+  applyBatchSuggestionsToLines,
+} as const;

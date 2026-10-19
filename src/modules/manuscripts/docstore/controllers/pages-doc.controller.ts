@@ -32,13 +32,13 @@ import {
   ResolvedProject,
 } from '@/modules/project/access';
 import { ManuscriptDoc } from '@prisma/client';
-import { PrismaService, AuthenticatedRequest } from '@/core';
+import { PrismaService, AuthenticatedRequest, isUuid } from '@/core';
 import * as path from 'path';
 import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
 import { ManuscriptProjectBootstrapService } from '../services/manuscript-project-bootstrap.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { LiveCollaborationPort } from '../domain';
+import { LiveCollaborationPort } from '@/modules/manuscripts/core';
 import { ManuscriptPageScopeRepository } from '../repositories/manuscript-page-scope.repository';
 
 export interface PageDocRanges {
@@ -50,13 +50,9 @@ export interface PageDocRanges {
   [key: string]: unknown;
 }
 
-const isUuid = (val?: string | null): boolean =>
-  typeof val === 'string' &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-
 @ApiTags('Manuscripts - Pages Compatibility Bridge')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1/manuscripts', 'v1/manuscripts', 'manuscripts', 'api'])
+@Controller('api/v1/manuscripts')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class PagesDocController {
@@ -120,21 +116,55 @@ export class PagesDocController {
     return node?.projectId ?? null;
   }
 
+  private resolveActiveProjectId(
+    project?: string | { id: string } | null,
+  ): string | undefined {
+    if (!project) return undefined;
+    return typeof project === 'string' ? project : project.id;
+  }
+
+  private async getHydratedDocLines(doc: {
+    id: string;
+    projectId: string;
+    lines: unknown;
+    inStorage?: boolean;
+  }): Promise<string[]> {
+    if (doc.inStorage) {
+      try {
+        const hydrated = await this.docstoreService.getDoc(
+          doc.projectId,
+          doc.id,
+        );
+        if (Array.isArray(hydrated.lines)) {
+          return hydrated.lines;
+        }
+      } catch {
+        // Fallback to raw lines if hydration fails
+      }
+    }
+    if (Array.isArray(doc.lines)) {
+      return doc.lines as string[];
+    }
+    if (typeof doc.lines === 'string') {
+      return doc.lines.split('\n');
+    }
+    return [];
+  }
+
   // ─── 1. CORE DOCUMENT CONTENT & METADATA ──────────────────────────────────────
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId
-   * GET /api/pages/:pageId
    */
-  @Get(['docs/:pageId', 'pages/:pageId'])
+  @Get('docs/:pageId')
   @ApiOperation({ summary: 'Get document by pageId from database' })
   async getPageById(
     @Param('pageId') pageId: string,
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     try {
       let record = null;
-      const targetProjectId = authorizedProjectId;
+      const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
 
       if (targetProjectId) {
         if (isUuid(pageId)) {
@@ -258,9 +288,8 @@ export class PagesDocController {
 
   /**
    * PUT /api/v1/manuscripts/docs/:pageId
-   * PUT /api/pages/:pageId
    */
-  @Put(['docs/:pageId', 'pages/:pageId'])
+  @Put('docs/:pageId')
   @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({ summary: 'Update document content by pageId' })
   async updatePageContent(
@@ -274,14 +303,15 @@ export class PagesDocController {
       status?: 'draft' | 'published' | 'archived';
       description?: string;
     },
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) {
       throw new BadRequestException('A valid UUID is required for pageId');
     }
 
-    const record = authorizedProjectId
-      ? await this.pageScopeRepo.findDocInProject(authorizedProjectId, pageId)
+    const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
+    const record = targetProjectId
+      ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
       : await this.prisma.manuscriptDoc.findUnique({
           where: { id: pageId },
         });
@@ -299,11 +329,7 @@ export class PagesDocController {
     const lines = hasNewContent
       ? body.lines ||
         (typeof body.content === 'string' ? body.content.split('\n') : [])
-      : Array.isArray(record.lines)
-        ? (record.lines as string[])
-        : typeof record.lines === 'string'
-          ? record.lines.split('\n')
-          : [];
+      : await this.getHydratedDocLines(record);
 
     const result = await this.docstoreService.updateDoc(
       record.projectId,
@@ -411,21 +437,21 @@ export class PagesDocController {
 
   /**
    * PUT /api/v1/manuscripts/docs/:pageId/thumbnail
-   * PUT /api/pages/:pageId/thumbnail
    */
-  @Put(['docs/:pageId/thumbnail', 'pages/:pageId/thumbnail'])
+  @Put('docs/:pageId/thumbnail')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async updateThumbnail(
     @Param('pageId') pageId: string,
     @Body() body: { pdfThumbnail?: string },
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     const pdfThumbnail = body?.pdfThumbnail || '';
 
     if (isUuid(pageId)) {
       try {
-        const targetProjectId = authorizedProjectId;
+        const targetProjectId =
+          this.resolveActiveProjectId(authorizedProjectId);
         const record = targetProjectId
           ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
           : await this.prisma.manuscriptDoc.findUnique({
@@ -494,9 +520,8 @@ export class PagesDocController {
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/files
-   * GET /api/pages/:pageId/files
    */
-  @Get(['docs/:pageId/files', 'pages/:pageId/files'])
+  @Get('docs/:pageId/files')
   async getPageFiles(@Param('pageId') pageId: string) {
     try {
       if (!isUuid(pageId)) {
@@ -535,8 +560,10 @@ export class PagesDocController {
           where: { projectId, deleted: false },
           select: {
             id: true,
+            projectId: true,
             path: true,
             lines: true,
+            inStorage: true,
             sizeBytes: true,
             createdAt: true,
             updatedAt: true,
@@ -547,20 +574,26 @@ export class PagesDocController {
 
       const docMap = new Map(allDocs.map((d) => [d.id, d]));
 
-      const files = nodes
-        .filter((node) => {
-          if (node.type === 'FOLDER') return false;
-          if (node.docId && !docMap.has(node.docId)) return false;
-          return true;
-        })
-        .map((node) => {
+      const filteredNodes = nodes.filter((node) => {
+        if (node.type === 'FOLDER') return false;
+        if (node.docId && !docMap.has(node.docId)) return false;
+        return true;
+      });
+
+      const files = await Promise.all(
+        filteredNodes.map(async (node) => {
           const cleanName =
             node.path.replace(/^\//, '') || node.name || 'main.tex';
           const targetDoc = node.docId ? docMap.get(node.docId) : null;
-          const docLines = targetDoc?.lines || [];
-          const content = Array.isArray(docLines)
-            ? docLines.join('\n')
-            : String(docLines || '');
+          const docLines = targetDoc
+            ? await this.getHydratedDocLines({
+                id: targetDoc.id,
+                projectId: targetDoc.projectId || projectId!,
+                lines: targetDoc.lines,
+                inStorage: targetDoc.inStorage,
+              })
+            : [];
+          const content = docLines.join('\n');
           return {
             id: node.docId || node.id,
             nodeId: node.id,
@@ -574,14 +607,13 @@ export class PagesDocController {
             createdAt: node.createdAt.toISOString(),
             updatedAt: node.updatedAt.toISOString(),
           };
-        });
+        }),
+      );
 
       if (files.length === 0 && rootDoc && !rootDoc.deleted) {
         const cleanName = rootDoc.path.replace(/^\//, '') || 'main.tex';
-        const rootLines = rootDoc.lines || [];
-        const content = Array.isArray(rootLines)
-          ? rootLines.join('\n')
-          : String(rootLines || '');
+        const rootLines = await this.getHydratedDocLines(rootDoc);
+        const content = rootLines.join('\n');
         files.push({
           id: rootDoc.id,
           nodeId: rootDoc.id,
@@ -609,21 +641,21 @@ export class PagesDocController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/files
-   * POST /api/pages/:pageId/files
    */
-  @Post(['docs/:pageId/files', 'pages/:pageId/files'])
+  @Post('docs/:pageId/files')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   async createPageFile(
     @Param('pageId') pageId: string,
     @Body() body: { title?: string; name?: string; content?: string },
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     const fileName = body?.title || body?.name || 'untitled.tex';
     const cleanName = fileName.trim().replace(/^\//, '');
     const content = body?.content || '';
 
-    let projectId: string | null = authorizedProjectId || null;
+    let projectId: string | null =
+      this.resolveActiveProjectId(authorizedProjectId) || null;
     const parentDocId = pageId;
 
     if (!projectId && isUuid(pageId)) {
@@ -691,9 +723,9 @@ export class PagesDocController {
 
   /**
    * POST /api/v1/manuscripts/projects/:projectId/docs
-   * POST /api/projects/:projectId/pages
    */
-  @Post(['projects/:projectId/docs', 'projects/:projectId/pages'])
+  @Post('projects/:projectId/docs')
+  @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   async createProjectPage(
     @Param('projectId') projectId: string,
@@ -718,9 +750,8 @@ export class PagesDocController {
 
   /**
    * GET /api/v1/manuscripts/projects/:projectId/docs
-   * GET /api/projects/:projectId/pages
    */
-  @Get(['projects/:projectId/docs', 'projects/:projectId/pages'])
+  @Get('projects/:projectId/docs')
   async getProjectPages(
     @Param('projectId') projectId: string,
     @Query('status') _status?: string,
@@ -760,43 +791,48 @@ export class PagesDocController {
         project?.createdBy?.email?.split('@')[0] ||
         'Author';
 
-      let pages = rootNodes.map((node) => {
-        const d = node.doc;
-        const title = node.name || d?.path?.replace(/^\//, '') || 'Untitled';
-        const content =
-          d && Array.isArray(d.lines)
-            ? (d.lines as string[]).join('\n')
-            : typeof d?.lines === 'string'
-              ? d.lines
-              : '';
+      let pages = await Promise.all(
+        rootNodes.map(async (node) => {
+          const d = node.doc;
+          const title = node.name || d?.path?.replace(/^\//, '') || 'Untitled';
+          const docLines = d
+            ? await this.getHydratedDocLines({
+                id: d.id,
+                projectId: d.projectId || projectId,
+                lines: d.lines,
+                inStorage: d.inStorage,
+              })
+            : [];
+          const content = docLines.join('\n');
 
-        const ranges = (
-          d?.ranges && typeof d.ranges === 'object' ? d.ranges : {}
-        ) as PageDocRanges;
-        const pageLabels = Array.isArray(ranges.labels) ? ranges.labels : [];
-        const pageStatus = ranges.status || 'published';
-        const pageDescription = ranges.description || '';
+          const ranges = (
+            d?.ranges && typeof d.ranges === 'object' ? d.ranges : {}
+          ) as PageDocRanges;
+          const pageLabels = Array.isArray(ranges.labels) ? ranges.labels : [];
+          const pageStatus = ranges.status || 'published';
+          const pageDescription = ranges.description || '';
 
-        return {
-          id: d?.id || node.docId || node.id,
-          title,
-          description: pageDescription,
-          content,
-          status: pageStatus,
-          projectId,
-          author: { name: authorName },
-          labels: pageLabels,
-          mainFile: { id: d?.id || node.docId || node.id, title },
-          mainFileId: d?.id || node.docId || node.id,
-          rootPageId: d?.id || node.docId || node.id,
-          version: d?.version ?? 1,
-          rev: d?.rev ?? 1,
-          createdAt:
-            d?.createdAt?.toISOString() ?? node.createdAt.toISOString(),
-          updatedAt:
-            d?.updatedAt?.toISOString() ?? node.updatedAt.toISOString(),
-        };
-      });
+          return {
+            id: d?.id || node.docId || node.id,
+            title,
+            description: pageDescription,
+            content,
+            status: pageStatus,
+            projectId,
+            author: { name: authorName },
+            labels: pageLabels,
+            mainFile: { id: d?.id || node.docId || node.id, title },
+            mainFileId: d?.id || node.docId || node.id,
+            rootPageId: d?.id || node.docId || node.id,
+            version: d?.version ?? 1,
+            rev: d?.rev ?? 1,
+            createdAt:
+              d?.createdAt?.toISOString() ?? node.createdAt.toISOString(),
+            updatedAt:
+              d?.updatedAt?.toISOString() ?? node.updatedAt.toISOString(),
+          };
+        }),
+      );
 
       if (_search && _search.trim()) {
         const query = _search.trim().toLowerCase();
@@ -825,18 +861,18 @@ export class PagesDocController {
 
   /**
    * DELETE /api/v1/manuscripts/docs/:pageId
-   * DELETE /api/pages/:pageId
    */
-  @Delete(['docs/:pageId', 'pages/:pageId'])
+  @Delete('docs/:pageId')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async deletePage(
     @Param('pageId') pageId: string,
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     if (isUuid(pageId)) {
       try {
-        const targetProjectId = authorizedProjectId;
+        const targetProjectId =
+          this.resolveActiveProjectId(authorizedProjectId);
         const doc = targetProjectId
           ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
           : await this.prisma.manuscriptDoc.findUnique({
@@ -863,15 +899,15 @@ export class PagesDocController {
 
   /**
    * GET /api/v1/manuscripts/docs/:pageId/deleted-files
-   * GET /api/pages/:pageId/deleted-files
    */
-  @Get(['docs/:pageId/deleted-files', 'pages/:pageId/deleted-files'])
+  @Get('docs/:pageId/deleted-files')
   @ApiOperation({ summary: 'Get list of deleted/trashed files in project' })
   async getDeletedFiles(
     @Param('pageId') pageId: string,
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
-    let projectId: string | null = authorizedProjectId || null;
+    let projectId: string | null =
+      this.resolveActiveProjectId(authorizedProjectId) || null;
     if (!projectId && isUuid(pageId)) {
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
@@ -927,21 +963,20 @@ export class PagesDocController {
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/restore
-   * POST /api/pages/:pageId/restore
    */
-  @Post(['docs/:pageId/restore', 'pages/:pageId/restore'])
+  @Post('docs/:pageId/restore')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Restore a soft-deleted document or file' })
   async restorePage(
     @Param('pageId') pageId: string,
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) {
       throw new BadRequestException('A valid UUID is required for pageId');
     }
 
-    const targetProjectId = authorizedProjectId;
+    const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
     const doc = targetProjectId
       ? await this.prisma.manuscriptDoc.findFirst({
           where: { id: pageId, projectId: targetProjectId },
@@ -949,14 +984,6 @@ export class PagesDocController {
       : await this.prisma.manuscriptDoc.findUnique({
           where: { id: pageId },
         });
-
-    if (!doc) {
-      throw new NotFoundException({
-        statusCode: 404,
-        code: 'RESOURCE_NOT_FOUND',
-        message: `Document ${pageId} not found`,
-      });
-    }
 
     if (doc) {
       await this.docstoreService.patchDoc(doc.projectId, pageId, {
@@ -990,8 +1017,8 @@ export class PagesDocController {
         },
       });
 
-      const lines = doc.lines || [];
-      const content = Array.isArray(lines) ? lines.join('\n') : String(lines);
+      const lines = await this.getHydratedDocLines(doc);
+      const content = lines.join('\n');
 
       return {
         success: true,
@@ -1004,9 +1031,13 @@ export class PagesDocController {
       };
     }
 
-    const file = await this.prisma.manuscriptFile.findUnique({
-      where: { id: pageId },
-    });
+    const file = targetProjectId
+      ? await this.prisma.manuscriptFile.findFirst({
+          where: { id: pageId, projectId: targetProjectId },
+        })
+      : await this.prisma.manuscriptFile.findUnique({
+          where: { id: pageId },
+        });
 
     if (file) {
       await this.prisma.manuscriptFile.update({
@@ -1049,25 +1080,18 @@ export class PagesDocController {
       };
     }
 
-    throw new NotFoundException(`Item ${pageId} not found to restore`);
+    throw new NotFoundException({
+      statusCode: 404,
+      code: 'RESOURCE_NOT_FOUND',
+      message: `Document ${pageId} not found`,
+    });
   }
 
   /**
    * POST /api/v1/manuscripts/docs/:pageId/duplicate
    * POST /api/v1/manuscripts/docs/:pageId/clone
-   * POST /api/v1/manuscripts/pages/:pageId/duplicate
-   * POST /api/v1/manuscripts/pages/:pageId/clone
-   * POST /api/docs/:pageId/duplicate
-   * POST /api/docs/:pageId/clone
-   * POST /api/pages/:pageId/duplicate
-   * POST /api/pages/:pageId/clone
    */
-  @Post([
-    'docs/:pageId/duplicate',
-    'docs/:pageId/clone',
-    'pages/:pageId/duplicate',
-    'pages/:pageId/clone',
-  ])
+  @Post(['docs/:pageId/duplicate', 'docs/:pageId/clone'])
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -1075,7 +1099,7 @@ export class PagesDocController {
   })
   async duplicatePage(
     @Param('pageId') pageId: string,
-    @ResolvedProject() authorizedProjectId?: string,
+    @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     if (!isUuid(pageId)) {
       throw new NotFoundException({
@@ -1085,8 +1109,9 @@ export class PagesDocController {
       });
     }
 
-    const source = authorizedProjectId
-      ? await this.pageScopeRepo.findDocInProject(authorizedProjectId, pageId)
+    const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
+    const source = targetProjectId
+      ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
       : await this.prisma.manuscriptDoc.findUnique({
           where: { id: pageId },
         });
@@ -1103,12 +1128,17 @@ export class PagesDocController {
     const newTitle = sourceTitle.endsWith(' (Copy)')
       ? `${sourceTitle.replace(/ \(Copy\)$/, '')} (Copy 2)`
       : `${sourceTitle} (Copy)`;
+    const normalizedNodePath = newTitle.startsWith('/')
+      ? newTitle
+      : `/${newTitle}`;
+
+    const hydratedSourceLines = await this.getHydratedDocLines(source);
 
     const newDoc = await this.prisma.manuscriptDoc.create({
       data: {
         projectId: source.projectId,
         path: newTitle,
-        lines: source.lines ?? [],
+        lines: hydratedSourceLines,
         rev: 0,
         version: 1,
         ranges: source.ranges ?? {},
@@ -1127,8 +1157,8 @@ export class PagesDocController {
           projectId: source.projectId,
           parentId: sourceNode.parentId,
           type: sourceNode.type,
-          name: newTitle,
-          path: newTitle,
+          name: newTitle.replace(/^\//, ''),
+          path: normalizedNodePath,
           depth: sourceNode.depth,
           docId: newDoc.id,
           fileId: null,
@@ -1144,13 +1174,19 @@ export class PagesDocController {
           projectId: source.projectId,
           change: {
             action: 'create',
-            node: { id: newDoc.id, path: newTitle, docId: newDoc.id },
+            node: {
+              id: newDoc.id,
+              path: normalizedNodePath,
+              docId: newDoc.id,
+            },
           },
         });
       }
     }
 
-    const lines = Array.isArray(newDoc.lines) ? newDoc.lines : [];
+    const lines = Array.isArray(newDoc.lines)
+      ? (newDoc.lines as string[])
+      : hydratedSourceLines;
     const content = lines.join('\n');
 
     return {
@@ -1174,10 +1210,7 @@ export class PagesDocController {
   /**
    * Label management routes
    */
-  @Get([
-    'projects/:projectId/docs/:pageId/labels',
-    'projects/:projectId/pages/:pageId/labels',
-  ])
+  @Get('projects/:projectId/docs/:pageId/labels')
   async getPageLabels(
     @Param('projectId') projectId: string,
     @Param('pageId') pageId: string,
@@ -1193,10 +1226,7 @@ export class PagesDocController {
     return { labels: [] };
   }
 
-  @Post([
-    'projects/:projectId/docs/:pageId/labels',
-    'projects/:projectId/pages/:pageId/labels',
-  ])
+  @Post('projects/:projectId/docs/:pageId/labels')
   @RequireRole(Role.CONTRIBUTOR)
   async assignPageLabels(
     @Param('projectId') projectId: string,
@@ -1213,10 +1243,14 @@ export class PagesDocController {
         });
       }
 
+      const targetProjectId = doc.projectId || projectId;
       let labels: { id: string; name: string; color: string }[] = [];
       try {
         const found = await this.prisma.label.findMany({
-          where: { id: { in: body.labelIds } },
+          where: {
+            id: { in: body.labelIds },
+            projects: { some: { projectId: targetProjectId } },
+          },
         });
         if (found.length > 0) {
           labels = found.map((l) => ({
@@ -1226,7 +1260,7 @@ export class PagesDocController {
           }));
         } else {
           const foundWork = await this.prisma.workItemLabel.findMany({
-            where: { id: { in: body.labelIds } },
+            where: { id: { in: body.labelIds }, projectId: targetProjectId },
           });
           labels = foundWork.map((l) => ({
             id: l.id,
@@ -1247,10 +1281,7 @@ export class PagesDocController {
     return { labels: [] };
   }
 
-  @Put([
-    'projects/:projectId/docs/:pageId/labels',
-    'projects/:projectId/pages/:pageId/labels',
-  ])
+  @Put('projects/:projectId/docs/:pageId/labels')
   @RequireRole(Role.CONTRIBUTOR)
   async replacePageLabels(
     @Param('projectId') projectId: string,
@@ -1260,10 +1291,7 @@ export class PagesDocController {
     return this.assignPageLabels(projectId, pageId, body);
   }
 
-  @Delete([
-    'projects/:projectId/docs/:pageId/labels/:labelId',
-    'projects/:projectId/pages/:pageId/labels/:labelId',
-  ])
+  @Delete('projects/:projectId/docs/:pageId/labels/:labelId')
   @RequireRole(Role.CONTRIBUTOR)
   async removePageLabel(
     @Param('projectId') projectId: string,
@@ -1295,5 +1323,3 @@ export class PagesDocController {
     return { labels: [] };
   }
 }
-
-export { PagesDocController as PagesBridgeController };

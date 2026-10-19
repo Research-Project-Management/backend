@@ -4,16 +4,20 @@
  * Zero I/O, zero NestJS imports.
  */
 
-import { DiagnosticItem } from './diagnostic-item.entity';
-import { DiagnosticReport } from './diagnostic-report.entity';
-import { DiagnosticSeverityVo } from './diagnostic-severity.vo';
 import {
+  DiagnosticItem,
+  DiagnosticSeverityVo,
   ErrorExplanationVo,
   ErrorExplanationProps,
-} from './error-explanation.vo';
+} from './diagnostic-item.entity';
+import { DiagnosticReport } from './diagnostic-report.entity';
 import { LogLineVo } from './log-line.vo';
 import { InvalidLogFormatException } from './invalid-log-format.exception';
 import { ExplanationNotFoundException } from './explanation-not-found.exception';
+import {
+  CompilerDiagnostic,
+  ILogParser,
+} from '@/modules/manuscripts/clsi/domain/clsi-ports';
 
 export interface RuleDefinition extends ErrorExplanationProps {
   patterns: RegExp[];
@@ -369,7 +373,7 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
   }
 }
 
-export class CompileLogAnalyzer {
+export class CompileLogAnalyzer implements ILogParser {
   private static readonly LATEX_WARNING_REGEX =
     /(?:LaTeX(?:\s+Font)?|Package [\w-]+|Class [\w-]+)\s+Warning:\s*(.+)/i;
 
@@ -378,6 +382,9 @@ export class CompileLogAnalyzer {
 
   private static readonly FILE_LINE_ERROR_REGEX =
     /^(\.{0,2}\/?[^\s:!()]+\.(?:tex|bib|sty|cls|dtx|ins)):(\d+):\s*(.+)/i;
+
+  private static readonly TECTONIC_ERROR_REGEX =
+    /^error:\s*(?:([^:\s]+):(\d+):\s*)?(.+)/i;
 
   private static readonly FILE_EXTENSION_REGEX =
     /\.(tex|sty|cls|bib|bbl|aux|toc|lof|lot|out|def|ldf|fd|cfg|dtx|ins)\b/i;
@@ -389,6 +396,262 @@ export class CompileLogAnalyzer {
 
   constructor(explainer?: ErrorExplainerLike) {
     this.explainer = explainer ?? new ErrorKnowledgeBase();
+  }
+
+  /**
+   * Implements `ILogParser.parse()` for CLSI compile pipeline diagnostics.
+   */
+  public parse(
+    logText: string,
+    defaultFile = 'main.tex',
+  ): CompilerDiagnostic[] {
+    if (!logText || typeof logText !== 'string') return [];
+
+    const diagnostics: CompilerDiagnostic[] = [];
+    const lines = logText.split('\n');
+    const parenStack: Array<{ isFile: boolean; file?: string }> = [
+      { isFile: true, file: defaultFile },
+    ];
+    const getActiveFile = (): string => {
+      for (let s = parenStack.length - 1; s >= 0; s--) {
+        if (parenStack[s]?.isFile && parenStack[s]?.file) {
+          return parenStack[s].file!;
+        }
+      }
+      return defaultFile;
+    };
+    const scanParensLeftToRight = (text: string) => {
+      let idx = 0;
+      while (idx < text.length) {
+        const ch = text[idx];
+        if (ch === '(') {
+          const rest = text.slice(idx + 1);
+          const m = rest.match(
+            /^(?:\.{0,2}\/)?([^\s()"]+\.(?:tex|sty|cls|bib|dtx|ins|aux|bbl))\b/i,
+          );
+          if (m && m[1]) {
+            const norm = m[1]
+              .replace(/\\/g, '/')
+              .replace(/^(\.\/)+/, '')
+              .replace(/^\/+/, '');
+            const isSystem =
+              norm.includes('texmf') ||
+              norm.includes('texlive') ||
+              /\.(?:sty|cls|def|cfg|ldf|fd)$/i.test(norm);
+            parenStack.push({
+              isFile: !isSystem,
+              file: !isSystem ? norm : undefined,
+            });
+            idx += 1 + m[0].length;
+            continue;
+          } else {
+            parenStack.push({ isFile: false });
+          }
+        } else if (ch === ')') {
+          if (parenStack.length > 1) {
+            parenStack.pop();
+          }
+        }
+        idx++;
+      }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line) continue;
+
+      const cleanedLine = CompileLogAnalyzer.cleanNonFileParens(line);
+
+      const isDiagnosticLine =
+        CompileLogAnalyzer.FILE_LINE_ERROR_REGEX.test(line) ||
+        CompileLogAnalyzer.TECTONIC_ERROR_REGEX.test(line) ||
+        line.startsWith('!') ||
+        CompileLogAnalyzer.LATEX_WARNING_REGEX.test(line) ||
+        CompileLogAnalyzer.BADBOX_REGEX.test(line);
+
+      if (!isDiagnosticLine) {
+        scanParensLeftToRight(cleanedLine);
+      }
+
+      const activeFile = getActiveFile();
+
+      const fleMatch = line.match(CompileLogAnalyzer.FILE_LINE_ERROR_REGEX);
+      if (fleMatch && fleMatch[1] && fleMatch[2] && fleMatch[3]) {
+        const errorFile = fleMatch[1]
+          .trim()
+          .replace(/\\/g, '/')
+          .replace(/^(\.\/)+/, '')
+          .replace(/^\/+/, '');
+        const errorLine = parseInt(fleMatch[2], 10);
+        const message = fleMatch[3].trim();
+        const context = lines
+          .slice(i, Math.min(i + 3, lines.length))
+          .join('\n');
+        const { code, suggestion } = this.generateSuggestion(message, context);
+
+        diagnostics.push({
+          file: errorFile,
+          line: errorLine,
+          message,
+          context,
+          severity: 'error',
+          code,
+          suggestion,
+        });
+      } else if (line.match(CompileLogAnalyzer.TECTONIC_ERROR_REGEX)) {
+        const tectonicMatch = line.match(
+          CompileLogAnalyzer.TECTONIC_ERROR_REGEX,
+        )!;
+        if (tectonicMatch[3]) {
+          const errorFile = tectonicMatch[1]?.trim() || activeFile;
+          const errorLine = parseInt(tectonicMatch[2], 10);
+          const message = tectonicMatch[3].trim();
+          const context = lines
+            .slice(i, Math.min(i + 3, lines.length))
+            .join('\n');
+          const { code, suggestion } = this.generateSuggestion(
+            message,
+            context,
+          );
+
+          diagnostics.push({
+            file: errorFile,
+            line: errorLine,
+            message,
+            context,
+            severity: 'error',
+            code,
+            suggestion,
+          });
+        }
+      } else if (line.startsWith('!')) {
+        const message = line.slice(1).trim();
+        let errorLine: number | null = null;
+        let context = '';
+
+        for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+          const match = lines[j]?.match(/^l\.(\d+)/);
+          if (match && match[1]) {
+            errorLine = parseInt(match[1], 10);
+            context = lines.slice(i, j + 2).join('\n');
+            break;
+          }
+        }
+
+        const resolvedContext = context || lines.slice(i, i + 3).join('\n');
+        const { code, suggestion } = this.generateSuggestion(
+          message,
+          resolvedContext,
+        );
+
+        diagnostics.push({
+          file: activeFile,
+          line: errorLine,
+          message,
+          context: resolvedContext,
+          severity: 'error',
+          code,
+          suggestion,
+        });
+      } else if (line.match(CompileLogAnalyzer.LATEX_WARNING_REGEX)) {
+        const warningMatch = line.match(CompileLogAnalyzer.LATEX_WARNING_REGEX)!;
+        if (warningMatch[1]) {
+          let warnMsg = warningMatch[1].trim();
+          let lineNum: number | null = null;
+          const inlineMatch = line.match(/on input line\s+(\d+)\./i);
+          if (inlineMatch && inlineMatch[1]) {
+            lineNum = parseInt(inlineMatch[1], 10);
+          }
+          let warnContext = line;
+
+          let j = i + 1;
+          while (
+            j < lines.length &&
+            lines[j] &&
+            lines[j].trim() !== '' &&
+            !lines[j].startsWith('!') &&
+            !lines[j].match(CompileLogAnalyzer.LATEX_WARNING_REGEX) &&
+            !lines[j].match(CompileLogAnalyzer.BADBOX_REGEX) &&
+            !lines[j].match(CompileLogAnalyzer.FILE_LINE_ERROR_REGEX) &&
+            !(lines[j].startsWith('(') && lines[j].includes('/'))
+          ) {
+            const nextL = lines[j].trim();
+            const extraMatch = nextL.match(/on input line\s+(\d+)\./i);
+            if (extraMatch && extraMatch[1]) {
+              lineNum = parseInt(extraMatch[1], 10);
+            }
+            warnMsg += ' ' + nextL;
+            warnContext += '\n' + lines[j];
+            j++;
+          }
+
+          warnMsg = warnMsg
+            .replace(/\s*on input line\s+\d+\.?$/i, '')
+            .replace(/\.$/, '')
+            .trim();
+
+          diagnostics.push({
+            file: activeFile,
+            line: lineNum,
+            message: `LaTeX Warning: ${warnMsg}`,
+            context: warnContext,
+            severity: 'warning',
+          });
+        }
+      } else if (line.match(CompileLogAnalyzer.BADBOX_REGEX)) {
+        const badboxMatch = line.match(CompileLogAnalyzer.BADBOX_REGEX)!;
+        if (badboxMatch[1]) {
+          const lineNum = parseInt(badboxMatch[1], 10);
+          diagnostics.push({
+            file: activeFile,
+            line: lineNum,
+            message: line.trim(),
+            context: line,
+            severity: 'info',
+          });
+        }
+      }
+
+      if (isDiagnosticLine) {
+        scanParensLeftToRight(cleanedLine);
+      }
+    }
+
+    return diagnostics;
+  }
+
+  private generateSuggestion(
+    message: string,
+    context: string,
+  ): { code?: string; suggestion?: string } {
+    const lowerMsg = message.toLowerCase();
+
+    if (lowerMsg.includes('undefined control sequence')) {
+      const match = context.match(/\\([a-zA-Z]+)/);
+      const command = match ? `\\${match[1]}` : 'this command';
+      return {
+        code: 'UNDEFINED_MACRO',
+        suggestion: `Command "${command}" is undefined. Check spelling or add the required \\usepackage{...}.`,
+      };
+    }
+
+    if (lowerMsg.includes('missing $ inserted')) {
+      return {
+        code: 'MISSING_MATH_DELIMITER',
+        suggestion:
+          'Math characters or variables must be placed in a math environment ($...$ or \\[...\\]).',
+      };
+    }
+
+    if (lowerMsg.includes('file') && lowerMsg.includes('not found')) {
+      return {
+        code: 'FILE_NOT_FOUND',
+        suggestion:
+          'File, graphic, bibliography, or package not found. Verify the file path and extension.',
+      };
+    }
+
+    return {};
   }
 
   public analyzeLog(
@@ -707,74 +970,11 @@ export class CompileLogAnalyzer {
   }
 }
 
-export { ErrorKnowledgeBase as KnowledgeBaseExplainerAdapter };
+const defaultLogParser = new CompileLogAnalyzer();
 
-export class TexParenTreeLogParser {
-  private readonly analyzer: CompileLogAnalyzer;
-  constructor(explainer?: ErrorExplainerLike) {
-    this.analyzer = new CompileLogAnalyzer(explainer);
-  }
-  public parse(logText: string, defaultFile = 'main.tex'): DiagnosticItem[] {
-    return this.analyzer.parseTexParenTreeLog(logText, defaultFile);
-  }
-}
-
-export class TectonicLogParser {
-  private readonly analyzer: CompileLogAnalyzer;
-  constructor(explainer?: ErrorExplainerLike) {
-    this.analyzer = new CompileLogAnalyzer(explainer);
-  }
-  public parse(logText: string, defaultFile = 'main.tex'): DiagnosticItem[] {
-    return this.analyzer.parseTectonicLog(logText, defaultFile);
-  }
-}
-
-export class ParseCompileLogUseCase {
-  constructor(
-    private readonly texParser = new TexParenTreeLogParser(),
-    private readonly tectonicParser = new TectonicLogParser(),
-  ) {}
-  public execute(input: {
-    logText: string;
-    defaultFile?: string;
-    engine?: string;
-  }): DiagnosticReport {
-    if (
-      typeof input.logText !== 'string' ||
-      input.logText.trim().length === 0
-    ) {
-      throw new InvalidLogFormatException();
-    }
-    const defaultFile = input.defaultFile || 'main.tex';
-    const isTectonic = input.engine?.toLowerCase() === 'tectonic';
-    let items = isTectonic
-      ? this.tectonicParser.parse(input.logText, defaultFile)
-      : this.texParser.parse(input.logText, defaultFile);
-    if (items.length === 0 && isTectonic) {
-      items = this.texParser.parse(input.logText, defaultFile);
-    }
-    return new DiagnosticReport({
-      items,
-      rawLog: input.logText,
-    });
-  }
-}
-
-export class GetErrorExplanationUseCase {
-  constructor(
-    private readonly explainer: ErrorExplainerLike = new ErrorKnowledgeBase(),
-  ) {}
-  public execute(code: string): ErrorExplanationVo {
-    if (!code || typeof code !== 'string') {
-      throw new ExplanationNotFoundException(String(code));
-    }
-    const found = this.explainer.getByCode(code);
-    if (!found) {
-      throw new ExplanationNotFoundException(code);
-    }
-    return found;
-  }
-  public listRules(): ErrorExplanationVo[] {
-    return this.explainer.getAllRules();
-  }
+export function parseLatexLog(
+  logText: string,
+  defaultFile = 'main.tex',
+): CompilerDiagnostic[] {
+  return defaultLogParser.parse(logText, defaultFile);
 }

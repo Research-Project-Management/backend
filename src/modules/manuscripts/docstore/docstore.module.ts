@@ -13,22 +13,14 @@ import {
   PagesSearchPresenceController,
 } from './controllers';
 import { DocstoreService } from './docstore.service';
-import { PageExportTranspilerService } from './services/page-export-transpiler.service';
 import { ManuscriptUserResolverService } from './services/manuscript-user-resolver.service';
-import { ManuscriptTextMutatorService } from './services/manuscript-text-mutator.service';
 import { ManuscriptPresenceService } from './services/manuscript-presence.service';
 import { ManuscriptSearchReplaceService } from './services/manuscript-search-replace.service';
 import { ManuscriptProjectBootstrapService } from './services/manuscript-project-bootstrap.service';
 
 // Repositories & Adapters
-import {
-  DocstoreRepository,
-  PrismaDocRepository,
-} from './repositories/docstore.repository';
-import {
-  DocArchiveRepository,
-  S3DocPersistorAdapter,
-} from './repositories/doc-archive.repository';
+import { DocstoreRepository } from './repositories/docstore.repository';
+import { DocArchiveRepository } from './repositories/doc-archive.repository';
 import {
   DocHasherAdapter,
   IDocRepository,
@@ -46,20 +38,16 @@ import { ManuscriptPageScopeRepository } from './repositories/manuscript-page-sc
     PagesSearchPresenceController,
   ],
   providers: [
-    // 7 Domain Services
+    // Domain Services
     DocstoreService,
-    PageExportTranspilerService,
     ManuscriptUserResolverService,
-    ManuscriptTextMutatorService,
     ManuscriptPresenceService,
     ManuscriptSearchReplaceService,
     ManuscriptProjectBootstrapService,
 
-    // 2 Repositories & Adapters
+    // Repositories & Adapters
     DocstoreRepository,
-    PrismaDocRepository,
     DocArchiveRepository,
-    S3DocPersistorAdapter,
     DocHasherAdapter,
     ManuscriptPageScopeRepository,
 
@@ -79,16 +67,12 @@ import { ManuscriptPageScopeRepository } from './repositories/manuscript-page-sc
   ],
   exports: [
     DocstoreService,
-    PageExportTranspilerService,
     ManuscriptUserResolverService,
-    ManuscriptTextMutatorService,
     ManuscriptPresenceService,
     ManuscriptSearchReplaceService,
     ManuscriptProjectBootstrapService,
     DocstoreRepository,
-    PrismaDocRepository,
     DocArchiveRepository,
-    S3DocPersistorAdapter,
     ManuscriptPageScopeRepository,
     IDocRepository,
     IDocPersistor,
