@@ -173,6 +173,3 @@ export class QueryWorkItemDto {
   @Max(200)
   limit?: number;
 }
-
-export const QueryDto = QueryWorkItemDto;
-export type QueryDto = QueryWorkItemDto;

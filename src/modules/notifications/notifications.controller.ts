@@ -159,8 +159,8 @@ export class NotificationsController {
     const result = await this.notificationsService.parseAndNotifyMentions(dto);
     return {
       tokens: result.tokens,
-      dispatchedNotifications: result.dispatchedNotifications.map((n) =>
-        n.toPlain(),
+      dispatchedNotifications: result.dispatchedNotifications.map(
+        (n: { toPlain: () => unknown }) => n.toPlain(),
       ),
     };
   }

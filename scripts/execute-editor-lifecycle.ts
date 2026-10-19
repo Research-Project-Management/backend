@@ -20,33 +20,33 @@
  *   --step-delay=<ms> (default: 150)
  */
 
-import { PresenceSession } from '../src/modules/realtime/manuscripts/core/domain/entities/presence-session.entity';
-import { InMemoryRoomManagerAdapter } from '../src/modules/realtime/manuscripts/core/adapters/storage/in-memory-room-manager.adapter';
-
-import { RegexAstBibtexParser } from '../src/modules/manuscripts/citations/core/adapters/parser/regex-ast-bibtex.parser';
-import { ValidateProjectBibtexUseCase } from '../src/modules/manuscripts/citations/core/use-cases/validate-project-bibtex.use-case';
-import { BibEntry } from '../src/modules/manuscripts/citations/core/domain/entities/bib-entry.entity';
-import { BibliographyFile } from '../src/modules/manuscripts/citations/core/domain/entities/bibliography-file.entity';
-import { CitationKeyVo } from '../src/modules/manuscripts/citations/core/domain/value-objects/citation-key.vo';
-import { ICitationsAggregatorPort } from '../src/modules/manuscripts/citations/core/ports/citations-aggregator.port';
+import { RoomStore } from '../src/modules/realtime/manuscripts/room.store';
+import { UserPresence } from '../src/modules/realtime/manuscripts/types/presence.type';
 
 import {
-  TexParenTreeLogParser,
-  KnowledgeBaseExplainerAdapter,
-  ParseCompileLogUseCase,
-  TectonicLogParser,
+  RegexAstBibtexParser,
+  BibEntry,
+  BibliographyFile,
+  CitationKeyVo,
+  CitationsService,
+  CitationsRepository,
+} from '../src/modules/manuscripts/citations';
+
+import {
+  CompileLogAnalyzer,
+  ErrorKnowledgeBase,
   DiagnosticReport,
-  DiagnosticItem,
 } from '../src/modules/manuscripts/diagnostics';
 
-import { SyncTexProcessor } from '../src/modules/manuscripts/clsi/core/adapters/artifacts/synctex.processor';
+import { SyncTexProcessor } from '../src/modules/manuscripts/clsi/domain/synctex.parser';
 
-import { PkzipEngineAdapter } from '../src/modules/manuscripts/export-import/core/adapters/engine/pkzip-engine.adapter';
-import { ExportProjectZipUseCase } from '../src/modules/manuscripts/export-import/core/use-cases/export-project-zip.use-case';
 import {
+  PkzipEngineAdapter,
+  ExportImportService,
   IManuscriptAggregatorPort,
+  IManuscriptHydratorPort,
   ExportableFileEntry,
-} from '../src/modules/manuscripts/export-import/core/ports/manuscript-aggregator.port';
+} from '../src/modules/manuscripts/export-import';
 
 // ---------------------------------------------------------------------------
 // ANSI Color Formatting Helpers
@@ -123,23 +123,12 @@ class MemoryManuscriptAggregator extends IManuscriptAggregatorPort {
     }
     return entries;
   }
-}
-
-class MemoryCitationsAggregator implements ICitationsAggregatorPort {
-  constructor(private readonly bibFiles: BibliographyFile[]) {}
-
-  public async collectBibFiles(
-    _projectId: string,
-  ): Promise<BibliographyFile[]> {
-    return this.bibFiles;
-  }
-
-  public async appendEntryToBib(
-    _projectId: string,
-    _entry: BibEntry,
-    _targetFilename?: string,
-  ): Promise<string> {
-    return '/references.bib';
+  public async collectLazyProjectEntries(
+    projectId: string,
+    includePdf?: boolean,
+    cleanArxiv?: boolean,
+  ): Promise<ExportableFileEntry[]> {
+    return this.collectProjectEntries(projectId, includePdf, cleanArxiv);
   }
 }
 
@@ -167,15 +156,16 @@ async function runEditorLifecycle() {
     `${c.cyan}${c.bold}[STAGE 1] Khởi tạo Document & Phiên làm việc Cộng tác Real-Time${c.reset}`,
   );
 
-  const roomManager = new InMemoryRoomManagerAdapter();
+  const roomManager = new RoomStore();
 
-  const authorSession = PresenceSession.create({
+  const authorSession: UserPresence = {
     userId: 'usr-elena-vance',
     socketId: 'sock-conn-elena-991',
     projectId,
     name: 'Dr. Elena Vance (Lead Author)',
     color: '#3b82f6',
-  });
+    lastHeartbeat: Date.now(),
+  };
 
   await roomManager.addProjectSession(authorSession);
   const docPresences = await roomManager.joinDocRoom(
@@ -333,9 +323,12 @@ Here we develop the primary quantum circuit equations.
     entries: parsedEntries,
   });
 
-  const citationsAggregator = new MemoryCitationsAggregator([bibFile]);
-  const validator = new ValidateProjectBibtexUseCase(citationsAggregator);
-  const validationResult = await validator.execute(projectId);
+  const mockCitationsRepo = {
+    collectBibFiles: async () => [bibFile],
+  } as unknown as CitationsRepository;
+  const citationsService = new CitationsService(mockCitationsRepo);
+  const validationResult =
+    await citationsService.validateProjectBibtex(projectId);
 
   console.log(
     `  ${c.green}✔${c.reset} BibTeX AST validation status: ${validationResult.valid ? c.green + 'VALID (0 syntax warnings)' : c.red + 'INVALID'}${c.reset}`,
@@ -424,19 +417,15 @@ Your command was ignored.
     `  ⚡ Injected error scenario: ${c.yellow}${ERROR_TYPE}${c.reset} at line ${expectedErrorLine}`,
   );
 
-  // Execute ParseCompileLogUseCase with TexParenTreeLogParser and KnowledgeBaseExplainerAdapter
-  const explainer = new KnowledgeBaseExplainerAdapter();
-  const classicParser = new TexParenTreeLogParser(explainer);
-  const tectonicParser = new TectonicLogParser(explainer);
-  const logParserUseCase = new ParseCompileLogUseCase(
-    classicParser,
-    tectonicParser,
-  );
+  // Execute CompileLogAnalyzer with ErrorKnowledgeBase
+  const explainer = new ErrorKnowledgeBase();
+  const logAnalyzer = new CompileLogAnalyzer(explainer);
 
-  const diagnosticReport: DiagnosticReport = await logParserUseCase.execute({
-    logText: simulatedErrorLog,
-    engine: 'pdflatex',
-  });
+  const diagnosticReport: DiagnosticReport = logAnalyzer.analyzeLog(
+    simulatedErrorLog,
+    'main.tex',
+    'pdflatex',
+  );
 
   console.log(
     `  ${c.red}✖ Compilation Failed as expected:${c.reset} ${diagnosticReport.errorsCount} error(s), ${diagnosticReport.warningsCount} warning(s)`,
@@ -498,10 +487,7 @@ SyncTeX written on main.synctex.gz.
 Transcript written on main.log.
 `;
 
-  await logParserUseCase.execute({
-    logText: successfulLog,
-    engine: 'pdflatex',
-  });
+  logAnalyzer.analyzeLog(successfulLog, 'main.tex', 'pdflatex');
 
   console.log(
     `  ${c.green}✔ Recompilation Completed:${c.reset} Status = ${c.green}SUCCESS${c.reset} (0 errors, 0 warnings)`,
@@ -618,10 +604,13 @@ x1,42:7200000,28800000
   aggregator.setFile('main.synctex.gz', Buffer.from('TEMP_SYNCTEX'));
 
   const zipEngine = new PkzipEngineAdapter();
-  const exportUseCase = new ExportProjectZipUseCase(aggregator, zipEngine);
+  const exportService = new ExportImportService(
+    aggregator,
+    zipEngine,
+    {} as IManuscriptHydratorPort,
+  );
 
-  const exportResult = await exportUseCase.execute({
-    projectId,
+  const exportResult = await exportService.exportProjectZip(projectId, {
     projectName: 'quantum_attention_arxiv',
     includePdf: true,
     cleanArxiv: true, // Auto-strip .aux, .log, .synctex.gz

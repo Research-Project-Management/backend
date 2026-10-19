@@ -7,7 +7,7 @@ import { MendeleyProvider } from '@/modules/integrations/providers/mendeley.prov
 import { GithubProvider } from '@/modules/integrations/providers/github.provider';
 import { IntegrationsService } from '@/modules/integrations/integrations.service';
 import { IntegrationsRepository } from '@/modules/integrations/integrations.repository';
-import { PluggableLibrarySyncAdapter } from '@/modules/manuscripts/citations';
+import { CitationsRepository } from '@/modules/manuscripts/citations';
 
 describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
   describe('Crypto Utils (AES-256-GCM)', () => {
@@ -432,8 +432,8 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
     });
   });
 
-  describe('PluggableLibrarySyncAdapter (Zotero Official API Bridge)', () => {
-    let adapter: PluggableLibrarySyncAdapter;
+  describe('CitationsRepository (Zotero Official API Bridge)', () => {
+    let adapter: CitationsRepository;
     let mockRepo: any;
     let zoteroProvider: ZoteroProvider;
 
@@ -442,7 +442,8 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
         findConnection: jest.fn(),
       };
       zoteroProvider = new ZoteroProvider();
-      adapter = new PluggableLibrarySyncAdapter(
+      adapter = new CitationsRepository(
+        undefined,
         undefined,
         mockRepo,
         zoteroProvider,

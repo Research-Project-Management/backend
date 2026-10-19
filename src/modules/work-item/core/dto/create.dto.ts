@@ -137,6 +137,3 @@ export class CreateWorkItemDto {
   @IsOptional()
   relations?: Record<string, unknown> | Array<Record<string, unknown>>;
 }
-
-export const CreateDto = CreateWorkItemDto;
-export type CreateDto = CreateWorkItemDto;

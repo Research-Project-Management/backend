@@ -1,6 +1,5 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '@/core';
 import { CoreRepository } from '@/modules/work-item/core/core.repository';
 import { IdHandler } from './id.handler';
 import type { WorkItemWithRelations } from '@/modules/work-item/core/types/work-item.types';
@@ -10,7 +9,6 @@ export class CloneHandler {
   constructor(
     private readonly idHandler: IdHandler,
     private readonly repository: CoreRepository,
-    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   async buildCloneData(
@@ -27,20 +25,10 @@ export class CloneHandler {
     if (!isSameProject) {
       const sourceState =
         sourceWorkItem.state ??
-        (this.repository?.findStateWithGroup
-          ? await this.repository.findStateWithGroup(sourceWorkItem.columnId)
-          : await this.prisma?.workItemState.findUnique({
-              where: { id: sourceWorkItem.columnId },
-              select: { group: true, name: true },
-            }));
+        (await this.repository.findStateWithGroup(sourceWorkItem.columnId));
 
       const targetStates =
-        (this.repository?.findProjectStates
-          ? await this.repository.findProjectStates(targetProjectId)
-          : await this.prisma?.workItemState.findMany({
-              where: { projectId: targetProjectId },
-              orderBy: { sequence: 'asc' },
-            })) || [];
+        (await this.repository.findProjectStates(targetProjectId)) || [];
 
       const matchedState =
         targetStates.find(
@@ -89,6 +77,3 @@ export class CloneHandler {
     return { cloneData, targetProjectId, isSameProject, identifier };
   }
 }
-
-export const WorkItemCloneHandler = CloneHandler;
-export type WorkItemCloneHandler = CloneHandler;

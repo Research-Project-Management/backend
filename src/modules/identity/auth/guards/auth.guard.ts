@@ -33,11 +33,12 @@ export class AuthGuard implements CanActivate {
       context.getClass(),
     ]);
 
+    const request = context.switchToHttp().getRequest();
+
     if (isPublic) {
+      await this.tryPopulateOptionalUser(request);
       return true;
     }
-
-    const request = context.switchToHttp().getRequest();
 
     // 1. Support Inter-Service Authentication (e.g. FLux-AI orchestrator tools)
     const internalKey = request.headers?.['x-internal-key'];
@@ -129,7 +130,8 @@ export class AuthGuard implements CanActivate {
         url.includes('/stream') ||
         url.includes('/events') ||
         url.includes('/sse') ||
-        url.includes('/artifacts');
+        url.includes('/artifacts') ||
+        url.includes('/storage/files/');
       if (isAllowedDownloadOrStreamPath) {
         token = String(request.query.token);
       }
@@ -172,7 +174,11 @@ export class AuthGuard implements CanActivate {
         }
       }
 
-      request.user = payload;
+      request.user = {
+        ...payload,
+        id: payload.id || payload.sub,
+        sub: payload.sub || payload.id,
+      };
       return true;
     } catch (err: unknown) {
       if (err instanceof UnauthorizedException) {
@@ -181,8 +187,53 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Token is invalid or expired');
     }
   }
+
+  private async tryPopulateOptionalUser(request: {
+    headers?: Record<string, string | undefined>;
+    query?: Record<string, string | undefined>;
+    raw?: { url?: string };
+    url?: string;
+    user?: Record<string, unknown>;
+  }): Promise<void> {
+    if (request.user?.id) return;
+    const authHeader = request.headers?.authorization;
+    let token =
+      authHeader && authHeader.startsWith('Bearer ')
+        ? authHeader.split(' ')[1]
+        : null;
+
+    if (!token && request.query?.token) {
+      token = String(request.query.token);
+    }
+
+    if (!token) return;
+
+    try {
+      const secret =
+        this.configService.get<string>('JWT_SECRET') || process.env.JWT_SECRET;
+      if (!secret) return;
+      const payload = await this.jwtService.verifyAsync(token, { secret });
+      const userId = payload.sub || payload.id;
+      if (userId && this.redis) {
+        const revokedAt = await this.redis
+          .get<number>(IDENTITY_REDIS_KEYS.revoked(userId))
+          .catch(() => null);
+        if (revokedAt && (payload.iat || 0) * 1000 <= revokedAt) {
+          return;
+        }
+      }
+      request.user = {
+        ...payload,
+        id: payload.id || payload.sub,
+        sub: payload.sub || payload.id,
+      };
+    } catch {
+      // Ignore invalid token on @Public() route; downstream policy decides if anonymous access is permitted
+    }
+  }
 }
 
 // ─── Standard & Backward Compatibility Aliases ───────────────────────────────
 export const JwtAuthGuard = AuthGuard;
 export type JwtAuthGuard = AuthGuard;
+

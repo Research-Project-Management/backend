@@ -51,6 +51,3 @@ export class IdHandler {
     return maxSeq + 1;
   }
 }
-
-export const WorkItemIdHandler = IdHandler;
-export type WorkItemIdHandler = IdHandler;

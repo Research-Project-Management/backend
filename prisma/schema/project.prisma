@@ -32,7 +32,7 @@ enum ProjectUpdateStatus {
 model Project {
   id          String  @id @default(uuid(7)) @db.Uuid
   name        String  @db.VarChar(100)
-  identifier  String  @unique(map: "uq_projects_identifier") @db.VarChar(20)
+  identifier  String  @db.VarChar(20)
   description String? @default("") @db.Text
   avatar      String?
   coverImage  String? @map("cover_image")
@@ -82,9 +82,11 @@ model Project {
   integrationLinks ProjectIntegrationLink[]
 
   @@index([createdById], map: "idx_projects_created_by_id")
+  @@index([identifier], map: "idx_projects_identifier")
   @@index([stateId], map: "idx_projects_state_id")
   @@index([priority], map: "idx_projects_priority")
   @@index([isActive, isArchived, deletedAt], map: "idx_projects_operational_status")
+  @@unique([createdById, identifier], map: "uq_projects_creator_identifier")
   @@map("projects")
 }
 

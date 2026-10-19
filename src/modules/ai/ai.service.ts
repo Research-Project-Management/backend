@@ -498,7 +498,7 @@ export class AiService {
 
     if (file) {
       let hasAccess = file.authorId === userId || file.sharedWith.length > 0;
-      if (!hasAccess && file.linkedToType === 'project' && file.linkedToId) {
+      if (!hasAccess && file.linkedToType?.toLowerCase() === 'project' && file.linkedToId) {
         const isMember = await this.prisma.projectMember.findFirst({
           where: { projectId: file.linkedToId, userId },
         });
@@ -519,7 +519,7 @@ export class AiService {
       }
       const meta = (file.metaData as FileDocMetadata | null) || {};
       const scopeId =
-        file.linkedToType === 'project' && file.linkedToId
+        file.linkedToType?.toLowerCase() === 'project' && file.linkedToId
           ? file.linkedToId
           : userId;
 

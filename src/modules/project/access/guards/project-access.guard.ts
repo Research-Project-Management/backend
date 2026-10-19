@@ -128,6 +128,7 @@ export class ProjectAccessGuard implements CanActivate {
       // Check if dual-context library route in personal scope
       const url = request.url || request.raw?.url || '';
       const isDualContextLibraryRoute =
+        !url.includes('/manuscripts/') &&
         (url.includes('/library') ||
           url.includes('/attachments') ||
           url.includes('/files')) &&

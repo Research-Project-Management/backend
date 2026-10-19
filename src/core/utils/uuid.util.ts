@@ -14,6 +14,8 @@ const UUID_FORMAT_REGEX =
 /**
  * Type guard validating whether a value is a valid canonical RFC 4122 UUID string.
  */
+export function isUuid(value: string): boolean;
+export function isUuid(value: unknown): value is string;
 export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_FORMAT_REGEX.test(value);
 }

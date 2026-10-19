@@ -352,6 +352,46 @@ export class IntegrationsService {
     };
   }
 
+  async fetchRemoteCollectionBibtex(
+    userId: string,
+    provider: IntegrationProviderType,
+    collectionId: string,
+  ): Promise<{
+    provider: IntegrationProviderType;
+    collectionId: string;
+    bibtex: string;
+    syncedAt: Date;
+  }> {
+    const conn = await this.repo.findConnection(userId, provider);
+    if (!conn) {
+      throw new NotFoundException(
+        `No active connection found for provider: ${provider}`,
+      );
+    }
+
+    if (conn.authFailedAt || conn.status !== 'connected') {
+      throw new BadRequestException(
+        'Integration authentication is expired or invalid.',
+      );
+    }
+
+    const providerInstance = this.getProvider(provider);
+    const decryptedToken = decryptToken(conn.accessToken);
+
+    const bibtex = await providerInstance.fetchCollectionBibtex(
+      decryptedToken,
+      conn.providerUserId,
+      collectionId,
+    );
+
+    return {
+      provider,
+      collectionId,
+      bibtex,
+      syncedAt: new Date(),
+    };
+  }
+
   // ============================================================================
   // GitHub-Specific Specialized Workflows
   // ============================================================================

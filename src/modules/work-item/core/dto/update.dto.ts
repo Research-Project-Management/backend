@@ -127,6 +127,3 @@ export class UpdateWorkItemDto {
   @IsOptional()
   expectedUpdatedAt?: string | Date;
 }
-
-export const UpdateDto = UpdateWorkItemDto;
-export type UpdateDto = UpdateWorkItemDto;

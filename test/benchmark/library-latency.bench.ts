@@ -132,23 +132,8 @@ describe('Library Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         count: jest.fn().mockResolvedValue(10),
       } as any;
 
-      const typesService = { isValidItemType: () => true } as any;
-      const transformer = new ItemTransformer(typesService);
       const queryService = new ItemQueryService(queryRepo, realCacheService);
-
-      itemsService = new ItemsService(
-        queryRepo,
-        {} as any,
-        {} as any,
-        {} as any,
-        queryService,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        realCacheService,
-      );
+      itemsService = queryService as any;
     });
 
     it('should coalesce 50 concurrent requests into 1 single DB execution with 98% suppression', async () => {
@@ -335,6 +320,7 @@ describe('Library Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
     let memoryStore: Map<string, string>;
     let realCacheService: RedisCacheService;
     let queryRepo: jest.Mocked<QueryRepository>;
+    let queryService: ItemQueryService;
     let itemsService: ItemsService;
 
     beforeEach(() => {
@@ -373,17 +359,12 @@ describe('Library Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         }),
       } as any;
 
-      const queryService = new ItemQueryService(queryRepo, realCacheService);
+      queryService = new ItemQueryService(queryRepo, realCacheService);
       itemsService = new ItemsService(
         queryRepo,
         {} as any,
         {} as any,
-        {} as any,
-        queryService,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
+        { invalidateTagsCache: jest.fn().mockResolvedValue(undefined) } as any,
         undefined,
         realCacheService,
       );
@@ -394,7 +375,7 @@ describe('Library Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
 
       // 1. Cold fetch (DB count)
       const t0 = process.hrtime.bigint();
-      const coldCounts = await itemsService.getCounts(userId);
+      const coldCounts = await queryService.getCounts(userId);
       const coldMs = hrtimeMs(t0);
 
       expect(coldCounts.total).toBe(42);
@@ -402,7 +383,7 @@ describe('Library Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
 
       // 2. Warm fetch (Cached)
       const t1 = process.hrtime.bigint();
-      const warmCounts = await itemsService.getCounts(userId);
+      const warmCounts = await queryService.getCounts(userId);
       const warmMs = hrtimeMs(t1);
 
       expect(warmCounts.total).toBe(42);

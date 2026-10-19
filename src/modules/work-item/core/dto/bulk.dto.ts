@@ -108,6 +108,3 @@ export class DuplicateWorkItemDto {
   @IsOptional()
   projectId?: string;
 }
-
-export const BulkDto = BulkUpdateWorkItemDto;
-export type BulkDto = BulkUpdateWorkItemDto;

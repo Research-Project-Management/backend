@@ -294,4 +294,26 @@ export class IntegrationsController {
 
     return await this.service.syncProjectCollection(userId, provider, dto);
   }
+
+  @Get(':provider/collections/:collectionId/bibtex')
+  @ApiOperation({
+    summary:
+      'Fetch BibTeX entries from a connected Zotero/Mendeley collection for Library ingestion',
+  })
+  async getCollectionBibtex(
+    @CurrentUser('id') userId: string,
+    @Param('provider') provider: string,
+    @Param('collectionId') collectionId: string,
+  ) {
+    if (!isValidProvider(provider)) {
+      throw new BadRequestException(
+        `Invalid integration provider: ${provider}`,
+      );
+    }
+    return await this.service.fetchRemoteCollectionBibtex(
+      userId,
+      provider,
+      collectionId,
+    );
+  }
 }

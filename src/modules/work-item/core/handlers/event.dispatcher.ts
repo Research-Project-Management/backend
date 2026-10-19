@@ -195,6 +195,3 @@ export class EventDispatcher {
     });
   }
 }
-
-export const WorkItemEventDispatcher = EventDispatcher;
-export type WorkItemEventDispatcher = EventDispatcher;

@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { EXTRACTION_FACADE, IExtractionFacade } from '@/modules/library';
+import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
 import { EngineService } from '../../engine/engine.service';
 import { ScientificChunkingService } from './scientific-chunking.service';
 import { FileUploadedEvent } from '@/modules/storage';
@@ -13,8 +13,8 @@ export class DocumentAiIngestionService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
-    @Inject(EXTRACTION_FACADE)
-    private readonly extractionFacade: IExtractionFacade,
+    @Inject(LIBRARY_FACADE)
+    private readonly libraryFacade: ILibraryFacade,
     private readonly chunkingService: ScientificChunkingService,
     private readonly engineService: EngineService,
   ) {}
@@ -76,11 +76,11 @@ export class DocumentAiIngestionService {
         );
       }
 
-      // 3. Extract text and academic metadata (in-process extraction facade)
-      const extractedDoc =
-        await this.extractionFacade.extractDocumentFromBuffer(
-          storageFile.buffer,
-        );
+      // 3. Extract text and academic metadata via LibraryFacade
+      const extractedDoc = await this.libraryFacade.extractPdfBuffer(
+        storageFile.buffer,
+        event.filename,
+      );
 
       // 4. Perform scientific semantic chunking
       const chunks = this.chunkingService.chunkPdfDocument(extractedDoc, {
@@ -168,46 +168,31 @@ export class DocumentAiIngestionService {
         `AI RAG Ingestion finished for file ${fileId}: status=${isIndexed ? 'indexed' : 'offline_fallback'}, chunks=${chunks.length}`,
       );
 
-      // 8. Propagate ragDocId and metadata to linked Library Attachment & Item if present
+      // 8. Propagate ragDocId and metadata to linked Library Attachment & Item via LibraryFacade
       if (isIndexed && ragDocId) {
         try {
-          const attachment = await this.prisma.attachment.findFirst({
-            where: { fileId, deletedAt: null },
-            select: { id: true, itemId: true, metadata: true },
-          });
+          const attachment =
+            typeof this.libraryFacade.findAttachmentByFileId === 'function'
+              ? await this.libraryFacade.findAttachmentByFileId(fileId)
+              : await this.prisma.attachment.findFirst({
+                  where: { fileId, deletedAt: null },
+                  select: { id: true, itemId: true, metadata: true },
+                });
           if (attachment) {
-            const attMeta =
-              (attachment.metadata as Record<string, unknown>) || {};
-            await this.prisma.attachment.update({
-              where: { id: attachment.id },
-              data: {
-                metadata: {
-                  ...attMeta,
-                  ragDocId,
-                  ragStatus: 'indexed',
-                },
+            await this.libraryFacade.updateAttachmentProcessingStatus(
+              attachment.id,
+              'indexed',
+              {
+                ragDocId,
+                ragStatus: 'indexed',
               },
-            });
+            );
 
             if (attachment.itemId) {
-              const item = await this.prisma.item.findUnique({
-                where: { id: attachment.itemId },
-                select: { id: true, metadata: true },
+              await this.libraryFacade.updateItemAiMetadata(attachment.itemId, {
+                ragDocId,
+                ragStatus: 'indexed',
               });
-              if (item) {
-                const itemMeta =
-                  (item.metadata as Record<string, unknown>) || {};
-                await this.prisma.item.update({
-                  where: { id: item.id },
-                  data: {
-                    metadata: {
-                      ...itemMeta,
-                      ragDocId,
-                      ragStatus: 'indexed',
-                    },
-                  },
-                });
-              }
             }
           }
         } catch (propagateErr) {

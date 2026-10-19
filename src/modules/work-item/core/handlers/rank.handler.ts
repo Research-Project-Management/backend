@@ -207,6 +207,3 @@ export class RankHandler {
     };
   }
 }
-
-export const WorkItemRankHandler = RankHandler;
-export type WorkItemRankHandler = RankHandler;

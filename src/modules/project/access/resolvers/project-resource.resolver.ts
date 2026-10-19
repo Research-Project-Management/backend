@@ -29,7 +29,11 @@ export class ProjectResourceResolver {
         (typeof request.params?.pageId === 'string' && request.params.pageId) ||
         (typeof request.params?.docId === 'string' && request.params.docId) ||
         (typeof request.body?.pageId === 'string' && request.body.pageId) ||
-        (typeof request.body?.docId === 'string' && request.body.docId);
+        (typeof request.body?.page_id === 'string' && request.body.page_id) ||
+        (typeof request.body?.docId === 'string' && request.body.docId) ||
+        (typeof request.body?.doc_id === 'string' && request.body.doc_id) ||
+        (typeof request.query?.pageId === 'string' && request.query.pageId) ||
+        (typeof request.query?.page_id === 'string' && request.query.page_id);
 
       if (pageId && isUUID(pageId)) {
         const doc = await this.prisma.manuscriptDoc.findUnique({
@@ -39,21 +43,34 @@ export class ProjectResourceResolver {
         if (doc?.projectId) {
           resolvedResourceProjects.set(`doc:${pageId}`, doc.projectId);
         } else {
-          // Legacy support: check if the pageId is actually a project ID
-          const project = await this.prisma.project.findUnique({
+          // Check if the pageId is a ManuscriptNode ID
+          const node = await this.prisma.manuscriptNode.findUnique({
             where: { id: pageId },
-            select: { id: true },
+            select: { projectId: true },
           });
-          if (project?.id) {
-            resolvedResourceProjects.set(`project:${pageId}`, project.id);
+          if (node?.projectId) {
+            resolvedResourceProjects.set(`node:${pageId}`, node.projectId);
+          } else {
+            // Legacy support: check if the pageId is actually a project ID
+            const project = await this.prisma.project.findUnique({
+              where: { id: pageId },
+              select: { id: true },
+            });
+            if (project?.id) {
+              resolvedResourceProjects.set(`project:${pageId}`, project.id);
+            }
           }
         }
       }
 
       // Check secondary docId in body if different from pageId
+      const candidateBodyDocId =
+        (typeof request.body?.docId === 'string' && request.body.docId) ||
+        (typeof request.body?.doc_id === 'string' && request.body.doc_id) ||
+        undefined;
       const bodyDocId =
-        typeof request.body?.docId === 'string' && request.body.docId !== pageId
-          ? request.body.docId
+        candidateBodyDocId && candidateBodyDocId !== pageId
+          ? candidateBodyDocId
           : undefined;
       if (bodyDocId && isUUID(bodyDocId)) {
         const doc = await this.prisma.manuscriptDoc.findUnique({
@@ -62,6 +79,14 @@ export class ProjectResourceResolver {
         });
         if (doc?.projectId) {
           resolvedResourceProjects.set(`doc:${bodyDocId}`, doc.projectId);
+        } else {
+          const node = await this.prisma.manuscriptNode.findUnique({
+            where: { id: bodyDocId },
+            select: { projectId: true },
+          });
+          if (node?.projectId) {
+            resolvedResourceProjects.set(`node:${bodyDocId}`, node.projectId);
+          }
         }
       }
 

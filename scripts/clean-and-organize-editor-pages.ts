@@ -575,7 +575,7 @@ Nhóm nghiên cứu của Lab sẽ tích hợp cơ chế ánh xạ tọa độ b
     name: '02. [Grant Proposal] NAFOSTED & NSF Grand Challenge (2026-2028)',
     path: '/documents/01_grant_proposal.tex',
     content: GRANT_PROPOSAL_TEX,
-    isRootDoc: true,
+    isRootDoc: false,
     sortOrder: 31,
   });
 
@@ -587,7 +587,7 @@ Nhóm nghiên cứu của Lab sẽ tích hợp cơ chế ánh xạ tọa độ b
     name: '03. [Technical Report] Zero-Shot Mesh Super-Resolution on Nek5000',
     path: '/documents/02_technical_report.tex',
     content: TECHNICAL_REPORT_TEX,
-    isRootDoc: true,
+    isRootDoc: false,
     sortOrder: 32,
   });
 
@@ -599,7 +599,7 @@ Nhóm nghiên cứu của Lab sẽ tích hợp cơ chế ánh xạ tọa độ b
     name: '04. [SOP] Flux Lab Operating Handbook & GPU Cluster Protocol',
     path: '/documents/03_lab_handbook.tex',
     content: LAB_HANDBOOK_TEX,
-    isRootDoc: true,
+    isRootDoc: false,
     sortOrder: 33,
   });
 
@@ -611,7 +611,7 @@ Nhóm nghiên cứu của Lab sẽ tích hợp cơ chế ánh xạ tọa độ b
     name: '05. [Journal Club] Biên bản Thảo luận Khoa học Hàng tuần',
     path: '/documents/04_journal_club_notes.tex',
     content: JOURNAL_CLUB_TEX,
-    isRootDoc: true,
+    isRootDoc: false,
     sortOrder: 34,
   });
 

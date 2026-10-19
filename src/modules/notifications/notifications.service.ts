@@ -12,14 +12,14 @@ import {
   ParseAndNotifyMentionsUseCase,
   ParseAndNotifyMentionsCommand,
   ParseMentionsResult,
-} from './manuscripts/core/use-cases/parse-and-notify-mentions.use-case';
+} from './core/use-cases/parse-and-notify-mentions.use-case';
 import {
   IMentionParserPort,
   MENTION_PARSER_PORT,
-} from './manuscripts/core/ports/mention-parser.port';
+} from './core/ports/mention-parser.port';
 import { QueryNotificationsOptions } from './core/ports/notification-repository.port';
 import { NotificationEntity } from './core/domain/entities/notification.entity';
-import { MentionToken } from './manuscripts/core/domain/value-objects/mention-token.vo';
+import { MentionToken } from './core/domain/value-objects/mention-token.vo';
 import { ManuscriptsNotificationsService } from './manuscripts/manuscripts-notifications.service';
 import { ProjectsNotificationsService } from './projects/projects-notifications.service';
 

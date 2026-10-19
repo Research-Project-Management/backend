@@ -43,6 +43,7 @@ interface ProjectStateRecord {
 @Injectable()
 export class CoreService {
   private readonly logger = new Logger(CoreService.name);
+  private readonly bulkHandler: BulkHandler;
 
   constructor(
     private readonly workItemRepository: CoreRepository,
@@ -50,14 +51,14 @@ export class CoreService {
     private readonly rankHandler: RankHandler,
     private readonly cloneHandler: CloneHandler,
     private readonly eventDispatcher: EventDispatcher,
-    @Optional()
-    private readonly bulkHandler = new BulkHandler(
-      workItemRepository,
-      eventDispatcher,
-    ),
+    @Optional() bulkHandler?: BulkHandler,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
-  ) {}
+  ) {
+    this.bulkHandler =
+      bulkHandler ||
+      new BulkHandler(this.workItemRepository, this.eventDispatcher);
+  }
 
   private async invalidateCache(projectId: string, workItemId?: string) {
     await invalidateWorkItemCache(this.cache, { projectId, workItemId });
@@ -869,6 +870,3 @@ export class CoreService {
     };
   }
 }
-
-export const WorkItemService = CoreService;
-export type WorkItemService = CoreService;

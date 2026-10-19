@@ -74,6 +74,26 @@ export class CoreController {
     return this.projectService.create(userId, dto);
   }
 
+  @Get('check-identifier')
+  @ApiOperation({
+    summary: 'Check if a project identifier is available and get a suggested alternative if taken',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Identifier availability check and suggested available identifier',
+  })
+  async checkIdentifier(
+    @CurrentUser('id') userId: string,
+    @Query('identifier') identifier?: string,
+    @Query('name') name?: string,
+  ) {
+    return this.projectService.checkIdentifierAvailability(
+      userId,
+      identifier,
+      name,
+    );
+  }
+
   @Get(':projectId')
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')

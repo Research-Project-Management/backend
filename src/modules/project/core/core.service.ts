@@ -276,20 +276,32 @@ export class CoreService {
       });
     }
 
-    const identifier = dto.identifier?.trim().toUpperCase();
-    if (identifier) {
-      const existing =
-        await this.projectRepo.findProjectByIdentifier(identifier);
-      if (existing) {
-        throw new BadRequestException(
-          `Project with identifier "${identifier}" already exists`,
-        );
-      }
+    const rawIdentifier = dto.identifier?.trim().toUpperCase();
+    const desiredIdentifier = (
+      rawIdentifier || deriveProjectPrefix(null, dto.name)
+    )
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .replace(/[^A-Z0-9_-]/g, '')
+      .slice(0, 10) || 'PROJ';
+
+    const isTaken = await this.projectRepo.isIdentifierTaken(
+      desiredIdentifier,
+      userId,
+    );
+    if (isTaken) {
+      throw new BadRequestException(
+        `A project with identifier "${desiredIdentifier}" already exists in your workspace.`,
+      );
     }
+
+    const identifier = desiredIdentifier;
 
     const project = await this.projectRepo.createProject(userId, {
       name: dto.name,
-      identifier: identifier || null,
+      identifier,
       avatar: dto.avatar || '',
       coverImage: dto.coverImage || dto.cover || '',
       description: dto.description || '',
@@ -334,7 +346,10 @@ export class CoreService {
     if (dto.identifier !== undefined && dto.identifier) {
       const identifier = dto.identifier.trim().toUpperCase();
       const duplicate =
-        await this.projectRepo.findProjectByIdentifier(identifier);
+        await this.projectRepo.findProjectByIdentifier(
+          identifier,
+          existing.createdById,
+        );
       if (duplicate && duplicate.id !== projectId) {
         throw new BadRequestException(
           `Project with identifier "${identifier}" already exists`,
@@ -560,5 +575,40 @@ export class CoreService {
     );
 
     return { message: 'Project permanently deleted' };
+  }
+
+  /**
+   * Check if a project identifier is available for the user and provide suggestion if taken.
+   */
+  async checkIdentifierAvailability(
+    userId: string,
+    identifier?: string,
+    name?: string,
+  ): Promise<{
+    available: boolean;
+    identifier: string;
+    suggested: string;
+  }> {
+    const raw =
+      identifier?.trim().toUpperCase() ||
+      deriveProjectPrefix(null, name) ||
+      'PROJ';
+
+    const clean =
+      raw
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .replace(/[^A-Z0-9_-]/g, '')
+        .slice(0, 10) || 'PROJ';
+
+    const isTaken = await this.projectRepo.isIdentifierTaken(clean, userId);
+
+    return {
+      available: !isTaken,
+      identifier: clean,
+      suggested: clean,
+    };
   }
 }

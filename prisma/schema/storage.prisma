@@ -148,26 +148,11 @@ model UploadSession {
   createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  parts UploadPart[]
-
   @@index([status, expiresAt], map: "idx_upload_sessions_cleanup")
   @@index([userId], map: "idx_upload_sessions_user")
   @@index([projectId], map: "idx_upload_sessions_project")
   @@index([parentId], map: "idx_upload_sessions_parent")
   @@map("upload_sessions")
-}
-
-model UploadPart {
-  sessionId  String   @map("session_id") @db.Uuid
-  partNumber Int      @map("part_number")
-  etag       String   @db.VarChar(64)
-  sizeBytes  Int      @map("size_bytes")
-  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
-
-  session UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@id([sessionId, partNumber])
-  @@map("upload_parts")
 }
 
 // -------------------------

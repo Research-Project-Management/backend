@@ -360,7 +360,7 @@ async function runBenchmark() {
   );
 
   const trusted = new TrustedExtractionService();
-  const pdfProvider = new PdfProvider(undefined, undefined, trusted);
+  const pdfProvider = new PdfProvider(undefined, trusted);
   const webFetchLadder = new WebFetchLadderService();
   const extractionGateway = {
     extractDocumentFromBuffer: (buf: Buffer, opts?: unknown) =>

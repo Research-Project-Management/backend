@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { EngineModule } from './engine/engine.module';
 import { ChatModule } from './chat/chat.module';
-import { ExtractionModule } from '../library/extraction/extraction.module';
+import { LibraryModule } from '@/modules/library';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 import { ScientificChunkingService } from './ingestion/services/scientific-chunking.service';
@@ -11,7 +11,7 @@ import { FileUploadedAiListener } from './ingestion/listeners/file-uploaded-ai.l
 import { VerifiedEmailGuard } from '@/modules/identity/auth';
 
 @Module({
-  imports: [EngineModule, ChatModule, ExtractionModule],
+  imports: [EngineModule, ChatModule, LibraryModule],
   controllers: [AiController],
   providers: [
     AiService,

@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DraftRepository } from './draft.repository';
-import { WorkItemService } from '@/modules/work-item/core/core.service';
+import { CoreService } from '@/modules/work-item/core/core.service';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { UpdateDraftDto } from './dto/update-draft.dto';
 import { PublishDraftDto } from './dto/publish-draft.dto';
@@ -19,7 +19,7 @@ export class DraftService {
 
   constructor(
     private readonly draftRepository: DraftRepository,
-    private readonly workItemService: WorkItemService,
+    private readonly workItemService: CoreService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 

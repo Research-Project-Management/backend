@@ -284,6 +284,3 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     return this.workItemService.convertToRootWorkItem(workItemId);
   }
 }
-
-export const WorkItemController = CoreController;
-export type WorkItemController = CoreController;

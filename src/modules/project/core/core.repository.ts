@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import {
   Prisma,
@@ -220,16 +220,22 @@ export class CoreRepository {
   }
 
   /**
-   * Find project by unique identifier (e.g. 'DLGA').
+   * Find project by identifier within a user's scope (or globally if userId omitted).
    */
   async findProjectByIdentifier(
     identifier: string,
+    userId?: string,
   ): Promise<ProjectWithMembers | null> {
+    const whereClause: Prisma.ProjectWhereInput = {
+      identifier: { equals: identifier.trim(), mode: 'insensitive' },
+      deletedAt: null,
+    };
+    if (userId) {
+      whereClause.createdById = userId;
+    }
+
     const project = await this.prisma.project.findFirst({
-      where: {
-        identifier: { equals: identifier.trim(), mode: 'insensitive' },
-        deletedAt: null,
-      },
+      where: whereClause,
       include: {
         state: true,
         members: {
@@ -248,15 +254,88 @@ export class CoreRepository {
   }
 
   /**
+   * Check whether a project identifier is already used by the specified user (or globally if userId omitted).
+   */
+  async isIdentifierTaken(
+    identifier: string,
+    userId?: string,
+  ): Promise<boolean> {
+    if (!identifier) return false;
+    const whereClause: Prisma.ProjectWhereInput = {
+      identifier: { equals: identifier.trim(), mode: 'insensitive' },
+      deletedAt: null,
+    };
+    if (userId) {
+      whereClause.createdById = userId;
+    }
+    const count = await this.prisma.project.count({ where: whereClause });
+    return count > 0;
+  }
+
+  /**
+   * Find an available unique project identifier for the user starting from a desired prefix.
+   * e.g. "FLUX" -> if user already has "FLUX", returns "FLUX2", "FLUX3", etc.
+   * Different users NEVER conflict!
+   */
+  async findAvailableIdentifier(
+    desiredPrefix: string,
+    userId?: string,
+  ): Promise<string> {
+    const clean =
+      desiredPrefix
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9_-]/g, '') || 'PROJ';
+
+    const baseCandidate = clean.slice(0, 10);
+    const taken = await this.isIdentifierTaken(baseCandidate, userId);
+    if (!taken) {
+      return baseCandidate;
+    }
+
+    let suffix = 2;
+    while (true) {
+      const suffixStr = String(suffix);
+      const baseLen = Math.min(clean.length, 10 - suffixStr.length);
+      const candidate = `${clean.slice(0, baseLen)}${suffixStr}`;
+      const isTaken = await this.isIdentifierTaken(candidate, userId);
+      if (!isTaken) {
+        return candidate;
+      }
+      suffix++;
+    }
+  }
+
+  /**
    * Create a new project. The creator is atomically enrolled as project 'owner'.
    */
   async createProject(
     userId: string,
     data: CreateProjectInput,
   ): Promise<ProjectWithMembers> {
-    const identifier =
+    const rawIdentifier =
       data.identifier?.trim().toUpperCase() ||
       deriveProjectPrefix(data.identifier, data.name);
+
+    const identifier =
+      rawIdentifier
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .replace(/[^A-Z0-9_-]/g, '')
+        .slice(0, 10) || 'PROJ';
+
+    const isTaken = await this.isIdentifierTaken(identifier, userId);
+    if (isTaken) {
+      throw new BadRequestException(
+        `A project with identifier "${identifier}" already exists in your workspace.`,
+      );
+    }
 
     const project = await this.prisma.project.create({
       data: {
@@ -805,8 +884,14 @@ export class CoreRepository {
     };
   }
 
-  async findByIdentifier(identifier: string) {
-    return this.prisma.project.findUnique({ where: { identifier } });
+  async findByIdentifier(identifier: string, userId?: string) {
+    return this.prisma.project.findFirst({
+      where: {
+        identifier: { equals: identifier.trim(), mode: 'insensitive' },
+        ...(userId ? { createdById: userId } : {}),
+        deletedAt: null,
+      },
+    });
   }
 
   async duplicateProject(

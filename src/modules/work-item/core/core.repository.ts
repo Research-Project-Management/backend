@@ -45,12 +45,17 @@ export const BASE_WORK_ITEM_INCLUDE = {
 @Injectable()
 export class CoreRepository {
   private readonly logger = new Logger(CoreRepository.name);
+  private readonly attachmentSync: AttachmentSyncHandler;
+  private readonly syncHandler: SyncHandler;
 
   constructor(
     private readonly prismaService: PrismaService,
-    @Optional() private readonly attachmentSync = new AttachmentSyncHandler(),
-    @Optional() private readonly syncHandler = new SyncHandler(),
-  ) {}
+    @Optional() attachmentSync?: AttachmentSyncHandler,
+    @Optional() syncHandler?: SyncHandler,
+  ) {
+    this.attachmentSync = attachmentSync || new AttachmentSyncHandler();
+    this.syncHandler = syncHandler || new SyncHandler();
+  }
 
   private async executeTx<T>(
     fn: (tx: Prisma.TransactionClient) => Promise<T>,
