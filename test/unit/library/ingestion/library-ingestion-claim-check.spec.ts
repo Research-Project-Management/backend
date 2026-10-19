@@ -218,11 +218,11 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
         uncompressedSize: largeContent.length,
       };
 
-      const candidates = await identifyStage.execute(
-        'run-test',
-        offloadedPayload,
-        'user-uuid-1',
-      );
+      const candidates = await identifyStage.execute({
+        runId: 'run-test',
+        payload: offloadedPayload,
+        scopeId: 'user-uuid-1',
+      });
 
       expect(mockStoragePort.readOwnedFile).toHaveBeenCalledWith({ fileId });
       expect(candidates.length).toBe(20);
@@ -241,11 +241,11 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
         content: sampleBibtexSmall,
       };
 
-      const candidates = await identifyStage.execute(
-        'run-test',
-        inlinePayload,
-        'user-uuid-1',
-      );
+      const candidates = await identifyStage.execute({
+        runId: 'run-test',
+        payload: inlinePayload,
+        scopeId: 'user-uuid-1',
+      });
 
       expect(mockStoragePort.readOwnedFile).not.toHaveBeenCalled();
       expect(candidates.length).toBe(1);

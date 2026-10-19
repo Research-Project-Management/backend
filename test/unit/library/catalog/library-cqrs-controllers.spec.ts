@@ -63,7 +63,6 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         'user-1',
         'item-1',
         dto,
-        undefined,
         'proj-1',
       );
 
@@ -78,7 +77,6 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       const res = await controller.getItemAttachments(
         'user-1',
         'item-1',
-        undefined,
         'proj-1',
       );
 
@@ -94,7 +92,6 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       const res = await controller.deleteAttachment(
         'user-1',
         'att-1',
-        undefined,
         'proj-1',
       );
 
@@ -131,7 +128,6 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         'user-1',
         'att-1',
         dto,
-        undefined,
         validProjId,
       );
 
@@ -150,7 +146,6 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       const res = await controller.batchRenameAttachments(
         'user-1',
         dto,
-        undefined,
         validProjId,
       );
 
@@ -170,7 +165,6 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         'user-1',
         'att-1',
         mockReply,
-        undefined,
         'proj-1',
       );
 
@@ -268,6 +262,7 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       expect(mockIngestionService.getRunStatus).toHaveBeenCalledWith(
         'user-1',
         validUuid,
+        undefined,
       );
       expect(res).toEqual({ runId: 'run-1', status: 'COMPLETED' });
     });
@@ -279,6 +274,7 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       expect(mockIngestionService.getRunProgress).toHaveBeenCalledWith(
         'user-1',
         validUuid,
+        undefined,
       );
       expect(res).toEqual({ runId: 'run-1', stage: 'EXTRACTING', percent: 60 });
     });
@@ -290,6 +286,7 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       expect(mockIngestionService.retryRun).toHaveBeenCalledWith(
         'user-1',
         validUuid,
+        undefined,
       );
       expect(res).toEqual({ runId: 'run-2', status: 'RETRYING' });
     });
@@ -441,13 +438,14 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
     });
 
     it('should extract notes from annotations by delegating to NotesService', async () => {
-      const res = await controller.extractNotesFromAnnotations(
+      const res = await controller.extractNotes(
         'user-1',
         sampleItemId,
       );
       expect(mockNotesService.extractNotesFromAnnotations).toHaveBeenCalledWith(
         'user-1',
         sampleItemId,
+        undefined,
         undefined,
       );
       expect(res).toEqual({ success: true, totalExtracted: 2 });
@@ -460,6 +458,7 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         'user-1',
         sampleNoteId,
         dto,
+        undefined,
       );
       expect(res).toEqual({ id: sampleNoteId, version: 2 });
     });
@@ -469,6 +468,8 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       expect(mockNotesService.deleteNote).toHaveBeenCalledWith(
         'user-1',
         sampleNoteId,
+        undefined,
+        undefined,
       );
       expect(res).toEqual({ deleted: true });
     });

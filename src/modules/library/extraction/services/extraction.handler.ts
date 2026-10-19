@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import crypto from 'crypto';
 import zlib from 'zlib';
 import { promisify } from 'util';
@@ -10,92 +11,60 @@ import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { OutboxEvent, Prisma } from '@prisma/client';
 import {
   OutboxDispatchHandler,
-  IdempotentConsumerService,
-} from '@/modules/library/core';
-import { AttachmentStorageException } from '@/modules/library/extraction/types/attachments.types';
-import {
+  LIBRARY_EVENT_TYPES,
+  normalizeProjectScopeId,
   parseCreatorString,
   isNoiseAuthorName,
   extractFileIdFromUrl,
   ExtractionProcessException,
 } from '@/modules/library/core';
+import {
+  IdempotentConsumerService,
+  TransactionService,
+} from '@/modules/library/sync';
+import { AttachmentStorageException } from '@/modules/library/extraction/types/attachments.types';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { ReferenceMatcherService } from './reference-matcher.service';
 
 export const EXTRACTION_EVENT_TYPES = {
   EXTRACTION_REQUESTED: 'library.attachment.extraction_requested',
+  PAGES_EXTRACTED: 'library.attachment.pages.extracted',
 } as const;
-
-export const ATTACHMENT_EXTRACTION_STALE_THRESHOLD =
-  'ATTACHMENT_EXTRACTION_STALE_THRESHOLD';
-
-export interface IAttachmentSearchIndexer {
-  indexAttachmentPages?(
-    attachmentId: string,
-    pages: Array<{
-      pageIndex?: number;
-      textContent?: string;
-      charOffset?: number;
-    }>,
-  ): Promise<void>;
-}
-
-function isIdempotentConsumer(val: unknown): val is IdempotentConsumerService {
-  return (
-    typeof val === 'object' &&
-    val !== null &&
-    'executeIdempotent' in val &&
-    typeof val.executeIdempotent === 'function'
-  );
-}
 
 @Injectable()
 export class ExtractionHandler implements OutboxDispatchHandler {
   private readonly logger = new Logger(ExtractionHandler.name);
   private readonly maxAttempts = 3;
-  private readonly staleThresholdMs: number;
-  private readonly storagePort: IStoragePort;
-  private readonly searchIndexer?: IAttachmentSearchIndexer;
-  private readonly idempotentConsumer?: IdempotentConsumerService;
+  private readonly staleThresholdMs = 5 * 60 * 1000;
 
   constructor(
     private readonly extractionRepo: ExtractionRepository,
     private readonly pdf: PdfProvider,
-    @Inject(STORAGE_PORT) storagePort: IStoragePort,
+    @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
     @Optional()
-    searchIndexerOrThreshold?: IAttachmentSearchIndexer | number,
-    @Optional()
-    @Inject(ATTACHMENT_EXTRACTION_STALE_THRESHOLD)
-    staleThresholdOrIdempotent?: number | IdempotentConsumerService,
-    @Optional()
-    idempotentConsumer?: IdempotentConsumerService,
+    private readonly idempotentConsumer?: IdempotentConsumerService,
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()
     private readonly referenceMatcher?: ReferenceMatcherService,
-  ) {
-    this.storagePort = storagePort;
-
-    if (typeof searchIndexerOrThreshold === 'number') {
-      this.staleThresholdMs = searchIndexerOrThreshold;
-      this.idempotentConsumer = isIdempotentConsumer(staleThresholdOrIdempotent)
-        ? staleThresholdOrIdempotent
-        : idempotentConsumer;
-    } else {
-      this.searchIndexer = searchIndexerOrThreshold;
-      if (typeof staleThresholdOrIdempotent === 'number') {
-        this.staleThresholdMs = staleThresholdOrIdempotent;
-        this.idempotentConsumer = idempotentConsumer;
-      } else if (isIdempotentConsumer(staleThresholdOrIdempotent)) {
-        this.staleThresholdMs = 5 * 60 * 1000;
-        this.idempotentConsumer = staleThresholdOrIdempotent;
-      } else {
-        this.staleThresholdMs = 5 * 60 * 1000;
-        this.idempotentConsumer = idempotentConsumer;
-      }
-    }
-  }
+    @Optional()
+    private readonly eventEmitter?: EventEmitter2,
+    @Optional()
+    private readonly libraryTx?: TransactionService,
+    @Optional()
+    @Inject('SEARCH_FACADE')
+    private readonly searchFacade?: {
+      indexAttachmentPages?: (
+        attachmentId: string,
+        pages: Array<{
+          pageIndex: number;
+          textContent: string;
+          charOffset?: number;
+        }>,
+      ) => Promise<void>;
+    },
+  ) {}
 
   async handle(event: OutboxEvent, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) {
@@ -241,16 +210,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       }
 
       // 2. Storage-first reading via Storage Port
-      interface StorageReaderAdapter {
-        readFile?: (id: string) => Promise<{ buffer?: Buffer } | Buffer | null>;
-      }
-      const storageReader = this.storagePort as unknown as StorageReaderAdapter;
-      const storageFile =
-        typeof this.storagePort?.readOwnedFile === 'function'
-          ? await this.storagePort.readOwnedFile({ fileId })
-          : typeof storageReader?.readFile === 'function'
-            ? await storageReader.readFile(fileId)
-            : null;
+      const storageFile = await this.storagePort.readOwnedFile({ fileId });
       const rawBuffer =
         storageFile?.buffer ||
         (Buffer.isBuffer(storageFile) ? storageFile : null);
@@ -269,10 +229,70 @@ export class ExtractionHandler implements OutboxDispatchHandler {
 
       // 3. Extract text and per-page structures
       const doc = await this.pdf.extractDocumentFromBuffer(buffer);
+      const extractionResult = doc as Omit<typeof doc, 'pages'> & {
+        markdown?: string;
+        text?: string;
+        pageCount?: number;
+        pages?: Array<{
+          pageIndex?: number;
+          pageNumber?: number;
+          textContent?: string;
+          text?: string;
+          charOffset?: number;
+        }>;
+      };
 
-      // 4. Atomically index pages idempotently if search indexer is available
-      if (doc.pages.length > 0 && this.searchIndexer?.indexAttachmentPages) {
-        await this.searchIndexer.indexAttachmentPages(attachment.id, doc.pages);
+      // 3.1. Wire Page-Level FullText Indexing (FullTextIndex in PostgreSQL)
+      if (
+        Array.isArray(extractionResult.pages) &&
+        extractionResult.pages.length > 0
+      ) {
+        const normalizedPages = extractionResult.pages.map((p, idx) => ({
+          pageIndex:
+            typeof p.pageIndex === 'number'
+              ? p.pageIndex
+              : typeof p.pageNumber === 'number'
+                ? Math.max(0, p.pageNumber - 1)
+                : idx,
+          pageNumber:
+            p.pageNumber ??
+            (typeof p.pageIndex === 'number' ? p.pageIndex + 1 : idx + 1),
+          textContent: p.text ?? p.textContent ?? '',
+          charOffset: p.charOffset ?? 0,
+        }));
+
+        try {
+          if (typeof this.searchFacade?.indexAttachmentPages === 'function') {
+            await this.searchFacade.indexAttachmentPages(
+              attachment.id,
+              normalizedPages,
+            );
+          } else if (
+            typeof this.extractionRepo.indexAttachmentPages === 'function'
+          ) {
+            await this.extractionRepo.indexAttachmentPages(
+              attachment.id,
+              normalizedPages,
+            );
+          }
+
+          this.eventEmitter?.emit('library.attachment.pages.extracted', {
+            attachmentId: attachment.id,
+            itemId: attachment.itemId,
+            pages: normalizedPages.map((p) => ({
+              pageNumber: p.pageNumber,
+              pageIndex: p.pageIndex,
+              textContent: p.textContent,
+              charOffset: p.charOffset,
+            })),
+          });
+        } catch (indexErr: unknown) {
+          const msg =
+            indexErr instanceof Error ? indexErr.message : String(indexErr);
+          this.logger.warn(
+            `Failed to index extracted pages for attachment ${attachment.id}: ${msg}`,
+          );
+        }
       }
 
       // 4.1. Store OCR provenance and quality stats if any pages were OCR'd
@@ -359,7 +379,11 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       if (
         (doc.references && doc.references.length > 0) ||
         (doc.sections && doc.sections.length > 0) ||
+        (doc.figures && doc.figures.length > 0) ||
+        (doc.tables && doc.tables.length > 0) ||
+        (doc.formulas && doc.formulas.length > 0) ||
         (doc.fullText && doc.fullText.trim().length > 0) ||
+        (doc.pages && doc.pages.length > 0) ||
         (doc.metadata?.rawText && doc.metadata.rawText.trim().length > 0) ||
         (doc.metadata?.keywords && doc.metadata.keywords.length > 0) ||
         (doc.metadata?.notes && doc.metadata.notes.length > 0) ||
@@ -374,6 +398,12 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         )
       ) {
         try {
+          const combinedPlainText =
+            extractionResult.text ??
+            doc.fullText ??
+            (Array.isArray(doc.pages) && doc.pages.length > 0
+              ? doc.pages.map((p) => p.textContent || '').join('\n')
+              : doc.metadata?.rawText ?? '');
           const fulltextTree = {
             title: doc.metadata?.title,
             abstract: doc.metadata?.abstract,
@@ -383,20 +413,22 @@ export class ExtractionHandler implements OutboxDispatchHandler {
             year: doc.metadata?.year,
             keywords: doc.metadata?.keywords,
             notes: doc.metadata?.notes,
-            sections: doc.sections ?? [],
-            figures: doc.figures ?? [],
-            tables: doc.tables ?? [],
-            formulas: doc.formulas ?? [],
-            references: doc.references ?? [],
+            sections: extractionResult.sections ?? [],
+            figures: extractionResult.figures ?? [],
+            tables: extractionResult.tables ?? [],
+            formulas: extractionResult.formulas ?? [],
+            references: extractionResult.references ?? [],
+            markdown: extractionResult.markdown ?? '',
+            plainText: combinedPlainText,
+            pageCount:
+              extractionResult.pageCount ??
+              doc.metadata?.numberOfPages ??
+              (Array.isArray(doc.pages) ? doc.pages.length : 0),
           };
 
           let payloadToSave: Record<string, unknown> = {
             ...fulltextTree,
-            sectionCount: doc.sections?.length ?? 0,
-            figureCount: doc.figures?.length ?? 0,
-            tableCount: doc.tables?.length ?? 0,
-            formulaCount: doc.formulas?.length ?? 0,
-            referenceCount: doc.references?.length ?? 0,
+            referenceCount: fulltextTree.references.length,
           };
 
           // Claim Check Pattern: Offload heavy full-text tree to Object Storage
@@ -429,11 +461,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
                   uncompressedSize: jsonBuffer.length,
                   title: doc.metadata?.title,
                   abstract: doc.metadata?.abstract,
-                  sectionCount: doc.sections?.length ?? 0,
-                  figureCount: doc.figures?.length ?? 0,
-                  tableCount: doc.tables?.length ?? 0,
-                  formulaCount: doc.formulas?.length ?? 0,
-                  referenceCount: doc.references?.length ?? 0,
+                  referenceCount: fulltextTree.references.length,
+                  pageCount: fulltextTree.pageCount,
                 };
               }
             } catch (offloadErr: unknown) {
@@ -448,11 +477,31 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           }
 
           // Store full-text structured tree (Claim Check reference or inline)
-          await this.extractionRepo.saveMetadataSourceRecord(
-            attachment.itemId,
-            'pdf_fulltext',
-            payloadToSave as unknown as Prisma.InputJsonValue,
-          );
+          const savedFulltextRecord =
+            await this.extractionRepo.saveMetadataSourceRecord(
+              attachment.itemId,
+              'pdf_fulltext',
+              payloadToSave as unknown as Prisma.InputJsonValue,
+            );
+
+          if (
+            savedFulltextRecord &&
+            'supersededFileIds' in savedFulltextRecord &&
+            Array.isArray(savedFulltextRecord.supersededFileIds) &&
+            typeof this.storagePort?.deleteFile === 'function'
+          ) {
+            for (const oldFileId of savedFulltextRecord.supersededFileIds) {
+              try {
+                await this.storagePort.deleteFile(oldFileId);
+              } catch (delErr: unknown) {
+                const msg =
+                  delErr instanceof Error ? delErr.message : String(delErr);
+                this.logger.warn(
+                  `Failed to delete superseded pdf_fulltext blob ${oldFileId}: ${msg}`,
+                );
+              }
+            }
+          }
 
           // Save native metadata extraction provenance record
           await this.extractionRepo.saveMetadataSourceRecord(
@@ -529,10 +578,27 @@ export class ExtractionHandler implements OutboxDispatchHandler {
             doc.metadata?.bookTitle ||
             doc.metadata?.conferenceName;
 
+          const existingItemRecord = (attachment.item ?? {}) as Record<
+            string,
+            unknown
+          >;
+
           const itemPatch: Prisma.ItemUpdateInput = {
             ...(shouldUpdateTitle ? { title: doc.metadata.title } : {}),
             ...(!attachment.item?.doi && doc.metadata?.doi
               ? { doi: doc.metadata.doi }
+              : {}),
+            ...(!existingItemRecord.arxivId && doc.metadata?.arxivId
+              ? { arxivId: doc.metadata.arxivId }
+              : {}),
+            ...(!existingItemRecord.pmid && doc.metadata?.pmid
+              ? { pmid: doc.metadata.pmid }
+              : {}),
+            ...(!existingItemRecord.isbn && doc.metadata?.isbn
+              ? { isbn: doc.metadata.isbn }
+              : {}),
+            ...(!existingItemRecord.issn && doc.metadata?.issn
+              ? { issn: doc.metadata.issn }
               : {}),
             ...(!attachment.item?.abstract && doc.metadata?.abstract
               ? { abstract: doc.metadata.abstract }
@@ -659,15 +725,6 @@ export class ExtractionHandler implements OutboxDispatchHandler {
               });
             }
           }
-
-          if (this.cache) {
-            const effectiveUserId = attachment.item?.userId || 'system';
-            const scopeId = attachment.item?.projectId || effectiveUserId;
-            await this.cache.del(LIBRARY_REDIS_KEYS.item(attachment.itemId));
-            await this.cache.delPattern(
-              LIBRARY_REDIS_KEYS.tagsPattern(scopeId),
-            );
-          }
         } catch (provenanceErr: unknown) {
           const message =
             provenanceErr instanceof Error
@@ -679,13 +736,17 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         }
       }
 
-      const scopeId =
-        attachment.item?.projectId ||
+      const effectiveUserId =
         attachment.item?.userId ||
-        (typeof payload.projectId === 'string'
-          ? payload.projectId
-          : undefined) ||
-        (typeof payload.userId === 'string' ? payload.userId : undefined);
+        (typeof payload.userId === 'string' ? payload.userId : undefined) ||
+        'system';
+      const effectiveProjectId = normalizeProjectScopeId(
+        attachment.item?.projectId ||
+          (typeof payload.projectId === 'string'
+            ? payload.projectId
+            : undefined),
+      );
+      const scopeId = effectiveProjectId || effectiveUserId;
 
       // 6. Build in-library citation graph (match references against papers in same project scope)
       if (doc.references && doc.references.length > 0 && scopeId) {
@@ -704,6 +765,91 @@ export class ExtractionHandler implements OutboxDispatchHandler {
 
       // 7. Update status to READY on completion
       await this.extractionRepo.markReady(attachment.id);
+
+      // 8. Publish ITEM_UPDATED outbox event / domain event for SearchEventsSubscriber & Retraction checks
+      const itemUpdatedPayload = {
+        itemId: attachment.itemId,
+        userId: effectiveUserId,
+        projectId: effectiveProjectId,
+        attachmentId: attachment.id,
+      };
+      if (this.libraryTx?.executeInTransaction) {
+        try {
+          await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
+            await helpers.publishOutbox(
+              { userId: effectiveUserId, projectId: effectiveProjectId },
+              attachment.itemId,
+              LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+              itemUpdatedPayload,
+            );
+          });
+        } catch (outboxErr: unknown) {
+          const msg =
+            outboxErr instanceof Error ? outboxErr.message : String(outboxErr);
+          this.logger.debug(
+            `Could not publish ITEM_UPDATED outbox after extraction: ${msg}`,
+          );
+        }
+      }
+      this.eventEmitter?.emit(LIBRARY_EVENT_TYPES.ITEM_UPDATED, {
+        eventId: event.id,
+        userId: effectiveUserId,
+        projectId: effectiveProjectId,
+        scopeId,
+        aggregateId: attachment.itemId,
+        eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+        payload: itemUpdatedPayload,
+        createdAt: new Date(),
+        schemaVersion: 1,
+      });
+
+      // 9. Invalidate all relevant Redis keys after extraction completes
+      if (this.cache) {
+        try {
+          const invalidationTasks: Promise<unknown>[] = [
+            this.cache.del(LIBRARY_REDIS_KEYS.item(attachment.itemId)),
+            this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(attachment.itemId)),
+            this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(attachment.itemId)),
+            this.cache.del(`library:item:${attachment.itemId}:attachments`),
+            this.cache.del(`library:item:${attachment.itemId}:notes`),
+            this.cache.delPattern(
+              LIBRARY_REDIS_KEYS.itemPattern(attachment.itemId),
+            ),
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
+            this.cache.del(`library:${scopeId}:counts`),
+            this.cache.del(`library:counts:user:${effectiveUserId}`),
+            this.cache.del(LIBRARY_REDIS_KEYS.tags(scopeId)),
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(scopeId)),
+          ];
+          if (effectiveProjectId) {
+            invalidationTasks.push(
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.itemsPattern(`proj:${effectiveProjectId}`),
+              ),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.itemsPattern(effectiveUserId),
+              ),
+              this.cache.del(`library:counts:proj:${effectiveProjectId}`),
+              this.cache.del(
+                LIBRARY_REDIS_KEYS.tags(`proj:${effectiveProjectId}`),
+              ),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.tagsPattern(`proj:${effectiveProjectId}`),
+              ),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.tagsPattern(effectiveUserId),
+              ),
+            );
+          }
+          await Promise.all(invalidationTasks);
+        } catch (cacheErr: unknown) {
+          const msg =
+            cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
+          this.logger.warn(
+            `Failed to invalidate Redis caches after extraction for item ${attachment.itemId}: ${msg}`,
+          );
+        }
+      }
 
       this.logger.log(
         JSON.stringify({

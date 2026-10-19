@@ -1,4 +1,4 @@
-﻿import {
+import {
   SCHEMA_V42_DATA,
   BASE_FIELD_MAPPINGS,
   REVERSE_BASE_FIELD_MAPPINGS,
@@ -96,4 +96,7 @@ export function parseAccessDate(value?: string): Date | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
-export type { CreateItemData, UpdateItemData } from './items.types';
+export type {
+  CreateItemData,
+  UpdateItemData,
+} from '@/modules/library/core/types/bibliographic.types';

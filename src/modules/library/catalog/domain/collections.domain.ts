@@ -1,5 +1,3 @@
-import { CollectionTreeNode } from '@/modules/library/catalog/types/collections.types';
-
 export interface RawCollectionItem {
   id: string;
   name: string;
@@ -19,54 +17,6 @@ export function normalizeParentId(rawParentId?: unknown): string | null {
   const str = rawParentId.trim();
   if (str === '' || str.toLowerCase() === 'root') return null;
   return str;
-}
-
-/**
- * Transforms a flat list of collections into a nested recursive tree structure.
- */
-export function buildCollectionTree(
-  collections: RawCollectionItem[],
-): CollectionTreeNode[] {
-  const map = new Map<string, CollectionTreeNode>();
-
-  for (const c of collections) {
-    const count = c.itemCount ?? c._count?.collectionItems ?? 0;
-    map.set(c.id, {
-      id: c.id,
-      name: c.name,
-      description: c.description,
-      color: c.color,
-      icon: c.icon,
-      parentId: c.parentId,
-      itemCount: count,
-      recursiveItemCount: count,
-      children: [],
-    });
-  }
-
-  const roots: CollectionTreeNode[] = [];
-  for (const node of map.values()) {
-    if (node.parentId && map.has(node.parentId)) {
-      map.get(node.parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-
-  const computeRecursiveCounts = (node: CollectionTreeNode): number => {
-    let sum = node.itemCount;
-    for (const child of node.children) {
-      sum += computeRecursiveCounts(child);
-    }
-    node.recursiveItemCount = sum;
-    return sum;
-  };
-
-  for (const root of roots) {
-    computeRecursiveCounts(root);
-  }
-
-  return roots;
 }
 
 /**

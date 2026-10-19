@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { IngestionService } from './services/ingestion.service';
-import { DuplicateService } from './services/duplicate.service';
+import { DuplicateDetectorService } from './services/duplicate-detector.service';
 import { QualityService, QualityAuditReport } from './services/quality.service';
 import { RetractionService } from './services/retraction.service';
 import {
@@ -26,7 +26,7 @@ export type { IIngestionFacade };
 export class IngestionFacade {
   constructor(
     private readonly ingestionService: IngestionService,
-    private readonly duplicateService: DuplicateService,
+    private readonly duplicateDetector: DuplicateDetectorService,
     private readonly qualityService: QualityService,
     private readonly retractionService: RetractionService,
   ) {}
@@ -49,7 +49,7 @@ export class IngestionFacade {
     userId: string,
     projectId?: string,
   ): Promise<DuplicateClusterResult[]> {
-    return this.duplicateService.detectDuplicates(userId, projectId);
+    return this.duplicateDetector.detectDuplicates(userId, projectId);
   }
 
   async getQualityAudit(

@@ -13,27 +13,6 @@ export interface IngestionStage {
   executedAt: Date;
 }
 
-export interface IngestionCandidate {
-  id: string;
-  ingestionRunId: string;
-  sourceProvider: string;
-  sourceRecordId?: string | null;
-  confidenceScore: number;
-  metadataPayload: unknown;
-  rawEvidenceRef?: string | null;
-  fetchedAt: Date;
-}
-
-export interface IngestionDecision {
-  id: string;
-  ingestionRunId: string;
-  decisionType: string;
-  decisionReason: string;
-  proposedItem: unknown;
-  fieldDecisions?: unknown;
-  duplicateMatch?: unknown;
-  decidedAt: Date;
-}
 
 export interface IngestionReviewCase {
   id: string;
@@ -212,9 +191,6 @@ export interface IngestionRunSnapshot {
   itemId?: string | null;
   item?: Record<string, unknown> | null;
   stages: IngestionStage[];
-  candidates: IngestionCandidate[];
-  decisions: IngestionDecision[];
   reviews?: IngestionReviewCase[];
-  reviewCases?: IngestionReviewCase[];
   errors: unknown[];
 }

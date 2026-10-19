@@ -5,13 +5,15 @@ import {
 } from '@nestjs/common';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { CreateItemData } from '@/modules/library/catalog/types/items.types';
-import { BibliographicReference } from '@/modules/library/core/types/bibliographic.types';
 import {
-  TransactionService,
+  CreateItemData,
+  BibliographicReference,
+} from '@/modules/library/core/types/bibliographic.types';
+import {
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
 } from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 
 interface CslItemData {
@@ -158,7 +160,7 @@ export class ItemCurationService {
     let existingCitationKeys = new Set<string>();
     let existingTitles = new Set<string>();
 
-    if (this.query.findDuplicatesInProject && sourceItems.length > 0) {
+    if (sourceItems.length > 0) {
       const existingItems = await this.query.findDuplicatesInProject(
         projectId,
         sourceItems.map((item) => ({
@@ -185,7 +187,7 @@ export class ItemCurationService {
     }
 
     for (const source of sourceItems) {
-      const isBatchDuplicate =
+      const isDuplicate =
         Boolean(
           source.doi && existingDois.has(source.doi.trim().toLowerCase()),
         ) ||
@@ -196,16 +198,6 @@ export class ItemCurationService {
         Boolean(
           source.title && existingTitles.has(source.title.trim().toLowerCase()),
         );
-
-      let isDuplicate = isBatchDuplicate;
-      if (!isBatchDuplicate && !this.query.findDuplicatesInProject) {
-        const found = await this.query.findDuplicateInProject(projectId, {
-          doi: source.doi,
-          citationKey: source.citationKey,
-          title: source.title,
-        });
-        isDuplicate = Boolean(found);
-      }
 
       if (isDuplicate) {
         continue;

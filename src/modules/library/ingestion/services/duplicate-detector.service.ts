@@ -8,12 +8,17 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
-  TransactionService,
   CATALOG_FACADE,
   ICatalogFacade,
   DuplicateCandidateItem,
+  normalizeProjectScopeId,
+  LIBRARY_REDIS_KEYS,
+  LIBRARY_EVENT_TYPES,
+  TransactionHelpers,
 } from '@/modules/library/core';
-import { ItemsMapper } from '@/modules/library/catalog';
+import { RedisCacheService } from '@/core';
+import { TransactionService } from '@/modules/library/sync';
+import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   DuplicateClusterResult,
@@ -70,20 +75,14 @@ export class DuplicateDetectorService {
     private readonly ingestionRepo?: IngestionRepository,
     @Optional()
     private readonly libraryTx?: TransactionService,
+    @Optional()
+    private readonly cache?: RedisCacheService,
   ) {}
 
   normalizeScopeProjectId(
     rawProjectId?: ProjectId | string | null,
   ): string | undefined {
-    if (!rawProjectId || typeof rawProjectId !== 'string') return undefined;
-    const trimmed = rawProjectId.trim();
-    if (
-      !trimmed ||
-      ['user', 'me', 'personal'].includes(trimmed.toLowerCase())
-    ) {
-      return undefined;
-    }
-    return trimmed;
+    return normalizeProjectScopeId(rawProjectId);
   }
 
   getDismissedPeerIds(item: {
@@ -329,7 +328,11 @@ export class DuplicateDetectorService {
 
     if (this.libraryTx) {
       await this.libraryTx.executeInTransaction(
-        async (tx: Prisma.TransactionClient) => {
+        async (tx: Prisma.TransactionClient, helpers?: TransactionHelpers) => {
+          const eventScope = {
+            userId: String(userId),
+            projectId: effectiveProjectId,
+          };
           for (const item of items) {
             const meta = { ...asMetaObject(item.metadata) };
             const existingDismissed = Array.isArray(meta.dismissedDuplicateIds)
@@ -340,18 +343,63 @@ export class DuplicateDetectorService {
               new Set([...existingDismissed, ...peerIds]),
             );
 
-            if (typeof tx.item?.update === 'function') {
-              await tx.item.update({
-                where: { id: item.id },
-                data: {
-                  metadata: meta as Prisma.InputJsonValue,
-                  version: { increment: 1 },
-                },
+            const updated = await tx.item.update({
+              where: { id: item.id },
+              data: {
+                metadata: meta as Prisma.InputJsonValue,
+                version: { increment: 1 },
+              },
+            });
+
+            if (helpers) {
+              await helpers.appendChange(eventScope, {
+                entityType: 'Item',
+                entityId: item.id,
+                action: 'update',
+                version: updated.version,
+                data: updated,
               });
+              await helpers.publishOutbox(
+                eventScope,
+                item.id,
+                LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+                {
+                  itemId: item.id,
+                  userId: String(userId),
+                  projectId: effectiveProjectId,
+                  dismissedDuplicateIds: meta.dismissedDuplicateIds,
+                },
+              );
             }
           }
         },
       );
+    }
+
+    if (this.cache) {
+      try {
+        const scopeKey = effectiveProjectId
+          ? `proj:${effectiveProjectId}`
+          : String(userId);
+        const tasks: Promise<unknown>[] = [
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeKey)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(String(userId))),
+          this.cache.del(LIBRARY_REDIS_KEYS.counts(scopeKey)),
+        ];
+        for (const id of uniqueIds) {
+          tasks.push(
+            this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
+            this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
+          );
+        }
+        await Promise.all(tasks);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Failed to invalidate cache after dismissing duplicates: ${msg}`,
+        );
+      }
     }
 
     return { dismissed: true, itemIds: uniqueIds };
@@ -631,7 +679,7 @@ export class DuplicateDetectorService {
     if (
       rawClusters.length > 0 &&
       groupedItemIds.size > 0 &&
-      typeof this.catalogGateway?.findByIds === 'function'
+      this.catalogGateway
     ) {
       try {
         const fullRawItems = await this.catalogGateway.findByIds(
@@ -663,7 +711,6 @@ export class DuplicateDetectorService {
         confidence: rc.confidence,
         recommendedMasterId: rc.recommendedMasterId,
         items: mappedItems,
-        papers: mappedItems,
       };
     });
   }

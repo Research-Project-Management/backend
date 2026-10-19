@@ -25,12 +25,13 @@ jest.mock('@mozilla/readability', () => ({
 
 import { fromPartial, fromAny } from '@total-typescript/shoehorn';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
+import { AttachmentThumbnailService } from '@/modules/library/extraction/services/attachment-thumbnail.service';
 import { WebSnapshotService } from '@/modules/library/extraction/services/web-snapshot.service';
 import { AttachmentController } from '@/modules/library/extraction/controllers/attachments.controller';
 import { AttachmentStorageController } from '@/modules/library/extraction/controllers/attachment-storage.controller';
 import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
+import { IdentifyFileResolver } from '@/modules/library/ingestion/stages/identify-file.resolver';
 import { ExtractionHandler } from '@/modules/library/extraction/services/extraction.handler';
-import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { IStoragePort } from '@/modules/storage/storage.port';
 
 describe('Library Attachments & Storage Integration Suite', () => {
@@ -111,6 +112,16 @@ describe('Library Attachments & Storage Integration Suite', () => {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       findManyByItemId: jest.fn().mockResolvedValue([]),
+      create: jest
+        .fn()
+        .mockImplementation((data, include) =>
+          mockPrisma.attachment.create({ data, include }),
+        ),
+      update: jest
+        .fn()
+        .mockImplementation((id, data) =>
+          mockPrisma.attachment.update({ where: { id }, data }),
+        ),
       updateLinkedFile: jest.fn().mockImplementation((fileId, itemId) => {
         return mockStoragePort.linkFile({
           fileId,
@@ -238,9 +249,10 @@ describe('Library Attachments & Storage Integration Suite', () => {
       const result = await service.deleteAttachment('user-1', 'att-1');
 
       expect(result).toEqual({ success: true });
-      expect(mockPrisma.attachment.delete).toHaveBeenCalledWith({
-        where: { id: 'att-1' },
-      });
+      expect(mockRepo.delete).toHaveBeenCalledWith(
+        'att-1',
+        expect.anything(),
+      );
       expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(
         'storage-file-123',
       );
@@ -319,8 +331,12 @@ describe('Library Attachments & Storage Integration Suite', () => {
         mockTx,
         { itemExists: jest.fn().mockResolvedValue(true) } as any,
         mockStoragePort,
-        mockDriver,
-        mockNodeRepo,
+        undefined,
+        new AttachmentThumbnailService(
+          mockDriver,
+          mockNodeRepo,
+          mockStoragePort,
+        ),
       );
 
       mockRepo.findFirst.mockResolvedValue({
@@ -364,9 +380,13 @@ describe('Library Attachments & Storage Integration Suite', () => {
         mockTx,
         { itemExists: jest.fn().mockResolvedValue(true) } as any,
         mockStoragePort,
-        mockDriver,
-        mockNodeRepo,
-        mockThumbGenerator,
+        undefined,
+        new AttachmentThumbnailService(
+          mockDriver,
+          mockNodeRepo,
+          mockStoragePort,
+          mockThumbGenerator,
+        ),
       );
 
       mockRepo.findFirst.mockResolvedValue({
@@ -438,7 +458,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
         'user-1',
         mockReq,
         projId,
-        undefined,
       );
 
       expect(res.success).toBe(true);
@@ -456,7 +475,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
     it('should provide presigned upload URL via storagePort', async () => {
       const projId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
-      const res = await storageController.getPresignedUploadUrl(
+      const res = await storageController.presignUpload(
         'user-1',
         {
           filename: 'big_dataset.pdf',
@@ -494,7 +513,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
         'user-1',
         'att-thumb-1',
         mockRes,
-        undefined,
         'proj-456',
       );
 
@@ -525,7 +543,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
         'user-1',
         'att-1',
         'proj-456',
-        undefined,
       );
 
       expect(res.status).toBe('PENDING');
@@ -614,26 +631,33 @@ describe('Library Attachments & Storage Integration Suite', () => {
         }),
       };
 
+      const fileResolver = new IdentifyFileResolver(
+        mockNormalizer,
+        mockStoragePort,
+        mockPdf,
+      );
+
       stage = new IdentifyStage(
         mockDoiParser,
         mockBibtexParser,
         mockRisParser,
         mockNormalizer,
         mockStoragePort,
-        mockPdf,
+        undefined,
+        fileResolver,
       );
     });
 
     it('should extract PDF metadata even when scopeId is undefined (personal library)', async () => {
-      const candidates = await stage.execute(
-        'run-1',
-        {
+      const candidates = await stage.execute({
+        runId: 'run-1',
+        payload: {
           kind: 'FILE',
           fileId: 'storage-file-123',
           filename: 'transformer.pdf',
         },
-        undefined, // scopeId is undefined for personal library!
-      );
+        scopeId: undefined, // scopeId is undefined for personal library!
+      });
 
       expect(candidates).toHaveLength(1);
       expect(mockStoragePort.readOwnedFile).toHaveBeenCalledWith({
@@ -762,42 +786,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
           comment: expect.stringContaining('OCR Sandwich PDF'),
         }),
       );
-    });
-  });
-
-  describe('CommandRepository (Item Purge & Attachment Storage Cleanup)', () => {
-    let repo: CommandRepository;
-
-    beforeEach(() => {
-      repo = new CommandRepository(mockPrisma, mockStoragePort);
-    });
-
-    it('should delete storage files for all item attachments before purging the item', async () => {
-      mockPrisma.item.findFirst.mockResolvedValue({
-        id: 'item-to-purge',
-        deletedAt: new Date(), // in trash
-      });
-      mockPrisma.attachment.findMany.mockResolvedValue([
-        {
-          id: 'att-1',
-          fileId: 'storage-file-1',
-          url: '/api/v1/storage/files/storage-file-1/content',
-        },
-        {
-          id: 'att-2',
-          fileId: null,
-          url: '/api/v1/library/files/storage-file-2/content',
-        },
-      ]);
-
-      const res = await repo.purge('user-1', 'item-to-purge');
-
-      expect(res).toBe(true);
-      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('storage-file-1');
-      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('storage-file-2');
-      expect(mockPrisma.item.delete).toHaveBeenCalledWith({
-        where: { id: 'item-to-purge' },
-      });
     });
   });
 });

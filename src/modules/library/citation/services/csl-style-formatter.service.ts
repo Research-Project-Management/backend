@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import {
   CslItemData,
   CslName,
@@ -133,11 +133,10 @@ export const RIS_CSL_TYPE_MAP: Record<string, string> = {
 
 @Injectable()
 export class CslStyleFormatterService {
-  private readonly tcvnFormatter: TcvnCitationFormatterService;
-
-  constructor(tcvnFormatter?: TcvnCitationFormatterService) {
-    this.tcvnFormatter = tcvnFormatter ?? new TcvnCitationFormatterService();
-  }
+  constructor(
+    @Optional()
+    private readonly tcvnFormatter: TcvnCitationFormatterService = new TcvnCitationFormatterService(),
+  ) {}
 
   public escapeHtml(text: string): string {
     return escapeCitationHtml(text);
@@ -536,33 +535,6 @@ export class CslStyleFormatterService {
   }
 
   // TCVN & VIETNAMESE DELEGATIONS
-
-  public static isVietnameseAuthor(author?: CslName | null): boolean {
-    return TcvnCitationFormatterService.isVietnameseAuthor(author);
-  }
-
-  public static getVietnameseSortKey(author?: CslName | null) {
-    return TcvnCitationFormatterService.getVietnameseSortKey(author);
-  }
-
-  public static isVietnameseItem(item: CslItemData): boolean {
-    return TcvnCitationFormatterService.isVietnameseItem(item);
-  }
-
-  public static compareTcvnEntries(
-    itemA: CslItemData,
-    itemB: CslItemData,
-  ): number {
-    return TcvnCitationFormatterService.compareTcvnEntries(itemA, itemB);
-  }
-
-  public static formatTcvnAuthorName(author?: CslName | null): string {
-    return TcvnCitationFormatterService.formatTcvnAuthorName(author);
-  }
-
-  public static formatTcvnInTextAuthor(author?: CslName | null): string {
-    return TcvnCitationFormatterService.formatTcvnInTextAuthor(author);
-  }
 
   public formatTcvn(
     cslItem: CslItemData,

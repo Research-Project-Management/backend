@@ -10,7 +10,7 @@ import {
 } from '@/modules/library/ingestion/types/metadata.types';
 import {
   normalizeIsbn,
-  normalizeTags,
+  normalizeAcademicTags,
   AcademicHttpClient,
   LibraryConfigService,
   libraryConfig,
@@ -30,7 +30,7 @@ export class OpenLibraryProvider implements MetadataProvider {
   };
 
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    private readonly httpClient: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -44,10 +44,6 @@ export class OpenLibraryProvider implements MetadataProvider {
   supports(input: QueryType | MetadataRequest): boolean {
     const type = typeof input === 'string' ? input : input?.queryType;
     return type ? this.capabilities.queryTypes.includes(type) : false;
-  }
-
-  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
-    return this.resolve(request);
   }
 
   async resolve(
@@ -65,9 +61,10 @@ export class OpenLibraryProvider implements MetadataProvider {
       Accept: 'application/json',
     };
 
-    const response = this.httpClient
-      ? (await this.httpClient.request(url, { headers, signal })).response
-      : await fetch(url, { headers, signal });
+    const { response } = await this.httpClient.request(url, {
+      headers,
+      signal,
+    });
 
     if (response.status === 404) return null;
 
@@ -184,7 +181,7 @@ export class OpenLibraryProvider implements MetadataProvider {
         }
       }
     }
-    const keywords = normalizeTags(rawSubjects).slice(0, 8);
+    const keywords = normalizeAcademicTags(rawSubjects).slice(0, 8);
 
     const pages =
       typeof item.number_of_pages === 'number' ||

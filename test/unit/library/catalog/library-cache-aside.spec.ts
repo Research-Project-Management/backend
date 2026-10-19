@@ -12,6 +12,8 @@ import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.
 
 describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
   let service: ItemsService;
+  let queryService: ItemQueryService;
+  let fulltextService: ItemFulltextService;
   let queryRepo: jest.Mocked<QueryRepository>;
   let commandRepo: jest.Mocked<CommandRepository>;
   let txService: jest.Mocked<TransactionService>;
@@ -43,16 +45,16 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
     ],
     collectionItems: [],
     itemTags: [],
-    notesList: [],
+    notes: [],
     attachments: [],
   };
 
   beforeEach(() => {
     queryRepo = {
       findById: jest.fn().mockResolvedValue(mockDbItem),
-      findMetadataSourceRecord: jest.fn().mockResolvedValue({
+      findItemMetadata: jest.fn().mockResolvedValue({
         id: 'meta-1',
-        source: 'pdf_fulltext',
+        sourceProvider: 'pdf_fulltext',
         rawPayload: {
           title: 'Attention Is All You Need',
           abstract: 'We propose the Transformer...',
@@ -93,7 +95,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
         };
         return callback({} as any, helpers as any);
       }),
-    };
+    } as unknown as jest.Mocked<TransactionService>;
 
     tagsService = {
       invalidateTagsCache: jest.fn().mockResolvedValue(undefined),
@@ -112,8 +114,8 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       delPattern: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<RedisCacheService>;
 
-    const queryService = new ItemQueryService(queryRepo, cache);
-    const fulltextService = new ItemFulltextService(queryRepo, cache);
+    queryService = new ItemQueryService(queryRepo, cache);
+    fulltextService = new ItemFulltextService(queryRepo, cache);
     const mockValidator = {
       validateAndSanitizeItem: jest.fn((_type, d) => ({
         sanitizedItem: d,
@@ -126,12 +128,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       commandRepo,
       txService,
       tagsService,
-      queryService,
-      fulltextService,
-      undefined,
-      undefined,
       mockValidator as any,
-      undefined,
       cache,
     );
   });
@@ -140,7 +137,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
     it('should query DB on cache miss, populate cache, and return mapped item', async () => {
       cache.get.mockResolvedValueOnce(null);
 
-      const result = await service.getItem(mockUserId, mockItemId);
+      const result = await queryService.getItem(mockUserId, mockItemId);
 
       expect(cache.get).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.item(mockItemId),
@@ -171,7 +168,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       };
       cache.get.mockResolvedValueOnce(cachedItem);
 
-      const result = await service.getItem(mockUserId, mockItemId);
+      const result = await queryService.getItem(mockUserId, mockItemId);
 
       expect(cache.get).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.item(mockItemId),
@@ -190,7 +187,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       };
       cache.get.mockResolvedValueOnce(cachedOtherUserItem);
 
-      const result = await service.getItem(mockUserId, mockItemId);
+      const result = await queryService.getItem(mockUserId, mockItemId);
 
       // Should bypass mismatched cached item and verify database access
       expect(queryRepo.findById).toHaveBeenCalledWith(
@@ -206,12 +203,12 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
     it('should query DB and metadata record on cache miss, then cache for 600s', async () => {
       cache.get.mockResolvedValueOnce(null);
 
-      const result = await service.getFulltext(mockUserId, mockItemId);
+      const result = await fulltextService.getFulltext(mockUserId, mockItemId);
 
       expect(cache.get).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),
       );
-      expect(queryRepo.findMetadataSourceRecord).toHaveBeenCalledWith(
+      expect(queryRepo.findItemMetadata).toHaveBeenCalledWith(
         mockItemId,
         'pdf_fulltext',
       );
@@ -239,13 +236,13 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       };
       cache.get.mockResolvedValueOnce(cachedFulltext);
 
-      const result = await service.getFulltext(mockUserId, mockItemId);
+      const result = await fulltextService.getFulltext(mockUserId, mockItemId);
 
       expect(cache.get).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),
       );
       expect(queryRepo.findById).not.toHaveBeenCalled();
-      expect(queryRepo.findMetadataSourceRecord).not.toHaveBeenCalled();
+      expect(queryRepo.findItemMetadata).not.toHaveBeenCalled();
       expect(result).toEqual(cachedFulltext);
     });
   });
@@ -254,7 +251,7 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
     it('should cache clean list query result for 60s', async () => {
       cache.get.mockResolvedValueOnce(null);
 
-      const result = await service.listItems(mockUserId, {
+      const result = await queryService.listItems(mockUserId, {
         view: 'all',
         limit: 20,
       });
@@ -270,7 +267,10 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
     });
 
     it('should bypass cache when search query or cursor is present', async () => {
-      await service.listItems(mockUserId, { search: 'quantum', limit: 20 });
+      await queryService.listItems(mockUserId, {
+        search: 'quantum',
+        limit: 20,
+      });
       expect(cache.get).not.toHaveBeenCalled();
       expect(cache.set).not.toHaveBeenCalled();
     });
@@ -355,26 +355,21 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
     it('should function smoothly without cache if RedisCacheService is not provided', async () => {
       const bareQueryService = new ItemQueryService(queryRepo, undefined);
       const bareFulltextService = new ItemFulltextService(queryRepo, undefined);
-      const bareService = new ItemsService(
-        queryRepo,
-        commandRepo,
-        txService,
-        tagsService,
-        bareQueryService,
-        bareFulltextService,
-      );
 
-      const item = await bareService.getItem(mockUserId, mockItemId);
+      const item = await bareQueryService.getItem(mockUserId, mockItemId);
       expect(item?.title).toBe('Attention Is All You Need');
 
-      const fulltext = await bareService.getFulltext(mockUserId, mockItemId);
+      const fulltext = await bareFulltextService.getFulltext(
+        mockUserId,
+        mockItemId,
+      );
       expect(fulltext.sections).toHaveLength(1);
     });
 
     it('should continue executing without throwing if cache.get throws an error', async () => {
       cache.get.mockRejectedValueOnce(new Error('Redis Connection Failure'));
 
-      const item = await service.getItem(mockUserId, mockItemId);
+      const item = await queryService.getItem(mockUserId, mockItemId);
       expect(item).toBeDefined();
       expect(queryRepo.findById).toHaveBeenCalled();
     });

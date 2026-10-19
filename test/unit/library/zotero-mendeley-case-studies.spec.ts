@@ -3,7 +3,11 @@ import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { DuplicatePolicy } from '@/modules/library/ingestion/policies/duplicate.policy';
-import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
+import {
+  DuplicateService,
+  DuplicateDetectorService,
+  DuplicateMergerService,
+} from '@/modules/library/ingestion/services/duplicate.service';
 import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
@@ -491,8 +495,8 @@ ER  -
       };
 
       const dupService = new DuplicateService(
-        {} as never,
-        mockCatalogGateway as never,
+        new DuplicateDetectorService(mockCatalogGateway as never),
+        new DuplicateMergerService({} as never, mockCatalogGateway as never),
       );
       const clusters = await dupService.detectDuplicates('user-1');
 
@@ -576,7 +580,9 @@ ER  -
           findMany: jest.fn().mockResolvedValue([]),
         },
         itemMetadata: {
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+          update: jest.fn().mockResolvedValue({}),
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
         contributor: {
           count: jest.fn().mockResolvedValue(1),
@@ -620,9 +626,16 @@ ER  -
       };
 
       const dupService = new DuplicateService(
-        mockLibraryTx as never,
-        mockCatalogGateway as never,
-        mockExtractionGateway as never,
+        new DuplicateDetectorService(
+          mockCatalogGateway as never,
+          undefined,
+          mockLibraryTx as never,
+        ),
+        new DuplicateMergerService(
+          mockLibraryTx as never,
+          mockCatalogGateway as never,
+          mockExtractionGateway as never,
+        ),
       );
 
       await dupService.mergeDuplicates('user-1', {

@@ -1,4 +1,4 @@
-import { IngestionStageName } from '@/modules/library/ingestion/domain/ingestion-domain.event';
+import { IngestionStageName } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
 import { IngestionSubmissionEnvelope } from './submission.types';
 import { MetadataCandidate } from './metadata-candidate.types';
 import { ItemMetadata } from './metadata.types';
@@ -14,13 +14,13 @@ import { CommitStageOptions } from '@/modules/library/ingestion/stages/commit.st
  */
 export interface IWorkflowStage<TInput, TOutput> {
   readonly stageName: IngestionStageName;
-  execute(input: TInput, ...args: unknown[]): Promise<TOutput>;
+  execute(input: TInput): Promise<TOutput>;
 }
 
 export interface IdentifyStageInput {
   runId: string;
   payload: IngestionSubmissionEnvelope['payload'];
-  scopeId: string;
+  scopeId?: string;
 }
 
 export interface EnrichStageInput {
@@ -29,12 +29,13 @@ export interface EnrichStageInput {
 }
 
 export interface MatchStageInput {
-  scope: { userId: string; projectId?: string };
+  scope: { userId?: string; projectId?: string | null } | string;
   proposedItem?: ItemMetadata;
 }
 
 export interface CommitStageInput {
-  scopeId: string;
+  scopeId: string | { userId?: string; projectId?: string | null };
   item: ItemMetadata;
   options?: CommitStageOptions;
 }
+

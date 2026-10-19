@@ -199,10 +199,16 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     });
   });
 
+  const USER_ID = '00000000-0000-4000-8000-000000000001';
+  const ITEM_ID = '00000000-0000-4000-8000-000000000123';
+  const ITEM_1 = '00000000-0000-4000-8000-000000000011';
+  const ITEM_2 = '00000000-0000-4000-8000-000000000012';
+  const ITEM_UNKNOWN = '00000000-0000-4000-8000-000000000099';
+
   describe('RetractionService', () => {
     it('should scan an item and update retraction status in database', async () => {
       const mockItem = {
-        id: 'item-123',
+        id: ITEM_ID,
         doi: '10.1016/s0140-6736(97)11096-0',
         pmid: '9500320',
         title: 'Original Title',
@@ -215,15 +221,15 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
         isRetracted: true,
       });
 
-      const checkResult = await service.checkItem('user-1', 'item-123');
+      const checkResult = await service.checkItem(USER_ID, ITEM_ID);
 
-      expect(checkResult.itemId).toBe('item-123');
+      expect(checkResult.itemId).toBe(ITEM_ID);
       expect(checkResult.isRetracted).toBe(true);
       expect(checkResult.nature).toBe('retraction');
       expect(checkResult.details?.source).toBe('retraction_watch');
       expect(mockPrisma.item.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'item-123' },
+          where: { id: ITEM_ID },
           data: expect.objectContaining({
             metadata: expect.objectContaining({
               isRetracted: true,
@@ -237,14 +243,14 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     it('should batch scan library items efficiently', async () => {
       const items = [
         {
-          id: 'item-1',
+          id: ITEM_1,
           title: 'Wakefield MMR Paper',
           doi: '10.1016/s0140-6736(97)11096-0',
           pmid: null,
           isRetracted: false,
         },
         {
-          id: 'item-2',
+          id: ITEM_2,
           title: 'Normal Physics Paper',
           doi: '10.1103/physrevlett.120.010001',
           pmid: null,
@@ -257,7 +263,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       // Mark the second paper as clean so it doesn't make network requests
       await retractionDb.saveClean('10.1103/physrevlett.120.010001');
 
-      const batchResult = await service.checkLibrary('user-1');
+      const batchResult = await service.checkLibrary(USER_ID);
       expect(batchResult.scanned).toBe(2);
       expect(batchResult.newlyRetracted).toBe(1);
     });
@@ -265,21 +271,21 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     it('should completely ignore items without DOI or PMID during batch scan (Zotero parity)', async () => {
       const mixedItems = [
         {
-          id: 'item-no-ids',
+          id: '00000000-0000-4000-8000-000000000021',
           title: 'A book chapter without DOI or PMID',
           doi: null,
           metadata: { pmid: null },
           isRetracted: false,
         },
         {
-          id: 'item-empty-doi',
+          id: '00000000-0000-4000-8000-000000000022',
           title: 'Item with empty string DOI',
           doi: '',
           metadata: {},
           isRetracted: false,
         },
         {
-          id: 'item-valid',
+          id: ITEM_1,
           title: 'Wakefield MMR Paper',
           doi: '10.1016/s0140-6736(97)11096-0',
           pmid: null,
@@ -289,7 +295,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       mockPrisma.item.findMany.mockResolvedValue(mixedItems);
       mockPrisma.item.update.mockResolvedValue({});
 
-      const batchResult = await service.checkLibrary('user-1');
+      const batchResult = await service.checkLibrary(USER_ID);
       // Only the item with valid DOI should be scanned; items without DOI/PMID are omitted
       expect(batchResult.scanned).toBe(1);
       expect(batchResult.newlyRetracted).toBe(1);
@@ -305,7 +311,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
 
     it('checkItem keeps the stored retracted status when the lookup is unknown', async () => {
       const mockItem = {
-        id: 'item-unknown',
+        id: ITEM_UNKNOWN,
         doi: null,
         title: 'No identifiers',
         metadata: {
@@ -318,7 +324,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       mockPrisma.item.findFirst.mockResolvedValue(mockItem);
       mockPrisma.item.update.mockClear();
 
-      const result = await service.checkItem('user-1', 'item-unknown');
+      const result = await service.checkItem(USER_ID, ITEM_UNKNOWN);
 
       expect(result.status).toBe('unknown');
       expect(result.isRetracted).toBe(true);
@@ -328,7 +334,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     it('should sync stale library items via syncLibrary', async () => {
       const staleItems = [
         {
-          id: 'item-stale-1',
+          id: ITEM_1,
           title: 'Wakefield MMR Paper',
           doi: '10.1016/s0140-6736(97)11096-0',
           pmid: null,
@@ -344,7 +350,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
           retractionCheckedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000),
         },
         {
-          id: 'item-stale-2',
+          id: ITEM_2,
           title: 'Manual flagged item',
           doi: '10.1016/s0140-6736(97)11096-0',
           pmid: null,
@@ -360,7 +366,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       mockPrisma.item.findMany.mockResolvedValue(staleItems);
       mockPrisma.item.update.mockResolvedValue({});
 
-      const syncRes = await service.syncLibrary('user-1', undefined, {
+      const syncRes = await service.syncLibrary(USER_ID, undefined, {
         maxDays: 14,
       });
       expect(syncRes.totalEligible).toBe(2);
@@ -374,7 +380,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     it('should skip items flagged as manual and re-scan stale items', async () => {
       const items = [
         {
-          id: 'stale-clean',
+          id: ITEM_1,
           title: 'Normal physics paper',
           doi: '10.1103/physrevlett.120.010001',
           pmid: null,
@@ -387,7 +393,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       mockPrisma.item.update.mockResolvedValue({});
       await retractionDb.saveClean('10.1103/physrevlett.120.010001');
 
-      const result = await syncService.syncStaleLibraryItems('user-1');
+      const result = await syncService.syncStaleLibraryItems(USER_ID);
       expect(result.scanned).toBe(1);
       expect(result.stillClean).toBe(1);
       expect(result.newlyRetracted).toBe(0);
@@ -396,8 +402,8 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     it('should sync all stale items globally across users', async () => {
       const globalStale = [
         {
-          id: 'global-stale-1',
-          userId: 'user-2',
+          id: ITEM_1,
+          userId: USER_ID,
           projectId: null,
           title: 'Normal physics paper',
           doi: '10.1103/physrevlett.120.010001',

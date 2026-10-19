@@ -84,11 +84,10 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     } as any);
     citationFacade = new CitationFacade(citationService, exportsService);
     libraryFacade = new LibraryFacade(
-      undefined,
-      undefined,
-      undefined,
+      {} as any,
+      {} as any,
+      {} as any,
       citationFacade,
-      undefined,
     );
   });
 
@@ -234,7 +233,7 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
     it('should forward projectId properly without hardcoding to "bibtex"', async () => {
       const spy = jest.spyOn(exportsService, 'exportByCitationKeys');
 
-      const result = await citationFacade.exportBibliography(
+      const result = await citationFacade.exportByCitationKeys(
         mockUserId,
         ['vaswani2017attention'],
         mockProjectId,
@@ -246,23 +245,30 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
         ['vaswani2017attention'],
         mockProjectId,
       );
-      expect(result).toEqual({
-        content: expect.stringContaining('@article{vaswani2017attention,'),
-      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          content: expect.stringContaining('@article{vaswani2017attention,'),
+        }),
+      );
     });
 
-    it('should return null when no bibliography entries are matched', async () => {
-      const result = await citationFacade.exportBibliography(mockUserId, [
+    it('should return empty result when no bibliography entries are matched', async () => {
+      const result = await citationFacade.exportByCitationKeys(mockUserId, [
         'non_existent_key',
       ]);
 
-      expect(result).toBeNull();
+      expect(result).toEqual({
+        content: '',
+        count: 0,
+        foundKeys: [],
+        missingKeys: ['non_existent_key'],
+      });
     });
 
     it('should allow LibraryFacade to invoke citation export with projectId', async () => {
-      const spy = jest.spyOn(citationFacade, 'exportBibliography');
+      const spy = jest.spyOn(citationFacade, 'exportByCitationKeys');
 
-      const result = await libraryFacade.exportBibByCitationKeys(
+      const result = await libraryFacade.exportByCitationKeys(
         mockUserId,
         ['vaswani2017attention'],
         mockProjectId,
@@ -274,15 +280,6 @@ describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)'
         mockProjectId,
       );
       expect(result?.content).toContain('@article{vaswani2017attention,');
-    });
-
-    it('should gracefully return null from LibraryFacade if CitationFacade is omitted', async () => {
-      const bareLibraryFacade = new LibraryFacade();
-      const result = await bareLibraryFacade.exportBibByCitationKeys(
-        mockUserId,
-        ['vaswani2017attention'],
-      );
-      expect(result).toBeNull();
     });
   });
 });

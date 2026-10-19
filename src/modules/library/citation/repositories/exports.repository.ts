@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 
 /** Maximum number of items exported in a single request. */
 export const EXPORT_MAX_ITEMS = 1000;
@@ -31,7 +32,7 @@ export class ExportsRepository {
     while (collected.length < maxItems) {
       const remaining = maxItems - collected.length;
       const pageSize = Math.min(chunkSize, remaining);
-      const take = pageSize + 1; // +1 sentinel to detect if DB has more rows than this page
+      const take = pageSize + 1;
 
       const chunk = await this.prisma.item.findMany({
         where,
@@ -45,7 +46,7 @@ export class ExportsRepository {
 
       const hasMore = chunk.length > pageSize;
       if (hasMore) {
-        chunk.pop(); // discard sentinel
+        chunk.pop();
       }
 
       collected.push(...chunk);
@@ -73,14 +74,12 @@ export class ExportsRepository {
       select: { role: true },
     });
     if (member) return member;
-    if (typeof this.prisma.project?.findFirst === 'function') {
-      const ownedProject = await this.prisma.project.findFirst({
-        where: { id: projectId, createdById: userId, deletedAt: null },
-        select: { id: true },
-      });
-      if (ownedProject) {
-        return { role: 'OWNER' as const };
-      }
+    const ownedProject = await this.prisma.project.findFirst({
+      where: { id: projectId, createdById: userId, deletedAt: null },
+      select: { id: true },
+    });
+    if (ownedProject) {
+      return { role: 'OWNER' as const };
     }
     return null;
   }
@@ -105,10 +104,10 @@ export class ExportsRepository {
   }
 
   async findItemById(userId: string, itemId: string, projectId?: string) {
-    const scopeWhere: Prisma.ItemWhereInput =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId, projectId: null };
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
+    const scopeWhere: Prisma.ItemWhereInput = effectiveProjectId
+      ? { projectId: effectiveProjectId }
+      : { userId, projectId: null };
     return this.prisma.item.findFirst({
       where: {
         id: itemId,
@@ -128,12 +127,56 @@ export class ExportsRepository {
     });
   }
 
-  async findItemsByScope(scopeWhere: Prisma.ItemWhereInput) {
+  async findItemsByScope(
+    scopeWhere: Prisma.ItemWhereInput,
+    take: number = EXPORT_MAX_ITEMS,
+  ) {
     return this.prisma.item.findMany({
       where: scopeWhere,
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
       },
+      take,
     });
+  }
+
+  async findItemsByMetadataAliases(
+    scopeWhere: Prisma.ItemWhereInput,
+    missingKeys: string[],
+  ): Promise<ExportItemRecord[]> {
+    if (!missingKeys || missingKeys.length === 0) return [];
+    const CHUNK_SIZE = 50;
+    const MAX_RESULTS = 500;
+    const collectedById = new Map<string, ExportItemRecord>();
+
+    for (let i = 0; i < missingKeys.length; i += CHUNK_SIZE) {
+      if (collectedById.size >= MAX_RESULTS) break;
+      const chunkKeys = missingKeys.slice(i, i + CHUNK_SIZE);
+      const aliasClauses: Prisma.ItemWhereInput[] = chunkKeys.flatMap((key) => [
+        { metadata: { path: ['mergedCitationKeys'], array_contains: key } },
+        { metadata: { path: ['citationKey'], equals: key } },
+        { metadata: { path: ['citation-key'], equals: key } },
+        { metadata: { path: ['tex.ids'], string_contains: key } },
+        { metadata: { path: ['extra'], string_contains: key } },
+      ]);
+
+      const batchItems = await this.prisma.item.findMany({
+        where: {
+          AND: [scopeWhere, { OR: aliasClauses }],
+        },
+        include: {
+          contributors: { orderBy: { orderIndex: 'asc' } },
+        },
+        take: Math.min(500, MAX_RESULTS - collectedById.size),
+      });
+
+      for (const item of batchItems) {
+        if (item?.id && !collectedById.has(item.id)) {
+          collectedById.set(item.id, item);
+        }
+      }
+    }
+
+    return Array.from(collectedById.values());
   }
 }

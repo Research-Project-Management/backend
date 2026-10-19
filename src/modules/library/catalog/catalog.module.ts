@@ -4,30 +4,18 @@ import { LibraryCoreModule } from '@/modules/library/core/core.module';
 
 // Controllers
 import {
-  ItemController,
-  ProjectItemController,
+  ItemsController,
   LibraryPermissionsController,
 } from './controllers/items.controller';
-import {
-  ItemCurationController,
-  ProjectItemCurationController,
-} from './controllers/item-curation.controller';
-import {
-  CollectionController,
-  ProjectCollectionController,
-} from './controllers/collections.controller';
+import { ItemCurationController } from './controllers/item-curation.controller';
+import { CollectionsController } from './controllers/collections.controller';
 import { TagController } from './controllers/tags.controller';
 import { TypeController } from './controllers/types.controller';
 import {
   StateController,
-  ProjectStateController,
   StateBatchController,
-  ProjectStateBatchController,
 } from './controllers/state.controller';
-import {
-  SavedSearchesController,
-  ProjectSavedSearchesController,
-} from './controllers/saved-searches.controller';
+import { SavedSearchesController } from './controllers/saved-searches.controller';
 import { NoteController } from './controllers/notes.controller';
 
 // Services
@@ -37,10 +25,6 @@ import { ItemFulltextService } from './services/item-fulltext.service';
 import { ItemTypeConversionService } from './services/item-type-conversion.service';
 import { ItemCurationService } from './services/item-curation.service';
 import { ItemRelationsService } from './services/item-relations.service';
-import { ItemBulkService } from './services/item-bulk.service';
-import { ItemCacheService } from './services/item-cache.service';
-import { ItemLifecycleService } from './services/item-lifecycle.service';
-import { ItemSyncDelegate } from './services/item-sync.delegate';
 import { CollectionsService } from './services/collections.service';
 import { TagsService } from './services/tags.service';
 import { TypesService } from './services/types.service';
@@ -68,8 +52,6 @@ import { TagsRepository } from './repositories/tags.repository';
 import { StateRepository } from './repositories/state.repository';
 import { SavedSearchesRepository } from './repositories/saved-searches.repository';
 import { NotesRepository } from './repositories/notes.repository';
-// Ports
-import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './types/items.types';
 
 // Facade
 import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
@@ -78,20 +60,14 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
   imports: [CoreModule, LibraryCoreModule],
   controllers: [
     ItemCurationController,
-    ProjectItemCurationController,
-    ItemController,
-    ProjectItemController,
+    ItemsController,
     LibraryPermissionsController,
-    CollectionController,
-    ProjectCollectionController,
+    CollectionsController,
     TagController,
     TypeController,
     StateController,
-    ProjectStateController,
     StateBatchController,
-    ProjectStateBatchController,
     SavedSearchesController,
-    ProjectSavedSearchesController,
     NoteController,
   ],
   providers: [
@@ -108,11 +84,7 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     ItemTypeConversionService,
     ItemCurationService,
     ItemRelationsService,
-    ItemBulkService,
-    ItemCacheService,
-    ItemLifecycleService,
     ItemService,
-    ItemSyncDelegate,
     CollectionsService,
     TagsService,
     TypesService,
@@ -138,34 +110,7 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     StateRepository,
     SavedSearchesRepository,
     NotesRepository,
-
-    // Ports
-    {
-      provide: ITEM_EXISTENCE_PORT,
-      useExisting: ItemQueryService,
-    },
-    {
-      provide: ITEM_READ_PORT,
-      useExisting: ItemQueryService,
-    },
   ],
-  exports: [
-    CatalogFacade,
-    CATALOG_FACADE,
-    ItemQueryService,
-    ItemFulltextService,
-    ItemTypeConversionService,
-    ItemCurationService,
-    ItemService,
-    ItemSyncDelegate,
-    CollectionsService,
-    TagsService,
-    TypesService,
-    StateService,
-    SavedSearchesService,
-    NotesService,
-    ITEM_EXISTENCE_PORT,
-    ITEM_READ_PORT,
-  ],
+  exports: [CATALOG_FACADE, CatalogFacade],
 })
 export class CatalogModule {}

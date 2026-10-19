@@ -1,4 +1,11 @@
-import { Injectable, Logger, Optional, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  OnModuleInit,
+  OnModuleDestroy,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -10,15 +17,14 @@ import { IngestionStatus } from '@prisma/client';
 import {
   LIBRARY_INGESTION_QUEUE,
   LIBRARY_INGESTION_JOB,
-  IngestionQueueTier,
 } from '@/modules/library/ingestion/types/queue.constants';
 
 export interface QueuedIngestionJob {
   runId: string;
   projectId: string;
   scopeId?: string;
-  tier?: IngestionQueueTier;
   envelope: IngestionSubmissionEnvelope;
+  enqueuedAt?: number;
 }
 
 export interface IngestionQueueStats {
@@ -28,7 +34,10 @@ export interface IngestionQueueStats {
 }
 
 @Injectable()
-export class QueueService implements OnModuleInit {
+export class QueueService implements OnModuleInit, OnModuleDestroy {
+  public static readonly MAX_FALLBACK_QUEUE_SIZE = 500;
+  private static readonly FALLBACK_JOB_TTL_MS = 30 * 60 * 1000;
+
   private readonly logger = new Logger(QueueService.name);
   private readonly queue: QueuedIngestionJob[] = [];
   private activeCount = 0;
@@ -64,6 +73,10 @@ export class QueueService implements OnModuleInit {
     this.logger.log(
       `QueueService initialized with maxConcurrency=${this.maxConcurrency} (BullMQ: ${Boolean(this.bullQueue)})`,
     );
+  }
+
+  onModuleDestroy(): void {
+    this.bullQueue?.removeAllListeners();
   }
 
   async onModuleInit(): Promise<void> {
@@ -106,7 +119,6 @@ export class QueueService implements OnModuleInit {
     runId: string,
     projectId: string,
     envelope: IngestionSubmissionEnvelope,
-    tier?: IngestionQueueTier,
   ): Promise<boolean> {
     if (this.isProcessingSync(runId)) {
       this.logger.warn(
@@ -123,14 +135,37 @@ export class QueueService implements OnModuleInit {
 
     if (this.bullQueue) {
       try {
+        const jobId = `ingest-${runId}`;
+        if (typeof this.bullQueue.getJob === 'function') {
+          const existingJob = await this.bullQueue
+            .getJob(jobId)
+            .catch(() => null);
+          if (existingJob && typeof existingJob.getState === 'function') {
+            const state = await existingJob.getState().catch(() => '');
+            if (
+              state === 'active' ||
+              state === 'waiting' ||
+              state === 'delayed' ||
+              state === 'prioritized'
+            ) {
+              this.logger.warn(
+                `Run ${runId} is already active or queued in BullMQ (${state}). Skipping duplicate enqueue.`,
+              );
+              return false;
+            }
+            if (typeof existingJob.remove === 'function') {
+              await existingJob.remove().catch(() => undefined);
+            }
+          }
+        }
+
         // Priority routing uses BullMQ job-level priority numbers (1 = high, 5 = normal)
         // within a single standard queue — not separate physical queues.
-        // The `tier` parameter is preserved in job data for observability only.
         await this.bullQueue.add(
           LIBRARY_INGESTION_JOB,
-          { runId, projectId, tier, envelope },
+          { runId, projectId, envelope },
           {
-            jobId: `ingest-${runId}`,
+            jobId,
             priority: jobPriority,
             attempts: 3,
             backoff: {
@@ -141,9 +176,8 @@ export class QueueService implements OnModuleInit {
             removeOnFail: { age: 7 * 86400, count: 2000 },
           },
         );
-        this.queuedRunIds.add(runId);
         this.logger.log(
-          `[BullMQ] Enqueued run ${runId} (jobPriority=${jobPriority}, fastPath=${isFastPath}, tier=${tier ?? 'standard'}) for project ${projectId}`,
+          `[BullMQ] Enqueued run ${runId} (jobPriority=${jobPriority}, fastPath=${isFastPath}) for project ${projectId}`,
         );
         return true;
       } catch (err: unknown) {
@@ -154,6 +188,41 @@ export class QueueService implements OnModuleInit {
       }
     }
 
+    return this.enqueueFallback(runId, projectId, envelope, isFastPath);
+  }
+
+  private enqueueFallback(
+    runId: string,
+    projectId: string,
+    envelope: IngestionSubmissionEnvelope,
+    isFastPath: boolean,
+  ): boolean {
+    if (this.queue.length >= QueueService.MAX_FALLBACK_QUEUE_SIZE) {
+      const now = Date.now();
+      const expiredIdx = this.queue.findIndex(
+        (j) =>
+          j.enqueuedAt !== undefined &&
+          now - j.enqueuedAt > QueueService.FALLBACK_JOB_TTL_MS,
+      );
+      if (expiredIdx !== -1) {
+        const [evicted] = this.queue.splice(expiredIdx, 1);
+        if (evicted) {
+          this.queuedRunIds.delete(evicted.runId);
+        }
+      } else {
+        throw new ServiceUnavailableException(
+          `Ingestion fallback queue is full (max ${QueueService.MAX_FALLBACK_QUEUE_SIZE} items). Please retry later.`,
+        );
+      }
+    }
+
+    const job: QueuedIngestionJob = {
+      runId,
+      projectId,
+      envelope,
+      enqueuedAt: Date.now(),
+    };
+
     this.queuedRunIds.add(runId);
     if (isFastPath) {
       // Prioritize fast path jobs ahead of heavy file OCR/parsing jobs to prevent head-of-line blocking
@@ -161,12 +230,12 @@ export class QueueService implements OnModuleInit {
         (j) => j.envelope?.payload?.kind === 'FILE',
       );
       if (insertIdx !== -1) {
-        this.queue.splice(insertIdx, 0, { runId, projectId, envelope });
+        this.queue.splice(insertIdx, 0, job);
       } else {
-        this.queue.push({ runId, projectId, envelope });
+        this.queue.push(job);
       }
     } else {
-      this.queue.push({ runId, projectId, envelope });
+      this.queue.push(job);
     }
     this.logger.log(
       `[In-Memory] Enqueued run ${runId} (fastPath=${isFastPath}) for project ${projectId} (queue length: ${this.queue.length}, active: ${this.activeCount}/${this.maxConcurrency})`,

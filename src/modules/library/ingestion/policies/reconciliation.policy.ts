@@ -5,51 +5,26 @@ import {
   MetadataConflictDetail,
 } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { BASE_FIELD_MAPPINGS } from '@/modules/library/core/types/schema.constants';
+import { resolveBidirectionalBaseFields } from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
+import { parseCreatorString } from '@/modules/library/core/domain/author.domain';
+import {
+  SOURCE_WEIGHTS,
+  FIELD_AUTHORITY_WEIGHTS,
+  resolveProviderFieldWeight,
+} from '@/modules/library/ingestion/services/metadata-reconciliation.service';
 
 export class ReconciliationPolicy {
   /**
-   * Global provider priority scores for ingestion-pipeline reconciliation.
+   * Global fallback provider priority scores for ingestion-pipeline reconciliation,
+   * derived from the unified SOURCE_WEIGHTS & FIELD_AUTHORITY_WEIGHTS hierarchy.
    */
-  private static readonly PROVIDER_PRIORITY: Record<string, number> = {
-    UserOverride: 100, // Always wins — never overwrite user intent
-    DirectIdentifier: 95, // DOI/PMID/arXivId resolved directly from source
-    TrustedPaper: 92, // In-process local-first academic metadata extraction ($S >= 0.85$)
-    trustedpaper: 92,
-    CrossRef: 90, // Publisher-submitted bibliographic authority
-    crossref: 90,
-    PubMed: 88, // NLM curated; authoritative for biomedical domain
-    pubmed: 88,
-    ZoteroSync: 85, // User's verified Zotero library data
-    zotero: 85,
-    EnrichedProvider: 85, // Automated multi-provider enrichment
-    MetadataResolution: 80, // Resolved provider cascade
-    OpenAlex: 78, // Aggregator; strong for enrichment, weaker for core fields
-    openalex: 78,
-    arXiv: 65, // Submission year != publication year
-    arxiv: 65,
-    OpenLibrary: 65, // Book metadata only; community-maintained
-    openlibrary: 65,
-    BibTeX: 60, // User-imported file; quality depends on export source
-    bibtex: 60,
-    RIS: 60, // User-imported file; quality depends on export source
-    ris: 60,
-    UrlCapture: 50, // Web scraping; lowest structural reliability
-    unpaywall: 55,
-    StagedPdf: 40, // LocalPDFExtraction / unpdf; noisy for venue/year fields
-  };
+  private static readonly PROVIDER_PRIORITY: Record<string, number> =
+    Object.fromEntries(
+      Object.entries(SOURCE_WEIGHTS).map(([k, v]) => [k, Math.round(v * 100)]),
+    );
 
-  private static getProviderPriority(provider: string): number {
-    if (!provider) return 50;
-    const direct = ReconciliationPolicy.PROVIDER_PRIORITY[provider];
-    if (direct !== undefined) return direct;
-    const lower = provider.toLowerCase();
-    for (const [key, val] of Object.entries(
-      ReconciliationPolicy.PROVIDER_PRIORITY,
-    )) {
-      if (key.toLowerCase() === lower) return val;
-    }
-    return 50;
+  private static getProviderPriority(provider: string, field?: string): number {
+    return resolveProviderFieldWeight(provider, field) * 100;
   }
 
   /**
@@ -102,9 +77,11 @@ export class ReconciliationPolicy {
       const sorted = [...evidences].sort((a, b) => {
         const priorityA = ReconciliationPolicy.getProviderPriority(
           a.sourceProvider,
+          field,
         );
         const priorityB = ReconciliationPolicy.getProviderPriority(
           b.sourceProvider,
+          field,
         );
         const scoreA = a.confidence * priorityA;
         const scoreB = b.confidence * priorityB;
@@ -195,7 +172,7 @@ export class ReconciliationPolicy {
 
       if (field === 'extraFields') {
         const mergedExtra: Record<string, unknown> = {};
-        for (const ev of evidences) {
+        for (const ev of [...sorted].reverse()) {
           if (ev.normalizedValue && typeof ev.normalizedValue === 'object') {
             Object.assign(mergedExtra, ev.normalizedValue);
           }
@@ -287,25 +264,7 @@ export class ReconciliationPolicy {
       typeof proposedItem.itemType === 'string' && proposedItem.itemType
         ? proposedItem.itemType
         : 'journalArticle';
-    const baseMap = BASE_FIELD_MAPPINGS[itemType];
-    if (baseMap) {
-      const venueField = baseMap.publicationTitle;
-      if (venueField && venueField !== 'publicationTitle') {
-        if (proposedItem.publicationTitle && !proposedItem[venueField]) {
-          proposedItem[venueField] = proposedItem.publicationTitle;
-        } else if (proposedItem[venueField] && !proposedItem.publicationTitle) {
-          proposedItem.publicationTitle = proposedItem[venueField];
-        }
-      }
-      const publisherField = baseMap.publisher;
-      if (publisherField && publisherField !== 'publisher') {
-        if (proposedItem.publisher && !proposedItem[publisherField]) {
-          proposedItem[publisherField] = proposedItem.publisher;
-        } else if (proposedItem[publisherField] && !proposedItem.publisher) {
-          proposedItem.publisher = proposedItem[publisherField];
-        }
-      }
-    }
+    resolveBidirectionalBaseFields(proposedItem, itemType, undefined, false);
     if (proposedItem.itemType === 'journalArticle' || !proposedItem.itemType) {
       if (proposedItem.publicationTitle && !proposedItem.journal) {
         proposedItem.journal = proposedItem.publicationTitle;
@@ -350,14 +309,11 @@ export class ReconciliationPolicy {
         !Array.isArray(proposedItem.creators) ||
         proposedItem.creators.length === 0
       ) {
-        proposedItem.creators = proposedItem.authors.map(
-          (authorName: string, idx: number) => ({
-            orderIndex: idx,
-            creatorType: 'author',
-            name: authorName,
-            fullName: authorName,
-          }),
-        );
+        proposedItem.creators = proposedItem.authors
+          .map((authorName: string, idx: number) =>
+            parseCreatorString(authorName, idx, 'author'),
+          )
+          .filter((c): c is NonNullable<typeof c> => c !== null);
       }
     }
 

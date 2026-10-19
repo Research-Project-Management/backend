@@ -1,16 +1,15 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import { CursorPaginatedResult } from '@/modules/library/catalog/dto/items.dto';
 import {
-  IItemReadPort,
-  IItemExistencePort,
   QualityAuditCandidateItem,
   DuplicateCandidateItem,
   ItemDetail,
-} from '@/modules/library/catalog/types/items.types';
+} from '@/modules/library/core/types/bibliographic.types';
 import { AccessService, Permission } from '@/modules/project/access';
 
 export interface LibraryPermissionsContract {
@@ -45,14 +44,9 @@ const PERSONAL_LIBRARY_PERMISSIONS: LibraryPermissionsContract = {
 
 /**
  * ItemQueryService — Dedicated Domain Service for Item Information Retrieval.
- * Implements IItemReadPort and IItemExistencePort:
- * - Caches counts (total, unfiled, starred, trash, itemTypes) + authoritative permissions
- * - Single item detail retrieval with Redis acceleration
- * - Cursor pagination and filtered listing
- * - Port methods for existence checks and duplicate candidate queries
  */
 @Injectable()
-export class ItemQueryService implements IItemReadPort, IItemExistencePort {
+export class ItemQueryService {
   private readonly logger = new Logger(ItemQueryService.name);
 
   constructor(
@@ -83,20 +77,16 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
       effectivePermissions?: readonly string[];
     },
   ): Promise<LibraryScopeAccessContract> {
-    const isProjectScope = Boolean(
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal',
-    );
+    const validProjectId = normalizeProjectScopeId(projectId);
 
-    if (!isProjectScope || !projectId) {
+    if (!validProjectId) {
       return {
         scope: 'personal',
         role: 'owner',
         permissions: { ...PERSONAL_LIBRARY_PERMISSIONS },
       };
     }
+    projectId = validProjectId;
 
     let resolvedRole: string | null = accessHint?.role ?? null;
     let overrides: Record<string, boolean> | null | undefined =
@@ -120,10 +110,7 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
       }
     }
 
-    if (
-      !resolvedRole &&
-      typeof this.query.getProjectMemberRole === 'function'
-    ) {
+    if (!resolvedRole) {
       try {
         resolvedRole = await this.query.getProjectMemberRole(userId, projectId);
       } catch {
@@ -214,9 +201,7 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
         this.query.count(userId, { view: 'unfiled', projectId }),
         this.query.count(userId, { view: 'starred', projectId }),
         this.query.count(userId, { view: 'trash', projectId }),
-        typeof this.query.countByItemType === 'function'
-          ? this.query.countByItemType(userId, projectId)
-          : Promise.resolve({} as Record<string, number>),
+        this.query.countByItemType(userId, projectId),
       ]);
       return {
         total,
@@ -228,7 +213,7 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
     };
 
     const [countsData, accessContract] = await Promise.all([
-      this.cache && typeof this.cache.wrap === 'function'
+      this.cache
         ? this.cache.wrap(cacheKey, fetchCountsData, 15)
         : fetchCountsData(),
       this.getPermissions(userId, projectId, accessHint),
@@ -243,8 +228,9 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
   }
 
   async getItem(userId: string, id: string, projectId?: string) {
+    const validProjectId = normalizeProjectScopeId(projectId);
     const cacheKey = LIBRARY_REDIS_KEYS.item(id);
-    const fetchRaw = () => this.query.findById(userId, id, projectId);
+    const fetchRaw = () => this.query.findById(userId, id, validProjectId);
 
     let item: ItemDetail | Record<string, unknown> | null = null;
 
@@ -255,11 +241,11 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
         >(cacheKey);
         if (cached) {
           const isOwner = cached.userId === userId;
-          const isProjectMatch = projectId && cached.projectId === projectId;
+          const isProjectMatch =
+            validProjectId && cached.projectId === validProjectId;
           if (isOwner || isProjectMatch) {
             if (
               Array.isArray((cached as Record<string, unknown>).states) ||
-              Array.isArray((cached as Record<string, unknown>).userStates) ||
               (cached as Record<string, unknown>).readStatus !== undefined
             ) {
               return this.mapFlattenedState(cached, userId);
@@ -272,12 +258,8 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
         this.logger.debug(`Cache lookup error for ${cacheKey}: ${msg}`);
       }
 
-      try {
-        item = await this.cache.wrap(cacheKey, fetchRaw, 300);
-      } catch {
-        item = await fetchRaw();
-      }
-      if (item && this.cache.set) {
+      item = await fetchRaw();
+      if (item) {
         await this.cache.set(cacheKey, item, 300).catch(() => undefined);
       }
     } else {
@@ -286,17 +268,13 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
 
     if (!item) return null;
 
-    // Access check: verify personal ownership or project scope match
-    const isProjectScope = Boolean(projectId && projectId !== 'user');
-    const isAuthorized = isProjectScope
-      ? item.projectId === projectId
+    const isAuthorized = validProjectId
+      ? item.projectId === validProjectId
       : item.userId === userId && !item.projectId;
     if (!isAuthorized) {
       return null;
     }
 
-    // Dynamically project user-specific reading state (starred, readStatus, rating, lastReadAt)
-    // for this specific caller, preventing cross-user reading state bleed in shared workspaces.
     return this.mapFlattenedState(item, userId);
   }
 
@@ -332,13 +310,14 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
       hasFile?: boolean;
       hasNotes?: boolean;
       projectId?: string;
+      include?: string;
+      isRetracted?: boolean;
+      onlyFlagged?: boolean;
     },
   ): Promise<CursorPaginatedResult<ItemDetail | Record<string, unknown>>> {
     const limit = Math.min(options.limit ?? 50, 100);
-    const scopeKey =
-      options.projectId && options.projectId !== 'user'
-        ? `proj:${options.projectId}`
-        : userId;
+    const validProjectId = normalizeProjectScopeId(options.projectId);
+    const scopeKey = validProjectId ? `proj:${validProjectId}` : userId;
     const canCache = !options.search && !options.cursor;
     const extraCacheParts = [
       options.page !== undefined && options.page > 1 ? `p=${options.page}` : '',
@@ -427,7 +406,7 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
 
     if (canCache && cacheKey && this.cache) {
       try {
-        await this.cache.set(cacheKey, result, 60); // 60s TTL
+        await this.cache.set(cacheKey, result, 60);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.debug(`Cache set error for ${cacheKey}: ${message}`);
@@ -541,18 +520,6 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
     )) as unknown as DuplicateCandidateItem[];
   }
 
-  async findCandidateItemsForQualityAudit(
-    limit: number,
-  ): Promise<QualityAuditCandidateItem[]> {
-    return this.findQualityAuditItems(undefined, limit);
-  }
-
-  async findCandidateItemsForDuplicateDetection(
-    limit: number,
-  ): Promise<DuplicateCandidateItem[]> {
-    return this.findDuplicateCandidateItems(undefined, limit);
-  }
-
   async count(
     userId: string,
     options?: Record<string, unknown>,
@@ -568,7 +535,7 @@ export class ItemQueryService implements IItemReadPort, IItemExistencePort {
   }
 
   async findMatchCandidates(
-    scope: { userId?: string; projectId?: string | null } | string,
+    scope: { userId?: string; projectId?: string | null },
     criteria: {
       doi?: string | null;
       arxivId?: string | null;

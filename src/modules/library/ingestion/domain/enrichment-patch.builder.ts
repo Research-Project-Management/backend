@@ -4,6 +4,8 @@ import {
   FIELD_ALIASES,
   harmonizeZoteroFields,
   LibraryItemSource,
+  parseCreatorString,
+  resolveCanonicalCreatorRole,
 } from '@/modules/library/core';
 
 export const SYSTEM_RESERVED_KEYS = new Set([
@@ -159,6 +161,167 @@ export function buildEnrichmentPatch(
   }
 
   return enrichPatch;
+}
+
+export function buildReResolvePatch(
+  existingRec: Record<string, unknown>,
+  resolvedMetadata: Record<string, unknown>,
+  options?: { fields?: string[] },
+): { updateData: Record<string, unknown>; updatedFields: string[] } {
+  const effectiveItemType =
+    (typeof resolvedMetadata.itemType === 'string' &&
+      resolvedMetadata.itemType) ||
+    (typeof existingRec.itemType === 'string' && existingRec.itemType) ||
+    (typeof existingRec.type === 'string' && existingRec.type) ||
+    'journalArticle';
+  const rawExtra =
+    resolvedMetadata.extraFields &&
+    typeof resolvedMetadata.extraFields === 'object' &&
+    !Array.isArray(resolvedMetadata.extraFields)
+      ? (resolvedMetadata.extraFields as Record<string, unknown>)
+      : {};
+  const m: Record<string, unknown> = harmonizeZoteroFields(
+    {
+      ...resolvedMetadata,
+      extraFields: { ...rawExtra },
+    },
+    { itemType: effectiveItemType, syncExtraFields: true },
+  );
+
+  const updateData: Record<string, unknown> = {};
+  const updatedFields: string[] = [];
+  const allowedFieldSet =
+    Array.isArray(options?.fields) && options.fields.length > 0
+      ? new Set(options.fields)
+      : null;
+
+  const applyField = (fieldName: string, value: unknown) => {
+    if (allowedFieldSet && !allowedFieldSet.has(fieldName)) {
+      return;
+    }
+    if (value !== undefined && value !== null && value !== '') {
+      updateData[fieldName] = value;
+      if (!updatedFields.includes(fieldName)) {
+        updatedFields.push(fieldName);
+      }
+    }
+  };
+
+  if (m.title && m.title !== existingRec.title) {
+    applyField('title', m.title);
+  }
+
+  if (Array.isArray(m.creators) && m.creators.length > 0) {
+    const creators = (
+      m.creators as Array<{
+        creatorType?: string;
+        firstName?: string;
+        lastName?: string;
+        fullName?: string;
+        name?: string;
+        fieldMode?: number;
+      }>
+    ).map((c, index) => ({
+      orderIndex: index,
+      creatorType: resolveCanonicalCreatorRole(c.creatorType, {
+        itemType: effectiveItemType,
+      }),
+      firstName: c.firstName || '',
+      lastName: c.lastName || '',
+      fullName:
+        c.fullName ||
+        c.name ||
+        [c.firstName, c.lastName].filter(Boolean).join(' '),
+      ...(c.fieldMode !== undefined ? { fieldMode: c.fieldMode } : {}),
+    }));
+    applyField('creators', creators);
+  } else if (Array.isArray(m.authors) && m.authors.length > 0) {
+    const creators = (m.authors as string[]).map(
+      (authorStr: string, index: number) => {
+        const parsed = parseCreatorString(authorStr, index, 'author');
+        return {
+          orderIndex: index,
+          creatorType: 'author',
+          firstName: parsed.firstName || '',
+          lastName: parsed.lastName || '',
+          fullName: parsed.fullName || authorStr,
+          ...(parsed.fieldMode !== undefined
+            ? { fieldMode: parsed.fieldMode }
+            : {}),
+        };
+      },
+    );
+    applyField('creators', creators);
+  }
+
+  if (m.publicationDate) {
+    applyField('date', m.publicationDate);
+    applyField('publicationDate', m.publicationDate);
+  } else if (m.year) {
+    applyField('date', String(m.year));
+  }
+  if (m.year) {
+    applyField('year', m.year);
+  }
+
+  if (m.journal || m.publicationTitle) {
+    applyField('publicationTitle', m.journal || m.publicationTitle);
+  }
+
+  if (m.abstract || m.abstractNote) {
+    applyField('abstractNote', m.abstract || m.abstractNote);
+    applyField('abstract', m.abstract || m.abstractNote);
+  }
+
+  const handledKeys = new Set([
+    'title',
+    'creators',
+    'authors',
+    'editors',
+    'contributors',
+    'publicationDate',
+    'date',
+    'year',
+    'publicationTitle',
+    'journal',
+    'abstract',
+    'abstractNote',
+    'extraFields',
+    'notes',
+    'provenance',
+  ]);
+
+  for (const [key, val] of Object.entries(m)) {
+    if (handledKeys.has(key)) continue;
+    if (val === undefined || val === null || val === '') continue;
+    if (Array.isArray(val) && val.length === 0) continue;
+    applyField(key, val);
+  }
+
+  const mExtra =
+    m.extraFields &&
+    typeof m.extraFields === 'object' &&
+    !Array.isArray(m.extraFields)
+      ? (m.extraFields as Record<string, unknown>)
+      : undefined;
+  if (mExtra && Object.keys(mExtra).length > 0) {
+    const existingExtra =
+      existingRec.extraFields &&
+      typeof existingRec.extraFields === 'object' &&
+      !Array.isArray(existingRec.extraFields)
+        ? (existingRec.extraFields as Record<string, unknown>)
+        : {};
+    const mergedExtraFields: Record<string, unknown> = { ...existingExtra };
+    for (const [efKey, efVal] of Object.entries(mExtra)) {
+      if (efVal !== undefined && efVal !== null && efVal !== '') {
+        mergedExtraFields[efKey] = efVal;
+        applyField(efKey, efVal);
+      }
+    }
+    updateData.extraFields = mergedExtraFields;
+  }
+
+  return { updateData, updatedFields };
 }
 
 export function mapPayloadToSource(kind: string): LibraryItemSource {

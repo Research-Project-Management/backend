@@ -171,6 +171,7 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
         ],
         authorId: 'user-1',
       },
+      undefined,
     );
 
     // Verify StrikeOut conversion
@@ -182,6 +183,7 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
         quoteText: 'Outdated hypothesis',
         color: '#ff0000',
       }),
+      undefined,
     );
   });
 

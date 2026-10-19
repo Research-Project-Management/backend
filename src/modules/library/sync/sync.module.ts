@@ -6,17 +6,16 @@ import { LibraryCoreModule } from '@/modules/library/core/core.module';
 
 import { LIBRARY_OUTBOX_QUEUE } from './types/outbox.constants';
 import { OutboxQueueConsumer } from './services/outbox-queue.consumer';
-import { TransactionService as SharedTransactionService } from '@/modules/library/core/ports/unit-of-work.port';
 import { TransactionService } from './services/transaction.service';
 import { ChangeLogRepository } from './repositories/changelog.repository';
-import { ChangeLogService } from './services/changelog.service';
 import { OutboxRepository } from './repositories/outbox.repository';
 import { OutboxWorker } from './services/outbox.worker';
 import { OutboxDispatcher } from './services/outbox.dispatcher';
-import { IntegrationEventBusService } from './services/integration-event-bus.service';
 import {
   OUTBOX_REGISTRY_PORT,
   LIBRARY_EVENT_TYPES,
+  UNIT_OF_WORK,
+  IDEMPOTENT_CONSUMER,
 } from '@/modules/library/core';
 import { OutboxMetrics } from './services/outbox.metrics';
 import { SyncController } from './controllers/sync.controller';
@@ -53,11 +52,10 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
   providers: [
     TransactionService,
     {
-      provide: SharedTransactionService,
+      provide: UNIT_OF_WORK,
       useExisting: TransactionService,
     },
     ChangeLogRepository,
-    ChangeLogService,
     OutboxRepository,
     OutboxWorker,
     {
@@ -68,20 +66,18 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
     OutboxMetrics,
     ...syncWorkerProviders,
     IdempotentConsumerService,
-    IntegrationEventBusService,
+    {
+      provide: IDEMPOTENT_CONSUMER,
+      useExisting: IdempotentConsumerService,
+    },
   ],
   exports: [
     TransactionService,
-    SharedTransactionService,
-    ChangeLogRepository,
-    ChangeLogService,
-    OutboxRepository,
-    OutboxWorker,
+    UNIT_OF_WORK,
     OUTBOX_REGISTRY_PORT,
     OutboxDispatcher,
-    OutboxMetrics,
     IdempotentConsumerService,
-    IntegrationEventBusService,
+    IDEMPOTENT_CONSUMER,
     LibraryCoreModule,
   ],
 })

@@ -181,37 +181,6 @@ describe('MeXtract Academic SLM Extractor (Tier 4)', () => {
     });
   });
 
-  describe('3b. Local ONNX SLM (@xenova/transformers)', () => {
-    it('returns MEXTRACT_ONNX_SLM when ONNX pipeline outputs structured metadata', async () => {
-      const spy = jest
-        .spyOn(MeXtractExtractor as any, 'tryOnnxExtraction')
-        .mockResolvedValueOnce({
-          metadata: {
-            title: 'Attention Is All You Need',
-            authors: ['Ashish Vaswani', 'Noam Shazeer'],
-            year: 2017,
-            doi: '10.48550/arXiv.1706.03762',
-          },
-          rawOutput: { test: true },
-        });
-
-      const result = await MeXtractExtractor.extract(
-        'Attention Is All You Need, Ashish Vaswani, Noam Shazeer, 2017...',
-      );
-
-      expect(result).not.toBeNull();
-      expect(result?.engine).toBe('MEXTRACT_ONNX_SLM');
-      expect(result?.confidence).toBe(0.95);
-      expect(result?.metadata.title).toBe('Attention Is All You Need');
-      expect(result?.metadata.authors).toEqual([
-        'Ashish Vaswani',
-        'Noam Shazeer',
-      ]);
-
-      spy.mockRestore();
-    });
-  });
-
   describe('4. TrustedExtractionFacade Tier 4 Cascade Integration', () => {
     it('activates MeXtract SLM when XMP is absent and Regex cannot satisfy quality gate', async () => {
       const mockedExtractText = extractText as jest.Mock;

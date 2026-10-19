@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, Item } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { isUUID } from 'class-validator';
-import { libraryConfig } from '@/modules/library/core/config/library.config';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 import {
   RetractionDetails,
   RetractionNature,
@@ -10,12 +10,11 @@ import {
 } from '@/modules/library/ingestion/types/retraction.types';
 
 const isValidId = (val?: unknown): val is string =>
-  typeof val === 'string' &&
-  Boolean(val) &&
-  (libraryConfig().app.isTest || isUUID(val));
+  typeof val === 'string' && isUUID(val);
 
 interface ItemRetractionMetadata {
   pmid?: string | null;
+  isbn?: string | null;
   isRetracted?: boolean;
   retractionNature?: RetractionNature | null;
   retractionDetails?: RetractionDetails | null;
@@ -54,13 +53,9 @@ export class RetractionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   private getScopeWhere(userId: string, projectId?: string) {
-    if (
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal'
-    ) {
-      return { projectId, deletedAt: null };
+    const normalizedProjectId = normalizeProjectScopeId(projectId);
+    if (normalizedProjectId) {
+      return { projectId: normalizedProjectId, deletedAt: null };
     }
     return { userId, projectId: null, deletedAt: null };
   }
@@ -92,6 +87,7 @@ export class RetractionRepository {
           ? { id: { in: itemIds } }
           : RETRACTION_IDENTIFIER_FILTER),
       },
+      take: 500,
       select: {
         id: true,
         title: true,
@@ -103,11 +99,16 @@ export class RetractionRepository {
     return items
       .map((item) => {
         const meta = parseItemMetadata(item.metadata);
+        const topItem = item as {
+          pmid?: string | null;
+          isbn?: string | null;
+        };
         return {
           id: item.id,
           title: item.title,
           doi: item.doi,
-          pmid: meta.pmid ?? null,
+          pmid: topItem.pmid ?? meta.pmid ?? null,
+          isbn: topItem.isbn ?? meta.isbn ?? null,
           isRetracted: Boolean(meta.isRetracted),
           retractionNature: meta.retractionNature ?? null,
           retractionCheckedAt: meta.retractionCheckedAt
@@ -130,6 +131,7 @@ export class RetractionRepository {
         ...scopeWhere,
         ...RETRACTION_IDENTIFIER_FILTER,
       },
+      orderBy: { updatedAt: 'asc' },
       select: {
         id: true,
         title: true,
@@ -142,11 +144,16 @@ export class RetractionRepository {
     return items
       .map((item) => {
         const meta = parseItemMetadata(item.metadata);
+        const topItem = item as {
+          pmid?: string | null;
+          isbn?: string | null;
+        };
         return {
           id: item.id,
           title: item.title,
           doi: item.doi,
-          pmid: meta.pmid ?? null,
+          pmid: topItem.pmid ?? meta.pmid ?? null,
+          isbn: topItem.isbn ?? meta.isbn ?? null,
           isRetracted: Boolean(meta.isRetracted),
           retractionNature: meta.retractionNature ?? null,
           retractionCheckedAt: meta.retractionCheckedAt
@@ -171,7 +178,7 @@ export class RetractionRepository {
     if (!isValidId(itemId)) return null;
     const existing = await this.prisma.item.findUnique({
       where: { id: itemId },
-      select: { metadata: true },
+      select: { metadata: true, userId: true, projectId: true },
     });
     const metadataObj: ItemRetractionMetadata = {
       ...parseItemMetadata(existing?.metadata),
@@ -181,10 +188,58 @@ export class RetractionRepository {
       retractionCheckedAt: checkedAt.toISOString(),
     };
 
-    return this.prisma.item.update({
+    const updated = await this.prisma.item.update({
       where: { id: itemId },
-      data: { metadata: metadataObj as unknown as Prisma.InputJsonValue },
+      data: {
+        metadata: metadataObj as unknown as Prisma.InputJsonValue,
+        version: { increment: 1 },
+      },
     });
+
+    if (updated && (existing?.userId || updated.userId)) {
+      const effectiveUserId = existing?.userId || updated.userId;
+      const effectiveProjectId = normalizeProjectScopeId(
+        existing?.projectId ?? updated.projectId,
+      );
+      try {
+        const seqRecord = effectiveProjectId
+          ? await this.prisma.syncSequence?.upsert({
+              where: { projectId: effectiveProjectId },
+              create: {
+                projectId: effectiveProjectId,
+                currentSequence: BigInt(1),
+              },
+              update: { currentSequence: { increment: BigInt(1) } },
+              select: { currentSequence: true },
+            })
+          : await this.prisma.syncSequence?.upsert({
+              where: { userId: effectiveUserId },
+              create: {
+                userId: effectiveUserId,
+                currentSequence: BigInt(1),
+              },
+              update: { currentSequence: { increment: BigInt(1) } },
+              select: { currentSequence: true },
+            });
+        const seq = seqRecord?.currentSequence ?? BigInt(1);
+        await this.prisma.libraryChange?.create({
+          data: {
+            seq,
+            userId: effectiveUserId,
+            projectId: effectiveProjectId ?? null,
+            entityType: 'Item',
+            entityId: itemId,
+            action: 'update',
+            version: updated.version,
+            data: updated as unknown as Prisma.InputJsonValue,
+          },
+        });
+      } catch {
+        // Non-critical changelog write in standalone repository context
+      }
+    }
+
+    return updated;
   }
 
   async findRetractedItems(userId: string, projectId?: string) {
@@ -197,6 +252,7 @@ export class RetractionRepository {
           equals: true,
         },
       },
+      take: 500,
       orderBy: [{ updatedAt: 'desc' }],
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
@@ -212,41 +268,56 @@ export class RetractionRepository {
 
   async getStats(userId: string, projectId?: string): Promise<RetractionStats> {
     const baseWhere = this.getScopeWhere(userId, projectId);
-    const [totalItems, retractedItems] = await Promise.all([
-      this.prisma.item.count({ where: baseWhere }).catch(() => 0),
-      this.prisma.item.findMany({
-        where: {
-          ...baseWhere,
-          metadata: {
-            path: ['isRetracted'],
-            equals: true,
-          },
-        },
-        select: { metadata: true },
-      }),
-    ]);
+    const retractedBaseWhere: Prisma.ItemWhereInput = {
+      ...baseWhere,
+      metadata: {
+        path: ['isRetracted'],
+        equals: true,
+      },
+    };
 
-    let retracted = 0;
-    let expressionsOfConcern = 0;
-    let manual = 0;
-
-    for (const item of retractedItems) {
-      const meta = parseItemMetadata(item.metadata);
-      if (meta.isRetracted) {
-        retracted++;
-        if (meta.retractionNature === 'expression_of_concern')
-          expressionsOfConcern++;
-        if (meta.retractionNature === 'manual') manual++;
-      }
-    }
+    const [totalItems, retractedCount, expressionsOfConcernCount, manualCount] =
+      await Promise.all([
+        this.prisma.item.count({ where: baseWhere }).catch(() => 0),
+        this.prisma.item.count({ where: retractedBaseWhere }).catch(() => 0),
+        this.prisma.item
+          .count({
+            where: {
+              AND: [
+                retractedBaseWhere,
+                {
+                  metadata: {
+                    path: ['retractionNature'],
+                    equals: 'expression_of_concern',
+                  },
+                },
+              ],
+            },
+          })
+          .catch(() => 0),
+        this.prisma.item
+          .count({
+            where: {
+              AND: [
+                retractedBaseWhere,
+                {
+                  metadata: {
+                    path: ['retractionNature'],
+                    equals: 'manual',
+                  },
+                },
+              ],
+            },
+          })
+          .catch(() => 0),
+      ]);
 
     return {
-      totalItems:
-        typeof totalItems === 'number' ? totalItems : retractedItems.length,
+      totalItems: typeof totalItems === 'number' ? totalItems : retractedCount,
       checkedItems: totalItems,
-      retractedCount: retracted,
-      expressionsOfConcernCount: expressionsOfConcern,
-      manualCount: manual,
+      retractedCount,
+      expressionsOfConcernCount,
+      manualCount,
     };
   }
 
@@ -256,6 +327,7 @@ export class RetractionRepository {
         deletedAt: null,
         ...RETRACTION_IDENTIFIER_FILTER,
       },
+      orderBy: { updatedAt: 'asc' },
       select: {
         id: true,
         userId: true,
@@ -270,13 +342,18 @@ export class RetractionRepository {
     return items
       .map((item) => {
         const meta = parseItemMetadata(item.metadata);
+        const topItem = item as {
+          pmid?: string | null;
+          isbn?: string | null;
+        };
         return {
           id: item.id,
           userId: item.userId,
           projectId: item.projectId,
           title: item.title,
           doi: item.doi,
-          pmid: meta.pmid ?? null,
+          pmid: topItem.pmid ?? meta.pmid ?? null,
+          isbn: topItem.isbn ?? meta.isbn ?? null,
           isRetracted: Boolean(meta.isRetracted),
           retractionNature: meta.retractionNature ?? null,
           retractionCheckedAt: meta.retractionCheckedAt
@@ -296,21 +373,15 @@ export class RetractionRepository {
     return this.prisma.retraction.count();
   }
 
-  async countRetractions(): Promise<number> {
-    return this.prisma.retraction.count();
-  }
-
   async upsertRetractionRecord(args: Prisma.RetractionUpsertArgs) {
     return this.prisma.retraction.upsert(args);
   }
 
-  async upsertRetraction(args: Prisma.RetractionUpsertArgs) {
-    return this.prisma.retraction.upsert(args);
-  }
-
-  async findRetractionRecordsForMemoryIndex() {
+  async findRetractionRecordsForMemoryIndex(limit = 5000) {
     return this.prisma.retraction.findMany({
       where: { isRetracted: true },
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
       select: {
         doi: true,
         pmid: true,
@@ -326,37 +397,21 @@ export class RetractionRepository {
     });
   }
 
-  async findRetractionRecord(
-    where: Prisma.RetractionWhereInput | { where: Prisma.RetractionWhereInput },
-  ) {
-    let filter: unknown = where;
-    while (
-      filter &&
-      typeof filter === 'object' &&
-      'where' in filter &&
-      (filter as { where?: unknown }).where
-    ) {
-      filter = filter.where;
-    }
+  async findRetractionRecordByDoi(doi: string) {
     return this.prisma.retraction.findFirst({
-      where: filter as Prisma.RetractionWhereInput,
+      where: { doi },
     });
   }
 
-  async findRetraction(
-    where: Prisma.RetractionWhereInput | { where: Prisma.RetractionWhereInput },
-  ) {
-    let filter: unknown = where;
-    while (
-      filter &&
-      typeof filter === 'object' &&
-      'where' in filter &&
-      (filter as { where?: unknown }).where
-    ) {
-      filter = filter.where;
-    }
+  async findRetractionRecordByPmid(pmid: string) {
     return this.prisma.retraction.findFirst({
-      where: filter as Prisma.RetractionWhereInput,
+      where: { pmid },
+    });
+  }
+
+  async findRetractionRecord(where: Prisma.RetractionWhereInput) {
+    return this.prisma.retraction.findFirst({
+      where,
     });
   }
 

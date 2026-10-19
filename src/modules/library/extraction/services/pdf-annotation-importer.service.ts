@@ -42,9 +42,8 @@ export class PdfAnnotationImporterService {
   async importFromAttachment(
     userId: string,
     attachmentId: string,
+    projectId?: string,
   ): Promise<ImportAnnotationsResult> {
-    await this.attachmentsService?.assertAttachmentExists(attachmentId, userId);
-
     const attachment = await this.attachmentsRepo.findUnique(attachmentId, {
       item: true,
     });
@@ -53,13 +52,18 @@ export class PdfAnnotationImporterService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    if (
-      attachment.item &&
-      !attachment.item.projectId &&
-      attachment.item.userId &&
-      attachment.item.userId !== userId
-    ) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    if (attachment.item) {
+      if (projectId && projectId !== 'user') {
+        if (attachment.item.projectId !== projectId) {
+          throw new NotFoundException(`Attachment ${attachmentId} not found`);
+        }
+      } else if (
+        !attachment.item.projectId &&
+        attachment.item.userId &&
+        attachment.item.userId !== userId
+      ) {
+        throw new NotFoundException(`Attachment ${attachmentId} not found`);
+      }
     }
 
     const fileId = attachment.fileId || extractFileIdFromUrl(attachment.url);
@@ -106,10 +110,29 @@ export class PdfAnnotationImporterService {
 
       let totalFound = 0;
       let imported = 0;
+      const annotationsToCreate: Array<{
+        type: AnnotationType;
+        pageIndex: number;
+        y: number;
+        x: number;
+        color: string;
+        quoteText?: string;
+        comment: string;
+        rectCoords: Array<{
+          x1: number;
+          y1: number;
+          x2: number;
+          y2: number;
+          width: number;
+          height: number;
+        }>;
+        authorId: string;
+      }> = [];
 
       for (let p = 1; p <= numPages; p++) {
+        let page: Awaited<ReturnType<typeof documentProxy.getPage>> | undefined;
         try {
-          const page = await documentProxy.getPage(p);
+          page = await documentProxy.getPage(p);
           interface PdfRawAnnotation {
             subtype?: string;
             rect?: number[];
@@ -118,7 +141,9 @@ export class PdfAnnotationImporterService {
             contentsObj?: { str?: string } | null;
           }
           const annots = (await page.getAnnotations()) as
-            PdfRawAnnotation[] | null | undefined;
+            | PdfRawAnnotation[]
+            | null
+            | undefined;
           if (!annots || !Array.isArray(annots) || annots.length === 0) {
             continue;
           }
@@ -215,8 +240,7 @@ export class PdfAnnotationImporterService {
                 : '') ||
               '';
 
-            await this.annotationsService.createAnnotation(userId, {
-              attachmentId,
+            annotationsToCreate.push({
               type: mappedType,
               pageIndex,
               y: normY1,
@@ -249,7 +273,25 @@ export class PdfAnnotationImporterService {
           this.logger.warn(
             `Failed extracting annotations from page ${p} of attachment ${attachmentId}: ${message}`,
           );
+        } finally {
+          try {
+            page?.cleanup?.();
+          } catch {
+            // Ignore page cleanup errors
+          }
         }
+      }
+
+      if (annotationsToCreate.length > 0) {
+        await this.annotationsService.batchUpsertAnnotations(
+          userId,
+          attachmentId,
+          {
+            upserts: annotationsToCreate,
+            deletes: [],
+          },
+          projectId,
+        );
       }
 
       this.logger.log(
@@ -262,13 +304,16 @@ export class PdfAnnotationImporterService {
         pagesScanned: numPages,
       };
     } finally {
-      try {
-        await (
+      await Promise.resolve(
+        (
+          documentProxy as { cleanup?: () => Promise<void> | void }
+        )?.cleanup?.(),
+      ).catch(() => {});
+      await Promise.resolve(
+        (
           documentProxy as { destroy?: () => Promise<void> | void }
-        ).destroy?.();
-      } catch {
-        // Ignore cleanup errors
-      }
+        )?.destroy?.(),
+      ).catch(() => {});
     }
   }
 

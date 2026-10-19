@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
-import { IngestionStageName } from '@/modules/library/ingestion/domain/ingestion-domain.event';
+import {
+  IngestionRunAggregate,
+  IngestionStageName,
+} from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { IngestionStage, IngestionStatus, Prisma } from '@prisma/client';
 

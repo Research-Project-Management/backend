@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma } from '@prisma/client';
-import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
+import {
+  DuplicateService,
+  DuplicateDetectorService,
+  DuplicateMergerService,
+} from '@/modules/library/ingestion/services/duplicate.service';
 import { PrismaService } from '@/core';
 import {
   CATALOG_FACADE,
@@ -107,7 +111,9 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
           delete: jest.fn().mockResolvedValue({}),
         }),
         itemMetadata: fromPartial({
-          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+          update: jest.fn().mockResolvedValue({}),
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         }),
       });
 
@@ -134,6 +140,8 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           DuplicateService,
+          DuplicateDetectorService,
+          DuplicateMergerService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: TransactionService, useValue: mockLibraryTx },
           { provide: CATALOG_FACADE, useValue: mockBibliographyFacade },
@@ -495,6 +503,9 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         primaryItem,
         duplicateItem,
       ]);
+      mockTx.itemMetadata.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'meta-dup-1', itemId: 'dup-meta-item' });
 
       await service.mergeDuplicates(
         mockUserId,
@@ -506,10 +517,16 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         mockProjectId,
       );
 
-      // Verify itemMetadata snapshots re-parented to primary item
-      expect(mockTx.itemMetadata.updateMany).toHaveBeenCalledWith({
-        where: { itemId: { in: ['dup-meta-item'] } },
+      // Verify single itemMetadata snapshot re-parented to primary item and remaining deleted
+      expect(mockTx.itemMetadata.update).toHaveBeenCalledWith({
+        where: { id: 'meta-dup-1' },
         data: { itemId: 'primary-meta-item' },
+      });
+      expect(mockTx.itemMetadata.deleteMany).toHaveBeenCalledWith({
+        where: {
+          itemId: { in: ['dup-meta-item'] },
+          id: { not: 'meta-dup-1' },
+        },
       });
     });
   });

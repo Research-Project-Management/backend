@@ -5,7 +5,7 @@ import {
   CreateAnnotationData,
   UpdateAnnotationData,
 } from '@/modules/library/extraction/types/annotations.types';
-import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 
 export const DEFAULT_ANNOTATION_COLOR = '#ffeb3b';
 const HEX_COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
@@ -188,7 +188,7 @@ export class AnnotationNormalizer {
    */
   normalizeTags(tags?: unknown): string[] {
     if (!Array.isArray(tags)) return [];
-    return normalizeTags(
+    return normalizeAcademicTags(
       tags.filter((t): t is string => typeof t === 'string'),
     );
   }

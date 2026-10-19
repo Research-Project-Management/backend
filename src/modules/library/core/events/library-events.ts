@@ -31,6 +31,7 @@ export const LIBRARY_EVENT_TYPES = {
   ATTACHMENT_CREATED: 'library.attachment.created',
   ATTACHMENT_REVISION_ADDED: 'library.attachment.revision_added',
   ATTACHMENT_DELETED: 'library.attachment.deleted',
+  ATTACHMENT_PAGES_EXTRACTED: 'library.attachment.pages.extracted',
 
   // Annotations
   ANNOTATION_CREATED: 'library.annotation.created',
@@ -43,6 +44,13 @@ export const LIBRARY_EVENT_TYPES = {
   COLLECTION_DELETED: 'library.collection.deleted',
   COLLECTION_ITEM_ADDED: 'library.collection.item_added',
   COLLECTION_ITEM_REMOVED: 'library.collection.item_removed',
+  COLLECTION_ITEMS_ASSIGNED: 'library.collection.items_assigned',
+  COLLECTION_ITEMS_DETACHED: 'library.collection.items_detached',
+
+  // Saved Searches
+  SAVED_SEARCH_CREATED: 'library.saved_search.created',
+  SAVED_SEARCH_UPDATED: 'library.saved_search.updated',
+  SAVED_SEARCH_DELETED: 'library.saved_search.deleted',
 
   // Reading
   READING_STATE_UPDATED: 'library.reading.updated',
@@ -83,252 +91,14 @@ export function buildItemCreatedOutboxPayload(input: {
   };
 }
 
-export interface EventRegistryEntry {
+export interface DomainEventEnvelope<T = unknown> {
+  eventId: string;
+  userId?: string;
+  projectId?: string;
+  scopeId?: string;
+  aggregateId: string;
   eventType: string;
-  producer: string;
-  consumer: string;
-  retryPolicy: 'immediate_dlq' | 'exponential_backoff' | 'dedup_window';
-  idempotency: 'dedupe_key' | 'aggregate_version' | 'none';
-  expectedSideEffect: string;
+  payload: T;
+  createdAt: Date;
+  schemaVersion: number;
 }
-
-export const LIBRARY_EVENT_REGISTRY: Record<string, EventRegistryEntry> = {
-  [LIBRARY_EVENT_TYPES.ITEM_CREATED]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_CREATED,
-    producer: 'ItemsService.createItem',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect:
-      'Emits domain event for local listeners, search projection, and metrics',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_UPDATED]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-    producer: 'ItemsService.updateItem',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect:
-      'Emits domain event for local listeners and change log tracking',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_DELETED]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_DELETED,
-    producer: 'ItemsService.deleteItem',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for local tombstone listeners',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_RESTORED]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_RESTORED,
-    producer: 'ItemsService.restoreItem',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for local restore listeners',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_PURGED]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
-    producer: 'ItemsService.purgeItem',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for permanent purge cleanup',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_INGESTED_URL]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_INGESTED_URL,
-    producer: 'IngestionService.confirmCapturedUrl',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect:
-      'Emits domain event for URL ingestion completion telemetry',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_INGESTED_DOI]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_INGESTED_DOI,
-    producer: 'IngestionService.ingest',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect:
-      'Emits domain event for DOI ingestion completion telemetry',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_INGESTED_BIBTEX]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_INGESTED_BIBTEX,
-    producer: 'IngestionService.ingest',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect:
-      'Emits domain event for BibTeX batch ingestion telemetry',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_MERGED_INTO]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_MERGED_INTO,
-    producer: 'CurationService.mergeItems',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for duplicate item merge audit',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_MERGED]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_MERGED,
-    producer: 'CurationService.mergeItems',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for item merge audit',
-  },
-  [LIBRARY_EVENT_TYPES.TAG_CREATED]: {
-    eventType: LIBRARY_EVENT_TYPES.TAG_CREATED,
-    producer: 'TagsService.createTag',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for tag creation telemetry',
-  },
-  [LIBRARY_EVENT_TYPES.TAG_DELETED]: {
-    eventType: LIBRARY_EVENT_TYPES.TAG_DELETED,
-    producer: 'TagsService.deleteTag',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for tag deletion telemetry',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_TAGGED]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_TAGGED,
-    producer: 'TagsService.assignTag',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for item tag association',
-  },
-  [LIBRARY_EVENT_TYPES.ITEM_UNTAGGED]: {
-    eventType: LIBRARY_EVENT_TYPES.ITEM_UNTAGGED,
-    producer: 'TagsService.removeTag',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for item untag association',
-  },
-  [LIBRARY_EVENT_TYPES.NOTE_CREATED]: {
-    eventType: LIBRARY_EVENT_TYPES.NOTE_CREATED,
-    producer: 'NotesService.createNote',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for note creation telemetry',
-  },
-  [LIBRARY_EVENT_TYPES.NOTE_UPDATED]: {
-    eventType: LIBRARY_EVENT_TYPES.NOTE_UPDATED,
-    producer: 'NotesService.updateNote',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for note update telemetry',
-  },
-  [LIBRARY_EVENT_TYPES.NOTE_DELETED]: {
-    eventType: LIBRARY_EVENT_TYPES.NOTE_DELETED,
-    producer: 'NotesService.deleteNote',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for note deletion telemetry',
-  },
-  [LIBRARY_EVENT_TYPES.ATTACHMENT_CREATED]: {
-    eventType: LIBRARY_EVENT_TYPES.ATTACHMENT_CREATED,
-    producer: 'AttachmentsService.uploadAttachment',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for attachment upload telemetry',
-  },
-  [LIBRARY_EVENT_TYPES.ATTACHMENT_REVISION_ADDED]: {
-    eventType: LIBRARY_EVENT_TYPES.ATTACHMENT_REVISION_ADDED,
-    producer: 'AttachmentsService.addRevision',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for attachment revision telemetry',
-  },
-  [LIBRARY_EVENT_TYPES.ATTACHMENT_DELETED]: {
-    eventType: LIBRARY_EVENT_TYPES.ATTACHMENT_DELETED,
-    producer: 'AttachmentsService.deleteAttachment',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for attachment deletion',
-  },
-  [LIBRARY_EVENT_TYPES.ANNOTATION_CREATED]: {
-    eventType: LIBRARY_EVENT_TYPES.ANNOTATION_CREATED,
-    producer: 'AnnotationsService.createAnnotation',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for annotation creation',
-  },
-  [LIBRARY_EVENT_TYPES.ANNOTATION_UPDATED]: {
-    eventType: LIBRARY_EVENT_TYPES.ANNOTATION_UPDATED,
-    producer: 'AnnotationsService.updateAnnotation',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for annotation update',
-  },
-  [LIBRARY_EVENT_TYPES.ANNOTATION_DELETED]: {
-    eventType: LIBRARY_EVENT_TYPES.ANNOTATION_DELETED,
-    producer: 'AnnotationsService.deleteAnnotation',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for annotation deletion',
-  },
-  [LIBRARY_EVENT_TYPES.COLLECTION_CREATED]: {
-    eventType: LIBRARY_EVENT_TYPES.COLLECTION_CREATED,
-    producer: 'CollectionsService.createCollection',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for collection creation',
-  },
-  [LIBRARY_EVENT_TYPES.COLLECTION_UPDATED]: {
-    eventType: LIBRARY_EVENT_TYPES.COLLECTION_UPDATED,
-    producer: 'CollectionsService.updateCollection',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for collection update',
-  },
-  [LIBRARY_EVENT_TYPES.COLLECTION_DELETED]: {
-    eventType: LIBRARY_EVENT_TYPES.COLLECTION_DELETED,
-    producer: 'CollectionsService.deleteCollection',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for collection deletion',
-  },
-  [LIBRARY_EVENT_TYPES.COLLECTION_ITEM_ADDED]: {
-    eventType: LIBRARY_EVENT_TYPES.COLLECTION_ITEM_ADDED,
-    producer: 'CollectionsService.addItem',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for collection item association',
-  },
-  [LIBRARY_EVENT_TYPES.COLLECTION_ITEM_REMOVED]: {
-    eventType: LIBRARY_EVENT_TYPES.COLLECTION_ITEM_REMOVED,
-    producer: 'CollectionsService.removeItem',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for collection item disassociation',
-  },
-  [LIBRARY_EVENT_TYPES.READING_STATE_UPDATED]: {
-    eventType: LIBRARY_EVENT_TYPES.READING_STATE_UPDATED,
-    producer: 'ReadingService.updateState',
-    consumer: 'EventDispatcher',
-    retryPolicy: 'exponential_backoff',
-    idempotency: 'aggregate_version',
-    expectedSideEffect:
-      'Emits domain event for reading state and sync change log',
-  },
-};

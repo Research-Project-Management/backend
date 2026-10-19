@@ -10,7 +10,6 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
-  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -25,7 +24,6 @@ import {
   CaptureUrlDto,
   ConfirmCapturedUrlDto,
 } from '@/modules/library/ingestion/dto/capture-url.dto';
-import { ReResolveMetadataDto } from '@/modules/library/ingestion/dto/curation.dto';
 import { isUUID } from 'class-validator';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
@@ -38,22 +36,46 @@ import {
 import { IngestionCommand } from '@/modules/library/ingestion/types/ingestion.types';
 
 /**
- * Shared Base Adapter for Library Ingestion Operations.
+ * Unified Library Ingestion Controller.
+ * Serves both User Library (/api/v1/library/ingestion) and Project Library (/api/v1/projects/:projectId/library/ingestion).
+ * ProjectAccessGuard allows user-scoped requests when :projectId is absent, and enforces project membership/roles when present.
  */
-export abstract class BaseIngestionController {
+@ApiTags('Library Ingestion')
+@ApiBearerAuth('JWT-auth')
+@Controller([
+  'api/v1/library/ingestion',
+  'api/v1/projects/:projectId/library/ingestion',
+])
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
+export class IngestionController {
   constructor(
     protected readonly ingestionService: IngestionService,
     protected readonly urlCaptureService: UrlCaptureService,
   ) {}
 
-  protected async executeSubmit(
-    userId: string,
-    idempotencyKeyHeader: string | undefined,
-    dto: IngestionSubmissionDto,
-    projectId?: string,
+  private validateProjectId(projectId?: string): string | undefined {
+    if (!projectId) return undefined;
+    if (!isUUID(projectId)) {
+      throw new BadRequestException('Invalid projectId UUID');
+    }
+    return projectId;
+  }
+
+  @Post('submit')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Submit item ingestion into library' })
+  @ApiParam({ name: 'projectId', required: false, type: 'string', format: 'uuid' })
+  async submit(
+    @CurrentUser('id') userId: string,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
+    @Body() dto: IngestionSubmissionDto,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
-    const effectiveProjectId = projectId || dto.projectId;
+    const effectiveProjectId =
+      this.validateProjectId(paramProjectId) || queryProjectId || dto.projectId;
 
     let payload: SubmissionPayload;
     switch (dto.kind) {
@@ -121,32 +143,74 @@ export abstract class BaseIngestionController {
     });
   }
 
-  protected async executeGetStatus(userId: string, runId: string) {
+  @Get(['status/:runId', 'runs/:runId'])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({ summary: 'Get ingestion run status' })
+  async getStatus(
+    @CurrentUser('id') userId: string,
+    @Param('runId') runId: string,
+    @Param('projectId') projectId?: string,
+  ) {
     if (!isUUID(runId)) {
       throw new BadRequestException('Invalid run ID');
     }
-    return this.ingestionService.getRunStatus(userId, runId);
+    return this.ingestionService.getRunStatus(
+      userId,
+      runId,
+      this.validateProjectId(projectId),
+    );
   }
 
-  protected async executeGetProgress(userId: string, runId: string) {
+  @Get(['status/:runId/progress', 'runs/:runId/progress'])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({ summary: 'Get ingestion run real-time progress' })
+  async getProgress(
+    @CurrentUser('id') userId: string,
+    @Param('runId') runId: string,
+    @Param('projectId') projectId?: string,
+  ) {
     if (!isUUID(runId)) {
       throw new BadRequestException('Invalid run ID');
     }
-    return this.ingestionService.getRunProgress(userId, runId);
+    return this.ingestionService.getRunProgress(
+      userId,
+      runId,
+      this.validateProjectId(projectId),
+    );
   }
 
-  protected async executeRetry(userId: string, runId: string) {
-    return this.ingestionService.retryRun(userId, runId);
+  @Post(['retry/:runId', 'runs/:runId/retry'])
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Retry failed ingestion run' })
+  async retry(
+    @CurrentUser('id') userId: string,
+    @Param('runId') runId: string,
+    @Param('projectId') projectId?: string,
+  ) {
+    return this.ingestionService.retryRun(
+      userId,
+      runId,
+      this.validateProjectId(projectId),
+    );
   }
 
-  protected async executeIngestUnified(
-    userId: string,
-    idempotencyKeyHeader: string | undefined,
-    dto: UnifiedIngestionDto,
-    projectId?: string,
+  @Post()
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Unified multi-source ingest into library',
+  })
+  async ingestUnified(
+    @CurrentUser('id') userId: string,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
+    @Body() dto: UnifiedIngestionDto,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
-    const effectiveProjectId = projectId || dto.projectId;
+    const effectiveProjectId =
+      this.validateProjectId(paramProjectId) || queryProjectId || dto.projectId;
     let command: IngestionCommand;
 
     switch (dto.source) {
@@ -270,23 +334,37 @@ export abstract class BaseIngestionController {
     return this.ingestionService.ingest(command);
   }
 
-  protected async executeCaptureUrl(
-    userId: string,
-    dto: CaptureUrlDto,
-    projectId?: string,
+  @Post('capture-url')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({
+    summary: 'Capture and extract metadata from URL for library',
+  })
+  async captureUrl(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CaptureUrlDto,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     return this.urlCaptureService.captureUrl(dto.url, {
-      projectId,
+      projectId: this.validateProjectId(paramProjectId) || queryProjectId,
       userId,
     });
   }
 
-  protected async executeConfirmUrl(
-    userId: string,
-    dto: ConfirmCapturedUrlDto,
-    projectId?: string,
+  @Post('confirm-url')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({ summary: 'Confirm captured URL into library' })
+  async confirmUrl(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ConfirmCapturedUrlDto,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
-    const effectiveScopeId = projectId || dto.projectId || userId;
+    const effectiveScopeId =
+      this.validateProjectId(paramProjectId) ||
+      queryProjectId ||
+      dto.projectId ||
+      userId;
 
     return this.urlCaptureService.confirmCapturedUrl(
       effectiveScopeId,
@@ -295,276 +373,12 @@ export abstract class BaseIngestionController {
     );
   }
 
-  protected async executeReResolveMetadata(
-    userId: string,
-    itemId: string,
-    dto: ReResolveMetadataDto,
-    projectId?: string,
-  ) {
-    return this.ingestionService.reResolveMetadata(
-      userId,
-      itemId,
-      dto,
-      projectId,
-    );
-  }
-}
-
-/**
- * User Library Ingestion Controller (/api/v1/library/ingestion).
- * Guarded purely by JwtAuthGuard — scoped to authenticated user.
- */
-@ApiTags('Library Ingestion - User Pipeline')
-@ApiBearerAuth('JWT-auth')
-@Controller('api/v1/library/ingestion')
-@UseGuards(JwtAuthGuard)
-export class IngestionController extends BaseIngestionController {
-  constructor(
-    ingestionService: IngestionService,
-    urlCaptureService: UrlCaptureService,
-  ) {
-    super(ingestionService, urlCaptureService);
-  }
-
-  @Post(['items/:id/re-resolve', ':id/re-resolve'])
-  @ApiOperation({
-    summary: 'Re-resolve bibliographic metadata on demand from open mirrors',
-  })
-  async reResolveMetadata(
-    @CurrentUser('id') userId: string,
-    @Param('id') id: string,
-    @Body() dto: ReResolveMetadataDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
-  ) {
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || dto?.projectId;
-    return this.executeReResolveMetadata(userId, id, dto, effectiveProjectId);
-  }
-
-  @Post('submit')
-  @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Submit item ingestion into user library' })
-  async submit(
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: IngestionSubmissionDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
-  ) {
-    const resolvedProjectId = paramProjectId || queryProjectId || dto.projectId;
-    return this.executeSubmit(
-      userId,
-      idempotencyKeyHeader,
-      dto,
-      resolvedProjectId,
-    );
-  }
-
-  @Get('status/:runId')
-  @ApiOperation({ summary: 'Get ingestion run status' })
-  async getStatus(
-    @CurrentUser('id') userId: string,
-    @Param('runId') runId: string,
-  ) {
-    return this.executeGetStatus(userId, runId);
-  }
-
-  @Get('status/:runId/progress')
-  @ApiOperation({ summary: 'Get ingestion run real-time progress' })
-  async getProgress(
-    @CurrentUser('id') userId: string,
-    @Param('runId') runId: string,
-  ) {
-    return this.executeGetProgress(userId, runId);
-  }
-
-  @Post('retry/:runId')
-  @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Retry failed ingestion run' })
-  async retry(
-    @CurrentUser('id') userId: string,
-    @Param('runId') runId: string,
-  ) {
-    return this.executeRetry(userId, runId);
-  }
-
-  @Post()
-  @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({
-    summary: 'Unified multi-source ingest into user library',
-  })
-  async ingestUnified(
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: UnifiedIngestionDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
-  ) {
-    const resolvedProjectId = paramProjectId || queryProjectId || dto.projectId;
-    return this.executeIngestUnified(
-      userId,
-      idempotencyKeyHeader,
-      dto,
-      resolvedProjectId,
-    );
-  }
-
-  @Post('capture-url')
-  @ApiOperation({
-    summary: 'Capture and extract metadata from URL for user library',
-  })
-  async captureUrl(
-    @CurrentUser('id') userId: string,
-    @Body() dto: CaptureUrlDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
-  ) {
-    return this.executeCaptureUrl(
-      userId,
-      dto,
-      paramProjectId || queryProjectId,
-    );
-  }
-
-  @Post('confirm-url')
-  @ApiOperation({ summary: 'Confirm captured URL into user library' })
-  async confirmUrl(
-    @CurrentUser('id') userId: string,
-    @Body() dto: ConfirmCapturedUrlDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
-  ) {
-    return this.executeConfirmUrl(
-      userId,
-      dto,
-      paramProjectId || queryProjectId,
-    );
-  }
-}
-
-/**
- * Project Library Ingestion Controller (/api/v1/projects/:projectId/library/ingestion).
- * Strictly validates :projectId with ParseUUIDPipe and enforces project roles.
- */
-@ApiTags('Library Ingestion - Project Pipeline')
-@ApiBearerAuth('JWT-auth')
-@Controller('api/v1/projects/:projectId/library/ingestion')
-@UseGuards(JwtAuthGuard, ProjectAccessGuard)
-export class ProjectIngestionController extends BaseIngestionController {
-  constructor(
-    ingestionService: IngestionService,
-    urlCaptureService: UrlCaptureService,
-  ) {
-    super(ingestionService, urlCaptureService);
-  }
-
-  @Post(['items/:id/re-resolve', ':id/re-resolve'])
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({
-    summary:
-      'Re-resolve bibliographic metadata on demand from open mirrors for project item',
-  })
-  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
-  async reResolveMetadata(
-    @CurrentUser('id') userId: string,
-    @Param('id') id: string,
-    @Param('projectId', new ParseUUIDPipe()) projectId: string,
-    @Body() dto: ReResolveMetadataDto,
-  ) {
-    return this.executeReResolveMetadata(userId, id, dto, projectId);
-  }
-
-  @Post('submit')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Submit item ingestion into project library' })
-  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
-  async submit(
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: IngestionSubmissionDto,
-    @Param('projectId', new ParseUUIDPipe()) projectId: string,
-  ) {
-    return this.executeSubmit(userId, idempotencyKeyHeader, dto, projectId);
-  }
-
-  @Get('status/:runId')
+  @Post('fetch-feed')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'Get project ingestion run status' })
-  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
-  async getStatus(
-    @Param('projectId', new ParseUUIDPipe()) projectId: string,
-    @Param('runId') runId: string,
-  ) {
-    return this.executeGetStatus(projectId, runId);
-  }
-
-  @Get('status/:runId/progress')
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'Get project ingestion run real-time progress' })
-  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
-  async getProgress(
-    @Param('projectId', new ParseUUIDPipe()) projectId: string,
-    @Param('runId') runId: string,
-  ) {
-    return this.executeGetProgress(projectId, runId);
-  }
-
-  @Post('retry/:runId')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Retry failed project ingestion run' })
-  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
-  async retry(
-    @Param('projectId', new ParseUUIDPipe()) projectId: string,
-    @Param('runId') runId: string,
-  ) {
-    return this.executeRetry(projectId, runId);
-  }
-
-  @Post()
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Unified multi-source ingest into project library' })
-  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
-  async ingestUnified(
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: UnifiedIngestionDto,
-    @Param('projectId', new ParseUUIDPipe()) projectId: string,
-  ) {
-    return this.executeIngestUnified(
-      userId,
-      idempotencyKeyHeader,
-      dto,
-      projectId,
-    );
-  }
-
-  @Post('capture-url')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
-    summary: 'Capture and extract metadata from URL for project library',
+    summary: 'Fetch and parse an external RSS/Atom journal or arXiv feed',
   })
-  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
-  async captureUrl(
-    @CurrentUser('id') userId: string,
-    @Body() dto: CaptureUrlDto,
-    @Param('projectId', new ParseUUIDPipe()) projectId: string,
-  ) {
-    return this.executeCaptureUrl(userId, dto, projectId);
-  }
-
-  @Post('confirm-url')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Confirm captured URL into project library' })
-  @ApiParam({ name: 'projectId', type: 'string', format: 'uuid' })
-  async confirmUrl(
-    @CurrentUser('id') userId: string,
-    @Body() dto: ConfirmCapturedUrlDto,
-    @Param('projectId', new ParseUUIDPipe()) projectId: string,
-  ) {
-    return this.executeConfirmUrl(userId, dto, projectId);
+  async fetchFeed(@Body() body: { url: string }) {
+    return this.urlCaptureService.fetchAcademicFeed(body?.url);
   }
 }

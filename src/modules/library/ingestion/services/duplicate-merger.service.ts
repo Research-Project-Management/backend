@@ -7,16 +7,19 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { RedisCacheService } from '@/core';
 import {
-  TransactionService,
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
+  LIBRARY_REDIS_KEYS,
   CATALOG_FACADE,
   ICatalogFacade,
   EXTRACTION_FACADE,
   IExtractionFacade,
   normalizeDoi,
+  normalizeProjectScopeId,
 } from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/curation.dto';
 import {
@@ -28,6 +31,7 @@ import {
   asMetaObject,
   getEffectiveItemField,
 } from './duplicate-detector.service';
+import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 export interface ContributorShape {
   creatorType?: string;
@@ -91,21 +95,12 @@ export class DuplicateMergerService {
     private readonly extractionGateway?: IExtractionFacade,
     @Optional()
     private readonly ingestionRepo?: IngestionRepository,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
+    @Optional()
+    private readonly cache?: RedisCacheService,
   ) {}
-
-  private normalizeScopeProjectId(
-    rawProjectId?: ProjectId | string | null,
-  ): string | undefined {
-    if (!rawProjectId || typeof rawProjectId !== 'string') return undefined;
-    const trimmed = rawProjectId.trim();
-    if (
-      !trimmed ||
-      ['user', 'me', 'personal'].includes(trimmed.toLowerCase())
-    ) {
-      return undefined;
-    }
-    return trimmed;
-  }
 
   async rewireMergedItemRelations(
     tx: Prisma.TransactionClient,
@@ -161,7 +156,6 @@ export class DuplicateMergerService {
     primaryId: string,
     uniqueDupIds: string[],
   ): Promise<void> {
-    if (typeof tx.userPublication?.findMany !== 'function') return;
     const dupPublications = await tx.userPublication.findMany({
       where: { itemId: { in: uniqueDupIds } },
     });
@@ -233,30 +227,26 @@ export class DuplicateMergerService {
     };
 
     if (Array.isArray(chosenContributors) && chosenContributors.length > 0) {
-      if (typeof tx.contributor?.deleteMany === 'function') {
-        await tx.contributor.deleteMany({ where: { itemId: primaryId } });
-        await tx.contributor.createMany({
-          data: chosenContributors.map(mapContributorInput),
-        });
-      }
+      await tx.contributor.deleteMany({ where: { itemId: primaryId } });
+      await tx.contributor.createMany({
+        data: chosenContributors.map(mapContributorInput),
+      });
       return;
     }
 
-    if (typeof tx.contributor?.count === 'function') {
-      const primaryContribCount = await tx.contributor.count({
-        where: { itemId: primaryId },
-      });
-      if (primaryContribCount === 0) {
-        const donor = duplicates.find(
-          (d) => Array.isArray(d.contributors) && d.contributors.length > 0,
-        );
-        if (donor && Array.isArray(donor.contributors)) {
-          await tx.contributor.createMany({
-            data: (donor.contributors as ContributorShape[]).map(
-              mapContributorInput,
-            ),
-          });
-        }
+    const primaryContribCount = await tx.contributor.count({
+      where: { itemId: primaryId },
+    });
+    if (primaryContribCount === 0) {
+      const donor = duplicates.find(
+        (d) => Array.isArray(d.contributors) && d.contributors.length > 0,
+      );
+      if (donor && Array.isArray(donor.contributors)) {
+        await tx.contributor.createMany({
+          data: (donor.contributors as ContributorShape[]).map(
+            mapContributorInput,
+          ),
+        });
       }
     }
   }
@@ -290,7 +280,7 @@ export class DuplicateMergerService {
       }
     }
 
-    const effectiveProjectId = this.normalizeScopeProjectId(
+    const effectiveProjectId = normalizeProjectScopeId(
       projectId || dto.projectId,
     );
     const allItemIds = [dto.primaryItemId, ...uniqueDupIds];
@@ -310,7 +300,7 @@ export class DuplicateMergerService {
 
     for (const item of items) {
       if ('projectId' in item) {
-        const itemProjectId = this.normalizeScopeProjectId(
+        const itemProjectId = normalizeProjectScopeId(
           (item as { projectId?: string | null }).projectId,
         );
         if (itemProjectId !== effectiveProjectId) {
@@ -335,23 +325,23 @@ export class DuplicateMergerService {
       primary.type ||
       'journalArticle';
 
-    return this.libraryTx.executeInTransaction(
+    const offloadedFileIdsToDelete: string[] = [];
+
+    const txResult = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const now = new Date();
 
-        if (typeof tx.$executeRaw === 'function') {
-          try {
-            let hash = 0;
-            for (let i = 0; i < primary.id.length; i++) {
-              hash = (hash << 5) - hash + primary.id.charCodeAt(i);
-              hash |= 0;
-            }
-            await tx.$executeRaw`SELECT pg_advisory_xact_lock(${Math.abs(hash)})`;
-          } catch (err) {
-            this.logger.warn(
-              `Could not acquire pg_advisory_xact_lock: ${(err as Error).message}`,
-            );
+        try {
+          let hash = 0;
+          for (let i = 0; i < primary.id.length; i++) {
+            hash = (hash << 5) - hash + primary.id.charCodeAt(i);
+            hash |= 0;
           }
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${Math.abs(hash)})`;
+        } catch (err) {
+          this.logger.warn(
+            `Could not acquire pg_advisory_xact_lock: ${(err as Error).message}`,
+          );
         }
 
         if (this.extractionGateway?.reassignContentToItem) {
@@ -369,11 +359,65 @@ export class DuplicateMergerService {
         await this.rewireMergedItemRelations(tx, primary.id, uniqueDupIds);
         await this.consolidateUserPublications(tx, primary.id, uniqueDupIds);
 
-        if (typeof tx.itemMetadata?.updateMany === 'function') {
-          await tx.itemMetadata.updateMany({
+        const existingPrimaryMeta = await tx.itemMetadata.findFirst({
+          where: { itemId: primary.id },
+        });
+        const dupMetas =
+          typeof tx.itemMetadata.findMany === 'function'
+            ? await tx.itemMetadata.findMany({
+                where: { itemId: { in: uniqueDupIds } },
+                select: { id: true, rawPayload: true },
+              })
+            : [];
+        const extractOffloadedFileId = (rawPayload: unknown): string | null => {
+          if (
+            rawPayload &&
+            typeof rawPayload === 'object' &&
+            !Array.isArray(rawPayload)
+          ) {
+            const rec = rawPayload as Record<string, unknown>;
+            if (
+              rec.isOffloaded === true &&
+              typeof rec.fileId === 'string' &&
+              rec.fileId.length > 0
+            ) {
+              return rec.fileId;
+            }
+          }
+          return null;
+        };
+
+        if (existingPrimaryMeta) {
+          for (const dm of dupMetas) {
+            const fid = extractOffloadedFileId(dm.rawPayload);
+            if (fid) offloadedFileIdsToDelete.push(fid);
+          }
+          await tx.itemMetadata.deleteMany({
             where: { itemId: { in: uniqueDupIds } },
-            data: { itemId: primary.id },
           });
+        } else {
+          const firstDupMeta =
+            dupMetas[0] ??
+            (await tx.itemMetadata.findFirst({
+              where: { itemId: { in: uniqueDupIds } },
+            }));
+          if (firstDupMeta) {
+            for (const dm of dupMetas) {
+              if (dm.id === firstDupMeta.id) continue;
+              const fid = extractOffloadedFileId(dm.rawPayload);
+              if (fid) offloadedFileIdsToDelete.push(fid);
+            }
+            await tx.itemMetadata.update({
+              where: { id: firstDupMeta.id },
+              data: { itemId: primary.id },
+            });
+            await tx.itemMetadata.deleteMany({
+              where: {
+                itemId: { in: uniqueDupIds },
+                id: { not: firstDupMeta.id },
+              },
+            });
+          }
         }
 
         // Provenance & Alias Citation Keys
@@ -423,7 +467,9 @@ export class DuplicateMergerService {
           tx,
           primary.id,
           (selectedContributors || selectedAuthors || selectedCreators) as
-            ContributorShape[] | string[] | undefined,
+            | ContributorShape[]
+            | string[]
+            | undefined,
           duplicates,
         );
 
@@ -506,7 +552,7 @@ export class DuplicateMergerService {
         // Preserve My Publications & Retraction warnings across merge
         let mergedIsRetracted = Boolean(
           (primary as { isRetracted?: boolean }).isRetracted ||
-          primaryMeta.isRetracted,
+            primaryMeta.isRetracted,
         );
         for (const dup of duplicates) {
           const dupMeta = asMetaObject(dup.metadata);
@@ -721,9 +767,83 @@ export class DuplicateMergerService {
           mergedCount: duplicates.length,
           softDeletedItemIds: uniqueDupIds,
           audit,
-          prismaAudit: audit,
         };
       },
     );
+
+    if (
+      offloadedFileIdsToDelete.length > 0 &&
+      typeof this.storagePort?.deleteFile === 'function'
+    ) {
+      for (const fid of offloadedFileIdsToDelete) {
+        try {
+          await this.storagePort.deleteFile(fid);
+        } catch (delErr: unknown) {
+          const msg =
+            delErr instanceof Error ? delErr.message : String(delErr);
+          this.logger.warn(
+            `Failed to delete offloaded duplicate ItemMetadata blob ${fid}: ${msg}`,
+          );
+        }
+      }
+    }
+
+    if (this.cache) {
+      try {
+        const scopeId = effectiveProjectId || userId;
+        const invalidationTasks: Promise<unknown>[] = [
+          this.cache.del(LIBRARY_REDIS_KEYS.item(primary.id)),
+          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(primary.id)),
+          this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(primary.id)),
+          this.cache.del(`library:item:${primary.id}:attachments`),
+          this.cache.del(`library:item:${primary.id}:notes`),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(primary.id)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
+          this.cache.del(`library:${scopeId}:counts`),
+          this.cache.del(`library:counts:user:${userId}`),
+          this.cache.del(LIBRARY_REDIS_KEYS.collections(scopeId)),
+          this.cache.del(LIBRARY_REDIS_KEYS.collectionTree(scopeId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(scopeId)),
+          this.cache.del(LIBRARY_REDIS_KEYS.tags(scopeId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(scopeId)),
+        ];
+        for (const dupId of uniqueDupIds) {
+          invalidationTasks.push(
+            this.cache.del(LIBRARY_REDIS_KEYS.item(dupId)),
+            this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(dupId)),
+            this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(dupId)),
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(dupId)),
+          );
+        }
+        if (effectiveProjectId) {
+          invalidationTasks.push(
+            this.cache.delPattern(
+              LIBRARY_REDIS_KEYS.itemsPattern(`proj:${effectiveProjectId}`),
+            ),
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+            this.cache.del(`library:counts:proj:${effectiveProjectId}`),
+            this.cache.delPattern(
+              LIBRARY_REDIS_KEYS.collectionsPattern(userId),
+            ),
+            this.cache.del(
+              LIBRARY_REDIS_KEYS.tags(`proj:${effectiveProjectId}`),
+            ),
+            this.cache.delPattern(
+              LIBRARY_REDIS_KEYS.tagsPattern(`proj:${effectiveProjectId}`),
+            ),
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(userId)),
+          );
+        }
+        await Promise.all(invalidationTasks);
+      } catch (cacheErr: unknown) {
+        const msg =
+          cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
+        this.logger.warn(
+          `Failed to invalidate Redis caches after merging items into ${primary.id}: ${msg}`,
+        );
+      }
+    }
+
+    return txResult;
   }
 }

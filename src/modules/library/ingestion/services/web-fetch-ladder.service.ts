@@ -60,7 +60,6 @@ interface StealthProxyJsonResponse {
 @Injectable()
 export class WebFetchLadderService implements IWebFetchPort {
   private readonly logger = new Logger(WebFetchLadderService.name);
-  private readonly mirrorResolver: WebMirrorResolverService;
 
   constructor(
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
@@ -68,12 +67,8 @@ export class WebFetchLadderService implements IWebFetchPort {
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
     @Optional() private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
-    @Optional() mirrorResolver?: WebMirrorResolverService,
-  ) {
-    this.mirrorResolver =
-      mirrorResolver ??
-      new WebMirrorResolverService(this.httpClient, this.configService);
-  }
+    @Optional() private readonly mirrorResolver?: WebMirrorResolverService,
+  ) {}
 
   private async assertSafeUrl(url: string): Promise<void> {
     if (this.ssrfGuard) {
@@ -168,7 +163,7 @@ export class WebFetchLadderService implements IWebFetchPort {
     pmid?: string,
     pmcid?: string,
   ): Promise<MirrorBibliographicMetadata | null> {
-    return this.mirrorResolver.resolveOpenMirror(doi, pmid, pmcid);
+    return (await this.mirrorResolver?.resolveOpenMirror(doi, pmid, pmcid)) ?? null;
   }
 
   /**
@@ -177,7 +172,7 @@ export class WebFetchLadderService implements IWebFetchPort {
   async resolveCrossRef(
     doi: string,
   ): Promise<MirrorBibliographicMetadata | null> {
-    return this.mirrorResolver.resolveCrossRef(doi);
+    return (await this.mirrorResolver?.resolveCrossRef(doi)) ?? null;
   }
 
   /**
@@ -186,7 +181,7 @@ export class WebFetchLadderService implements IWebFetchPort {
   async resolveArxiv(
     arxivId: string,
   ): Promise<MirrorBibliographicMetadata | null> {
-    return this.mirrorResolver.resolveArxiv(arxivId);
+    return (await this.mirrorResolver?.resolveArxiv(arxivId)) ?? null;
   }
 
   /**
@@ -198,7 +193,7 @@ export class WebFetchLadderService implements IWebFetchPort {
     pmcid?: string;
     url?: string;
   }): Promise<MirrorBibliographicMetadata | null> {
-    return this.mirrorResolver.resolveOpenAlex(target);
+    return (await this.mirrorResolver?.resolveOpenAlex(target)) ?? null;
   }
 
   /**

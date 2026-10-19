@@ -5,7 +5,7 @@ import {
 } from '@/modules/library/extraction';
 import { IngestionStatusVo } from '@/modules/library/ingestion/domain/ingestion-status.vo';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
-import { createSearchQuery } from '@/modules/library/search';
+import { sanitizeSearchQuery } from '@/modules/library/search';
 import {
   normalizeCitationStyleId,
   isSupportedCitationStyle,
@@ -66,17 +66,11 @@ describe('Library Bounded Contexts - Modular Monolith Domain Logic', () => {
   });
 
   describe('Search Domain Logic', () => {
-    it('createSearchQuery should enforce limits and sanitize parameters', () => {
-      const sanitized = createSearchQuery('  quantum computing  ', {
-        limit: 500, // Should be clamped to 100
-        offset: -10, // Should be clamped to 0
-        sortBy: 'date',
-      });
-
-      expect(sanitized.query).toBe('quantum computing');
-      expect(sanitized.limit).toBe(100);
-      expect(sanitized.offset).toBe(0);
-      expect(sanitized.sortBy).toBe('date');
+    it('sanitizeSearchQuery should sanitize tsquery special characters and whitespace', () => {
+      const sanitized = sanitizeSearchQuery('  quantum & "computing":*  ');
+      expect(sanitized).toBe('quantum computing');
+      expect(sanitizeSearchQuery('')).toBe('');
+      expect(sanitizeSearchQuery(undefined)).toBe('');
     });
   });
 

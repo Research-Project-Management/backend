@@ -20,19 +20,6 @@ import {
 } from './author-particles.lexicon';
 
 export type { ParsedCreator };
-export {
-  INSTITUTION_KEYWORDS,
-  INSTITUTION_REGEX,
-  PREFIX_PARTICLES,
-  GENERATIONAL_SUFFIX_REGEX,
-  PARTICLE_SURNAME_REGEX,
-  VIETNAMESE_DIACRITICS_REGEX,
-  VIETNAMESE_FAMILY_NAMES,
-  VIETNAMESE_COMPOUND_SURNAMES,
-  VIETNAMESE_SURNAMES_PREFIX_REGEX,
-  VIETNAMESE_MIDDLE_NAMES,
-  NOISE_AUTHOR_WORDS,
-} from './author-particles.lexicon';
 
 /**
  * Returns true when the (already cleaned) creator string looks like an
@@ -439,15 +426,10 @@ export interface ParseCreatorOptions {
 
 export function parseCreatorString(
   rawName: string,
-  orderIndexOrOptions: number | ParseCreatorOptions = 0,
+  orderIndex: number = 0,
   creatorType: CreatorType = 'author',
   options?: ParseCreatorOptions,
 ): ParsedCreator {
-  const orderIndex =
-    typeof orderIndexOrOptions === 'number' ? orderIndexOrOptions : 0;
-  const effectiveOptions =
-    typeof orderIndexOrOptions === 'object' ? orderIndexOrOptions : options;
-
   const cleaned = cleanAuthorName(rawName);
 
   if (!cleaned) {
@@ -495,7 +477,7 @@ export function parseCreatorString(
 
   // Vietnamese naming order (Family Name First): e.g. "Nguyễn Văn An" -> Family: "Nguyễn", Given: "Văn An"
   if (!workingName.includes(',') && isVietnameseName(workingName)) {
-    if (effectiveOptions?.preferSingleFieldForVietnamese) {
+    if (options?.preferSingleFieldForVietnamese) {
       return {
         orderIndex,
         creatorType,

@@ -64,7 +64,14 @@ describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapt
         ),
     };
 
-    controller = new ItemCurationController(mockItemService as any);
+    controller = new ItemCurationController(
+      mockItemService as any,
+      mockItemService as any,
+      mockItemService as any,
+      mockItemService as any,
+      mockItemService as any,
+      mockItemService as any,
+    );
   });
 
   it('should parse citations using ItemService', async () => {
@@ -133,6 +140,7 @@ describe('ItemCurationController (Scholarly Curation & Academic Enrichment Adapt
         expectedVersion: undefined,
         retainUnmappedInExtra: true,
       },
+      'proj-1',
     );
   });
 

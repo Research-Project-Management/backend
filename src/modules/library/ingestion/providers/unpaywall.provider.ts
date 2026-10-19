@@ -31,7 +31,7 @@ export class UnpaywallProvider implements MetadataProvider {
   };
 
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    private readonly httpClient: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -55,10 +55,6 @@ export class UnpaywallProvider implements MetadataProvider {
     return type ? this.capabilities.queryTypes.includes(type) : false;
   }
 
-  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
-    return this.resolve(request);
-  }
-
   async resolve(
     request: MetadataRequest,
     signal?: AbortSignal,
@@ -73,9 +69,10 @@ export class UnpaywallProvider implements MetadataProvider {
       Accept: 'application/json',
     };
 
-    const response = this.httpClient
-      ? (await this.httpClient.request(url, { headers, signal })).response
-      : await fetch(url, { headers, signal });
+    const { response } = await this.httpClient.request(url, {
+      headers,
+      signal,
+    });
 
     if (response.status === 404) return null;
 

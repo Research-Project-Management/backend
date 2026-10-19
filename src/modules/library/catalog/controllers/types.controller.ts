@@ -6,39 +6,37 @@ import {
   Body,
   UseGuards,
   NotFoundException,
+  Header,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/identity/auth';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
-import { JwtAuthGuard } from '@/modules/identity/auth';
 
-@ApiTags('Library Catalog Types')
+@ApiTags('Library Item Types & Zotero Schema')
 @ApiBearerAuth()
-@Controller([
-  'api/v1/library/item-types',
-  'api/v1/library/types',
-  'api/v1/projects/:projectId/library/item-types',
-  'api/v1/projects/:projectId/library/types',
-])
+@Controller(['api/v1/library/types', 'api/v1/library/item-types'])
 @UseGuards(JwtAuthGuard)
 export class TypeController {
   constructor(
     private readonly typesService: TypesService,
-    private readonly validator: ZoteroSchemaValidatorService,
+    private readonly schemaValidator: ZoteroSchemaValidatorService,
   ) {}
 
   @Get()
+  @Header(
+    'Cache-Control',
+    'public, max-age=86400, stale-while-revalidate=604800',
+  )
   listAllItemTypes() {
     const snapshot = this.typesService.getSnapshot();
+    const itemTypes = this.typesService.getAllItemTypes();
     return {
       success: true,
-      registryVersion: this.typesService.getSchemaVersion(),
-      schemaVersion: this.typesService.getSchemaVersion(),
-      source: this.typesService.getSource(),
-      itemTypes: this.typesService.getAllItemTypes(),
-      data: this.typesService.getAllItemTypes(),
+      schemaVersion: snapshot.version,
+      count: itemTypes.length,
+      itemTypes,
       baseFieldMappings: snapshot.baseFieldMappings,
-      reverseBaseFieldMappings: snapshot.reverseBaseFieldMappings,
       creatorRoles: snapshot.creatorRoles,
       cslTypeMap: snapshot.cslTypeMap,
       cslFieldMap: snapshot.cslFieldMap,
@@ -46,83 +44,46 @@ export class TypeController {
   }
 
   @Get('schema')
+  @Header(
+    'Cache-Control',
+    'public, max-age=86400, stale-while-revalidate=604800',
+  )
   getSchemaSnapshot() {
     const snapshot = this.typesService.getSnapshot();
     return {
       success: true,
-      ...snapshot,
       data: snapshot,
     };
   }
 
   @Get(':itemType')
+  @Header(
+    'Cache-Control',
+    'public, max-age=86400, stale-while-revalidate=604800',
+  )
   getItemTypeDefinition(@Param('itemType') itemType: string) {
-    const definition = this.typesService.getItemType(itemType);
-    if (!definition) {
+    const def = this.typesService.getItemType(itemType);
+    if (!def) {
       throw new NotFoundException(
-        `Item type '${itemType}' not found in Library registry`,
-      );
-    }
-    return { success: true, itemType: definition, data: definition };
-  }
-
-  @Get(':itemType/fields')
-  getItemTypeFields(@Param('itemType') itemType: string) {
-    const definition = this.typesService.getItemType(itemType);
-    if (!definition) {
-      throw new NotFoundException(
-        `Item type '${itemType}' not found in Library registry`,
+        `Item type '${itemType}' is not a valid Zotero v42 bibliographic type`,
       );
     }
     return {
       success: true,
-      itemType: definition.itemType,
-      fields: definition.fields,
-      count: definition.fields.length,
+      itemType: def,
     };
   }
 
-  @Get(':itemType/creator-types')
-  getItemTypeCreatorTypes(@Param('itemType') itemType: string) {
-    const definition = this.typesService.getItemType(itemType);
-    if (!definition) {
-      throw new NotFoundException(
-        `Item type '${itemType}' not found in Library registry`,
-      );
-    }
-    return {
-      success: true,
-      itemType: definition.itemType,
-      primaryCreatorType: definition.primaryCreatorType,
-      creatorTypes: definition.creatorTypes,
-    };
-  }
-
-  @Get(':itemType/csl')
-  getItemTypeCslMapping(@Param('itemType') itemType: string) {
-    const definition = this.typesService.getItemType(itemType);
-    if (!definition) {
-      throw new NotFoundException(
-        `Item type '${itemType}' not found in Library registry`,
-      );
-    }
-    const cslType = this.typesService.getCslType(itemType);
-    return {
-      success: true,
-      itemType: definition.itemType,
-      cslType,
-    };
-  }
-
-  @Post(':itemType/validate')
-  validateItemAgainstSchema(
-    @Param('itemType') itemType: string,
-    @Body() body: Record<string, unknown>,
+  @Post('validate')
+  validateItemPayload(
+    @Body() body: { itemType: string; data: Record<string, unknown> },
   ) {
-    const result = this.validator.validateAndSanitizeItem(itemType, body || {});
+    const type = body?.itemType || 'journalArticle';
+    const data = body?.data || {};
+    const validation = this.schemaValidator.validateAndSanitizeItem(type, data);
     return {
-      success: true,
-      result,
+      success: validation.valid,
+      ...validation,
     };
   }
 }

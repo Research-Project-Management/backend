@@ -1,9 +1,10 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { ReferenceData } from '@/modules/library/citation/types/citation.types';
+import { normalizeWork } from '@/modules/library/citation/domain/citation.domain';
 import {
-  cleanBibliographicText,
   AcademicHttpClient,
   ExternalProviderException,
+  normalizeDoi,
 } from '@/modules/library/core';
 import { getAcademicUserAgent } from '@/modules/library/core/constants/academic-client.constants';
 import { ResilienceRegistryService } from '@/modules/library/core/resilience/resilience-registry.service';
@@ -14,36 +15,6 @@ export interface DoiCitationResult {
   bibliographyHtml?: string;
   inText?: string;
   source: 'publisher';
-}
-
-interface CslDateParts {
-  'date-parts'?: Array<Array<number | string>>;
-}
-
-interface CslAuthorInput {
-  given?: string;
-  family?: string;
-  name?: string;
-  literal?: string;
-}
-
-interface CslMetadataInput {
-  title?: string | string[];
-  author?: CslAuthorInput[];
-  'published-print'?: CslDateParts;
-  'published-online'?: CslDateParts;
-  issued?: CslDateParts;
-  'container-title'?: string | string[];
-  publisher?: string;
-  DOI?: string;
-  volume?: string;
-  issue?: string;
-  page?: string;
-  ISSN?: string | string[];
-  ISBN?: string | string[];
-  URL?: string;
-  abstract?: string;
-  type?: string;
 }
 
 @Injectable()
@@ -107,31 +78,8 @@ export class DoiContentNegotiationService {
     ris: 'application/x-research-info-systems',
   };
 
-  /**
-   * Cleans and normalizes DOI string according to ISO 26324.
-   * Supports complex SICI strings, angle brackets, square brackets, plus, and equals signs.
-   */
-  public cleanDoi(rawDoi?: string | null): string | null {
-    if (!rawDoi || typeof rawDoi !== 'string') return null;
-    let clean = rawDoi.trim();
-    clean = clean.replace(/^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)/i, '');
-    clean = clean.replace(/[.,;]+$/, '');
-    if (clean.endsWith(')') && !clean.includes('(')) {
-      clean = clean.slice(0, -1);
-    }
-    if (clean.endsWith(']') && !clean.includes('[')) {
-      clean = clean.slice(0, -1);
-    }
-    const match = clean.match(/^10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+$/);
-    if (!match) {
-      const embedded = clean.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+/);
-      return embedded ? embedded[0] : null;
-    }
-    return clean;
-  }
-
   isDoi(raw: string): boolean {
-    return Boolean(this.cleanDoi(raw));
+    return Boolean(normalizeDoi(raw));
   }
 
   /**
@@ -143,7 +91,7 @@ export class DoiContentNegotiationService {
     styleId: string = 'apa',
     timeoutMs: number = 5000,
   ): Promise<DoiCitationResult | null> {
-    const doi = this.cleanDoi(rawDoi);
+    const doi = normalizeDoi(rawDoi);
     if (!doi) return null;
 
     const normalizedStyle = (styleId || 'apa').toLowerCase();
@@ -280,7 +228,7 @@ export class DoiContentNegotiationService {
     rawDoi: string,
     timeoutMs: number = 6000,
   ): Promise<ReferenceData | null> {
-    const doi = this.cleanDoi(rawDoi);
+    const doi = normalizeDoi(rawDoi);
     if (!doi) return null;
 
     // Check metadata cache
@@ -335,7 +283,7 @@ export class DoiContentNegotiationService {
         const json = (await response.json()) as unknown;
         if (!json || typeof json !== 'object') return null;
 
-        const result = this.mapCslJsonToReferenceData(
+        const result = normalizeWork(
           json as Record<string, unknown>,
           doi,
         );
@@ -373,78 +321,5 @@ export class DoiContentNegotiationService {
       );
       return null;
     }
-  }
-
-  private mapCslJsonToReferenceData(
-    rawCsl: Record<string, unknown>,
-    fallbackDoi: string,
-  ): ReferenceData {
-    const csl = (
-      rawCsl.message && typeof rawCsl.message === 'object'
-        ? rawCsl.message
-        : rawCsl
-    ) as CslMetadataInput;
-
-    const rawTitle = Array.isArray(csl.title)
-      ? csl.title[0] || 'Untitled'
-      : (csl.title as string) || 'Untitled';
-    const title = cleanBibliographicText(rawTitle) || 'Untitled';
-
-    const authors: string[] = [];
-    if (Array.isArray(csl.author)) {
-      for (const auth of csl.author) {
-        if (auth.given && auth.family) {
-          authors.push(`${auth.family}, ${auth.given}`);
-        } else if (auth.family) {
-          authors.push(auth.family);
-        } else if (auth.name) {
-          authors.push(auth.name);
-        } else if (auth.literal) {
-          authors.push(auth.literal);
-        }
-      }
-    }
-
-    let year: number | string = '';
-    const dateParts =
-      csl['published-print']?.['date-parts']?.[0] ||
-      csl['published-online']?.['date-parts']?.[0] ||
-      csl.issued?.['date-parts']?.[0];
-    if (dateParts && dateParts[0]) {
-      year = Number(dateParts[0]);
-    }
-
-    const journal = Array.isArray(csl['container-title'])
-      ? csl['container-title'][0]
-      : (csl['container-title'] as string) || (csl.publisher as string) || '';
-
-    const doi = (csl.DOI as string) || fallbackDoi;
-
-    return {
-      doi,
-      title,
-      authors,
-      year,
-      journal,
-      publisher: csl.publisher || '',
-      volume: csl.volume || '',
-      issue: csl.issue || '',
-      pages: csl.page || '',
-      issn: Array.isArray(csl.ISSN) ? csl.ISSN[0] : csl.ISSN || '',
-      isbn: Array.isArray(csl.ISBN) ? csl.ISBN[0] : csl.ISBN || '',
-      url: csl.URL || (doi ? `https://doi.org/${doi}` : ''),
-      abstract: csl.abstract ? csl.abstract.replace(/<[^>]*>/g, '') : '',
-      type: csl.type || 'journal-article',
-      itemType:
-        csl.type === 'article-journal'
-          ? 'journalArticle'
-          : csl.type === 'dataset'
-            ? 'dataset'
-            : csl.type === 'paper-conference'
-              ? 'conferencePaper'
-              : csl.type === 'book'
-                ? 'book'
-                : 'journalArticle',
-    };
   }
 }

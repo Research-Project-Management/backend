@@ -18,11 +18,6 @@ export interface ICitationFacade {
     index?: number,
     projectId?: string,
   ): Promise<FormattedCitationResult>;
-  exportBibliography(
-    userId: string,
-    citeKeys: string[],
-    projectId?: string,
-  ): Promise<{ content: string } | null>;
   exportByCitationKeys(
     userId: string,
     citeKeys: string[],
@@ -60,20 +55,6 @@ export class CitationFacade implements ICitationFacade {
       index,
       projectId,
     );
-  }
-
-  async exportBibliography(
-    userId: string,
-    citeKeys: string[],
-    projectId?: string,
-  ): Promise<{ content: string } | null> {
-    const res = await this.exportsService.exportByCitationKeys(
-      userId,
-      citeKeys,
-      projectId,
-    );
-    if (!res || !res.content) return null;
-    return { content: res.content };
   }
 
   async exportByCitationKeys(

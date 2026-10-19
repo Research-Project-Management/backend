@@ -1,6 +1,5 @@
-import type { Brand, UserId, ItemId } from '@/modules/library/core';
+import type { UserId, ItemId } from '@/modules/library/core';
 
-export type StateId = Brand<string, 'StateId'>;
 export type { UserId, ItemId };
 
 export enum ReadingStatus {
@@ -8,15 +7,6 @@ export enum ReadingStatus {
   READING = 'reading',
   COMPLETED = 'completed',
 }
-
-export const READING_STATUS = {
-  UNREAD: 'unread',
-  READING: 'reading',
-  COMPLETED: 'completed',
-} as const;
-
-export type ReadingStatusValue =
-  (typeof READING_STATUS)[keyof typeof READING_STATUS];
 
 export interface StateEntity {
   id?: string;
@@ -60,11 +50,3 @@ export const VALID_READING_TRANSITIONS: Record<
   [ReadingStatus.READING]: [ReadingStatus.COMPLETED, ReadingStatus.UNREAD],
   [ReadingStatus.COMPLETED]: [ReadingStatus.READING, ReadingStatus.UNREAD],
 };
-
-export type StateResult =
-  | { success: true; data: StateData }
-  | {
-      success: false;
-      code: 'NOT_FOUND' | 'INVALID_TRANSITION' | 'FORBIDDEN';
-      message: string;
-    };

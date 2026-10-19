@@ -21,6 +21,7 @@ export interface DomainRateLimitConfig {
 export class DomainRateLimiterService {
   private readonly logger = new Logger(DomainRateLimiterService.name);
 
+  private static readonly MAX_DOMAINS = 1000;
   private readonly domainChains = new Map<string, Promise<void>>();
   private readonly lastExecutionMap = new Map<string, number>();
 
@@ -75,6 +76,20 @@ export class DomainRateLimiterService {
     return this.domainConfigs[key] || { minIntervalMs: 50 };
   }
 
+  private recordExecutionTime(key: string, timestamp: number): void {
+    if (this.lastExecutionMap.has(key)) {
+      this.lastExecutionMap.delete(key);
+    } else if (
+      this.lastExecutionMap.size >= DomainRateLimiterService.MAX_DOMAINS
+    ) {
+      const oldestKey = this.lastExecutionMap.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.lastExecutionMap.delete(oldestKey);
+      }
+    }
+    this.lastExecutionMap.set(key, timestamp);
+  }
+
   /**
    * Enforces inter-request spacing for the target domain or provider.
    * Resolves when the caller is safe to proceed.
@@ -95,11 +110,16 @@ export class DomainRateLimiterService {
       releaseSlot = resolve;
     });
 
-    // Update queue chain immediately
-    this.domainChains.set(
-      key,
-      prevChain.then(() => currentSlot).catch(() => currentSlot),
-    );
+    // Update queue chain immediately and clean up when the tail finishes
+    const currentChain = prevChain
+      .then(() => currentSlot)
+      .catch(() => currentSlot)
+      .finally(() => {
+        if (this.domainChains.get(key) === currentChain) {
+          this.domainChains.delete(key);
+        }
+      });
+    this.domainChains.set(key, currentChain);
 
     try {
       await prevChain;
@@ -132,7 +152,7 @@ export class DomainRateLimiterService {
       }
     }
 
-    this.lastExecutionMap.set(key, Date.now());
+    this.recordExecutionTime(key, Date.now());
     releaseSlot();
   }
 
@@ -146,6 +166,17 @@ export class DomainRateLimiterService {
   ): Promise<T> {
     await this.acquire(domainOrKey, signal);
     return task();
+  }
+
+  /**
+   * Alias for schedule to execute rate-limited tasks per domain.
+   */
+  public async executeRateLimited<T>(
+    domainOrKey: string,
+    task: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return this.schedule(domainOrKey, task, signal);
   }
 
   /**

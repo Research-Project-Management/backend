@@ -13,14 +13,9 @@ import {
   AnnotationType,
 } from '@/modules/library/extraction/types/annotations.types';
 import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
-import { TransactionService, TransactionHelpers } from '@/modules/library/core';
+import { TransactionHelpers } from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 import { AttachmentsService } from './attachments.service';
-import type {
-  UpsertSyncAnnotationCommand,
-  DeleteSyncEntityCommand,
-  UpsertSyncEntityResult,
-} from '@/modules/library/core/types/entity-commands.types';
-import { buildAnnotationSortIndex } from '@/modules/library/core';
 
 @Injectable()
 export class AnnotationsService {
@@ -38,46 +33,46 @@ export class AnnotationsService {
     attachmentId: string,
     pageIndex?: number,
     type?: AnnotationType,
+    projectId?: string,
   ) {
-    await this.attachmentsService.assertAttachmentExists(attachmentId, userId);
+    await this.attachmentsService.assertAttachmentExists(
+      attachmentId,
+      userId,
+      undefined,
+      projectId,
+    );
     return this.annotationsRepo.findByAttachment(attachmentId, pageIndex, type);
   }
 
-  async listAnnotations(
-    userId: string,
-    attachmentId: string,
-    filter?: { pageIndex?: number; type?: AnnotationType },
-    _projectId?: string,
-  ) {
-    return this.getAnnotationsByAttachment(
-      userId,
-      attachmentId,
-      filter?.pageIndex,
-      filter?.type,
-    );
-  }
-
-  async getAnnotation(userId: string, id: string) {
+  async getAnnotation(userId: string, id: string, projectId?: string) {
     const annotation = await this.annotationsRepo.findById(id);
     if (!annotation) return null;
     await this.attachmentsService.assertAttachmentExists(
       annotation.attachmentId,
       userId,
+      undefined,
+      projectId,
     );
     return annotation;
   }
 
   // Mutations
 
-  async createAnnotation(userId: string, data: CreateAnnotationData) {
+  async createAnnotation(
+    userId: string,
+    data: CreateAnnotationData,
+    projectId?: string,
+  ) {
     return this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const attachment = await this.attachmentsService.assertAttachmentExists(
           data.attachmentId,
           userId,
           tx,
+          projectId,
         );
-        const effectiveProjectId = attachment?.item?.projectId || undefined;
+        const effectiveProjectId =
+          projectId || attachment?.item?.projectId || undefined;
         const eventScope = { userId, projectId: effectiveProjectId };
 
         const normalized = this.normalizer.normalizeCreateData(data);
@@ -108,6 +103,7 @@ export class AnnotationsService {
     id: string,
     expectedVersion: number,
     data: UpdateAnnotationData,
+    projectId?: string,
   ) {
     return this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
@@ -119,8 +115,10 @@ export class AnnotationsService {
           existing.attachmentId,
           userId,
           tx,
+          projectId,
         );
-        const effectiveProjectId = attachment?.item?.projectId || undefined;
+        const effectiveProjectId =
+          projectId || attachment?.item?.projectId || undefined;
         const eventScope = { userId, projectId: effectiveProjectId };
 
         this.assertCanModifyAnnotation(userId, existing);
@@ -154,7 +152,12 @@ export class AnnotationsService {
     );
   }
 
-  async deleteAnnotation(userId: string, id: string, expectedVersion?: number) {
+  async deleteAnnotation(
+    userId: string,
+    id: string,
+    expectedVersion?: number,
+    projectId?: string,
+  ) {
     return this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const existing = await this.annotationsRepo.findById(id, tx);
@@ -165,8 +168,10 @@ export class AnnotationsService {
           existing.attachmentId,
           userId,
           tx,
+          projectId,
         );
-        const effectiveProjectId = attachment?.item?.projectId || undefined;
+        const effectiveProjectId =
+          projectId || attachment?.item?.projectId || undefined;
         const eventScope = { userId, projectId: effectiveProjectId };
 
         this.assertCanModifyAnnotation(userId, existing);
@@ -206,6 +211,7 @@ export class AnnotationsService {
     userId: string,
     attachmentId: string,
     data: BatchAnnotationsData,
+    projectId?: string,
   ): Promise<BatchAnnotationsResult> {
     if (data.upserts.length === 0 && data.deletes.length === 0) {
       return { created: [], updated: [], deleted: [] };
@@ -217,8 +223,10 @@ export class AnnotationsService {
           attachmentId,
           userId,
           tx,
+          projectId,
         );
-        const effectiveProjectId = attachment?.item?.projectId || undefined;
+        const effectiveProjectId =
+          projectId || attachment?.item?.projectId || undefined;
         const eventScope = { userId, projectId: effectiveProjectId };
 
         const result = await this.annotationsRepo.batchUpsert(
@@ -278,145 +286,6 @@ export class AnnotationsService {
         return result;
       },
     );
-  }
-
-  // Sync adapters
-
-  async upsertFromSync(
-    command: UpsertSyncAnnotationCommand,
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
-  ): Promise<UpsertSyncEntityResult> {
-    const userId = command.userId;
-    if (command.existingId) {
-      const existing = await tx.annotation.findUnique({
-        where: { id: command.existingId },
-      });
-
-      if (!existing) {
-        throw new NotFoundException(
-          `Annotation ${command.existingId} not found`,
-        );
-      }
-
-      const attachment = await this.attachmentsService.assertAttachmentExists(
-        existing.attachmentId,
-        userId,
-        tx,
-      );
-      const effectiveProjectId =
-        command.projectId || attachment?.item?.projectId || undefined;
-      const syncScope = { userId, projectId: effectiveProjectId };
-
-      const updated = await tx.annotation.update({
-        where: { id: command.existingId },
-        data: {
-          quoteText: this.normalizer.normalizeQuote(command.quoteText),
-          comment: this.normalizer.normalizeComment(command.comment),
-          color: this.normalizer.normalizeColor(command.color),
-          pageIndex: command.pageIndex,
-          version: { increment: 1 },
-        },
-      });
-
-      await helpers.appendChange(syncScope, {
-        entityType: 'Annotation',
-        entityId: updated.id,
-        action: 'update',
-        version: updated.version,
-      });
-
-      return { id: updated.id, isNew: false, version: updated.version };
-    } else {
-      if (!command.attachmentId) {
-        throw new NotFoundException(
-          `Parent attachment ID required for annotation on page ${command.pageIndex}`,
-        );
-      }
-
-      const attachment = await this.attachmentsService.assertAttachmentExists(
-        command.attachmentId,
-        userId,
-        tx,
-      );
-      const effectiveProjectId =
-        command.projectId || attachment?.item?.projectId || undefined;
-      const syncScope = { userId, projectId: effectiveProjectId };
-
-      const created = await tx.annotation.create({
-        data: {
-          attachmentId: command.attachmentId,
-          authorId: userId,
-          pageIndex: command.pageIndex,
-          annotationSortIndex: buildAnnotationSortIndex(command.pageIndex),
-          quoteText: this.normalizer.normalizeQuote(command.quoteText),
-          comment: this.normalizer.normalizeComment(command.comment),
-          color: this.normalizer.normalizeColor(command.color),
-          type: this.normalizer.parseType(command.type),
-          version: 1,
-        },
-      });
-
-      await helpers.appendChange(syncScope, {
-        entityType: 'Annotation',
-        entityId: created.id,
-        action: 'create',
-        version: 1,
-      });
-
-      await helpers.publishOutbox(
-        syncScope,
-        created.id,
-        'library.annotation.created',
-        { annotationId: created.id },
-      );
-
-      return { id: created.id, isNew: true, version: 1 };
-    }
-  }
-
-  async deleteFromSync(
-    command: DeleteSyncEntityCommand,
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
-  ): Promise<void> {
-    const userId = command.userId || 'system';
-    const { entityId } = command;
-    const existing = await tx.annotation.findUnique({
-      where: { id: entityId },
-    });
-    if (!existing) return;
-
-    let effectiveProjectId = command.projectId;
-    try {
-      const attachment = await this.attachmentsService.assertAttachmentExists(
-        existing.attachmentId,
-        userId !== 'system' ? userId : undefined,
-        tx,
-      );
-      effectiveProjectId =
-        effectiveProjectId || attachment?.item?.projectId || undefined;
-    } catch {
-      // Attachment or item may be deleted or inaccessible during cascade sync
-    }
-    const syncScope = { userId: command.userId, projectId: effectiveProjectId };
-
-    await tx.annotation.update({
-      where: { id: entityId },
-      data: { deletedAt: new Date() },
-    });
-
-    await helpers.appendChange(syncScope, {
-      entityType: 'Annotation',
-      entityId,
-      action: 'delete',
-      version: existing.version + 1,
-    });
-    await helpers.recordTombstone(syncScope, {
-      entityType: 'Annotation',
-      entityId,
-      deletedById: command.userId || undefined,
-    });
   }
 
   // Auth helpers

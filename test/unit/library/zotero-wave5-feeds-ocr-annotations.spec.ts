@@ -9,7 +9,12 @@ import { ArxivProvider } from '@/modules/library/ingestion/providers/arxiv.provi
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
-import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
+import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
+import {
+  DuplicateService,
+  DuplicateDetectorService,
+  DuplicateMergerService,
+} from '@/modules/library/ingestion/services/duplicate.service';
 import { OcrProvider } from '@/modules/library/extraction/providers/ocr.provider';
 import { OcrSandwichPdfService } from '@/modules/library/extraction/services/ocr-sandwich-pdf.service';
 import { FullTextProvider } from '@/modules/library/search/services/full-text.provider';
@@ -31,10 +36,6 @@ import type {
 } from '@/modules/library/core';
 import type { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import type { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
-import type {
-  IItemExistencePort,
-  IItemReadPort,
-} from '@/modules/library/catalog/types/items.types';
 import type { ExportsRepository } from '@/modules/library/citation/repositories/exports.repository';
 import type { CitationService } from '@/modules/library/citation/services/citation.service';
 
@@ -399,12 +400,14 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
         ),
       } as unknown as TransactionService;
 
+      const mockTagsService = {
+        invalidateTagsCache: jest.fn(async () => undefined),
+      } as unknown as any;
       const itemService = new ItemService(
         {} as unknown as QueryRepository,
         commandRepo,
         mockLibraryTx,
-        {} as unknown as any,
-        {} as unknown as any,
+        mockTagsService,
       );
 
       // Step 1: Mark as My Publication with CC-BY-4.0 license and authorship verification
@@ -542,7 +545,9 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
           ),
         },
         itemMetadata: {
-          updateMany: jest.fn(async () => ({ count: 1 })),
+          findFirst: jest.fn(async () => null),
+          update: jest.fn(async () => ({})),
+          deleteMany: jest.fn(async () => ({ count: 0 })),
         },
         contributor: {
           count: jest.fn(async () => 1),
@@ -616,25 +621,32 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
         mergeItems: jest.fn(async () => undefined),
       };
 
+      const mockTxService = {
+        executeInTransaction: jest.fn(
+          async <T>(
+            fn: (
+              tx: Prisma.TransactionClient,
+              helpers: TransactionHelpers,
+            ) => Promise<T>,
+          ) =>
+            fn(mockMergeTx as unknown as Prisma.TransactionClient, {
+              appendChange: jest.fn(async () => undefined) as any,
+              publishOutbox: jest.fn(async () => undefined) as any,
+              recordTombstone: jest.fn(async () => undefined) as any,
+            }),
+        ),
+      } as unknown as TransactionService;
+
       const duplicateService = new DuplicateService(
-        {
-          executeInTransaction: jest.fn(
-            async <T>(
-              fn: (
-                tx: Prisma.TransactionClient,
-                helpers: TransactionHelpers,
-              ) => Promise<T>,
-            ) =>
-              fn(mockMergeTx as unknown as Prisma.TransactionClient, {
-                appendChange: jest.fn(async () => undefined) as any,
-                publishOutbox: jest.fn(async () => undefined) as any,
-                recordTombstone: jest.fn(async () => undefined) as any,
-              }),
-          ),
-        } as unknown as TransactionService,
-        mockCatalogGateway as unknown as ConstructorParameters<
-          typeof DuplicateService
-        >[1],
+        new DuplicateDetectorService(
+          mockCatalogGateway as never,
+          undefined,
+          mockTxService,
+        ),
+        new DuplicateMergerService(
+          mockTxService,
+          mockCatalogGateway as never,
+        ),
       );
 
       await duplicateService.mergeDuplicates(USER_A, {
@@ -1055,7 +1067,10 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
         ),
       } as unknown as NotesRepository;
 
-      const mockItemReadPort: IItemReadPort = fromPartial<IItemReadPort>({
+      const mockItemQueryService = fromPartial<
+        Pick<ItemQueryService, 'exists' | 'findById'>
+      >({
+        exists: jest.fn(async () => true),
         findById: jest.fn(
           async (userId: string, itemId: string, projectId?: string) => {
             // Enforce personal vs project scope isolation
@@ -1073,17 +1088,12 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
                 doi: '10.1145/sparse.2026',
                 citekey: 'rostova2026sparse',
                 creators: [{ firstName: 'Elena', lastName: 'Rostova' }],
-              } as unknown as Awaited<ReturnType<IItemReadPort['findById']>>;
+              } as unknown as Awaited<ReturnType<ItemQueryService['findById']>>;
             }
             return null;
           },
         ),
       });
-
-      const mockItemExistencePort: IItemExistencePort =
-        fromPartial<IItemExistencePort>({
-          exists: jest.fn(async () => true),
-        });
 
       const notesService = new NotesService(
         mockNotesRepo,
@@ -1102,8 +1112,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
               }),
           ),
         } as unknown as TransactionService,
-        mockItemExistencePort,
-        mockItemReadPort,
+        mockItemQueryService,
       );
 
       // Wrong scope (USER_B) is rejected

@@ -36,12 +36,12 @@ describe('TypeController & Zotero Schema Endpoints', () => {
     it('should return full Zotero schema snapshot', () => {
       const result = controller.getSchemaSnapshot();
       expect(result.success).toBe(true);
-      expect(result.version).toBe(42);
-      expect(result.source).toContain('zotero');
-      expect(result.itemTypes).toBeDefined();
-      expect(result.itemTypes.journalArticle).toBeDefined();
-      expect(result.itemTypes.journalArticle.primaryCreatorType).toBe('author');
-      expect(result.baseFieldMappings).toBeDefined();
+      expect(result.data.version).toBe(42);
+      expect(result.data.source).toContain('zotero');
+      expect(result.data.itemTypes).toBeDefined();
+      expect(result.data.itemTypes.journalArticle).toBeDefined();
+      expect(result.data.itemTypes.journalArticle.primaryCreatorType).toBe('author');
+      expect(result.data.baseFieldMappings).toBeDefined();
     });
   });
 

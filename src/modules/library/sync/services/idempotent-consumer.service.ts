@@ -1,10 +1,10 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 import {
-  IdempotentConsumerService as SharedIdempotentConsumerService,
+  IIdempotentConsumer,
   IdempotentConsumerOptions,
   IdempotentResult,
-} from '@/modules/library/core';
+} from '@/modules/library/core/ports/idempotent-consumer.port';
 
 export type { IdempotentConsumerOptions, IdempotentResult };
 
@@ -22,16 +22,14 @@ interface MemoryInboxEntry {
  * Employs atomic Redis lease locking (`SET ... NX EX`) with automatic in-memory LRU fallback.
  */
 @Injectable()
-export class IdempotentConsumerService extends SharedIdempotentConsumerService {
+export class IdempotentConsumerService implements IIdempotentConsumer {
   private readonly logger = new Logger(IdempotentConsumerService.name);
 
   // In-memory fallback cache
   private readonly memoryStore = new Map<string, MemoryInboxEntry>();
   private static readonly MAX_MEMORY_STORE_SIZE = 5000;
 
-  constructor(@Optional() private readonly redis?: RedisCacheService) {
-    super();
-  }
+  constructor(@Optional() private readonly redis?: RedisCacheService) {}
 
   /**
    * Generates standardized inbox deduplication key.

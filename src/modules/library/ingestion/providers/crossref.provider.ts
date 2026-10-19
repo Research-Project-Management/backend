@@ -41,7 +41,7 @@ export class CrossRefProvider implements MetadataProvider {
   private readonly logger = new Logger(CrossRefProvider.name);
 
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    private readonly httpClient: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -57,32 +57,19 @@ export class CrossRefProvider implements MetadataProvider {
     url: string,
     signal?: AbortSignal,
   ): Promise<Response> {
-    if (this.httpClient) {
-      const { response } = await this.httpClient.request(url, {
-        headers: {
-          'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
-          Accept: 'application/json',
-        },
-        signal,
-      });
-      return response;
-    }
-    return fetch(url, {
+    const { response } = await this.httpClient.request(url, {
       headers: {
         'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
         Accept: 'application/json',
       },
       signal,
     });
+    return response;
   }
 
   supports(input: QueryType | MetadataRequest): boolean {
     const type = typeof input === 'string' ? input : input?.queryType;
     return type ? this.capabilities.queryTypes.includes(type) : false;
-  }
-
-  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
-    return this.resolve(request);
   }
 
   async resolve(

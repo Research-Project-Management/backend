@@ -9,8 +9,6 @@ import {
 } from '@prisma/client';
 import {
   IngestionStage,
-  IngestionCandidate,
-  IngestionDecision,
   IngestionReviewCase,
 } from '@/modules/library/ingestion/types/ingestion.types';
 import { randomUUID } from 'crypto';
@@ -188,9 +186,7 @@ export class IngestionRepository {
   ): Promise<
     | (IngestionRun & {
         stages: IngestionStage[];
-        candidates: IngestionCandidate[];
-        decisions: IngestionDecision[];
-        reviewCases: IngestionReviewCase[];
+        reviews: IngestionReviewCase[];
         item?: Item | null;
       })
     | null
@@ -227,15 +223,11 @@ export class IngestionRepository {
       };
     });
     const parsedReview = parseReviewCase(run.reviewData);
-    const reviewCases: IngestionReviewCase[] = parsedReview
-      ? [parsedReview]
-      : [];
+    const reviews: IngestionReviewCase[] = parsedReview ? [parsedReview] : [];
     return {
       ...run,
       stages,
-      candidates: [],
-      decisions: [],
-      reviewCases,
+      reviews,
     };
   }
 
@@ -367,10 +359,14 @@ export class IngestionRepository {
    * Prevents long-term table and TOAST bloat.
    */
   async purgeOldRuns(
-    olderThan: Date,
+    olderThanOrDays: Date | number = 7,
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
     const client = this.getClient(tx);
+    const olderThan =
+      typeof olderThanOrDays === 'number'
+        ? new Date(Date.now() - olderThanOrDays * 24 * 60 * 60 * 1000)
+        : olderThanOrDays;
     const terminalStatuses: IngestionStatus[] = [
       IngestionStatus.COMPLETED,
       IngestionStatus.FAILED_FINAL,
@@ -659,27 +655,18 @@ export class IngestionRepository {
   ): Promise<void> {
     if (!itemIds || itemIds.length === 0) return;
     const client = this.getClient(tx);
-    const runs = await client.ingestionRun.findMany({
+    await client.ingestionRun.updateMany({
       where: {
         itemId: { in: itemIds },
         reviewData: { not: Prisma.JsonNull },
       },
-      select: { id: true, reviewData: true },
+      data: {
+        reviewData: toJsonValue({
+          status: 'RESOLVED',
+          resolvedAt: new Date(),
+        }),
+      },
     });
-
-    for (const run of runs) {
-      const rd = parseReviewCase(run.reviewData) || ({} as IngestionReviewCase);
-      await client.ingestionRun.update({
-        where: { id: run.id },
-        data: {
-          reviewData: toJsonValue({
-            ...rd,
-            status: 'RESOLVED',
-            resolvedAt: new Date(),
-          }),
-        },
-      });
-    }
   }
 
   // Capture Preview Operations (Persistent Database Store)
@@ -718,8 +705,29 @@ export class IngestionRepository {
     return updateRes.count;
   }
 
+  async findExpiredCapturePreviews(
+    olderThan: Date = new Date(),
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
+    if (typeof client.capturePreview?.findMany !== 'function') {
+      return [];
+    }
+    return client.capturePreview.findMany({
+      where: {
+        expiresAt: { lt: olderThan },
+      },
+      take: 200,
+      select: {
+        id: true,
+        claimedAt: true,
+        canonicalMetadata: true,
+      },
+    });
+  }
+
   async deleteExpiredCapturePreviews(
-    olderThan: Date,
+    olderThan: Date = new Date(),
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
     const client = this.getClient(tx);

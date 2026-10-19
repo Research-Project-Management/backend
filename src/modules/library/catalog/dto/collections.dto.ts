@@ -43,9 +43,6 @@ export class CreateCollectionDto {
   parentId?: string | null;
 
   @IsOptional()
-  parent?: string | null;
-
-  @IsOptional()
   @IsUUID()
   projectId?: string | null;
 }
@@ -81,9 +78,6 @@ export class UpdateCollectionDto {
   )
   @IsUUID()
   parentId?: string | null;
-
-  @IsOptional()
-  parent?: string | null;
 }
 
 export class AssignItemsToCollectionDto {
@@ -91,11 +85,6 @@ export class AssignItemsToCollectionDto {
   @IsString({ each: true })
   @IsOptional()
   itemIds?: string[];
-
-  @IsArray()
-  @IsString({ each: true })
-  @IsOptional()
-  paperIds?: string[];
 }
 
 export class MoveItemsDto {
@@ -103,11 +92,6 @@ export class MoveItemsDto {
   @IsString({ each: true })
   @IsOptional()
   itemIds?: string[];
-
-  @IsArray()
-  @IsString({ each: true })
-  @IsOptional()
-  paperIds?: string[];
 }
 
 export class ReorderCollectionItemDto {

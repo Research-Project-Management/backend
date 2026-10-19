@@ -2,58 +2,15 @@ import {
   CompositeSpecification,
   QueryCriteria,
 } from './specification.interface';
+import { ScopeSpecification } from '@/modules/library/core';
 
-export { CompositeSpecification };
+export { CompositeSpecification, ScopeSpecification };
 export type { QueryCriteria };
-
-/**
- * ScopeSpecification: Enforces multi-tenant isolation.
- * Resolves to projectId for collaborative workspaces, or userId for user library.
- */
-export class ScopeSpecification extends CompositeSpecification {
-  constructor(
-    public readonly userId: string,
-    public readonly projectId?: string,
-  ) {
-    super();
-  }
-
-  isSatisfiedBy(candidate: Record<string, unknown>): boolean {
-    if (
-      this.projectId &&
-      this.projectId !== 'user' &&
-      this.projectId !== 'me' &&
-      this.projectId !== 'personal'
-    ) {
-      return candidate?.projectId === this.projectId;
-    }
-    return (
-      candidate?.userId === this.userId &&
-      (candidate?.projectId === null || candidate?.projectId === undefined)
-    );
-  }
-
-  toPrismaWhere(): QueryCriteria {
-    if (
-      this.projectId &&
-      this.projectId !== 'user' &&
-      this.projectId !== 'me' &&
-      this.projectId !== 'personal'
-    ) {
-      return { projectId: this.projectId };
-    }
-    return { userId: this.userId, projectId: null };
-  }
-}
 
 /**
  * ActiveItemsSpecification: Filters out soft-deleted items.
  */
 export class ActiveItemsSpecification extends CompositeSpecification {
-  isSatisfiedBy(candidate: Record<string, unknown>): boolean {
-    return candidate?.deletedAt == null;
-  }
-
   toPrismaWhere(): QueryCriteria {
     return { deletedAt: null };
   }
@@ -68,10 +25,6 @@ export class ItemTypeSpecification extends CompositeSpecification {
   constructor(itemTypes: string | string[]) {
     super();
     this.itemTypes = Array.isArray(itemTypes) ? itemTypes : [itemTypes];
-  }
-
-  isSatisfiedBy(candidate: Record<string, unknown>): boolean {
-    return this.itemTypes.includes(candidate?.itemType as string);
   }
 
   toPrismaWhere(): QueryCriteria {
@@ -93,14 +46,6 @@ export class YearRangeSpecification extends CompositeSpecification {
     super();
   }
 
-  isSatisfiedBy(candidate: Record<string, unknown>): boolean {
-    if (candidate?.year == null) return false;
-    const y = Number(candidate.year);
-    if (this.yearFrom !== undefined && y < this.yearFrom) return false;
-    if (this.yearTo !== undefined && y > this.yearTo) return false;
-    return true;
-  }
-
   toPrismaWhere(): QueryCriteria {
     const yearFilter: Record<string, unknown> = {};
     if (this.yearFrom !== undefined) yearFilter.gte = this.yearFrom;
@@ -115,23 +60,6 @@ export class YearRangeSpecification extends CompositeSpecification {
 export class CollectionSpecification extends CompositeSpecification {
   constructor(public readonly collectionId: string) {
     super();
-  }
-
-  isSatisfiedBy(candidate: Record<string, unknown>): boolean {
-    if (candidate?.collectionId === this.collectionId) return true;
-    if (Array.isArray(candidate?.collectionItems)) {
-      return (
-        candidate.collectionItems as Array<{
-          collectionId?: string;
-          collection?: { id?: string };
-        }>
-      ).some(
-        (ci) =>
-          ci?.collectionId === this.collectionId ||
-          ci?.collection?.id === this.collectionId,
-      );
-    }
-    return false;
   }
 
   toPrismaWhere(): QueryCriteria {
@@ -149,18 +77,6 @@ export class CollectionSpecification extends CompositeSpecification {
 export class TagSpecification extends CompositeSpecification {
   constructor(public readonly tagId: string) {
     super();
-  }
-
-  isSatisfiedBy(candidate: Record<string, unknown>): boolean {
-    if (Array.isArray(candidate?.itemTags)) {
-      return (
-        candidate.itemTags as Array<{
-          tagId?: string;
-          tag?: { id?: string };
-        }>
-      ).some((it) => it?.tagId === this.tagId || it?.tag?.id === this.tagId);
-    }
-    return false;
   }
 
   toPrismaWhere(): QueryCriteria {
@@ -182,92 +98,6 @@ export class TextSearchSpecification extends CompositeSpecification {
   constructor(query: string) {
     super();
     this.query = (query ?? '').trim();
-  }
-
-  isSatisfiedBy(candidate: Record<string, unknown>): boolean {
-    if (!this.query) return true;
-    const qLower = this.query.toLowerCase();
-
-    // 1. Bibliographic fields
-    if (
-      typeof candidate?.title === 'string' &&
-      candidate.title.toLowerCase().includes(qLower)
-    )
-      return true;
-    if (
-      typeof candidate?.abstract === 'string' &&
-      candidate.abstract.toLowerCase().includes(qLower)
-    )
-      return true;
-    if (
-      typeof candidate?.doi === 'string' &&
-      candidate.doi.toLowerCase().includes(qLower)
-    )
-      return true;
-    if (
-      typeof candidate?.citationKey === 'string' &&
-      candidate.citationKey.toLowerCase().includes(qLower)
-    )
-      return true;
-
-    // 2. Contributors
-    if (Array.isArray(candidate?.contributors)) {
-      const match = (
-        candidate.contributors as Array<{
-          fullName?: string;
-          lastName?: string;
-        }>
-      ).some(
-        (c) =>
-          c?.fullName?.toLowerCase().includes(qLower) ||
-          c?.lastName?.toLowerCase().includes(qLower),
-      );
-      if (match) return true;
-    }
-
-    // 3. Notes
-    if (Array.isArray(candidate?.notesList)) {
-      const match = (
-        candidate.notesList as Array<{
-          deletedAt?: unknown;
-          title?: string;
-          contentMd?: string;
-        }>
-      ).some(
-        (n) =>
-          n?.deletedAt == null &&
-          (n?.title?.toLowerCase().includes(qLower) ||
-            n?.contentMd?.toLowerCase().includes(qLower)),
-      );
-      if (match) return true;
-    }
-
-    // 4. Annotations
-    if (Array.isArray(candidate?.attachments)) {
-      const match = (
-        candidate.attachments as Array<{
-          deletedAt?: unknown;
-          annotations?: Array<{
-            deletedAt?: unknown;
-            quoteText?: string;
-            comment?: string;
-          }>;
-        }>
-      ).some(
-        (att) =>
-          att?.deletedAt == null &&
-          Array.isArray(att?.annotations) &&
-          att.annotations.some(
-            (ann) =>
-              ann?.deletedAt == null &&
-              (ann?.quoteText?.toLowerCase().includes(qLower) ||
-                ann?.comment?.toLowerCase().includes(qLower)),
-          ),
-      );
-      if (match) return true;
-    }
-
-    return false;
   }
 
   toPrismaWhere(): QueryCriteria {
@@ -322,3 +152,4 @@ export class TextSearchSpecification extends CompositeSpecification {
     };
   }
 }
+

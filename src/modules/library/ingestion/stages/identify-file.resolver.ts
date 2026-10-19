@@ -16,19 +16,19 @@ export interface ExtractedPdfMetadata {
   authors?: Array<
     | string
     | {
-        fullName?: string;
-        name?: string;
-        firstName?: string;
-        lastName?: string;
+        fullName?: string | null;
+        name?: string | null;
+        firstName?: string | null;
+        lastName?: string | null;
       }
   >;
   creators?: Array<
     | string
     | {
-        fullName?: string;
-        name?: string;
-        firstName?: string;
-        lastName?: string;
+        fullName?: string | null;
+        name?: string | null;
+        firstName?: string | null;
+        lastName?: string | null;
       }
   >;
   doi?: string;
@@ -191,15 +191,13 @@ export class IdentifyFileResolver {
           if (this.extractionGateway?.extractTrustedMetadata) {
             try {
               const trusted =
-                await this.extractionGateway.extractTrustedMetadata<{
-                  metadata?: Record<string, unknown>;
-                  isSelfSufficient?: boolean;
-                  quality?: { totalScore?: number };
-                  provenance?: { engineUsed?: string };
-                }>(fileRecord.buffer, payload.filename);
+                await this.extractionGateway.extractTrustedMetadata(
+                  fileRecord.buffer,
+                  payload.filename,
+                );
               if (trusted?.metadata) {
                 extractedMetadata = {
-                  ...trusted.metadata,
+                  ...(trusted.metadata as unknown as ExtractedPdfMetadata),
                   isSelfSufficient: trusted.isSelfSufficient,
                   qualityScore: trusted.quality?.totalScore,
                   engineUsed: trusted.provenance?.engineUsed,
@@ -215,10 +213,12 @@ export class IdentifyFileResolver {
             this.extractionGateway?.extractDocumentFromBuffer
           ) {
             const extractedDoc =
-              await this.extractionGateway.extractDocumentFromBuffer<{
-                metadata?: Record<string, unknown>;
-              }>(fileRecord.buffer, { headerOnly: true, maxPages: 3 });
-            extractedMetadata = extractedDoc?.metadata || extractedDoc || {};
+              await this.extractionGateway.extractDocumentFromBuffer(
+                fileRecord.buffer,
+                { headerOnly: true, maxPages: 3 },
+              );
+            extractedMetadata = ((extractedDoc?.metadata ||
+              extractedDoc) as unknown as ExtractedPdfMetadata) || {};
           }
 
           if (
@@ -226,9 +226,9 @@ export class IdentifyFileResolver {
             this.extractionGateway.extractMetadataFromBuffer
           ) {
             extractedMetadata =
-              this.extractionGateway.extractMetadataFromBuffer<
-                Record<string, unknown>
-              >(fileRecord.buffer) || {};
+              (this.extractionGateway.extractMetadataFromBuffer(
+                fileRecord.buffer,
+              ) as unknown as ExtractedPdfMetadata) || {};
           }
         }
       } catch (caughtError: unknown) {
@@ -238,9 +238,9 @@ export class IdentifyFileResolver {
         try {
           extractedMetadata =
             fileBuffer && this.extractionGateway?.extractMetadataFromBuffer
-              ? (await this.extractionGateway.extractMetadataFromBuffer(
+              ? ((await this.extractionGateway.extractMetadataFromBuffer(
                   fileBuffer,
-                )) || {}
+                )) as unknown as ExtractedPdfMetadata) || {}
               : {};
         } catch {
           extractedMetadata = {};
@@ -254,12 +254,25 @@ export class IdentifyFileResolver {
       ...extractedItemMeta
     } = extractedMetadata;
 
-    const resolvedTitle = cleanPdfTitle(
+    const contentExtractedTitle = cleanPdfTitle(
       extractedMetadata.title,
-      payload.filename,
+      undefined,
       extractedMetadata.authors,
       extractedMetadata.creators,
     );
+    const hasExtractedTitle =
+      Boolean(contentExtractedTitle) &&
+      contentExtractedTitle !== 'Uploaded Document';
+
+    const resolvedTitle = hasExtractedTitle
+      ? contentExtractedTitle
+      : cleanPdfTitle(
+          extractedMetadata.title,
+          payload.filename,
+          extractedMetadata.authors,
+          extractedMetadata.creators,
+        );
+    const isFilenameTitle = !hasExtractedTitle;
 
     const hasAuthoritativeId = Boolean(
       extractedMetadata.doi ||
@@ -326,6 +339,7 @@ export class IdentifyFileResolver {
         : undefined,
       extraFields: {
         ...(extractedMetadata.extraFields || {}),
+        ...(isFilenameTitle ? { isFilenameTitle: true } : {}),
         ...(extractedMetadata.numberOfPages
           ? {
               numberOfPages: extractedMetadata.numberOfPages,
@@ -349,14 +363,27 @@ export class IdentifyFileResolver {
     const candidateSourceName = isSelfSufficient ? 'TrustedPaper' : 'StagedPdf';
 
     const candidateConfidence = isSelfSufficient
-      ? extractedMetadata.qualityScore || 0.95
-      : extractedMetadata.doi
-        ? 0.95
-        : extractedMetadata.arxivId
-          ? 0.92
+      ? extractedMetadata.qualityScore || 0.85
+      : extractedMetadata.doi || filenameDoi
+        ? 0.9
+        : extractedMetadata.arxivId || filenameArxivId
+          ? 0.88
           : extractedMetadata.isbn
-            ? 0.9
+            ? 0.85
             : inferredConfidence;
+
+    const fieldOverrides = isFilenameTitle
+      ? {
+          title: {
+            path: 'title',
+            value: resolvedTitle,
+            normalizedValue: resolvedTitle,
+            confidence: 0.25,
+            sourceProvider: 'StagedPdf',
+            retrievedAt: new Date().toISOString(),
+          },
+        }
+      : undefined;
 
     return createCandidate({
       sourceKind: 'FILE',
@@ -364,6 +391,7 @@ export class IdentifyFileResolver {
       sourceRecordId: payload.fileId,
       rawMetadata: rawFileMetadata,
       confidenceScore: candidateConfidence,
+      fieldOverrides,
       normalizer: this.normalizer,
     });
   }

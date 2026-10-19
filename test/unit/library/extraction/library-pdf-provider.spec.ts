@@ -57,7 +57,7 @@ describe('PdfProvider', () => {
         .mockResolvedValue('Scanned article text from OCR'),
     };
 
-    const provider = new PdfProvider(undefined, ocr as any);
+    const provider = new PdfProvider(ocr as any);
     const result = await provider.extractDocumentFromBuffer(
       Buffer.from('%PDF scan'),
     );

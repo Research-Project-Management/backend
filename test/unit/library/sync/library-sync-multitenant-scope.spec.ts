@@ -1,4 +1,4 @@
-﻿import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma, TagType } from '@prisma/client';
 import { NotesService } from '@/modules/library/catalog/services/notes.service';
@@ -12,7 +12,6 @@ import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annota
 import { TransactionService, TransactionHelpers } from '@/modules/library/core';
 import { PrismaService } from '@/core';
 import { CATALOG_FACADE } from '@/modules/library/catalog/catalog.facade';
-import { ITEM_EXISTENCE_PORT } from '@/modules/library/catalog/types/items.types';
 
 describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';
@@ -70,12 +69,6 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
               }),
             },
           },
-          {
-            provide: ITEM_EXISTENCE_PORT,
-            useValue: {
-              exists: jest.fn().mockResolvedValue(true),
-            },
-          },
         ],
       }).compile();
 
@@ -130,8 +123,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
       await service.updateNote(
         mockUserId,
         mockNoteId,
-        1,
-        { title: 'Updated Note' },
+        { title: 'Updated Note', expectedVersion: 1 },
         mockProjectId,
       );
 
@@ -177,87 +169,6 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
         mockNoteId,
         'library.note.deleted',
         expect.anything(),
-      );
-    });
-
-    it('should pass projectId syncScope to appendChange in upsertFromSync', async () => {
-      const mockTx = fromPartial<Prisma.TransactionClient>({
-        note: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: mockNoteId,
-            userId: mockUserId,
-            projectId: mockProjectId,
-            tags: [],
-          }),
-          update: jest.fn().mockResolvedValue({
-            id: mockNoteId,
-            version: 3,
-            projectId: mockProjectId,
-          }),
-        },
-      });
-
-      await service.upsertFromSync(
-        {
-          userId: mockUserId,
-          projectId: mockProjectId,
-          existingId: mockNoteId,
-          title: 'Synced Note',
-          contentMd: 'Synced content',
-        },
-        mockTx,
-        mockHelpers,
-      );
-
-      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
-        { userId: mockUserId, projectId: mockProjectId },
-        expect.objectContaining({
-          entityType: 'Note',
-          entityId: mockNoteId,
-          action: 'update',
-          version: 3,
-        }),
-      );
-    });
-
-    it('should record tombstone with projectId in deleteFromSync', async () => {
-      const mockTx = fromPartial<Prisma.TransactionClient>({
-        note: {
-          findFirst: jest.fn().mockResolvedValue({
-            id: mockNoteId,
-            version: 1,
-            projectId: mockProjectId,
-          }),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-      });
-
-      await service.deleteFromSync(
-        {
-          userId: mockUserId,
-          projectId: mockProjectId,
-          entityId: mockNoteId,
-          entityType: 'Note',
-        },
-        mockTx,
-        mockHelpers,
-      );
-
-      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
-        { userId: mockUserId, projectId: mockProjectId },
-        expect.objectContaining({
-          entityType: 'Note',
-          entityId: mockNoteId,
-          action: 'delete',
-        }),
-      );
-
-      expect(mockHelpers.recordTombstone).toHaveBeenCalledWith(
-        { userId: mockUserId, projectId: mockProjectId },
-        expect.objectContaining({
-          entityType: 'Note',
-          entityId: mockNoteId,
-        }),
       );
     });
   });
@@ -358,47 +269,6 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
         mockAnnotationId,
         'library.annotation.deleted',
         expect.anything(),
-      );
-    });
-
-    it('should record tombstone and appendChange with syncScope on deleteFromSync', async () => {
-      const mockTx = fromPartial<Prisma.TransactionClient>({
-        annotation: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: mockAnnotationId,
-            attachmentId: mockAttachmentId,
-            version: 1,
-          }),
-          update: jest.fn().mockResolvedValue({}),
-        },
-      });
-
-      await service.deleteFromSync(
-        {
-          userId: mockUserId,
-          projectId: mockProjectId,
-          entityId: mockAnnotationId,
-          entityType: 'Annotation',
-        },
-        mockTx,
-        mockHelpers,
-      );
-
-      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
-        { userId: mockUserId, projectId: mockProjectId },
-        expect.objectContaining({
-          entityType: 'Annotation',
-          entityId: mockAnnotationId,
-          action: 'delete',
-        }),
-      );
-
-      expect(mockHelpers.recordTombstone).toHaveBeenCalledWith(
-        { userId: mockUserId, projectId: mockProjectId },
-        expect.objectContaining({
-          entityType: 'Annotation',
-          entityId: mockAnnotationId,
-        }),
       );
     });
   });

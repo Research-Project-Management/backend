@@ -1,6 +1,9 @@
-﻿import { WebFetchLadderService } from '@/modules/library/ingestion/services/web-fetch-ladder.service';
+import { WebFetchLadderService, WebMirrorResolverService } from '@/modules/library/ingestion/services/web-fetch-ladder.service';
 import { IngestionVerifierService } from '@/modules/library/ingestion/services/ingestion-verifier.service';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
+import { CrossRefProvider } from '@/modules/library/ingestion/providers/crossref.provider';
+import { ArxivProvider } from '@/modules/library/ingestion/providers/arxiv.provider';
+import { OpenAlexProvider } from '@/modules/library/ingestion/providers/openalex.provider';
 
 describe('WebFetchLadderService', () => {
   let service: WebFetchLadderService;
@@ -15,7 +18,22 @@ describe('WebFetchLadderService', () => {
         .mockResolvedValue(new URL('https://example.com')),
     } as any;
 
-    service = new WebFetchLadderService(mockSsrfGuard, mockVerifier);
+    const mirrorResolver = new WebMirrorResolverService(
+      undefined,
+      undefined,
+      new CrossRefProvider(),
+      new ArxivProvider(),
+      new OpenAlexProvider(),
+    );
+
+    service = new WebFetchLadderService(
+      mockSsrfGuard,
+      mockVerifier,
+      undefined,
+      undefined,
+      undefined,
+      mirrorResolver,
+    );
   });
 
   afterEach(() => {

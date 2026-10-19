@@ -7,38 +7,25 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma, AttachmentType } from '@prisma/client';
+import { RedisCacheService } from '@/core';
 import {
-  TransactionService,
   TransactionHelpers,
   CATALOG_FACADE,
   ICatalogFacade,
+  LIBRARY_REDIS_KEYS,
+  normalizeProjectScopeId,
   extractFileIdFromUrl,
 } from '@/modules/library/core';
-import {
-  CreateAttachmentInput,
-  ReplaceAttachmentFileInput,
-} from '@/modules/library/extraction/types/attachments.types';
+import { TransactionService } from '@/modules/library/sync';
+import { CreateAttachmentInput } from '@/modules/library/extraction/types/attachments.types';
 import {
   validateAttachmentInvariants,
   inferAttachmentTypeFromFilename,
-  calculateFileChecksum,
 } from '@/modules/library/extraction/domain/attachments.domain';
 
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 
-import type {
-  UpsertSyncAttachmentCommand,
-  DeleteSyncEntityCommand,
-  UpsertSyncEntityResult,
-} from '@/modules/library/core/types/entity-commands.types';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import {
-  STORAGE_DRIVER,
-  STORAGE_NODE_REPOSITORY,
-} from '@/modules/storage/storage.tokens';
-import type { IStorageDriver } from '@/modules/storage/core';
-import type { IStorageNodeRepository } from '@/modules/storage/drive';
-import { PdfThumbnailService } from '@/modules/storage/worker';
 import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
@@ -49,11 +36,10 @@ import {
   AttachmentId,
   ProjectId,
 } from '@/modules/library/core/types/branded.types';
-import { AttachmentSyncService } from './attachment-sync.service';
 import { AttachmentRenamerService } from './attachment-renamer.service';
 import { AttachmentThumbnailService } from './attachment-thumbnail.service';
 
-export type { CreateAttachmentInput, ReplaceAttachmentFileInput };
+export type { CreateAttachmentInput };
 
 @Injectable()
 export class AttachmentsService {
@@ -69,28 +55,11 @@ export class AttachmentsService {
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
     @Optional()
-    @Inject(STORAGE_DRIVER)
-    private readonly storageDriver?: IStorageDriver,
+    private readonly renamerService?: AttachmentRenamerService,
     @Optional()
-    @Inject(STORAGE_NODE_REPOSITORY)
-    private readonly storageNodeRepo?: IStorageNodeRepository,
+    private readonly thumbnailService?: AttachmentThumbnailService,
     @Optional()
-    @Inject(PdfThumbnailService)
-    private readonly pdfThumbnailService?: PdfThumbnailService,
-    @Optional()
-    private readonly syncService: AttachmentSyncService = new AttachmentSyncService(),
-    @Optional()
-    private readonly renamerService: AttachmentRenamerService = new AttachmentRenamerService(
-      repo,
-      catalogGateway,
-    ),
-    @Optional()
-    private readonly thumbnailService: AttachmentThumbnailService = new AttachmentThumbnailService(
-      storageDriver,
-      storageNodeRepo,
-      storagePort,
-      pdfThumbnailService,
-    ),
+    private readonly cache?: RedisCacheService,
   ) {}
 
   private async assertItemExists(
@@ -108,10 +77,6 @@ export class AttachmentsService {
         throw new NotFoundException(`Item ${itemId} not found`);
       }
     }
-  }
-
-  calculateChecksum(buffer: Buffer): string {
-    return calculateFileChecksum(buffer);
   }
 
   async createAttachment(input: CreateAttachmentInput, projectId?: string) {
@@ -175,41 +140,44 @@ export class AttachmentsService {
 
     return this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
-        const attachment = await tx.attachment.create({
-          data: {
-            itemId: targetItemId,
-            linkMode: resolvedLinkMode,
-            attachmentType: resolvedAttachmentType,
-            filename: input.filename,
-            url: effectiveUrl,
-            mimeType:
-              input.mimeType ??
-              (resolvedLinkMode === 'linked_url'
-                ? 'text/uri-list'
-                : 'application/pdf'),
-            size: sizeBigInt,
-            fileHash: input.fileHash ?? '',
-            fileId: resolvedFileId,
-            revisions: {
-              create: {
-                revisionNumber: 1,
-                url: effectiveUrl,
-                fileHash: input.fileHash ?? '',
-                fileId: resolvedFileId,
-                sizeBytes: sizeBigInt,
-                comment:
-                  resolvedLinkMode === 'linked_url'
-                    ? 'Linked URI'
-                    : 'Initial file upload',
-              },
+        const createData: Prisma.AttachmentCreateInput = {
+          item: { connect: { id: targetItemId } },
+          linkMode: resolvedLinkMode,
+          attachmentType: resolvedAttachmentType,
+          filename: input.filename,
+          url: effectiveUrl,
+          mimeType:
+            input.mimeType ??
+            (resolvedLinkMode === 'linked_url'
+              ? 'text/uri-list'
+              : 'application/pdf'),
+          size: sizeBigInt,
+          fileHash: input.fileHash ?? '',
+          fileId: resolvedFileId,
+          revisions: {
+            create: {
+              revisionNumber: 1,
+              url: effectiveUrl,
+              fileHash: input.fileHash ?? '',
+              fileId: resolvedFileId,
+              sizeBytes: sizeBigInt,
+              comment:
+                resolvedLinkMode === 'linked_url'
+                  ? 'Linked URI'
+                  : 'Initial file upload',
             },
           },
-          include: {
-            revisions: {
-              orderBy: { revisionNumber: 'desc' },
-            },
+        };
+        const includeOpts = {
+          revisions: {
+            orderBy: { revisionNumber: 'desc' as const },
           },
-        });
+        };
+        const attachment = await this.repo.create(
+          createData,
+          includeOpts,
+          tx,
+        );
 
         if (resolvedFileId) {
           await this.repo.updateLinkedFile(resolvedFileId, targetItemId, tx);
@@ -248,7 +216,44 @@ export class AttachmentsService {
 
         return attachment;
       },
-    );
+    ).then(async (attachment) => {
+      await this.invalidateAttachmentItemCache(
+        targetItemId,
+        userId,
+        projectId,
+      );
+      return attachment;
+    });
+  }
+
+  private async invalidateAttachmentItemCache(
+    itemId: string,
+    userId: string,
+    projectId?: string,
+  ): Promise<void> {
+    if (!this.cache || !itemId) return;
+    try {
+      const validProjectId = normalizeProjectScopeId(projectId);
+      const scopeId = validProjectId || userId;
+      const countsScopeKey = validProjectId
+        ? `proj:${validProjectId}`
+        : `user:${userId}`;
+      await Promise.all([
+        this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
+        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
+        ...(scopeId
+          ? [
+              this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
+              this.cache.del(LIBRARY_REDIS_KEYS.counts(countsScopeKey)),
+            ]
+          : []),
+      ]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to invalidate item cache after attachment mutation (${itemId}): ${message}`,
+      );
+    }
   }
 
   async getItemAttachments(
@@ -311,25 +316,36 @@ export class AttachmentsService {
         id: attachmentId,
         item: scopeItemWhere,
       },
-      { item: true },
+      { item: true, revisions: true },
     );
 
     if (!attachment) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    const targetFileId =
+    const fileIdsToDelete = new Set<string>();
+    const mainFileId =
       attachment.fileId || extractFileIdFromUrl(attachment.url);
+    if (mainFileId) {
+      fileIdsToDelete.add(mainFileId);
+    }
+    if (Array.isArray(attachment.revisions)) {
+      for (const rev of attachment.revisions) {
+        const revFileId = rev.fileId || extractFileIdFromUrl(rev.url);
+        if (revFileId) {
+          fileIdsToDelete.add(revFileId);
+        }
+      }
+    }
+
+    const effectiveProjectId =
+      projectId || attachment.item?.projectId || undefined;
 
     const result = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
-        const effectiveProjectId =
-          projectId || attachment.item?.projectId || undefined;
         const eventScope = { userId, projectId: effectiveProjectId };
 
-        await tx.attachment.delete({
-          where: { id: attachment.id },
-        });
+        await this.repo.delete(attachment.id, tx);
 
         await helpers.appendChange(eventScope, {
           entityType: 'Attachment',
@@ -350,34 +366,28 @@ export class AttachmentsService {
       },
     );
 
-    if (targetFileId && this.storagePort?.deleteFile) {
-      try {
-        await this.storagePort.deleteFile(targetFileId);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `Failed to delete storage file ${targetFileId} on attachment delete: ${message}`,
-        );
+    if (attachment.itemId) {
+      await this.invalidateAttachmentItemCache(
+        attachment.itemId,
+        userId,
+        effectiveProjectId,
+      );
+    }
+
+    if (fileIdsToDelete.size > 0 && this.storagePort?.deleteFile) {
+      for (const fid of fileIdsToDelete) {
+        try {
+          await this.storagePort.deleteFile(fid);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Failed to delete storage file ${fid} on attachment delete: ${message}`,
+          );
+        }
       }
     }
 
     return result;
-  }
-
-  async upsertFromSync(
-    command: UpsertSyncAttachmentCommand,
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
-  ): Promise<UpsertSyncEntityResult> {
-    return this.syncService.upsertFromSync(command, tx, helpers);
-  }
-
-  async deleteFromSync(
-    command: DeleteSyncEntityCommand,
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
-  ): Promise<void> {
-    return this.syncService.deleteFromSync(command, tx, helpers);
   }
 
   async reassignToItem(
@@ -385,13 +395,34 @@ export class AttachmentsService {
     targetItemId: ItemId | string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    await this.repo.reassignToItem(sourceItemIds, targetItemId, tx);
+    const orphanedFileIds = await this.repo.reassignToItem(
+      sourceItemIds,
+      targetItemId,
+      tx,
+    );
+    if (
+      Array.isArray(orphanedFileIds) &&
+      orphanedFileIds.length > 0 &&
+      this.storagePort?.deleteFile
+    ) {
+      for (const fid of orphanedFileIds) {
+        try {
+          await this.storagePort.deleteFile(fid);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Failed to delete duplicate attachment file ${fid} on item merge: ${message}`,
+          );
+        }
+      }
+    }
   }
 
   async assertAttachmentExists(
     attachmentId: AttachmentId | string,
     userId?: UserId | string,
     tx?: Prisma.TransactionClient,
+    projectId?: ProjectId | string,
   ) {
     const attachment = await this.repo.findUnique(
       attachmentId,
@@ -402,9 +433,13 @@ export class AttachmentsService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    if (userId && attachment.item) {
+    if (attachment.item) {
       const item = attachment.item;
-      if (!item.projectId && item.userId && item.userId !== userId) {
+      if (projectId && projectId !== 'user') {
+        if (item.projectId !== projectId) {
+          throw new NotFoundException(`Attachment ${attachmentId} not found`);
+        }
+      } else if (userId && !item.projectId && item.userId && item.userId !== userId) {
         throw new NotFoundException(`Attachment ${attachmentId} not found`);
       }
     }
@@ -433,34 +468,27 @@ export class AttachmentsService {
 
     await this.repo.setPrimaryAttachment(itemId, attachmentId);
 
+    if (this.cache) {
+      const validProjectId = normalizeProjectScopeId(projectId);
+      const scopeId = validProjectId || userId;
+      await Promise.all([
+        this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
+        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
+        this.cache.del(`library:item:${itemId}:attachments`),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
+        ...(validProjectId
+          ? [
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
+              ),
+              this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+            ]
+          : []),
+      ]);
+    }
+
     return { success: true };
-  }
-
-  async assertAttachmentInScope(
-    attachmentId: AttachmentId | string,
-    scopeOrUserId?: UserId | ProjectId | string,
-    tx?: Prisma.TransactionClient,
-  ) {
-    const attachment = await this.repo.findUnique(
-      attachmentId,
-      { item: true },
-      tx,
-    );
-    if (!attachment) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
-    }
-
-    if (scopeOrUserId && attachment.item) {
-      const item = attachment.item;
-      if (item.projectId === scopeOrUserId) {
-        return attachment;
-      }
-      if (!item.projectId && item.userId && item.userId !== scopeOrUserId) {
-        throw new NotFoundException(`Attachment ${attachmentId} not found`);
-      }
-    }
-
-    return attachment;
   }
 
   async getThumbnail(
@@ -479,10 +507,15 @@ export class AttachmentsService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
+    if (!this.thumbnailService) {
+      throw new NotFoundException('Thumbnail service unavailable');
+    }
+
     return this.thumbnailService.getThumbnail(
       userId,
       attachmentId,
       attachment.fileId,
+      projectId,
     );
   }
 
@@ -492,7 +525,10 @@ export class AttachmentsService {
     dto: RenameAttachmentDto,
     projectId?: ProjectId | string,
   ) {
-    return this.renamerService.renameAttachment(
+    const renamerService =
+      this.renamerService ??
+      new AttachmentRenamerService(this.repo, this.catalogGateway, this.cache);
+    return renamerService.renameAttachment(
       userId,
       attachmentId,
       dto,
@@ -513,17 +549,10 @@ export class AttachmentsService {
       newFilename: string;
     }>;
   }> {
-    return this.renamerService.batchRenameAttachments(userId, dto, projectId);
-  }
-
-  async resolveAttachmentItemId(
-    attachmentId: AttachmentId | string,
-  ): Promise<ItemId> {
-    const attachment = await this.repo.findUnique(attachmentId);
-    if (!attachment?.itemId) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
-    }
-    return attachment.itemId as ItemId;
+    const renamerService =
+      this.renamerService ??
+      new AttachmentRenamerService(this.repo, this.catalogGateway, this.cache);
+    return renamerService.batchRenameAttachments(userId, dto, projectId);
   }
 
   async resolveItemUrl(
@@ -586,14 +615,12 @@ export class AttachmentsService {
 
     return this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
-        await tx.attachment.update({
-          where: { id: attachmentId },
-          data: {
-            extractionStatus: 'PENDING',
-            extractionAttempts: 0,
-            extractionLastError: null,
-          },
-        });
+        const updateData: Prisma.AttachmentUpdateInput = {
+          extractionStatus: 'PENDING',
+          extractionAttempts: 0,
+          extractionLastError: null,
+        };
+        await this.repo.update(attachmentId, updateData, tx);
 
         await helpers.publishOutbox(
           eventScope,

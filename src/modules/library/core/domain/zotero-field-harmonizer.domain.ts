@@ -160,62 +160,42 @@ function getFirstNonEmpty(
 }
 
 /**
- * Bidirectional alias groups linking Flux DB/DTO properties and Zotero v42 field names.
+ * Canonical field mappings from legacy/alias inputs to canonical Zotero/Flux properties.
  */
-const CANONICAL_ALIAS_GROUPS: ReadonlyArray<readonly string[]> = [
-  ['doi', 'DOI'],
-  ['isbn', 'ISBN'],
-  ['issn', 'ISSN'],
-  ['pmid', 'PMID'],
-  ['pmcid', 'PMCID'],
-  ['arxivId', 'archiveId', 'archiveID'],
-  ['journalAbbreviation', 'journalAbbr'],
-  ['abstract', 'abstractNote'],
-  ['accessDate', 'accessedAt'],
-  ['citationKey', 'citeKey'],
-  ['url', 'URL'],
-  ['rights', 'license'],
-  ['numPages', 'numberOfPages'],
-  ['authority', 'issuingAuthority'],
+const CANONICAL_ALIAS_GROUPS: ReadonlyArray<{
+  canonical: readonly string[];
+  sources: readonly string[];
+}> = [
+  { canonical: ['doi'], sources: ['doi', 'DOI'] },
+  { canonical: ['isbn'], sources: ['isbn', 'ISBN'] },
+  { canonical: ['issn'], sources: ['issn', 'ISSN'] },
+  { canonical: ['pmid'], sources: ['pmid', 'PMID'] },
+  { canonical: ['pmcid'], sources: ['pmcid', 'PMCID'] },
+  { canonical: ['arxivId', 'archiveId'], sources: ['arxivId', 'archiveId', 'archiveID'] },
+  { canonical: ['journalAbbreviation'], sources: ['journalAbbreviation', 'journalAbbr'] },
+  { canonical: ['abstract', 'abstractNote'], sources: ['abstract', 'abstractNote'] },
+  { canonical: ['accessDate'], sources: ['accessDate', 'accessedAt'] },
+  { canonical: ['citationKey'], sources: ['citationKey', 'citeKey'] },
+  { canonical: ['url'], sources: ['url', 'URL'] },
+  { canonical: ['rights', 'license'], sources: ['rights', 'license'] },
+  { canonical: ['numPages', 'numberOfPages'], sources: ['numPages', 'numberOfPages'] },
+  { canonical: ['authority', 'issuingAuthority'], sources: ['authority', 'issuingAuthority'] },
 ];
 
 /**
- * Synchronizes all `FIELD_ALIASES` and canonical alias groups in-place on `record`.
- * Does not overwrite existing non-empty values on `record`.
+ * Resolves all legacy alias inputs into canonical fields in-place on `record`.
+ * Does not overwrite existing non-empty values on `record` and does not write duplicate legacy alias keys unless `syncLegacyAliases` is true.
  */
 export function resolveFieldAliases(
   record: Record<string, unknown>,
   extraSources?: ReadonlyArray<Record<string, unknown> | null | undefined>,
+  syncLegacyAliases = false,
 ): void {
-  // 1. Apply explicit FIELD_ALIASES from schema.constants.ts
-  for (const [aliasKey, targetKey] of Object.entries(FIELD_ALIASES)) {
-    const val = getFirstNonEmpty([aliasKey, targetKey], record, extraSources);
-    if (val !== undefined) {
-      if (!isNonEmptyValue(record[targetKey])) {
-        if (targetKey === 'accessedAt' && typeof val === 'string') {
-          const parsed = new Date(val);
-          if (!Number.isNaN(parsed.getTime())) {
-            record[targetKey] = parsed;
-          }
-        } else {
-          record[targetKey] = val;
-        }
-      }
-      if (!isNonEmptyValue(record[aliasKey])) {
-        if (aliasKey === 'accessDate' && val instanceof Date) {
-          record[aliasKey] = val.toISOString();
-        } else {
-          record[aliasKey] = val;
-        }
-      }
-    }
-  }
-
-  // 2. Apply multi-way canonical alias groups (e.g. arxivId <-> archiveId <-> archiveID)
   for (const group of CANONICAL_ALIAS_GROUPS) {
-    const val = getFirstNonEmpty(group, record, extraSources);
+    const val = getFirstNonEmpty(group.sources, record, extraSources);
     if (val !== undefined) {
-      for (const key of group) {
+      const targetKeys = syncLegacyAliases ? group.sources : group.canonical;
+      for (const key of targetKeys) {
         if (!isNonEmptyValue(record[key])) {
           if (key === 'accessDate' && val instanceof Date) {
             record[key] = val.toISOString();
@@ -288,7 +268,7 @@ export function resolveBidirectionalBaseFields(
   record: Record<string, unknown>,
   itemType?: string,
   extraSources?: ReadonlyArray<Record<string, unknown> | null | undefined>,
-  syncLegacyAliases = true,
+  syncLegacyAliases = false,
 ): void {
   const resolvedType =
     itemType ||
@@ -300,34 +280,32 @@ export function resolveBidirectionalBaseFields(
         ? record.type.trim()
         : 'journalArticle');
 
-  if (syncLegacyAliases) {
-    // Pre-sync publicationTitle <-> journal / venue and date <-> publicationDate before base field mapping
-    const pubTitleVal = getFirstNonEmpty(
-      ['publicationTitle', 'journal', 'venue'],
-      record,
-      extraSources,
-    );
-    if (pubTitleVal !== undefined) {
-      if (!isNonEmptyValue(record.publicationTitle)) {
-        record.publicationTitle = pubTitleVal;
-      }
-      if (!isNonEmptyValue(record.journal)) {
-        record.journal = pubTitleVal;
-      }
+  // Resolve legacy journal/venue -> publicationTitle and date <-> publicationDate on input
+  const pubTitleVal = getFirstNonEmpty(
+    ['publicationTitle', 'journal', 'venue'],
+    record,
+    extraSources,
+  );
+  if (pubTitleVal !== undefined) {
+    if (!isNonEmptyValue(record.publicationTitle)) {
+      record.publicationTitle = pubTitleVal;
     }
+    if (syncLegacyAliases && !isNonEmptyValue(record.journal)) {
+      record.journal = pubTitleVal;
+    }
+  }
 
-    const dateVal = getFirstNonEmpty(
-      ['date', 'publicationDate'],
-      record,
-      extraSources,
-    );
-    if (dateVal !== undefined) {
-      if (!isNonEmptyValue(record.date)) {
-        record.date = dateVal;
-      }
-      if (!isNonEmptyValue(record.publicationDate)) {
-        record.publicationDate = dateVal;
-      }
+  const dateVal = getFirstNonEmpty(
+    ['date', 'publicationDate'],
+    record,
+    extraSources,
+  );
+  if (dateVal !== undefined) {
+    if (!isNonEmptyValue(record.date)) {
+      record.date = dateVal;
+    }
+    if (!isNonEmptyValue(record.publicationDate)) {
+      record.publicationDate = dateVal;
     }
   }
 
@@ -374,6 +352,9 @@ export function resolveBidirectionalBaseFields(
           if (!isNonEmptyValue(record.publicationDate)) {
             record.publicationDate = resolvedVal;
           }
+          if (!isNonEmptyValue(record.date)) {
+            record.date = resolvedVal;
+          }
         } else {
           record[baseField] = resolvedVal;
         }
@@ -388,19 +369,19 @@ export function resolveBidirectionalBaseFields(
     }
   }
 
+  if (
+    isNonEmptyValue(record.date) &&
+    !isNonEmptyValue(record.publicationDate)
+  ) {
+    record.publicationDate = record.date;
+  }
+
   if (syncLegacyAliases) {
-    // Ensure journal and publicationDate reflect any newly mapped publicationTitle or date
     if (
       isNonEmptyValue(record.publicationTitle) &&
       !isNonEmptyValue(record.journal)
     ) {
       record.journal = record.publicationTitle;
-    }
-    if (
-      isNonEmptyValue(record.date) &&
-      !isNonEmptyValue(record.publicationDate)
-    ) {
-      record.publicationDate = record.date;
     }
   }
 }
@@ -408,6 +389,7 @@ export function resolveBidirectionalBaseFields(
 export interface HarmonizeZoteroFieldsOptions {
   itemType?: string;
   syncExtraFields?: boolean;
+  syncLegacyAliases?: boolean;
   extraSources?: ReadonlyArray<Record<string, unknown> | null | undefined>;
 }
 
@@ -417,7 +399,7 @@ export interface HarmonizeZoteroFieldsOptions {
  * Guarantees:
  * 1. Idempotency: `harmonizeZoteroFields(harmonizeZoteroFields(x))` is deep-equal to `harmonizeZoteroFields(x)`.
  * 2. Bidirectional `BASE_FIELD_MAPPINGS` across all 37 Zotero item types.
- * 3. Lossless `FIELD_ALIASES` synchronization (`DOI` <-> `doi`, `ISBN` <-> `isbn`, `abstractNote` <-> `abstract`, etc.).
+ * 3. Lossless input alias resolution (`DOI` -> `doi`, `ISBN` -> `isbn`, `abstract` <-> `abstractNote`, etc.).
  * 4. Optional synchronization of type-specific mapped fields into `extraFields` when present.
  */
 export function harmonizeZoteroFields<T extends Record<string, unknown>>(
@@ -456,14 +438,21 @@ export function harmonizeZoteroFields<T extends Record<string, unknown>>(
         ? clone.type.trim()
         : 'journalArticle');
 
+  const syncLegacyAliases = options?.syncLegacyAliases ?? false;
+
   // 1. Synchronize aliases across top-level and extraSources
-  resolveFieldAliases(clone, sources);
+  resolveFieldAliases(clone, sources, syncLegacyAliases);
 
   // 2. Synchronize bidirectional BASE_FIELD_MAPPINGS for resolvedItemType
-  resolveBidirectionalBaseFields(clone, resolvedItemType, sources);
+  resolveBidirectionalBaseFields(
+    clone,
+    resolvedItemType,
+    sources,
+    syncLegacyAliases,
+  );
 
   // 3. Re-run alias resolution in case base field mapping populated a field with an alias
-  resolveFieldAliases(clone, sources);
+  resolveFieldAliases(clone, sources, syncLegacyAliases);
 
   // 4. Mirror type-specific mapped fields into extraFields if extraFields exists and syncExtraFields !== false
   if (existingExtraFields && options?.syncExtraFields !== false) {

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { RawXmpMetadata } from '@/modules/library/extraction/types/trusted-extraction.types';
 
 /**
@@ -9,7 +9,6 @@ import { RawXmpMetadata } from '@/modules/library/extraction/types/trusted-extra
  * to locate the raw UTF-8 <x:xmpmeta> packet without loading or decompressing
  * the full PDF body stream. Execution latency is typically < 0.5ms.
  */
-@Injectable()
 export class XmpParser {
   private static readonly logger = new Logger(XmpParser.name);
 

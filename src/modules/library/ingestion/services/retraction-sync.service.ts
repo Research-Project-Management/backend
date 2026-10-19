@@ -3,7 +3,13 @@ import {
   Logger,
   OnModuleInit,
   OnModuleDestroy,
+  Optional,
 } from '@nestjs/common';
+import { RedisCacheService } from '@/core';
+import {
+  LIBRARY_REDIS_KEYS,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
 import { libraryConfig } from '@/modules/library/core/config/library.config';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
@@ -28,6 +34,8 @@ export interface RetractionSyncResult {
 
 interface SyncCandidate {
   id: string;
+  userId?: string | null;
+  projectId?: string | null;
   doi?: string | null;
   pmid?: string | null;
   isRetracted?: boolean | null;
@@ -43,6 +51,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly repo: RetractionRepository,
     private readonly scanner: RetractionScannerProvider,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
   onModuleInit(): void {
@@ -130,7 +139,13 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
       `Starting retraction delta sync: found ${items.length} eligible stale item(s) (stale threshold: ${maxDays} days, concurrency: ${concurrency})`,
     );
 
-    const result = await this.processItems(items, concurrency, startTime);
+    const scopedItems = items.map((it) => ({
+      ...it,
+      userId: (it as { userId?: string }).userId || userId,
+      projectId: (it as { projectId?: string | null }).projectId ?? projectId,
+    }));
+
+    const result = await this.processItems(scopedItems, concurrency, startTime);
 
     this.logger.log(
       `Retraction delta sync finished in ${result.durationMs}ms: scanned=${result.scanned}, newlyRetracted=${result.newlyRetracted}, clean=${result.stillClean}, skippedManual=${result.skippedManual}, skippedUnverified=${result.skippedUnverified}, failed=${result.failed}`,
@@ -158,6 +173,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     let skippedManual = 0;
     let skippedUnverified = 0;
     let failed = 0;
+    const updatedItems: SyncCandidate[] = [];
 
     for (let i = 0; i < items.length; i += concurrency) {
       const chunk = items.slice(i, i + concurrency);
@@ -183,6 +199,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
                 now,
               );
               scanned++;
+              updatedItems.push(item);
             } else if (result.status === 'clean') {
               stillClean++;
               await this.repo.updateItemRetraction(
@@ -193,6 +210,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
                 now,
               );
               scanned++;
+              updatedItems.push(item);
             } else {
               skippedUnverified++;
             }
@@ -205,6 +223,41 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
           }
         }),
       );
+    }
+
+    if (this.cache && updatedItems.length > 0) {
+      try {
+        const scopesToInvalidate = new Set<string>();
+        const tasks: Promise<unknown>[] = [];
+        for (const item of updatedItems) {
+          tasks.push(
+            this.cache.del(LIBRARY_REDIS_KEYS.item(item.id)),
+            this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(item.id)),
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(item.id)),
+          );
+          const validProjectId = normalizeProjectScopeId(item.projectId);
+          if (validProjectId) {
+            scopesToInvalidate.add(validProjectId);
+            scopesToInvalidate.add(`proj:${validProjectId}`);
+          }
+          if (item.userId) {
+            scopesToInvalidate.add(item.userId);
+          }
+        }
+        for (const scopeKey of scopesToInvalidate) {
+          tasks.push(
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeKey)),
+            this.cache.del(LIBRARY_REDIS_KEYS.counts(scopeKey)),
+          );
+        }
+        await Promise.all(tasks);
+      } catch (cacheErr: unknown) {
+        const msg =
+          cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
+        this.logger.warn(
+          `Failed to invalidate Redis caches during retraction sync: ${msg}`,
+        );
+      }
     }
 
     return {

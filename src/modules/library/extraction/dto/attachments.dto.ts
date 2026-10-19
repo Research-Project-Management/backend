@@ -65,32 +65,6 @@ export class CaptureSnapshotDto {
   title?: string;
 }
 
-export class ReplaceAttachmentFileDto {
-  @IsString()
-  @IsOptional()
-  fileId?: string;
-
-  @IsString()
-  @IsOptional()
-  filename?: string;
-
-  @IsString()
-  @IsOptional()
-  url?: string;
-
-  @IsString()
-  @IsOptional()
-  fileHash?: string;
-
-  @IsNumber()
-  @IsOptional()
-  sizeBytes?: number;
-
-  @IsString()
-  @IsOptional()
-  comment?: string;
-}
-
 export class RenameAttachmentDto {
   @IsString()
   @IsOptional()

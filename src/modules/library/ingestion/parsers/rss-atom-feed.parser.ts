@@ -4,7 +4,7 @@ import {
   decodeHtmlEntities,
   normalizeArxivId,
   normalizeDoi,
-  normalizeTags,
+  normalizeAcademicTags,
 } from '@/modules/library/core';
 import { parseCreatorString } from '@/modules/library/core';
 import { AcademicCreator } from '@/modules/library/core/types/bibliographic.types';
@@ -444,7 +444,7 @@ function parseFeedEntryXml(
     ? decodeHtmlEntities(primaryCatMatch[1].trim())
     : atomCategories[0] || rssCategories[0];
 
-  const keywords = normalizeTags([
+  const keywords = normalizeAcademicTags([
     ...atomCategories,
     ...rssCategories,
     ...(primaryCategory ? [primaryCategory] : []),
@@ -597,7 +597,7 @@ export async function promoteFeedEntryToLibrary(
     }
   }
 
-  const combinedTags = normalizeTags([
+  const combinedTags = normalizeAcademicTags([
     ...(entry.keywords || []),
     ...(options.tags || []),
   ]);

@@ -18,11 +18,71 @@ export interface ResilienceExecuteOptions<T> {
 export class ResilienceRegistryService {
   private readonly logger = new Logger(ResilienceRegistryService.name);
 
+  private static readonly MAX_DYNAMIC_HOSTS = 500;
+  private static readonly IDLE_TTL_MS = 60 * 60 * 1000; // 1 hour
+  private static readonly PINNED_PROVIDERS = new Set<string>([
+    'doi-org',
+    'arxiv',
+    'crossref',
+    'pubmed',
+    'openalex',
+    'semantic-scholar',
+    'unpaywall',
+    'dblp',
+    'openlibrary',
+  ]);
+
   private readonly breakers = new Map<string, CircuitBreaker>();
   private readonly limiters = new Map<string, TokenBucketRateLimiter>();
+  private readonly dynamicHostLastUsed = new Map<string, number>();
 
   constructor() {
     this.registerDefaults();
+  }
+
+  private touchDynamicHost(name: string): void {
+    if (ResilienceRegistryService.PINNED_PROVIDERS.has(name)) {
+      return;
+    }
+    const now = Date.now();
+    // Refresh insertion order for LRU behavior
+    if (this.dynamicHostLastUsed.has(name)) {
+      this.dynamicHostLastUsed.delete(name);
+    }
+    this.dynamicHostLastUsed.set(name, now);
+
+    if (
+      this.dynamicHostLastUsed.size >
+      ResilienceRegistryService.MAX_DYNAMIC_HOSTS
+    ) {
+      this.evictStaleOrOldestDynamicHosts(now);
+    }
+  }
+
+  private evictStaleOrOldestDynamicHosts(now: number): void {
+    // 1. Evict any expired entries older than 1-hour idle TTL
+    for (const [host, lastUsed] of this.dynamicHostLastUsed.entries()) {
+      if (now - lastUsed > ResilienceRegistryService.IDLE_TTL_MS) {
+        this.dynamicHostLastUsed.delete(host);
+        this.breakers.delete(host);
+        this.limiters.delete(host);
+      } else {
+        // Since Map is ordered by last-used timestamp ascending, we can stop scanning for TTL once we hit a fresh entry
+        break;
+      }
+    }
+
+    // 2. If still exceeding MAX_DYNAMIC_HOSTS, evict oldest LRU entries
+    while (
+      this.dynamicHostLastUsed.size >
+      ResilienceRegistryService.MAX_DYNAMIC_HOSTS
+    ) {
+      const oldestKey = this.dynamicHostLastUsed.keys().next().value;
+      if (!oldestKey) break;
+      this.dynamicHostLastUsed.delete(oldestKey);
+      this.breakers.delete(oldestKey);
+      this.limiters.delete(oldestKey);
+    }
   }
 
   /**
@@ -32,12 +92,25 @@ export class ResilienceRegistryService {
     name: string,
     options?: CircuitBreakerOptions,
   ): CircuitBreaker {
+    const now = Date.now();
+    const lastUsed = this.dynamicHostLastUsed.get(name);
+    if (
+      lastUsed !== undefined &&
+      now - lastUsed > ResilienceRegistryService.IDLE_TTL_MS &&
+      !ResilienceRegistryService.PINNED_PROVIDERS.has(name)
+    ) {
+      this.dynamicHostLastUsed.delete(name);
+      this.breakers.delete(name);
+      this.limiters.delete(name);
+    }
+
     let breaker = this.breakers.get(name);
     if (!breaker) {
       breaker = new CircuitBreaker({ name, ...options });
       this.breakers.set(name, breaker);
       this.logger.log(`Initialized CircuitBreaker for "${name}"`);
     }
+    this.touchDynamicHost(name);
     return breaker;
   }
 
@@ -48,6 +121,18 @@ export class ResilienceRegistryService {
     name: string,
     options?: RateLimiterOptions,
   ): TokenBucketRateLimiter {
+    const now = Date.now();
+    const lastUsed = this.dynamicHostLastUsed.get(name);
+    if (
+      lastUsed !== undefined &&
+      now - lastUsed > ResilienceRegistryService.IDLE_TTL_MS &&
+      !ResilienceRegistryService.PINNED_PROVIDERS.has(name)
+    ) {
+      this.dynamicHostLastUsed.delete(name);
+      this.breakers.delete(name);
+      this.limiters.delete(name);
+    }
+
     let limiter = this.limiters.get(name);
     if (!limiter) {
       limiter = new TokenBucketRateLimiter({
@@ -58,6 +143,7 @@ export class ResilienceRegistryService {
       this.limiters.set(name, limiter);
       this.logger.log(`Initialized RateLimiter for "${name}"`);
     }
+    this.touchDynamicHost(name);
     return limiter;
   }
 
@@ -104,6 +190,11 @@ export class ResilienceRegistryService {
    * Resets all circuit breakers and rate limiters (primarily for unit tests).
    */
   public resetAll(): void {
+    for (const host of this.dynamicHostLastUsed.keys()) {
+      this.breakers.delete(host);
+      this.limiters.delete(host);
+    }
+    this.dynamicHostLastUsed.clear();
     for (const breaker of this.breakers.values()) {
       breaker.reset();
     }
@@ -184,5 +275,69 @@ export class ResilienceRegistryService {
         refillRatePerSec: 3,
       }),
     );
+
+    // 5. Additional Pinned Academic Providers (OpenAlex, Semantic Scholar, Unpaywall, DBLP, OpenLibrary)
+    const additionalPinned: Array<{
+      name: string;
+      capacity: number;
+      refillRatePerSec: number;
+      failureThreshold: number;
+      resetTimeoutMs: number;
+    }> = [
+      {
+        name: 'openalex',
+        capacity: 10,
+        refillRatePerSec: 10,
+        failureThreshold: 5,
+        resetTimeoutMs: 30000,
+      },
+      {
+        name: 'semantic-scholar',
+        capacity: 5,
+        refillRatePerSec: 5,
+        failureThreshold: 4,
+        resetTimeoutMs: 30000,
+      },
+      {
+        name: 'unpaywall',
+        capacity: 10,
+        refillRatePerSec: 10,
+        failureThreshold: 5,
+        resetTimeoutMs: 30000,
+      },
+      {
+        name: 'dblp',
+        capacity: 5,
+        refillRatePerSec: 5,
+        failureThreshold: 4,
+        resetTimeoutMs: 30000,
+      },
+      {
+        name: 'openlibrary',
+        capacity: 5,
+        refillRatePerSec: 5,
+        failureThreshold: 4,
+        resetTimeoutMs: 30000,
+      },
+    ];
+
+    for (const p of additionalPinned) {
+      this.breakers.set(
+        p.name,
+        new CircuitBreaker({
+          name: p.name,
+          failureThreshold: p.failureThreshold,
+          resetTimeoutMs: p.resetTimeoutMs,
+        }),
+      );
+      this.limiters.set(
+        p.name,
+        new TokenBucketRateLimiter({
+          name: p.name,
+          capacity: p.capacity,
+          refillRatePerSec: p.refillRatePerSec,
+        }),
+      );
+    }
   }
 }

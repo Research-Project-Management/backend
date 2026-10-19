@@ -2,6 +2,8 @@
  * Canonical Bibliographic Types & Constants for Library Shared Kernel.
  * Aligned with Zotero v42 schema and CSL v1.0.2 standards.
  */
+import type { Prisma } from '@prisma/client';
+import type { TransactionHelpers } from '../ports/unit-of-work.port';
 
 // Creator & Contributor Roles
 export type CreatorType =
@@ -150,10 +152,14 @@ export interface CreateItemData {
    *  in sync throughout the stack. Stored in the single DB `abstract` column. */
   abstractNote?: string;
   itemType?: string;
+  type?: string;
   editors?: string[];
   journal?: string;
+  journalAbbr?: string;
+  journalAbbreviation?: string;
   publicationTitle?: string;
   publicationDate?: string;
+  date?: string;
   publisher?: string;
   place?: string;
   volume?: string;
@@ -171,19 +177,68 @@ export interface CreateItemData {
   pmid?: string;
   pmcid?: string;
   arxivId?: string;
+  archiveId?: string;
+  archiveID?: string;
+  DOI?: string;
+  ISBN?: string;
+  ISSN?: string;
+  PMID?: string;
+  PMCID?: string;
   primaryCategory?: string;
   url?: string;
+  accessedAt?: Date | null;
   accessDate?: string;
   archive?: string;
   archiveLocation?: string;
+  libraryCatalog?: string;
   callNumber?: string;
   rights?: string;
+  license?: string;
   language?: string;
   edition?: string;
   shortTitle?: string;
   citationKey?: string;
+  citeKey?: string;
   extra?: string;
   tags?: string[];
+  labels?: string[];
+  keywords?: string[];
+  notes?: unknown[] | string[] | null;
+  fileUrl?: string;
+  fileId?: string;
+  filename?: string;
+  mimeType?: string;
+  size?: number;
+  fileHash?: string;
+  attachments?: Array<
+    Record<string, unknown> & {
+      id?: string;
+      title?: string;
+      filename?: string;
+      url?: string;
+      fileId?: string | null;
+      fileHash?: string | null;
+      mimeType?: string;
+      size?: number;
+      linkMode?: string;
+      attachmentType?: string;
+      metadata?: Record<string, unknown>;
+    }
+  >;
+  collectionId?: string | null;
+  collectionIds?: string[] | null;
+  uploadedById?: string;
+  userId?: string;
+  projectId?: string | null;
+  citationCount?: number | null;
+  referenceCount?: number | null;
+  openAccessPdfUrl?: string | null;
+  isRetracted?: boolean;
+  retractionCheckedAt?: Date | string | null;
+  retractionNature?: string | null;
+  retractionDetails?: Record<string, unknown> | unknown | null;
+  isMyPublication?: boolean;
+  metadata?: Record<string, unknown>;
   creators?: CreatorCreditInput[];
   contributors?: CreatorCreditInput[];
   extraFields?: Record<string, unknown>;
@@ -243,7 +298,7 @@ export interface ItemMetadata {
   labels?: string[];
   keywords?: string[];
   notes?: Array<{ content: string; source?: string }>;
-  attachments?: unknown[];
+  attachments?: CreateItemData['attachments'];
   isSelfSufficient?: boolean;
   rights?: string;
   license?: string;
@@ -415,7 +470,7 @@ export interface ItemSummary {
 export interface ItemDetail {
   id: string;
   title: string;
-  shortTitle?: string;
+  shortTitle?: string | null;
   userId?: string;
   projectId?: string | null;
   version: number;
@@ -428,87 +483,89 @@ export interface ItemDetail {
   pmid?: string | null;
   pmcid?: string | null;
   arxivId?: string | null;
-  primaryCategory?: string;
+  primaryCategory?: string | null;
   citationKey?: string | null;
-  itemType?: string;
-  type?: string;
+  itemType?: string | null;
+  type?: string | null;
   authors?: string[];
   editors?: string[];
   year?: number | null;
-  publicationDate?: string;
-  date?: string;
+  publicationDate?: string | null;
+  date?: string | null;
   accessedAt?: string | Date | null;
-  abstract?: string;
-  abstractNote?: string;
-  publicationTitle?: string;
-  journal?: string;
-  journalAbbr?: string;
-  publisher?: string;
-  place?: string;
-  volume?: string;
-  issue?: string;
-  section?: string;
-  partNumber?: string;
-  partTitle?: string;
-  series?: string;
-  seriesTitle?: string;
-  seriesText?: string;
-  seriesNumber?: string;
-  edition?: string;
-  pages?: string;
-  citationCount?: number;
-  referenceCount?: number;
-  language?: string;
-  url?: string;
-  pdfUrl?: string;
-  fileUrl?: string;
-  fileId?: string;
-  filename?: string;
-  openAccessPdfUrl?: string;
-  extra?: string;
+  accessDate?: string | null;
+  abstract?: string | null;
+  abstractNote?: string | null;
+  publicationTitle?: string | null;
+  journal?: string | null;
+  journalAbbr?: string | null;
+  journalAbbreviation?: string | null;
+  publisher?: string | null;
+  place?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  section?: string | null;
+  partNumber?: string | null;
+  partTitle?: string | null;
+  series?: string | null;
+  seriesTitle?: string | null;
+  seriesText?: string | null;
+  seriesNumber?: string | null;
+  edition?: string | null;
+  pages?: string | null;
+  citationCount?: number | null;
+  referenceCount?: number | null;
+  language?: string | null;
+  url?: string | null;
+  pdfUrl?: string | null;
+  fileUrl?: string | null;
+  fileId?: string | null;
+  filename?: string | null;
+  openAccessPdfUrl?: string | null;
+  extra?: string | null;
   tags?: string[];
   labels?: string[];
   keywords?: string[];
   notes?: Array<{ content: string; source?: string }>;
   attachments?: unknown[];
-  rights?: string;
-  license?: string;
-  archive?: string;
-  archiveLocation?: string;
-  archiveId?: string;
-  repository?: string;
-  genre?: string;
-  callNumber?: string;
-  libraryCatalog?: string;
-  bookTitle?: string;
-  proceedingsTitle?: string;
-  conferenceName?: string;
-  eventPlace?: string;
-  websiteTitle?: string;
-  websiteType?: string;
-  blogTitle?: string;
-  university?: string;
-  institution?: string;
-  numPages?: string | number;
-  numberOfPages?: number | string;
-  pageCount?: string | number;
-  reportNumber?: string;
-  reportType?: string;
-  thesisType?: string;
-  versionNumber?: string;
-  patentNumber?: string;
-  applicationNumber?: string;
-  assignee?: string;
-  issuingAuthority?: string;
-  distributor?: string;
-  system?: string;
+  rights?: string | null;
+  license?: string | null;
+  archive?: string | null;
+  archiveLocation?: string | null;
+  archiveId?: string | null;
+  repository?: string | null;
+  genre?: string | null;
+  callNumber?: string | null;
+  libraryCatalog?: string | null;
+  bookTitle?: string | null;
+  proceedingsTitle?: string | null;
+  conferenceName?: string | null;
+  eventPlace?: string | null;
+  websiteTitle?: string | null;
+  websiteType?: string | null;
+  blogTitle?: string | null;
+  university?: string | null;
+  institution?: string | null;
+  numPages?: string | number | null;
+  numberOfPages?: number | string | null;
+  pageCount?: string | number | null;
+  reportNumber?: string | null;
+  reportType?: string | null;
+  thesisType?: string | null;
+  versionNumber?: string | null;
+  patentNumber?: string | null;
+  applicationNumber?: string | null;
+  assignee?: string | null;
+  issuingAuthority?: string | null;
+  distributor?: string | null;
+  system?: string | null;
   extraFields?: Record<string, unknown>;
-  metadata?: Record<string, unknown> | null;
+  metadata?: Prisma.JsonValue | Record<string, unknown> | null;
   fields?: Record<string, unknown> | null;
   isRetracted?: boolean;
-  retractionNature?: string;
+  retractionNature?: string | null;
   retractionDetails?: unknown;
-  retractionCheckedAt?: string;
+  retractionCheckedAt?: string | Date | null;
   creators?: CreatorCredit[];
   contributors?: CreatorCredit[];
   [key: string]: unknown;
@@ -568,3 +625,68 @@ export interface CreateNoteData {
   tags?: string[];
   createdById?: string;
 }
+
+// Item Type Conversion Types
+export interface ItemTypeConversionFieldDiff {
+  key: string;
+  label: string;
+  sourceValue: unknown;
+  targetValue: unknown;
+  status: 'preserved' | 'mapped' | 'cleared';
+  baseSemantic?: string;
+}
+
+export interface ItemTypeConversionRoleDiff {
+  creatorId?: string;
+  name: string;
+  sourceRole: string;
+  targetRole: string;
+  changed: boolean;
+}
+
+export interface FieldMappingChange {
+  fromField: string;
+  toField: string;
+  value: unknown;
+  rule: 'direct' | 'base-semantic' | 'special-rule';
+}
+
+export interface DroppedField {
+  field: string;
+  label: string;
+  value: unknown;
+}
+
+export interface CreatorRoleChange {
+  creator: Record<string, unknown>;
+  fromRole: string;
+  toRole: string;
+  reason: 'preserved' | 'primary-fallback' | 'secondary-fallback';
+}
+
+export interface TypeConversionPreview {
+  sourceType: string;
+  targetType: string;
+  preservedFields: string[];
+  mappedFields: FieldMappingChange[];
+  droppedFields: DroppedField[];
+  newAvailableFields: string[];
+  creatorChanges: CreatorRoleChange[];
+  projectedItem: Record<string, unknown>;
+  unmappedRetained: Record<string, unknown>;
+  hasLoss: boolean;
+}
+
+export interface ConvertTypeOptions {
+  expectedVersion?: number;
+  retainUnmappedInExtra?: boolean;
+}
+
+export const ITEM_TRANSFORMER_PORT = Symbol('ITEM_TRANSFORMER_PORT');
+
+/** Transaction context passed to write methods for composing operations within a parent transaction. */
+export interface ItemTransactionContext<TTx = Prisma.TransactionClient> {
+  tx: TTx;
+  helpers: TransactionHelpers;
+}
+

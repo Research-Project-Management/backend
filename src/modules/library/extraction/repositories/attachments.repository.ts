@@ -60,34 +60,53 @@ export class AttachmentsRepository {
     });
   }
 
-  async findRevisions(attachmentId: string, tx?: Prisma.TransactionClient) {
-    const client = this.getClient(tx);
-    return client.attachmentRevision.findMany({
-      where: { attachmentId },
-      orderBy: { revisionNumber: 'desc' },
-    });
-  }
-
-  async countRevisions(attachmentId: string, tx?: Prisma.TransactionClient) {
-    const client = this.getClient(tx);
-    return client.attachmentRevision.count({
-      where: { attachmentId },
-    });
-  }
-
-  async create(
-    data: Prisma.AttachmentCreateInput,
+  async syncItemAttachmentCounts(
+    itemId: string,
     tx?: Prisma.TransactionClient,
-  ) {
+  ): Promise<void> {
+    if (!itemId) return;
     const client = this.getClient(tx);
-    return client.attachment.create({
-      data,
-      include: {
-        revisions: {
-          orderBy: { revisionNumber: 'desc' },
-        },
+    if (
+      typeof client.attachment?.count !== 'function' ||
+      typeof client.item?.updateMany !== 'function'
+    ) {
+      return;
+    }
+    const activeCount = await client.attachment.count({
+      where: { itemId, deletedAt: null },
+    });
+    await client.item.updateMany({
+      where: { id: itemId },
+      data: {
+        hasFile: activeCount > 0,
+        attachmentCount: activeCount,
       },
     });
+  }
+
+  async create<
+    I extends Prisma.AttachmentInclude = Prisma.AttachmentInclude,
+  >(
+    data: Prisma.AttachmentCreateInput,
+    include?: Prisma.Subset<I, Prisma.AttachmentInclude>,
+    tx?: Prisma.TransactionClient,
+  ): Promise<Prisma.AttachmentGetPayload<{ include: I }>> {
+    const client = this.getClient(tx);
+    const sanitizedData = { ...data } as Record<string, unknown>;
+    if (sanitizedData.itemId && typeof sanitizedData.itemId === 'string') {
+      if (!sanitizedData.item) {
+        sanitizedData.item = { connect: { id: sanitizedData.itemId } };
+      }
+      delete sanitizedData.itemId;
+    }
+    const created = (await client.attachment.create({
+      data: sanitizedData as Prisma.AttachmentCreateInput,
+      include,
+    })) as Prisma.AttachmentGetPayload<{ include: I }> & { itemId?: string };
+    if (created?.itemId) {
+      await this.syncItemAttachmentCounts(created.itemId, tx);
+    }
+    return created;
   }
 
   async update(
@@ -104,29 +123,23 @@ export class AttachmentsRepository {
 
   async delete(id: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
-    return client.attachment.delete({
+    const deleted = await client.attachment.delete({
       where: { id },
     });
-  }
-
-  async createRevision(
-    data: Prisma.AttachmentRevisionCreateInput,
-    tx?: Prisma.TransactionClient,
-  ) {
-    const client = this.getClient(tx);
-    return client.attachmentRevision.create({
-      data,
-    });
+    if (deleted?.itemId) {
+      await this.syncItemAttachmentCounts(deleted.itemId, tx);
+    }
+    return deleted;
   }
 
   async reassignToItem(
     sourceItemIds: string[],
     targetItemId: string,
     tx?: Prisma.TransactionClient,
-  ) {
-    if (sourceItemIds.length === 0) return;
+  ): Promise<string[]> {
+    if (sourceItemIds.length === 0) return [];
     const cleanSourceIds = sourceItemIds.filter((id) => id !== targetItemId);
-    if (cleanSourceIds.length === 0) return;
+    if (cleanSourceIds.length === 0) return [];
 
     const client = this.getClient(tx);
 
@@ -135,6 +148,11 @@ export class AttachmentsRepository {
         itemId: { in: [targetItemId, ...cleanSourceIds] },
         deletedAt: null,
       },
+      include: {
+        revisions: {
+          select: { fileId: true },
+        },
+      },
     });
 
     if (!allAttachments || allAttachments.length === 0) {
@@ -142,7 +160,7 @@ export class AttachmentsRepository {
         where: { itemId: { in: cleanSourceIds } },
         data: { itemId: targetItemId },
       });
-      return;
+      return [];
     }
 
     // Order so targetItemId's existing attachments come first, then source attachments
@@ -154,6 +172,8 @@ export class AttachmentsRepository {
 
     const survivingByHash = new Map<string, (typeof sortedAttachments)[0]>();
     const survivingByUrl = new Map<string, (typeof sortedAttachments)[0]>();
+    const survivingFileIds = new Set<string>();
+    const deletedCandidateFileIds = new Set<string>();
     let hasPrimaryPdf = false;
 
     for (const att of sortedAttachments) {
@@ -175,98 +195,104 @@ export class AttachmentsRepository {
 
       if (existingSurvivor && existingSurvivor.id !== att.id) {
         // Consolidate annotations from duplicate attachment onto existingSurvivor
-        if (typeof client.annotation?.findMany === 'function') {
-          const [survivorAnnots, dupAnnots] = await Promise.all([
-            client.annotation.findMany({
-              where: { attachmentId: existingSurvivor.id, deletedAt: null },
-            }),
-            client.annotation.findMany({
-              where: { attachmentId: att.id, deletedAt: null },
-            }),
-          ]);
+        const [survivorAnnots, dupAnnots] = await Promise.all([
+          client.annotation.findMany({
+            where: { attachmentId: existingSurvivor.id, deletedAt: null },
+          }),
+          client.annotation.findMany({
+            where: { attachmentId: att.id, deletedAt: null },
+          }),
+        ]);
 
-          const duplicateAnnotIdsToDelete: string[] = [];
-          const annotIdsToMove: string[] = [];
+        const duplicateAnnotIdsToDelete: string[] = [];
+        const annotIdsToMove: string[] = [];
 
-          for (const dupAnn of dupAnnots) {
-            const dupQuote = (
+        for (const dupAnn of dupAnnots) {
+          const dupQuote = (
+            (
+              dupAnn as {
+                quoteText?: string | null;
+                textSelection?: string | null;
+              }
+            ).quoteText ??
+            (dupAnn as { textSelection?: string | null }).textSelection ??
+            ''
+          )
+            .trim()
+            .toLowerCase();
+          const isIdentical = survivorAnnots.some((sa) => {
+            const saQuote = (
               (
-                dupAnn as {
+                sa as {
                   quoteText?: string | null;
                   textSelection?: string | null;
                 }
               ).quoteText ??
-              (dupAnn as { textSelection?: string | null }).textSelection ??
+              (sa as { textSelection?: string | null }).textSelection ??
               ''
             )
               .trim()
               .toLowerCase();
-            const isIdentical = survivorAnnots.some((sa) => {
-              const saQuote = (
-                (
-                  sa as {
-                    quoteText?: string | null;
-                    textSelection?: string | null;
-                  }
-                ).quoteText ??
-                (sa as { textSelection?: string | null }).textSelection ??
-                ''
-              )
-                .trim()
-                .toLowerCase();
-              return (
-                sa.pageIndex === dupAnn.pageIndex &&
-                sa.type === dupAnn.type &&
-                dupQuote.length > 0 &&
-                saQuote === dupQuote
-              );
-            });
+            return (
+              sa.pageIndex === dupAnn.pageIndex &&
+              sa.type === dupAnn.type &&
+              dupQuote.length > 0 &&
+              saQuote === dupQuote
+            );
+          });
 
-            if (isIdentical) {
-              duplicateAnnotIdsToDelete.push(dupAnn.id);
-            } else {
-              annotIdsToMove.push(dupAnn.id);
-              survivorAnnots.push(dupAnn);
-            }
+          if (isIdentical) {
+            duplicateAnnotIdsToDelete.push(dupAnn.id);
+          } else {
+            annotIdsToMove.push(dupAnn.id);
+            survivorAnnots.push(dupAnn);
           }
+        }
 
-          if (
-            duplicateAnnotIdsToDelete.length > 0 &&
-            typeof client.annotation?.deleteMany === 'function'
-          ) {
-            await client.annotation.deleteMany({
-              where: { id: { in: duplicateAnnotIdsToDelete } },
-            });
-          }
+        if (duplicateAnnotIdsToDelete.length > 0) {
+          await client.annotation.deleteMany({
+            where: { id: { in: duplicateAnnotIdsToDelete } },
+          });
+        }
 
-          if (
-            annotIdsToMove.length > 0 &&
-            typeof client.annotation?.updateMany === 'function'
-          ) {
-            await client.annotation.updateMany({
-              where: { id: { in: annotIdsToMove } },
-              data: { attachmentId: existingSurvivor.id },
-            });
-          }
-        } else if (typeof client.annotation?.updateMany === 'function') {
+        if (annotIdsToMove.length > 0) {
           await client.annotation.updateMany({
-            where: { attachmentId: att.id },
+            where: { id: { in: annotIdsToMove } },
             data: { attachmentId: existingSurvivor.id },
           });
         }
 
-        // Remove the redundant duplicate attachment
-        if (typeof client.attachment?.delete === 'function') {
-          await client.attachment.delete({ where: { id: att.id } });
-        } else if (typeof client.attachment?.deleteMany === 'function') {
-          await client.attachment.deleteMany({ where: { id: att.id } });
+        if (att.fileId) {
+          deletedCandidateFileIds.add(att.fileId);
         }
+        const attRevisions = (
+          att as { revisions?: Array<{ fileId?: string | null }> }
+        ).revisions;
+        if (Array.isArray(attRevisions)) {
+          for (const rev of attRevisions) {
+            if (rev.fileId) {
+              deletedCandidateFileIds.add(rev.fileId);
+            }
+          }
+        }
+
+        // Remove the redundant duplicate attachment
+        await client.attachment.delete({ where: { id: att.id } });
         continue;
       }
 
       // Surviving attachment: register hash/url and enforce single primary_pdf
       if (hashKey) survivingByHash.set(hashKey, att);
       if (urlKey) survivingByUrl.set(urlKey, att);
+      if (att.fileId) survivingFileIds.add(att.fileId);
+      const survivorRevisions = (
+        att as { revisions?: Array<{ fileId?: string | null }> }
+      ).revisions;
+      if (Array.isArray(survivorRevisions)) {
+        for (const rev of survivorRevisions) {
+          if (rev.fileId) survivingFileIds.add(rev.fileId);
+        }
+      }
 
       const isPrimaryPdf = att.attachmentType === 'primary_pdf';
       let nextAttachmentType = att.attachmentType;
@@ -282,29 +308,40 @@ export class AttachmentsRepository {
         att.itemId !== targetItemId ||
         nextAttachmentType !== att.attachmentType
       ) {
-        if (typeof client.attachment?.update === 'function') {
-          await client.attachment.update({
-            where: { id: att.id },
-            data: {
-              itemId: targetItemId,
-              ...(nextAttachmentType !== att.attachmentType
-                ? { attachmentType: nextAttachmentType }
-                : {}),
-            },
-          });
-        } else {
-          await client.attachment.updateMany({
-            where: { id: att.id },
-            data: {
-              itemId: targetItemId,
-              ...(nextAttachmentType !== att.attachmentType
-                ? { attachmentType: nextAttachmentType }
-                : {}),
-            },
-          });
+        await client.attachment.update({
+          where: { id: att.id },
+          data: {
+            itemId: targetItemId,
+            ...(nextAttachmentType !== att.attachmentType
+              ? { attachmentType: nextAttachmentType }
+              : {}),
+          },
+        });
+      }
+    }
+
+    await this.syncItemAttachmentCounts(targetItemId, tx);
+    for (const srcId of cleanSourceIds) {
+      await this.syncItemAttachmentCounts(srcId, tx);
+    }
+
+    const orphanedFileIds = Array.from(deletedCandidateFileIds).filter(
+      (fid) => !survivingFileIds.has(fid),
+    );
+    if (orphanedFileIds.length > 0 && this.storagePort?.deleteFile) {
+      for (const fid of orphanedFileIds) {
+        try {
+          await this.storagePort.deleteFile(fid);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Failed to delete duplicate attachment file ${fid} from storage: ${message}`,
+          );
         }
       }
     }
+
+    return orphanedFileIds;
   }
 
   async updateLinkedFile(

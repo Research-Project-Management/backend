@@ -1,17 +1,13 @@
-import { ItemService as ItemsService } from '@/modules/library/catalog/services/items.service';
 import { ItemFulltextService } from '@/modules/library/catalog/services/item-fulltext.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
-import { IdempotencyMiddleware } from '@/modules/library/core/middlewares/idempotency.middleware';
 import { NotFoundException } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 
 describe('Library Security Hardening & Performance Optimization', () => {
-  describe('1. Security: Multi-Tenant Cache Isolation in ItemsService.getFulltext', () => {
-    let service: ItemsService;
+  describe('1. Security: Multi-Tenant Cache Isolation in ItemFulltextService.getFulltext', () => {
+    let fulltextService: ItemFulltextService;
     let mockQueryRepo: any;
-    let mockCommandRepo: any;
-    let mockTxService: any;
     let mockCache: Partial<RedisCacheService>;
 
     const victimUserId = '00000000-0000-0000-0000-000000000001';
@@ -21,12 +17,10 @@ describe('Library Security Hardening & Performance Optimization', () => {
     beforeEach(() => {
       mockQueryRepo = {
         findById: jest.fn(),
-        findMetadataSourceRecord: jest.fn(),
+        findItemMetadata: jest.fn(),
         count: jest.fn(),
         findMany: jest.fn(),
       };
-      mockCommandRepo = {};
-      mockTxService = {};
       mockCache = {
         get: jest.fn(),
         set: jest.fn(),
@@ -34,22 +28,8 @@ describe('Library Security Hardening & Performance Optimization', () => {
         delPattern: jest.fn(),
       };
 
-      const fulltextService = new ItemFulltextService(
+      fulltextService = new ItemFulltextService(
         mockQueryRepo,
-        mockCache as RedisCacheService,
-      );
-
-      service = new ItemsService(
-        mockQueryRepo,
-        mockCommandRepo,
-        mockTxService,
-        {} as any,
-        {} as any,
-        fulltextService,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
         mockCache as RedisCacheService,
       );
     });
@@ -63,14 +43,14 @@ describe('Library Security Hardening & Performance Optimization', () => {
         title: 'Confidential Research Findings',
         abstract: 'Secret data',
       });
-      mockQueryRepo.findMetadataSourceRecord.mockResolvedValueOnce({
+      mockQueryRepo.findItemMetadata.mockResolvedValueOnce({
         rawPayload: {
           title: 'Confidential Research Findings',
           sections: [{ title: 'Section 1', text: 'Top secret findings' }],
         },
       });
 
-      const res = await service.getFulltext(victimUserId, sampleItemId);
+      const res = await fulltextService.getFulltext(victimUserId, sampleItemId);
 
       expect(res.title).toBe('Confidential Research Findings');
       expect(mockCache.set).toHaveBeenCalledWith(
@@ -94,11 +74,11 @@ describe('Library Security Hardening & Performance Optimization', () => {
       };
       (mockCache.get as jest.Mock).mockResolvedValueOnce(cachedData);
 
-      const res = await service.getFulltext(victimUserId, sampleItemId);
+      const res = await fulltextService.getFulltext(victimUserId, sampleItemId);
 
       expect(res.title).toBe('Confidential Research Findings');
       expect(mockQueryRepo.findById).not.toHaveBeenCalled();
-      expect(mockQueryRepo.findMetadataSourceRecord).not.toHaveBeenCalled();
+      expect(mockQueryRepo.findItemMetadata).not.toHaveBeenCalled();
     });
 
     it('should REJECT cache retrieval when attacker attempts to read victim cached item (IDOR Prevention)', async () => {
@@ -116,7 +96,7 @@ describe('Library Security Hardening & Performance Optimization', () => {
 
       // Attacker calls getFulltext
       await expect(
-        service.getFulltext(attackerUserId, sampleItemId),
+        fulltextService.getFulltext(attackerUserId, sampleItemId),
       ).rejects.toThrow(NotFoundException);
 
       // Verified: Cache was rejected because cached.userId !== attackerUserId,
@@ -129,54 +109,8 @@ describe('Library Security Hardening & Performance Optimization', () => {
     });
   });
 
-  describe('3. Security: Tenant-Isolated IdempotencyMiddleware', () => {
-    let middleware: IdempotencyMiddleware;
-
-    beforeEach(() => {
-      middleware = new IdempotencyMiddleware();
-    });
-
-    it('should isolate idempotency keys between different users so they do not collide or leak responses', () => {
-      const userAReq = {
-        method: 'POST',
-        path: '/api/v1/library/items',
-        headers: { 'x-idempotency-key': 'same-key-123', 'x-user-id': 'user-a' },
-      };
-      const userARes = {
-        json: jest.fn(),
-        status: jest.fn().mockReturnThis(),
-      };
-      const nextA = jest.fn();
-
-      middleware.use(userAReq, userARes, nextA);
-      expect(nextA).toHaveBeenCalled();
-
-      // Complete User A's response
-      userARes.json({ itemId: 'item-user-a', secret: 'secret-a' });
-
-      // Now User B sends a request with the SAME idempotency key
-      const userBReq = {
-        method: 'POST',
-        path: '/api/v1/library/items',
-        headers: { 'x-idempotency-key': 'same-key-123', 'x-user-id': 'user-b' },
-      };
-      const userBJsonSpy = jest.fn();
-      const userBRes = {
-        json: userBJsonSpy,
-        status: jest.fn().mockReturnThis(),
-      };
-      const nextB = jest.fn();
-
-      middleware.use(userBReq, userBRes, nextB);
-
-      // User B must NOT receive User A's response — it proceeds to handler!
-      expect(nextB).toHaveBeenCalled();
-      expect(userBJsonSpy).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('4. Performance: Cursor Pagination COUNT(*) Optimization in ItemsService.listItems', () => {
-    let service: ItemsService;
+  describe('4. Performance: Cursor Pagination COUNT(*) Optimization in ItemQueryService.listItems', () => {
+    let queryService: ItemQueryService;
     let mockQueryRepo: any;
 
     const userId = '00000000-0000-0000-0000-000000000001';
@@ -190,17 +124,11 @@ describe('Library Security Hardening & Performance Optimization', () => {
         ]),
       };
 
-      service = new ItemsService(
-        mockQueryRepo,
-        {} as any,
-        {} as any,
-        {} as any,
-        new ItemQueryService(mockQueryRepo, undefined),
-      );
+      queryService = new ItemQueryService(mockQueryRepo, undefined);
     });
 
     it('should execute COUNT(*) query on initial page (when cursor is undefined)', async () => {
-      const result = await service.listItems(userId, { limit: 10 });
+      const result = await queryService.listItems(userId, { limit: 10 });
 
       expect(mockQueryRepo.count).toHaveBeenCalledTimes(1);
       expect(result.meta.totalCount).toBe(100);
@@ -208,7 +136,7 @@ describe('Library Security Hardening & Performance Optimization', () => {
     });
 
     it('should SKIP COUNT(*) query on subsequent pages (when cursor is present) to save DB cycles', async () => {
-      const result = await service.listItems(userId, {
+      const result = await queryService.listItems(userId, {
         limit: 10,
         cursor: 'item-cursor-1',
       });

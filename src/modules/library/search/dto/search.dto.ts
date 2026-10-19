@@ -7,10 +7,6 @@ export class SearchItemsQueryDto {
   query?: string;
 
   @IsOptional()
-  @IsString()
-  q?: string;
-
-  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)

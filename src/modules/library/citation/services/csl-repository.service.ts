@@ -265,8 +265,12 @@ export class CslRepositoryService implements OnModuleInit {
   private static readonly GITHUB_RAW_CSL_BASE =
     'https://raw.githubusercontent.com/citation-style-language/styles/master/';
 
+  private static readonly REMOTE_INDEX_TTL_MS = 30 * 60 * 1000; // 30 minutes
+  private static readonly MAX_CUSTOM_STYLES_PER_SCOPE = 100;
+
   /** In-memory cached index of 10,000+ CSL styles from Zotero/CSL repo */
   private remoteStylesIndex: CslStyleMetadata[] | null = null;
+  private remoteStylesIndexExpiresAt = 0;
   private isIndexLoading = false;
 
   constructor(
@@ -510,7 +514,10 @@ export class CslRepositoryService implements OnModuleInit {
         ? `csl:${scopeId}:custom-styles-list`
         : 'csl:custom-styles-list';
       const existing = await this.getCustomStyles(scopeId);
-      const updated = [meta, ...existing.filter((s) => s.id !== slug)];
+      const updated = [meta, ...existing.filter((s) => s.id !== slug)].slice(
+        0,
+        CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE,
+      );
       await this.redisCache.set(listKey, updated, 86400 * 365);
     }
 
@@ -527,7 +534,9 @@ export class CslRepositoryService implements OnModuleInit {
         ? `csl:${scopeId}:custom-styles-list`
         : 'csl:custom-styles-list';
       const styles = await this.redisCache.get<CslStyleMetadata[]>(listKey);
-      return Array.isArray(styles) ? styles : [];
+      return Array.isArray(styles)
+        ? styles.slice(0, CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE)
+        : [];
     } catch {
       return [];
     }
@@ -537,7 +546,12 @@ export class CslRepositoryService implements OnModuleInit {
    * Loads the 10,000+ CSL Styles index (cached in memory & Redis).
    */
   private async getStylesCatalog(): Promise<CslStyleMetadata[]> {
-    if (this.remoteStylesIndex && this.remoteStylesIndex.length > 0) {
+    const now = Date.now();
+    if (
+      this.remoteStylesIndex &&
+      this.remoteStylesIndex.length > 0 &&
+      now < this.remoteStylesIndexExpiresAt
+    ) {
       return this.remoteStylesIndex;
     }
 
@@ -548,6 +562,8 @@ export class CslRepositoryService implements OnModuleInit {
       );
       if (Array.isArray(cached) && cached.length > 1000) {
         this.remoteStylesIndex = cached;
+        this.remoteStylesIndexExpiresAt =
+          now + CslRepositoryService.REMOTE_INDEX_TTL_MS;
         return cached;
       }
     }
@@ -633,6 +649,8 @@ export class CslRepositoryService implements OnModuleInit {
       });
 
       this.remoteStylesIndex = parsed;
+      this.remoteStylesIndexExpiresAt =
+        Date.now() + CslRepositoryService.REMOTE_INDEX_TTL_MS;
       this.logger.log(
         `Successfully indexed ${parsed.length} official CSL styles from repository.`,
       );

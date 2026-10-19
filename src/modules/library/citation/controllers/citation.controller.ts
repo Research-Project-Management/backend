@@ -17,23 +17,29 @@ import {
 } from '@/modules/library/citation/dto/citation.dto';
 import { normalizeCitationStyleId } from '@/modules/library/citation/domain/citation.domain';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ProjectAccessGuard } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  ProjectRoles,
+  ProjectRole,
+} from '@/modules/project/access';
 
 @ApiTags('Library Citation')
 @ApiBearerAuth()
 @Controller([
   'api/v1/projects/:projectId/library/citation',
-  'api/v1/projects/:projectId/library/references',
   'api/v1/library/citation',
-  'api/v1/library/references',
-  'api/library/citation',
-  'api/library/references',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class CitationController {
   constructor(private readonly citationService: CitationService) {}
 
   @Get('styles')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   @Header(
     'Cache-Control',
     'public, max-age=86400, stale-while-revalidate=604800',
@@ -46,6 +52,12 @@ export class CitationController {
    * Search across the 10,000+ official CSL Style repository.
    */
   @Get('styles/search')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   async searchStyles(
     @Query('q') query?: string,
     @Query('limit') limit?: string,
@@ -65,6 +77,11 @@ export class CitationController {
    * Upload and register a custom CSL XML stylesheet.
    */
   @Post('styles/custom')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+  )
   async uploadCustomStyle(
     @Body('xml') xml: string,
     @Body('title') title?: string,
@@ -77,6 +94,12 @@ export class CitationController {
    * Use GET /citation/items/:itemId/citation for persisted items.
    */
   @Post('format')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   format(@Body() dto: FormatCitationDto) {
     return this.citationService.formatItemAsync(
       dto.item,
@@ -86,6 +109,12 @@ export class CitationController {
   }
 
   @Post('batch')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   formatBatch(@Body() dto: FormatBatchCitationDto) {
     return this.citationService.formatBatchAsync(
       dto.items || [],
@@ -98,6 +127,12 @@ export class CitationController {
    * Gracefully returns { found: false, ... } without throwing 404 HTTP errors on misses.
    */
   @Post('resolve')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   async resolve(
     @CurrentUser('id') userId: string,
     @Body('doi') doi?: string,
@@ -111,12 +146,9 @@ export class CitationController {
     );
     return {
       found: result.found,
-      work: result.work,
       data: result.work,
-      metadata: result.work,
       queryType: result.queryType,
       provider: result.provider,
-      ...(result.work || {}),
     };
   }
 
@@ -124,6 +156,12 @@ export class CitationController {
    * GET /citation/doi/:doi — for encoded DOIs (use encodeURIComponent on client).
    */
   @Get('doi/:doi')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   @Header(
     'Cache-Control',
     'public, max-age=86400, stale-while-revalidate=604800',
@@ -143,15 +181,18 @@ export class CitationController {
     }
     return {
       found: true,
-      work: result.work,
       data: result.work,
-      metadata: result.work,
       provider: result.provider,
-      ...result.work,
     };
   }
 
   @Get('crossref/search')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   async searchCrossRef(
     @Query('query') query: string,
     @Query('rows') rows?: string,
@@ -164,12 +205,13 @@ export class CitationController {
    * Format citation for a persisted item by ID.
    * Route: GET /citation/items/:itemId/citation
    */
-  @Get([
-    'items/:itemId/citation',
-    'items/:itemId',
-    'item/:itemId/citation',
-    'item/:itemId',
-  ])
+  @Get('items/:itemId/citation')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   @Header(
     'Cache-Control',
     'private, max-age=3600, stale-while-revalidate=86400',
@@ -204,21 +246,22 @@ export class CitationController {
    * Route: POST /citation/batch-items
    */
   @Post('batch-items')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   async getBatchCitations(
     @CurrentUser('id') userId: string,
     @Body('itemIds') itemIds?: string[],
-    @Body('paperIds') paperIds?: string[],
     @Body('style') style?: string,
     @Body('projectId') bodyProjectId?: string,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') routeProjectId?: string,
   ) {
     const styleId = normalizeCitationStyleId(style);
-    const rawIds = Array.isArray(itemIds)
-      ? itemIds
-      : Array.isArray(paperIds)
-        ? paperIds
-        : [];
+    const rawIds = Array.isArray(itemIds) ? itemIds : [];
     // Safety guard: Deduplicate and cap batch at 100 items to protect Node.js event loop
     const ids = Array.from(new Set(rawIds)).slice(0, 100);
     const projectId = bodyProjectId || queryProjectId || routeProjectId;

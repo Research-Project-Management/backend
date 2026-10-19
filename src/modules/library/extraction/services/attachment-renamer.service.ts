@@ -7,7 +7,13 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
+import { RedisCacheService } from '@/core';
+import {
+  CATALOG_FACADE,
+  ICatalogFacade,
+  LIBRARY_REDIS_KEYS,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import {
   formatAttachmentFilename,
@@ -34,7 +40,40 @@ export class AttachmentRenamerService {
     @Optional()
     @Inject(CATALOG_FACADE)
     private readonly catalogGateway?: ICatalogFacade,
+    @Optional()
+    private readonly cache?: RedisCacheService,
   ) {}
+
+  private async invalidateAttachmentCache(
+    itemId: string,
+    userId: string,
+    projectId?: string,
+  ): Promise<void> {
+    if (!this.cache) return;
+    try {
+      const validProjectId = normalizeProjectScopeId(projectId);
+      const scopeId = validProjectId || userId;
+      const tasks: Promise<unknown>[] = [
+        this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
+        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
+        this.cache.del(`library:item:${itemId}:attachments`),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
+      ];
+      if (validProjectId) {
+        tasks.push(
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
+          ),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+        );
+      }
+      await Promise.all(tasks);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to invalidate attachment rename cache: ${msg}`);
+    }
+  }
 
   private async assertItemExists(
     userId: string,
@@ -113,7 +152,26 @@ export class AttachmentRenamerService {
       attachment.fileId ?? undefined,
     );
 
+    const effectiveProjectId =
+      projectId ||
+      (attachment.item as { projectId?: string | null } | undefined)
+        ?.projectId ||
+      undefined;
+    await this.invalidateAttachmentCache(
+      attachment.itemId,
+      userId,
+      effectiveProjectId,
+    );
+
     return { attachment: updated, oldFilename, newFilename };
+  }
+
+  async batchRenameByPattern(
+    userId: string,
+    dto: BatchRenameAttachmentsDto,
+    projectId?: string,
+  ) {
+    return this.batchRenameAttachments(userId, dto, projectId);
   }
 
   async batchRenameAttachments(
@@ -149,7 +207,9 @@ export class AttachmentRenamerService {
       itemId: string;
       filename?: string | null;
       fileId?: string | null;
-      item?: Parameters<typeof formatAttachmentFilename>[1];
+      item?: Parameters<typeof formatAttachmentFilename>[1] & {
+        projectId?: string | null;
+      };
     }
     const attachments = (await this.repo.findMany(whereClause, {
       item: {
@@ -170,6 +230,13 @@ export class AttachmentRenamerService {
 
     const verifiedItemIds = new Set<string>();
     const invalidItemIds = new Set<string>();
+    const updatesToPersist: Array<{
+      id: string;
+      itemId: string;
+      projectId?: string;
+      filename: string;
+      fileId?: string;
+    }> = [];
 
     for (const att of attachments) {
       try {
@@ -193,11 +260,13 @@ export class AttachmentRenamerService {
         );
 
         if (oldFilename !== newFilename) {
-          await this.repo.renameAttachment(
-            att.id,
-            newFilename,
-            att.fileId ?? undefined,
-          );
+          updatesToPersist.push({
+            id: att.id,
+            itemId: att.itemId,
+            projectId: projectId || att.item?.projectId || undefined,
+            filename: newFilename,
+            fileId: att.fileId ?? undefined,
+          });
         }
 
         results.push({
@@ -212,9 +281,30 @@ export class AttachmentRenamerService {
       }
     }
 
+    if (updatesToPersist.length > 0) {
+      if (typeof this.repo.batchRename === 'function') {
+        await this.repo.batchRename(updatesToPersist);
+      } else {
+        for (const u of updatesToPersist) {
+          await this.repo.renameAttachment(u.id, u.filename, u.fileId);
+        }
+      }
+
+      const uniqueRenamedItemIds = new Map<string, string | undefined>();
+      for (const u of updatesToPersist) {
+        uniqueRenamedItemIds.set(u.itemId, u.projectId);
+      }
+      for (const [renamedItemId, itemProjectId] of uniqueRenamedItemIds) {
+        await this.invalidateAttachmentCache(
+          renamedItemId,
+          userId,
+          itemProjectId,
+        );
+      }
+    }
+
     return {
-      renamedCount: results.filter((r) => r.oldFilename !== r.newFilename)
-        .length,
+      renamedCount: updatesToPersist.length,
       results,
     };
   }

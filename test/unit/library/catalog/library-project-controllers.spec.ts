@@ -1,21 +1,19 @@
-import { ProjectItemController } from '@/modules/library/catalog/controllers/items.controller';
-import { ProjectCollectionController } from '@/modules/library/catalog/controllers/collections.controller';
-import { ProjectItemCurationController } from '@/modules/library/catalog/controllers/item-curation.controller';
-import { ProjectSavedSearchesController } from '@/modules/library/catalog/controllers/saved-searches.controller';
+import { ItemsController } from '@/modules/library/catalog/controllers/items.controller';
+import { CollectionsController } from '@/modules/library/catalog/controllers/collections.controller';
 import {
-  ProjectStateController,
-  ProjectStateBatchController,
+  StateController,
+  StateBatchController,
 } from '@/modules/library/catalog/controllers/state.controller';
-import { ProjectAttachmentController } from '@/modules/library/extraction/controllers/attachments.controller';
-import { ProjectIngestionController } from '@/modules/library/ingestion/controllers/ingestion.controller';
+import { AttachmentController } from '@/modules/library/extraction/controllers/attachments.controller';
+import { IngestionController } from '@/modules/library/ingestion/controllers/ingestion.controller';
 
 describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)', () => {
   const sampleProjectId = '11111111-2222-4333-8444-555555555555';
   const sampleUserId = 'user-test-1';
   const sampleItemId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
 
-  describe('ProjectItemController', () => {
-    let controller: ProjectItemController;
+  describe('ItemsController (Project Scope)', () => {
+    let controller: ItemsController;
     let mockItemService: {
       listItems: jest.Mock;
       getItem: jest.Mock;
@@ -38,13 +36,19 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
         }),
       };
 
-      controller = new ProjectItemController(mockItemService as any);
+      controller = new ItemsController(
+        mockItemService as any,
+        mockItemService as any,
+        mockItemService as any,
+      );
     });
 
     it('should pass projectId strictly to listItems', async () => {
-      const result = await controller.listItems(sampleUserId, sampleProjectId, {
-        view: 'all',
-      });
+      const result = await controller.listItems(
+        sampleUserId,
+        { view: 'all' },
+        sampleProjectId,
+      );
 
       expect(mockItemService.listItems).toHaveBeenCalledWith(
         sampleUserId,
@@ -90,8 +94,8 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
     });
   });
 
-  describe('ProjectCollectionController', () => {
-    let controller: ProjectCollectionController;
+  describe('CollectionsController (Project Scope)', () => {
+    let controller: CollectionsController;
     let mockCollectionsService: {
       getCollections: jest.Mock;
     };
@@ -103,7 +107,7 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
           .mockResolvedValue([{ id: 'col-1', name: 'Project Collection' }]),
       };
 
-      controller = new ProjectCollectionController(
+      controller = new CollectionsController(
         mockCollectionsService as any,
       );
     });
@@ -122,9 +126,9 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
     });
   });
 
-  describe('ProjectStateController & ProjectStateBatchController', () => {
-    let stateController: ProjectStateController;
-    let batchController: ProjectStateBatchController;
+  describe('StateController & StateBatchController (Project Scope)', () => {
+    let stateController: StateController;
+    let batchController: StateBatchController;
     let mockStateService: {
       getState: jest.Mock;
       getBatchStates: jest.Mock;
@@ -141,8 +145,8 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
         }),
       };
 
-      stateController = new ProjectStateController(mockStateService as any);
-      batchController = new ProjectStateBatchController(
+      stateController = new StateController(mockStateService as any);
+      batchController = new StateBatchController(
         mockStateService as any,
       );
     });
@@ -165,8 +169,8 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
     it('should query batch states scoped strictly to projectId', async () => {
       const states = await batchController.getBatchStates(
         sampleUserId,
-        sampleProjectId,
         { itemIds: [sampleItemId] },
+        sampleProjectId,
       );
 
       expect(mockStateService.getBatchStates).toHaveBeenCalledWith(
@@ -178,8 +182,8 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
     });
   });
 
-  describe('ProjectAttachmentController', () => {
-    let controller: ProjectAttachmentController;
+  describe('AttachmentController', () => {
+    let controller: AttachmentController;
     let mockAttachmentsService: {
       getItemAttachments: jest.Mock;
     };
@@ -192,7 +196,7 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
         }),
       };
 
-      controller = new ProjectAttachmentController(
+      controller = new AttachmentController(
         mockAttachmentsService as any,
       );
     });
@@ -213,8 +217,8 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
     });
   });
 
-  describe('ProjectIngestionController', () => {
-    let controller: ProjectIngestionController;
+  describe('IngestionController', () => {
+    let controller: IngestionController;
     let mockIngestionService: {
       submit: jest.Mock;
     };
@@ -227,7 +231,7 @@ describe('Project-Scoped Library Controllers (Strict UUID & Project Isolation)',
         }),
       };
 
-      controller = new ProjectIngestionController(
+      controller = new IngestionController(
         mockIngestionService as any,
         {} as any,
       );

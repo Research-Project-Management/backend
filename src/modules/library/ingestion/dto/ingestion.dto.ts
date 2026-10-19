@@ -3,7 +3,6 @@ import {
   IsOptional,
   IsIn,
   IsObject,
-  IsBoolean,
 } from 'class-validator';
 
 export class UnifiedIngestionDto {
@@ -97,8 +96,5 @@ export class UnifiedIngestionDto {
   @IsOptional()
   @IsString()
   projectId?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  silent?: boolean;
 }
+

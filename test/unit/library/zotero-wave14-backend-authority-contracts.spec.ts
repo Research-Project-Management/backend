@@ -2,7 +2,11 @@ import { ItemQueryService } from '@/modules/library/catalog/services/item-query.
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
-import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
+import {
+  DuplicateService,
+  DuplicateDetectorService,
+  DuplicateMergerService,
+} from '@/modules/library/ingestion/services/duplicate.service';
 import { QualityService } from '@/modules/library/ingestion/services/quality.service';
 import { Permission, Role } from '@/modules/project/access';
 
@@ -193,8 +197,8 @@ describe('Wave 14 — Backend Authority Contracts (Permissions, Duplicates Hydra
     });
   });
 
-  describe('Axis 3 — Preserve recommendedMasterId & Hydrated Domain Items in DuplicateService & QualityService', () => {
-    it('preserves recommendedMasterId and hydrates full ItemsMapper.toDomain items in detectDuplicates and QualityService.getDuplicates', async () => {
+  describe('Axis 3 — Preserve recommendedMasterId & Hydrated Domain Items in DuplicateService', () => {
+    it('preserves recommendedMasterId and hydrates full ItemsMapper.toDomain items in detectDuplicates', async () => {
       const itemAId = '550e8400-e29b-41d4-a716-446655440010';
       const itemBId = '550e8400-e29b-41d4-a716-446655440011';
 
@@ -310,12 +314,8 @@ describe('Wave 14 — Backend Authority Contracts (Permissions, Duplicates Hydra
       };
 
       const duplicateService = new DuplicateService(
-        {} as never,
-        mockCatalogGateway as never,
-      );
-      const qualityService = new QualityService(
-        mockCatalogGateway as never,
-        duplicateService,
+        new DuplicateDetectorService(mockCatalogGateway as never),
+        new DuplicateMergerService({} as never, mockCatalogGateway as never),
       );
 
       const clusters = await duplicateService.detectDuplicates(userId);
@@ -323,7 +323,6 @@ describe('Wave 14 — Backend Authority Contracts (Permissions, Duplicates Hydra
       expect(clusters[0].recommendedMasterId).toBeDefined();
       expect([itemAId, itemBId]).toContain(clusters[0].recommendedMasterId);
       expect(clusters[0].items).toHaveLength(2);
-      expect(clusters[0].papers).toHaveLength(2);
 
       const hydratedA = clusters[0].items.find((i) => i.id === itemAId)!;
       expect(hydratedA.publicationTitle).toBe(
@@ -333,15 +332,6 @@ describe('Wave 14 — Backend Authority Contracts (Permissions, Duplicates Hydra
       expect(hydratedA.creators).toBeDefined();
       expect(hydratedA.tags).toContain('transformers');
       expect(hydratedA.attachments).toHaveLength(1);
-
-      const qualityDuplicates = await qualityService.getDuplicates(userId);
-      expect(qualityDuplicates.duplicateGroups).toHaveLength(1);
-      expect(qualityDuplicates.duplicateGroups[0].recommendedMasterId).toBe(
-        clusters[0].recommendedMasterId,
-      );
-      expect(
-        qualityDuplicates.duplicateGroups[0].papers[0].publicationTitle,
-      ).toBeDefined();
     });
   });
 

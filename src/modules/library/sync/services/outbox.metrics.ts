@@ -25,56 +25,9 @@ export class OutboxMetrics {
     return this.gauges.get(name) || 0;
   }
 
-  recordSyncPull(
-    scope: { userId?: string; projectId?: string } | string,
-    durationMs: number,
-    changeCount: number,
-  ) {
-    const scopeStr =
-      typeof scope === 'object'
-        ? scope.projectId
-          ? `project:${scope.projectId}`
-          : `user:${scope.userId}`
-        : scope;
-    this.logger.debug(
-      `[OutboxMetrics] Pull executed for scope ${scopeStr}: ${changeCount} changes in ${durationMs}ms`,
-    );
-  }
-
   recordOutboxDispatch(durationMs: number, success: boolean) {
     this.logger.debug(
       `[OutboxMetrics] Outbox dispatch executed in ${durationMs}ms (success=${success})`,
     );
-  }
-
-  redactSensitiveData(
-    payload: Record<string, unknown>,
-  ): Record<string, unknown> {
-    if (!payload || typeof payload !== 'object') return payload;
-
-    const sanitized = { ...payload };
-    const sensitiveKeys = [
-      'password',
-      'token',
-      'authorization',
-      'apiKey',
-      'secret',
-      'previewToken',
-    ];
-
-    for (const key of Object.keys(sanitized)) {
-      if (sensitiveKeys.some((s) => key.toLowerCase().includes(s))) {
-        sanitized[key] = '[REDACTED]';
-      } else if (
-        typeof sanitized[key] === 'object' &&
-        sanitized[key] !== null
-      ) {
-        sanitized[key] = this.redactSensitiveData(
-          sanitized[key] as Record<string, unknown>,
-        );
-      }
-    }
-
-    return sanitized;
   }
 }

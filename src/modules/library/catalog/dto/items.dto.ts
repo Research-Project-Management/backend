@@ -318,10 +318,6 @@ export class CreateItemDto {
   @IsString({ each: true })
   collectionIds?: string[] | null;
 
-  @IsOptional()
-  @IsBoolean()
-  crossrefEnriched?: boolean;
-
   // Type-specific field aliases/direct inputs supported across 37 item types
   @IsOptional() @IsString() edition?: string;
   @IsOptional() @IsString() numPages?: string;
@@ -502,32 +498,6 @@ export class TypeConversionDto {
   @IsOptional()
   @IsObject()
   customFieldOverrides?: Record<string, unknown>;
-}
-
-export class BulkDeleteItemsDto {
-  @IsArray()
-  @IsString({ each: true })
-  itemIds!: string[];
-}
-
-export class BulkMoveItemsDto {
-  @IsArray()
-  @IsString({ each: true })
-  itemIds!: string[];
-
-  @IsOptional()
-  @IsString()
-  targetCollectionId?: string | null;
-}
-
-export class BulkTagItemsDto {
-  @IsArray()
-  @IsString({ each: true })
-  itemIds!: string[];
-
-  @IsArray()
-  @IsString({ each: true })
-  tagIds!: string[];
 }
 
 export { CursorPaginationQueryDto } from './item-query.dto';

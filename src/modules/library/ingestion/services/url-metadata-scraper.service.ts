@@ -335,12 +335,14 @@ export class UrlMetadataScraperService {
     let pdfExtracted: Record<string, unknown> = {};
     if (this.extractionGateway?.extractDocumentFromBuffer) {
       try {
-        const doc = await this.extractionGateway.extractDocumentFromBuffer<{
-          metadata?: Record<string, unknown>;
-        }>(buffer, {
-          headerOnly: true,
-        });
-        pdfExtracted = doc?.metadata || {};
+        const doc = await this.extractionGateway.extractDocumentFromBuffer(
+          buffer,
+          {
+            headerOnly: true,
+          },
+        );
+        pdfExtracted =
+          (doc?.metadata as unknown as Record<string, unknown>) || {};
       } catch (pdfErr: unknown) {
         const msg = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
         this.logger.warn(`ExtractionGateway pdf extraction failed: ${msg}`);
@@ -393,7 +395,7 @@ export class UrlMetadataScraperService {
     return {
       url: canonicalUrl,
       isPdf: true,
-      fileBuffer: buffer,
+      ...(fileId ? {} : { fileBuffer: buffer }),
       filename: effectiveFilename,
       fileId,
       title: resolvedTitle,

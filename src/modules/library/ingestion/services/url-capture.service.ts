@@ -20,12 +20,18 @@ import {
   EXTRACTION_FACADE,
   IExtractionFacade,
   ItemDetail,
-  TransactionService,
   CreateItemData,
   harmonizeZoteroFields,
   resolveCanonicalCreatorRole,
+  SsrfGuardService,
 } from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
+import {
+  parseAcademicFeedXml,
+  ParsedAcademicFeed,
+} from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 import { createHash } from 'crypto';
+import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 @Injectable()
 export class UrlCaptureService {
@@ -41,7 +47,50 @@ export class UrlCaptureService {
     @Optional()
     @Inject(EXTRACTION_FACADE)
     private readonly extractionGateway?: IExtractionFacade,
+    @Optional() private readonly ssrfGuard?: SsrfGuardService,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
   ) {}
+
+  /**
+   * Fetches and parses an external RSS 2.0, RDF/PRISM, or Atom XML feed safely.
+   */
+  async fetchAcademicFeed(feedUrl: string): Promise<ParsedAcademicFeed> {
+    if (!feedUrl || typeof feedUrl !== 'string') {
+      throw new BadRequestException('A valid feed URL is required');
+    }
+    const trimmed = feedUrl.trim();
+    const headers: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (compatible; FluxAcademicReader/1.0; +https://zotero.org)',
+      Accept:
+        'application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml, */*;q=0.8',
+    };
+
+    let response: Response;
+    if (this.ssrfGuard) {
+      response = await this.ssrfGuard.safeFetch(trimmed, {
+        method: 'GET',
+        headers,
+      });
+    } else {
+      response = await fetch(trimmed, { method: 'GET', headers });
+    }
+
+    if (!response.ok) {
+      throw new BadRequestException(
+        `Failed to fetch RSS/Atom feed (HTTP ${response.status})`,
+      );
+    }
+
+    const xml = await response.text();
+    const parsed = parseAcademicFeedXml(xml);
+    return {
+      ...parsed,
+      feedUrl: parsed.feedUrl || trimmed,
+    };
+  }
 
   /**
    * Captures metadata from a URL and creates a temporary preview record with a cryptographic token.
@@ -55,16 +104,7 @@ export class UrlCaptureService {
           projectId?: string;
           userId?: string;
         },
-  ): Promise<
-    | CapturedItemMetadata
-    | {
-        title: string;
-        url: string;
-        scopeId: string;
-        itemType: string;
-        previewToken?: string;
-      }
-  > {
+  ): Promise<CapturedItemMetadata> {
     const scopeId =
       typeof contextOrScopeId === 'string'
         ? contextOrScopeId
@@ -75,34 +115,23 @@ export class UrlCaptureService {
         : undefined;
     const effectiveScopeId = scopeId || userId || 'unassigned';
 
-    let result:
-      | CapturedItemMetadata
-      | {
-          title: string;
-          url: string;
-          scopeId: string;
-          itemType: string;
-          previewToken?: string;
-        };
-    if (this.urlCaptureProvider?.captureFromUrl) {
-      result = await this.urlCaptureProvider.captureFromUrl(url, {
-        scopeId: effectiveScopeId,
-        userId,
-      });
-    } else {
-      result = {
-        title: 'Blog Post',
-        url,
-        scopeId: effectiveScopeId,
-        itemType: 'webpage',
-      };
+    if (!this.urlCaptureProvider?.captureFromUrl) {
+      throw new SubsystemUnavailableException(
+        'UrlCaptureProvider is unavailable',
+        { provider: 'UrlCaptureProvider' },
+      );
     }
+
+    const result = await this.urlCaptureProvider.captureFromUrl(url, {
+      scopeId: effectiveScopeId,
+      userId,
+    });
 
     const { previewToken, ...metaWithoutToken } = result;
     const tokenHash = previewToken
       ? createHash('sha256').update(previewToken).digest('hex')
       : createHash('sha256').update(url).digest('hex');
-    const metadataDigest = this.urlCaptureProvider?.calculateMetadataDigest
+    const metadataDigest = this.urlCaptureProvider.calculateMetadataDigest
       ? this.urlCaptureProvider.calculateMetadataDigest(metaWithoutToken)
       : '';
 
@@ -318,7 +347,9 @@ export class UrlCaptureService {
       rights:
         (harmonized.rights as string | undefined) ??
         (canonical.rights as string | undefined),
-      license: harmonized.license ?? canonical.license,
+      license:
+        (harmonized.license as string | undefined) ??
+        (canonical.license as string | undefined),
       extra: canonical.extra as string | undefined,
       extraFields:
         Object.keys(syncedExtraFields).length > 0
@@ -327,68 +358,44 @@ export class UrlCaptureService {
       citationKey:
         (harmonized.citationKey as string | undefined) ??
         (canonical.citationKey as string | undefined),
-      libraryCatalog: canonical.libraryCatalog,
+      libraryCatalog: canonical.libraryCatalog as string | undefined,
       callNumber: canonical.callNumber as string | undefined,
       archive: canonical.archive as string | undefined,
       collectionId: undefined,
-      labels: canonical.keywords || canonical.tags || [],
-      keywords: canonical.keywords || canonical.tags || [],
+      labels: Array.isArray(canonical.keywords)
+        ? (canonical.keywords as string[])
+        : Array.isArray(canonical.tags)
+          ? (canonical.tags as string[])
+          : [],
+      keywords: Array.isArray(canonical.keywords)
+        ? (canonical.keywords as string[])
+        : Array.isArray(canonical.tags)
+          ? (canonical.tags as string[])
+          : [],
       uploadedById: targetUserId,
     };
 
-    let createdItem: ItemDetail;
-    if (this.txService?.executeInTransaction) {
-      createdItem = await this.txService.executeInTransaction(
-        async (tx: Prisma.TransactionClient, _helpers: unknown) => {
-          const claimedCount = await this.repo.claimCapturePreview(
-            tokenHash,
-            tx,
-          );
+    const claimedCount = await this.repo.claimCapturePreview(tokenHash);
 
-          if (!claimedCount || claimedCount === 0) {
-            throw new ConflictException(
-              'Capture preview has already been confirmed or claimed',
-            );
-          }
-
-          if (this.catalogGateway?.createItem) {
-            return this.catalogGateway.createItem(
-              targetUserId,
-              itemData,
-              { source: 'url', projectId },
-              projectId,
-            );
-          }
-
-          throw new SubsystemUnavailableException(
-            'CatalogGateway is required to confirm captured URL item',
-            { gateway: 'CatalogGateway' },
-          );
-        },
+    if (!claimedCount || claimedCount === 0) {
+      throw new ConflictException(
+        'Capture preview has already been confirmed or claimed',
       );
-    } else {
-      const updateRes = await this.repo.claimCapturePreview(tokenHash);
-
-      if (!updateRes || updateRes === 0) {
-        throw new ConflictException(
-          'Capture preview has already been confirmed or claimed',
-        );
-      }
-
-      if (this.catalogGateway?.createItem) {
-        createdItem = await this.catalogGateway.createItem(
-          targetUserId,
-          itemData,
-          { source: 'url', projectId },
-          projectId,
-        );
-      } else {
-        throw new SubsystemUnavailableException(
-          'CatalogGateway is required to confirm captured URL item',
-          { gateway: 'CatalogGateway' },
-        );
-      }
     }
+
+    if (!this.catalogGateway?.createItem) {
+      throw new SubsystemUnavailableException(
+        'CatalogGateway is required to confirm captured URL item',
+        { gateway: 'CatalogGateway' },
+      );
+    }
+
+    const createdItem = await this.catalogGateway.createItem(
+      targetUserId,
+      itemData,
+      { source: 'url', projectId },
+      projectId,
+    );
 
     if (
       createdItem?.id &&
@@ -413,6 +420,46 @@ export class UrlCaptureService {
    */
   async cleanupExpiredPreviews(retentionDays = 7): Promise<number> {
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    if (
+      typeof this.repo.findExpiredCapturePreviews === 'function' &&
+      typeof this.storagePort?.deleteFile === 'function'
+    ) {
+      try {
+        const expiredList = await this.repo.findExpiredCapturePreviews(cutoff);
+        for (const p of expiredList) {
+          if (p.claimedAt) continue;
+          const meta =
+            p.canonicalMetadata &&
+            typeof p.canonicalMetadata === 'object' &&
+            !Array.isArray(p.canonicalMetadata)
+              ? (p.canonicalMetadata as Record<string, unknown>)
+              : {};
+          const extra =
+            meta.extraFields &&
+            typeof meta.extraFields === 'object' &&
+            !Array.isArray(meta.extraFields)
+              ? (meta.extraFields as Record<string, unknown>)
+              : {};
+          const scraped =
+            meta.scrapedData &&
+            typeof meta.scrapedData === 'object' &&
+            !Array.isArray(meta.scrapedData)
+              ? (meta.scrapedData as Record<string, unknown>)
+              : {};
+          const pdfFileId =
+            (typeof scraped.pdfFileId === 'string' && scraped.pdfFileId) ||
+            (typeof meta.pdfFileId === 'string' && meta.pdfFileId) ||
+            (typeof extra.pdfFileId === 'string' && extra.pdfFileId) ||
+            (typeof extra.fileId === 'string' && extra.fileId) ||
+            (typeof meta.fileId === 'string' && meta.fileId);
+          if (pdfFileId) {
+            await this.storagePort.deleteFile(pdfFileId).catch(() => undefined);
+          }
+        }
+      } catch {
+        // Ignore blob cleanup errors during preview sweep
+      }
+    }
     return this.repo.deleteExpiredCapturePreviews(cutoff);
   }
 }

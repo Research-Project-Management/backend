@@ -10,16 +10,157 @@ import {
   ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
 } from '@/modules/library/catalog/types/items.constants';
-import type { CreatorCreditInput } from '@/modules/library/catalog/types/items.types';
-import type { MutableItemPayload } from './item-mapper.types';
+import type { CreatorCreditInput } from '@/modules/library/core/types/bibliographic.types';
+
+export interface AttachmentLike {
+  attachmentType?: string;
+  mimeType?: string;
+  filename?: string;
+  fileId?: string | null;
+  title?: string;
+  metadata?: { title?: string; [key: string]: unknown } | null;
+  url?: string;
+  revisions?: Array<{ url?: string; [key: string]: unknown }>;
+  size?: number;
+  [key: string]: unknown;
+}
+
+export interface ItemIdentifierLike {
+  type?: string;
+  identifierType?: string;
+  value?: string;
+  canonicalUri?: string | null;
+  [key: string]: unknown;
+}
+
+export type MutableItemPayload = Record<string, unknown> & {
+  id?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  attachments?: AttachmentLike[];
+  states?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown> | string | null;
+  contributors?: CreatorCreditInput[];
+  creators?: CreatorCreditInput[];
+  authors?: unknown;
+  editors?: unknown;
+  itemTags?: Array<Record<string, unknown>>;
+  tags?: unknown;
+  keywords?: unknown;
+  zoteroTags?: unknown;
+  collectionItems?: Array<Record<string, unknown>>;
+  collectionId?: string | null;
+  collectionIds?: string[];
+  collections?: unknown[];
+  notesList?: Array<Record<string, unknown>>;
+  notes?: Array<Record<string, unknown>>;
+  extraFields?: Record<string, unknown>;
+  extra?: unknown;
+  citationCount?: number | string | null;
+  referenceCount?: number | string | null;
+  openAccessPdfUrl?: string | null;
+  doi?: string | null;
+  DOI?: string | null;
+  arxivId?: string | null;
+  archiveId?: string | null;
+  archiveID?: string | null;
+  isbn?: string | null;
+  ISBN?: string | null;
+  issn?: string | null;
+  ISSN?: string | null;
+  pmid?: string | null;
+  PMID?: string | null;
+  pmcid?: string | null;
+  PMCID?: string | null;
+  identifiers?: ItemIdentifierLike[];
+  seriesNumber?: string | null;
+  edition?: string | null;
+  numPages?: number | string | null;
+  numberOfPages?: number | string | null;
+  proceedingsTitle?: string | null;
+  conferenceName?: string | null;
+  institution?: string | null;
+  university?: string | null;
+  reportNumber?: string | null;
+  reportType?: string | null;
+  thesisType?: string | null;
+  repository?: string | null;
+  country?: string | null;
+  websiteTitle?: string | null;
+  websiteType?: string | null;
+  blogTitle?: string | null;
+  issuingAuthority?: string | null;
+  authority?: string | null;
+  patentNumber?: string | null;
+  issueDate?: string | null;
+  priorityDate?: string | null;
+  originalDate?: string | null;
+  assignee?: string | null;
+  rights?: string | null;
+  license?: string | null;
+  abstract?: string | null;
+  abstractNote?: string | null;
+  year?: number | string | null;
+  date?: string | null;
+  publicationDate?: string | null;
+  publicationTitle?: string | null;
+  journal?: string | null;
+  journalAbbreviation?: string | null;
+  journalAbbr?: string | null;
+  place?: string | null;
+  eventPlace?: string | null;
+  bookTitle?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  callNumber?: string | null;
+  accessDate?: string | null;
+  accessedAt?: string | Date | null;
+  citationKey?: string | null;
+  citeKey?: string | null;
+  genre?: string | null;
+  number?: string | null;
+  isStarred?: boolean;
+  readStatus?: string;
+  rating?: number;
+  lastReadAt?: string | Date | null;
+  itemType?: string;
+  type?: string;
+  fileUrl?: string | null;
+  filename?: string;
+  mimeType?: string;
+  size?: number;
+  primaryFile?: Record<string, unknown> | null;
+  isMyPublication?: boolean;
+  publications?: unknown[];
+  outgoingRel?: Array<Record<string, unknown>>;
+  incomingRel?: Array<Record<string, unknown>>;
+  relations?: unknown[];
+  seeAlso?: unknown;
+  [key: string]: unknown;
+};
+
+export function parseJsonObject(val: unknown): Record<string, unknown> | null {
+  if (val && typeof val === 'object' && !Array.isArray(val)) {
+    return val as Record<string, unknown>;
+  }
+  if (typeof val === 'string' && val.trim().startsWith('{')) {
+    try {
+      const parsed: unknown = JSON.parse(val.trim());
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 function toStr(val: unknown): string {
   return typeof val === 'string' || typeof val === 'number' ? String(val) : '';
 }
 
-/**
- * Normalizes creators, authors, and editors.
- */
 export function mapCreatorsPartial(it: MutableItemPayload): void {
   const rawStructured =
     Array.isArray(it.contributors) && it.contributors.length > 0
@@ -86,9 +227,6 @@ export function mapCreatorsPartial(it: MutableItemPayload): void {
     .filter(Boolean);
 }
 
-/**
- * Harmonizes Zotero v42 fields, dates, numbers, and identifiers.
- */
 export function harmonizeDomainMetadataAndIdentifiersPartial(
   it: MutableItemPayload,
 ): void {
@@ -231,7 +369,6 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     }
   }
 
-  // Zotero v42 Base Field & Alias Harmonization via Single-Source-of-Truth Harmonizer
   const baseMap = it.itemType
     ? getEffectiveBaseFieldMap(it.itemType)
     : undefined;
@@ -298,9 +435,12 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
           .replace(/v\d+$/i, '')
           .trim()
       : '';
-    it.archiveID =
-      it.archiveID || (cleanArxivNum ? `arXiv:${cleanArxivNum}` : '') || '';
-    it.archiveId = it.archiveID;
+    it.archiveId =
+      it.archiveId ||
+      it.archiveID ||
+      (cleanArxivNum ? `arXiv:${cleanArxivNum}` : '') ||
+      '';
+    delete it.archiveID;
     it.repository =
       it.repository ||
       (it.publisher && !/^arxiv$/i.test(toStr(it.publisher).trim())
@@ -360,7 +500,7 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
   it.abstract = it.abstract || it.abstractNote || '';
   it.abstractNote = it.abstract;
   it.journalAbbreviation = it.journalAbbreviation || it.journalAbbr || '';
-  it.journalAbbr = it.journalAbbr || it.journalAbbreviation || '';
+  delete it.journalAbbr;
   it.accessDate =
     it.accessDate ||
     (it.accessedAt
@@ -368,12 +508,12 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
         ? it.accessedAt.toISOString()
         : toStr(it.accessedAt)
       : '');
+  delete it.accessedAt;
   it.citationKey = it.citationKey || it.citeKey || '';
-  it.citeKey = it.citeKey || it.citationKey || '';
-  it.url = it.url || it.URL || '';
-  it.URL = it.url;
+  delete it.citeKey;
+  it.url = it.url || (it.URL as string | undefined) || '';
+  delete it.URL;
 
-  // Identifier Projections
   if (Array.isArray(it.identifiers)) {
     const idTypeToField: Record<string, keyof MutableItemPayload> = {
       arxiv: 'arxivId',
@@ -405,7 +545,7 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     const canonicalVal =
       (it[lowerKey] as string) || (it[upperKey] as string) || '';
     it[lowerKey] = canonicalVal;
-    it[upperKey] = canonicalVal;
+    delete it[upperKey];
   }
 
   const canonicalArxivId =
@@ -427,10 +567,9 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     ? it.itemType === 'preprint'
       ? `arXiv:${cleanArxiv.replace(/v\d+$/i, '')}`
       : cleanArxiv
-    : it.archiveId || '';
-  it.archiveID = it.archiveID || it.archiveId;
+    : it.archiveId || it.archiveID || '';
+  delete it.archiveID;
 
-  // Sync non-column Zotero v42 fields into extraFields
   if (it.extraFields && typeof it.extraFields === 'object') {
     for (const fieldKey of TYPE_SPECIFIC_EXTRA_FIELDS) {
       const topVal = it[fieldKey];

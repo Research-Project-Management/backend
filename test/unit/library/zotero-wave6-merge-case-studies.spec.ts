@@ -1,5 +1,9 @@
 import { Prisma, AnnotationType } from '@prisma/client';
-import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
+import {
+  DuplicateService,
+  DuplicateDetectorService,
+  DuplicateMergerService,
+} from '@/modules/library/ingestion/services/duplicate.service';
 import { CatalogFacade } from '@/modules/library/catalog/catalog.facade';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { StateService } from '@/modules/library/catalog/services/state.service';
@@ -29,7 +33,27 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
   const PROJECT_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const PROJECT_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
+  const createDuplicateService = (
+    txService: TransactionService,
+    catalogGateway?: ICatalogFacade,
+    extractionGateway?: IExtractionFacade,
+  ) =>
+    new DuplicateService(
+      new DuplicateDetectorService(catalogGateway, undefined, txService),
+      new DuplicateMergerService(
+        txService,
+        catalogGateway,
+        extractionGateway,
+      ),
+    );
+
   const createMockTxService = (mockTx: Record<string, unknown>) => {
+    mockTx.itemMetadata = {
+      findFirst: jest.fn(async () => null),
+      update: jest.fn(async () => ({})),
+      deleteMany: jest.fn(async () => ({ count: 0 })),
+      ...(mockTx.itemMetadata as Record<string, unknown> | undefined),
+    };
     const outboxEvents: Array<{
       scope: unknown;
       aggregateId: string;
@@ -181,7 +205,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
       );
@@ -471,7 +495,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
       );
@@ -667,7 +691,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
       );
@@ -773,7 +797,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         mergeItems: jest.fn(async () => undefined),
       };
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
       );
@@ -920,7 +944,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
       );
@@ -1016,7 +1040,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         findDuplicateCandidateItems: jest.fn(async () => []),
       };
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
       );
@@ -1171,7 +1195,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         reassignContentToItem: jest.fn(async () => undefined),
       } as unknown as IExtractionFacade;
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
         mockExtractionGateway,
@@ -1319,7 +1343,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         mergeItems: jest.fn(async () => undefined),
       };
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
       );
@@ -1375,7 +1399,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         mergeItems: jest.fn(async () => undefined),
       };
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
       );
@@ -1444,7 +1468,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         mergeItems: jest.fn(async () => undefined),
       };
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
       );
@@ -1532,7 +1556,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         mergeItems: jest.fn(async () => undefined),
       };
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
       );
@@ -1633,7 +1657,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         reassignContentToItem: jest.fn(async () => undefined),
       } as unknown as IExtractionFacade;
 
-      const duplicateService = new DuplicateService(
+      const duplicateService = createDuplicateService(
         txService,
         mockCatalogGateway as unknown as ICatalogFacade,
         mockExtractionGateway,
@@ -1649,7 +1673,6 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
       );
 
       expect(mergeResult.audit).toBeDefined();
-      expect(mergeResult.prismaAudit).toEqual(mergeResult.audit);
       expect(mergeResult.audit).toEqual(
         expect.objectContaining({
           masterItemId: 'master-pub',

@@ -12,6 +12,7 @@ import {
 import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { libraryConfig } from '@/modules/library/core';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
 
 export interface BenchmarkPayloadDto {
@@ -35,6 +36,7 @@ export class ExtractionTelemetryController {
       'Get operational telemetry and in-process extraction engine metrics',
   })
   getTelemetry() {
+    const slmConfigured = Boolean(libraryConfig().mextract.apiUrl);
     return {
       status: 'UP',
       architecture: 'Zero-Docker In-Process Academic Extraction Engine',
@@ -43,7 +45,9 @@ export class ExtractionTelemetryController {
         enabled: true,
         zeroDocker: true,
         fallbackMode: 'in-process-heuristics',
-        slmModel: 'Qwen2.5-0.5B-Instruct-ONNX',
+        pipelineMode: slmConfigured
+          ? 'external-slm-with-heuristic-fallback'
+          : 'deterministic-heuristic-pipeline',
       },
       metrics: {
         latencyTarget: '< 20ms',

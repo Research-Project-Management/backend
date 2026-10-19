@@ -11,6 +11,7 @@ import {
 import { SearchSpecificationBuilder } from '@/modules/library/search/domain/search-specification.builder';
 import { TextSearchSpecification } from '@/modules/library/search/domain/item-specifications';
 import { sanitizeSearchQuery } from '@/modules/library/search/domain/search.domain';
+import { isProjectScopeId } from '@/modules/library/core';
 
 export type { SearchOptions, FacetResult };
 
@@ -32,12 +33,7 @@ export class SearchRepository implements OnModuleInit {
   }
 
   private isProjectScope(projectId?: string): projectId is string {
-    return Boolean(
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal',
-    );
+    return isProjectScopeId(projectId);
   }
 
   /**
@@ -103,7 +99,13 @@ export class SearchRepository implements OnModuleInit {
     const ftsSanitized = sanitizeSearchQuery(queryText);
     if (queryText && ftsSanitized && this.hasFtsColumn()) {
       try {
-        return await this.searchItemsFts(userId, options, queryText, limit, tx);
+        return await this.searchItemsFts(
+          userId,
+          options,
+          ftsSanitized,
+          limit,
+          tx,
+        );
       } catch (err: unknown) {
         // Column might not exist yet (pre-migration) — fall through to ILIKE
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -137,8 +139,18 @@ export class SearchRepository implements OnModuleInit {
     let paramIdx = 3;
 
     if (options.itemType) {
-      baseFilters.push(`"type" = $${paramIdx++}`);
-      params.push(options.itemType);
+      if (Array.isArray(options.itemType)) {
+        if (options.itemType.length === 1) {
+          baseFilters.push(`"type" = $${paramIdx++}`);
+          params.push(options.itemType[0]);
+        } else if (options.itemType.length > 1) {
+          baseFilters.push(`"type" = ANY($${paramIdx++}::text[])`);
+          params.push(options.itemType);
+        }
+      } else {
+        baseFilters.push(`"type" = $${paramIdx++}`);
+        params.push(options.itemType);
+      }
     }
     if (options.yearFrom) {
       baseFilters.push(`year >= $${paramIdx++}`);
@@ -319,69 +331,79 @@ export class SearchRepository implements OnModuleInit {
     }
 
     const client = this.getClient(tx);
-    const spec = SearchSpecificationBuilder.fromOptions(userId, options);
-    const where = spec.toPrismaWhere();
+    const q = options.q?.trim();
+    const ftsSanitized = sanitizeSearchQuery(q);
+    let textWhere: Prisma.ItemWhereInput = {};
 
-    // 2. High-Performance Database Pushdown Aggregation (PostgreSQL engine groupBy)
-    let facetResult: FacetResult;
-    if (typeof client.item?.groupBy === 'function') {
-      try {
-        const [typeGroups, yearGroups, tagItems] = await Promise.all([
-          client.item.groupBy({
-            by: ['itemType'],
-            where,
-            _count: { _all: true },
-          }),
-          client.item.groupBy({
-            by: ['year'],
-            where,
-            _count: { _all: true },
-          }),
-          typeof client.itemTag?.findMany === 'function'
-            ? client.itemTag.findMany({
-                where: { item: where },
-                take: 1000,
-                select: { tag: { select: { name: true } } },
-              })
-            : Promise.resolve([]),
-        ]);
-
-        const itemTypes: Record<string, number> = {};
-        for (const g of typeGroups || []) {
-          if (g.itemType) {
-            itemTypes[g.itemType] = (g._count as { _all?: number })?._all ?? 1;
-          }
+    if (q) {
+      if (ftsSanitized && this.hasFtsColumn()) {
+        try {
+          const hasProject = this.isProjectScope(options.projectId);
+          const scopeSql = hasProject
+            ? `project_id = $1::uuid`
+            : `user_id = $1::uuid AND project_id IS NULL`;
+          const ftsRows = await this.prisma.$queryRawUnsafe<
+            Array<{ id: string }>
+          >(
+            `SELECT id FROM "items" WHERE ${scopeSql} AND deleted_at IS NULL AND search_vector @@ plainto_tsquery('english', $2)`,
+            hasProject ? options.projectId : userId,
+            ftsSanitized,
+          );
+          textWhere = { id: { in: ftsRows.map((r) => r.id) } };
+        } catch {
+          textWhere = this.buildTextWhereIlike(q);
         }
-
-        const years: Record<number, number> = {};
-        for (const g of yearGroups || []) {
-          if (g.year != null) {
-            years[Number(g.year)] = (g._count as { _all?: number })?._all ?? 1;
-          }
-        }
-
-        const tags: Record<string, number> = {};
-        for (const t of tagItems || []) {
-          const tagName = t?.tag?.name;
-          if (tagName) {
-            tags[tagName] = (tags[tagName] || 0) + 1;
-          }
-        }
-
-        facetResult = { itemTypes, years, tags };
-      } catch (pushdownErr: unknown) {
-        const message =
-          pushdownErr instanceof Error
-            ? pushdownErr.message
-            : String(pushdownErr);
-        this.logger.debug(
-          `GroupBy pushdown aggregation fallback to scan: ${message}`,
-        );
-        facetResult = await this.computeFacetsFallback(client, where);
+      } else {
+        textWhere = this.buildTextWhereIlike(q);
       }
-    } else {
-      facetResult = await this.computeFacetsFallback(client, where);
     }
+
+    const where: Prisma.ItemWhereInput = {
+      ...this.buildBaseWhere(userId, options),
+      ...textWhere,
+    };
+
+    const [typeGroups, yearGroups, tagItems] = await Promise.all([
+      client.item.groupBy({
+        by: ['itemType'],
+        where,
+        _count: { _all: true },
+      }),
+      client.item.groupBy({
+        by: ['year'],
+        where,
+        _count: { _all: true },
+      }),
+      client.itemTag.findMany({
+        where: { item: where },
+        take: 1000,
+        select: { tag: { select: { name: true } } },
+      }),
+    ]);
+
+    const itemTypes: Record<string, number> = {};
+    for (const g of typeGroups || []) {
+      if (g.itemType) {
+        itemTypes[g.itemType] = (g._count as { _all?: number })?._all ?? 1;
+      }
+    }
+
+    const years: Record<number, number> = {};
+    for (const g of yearGroups || []) {
+      if (g.year != null) {
+        years[Number(g.year)] = (g._count as { _all?: number })?._all ?? 1;
+      }
+    }
+
+    const tags: Record<string, number> = {};
+    for (const t of tagItems || []) {
+      const tagName = t?.tag?.name;
+      if (tagName) {
+        tags[tagName] = (tags[tagName] || 0) + 1;
+      }
+    }
+
+    const facetResult: FacetResult = { itemTypes, years, tags };
 
     // 3. Cache computed facet result (TTL: 120 seconds)
     if (this.cache) {
@@ -394,46 +416,6 @@ export class SearchRepository implements OnModuleInit {
     }
 
     return facetResult;
-  }
-
-  private async computeFacetsFallback(
-    client: Prisma.TransactionClient | PrismaService,
-    where: Prisma.ItemWhereInput,
-  ): Promise<FacetResult> {
-    const items = await client.item.findMany({
-      where,
-      take: 2000,
-      select: {
-        itemType: true,
-        year: true,
-        itemTags: {
-          take: 10,
-          select: {
-            tag: { select: { name: true } },
-          },
-        },
-      },
-    });
-
-    const itemTypes: Record<string, number> = {};
-    const years: Record<number, number> = {};
-    const tags: Record<string, number> = {};
-
-    for (const item of items) {
-      if (item.itemType) {
-        itemTypes[item.itemType] = (itemTypes[item.itemType] || 0) + 1;
-      }
-      if (item.year) {
-        years[item.year] = (years[item.year] || 0) + 1;
-      }
-      for (const t of item.itemTags ?? []) {
-        if (t.tag?.name) {
-          tags[t.tag.name] = (tags[t.tag.name] || 0) + 1;
-        }
-      }
-    }
-
-    return { itemTypes, years, tags };
   }
 
   async invalidateFacets(scopeId: string): Promise<void> {
@@ -467,7 +449,7 @@ export class SearchRepository implements OnModuleInit {
       const res = await this.prisma.$queryRaw<unknown[]>`
         SELECT 1 FROM pg_attribute a
         JOIN pg_class c ON c.oid = a.attrelid
-        WHERE c.relname IN ('items', 'papers')
+        WHERE c.relname = 'items'
           AND a.attname = 'search_vector'
           AND NOT a.attisdropped
         LIMIT 1
@@ -508,38 +490,14 @@ export class SearchRepository implements OnModuleInit {
 
   // EventHandler Index Cleanup Operations
   async deleteFullTextIndexByItemId(itemId: string): Promise<void> {
-    const attachments = await this.prisma.attachment.findMany({
-      where: { itemId },
-      select: { id: true },
+    await this.prisma.fullTextIndex.deleteMany({
+      where: { attachment: { itemId } },
     });
-
-    const attachmentIds = attachments.map((att) => att.id);
-    if (attachmentIds.length > 0) {
-      await this.prisma.fullTextIndex.deleteMany({
-        where: { attachmentId: { in: attachmentIds } },
-      });
-    }
   }
 
   async deleteFullTextIndexByAttachmentId(attachmentId: string): Promise<void> {
     await this.prisma.fullTextIndex.deleteMany({
       where: { attachmentId },
-    });
-  }
-
-  async countIndexedAttachments(userId: string): Promise<number> {
-    if (typeof this.prisma?.attachment?.count !== 'function') {
-      return 0;
-    }
-    return this.prisma.attachment.count({
-      where: {
-        deletedAt: null,
-        item: {
-          userId,
-          projectId: null,
-          deletedAt: null,
-        },
-      },
     });
   }
 
@@ -557,30 +515,56 @@ export class SearchRepository implements OnModuleInit {
       });
 
       if (pages.length > 0) {
-        await tx.fullTextIndex.createMany({
-          data: pages.map((page) => ({
-            attachmentId,
-            pageIndex: page.pageIndex,
-            textContent: (page.textContent || '').replace(/\0/g, ''),
-            charOffset: page.charOffset ?? 0,
-          })),
-        });
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < pages.length; i += CHUNK_SIZE) {
+          const chunk = pages.slice(i, i + CHUNK_SIZE);
+          await tx.fullTextIndex.createMany({
+            data: chunk.map((page) => ({
+              attachmentId,
+              pageIndex: page.pageIndex,
+              textContent: (page.textContent || '').replace(/\0/g, ''),
+              charOffset: page.charOffset ?? 0,
+            })),
+          });
+        }
       }
     });
   }
 
   async findAttachmentPages(
     attachmentId: string,
-    pageIndex?: number,
+    pageIndexOrSearchTerm?: number | string,
+    searchTerm?: string,
   ): Promise<
     Array<{ pageIndex: number; textContent: string; charOffset: number }>
   > {
+    const resolvedPageIndex =
+      typeof pageIndexOrSearchTerm === 'number'
+        ? pageIndexOrSearchTerm
+        : undefined;
+    const resolvedSearchTerm =
+      typeof pageIndexOrSearchTerm === 'string'
+        ? pageIndexOrSearchTerm
+        : searchTerm;
+    const trimmedTerm = resolvedSearchTerm?.trim();
+
     const dbPages = await this.prisma.fullTextIndex.findMany({
       where: {
         attachmentId,
-        ...(pageIndex !== undefined ? { pageIndex } : {}),
+        ...(resolvedPageIndex !== undefined
+          ? { pageIndex: resolvedPageIndex }
+          : {}),
+        ...(trimmedTerm
+          ? {
+              textContent: {
+                contains: trimmedTerm,
+                mode: 'insensitive',
+              },
+            }
+          : {}),
       },
       orderBy: { pageIndex: 'asc' },
+      ...(trimmedTerm ? { take: 50 } : {}),
     });
 
     return dbPages.map((dbPage) => ({

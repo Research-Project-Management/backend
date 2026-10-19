@@ -26,4 +26,8 @@ export const LIBRARY_REDIS_KEYS = {
     `library:${scopeKey}:items:list:${optionsHash}`,
   itemsPattern: (scopeKey: string) => `library:${scopeKey}:items*`,
   itemPattern: (itemId: string) => `library:item:${itemId}*`,
+  counts: (scopeId: string) =>
+    scopeId.startsWith('proj:') || scopeId.startsWith('user:')
+      ? `library:counts:${scopeId}`
+      : `library:counts:user:${scopeId}`,
 };

@@ -112,33 +112,82 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
     let sharedDoc: Awaited<ReturnType<typeof getDocumentProxy>> | undefined =
       pdfDocument;
     try {
-      const cloned = new Uint8Array(buffer.byteLength);
-      cloned.set(buffer);
-
       let docText = '';
       try {
-        const doc = sharedDoc ?? (await getDocumentProxy(cloned));
-        sharedDoc = doc;
+        let doc = sharedDoc;
+        if (!doc) {
+          const cloned = new Uint8Array(buffer.byteLength);
+          cloned.set(buffer);
+          doc = await getDocumentProxy(cloned);
+          sharedDoc = doc;
+        }
         if (doc && doc.numPages > 0) {
           const pagesToRead = Math.min(doc.numPages, 3);
           const pageChunks: string[] = [];
-          for (let i = 1; i <= pagesToRead; i++) {
-            const page = await doc.getPage(i);
+          const readPageText = async (pageNum: number): Promise<string> => {
+            const page = await doc.getPage(pageNum);
             const content = await page.getTextContent();
             if (content?.items && content.items.length > 0) {
               const items = content.items as Array<{
                 str?: string;
                 hasEOL?: boolean;
               }>;
-              const pText = items
+              return items
                 .filter((it) => it && it.str != null)
                 .map((it) => (it.str || '') + (it.hasEOL ? '\n' : ' '))
-                .join('');
-              if (pText.trim().length > 0) {
-                pageChunks.push(pText);
+                .join('')
+                .trim();
+            }
+            return '';
+          };
+
+          for (let i = 1; i <= pagesToRead; i++) {
+            const pText = await readPageText(i);
+            if (pText.length > 0) {
+              pageChunks.push(pText);
+            }
+          }
+
+          // Official Zotero RecognizePDF behavior: also scan the last 1-2 pages
+          // for trailing DOIs, ISBNs, or publisher colophons if not on the front pages.
+          if (doc.numPages > 3) {
+            const tailPages =
+              doc.numPages > 4
+                ? [doc.numPages - 1, doc.numPages]
+                : [doc.numPages];
+            for (const tailPage of tailPages) {
+              try {
+                const tailText = await readPageText(tailPage);
+                if (tailText.length > 0) {
+                  const tailRegex = AcademicRegexCatalog.scan(tailText);
+                  if (!merged.doi && tailRegex.doi) {
+                    merged.doi = tailRegex.doi;
+                    rawMatches.detectedDoi = tailRegex.doi;
+                  }
+                  if (!merged.arxivId && tailRegex.arxivId) {
+                    merged.arxivId = tailRegex.arxivId;
+                    rawMatches.detectedArxivId = tailRegex.arxivId;
+                    if (!merged.doi) {
+                      merged.doi = `10.48550/arXiv.${tailRegex.arxivId}`;
+                    }
+                  }
+                  if (!merged.pmid && tailRegex.pmid) {
+                    merged.pmid = tailRegex.pmid;
+                    rawMatches.detectedPmid = tailRegex.pmid;
+                  }
+                  if (!merged.isbn && tailRegex.isbn) {
+                    merged.isbn = tailRegex.isbn;
+                  }
+                  if (!merged.issn && tailRegex.issn) {
+                    merged.issn = tailRegex.issn;
+                  }
+                }
+              } catch {
+                // Ignore tail page read errors
               }
             }
           }
+
           if (pageChunks.length > 0) {
             docText = pageChunks.join('\n\n');
           }
@@ -150,6 +199,8 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
       if (docText && docText.trim().length > 0) {
         pageText = docText;
       } else {
+        const cloned = new Uint8Array(buffer.byteLength);
+        cloned.set(buffer);
         const rawResult = await extractText(cloned, { mergePages: true });
         pageText =
           typeof rawResult === 'string'
@@ -367,19 +418,25 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
     this.refineMetadata(merged, xmp?.year, pageText, rawMatches);
     gateEvaluation = MetadataQualityGate.evaluate(merged);
 
-    // Filename fallback if title is still missing
-    if (!merged.title && preferredFilename) {
+    // Filename fallback ONLY if title is still missing AND no authoritative identifier exists.
+    // When a DOI/arXivId/PMID/ISBN is present, external registry enrichment must supply the canonical title.
+    const hasAuthoritativeId = Boolean(
+      merged.doi || merged.arxivId || merged.pmid || merged.isbn,
+    );
+    if (!merged.title && !hasAuthoritativeId && preferredFilename) {
       const cleanSlug = preferredFilename
         .replace(/\.[a-zA-Z0-9]+$/, '')
         .replace(/[-_]+/g, ' ')
         .trim();
       if (cleanSlug.length > 3) {
         merged.title = normalizeAcademicTitleCase(cleanSlug);
+        rawMatches.titleFromFilename = true;
       }
     }
 
     if (!merged.title) {
       merged.title = 'Uploaded Document';
+      rawMatches.titleFromFilename = true;
     }
 
     const durationMs = Date.now() - startedAt;

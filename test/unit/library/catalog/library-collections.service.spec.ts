@@ -212,7 +212,6 @@ describe('Library Collections — Tree Invariants & Sanitization', () => {
 
       expect(repo.create).toHaveBeenCalledWith(
         mockUserId,
-        mockUserId,
         expect.objectContaining({
           name: 'Neural Models',
           description: 'Clean description',

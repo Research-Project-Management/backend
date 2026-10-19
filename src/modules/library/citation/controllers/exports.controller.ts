@@ -15,6 +15,7 @@ import {
 } from '@/modules/library/citation/dto/exports.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 
 @ApiTags('Library Exports')
 @ApiBearerAuth()
@@ -34,10 +35,13 @@ export class ExportsController {
     @Param('projectId') routeProjectId?: string,
     @Query('projectId') queryProjectId?: string,
   ) {
-    const effectiveProjectId = routeProjectId || queryProjectId;
-    return this.exportsService.exportAnnotatedPdf(
+    const effectiveProjectId = normalizeProjectScopeId(
+      routeProjectId || queryProjectId,
+    );
+    return this.exportsService.exportAnnotatedItemPdf(
       userId,
       itemId,
+      undefined,
       effectiveProjectId,
     );
   }
@@ -55,7 +59,7 @@ export class ExportsController {
     return this.exportsService.exportLibrary(userId, dto);
   }
 
-  @Post('citations/bibtex')
+  @Post('by-keys')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async exportCitationsBibtex(
     @CurrentUser('id') userId: string,
@@ -63,9 +67,10 @@ export class ExportsController {
     @Param('projectId') routeProjectId?: string,
     @Query('projectId') queryProjectId?: string,
   ) {
-    const effectiveProjectId =
-      routeProjectId || body.projectId || queryProjectId;
-    const result = await this.exportsService.exportBibliography(
+    const effectiveProjectId = normalizeProjectScopeId(
+      routeProjectId || body.projectId || queryProjectId,
+    );
+    const result = await this.exportsService.exportByCitationKeys(
       userId,
       body.keys || [],
       effectiveProjectId,
@@ -86,7 +91,9 @@ export class ExportsController {
     @Query('tagId') tagId?: string,
     @Query('projectId') projectIdQuery?: string,
   ) {
-    const effectiveProjectId = routeProjectId || projectIdQuery;
+    const effectiveProjectId = normalizeProjectScopeId(
+      routeProjectId || projectIdQuery,
+    );
     const effectiveFormat = format || 'bibtex';
     const queryDto: ExportLibraryDto = {
       format: effectiveFormat,
@@ -110,7 +117,13 @@ export class ExportsController {
   async getCollectionBundle(
     @CurrentUser('id') userId: string,
     @Param('collectionId') collectionId: string,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
-    return this.exportsService.exportBundle(userId, collectionId);
+    return this.exportsService.exportBundle(
+      userId,
+      collectionId,
+      normalizeProjectScopeId(routeProjectId || queryProjectId),
+    );
   }
 }

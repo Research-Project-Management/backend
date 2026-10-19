@@ -179,8 +179,17 @@ export class RisFallbackParser {
    * Resilient line-by-line parser for non-standard RIS dialect variations
    */
   static parse(content: string): RisItem[] {
+    return this.parseRawRecords(content).map((rec) =>
+      this.finalizeRecord(rec),
+    );
+  }
+
+  /**
+   * Parses raw RIS content into intermediate FallbackRisRecord objects.
+   */
+  static parseRawRecords(content: string): FallbackRisRecord[] {
     const lines = content.split(/\r?\n/);
-    const records: RisItem[] = [];
+    const records: FallbackRisRecord[] = [];
     let currentRecord: FallbackRisRecord | null = null;
     let lastTag = '';
 
@@ -193,7 +202,7 @@ export class RisFallbackParser {
         if (currentRecord && line) {
           if (lastTag === 'AB' || lastTag === 'N2') {
             currentRecord.abstract =
-              (currentRecord.abstract ? currentRecord.abstract + ' ' : '') +
+              (currentRecord.abstract ? currentRecord.abstract + '\n' : '') +
               line;
           } else if (
             (lastTag === 'RN' || lastTag === 'N1') &&
@@ -217,6 +226,9 @@ export class RisFallbackParser {
       lastTag = tag;
 
       if (tag === 'TY') {
+        if (currentRecord) {
+          records.push(currentRecord);
+        }
         currentRecord = {
           itemType: mapRisTypeToItemType(value),
           rawAuthors: [],
@@ -229,7 +241,7 @@ export class RisFallbackParser {
 
       if (tag === 'ER') {
         if (currentRecord) {
-          records.push(this.finalizeRecord(currentRecord));
+          records.push(currentRecord);
           currentRecord = null;
         }
         continue;
@@ -255,7 +267,8 @@ export class RisFallbackParser {
           currentRecord.rawEditors.push(value);
           break;
         case 'PY':
-        case 'Y1': {
+        case 'Y1':
+        case 'DA': {
           const yearMatch = value.match(/\b(19|20)\d{2}\b/);
           if (yearMatch) currentRecord.year = parseInt(yearMatch[0], 10);
           break;
@@ -311,9 +324,20 @@ export class RisFallbackParser {
         case 'M1':
           currentRecord.rawM1 = value;
           break;
-        case 'M3':
+        case 'M3': {
           currentRecord.rawM3 = value;
+          const ids = extractIdentifiersFromText(
+            tag,
+            value,
+            currentRecord.isPubMedDb,
+          );
+          if (ids.pmcid && !currentRecord.pmcid) currentRecord.pmcid = ids.pmcid;
+          if (ids.pmid && !currentRecord.pmid) currentRecord.pmid = ids.pmid;
+          if (ids.arxivId && !currentRecord.arxivId) {
+            currentRecord.arxivId = ids.arxivId;
+          }
           break;
+        }
         case 'U1':
           currentRecord.rawU1 = value;
           break;
@@ -393,7 +417,7 @@ export class RisFallbackParser {
     }
 
     if (currentRecord) {
-      records.push(this.finalizeRecord(currentRecord));
+      records.push(currentRecord);
     }
 
     return records;

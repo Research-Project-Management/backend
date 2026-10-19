@@ -1,4 +1,4 @@
-﻿import { Injectable, BadRequestException, Inject } from '@nestjs/common';
+import { Injectable, BadRequestException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
 import { UpdateStateDto } from '@/modules/library/catalog/dto/state.dto';
@@ -9,14 +9,11 @@ import {
   UpsertStateData,
 } from '@/modules/library/catalog/types/state.types';
 import {
-  TransactionService,
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
 } from '@/modules/library/core';
-import {
-  ITEM_EXISTENCE_PORT,
-  IItemExistencePort,
-} from '@/modules/library/catalog/types/items.types';
+import { TransactionService } from '@/modules/library/sync';
+import { ItemQueryService } from './item-query.service';
 import {
   toStateResponse,
   isValidRating,
@@ -31,8 +28,8 @@ export class StateService {
   constructor(
     private readonly stateRepository: StateRepository,
     private readonly libraryTx: TransactionService,
-    @Inject(ITEM_EXISTENCE_PORT)
-    private readonly itemExistencePort?: IItemExistencePort,
+    @Optional()
+    private readonly itemExistencePort?: ItemQueryService,
   ) {}
 
   private toResponse(state?: StateEntity | null): StateData {

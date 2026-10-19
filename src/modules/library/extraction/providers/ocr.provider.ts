@@ -22,6 +22,7 @@ export interface PdfPageProxyLike {
     canvasContext?: unknown;
     viewport: unknown;
   }): { promise: Promise<unknown> };
+  cleanup?: () => void;
 }
 
 /**
@@ -132,6 +133,65 @@ export class OcrProvider {
   }
 
   /**
+   * Recognizes multiple scanned PDF pages sequentially, yielding the event loop every 5 pages.
+   */
+  async recognizeScannedPdfPages(
+    pages: PdfPageProxyLike[],
+    options?: OcrPreprocessOptions,
+  ): Promise<OcrPageResult[]> {
+    const results: OcrPageResult[] = [];
+    const limit = Math.min(pages.length, this.maxPages);
+    for (let i = 0; i < limit; i++) {
+      const res = await this.recognizePdfPage(pages[i], i, options);
+      results.push(res);
+      if ((i + 1) % 5 === 0) {
+        await new Promise((r) => setImmediate(r));
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Renders a PDF page into a PNG image buffer and immediately releases native Skia backing memory.
+   */
+  async renderPdfPageToImage(page: PdfPageProxyLike): Promise<{
+    buffer: Buffer;
+    width: number;
+    height: number;
+  }> {
+    let scale = this.renderScale;
+    let viewport = page.getViewport({ scale });
+    const maxDim = Math.max(viewport.width, viewport.height);
+    if (maxDim > 4096) {
+      scale = scale * (4096 / maxDim);
+      viewport = page.getViewport({ scale });
+    }
+
+    const canvasWidth = Math.max(1, Math.ceil(viewport.width));
+    const canvasHeight = Math.max(1, Math.ceil(viewport.height));
+    const canvas = createCanvas(canvasWidth, canvasHeight);
+    try {
+      const canvasContext = canvas.getContext('2d');
+      await page.render({
+        canvas,
+        canvasContext,
+        viewport,
+      }).promise;
+
+      const rawBuffer = canvas.toBuffer('image/png');
+      return {
+        buffer: rawBuffer,
+        width: canvasWidth,
+        height: canvasHeight,
+      };
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+      page?.cleanup?.();
+    }
+  }
+
+  /**
    * Performs full OCR recognition on a single PDF page with image preprocessing and worker pool.
    */
   async recognizePdfPage(
@@ -146,25 +206,11 @@ export class OcrProvider {
     const startTime = Date.now();
 
     try {
-      let scale = this.renderScale;
-      let viewport = page.getViewport({ scale });
-      const maxDim = Math.max(viewport.width, viewport.height);
-      if (maxDim > 4096) {
-        scale = scale * (4096 / maxDim);
-        viewport = page.getViewport({ scale });
-      }
-
-      const canvasWidth = Math.max(1, Math.ceil(viewport.width));
-      const canvasHeight = Math.max(1, Math.ceil(viewport.height));
-      const canvas = createCanvas(canvasWidth, canvasHeight);
-      const canvasContext = canvas.getContext('2d');
-      await page.render({
-        canvas,
-        canvasContext,
-        viewport,
-      }).promise;
-
-      const rawBuffer = canvas.toBuffer('image/png');
+      const {
+        buffer: rawBuffer,
+        width: canvasWidth,
+        height: canvasHeight,
+      } = await this.renderPdfPageToImage(page);
 
       let processedBuffer = rawBuffer;
       let orientationAngle = 0;

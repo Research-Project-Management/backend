@@ -93,22 +93,8 @@ export class RisParser {
   private readonly logger = new Logger(RisParser.name);
 
   /**
-   * Asynchronously parses raw RIS text using standard in-process citation parser.
-   */
-  parseAsync(content: string): Promise<RisItem[]> {
-    if (!content || typeof content !== 'string' || !content.trim()) {
-      return Promise.reject(
-        new IngestionValidationException(
-          'RIS content must be a non-empty string',
-        ),
-      );
-    }
-
-    return Promise.resolve(this.parse(content));
-  }
-
-  /**
-   * Parses a raw RIS string into one or more ItemMetadata objects using @citation-js engine.
+   * Parses a raw RIS string into one or more ItemMetadata objects using @citation-js engine,
+   * enriched by RisFallbackParser.parseRawRecords for tags dropped by citation-js.
    */
   parse(content: string): RisItem[] {
     if (!content || typeof content !== 'string' || !content.trim()) {
@@ -118,12 +104,6 @@ export class RisParser {
     }
 
     try {
-      const normalized = content.replace(/\r\n/g, '\n').trim();
-      const rawRecords = normalized
-        .split(/(?=^TY\s+-)/m)
-        .map((r) => r.trim())
-        .filter((r) => r.startsWith('TY'));
-
       const cite = new Cite(content);
       const data = cite.data || [];
 
@@ -131,7 +111,17 @@ export class RisParser {
         return this.fallbackParse(content);
       }
 
+      const rawRecordBlocks = this.splitRawRecordBlocks(content);
+
       return data.map((csl: CslRisItem, idx: number) => {
+        const block =
+          rawRecordBlocks[idx] ??
+          (rawRecordBlocks.length === 1 ? rawRecordBlocks[0] : undefined);
+        const rawRec =
+          block && this.needsRawRecordEnrichment(csl, block)
+            ? RisFallbackParser.parseRawRecords(block)[0]
+            : undefined;
+
         const rawAuthors: string[] = [];
         const creators: CreatorInput[] = [];
 
@@ -174,50 +164,30 @@ export class RisParser {
           }
         });
 
-        const currentRawRecord =
-          rawRecords[idx] || (rawRecords.length === 1 ? rawRecords[0] : '');
-
-        // Citation.js RIS plugin omits 'ED  -' (and sometimes variations of 'A2  -').
-        // Enrich editors from the raw record so they are never dropped.
-        if (currentRawRecord) {
-          const editorMatches = [
-            ...currentRawRecord.matchAll(/^(?:ED|A2)\s*-\s*(.+)$/gim),
-          ];
-          for (const m of editorMatches) {
-            const edStr = m[1]?.trim();
-            if (
-              edStr &&
-              !rawEditors.some(
-                (existing) => existing.toLowerCase() === edStr.toLowerCase(),
-              )
-            ) {
-              rawEditors.push(edStr);
-              const parsed = parseCreatorString(
-                edStr,
-                creators.length,
-                'editor',
-              );
-              creators.push({
-                lastName: parsed.lastName,
-                firstName: parsed.firstName || undefined,
-                fullName: parsed.fullName,
-                creatorType: 'editor',
-                ...(parsed.fieldMode === 1 ? { fieldMode: 1 } : {}),
-              });
-            }
+        for (const edStr of rawRec?.rawEditors || []) {
+          if (
+            edStr &&
+            !rawEditors.some(
+              (existing) => existing.toLowerCase() === edStr.toLowerCase(),
+            )
+          ) {
+            rawEditors.push(edStr);
+            const parsed = parseCreatorString(
+              edStr,
+              creators.length,
+              'editor',
+            );
+            creators.push({
+              lastName: parsed.lastName,
+              firstName: parsed.firstName || undefined,
+              fullName: parsed.fullName,
+              creatorType: 'editor',
+              ...(parsed.fieldMode === 1 ? { fieldMode: 1 } : {}),
+            });
           }
         }
 
-        // Tags / keywords handling
-        const rawKeywords: string[] = [];
-        if (currentRawRecord) {
-          const kwMatches = currentRawRecord.matchAll(/^(?:KW)\s*-\s*(.+)$/gim);
-          for (const m of kwMatches) {
-            if (m[1]?.trim()) {
-              rawKeywords.push(m[1].trim());
-            }
-          }
-        }
+        const rawKeywords: string[] = [...(rawRec?.rawTags || [])];
         if (rawKeywords.length === 0 && csl.keyword) {
           if (Array.isArray(csl.keyword)) {
             rawKeywords.push(
@@ -233,39 +203,25 @@ export class RisParser {
           csl.issued?.['date-parts']?.[0]?.[0] != null
             ? Number(csl.issued['date-parts'][0][0])
             : undefined;
-        if ((!year || Number.isNaN(year)) && currentRawRecord) {
-          const pyMatch = currentRawRecord.match(
-            /^(?:PY|Y1|DA)\s*-\s*.*?((?:19|20)\d{2})\b/im,
-          );
-          if (pyMatch) {
-            year = parseInt(pyMatch[1], 10);
-          } else {
-            year = undefined;
-          }
+        if (!year || Number.isNaN(year)) {
+          year = rawRec?.year;
         }
 
         let itemType = this.mapCslTypeToItemType(csl.type || 'article-journal');
-        if (currentRawRecord) {
-          const tyMatch = currentRawRecord.match(/^TY\s*-\s*(\S+)/im);
-          if (tyMatch?.[1]) {
-            const rawRisType = this.mapRisTypeToItemType(tyMatch[1]);
-            if (
-              rawRisType === 'patent' ||
-              rawRisType === 'thesis' ||
-              rawRisType === 'report' ||
-              rawRisType === 'bookSection' ||
-              rawRisType === 'conferencePaper'
-            ) {
-              itemType = rawRisType;
-            }
-          }
+        const rawRisType = rawRec?.itemType;
+        if (
+          rawRisType === 'patent' ||
+          rawRisType === 'thesis' ||
+          rawRisType === 'report' ||
+          rawRisType === 'bookSection' ||
+          rawRisType === 'conferencePaper'
+        ) {
+          itemType = rawRisType;
         }
 
-        // Notes extraction (including RN Research Notes and N1 Notes)
         const consolidatedNotes: Array<{ content: string; source?: string }> =
           [];
         const seenNotes = new Set<string>();
-
         const addNote = (text?: string | null, source: string = 'ris') => {
           if (!text || typeof text !== 'string') return;
           const trimmed = text.trim();
@@ -274,179 +230,67 @@ export class RisParser {
             consolidatedNotes.push({ content: trimmed, source });
           }
         };
-
-        if (currentRawRecord) {
-          const rnMatches = currentRawRecord.matchAll(
-            /^(?:RN|N1)\s*-\s*(.+)$/gim,
-          );
-          for (const m of rnMatches) {
-            addNote(m[1], 'ris');
-          }
+        for (const n of rawRec?.rawNotes || []) {
+          addNote(n, 'ris');
         }
-
         const rawNote = csl.note || csl.annote || csl.comment;
         addNote(typeof rawNote === 'string' ? rawNote : undefined, 'ris');
-
         const notes =
           consolidatedNotes.length > 0 ? consolidatedNotes : undefined;
 
-        let archive = csl.archive || undefined;
-        let callNumber = csl['call-number'] || undefined;
-        let series = csl['collection-title'] || undefined;
-        let edition = csl.edition ? String(csl.edition).trim() : undefined;
-        let language = csl.language ? String(csl.language).trim() : undefined;
-        let place = csl['publisher-place'] || undefined;
-        let pages = csl.page ? String(csl.page).trim() : undefined;
-        let shortTitle = csl['title-short']
-          ? String(csl['title-short']).trim()
-          : undefined;
-        let journalAbbr = csl['container-title-short']
-          ? String(csl['container-title-short']).trim()
-          : undefined;
-        let accessedAt: string | undefined;
-        let pmid: string | undefined;
-        let pmcid: string | undefined;
-        let arxivId: string | undefined;
-        let rawPublisher = csl.publisher
-          ? String(csl.publisher).trim()
-          : undefined;
-        let rawM1: string | undefined;
-        let rawM3: string | undefined;
-        let rawU1: string | undefined;
-        let rawSn: string | undefined;
-        let rawIs: string | undefined = csl.issue
-          ? String(csl.issue).trim()
-          : undefined;
-        let rawT2: string | undefined = csl['container-title']
-          ? String(csl['container-title']).trim()
-          : undefined;
-        let rawC3: string | undefined;
+        const sp = rawRec?.startPage;
+        const ep = rawRec?.endPage;
+        const combinedRawPages =
+          sp && ep && sp !== ep ? `${sp}-${ep}` : sp || ep;
+        const cslPages = csl.page ? String(csl.page).trim() : undefined;
+        const pages =
+          !cslPages || (!cslPages.includes('-') && sp && ep && sp !== ep)
+            ? combinedRawPages || cslPages
+            : cslPages;
 
-        if (currentRawRecord) {
-          if (!archive) {
-            const l4Match = currentRawRecord.match(/^L4\s*-\s*(.+)$/m);
-            if (l4Match) archive = l4Match[1].trim();
-          }
-          if (!callNumber) {
-            const cnMatch = currentRawRecord.match(
-              /^(?:CN|CA|C1)\s*-\s*(.+)$/m,
-            );
-            if (cnMatch) callNumber = cnMatch[1].trim();
-          }
-          if (!series) {
-            const t3Match = currentRawRecord.match(/^(?:T3|SE)\s*-\s*(.+)$/m);
-            if (t3Match) series = t3Match[1].trim();
-          }
-          if (!edition) {
-            const etMatch = currentRawRecord.match(/^ET\s*-\s*(.+)$/m);
-            if (etMatch) edition = etMatch[1].trim();
-          }
-          if (!language) {
-            const laMatch = currentRawRecord.match(/^LA\s*-\s*(.+)$/m);
-            if (laMatch) language = laMatch[1].trim();
-          }
-          if (!place) {
-            const placeMatch = currentRawRecord.match(
-              /^(?:CY|AD)\s*-\s*(.+)$/m,
-            );
-            if (placeMatch) place = placeMatch[1].trim();
-          }
-          const spMatch = currentRawRecord.match(/^SP\s*-\s*(.+)$/im);
-          const epMatch = currentRawRecord.match(/^EP\s*-\s*(.+)$/im);
-          const sp = spMatch?.[1]?.trim();
-          const ep = epMatch?.[1]?.trim();
-          if (sp || ep) {
-            const combinedPages =
-              sp && ep && sp !== ep ? `${sp}-${ep}` : sp || ep;
-            if (!pages || (!pages.includes('-') && sp && ep && sp !== ep)) {
-              pages = combinedPages;
-            }
-          }
-
-          if (!shortTitle) {
-            const stMatch = currentRawRecord.match(/^ST\s*-\s*(.+)$/im);
-            if (stMatch) shortTitle = stMatch[1].trim();
-          }
-          if (!journalAbbr) {
-            const j2Match = currentRawRecord.match(/^(?:J2|JA)\s*-\s*(.+)$/im);
-            if (j2Match) journalAbbr = j2Match[1].trim();
-          }
-          const y2Match = currentRawRecord.match(/^Y2\s*-\s*(.+)$/im);
-          if (y2Match?.[1]) {
-            accessedAt = y2Match[1].trim().replace(/\//g, '-');
-          }
-          if (!rawPublisher) {
-            const pbMatch = currentRawRecord.match(
-              /^(?:PB|INST)\s*-\s*(.+)$/im,
-            );
-            if (pbMatch) rawPublisher = pbMatch[1].trim();
-          }
-          const m1Match = currentRawRecord.match(/^M1\s*-\s*(.+)$/im);
-          if (m1Match) rawM1 = m1Match[1].trim();
-          const m3Match = currentRawRecord.match(/^M3\s*-\s*(.+)$/im);
-          if (m3Match) rawM3 = m3Match[1].trim();
-          const u1Match = currentRawRecord.match(/^U1\s*-\s*(.+)$/im);
-          if (u1Match) rawU1 = u1Match[1].trim();
-          const snMatch = currentRawRecord.match(/^SN\s*-\s*(.+)$/im);
-          if (snMatch) rawSn = snMatch[1].trim();
-          if (!rawIs) {
-            const isMatch = currentRawRecord.match(/^IS\s*-\s*(.+)$/im);
-            if (isMatch) rawIs = isMatch[1].trim();
-          }
-          const t2Match = currentRawRecord.match(
-            /^(?:T2|BT|JO|JF)\s*-\s*(.+)$/im,
-          );
-          if (t2Match) rawT2 = t2Match[1].trim();
-          const c3Match = currentRawRecord.match(/^(?:C3|T3)\s*-\s*(.+)$/im);
-          if (c3Match) rawC3 = c3Match[1].trim();
-
-          // Identifier extraction from AN, C2, M3, N1, UR, DB
-          const dbMatch = currentRawRecord.match(/^DB\s*-\s*(.+)$/im);
-          const isPubMedDb = dbMatch
-            ? /pubmed|medline|ncbi/i.test(dbMatch[1])
-            : false;
-          const idLines = [
-            ...currentRawRecord.matchAll(/^(?:AN|C2|M3|N1|UR)\s*-\s*(.+)$/gim),
-          ].map((m) => ({
-            tag: m[0].slice(0, 2).toUpperCase(),
-            val: m[1].trim(),
-          }));
-
-          for (const { tag, val } of idLines) {
-            const extracted = this.extractIdentifiersFromText(
-              tag,
-              val,
-              isPubMedDb,
-            );
-            if (!pmcid && extracted.pmcid) pmcid = extracted.pmcid;
-            if (!pmid && extracted.pmid) pmid = extracted.pmid;
-            if (!arxivId && extracted.arxivId) arxivId = extracted.arxivId;
-          }
-        }
-
-        let rawDoi = csl.DOI || undefined;
-        if (!rawDoi && currentRawRecord) {
-          const doMatch = currentRawRecord.match(/^DO\s*-\s*(.+)$/im);
-          if (doMatch) rawDoi = doMatch[1].trim();
-        }
+        const rawPublisher =
+          (csl.publisher ? String(csl.publisher).trim() : undefined) ||
+          rawRec?.publisher;
+        const rawIs =
+          (csl.issue ? String(csl.issue).trim() : undefined) || rawRec?.issue;
+        const rawT2 =
+          rawRec?.publicationTitle ||
+          (csl['container-title']
+            ? String(csl['container-title']).trim()
+            : undefined);
+        const rawC3 = rawRec?.rawC3;
+        const rawDoi = csl.DOI || rawRec?.doi || undefined;
         const doi = rawDoi ? normalizeDoi(rawDoi) || rawDoi : undefined;
 
         const typeSpecific = this.buildTypeSpecificFields({
           itemType,
           publisher: rawPublisher,
-          rawM1,
-          rawM3,
-          rawU1,
+          rawM1: rawRec?.rawM1,
+          rawM3: rawRec?.rawM3,
+          rawU1: rawRec?.rawU1,
           rawIs,
-          rawSn,
+          rawSn: rawRec?.rawSn,
           rawT2,
           rawC3,
         });
 
+        const cslAbstract = csl.abstract || undefined;
+        const rawRecAbstract = rawRec?.abstract;
+        const rawAbstract =
+          rawRecAbstract &&
+          (!cslAbstract ||
+            rawRecAbstract.replace(/\s+/g, ' ').length >
+              cslAbstract.replace(/\s+/g, ' ').length)
+            ? rawRecAbstract
+            : cslAbstract;
+
         return {
           itemType,
-          title: (csl.title || 'Untitled Reference').trim(),
-          shortTitle,
+          title: (csl.title || rawRec?.title || 'Untitled Reference').trim(),
+          shortTitle:
+            (csl['title-short']
+              ? String(csl['title-short']).trim()
+              : undefined) || rawRec?.shortTitle,
           authors: rawAuthors,
           creators,
           editors: rawEditors.length > 0 ? rawEditors : undefined,
@@ -454,47 +298,39 @@ export class RisParser {
           publicationDate: year ? String(year) : undefined,
           journal: rawT2,
           publicationTitle: rawT2,
-          journalAbbr,
+          journalAbbr:
+            (csl['container-title-short']
+              ? String(csl['container-title-short']).trim()
+              : undefined) || rawRec?.journalAbbr,
           publisher: rawPublisher,
           ...typeSpecific,
-          place,
-          volume: csl.volume ? String(csl.volume) : undefined,
+          place: csl['publisher-place'] || rawRec?.place || undefined,
+          volume: csl.volume ? String(csl.volume) : rawRec?.volume,
           issue:
             itemType === 'report' || itemType === 'patent' ? undefined : rawIs,
           pages,
           doi,
-          pmid,
-          pmcid,
-          arxivId,
-          isbn: itemType === 'patent' ? undefined : csl.ISBN || undefined,
-          issn: csl.ISSN || undefined,
-          url: csl.URL || undefined,
-          accessedAt,
-          abstract: (() => {
-            let rawAbstract = csl.abstract || undefined;
-            if (currentRawRecord) {
-              const abMatch = currentRawRecord.match(
-                /^(?:AB|N2)\s*-\s*([\s\S]*?)(?=\n[A-Z0-9]{2}\s*-|$)/im,
-              );
-              if (abMatch) {
-                const fullRawAb = abMatch[1].trim();
-                if (
-                  !rawAbstract ||
-                  fullRawAb.replace(/\s+/g, ' ').length >
-                    rawAbstract.replace(/\s+/g, ' ').length
-                ) {
-                  rawAbstract = fullRawAb;
-                }
-              }
-            }
-            return cleanAbstractText(rawAbstract);
-          })(),
-          series,
-          edition,
-          language,
+          pmid: rawRec?.pmid,
+          pmcid: rawRec?.pmcid,
+          arxivId: rawRec?.arxivId,
+          isbn:
+            itemType === 'patent'
+              ? undefined
+              : csl.ISBN || rawRec?.isbn || undefined,
+          issn: csl.ISSN || rawRec?.issn || undefined,
+          url: csl.URL || rawRec?.url || undefined,
+          accessedAt: rawRec?.accessedAt,
+          abstract: cleanAbstractText(rawAbstract),
+          series: csl['collection-title'] || rawRec?.series || undefined,
+          edition:
+            (csl.edition ? String(csl.edition).trim() : undefined) ||
+            rawRec?.edition,
+          language:
+            (csl.language ? String(csl.language).trim() : undefined) ||
+            rawRec?.language,
           rights: csl.rights ? String(csl.rights).trim() : undefined,
-          callNumber,
-          archive,
+          callNumber: csl['call-number'] || rawRec?.callNumber || undefined,
+          archive: csl.archive || rawRec?.archive || undefined,
           tags,
           keywords: tags,
           notes,
@@ -507,6 +343,29 @@ export class RisParser {
       );
       return this.fallbackParse(content);
     }
+  }
+
+  private splitRawRecordBlocks(content: string): string[] {
+    const blocks: string[] = [];
+    const regex = /TY\s*-[\s\S]*?(?:ER\s*-|$)/g;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(content)) !== null) {
+      blocks.push(match[0]);
+    }
+    return blocks;
+  }
+
+  private needsRawRecordEnrichment(csl: CslRisItem, block: string): boolean {
+    if (!csl.title || !csl.issued?.['date-parts']?.[0]?.[0]) {
+      return true;
+    }
+    if (csl.page && !String(csl.page).includes('-')) {
+      return true;
+    }
+    // Check if the block contains non-standard/type-specific RIS tags or multiline continuations
+    return /^(?:ST|ED|A2|Y2|J2|JA|T2|BT|INST|CY|AD|LA|M1|M3|U1|C3|AN|C2|UR|L1|ET|CN|CA|C1|L4|T3|SE|KW|RN|N1|AB|N2)\s*-/m.test(
+      block,
+    );
   }
 
   private extractIdentifiersFromText(

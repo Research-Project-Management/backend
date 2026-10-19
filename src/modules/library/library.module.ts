@@ -51,13 +51,11 @@ import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
   exports: [
     LibraryFacade,
     LIBRARY_FACADE,
-    LibraryCoreModule,
-    SyncModule,
     CatalogModule,
     ExtractionModule,
+    CitationModule,
     IngestionModule,
     SearchModule,
-    CitationModule,
   ],
 })
 export class LibraryModule {}

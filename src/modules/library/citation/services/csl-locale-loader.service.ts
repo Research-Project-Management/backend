@@ -8,11 +8,22 @@ import {
   TCVN_NUMERIC_CSL,
 } from '@/modules/library/citation/data/official-styles.data';
 import { VI_VN_LOCALE } from '@/modules/library/citation/data/official-locales.data';
+import {
+  BUILTIN_SPECIAL_STYLES,
+  NUMERIC_STYLE_TOKENS,
+  MAX_DYNAMIC_CSL_STYLES,
+  normalizeEngineStyleId,
+} from '@/modules/library/citation/domain/csl-style-registry';
 import { CslRepositoryService } from './csl-repository.service';
+
+export { BUILTIN_SPECIAL_STYLES, NUMERIC_STYLE_TOKENS, MAX_DYNAMIC_CSL_STYLES };
 
 interface CitationJsTemplateStore {
   has(id: string): boolean;
   add(id: string, xml: string): void;
+  remove?(id: string): void;
+  delete?(id: string): boolean;
+  data?: Record<string, string>;
 }
 
 interface CitationJsPluginConfig {
@@ -34,35 +45,44 @@ const { plugins } = require('@citation-js/core') as {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 require('@citation-js/plugin-csl');
 
-export const BUILTIN_SPECIAL_STYLES = new Set([
-  'auto',
-  'auto-numeric',
-  'bibtex',
-  'ris',
-  'tcvn',
-  'tcvn-numeric',
-]);
-
-export const NUMERIC_STYLE_TOKENS = [
-  'vancouver',
-  'nature',
-  'science',
-  'ieee',
-  'the-lancet',
-  'pnas',
-  'plos',
-];
-
 @Injectable()
 export class CslLocaleLoaderService {
   private readonly logger = new Logger(CslLocaleLoaderService.name);
   private templatesInitialized = false;
+  private readonly staticTemplateIds = new Set<string>([
+    'apa',
+    'vancouver',
+    'harvard1',
+    'ieee',
+    'nature',
+    'chicago',
+    'chicago-author-date',
+    'mla',
+    'mla-9th',
+    'tcvn',
+    'tcvn-author-date',
+    'tcvn-numeric',
+  ]);
+  private readonly dynamicTemplateIds = new Set<string>();
 
   constructor(
     @Optional()
     @Inject(CslRepositoryService)
     private readonly cslRepo?: CslRepositoryService,
   ) {}
+
+  private evictTemplateFromStore(
+    templates: CitationJsTemplateStore,
+    id: string,
+  ): void {
+    if (typeof templates.remove === 'function') {
+      templates.remove(id);
+    } else if (typeof templates.delete === 'function') {
+      templates.delete(id);
+    } else if (templates.data && typeof templates.data === 'object') {
+      delete templates.data[id];
+    }
+  }
 
   public initTemplates(): void {
     if (this.templatesInitialized) return;
@@ -87,6 +107,7 @@ export class CslLocaleLoaderService {
           ['tcvn-numeric', TCVN_NUMERIC_CSL],
         ];
         for (const [id, xml] of templateBindings) {
+          this.staticTemplateIds.add(id);
           if (!csl.templates.has(id)) csl.templates.add(id, xml);
         }
       }
@@ -122,12 +143,31 @@ export class CslLocaleLoaderService {
 
     try {
       const csl = plugins.config.get('@csl');
-      if (csl?.templates?.has(normalized)) return true;
+      if (csl?.templates?.has(normalized)) {
+        if (!this.staticTemplateIds.has(normalized)) {
+          this.dynamicTemplateIds.delete(normalized);
+          this.dynamicTemplateIds.add(normalized);
+        }
+        return true;
+      }
 
       if (this.cslRepo) {
         const xml = await this.cslRepo.fetchCslXml(normalized);
         if (xml && csl?.templates) {
+          if (
+            !this.staticTemplateIds.has(normalized) &&
+            this.dynamicTemplateIds.size >= MAX_DYNAMIC_CSL_STYLES
+          ) {
+            const oldestId = this.dynamicTemplateIds.values().next().value;
+            if (oldestId) {
+              this.dynamicTemplateIds.delete(oldestId);
+              this.evictTemplateFromStore(csl.templates, oldestId);
+            }
+          }
           csl.templates.add(normalized, xml);
+          if (!this.staticTemplateIds.has(normalized)) {
+            this.dynamicTemplateIds.add(normalized);
+          }
           this.logger.log(
             `Dynamically registered on-demand CSL template: "${normalized}"`,
           );
@@ -144,22 +184,6 @@ export class CslLocaleLoaderService {
   }
 
   public normalizeStyle(styleId: string): string {
-    const s = (styleId || 'auto').toLowerCase().trim();
-    if (s === 'auto' || s === 'default' || !s) return 'auto';
-    if (s === 'auto-numeric' || s === 'numeric') return 'auto-numeric';
-    if (s === 'apa-7th' || s === 'apa') return 'apa';
-    if (s === 'mla-9th' || s === 'mla') return 'mla';
-    if (s === 'chicago-author-date' || s === 'chicago') return 'chicago';
-    if (s === 'harvard' || s === 'harvard1') return 'harvard1';
-    if (
-      s === 'tcvn' ||
-      s === 'tcvn-author-date' ||
-      s === 'bo-giao-duc' ||
-      s === 'vietnam'
-    ) {
-      return 'tcvn';
-    }
-    if (s === 'tcvn-numeric') return 'tcvn-numeric';
-    return s;
+    return normalizeEngineStyleId(styleId);
   }
 }

@@ -1,8 +1,6 @@
 import { cleanAuthorName, splitAuthorString } from './author.domain';
-import {
-  cleanAbstractText,
-  normalizeAcademicTitleCase,
-} from './academic-text.domain';
+import { cleanAbstractText } from './academic-text.domain';
+import { normalizeAcademicTitleCase } from './academic-title.domain';
 import { normalizeAcademicTags } from './tag.domain';
 
 export interface ExtractedRegexFields {

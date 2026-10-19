@@ -1,14 +1,8 @@
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
-import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { PrismaService } from '@/core';
 import { formatLiteratureNoteMarkdown } from '@/modules/library/catalog/domain/notes.domain';
-import {
-  prepareNotesToCreate,
-  prepareAttachmentsToCreate,
-  buildCommandCreateInput,
-  buildTipTapDocFromText,
-} from '@/modules/library/catalog/domain/command-payload.builder';
-
+import { buildTipTapDocFromText, stripNoteHtml } from '@/modules/library/core/domain/tiptap.domain';
+import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { PrismaService } from '@/core';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 
 describe('Library Notes, Annotations & Deep Search Parity', () => {
@@ -72,86 +66,6 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
     });
   });
 
-  describe('2. CommandRepository - Restore Cascade for Notes, Attachments & Annotations', () => {
-    let commandRepo: CommandRepository;
-    let mockPrisma: any;
-
-    beforeEach(() => {
-      mockPrisma = {
-        item: {
-          findFirst: jest.fn().mockResolvedValue({
-            id: 'a0000000-0000-0000-0000-000000000001',
-            userId: 'b0000000-0000-0000-0000-000000000002',
-            deletedAt: new Date(),
-            version: 1,
-            metadata: {},
-          }),
-          update: jest.fn().mockResolvedValue({
-            id: 'a0000000-0000-0000-0000-000000000001',
-            deletedAt: null,
-            version: 2,
-            notesList: [],
-            attachments: [],
-          }),
-        },
-        note: {
-          updateMany: jest.fn().mockResolvedValue({ count: 2 }),
-        },
-        attachment: {
-          findMany: jest
-            .fn()
-            .mockResolvedValue([
-              { id: 'c0000000-0000-0000-0000-000000000003' },
-            ]),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        annotation: {
-          updateMany: jest.fn().mockResolvedValue({ count: 4 }),
-        },
-      };
-
-      commandRepo = new CommandRepository(mockPrisma as PrismaService);
-    });
-
-    it('should cascade restore to associated notes, attachments, and annotations when restoring an item', async () => {
-      const itemId = 'a0000000-0000-0000-0000-000000000001';
-      const userId = 'b0000000-0000-0000-0000-000000000002';
-      const attId = 'c0000000-0000-0000-0000-000000000003';
-
-      const restored = await commandRepo.restore(userId, itemId);
-
-      expect(restored).toBeDefined();
-
-      // Verify Note restore cascade
-      expect(mockPrisma.note.updateMany).toHaveBeenCalledWith({
-        where: { itemId, deletedAt: { not: null } },
-        data: { deletedAt: null },
-      });
-
-      // Verify Attachment and Annotation restore cascade
-      expect(mockPrisma.attachment.findMany).toHaveBeenCalledWith({
-        where: { itemId },
-        select: { id: true },
-      });
-      expect(mockPrisma.attachment.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: [attId] }, deletedAt: { not: null } },
-        data: { deletedAt: null },
-      });
-      expect(mockPrisma.annotation.updateMany).toHaveBeenCalledWith({
-        where: { attachmentId: { in: [attId] }, deletedAt: { not: null } },
-        data: { deletedAt: null },
-      });
-
-      // Verify Item restore
-      expect(mockPrisma.item.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: itemId },
-          data: { deletedAt: null, version: { increment: 1 } },
-        }),
-      );
-    });
-  });
-
   describe('3. Literature Notes Multi-Protocol Backlink Formatter', () => {
     const mockItem = {
       id: 'paper-123',
@@ -199,8 +113,7 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
   });
 
   describe('4. Standardized Note Ingestion & TipTap AST Parity', () => {
-    const userId = '00000000-0000-0000-0000-000000000001';
-    const createdById = '00000000-0000-0000-0000-000000000002';
+    const policy = new NormalizationPolicy();
 
     it('should split multi-paragraph text into clean TipTap paragraph nodes', () => {
       const multiline =
@@ -233,193 +146,23 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
       });
     });
 
-    it('should derive note title from first line following Zotero conventions', () => {
-      const notes = [
-        '# Core Findings on Attention Mechanisms\n\nDetailed analysis follows...',
-      ];
-      const prepared = prepareNotesToCreate(notes, userId, createdById);
-
-      expect(prepared).toHaveLength(1);
-      expect(prepared[0].title).toBe('Core Findings on Attention Mechanisms');
-      expect(prepared[0].contentMd).toBe(notes[0]);
-      expect(prepared[0].tags).toContain('imported');
-      expect((prepared[0].contentJson as any).content).toHaveLength(2);
-    });
-
-    it('should truncate titles longer than 80 characters cleanly', () => {
-      const longTitle =
-        'This is an extremely long title for a note that exceeds eighty characters in length and therefore should be truncated';
-      const notes = [longTitle];
-      const prepared = prepareNotesToCreate(notes, userId, createdById);
-
-      expect(prepared).toHaveLength(1);
-      expect(prepared[0].title.length).toBeLessThanOrEqual(80);
-      expect(prepared[0].title.endsWith('...')).toBe(true);
-    });
-
-    it('should preserve explicit title, custom tags, and existing TipTap AST when provided', () => {
-      const customAST = {
-        type: 'doc',
-        content: [
-          {
-            type: 'paragraph',
-            content: [{ type: 'text', text: 'Pre-rendered AST' }],
-          },
-        ],
-      };
-      const notes = [
-        {
-          title: 'Custom User Title',
-          content: 'Pre-rendered AST',
-          contentJson: customAST,
-          tags: ['deep-learning', 'methodology'],
-        },
-      ];
-      const prepared = prepareNotesToCreate(notes, userId, createdById);
-
-      expect(prepared).toHaveLength(1);
-      expect(prepared[0].title).toBe('Custom User Title');
-      expect(prepared[0].contentJson).toEqual(customAST);
-      expect(prepared[0].tags).toContain('imported');
-      expect(prepared[0].tags).toContain('deep-learning');
-      expect(prepared[0].tags).toContain('methodology');
-    });
-
-    it('should eliminate duplicate notes and ignore existing notes list', () => {
-      const notes = ['Note A', 'Note A', 'Note B'];
-      const existing = [{ contentMd: 'Note B' }];
-      const prepared = prepareNotesToCreate(
-        notes,
-        userId,
-        createdById,
-        existing,
-      );
-
-      expect(prepared).toHaveLength(1);
-      expect(prepared[0].contentMd).toBe('Note A');
+    it('should eliminate duplicate notes during NormalizationPolicy.normalize', () => {
+      const normalized = policy.normalize({
+        title: 'Test Paper',
+        notes: ['Note A', 'Note A', 'Note B'],
+      });
+      expect(normalized.notes).toHaveLength(2);
+      expect(normalized.notes?.map((n) => n.content)).toEqual(['Note A', 'Note B']);
     });
 
     it('should strip HTML tags from raw note content', () => {
-      const notes = ['<div><p>Paragraph inside HTML tags</p></div>'];
-      const prepared = prepareNotesToCreate(notes, userId, createdById);
-
-      expect(prepared).toHaveLength(1);
-      expect(prepared[0].contentMd).toBe('Paragraph inside HTML tags');
-      expect(prepared[0].title).toBe('Paragraph inside HTML tags');
+      const cleaned = stripNoteHtml('<div><p>Paragraph inside HTML tags</p></div>');
+      expect(cleaned).toBe('Paragraph inside HTML tags');
     });
   });
 
-  describe('5. Standardized Multi-Attachment Ingestion & Title Parity', () => {
-    it('should parse multiple attachments preserving titles, linkModes, and types in metadata', () => {
-      const rawAttachments = [
-        {
-          title: 'Full Text PDF',
-          filename: 'vaswani2017.pdf',
-          fileId: '018f3a21-1234-7000-8000-000000000001',
-          mimeType: 'application/pdf',
-          size: 1048576,
-        },
-        {
-          title: 'ArXiv Snapshot',
-          url: 'https://arxiv.org/abs/1706.03762',
-          mimeType: 'text/html',
-          attachmentType: 'snapshot',
-          linkMode: 'imported_url',
-          accessDate: '2024-05-18T10:00:00Z',
-        },
-        {
-          title: 'Supplementary Appendix',
-          filename: 'appendix.pdf',
-          url: 'https://arxiv.org/pdf/1706.03762.pdf',
-          mimeType: 'application/pdf',
-          attachmentType: 'supplementary',
-          linkMode: 'linked_url',
-        },
-      ];
-
-      const prepared = prepareAttachmentsToCreate(rawAttachments);
-      expect(prepared).toHaveLength(3);
-
-      // Primary PDF check
-      expect(prepared[0].attachmentType).toBe('primary_pdf');
-      expect(prepared[0].filename).toBe('vaswani2017.pdf');
-      expect((prepared[0].metadata as any)?.title).toBe('Full Text PDF');
-      expect(prepared[0].linkMode).toBe('imported_file');
-
-      // Snapshot check
-      expect(prepared[1].attachmentType).toBe('snapshot');
-      expect(prepared[1].linkMode).toBe('imported_url');
-      expect((prepared[1].metadata as any)?.title).toBe('ArXiv Snapshot');
-      expect((prepared[1].metadata as any)?.accessDate).toBe(
-        '2024-05-18T10:00:00Z',
-      );
-
-      // Supplementary check
-      expect(prepared[2].attachmentType).toBe('supplementary');
-      expect(prepared[2].linkMode).toBe('linked_url');
-      expect((prepared[2].metadata as any)?.title).toBe(
-        'Supplementary Appendix',
-      );
-    });
-
-    it('should fallback cleanly to single fileUrl/fileId when attachments array is absent', () => {
-      const fallbackFileId = '018f3a21-1234-7000-8000-000000000002';
-      const fallbackData = {
-        filename: 'single_doc.pdf',
-        fileUrl:
-          '/api/v1/storage/files/018f3a21-1234-7000-8000-000000000002/content',
-        size: 500000,
-        mimeType: 'application/pdf',
-      };
-
-      const prepared = prepareAttachmentsToCreate(
-        undefined,
-        fallbackFileId,
-        fallbackData,
-      );
-      expect(prepared).toHaveLength(1);
-      expect(prepared[0].attachmentType).toBe('primary_pdf');
-      expect(prepared[0].filename).toBe('single_doc.pdf');
-      expect(prepared[0].fileId).toBe(fallbackFileId);
-    });
-
-    it('should accurately compute hasFile and attachmentCount in buildCommandCreateInput', async () => {
-      const mockClient = {
-        tag: {
-          createMany: jest.fn().mockResolvedValue({ count: 0 }),
-        },
-      } as any;
-
-      const itemData: any = {
-        title: 'Multi Attachment Paper',
-        uploadedById: '018f3a21-1234-7000-8000-000000000003',
-        attachments: [
-          {
-            title: 'Full Text PDF',
-            filename: 'paper.pdf',
-            fileId: '018f3a21-1234-7000-8000-000000000004',
-            mimeType: 'application/pdf',
-          },
-          {
-            title: 'Web Snapshot',
-            url: 'https://example.com/snapshot.html',
-            mimeType: 'text/html',
-          },
-        ],
-      };
-
-      const { createData } = await buildCommandCreateInput(
-        '018f3a21-1234-7000-8000-000000000003',
-        itemData,
-        mockClient,
-      );
-
-      expect(createData.hasFile).toBe(true);
-      expect(createData.attachmentCount).toBe(2);
-      expect((createData.attachments as any)?.create).toHaveLength(2);
-    });
-
-    it('should expose attachment title in items.mapper.ts from att.title or metadata.title', () => {
+  describe('5. Standardized Multi-Attachment Ingestion & Mapper Parity', () => {
+    it('should expose attachment title and primaryFile in ItemsMapper.toDomain', () => {
       const rawItem = {
         id: '018f3a21-1234-7000-8000-000000000005',
         title: 'Test Paper',
@@ -441,7 +184,7 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
         ],
       };
 
-      const mapped = ItemsMapper.toDomain(rawItem as any);
+      const mapped = ItemsMapper.toDomain(rawItem as any) as any;
       expect(mapped.attachments).toHaveLength(2);
       expect(mapped.attachments[0].title).toBe('Author Manuscript PDF');
       expect(mapped.attachments[1].title).toBe('Publisher Webpage Snapshot');

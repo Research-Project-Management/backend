@@ -1,4 +1,4 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
@@ -9,7 +9,7 @@ import {
   ItemDetail,
   TypeConversionPreview,
   ConvertTypeOptions,
-} from '@/modules/library/catalog/types/items.types';
+} from '@/modules/library/core/types/bibliographic.types';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
@@ -50,18 +50,14 @@ export class ItemTypeConversionService {
     itemId: string,
     targetType: string,
     options: ConvertTypeOptions = {},
-    projectIdOrTx?: string | Prisma.TransactionClient,
+    projectId?: string,
     tx?: Prisma.TransactionClient,
   ) {
-    const projectId =
-      typeof projectIdOrTx === 'string' ? projectIdOrTx : undefined;
-    const effectiveTx = typeof projectIdOrTx === 'object' ? projectIdOrTx : tx;
-
     const rawExisting = await this.query.findById(
       userId,
       itemId,
       projectId,
-      effectiveTx,
+      tx,
     );
     if (!rawExisting) {
       throw new NotFoundException(`Item ${itemId} not found in user library`);
@@ -86,7 +82,7 @@ export class ItemTypeConversionService {
       itemId,
       options.expectedVersion,
       updatePayload,
-      effectiveTx,
+      tx,
       projectId,
     );
 

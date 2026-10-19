@@ -12,24 +12,6 @@ export function calculateFileChecksum(buffer: Buffer): string {
 }
 
 /**
- * Sanitizes a filename, removing path traversal sequences and invalid characters.
- */
-export function sanitizeFilename(filename?: string): string {
-  if (!filename) return 'unnamed_attachment';
-  const clean = filename
-    .replace(/[/\\]/g, '_')
-    .split('')
-    .filter((c) => {
-      const code = c.charCodeAt(0);
-      return code >= 32 && code !== 127;
-    })
-    .join('')
-    .trim();
-
-  return clean || 'unnamed_attachment';
-}
-
-/**
  * Validates domain invariant rules for creating an attachment.
  */
 export function validateAttachmentInvariants(input: {

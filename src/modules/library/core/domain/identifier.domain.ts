@@ -424,3 +424,91 @@ export function extractFileIdFromUrl(url?: string | null): string | null {
   );
   return match ? match[1] : null;
 }
+
+const CITATION_KEY_STOPWORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'on',
+  'in',
+  'of',
+  'for',
+  'and',
+  'to',
+  'with',
+  'by',
+  'from',
+  'at',
+  'as',
+  'into',
+  'towards',
+  'toward',
+  'via',
+  'using',
+]);
+
+/**
+ * Generates a canonical BibTeX / BetterBibTeX-style citation key (`lastnameYYYYkeyword`)
+ * from item bibliographic metadata.
+ */
+export function generateCitationKey(metadata: {
+  citationKey?: string | null;
+  creators?: Array<{
+    lastName?: string | null;
+    fullName?: string | null;
+    name?: string | null;
+    fieldMode?: number | null;
+  }> | null;
+  authors?: string[] | null;
+  year?: number | string | null;
+  publicationDate?: string | null;
+  date?: string | null;
+  title?: string | null;
+}): string {
+  if (metadata.citationKey && metadata.citationKey.trim()) {
+    return metadata.citationKey.trim();
+  }
+
+  let family = 'anon';
+  const firstCreator = metadata.creators?.[0];
+  const firstAuthor = metadata.authors?.[0];
+
+  if (firstCreator?.lastName) {
+    family = firstCreator.lastName;
+  } else if (firstCreator?.fullName || firstCreator?.name) {
+    const raw = (firstCreator.fullName || firstCreator.name || '').trim();
+    const parts = raw.split(/\s+/);
+    family = parts[parts.length - 1] || 'anon';
+  } else if (typeof firstAuthor === 'string' && firstAuthor.trim()) {
+    const raw = firstAuthor.trim();
+    if (raw.includes(',')) {
+      family = raw.split(',')[0].trim();
+    } else {
+      const parts = raw.split(/\s+/);
+      family = parts[parts.length - 1] || 'anon';
+    }
+  }
+
+  const cleanFamily =
+    family
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '') || 'anon';
+
+  const yearStr = metadata.year
+    ? String(metadata.year)
+    : (metadata.publicationDate || metadata.date)?.match(/\b(\d{4})\b/)?.[1] ||
+      'nd';
+
+  const rawTitle = (metadata.title || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  const words = rawTitle.match(/[a-z0-9]{3,}/g) || [];
+  const titleWord =
+    words.find((w) => !CITATION_KEY_STOPWORDS.has(w)) || words[0] || 'work';
+
+  return `${cleanFamily}${yearStr}${titleWord}`;
+}
+

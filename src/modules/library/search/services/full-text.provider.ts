@@ -20,23 +20,14 @@ export interface PageAnchorMatch {
 export class FullTextProvider {
   private readonly repo: SearchRepository;
 
-  constructor(@Optional() searchRepoOrClient?: SearchRepository | object) {
-    if (!searchRepoOrClient) {
+  constructor(@Optional() private readonly searchRepo?: SearchRepository) {
+    if (!this.searchRepo) {
       throw new SubsystemUnavailableException(
         'FullTextProvider requires SearchRepository',
         { service: 'SearchIndex' },
       );
     }
-    if (
-      'findAttachmentPages' in searchRepoOrClient &&
-      typeof searchRepoOrClient.findAttachmentPages === 'function'
-    ) {
-      this.repo = searchRepoOrClient;
-    } else {
-      this.repo = new SearchRepository(
-        searchRepoOrClient as ConstructorParameters<typeof SearchRepository>[0],
-      );
-    }
+    this.repo = this.searchRepo;
   }
 
   /**
@@ -60,7 +51,11 @@ export class FullTextProvider {
     const normalizedTerm = (term ?? '').trim().toLowerCase();
     if (!normalizedTerm) return [];
 
-    const pages = await this.repo.findAttachmentPages(attachmentId, pageIndex);
+    const pages = await this.repo.findAttachmentPages(
+      attachmentId,
+      pageIndex,
+      normalizedTerm,
+    );
     const matches: PageAnchorMatch[] = [];
 
     for (const page of pages) {

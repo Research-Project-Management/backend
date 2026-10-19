@@ -107,8 +107,7 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
         zlib.gunzipSync(uploadedBuffer).toString('utf-8'),
       );
       expect(decompressed.title).toBe('Attention Is All You Need');
-      expect(decompressed.sections).toHaveLength(2);
-      expect(decompressed.figures).toHaveLength(1);
+      expect(decompressed.references).toHaveLength(1);
 
       // Verify that extractionRepo saved the lightweight Claim Check payload in Postgres
       expect(mockExtractionRepo.saveMetadataSourceRecord).toHaveBeenCalledWith(
@@ -118,10 +117,6 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
           isOffloaded: true,
           fileId: storageFileId,
           storageKey: `extractions/${itemId}/pdf_fulltext.json.gz`,
-          sectionCount: 2,
-          figureCount: 1,
-          tableCount: 1,
-          formulaCount: 1,
           referenceCount: 1,
           title: 'Attention Is All You Need',
         }),
@@ -146,8 +141,8 @@ describe('Library Claim Check / Tiered Storage Pattern', () => {
         'pdf_fulltext',
         expect.objectContaining({
           title: 'Attention Is All You Need',
-          sections: expect.any(Array),
-          sectionCount: 2,
+          references: expect.any(Array),
+          referenceCount: 1,
         }),
       );
 

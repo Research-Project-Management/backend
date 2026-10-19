@@ -271,6 +271,9 @@ export interface DocumentReferenceDto {
 export interface DocumentFulltextResponse {
   title?: string;
   abstract?: string;
+  markdown?: string;
+  plainText?: string;
+  pageCount?: number;
   sections: DocumentSectionDto[];
   figures: DocumentFigureDto[];
   tables: DocumentTableDto[];

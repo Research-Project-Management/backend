@@ -1,13 +1,12 @@
 import {
   cleanSingleTag,
   normalizeAcademicTags,
-  normalizeTags,
   toCanonicalTagKey,
   resolveArxivTaxonomyTag,
   stripLatexMarkup,
   stripTagPrefixes,
   MAX_TAG_LENGTH,
-} from '@/modules/library/core/domain/tag.domain';
+} from '@/modules/library/core';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import { toItemData } from '@/modules/library/ingestion/stages/commit.stage';
 
@@ -255,7 +254,7 @@ describe('Library Academic Tag & Subject Taxonomy Engine', () => {
         ],
       };
 
-      const mapped = ItemsMapper.mapFlattenedState(rawItem, 'user-1');
+      const mapped = ItemsMapper.mapFlattenedState(rawItem, 'user-1')!;
 
       expect(mapped.tags).toEqual(['Deep Learning', 'COVID-19']);
       expect(mapped.zoteroTags).toEqual([
@@ -273,7 +272,7 @@ describe('Library Academic Tag & Subject Taxonomy Engine', () => {
         },
       };
 
-      const mapped = ItemsMapper.mapFlattenedState(rawItem, 'user-1');
+      const mapped = ItemsMapper.mapFlattenedState(rawItem, 'user-1')!;
 
       expect(mapped.tags).toEqual(['Machine Learning', 'NLP']);
       expect(mapped.zoteroTags).toEqual([

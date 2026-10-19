@@ -340,7 +340,6 @@ describe('IdempotentConsumerService & Inbox Pattern', () => {
         mockExtractionRepo,
         mockPdf,
         mockStoragePort,
-        300000,
         idempotentConsumer,
       );
     });

@@ -1,6 +1,6 @@
 import {
   cleanSingleTag,
-  normalizeTags,
+  normalizeAcademicTags,
   toCanonicalTagKey,
 } from '@/modules/library/core/domain/tag.domain';
 import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
@@ -3989,7 +3989,7 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
       let totalFalseNegatives = 0;
 
       for (const record of LARGE_SCALE_BENCHMARK_CORPUS) {
-        const actual = normalizeTags(record.rawInputTags);
+        const actual = normalizeAcademicTags(record.rawInputTags);
         const expectedSet = new Set(record.expectedCleanTags);
         const actualSet = new Set(actual);
 
@@ -4131,7 +4131,7 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
             content: n.content,
             contentMd: n.content,
           })),
-          userStates: [
+          states: [
             {
               userId: 'user-benchmark',
               isStarred: true,
@@ -4319,7 +4319,7 @@ describe('Large-Scale 108-Dataset Library Tag, Note & User Output Accuracy Bench
   describe('Stage E: Backend-to-Frontend Inspector UI Output Parity across all 108 Records', () => {
     it('guarantees 100% parity between Backend normalized output and Frontend cleanSingleTag / Note presentation rules', () => {
       for (const record of LARGE_SCALE_BENCHMARK_CORPUS) {
-        const backendTags = normalizeTags(record.rawInputTags);
+        const backendTags = normalizeAcademicTags(record.rawInputTags);
         expect(backendTags).toEqual(record.expectedCleanTags);
 
         // Every tag emitted by backend must pass idempotently through cleanSingleTag without mutation or loss

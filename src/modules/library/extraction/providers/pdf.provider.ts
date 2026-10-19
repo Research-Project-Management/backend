@@ -1,18 +1,14 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { getDocumentProxy, getMeta } from 'unpdf';
-import {
-  AcademicCreator,
-  BibliographicReference,
-  DocumentSection,
-  DocumentFigure,
-  DocumentTable,
-  DocumentFormula,
-} from '@/modules/library/core/types/bibliographic.types';
-import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
+import { AcademicCreator } from '@/modules/library/core/types/bibliographic.types';
 import {
   cleanAbstractText,
-  ExtractionProcessException,
   libraryConfig,
+  ExtractedPdfMetadata,
+  OcrPageProvenance,
+  OcrProvenanceData,
+  ExtractedPdfDocument,
+  TrustedExtractionResult,
 } from '@/modules/library/core';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import { OcrProvider } from './ocr.provider';
@@ -21,81 +17,14 @@ import {
   OcrBlock,
 } from '@/modules/library/extraction/types/ocr.types';
 import { TrustedExtractionService } from '@/modules/library/extraction/services/trusted-extraction.service';
-import { TrustedExtractionResult } from '@/modules/library/extraction/types/trusted-extraction.types';
 import { PdfTextMetadataExtractor } from './pdf-text-metadata.extractor';
 
-export interface ExtractedPdfMetadata {
-  doi?: string;
-  isbn?: string;
-  arxivId?: string;
-  primaryCategory?: string;
-  pmid?: string;
-  title?: string;
-  authors?: string[];
-  creators?: AcademicCreator[];
-  year?: number;
-  publicationDate?: string;
-  publisher?: string;
-  repository?: string;
-  numberOfPages?: number;
-  abstract?: string;
-  abstractParagraphs?: string[];
-  abstractSections?: Array<{ heading?: string; text: string }>;
-  keywords?: string[];
-  notes?: Array<{ content: string; type?: string }>;
-  journal?: string;
-  bookTitle?: string;
-  conferenceName?: string;
-  volume?: string;
-  issue?: string;
-  pages?: string;
-  place?: string;
-  issn?: string;
-  creationDate?: string;
-  rawText?: string;
-  rawTei?: string;
-  referenceCount?: number;
-  citationCount?: number;
-  isSelfSufficient?: boolean;
-  qualityScore?: number;
-  engineUsed?: string;
-}
-
-export interface OcrPageProvenance {
-  pageIndex: number;
-  confidence: number;
-  orientationAngle: number;
-  skewAngle: number;
-  preprocessed: boolean;
-  textLength: number;
-  lineCount: number;
-  wordCount: number;
-  executionTimeMs: number;
-}
-
-export interface OcrProvenanceData {
-  totalOcrPages: number;
-  avgConfidence: number;
-  executionTimeMs: number;
-  pages: OcrPageProvenance[];
-}
-
-export interface ExtractedPdfDocument {
-  metadata: ExtractedPdfMetadata;
-  pages: Array<{
-    pageIndex: number;
-    textContent: string;
-    charOffset: number;
-  }>;
-  references?: BibliographicReference[];
-  sections?: DocumentSection[];
-  figures?: DocumentFigure[];
-  tables?: DocumentTable[];
-  formulas?: DocumentFormula[];
-  ocrProvenance?: OcrProvenanceData;
-  searchablePdfBuffer?: Buffer;
-  fullText?: string;
-}
+export type {
+  ExtractedPdfMetadata,
+  OcrPageProvenance,
+  OcrProvenanceData,
+  ExtractedPdfDocument,
+};
 
 @Injectable()
 export class PdfProvider {
@@ -103,7 +32,6 @@ export class PdfProvider {
   public static readonly TEXT_SCAN_LIMIT = 50_000;
 
   constructor(
-    @Optional() private readonly ssrfGuard?: SsrfGuardService,
     @Optional() private readonly ocrProvider?: OcrProvider,
     @Optional() private readonly trustedExtractor?: TrustedExtractionService,
     @Optional()
@@ -137,189 +65,203 @@ export class PdfProvider {
       // Non-fatal: individual stages handle unparseable buffers gracefully
     }
 
-    // 2. Local-first In-Process Fast-Path: TrustedExtractionFacade (< 15ms)
-    let trustedResult: TrustedExtractionResult | undefined;
-    const localStart = performance.now();
+    let fallbackDocumentProxy:
+      | Awaited<ReturnType<typeof getDocumentProxy>>
+      | undefined;
 
-    if (this.trustedExtractor) {
-      try {
-        trustedResult = await this.trustedExtractor.extract(
-          buffer,
-          undefined,
-          sharedDocumentProxy,
-        );
-      } catch (err: unknown) {
-        this.logger.debug(
-          `TrustedExtractor local execution skipped: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-
-    const _localDurationMs = performance.now() - localStart;
-
-    let combinedText = '';
-    const unpdfExtractedMetadata: ExtractedPdfMetadata = {};
-
-    // 3. Extract metadata from header stream first using safe regex before any parsing
-    const headerExtractedMetadata = this.extractMetadataFromBuffer(buffer);
-
-    // 4. Reuse pre-parsed PDF document proxy (or fallback to getDocumentProxy)
     try {
-      const document =
-        sharedDocumentProxy ??
-        (await (async () => {
-          const clonedBinaryDataArray = new Uint8Array(buffer.byteLength);
-          clonedBinaryDataArray.set(buffer);
-          return getDocumentProxy(clonedBinaryDataArray);
-        })());
+      // 2. Local-first In-Process Fast-Path: TrustedExtractionFacade (< 15ms)
+      let trustedResult: TrustedExtractionResult | undefined;
+      const localStart = performance.now();
 
-      try {
-        const documentInformation = await getMeta(document);
-        if (documentInformation?.info) {
-          const informationRecord = documentInformation.info;
-          if (typeof informationRecord.Title === 'string') {
-            const cleanTitle = informationRecord.Title.trim();
-            if (
-              cleanTitle.length > 5 &&
-              !cleanTitle.toLowerCase().endsWith('.pdf') &&
-              !/^(untitled|document|microsoft word)/i.test(cleanTitle)
-            ) {
-              unpdfExtractedMetadata.title = cleanTitle;
-            }
-          }
-          if (typeof informationRecord.Author === 'string') {
-            const cleanAuthor = informationRecord.Author.trim();
-            if (
-              cleanAuthor.length > 2 &&
-              !/^(administrator|user|owner|unknown)$/i.test(cleanAuthor)
-            ) {
-              const authorList = cleanAuthor
-                .split(/[,;\n]|\band\b/i)
-                .map((authorItem: string) => authorItem.trim())
-                .filter(
-                  (authorItem: string) =>
-                    authorItem.length > 1 && !/^\d+$/.test(authorItem),
-                );
-              if (authorList.length > 0) {
-                unpdfExtractedMetadata.authors = authorList;
-              }
-            }
-          }
-          if (typeof informationRecord.CreationDate === 'string') {
-            const yearMatch = informationRecord.CreationDate.match(/D:(\d{4})/);
-            if (yearMatch?.[1]) {
-              unpdfExtractedMetadata.year = parseInt(yearMatch[1], 10);
-            }
-          }
-          if (typeof informationRecord.Keywords === 'string') {
-            const rawTokens = informationRecord.Keywords.split(/[,;•|]/)
-              .map((k: string) => k.trim())
-              .filter(
-                (k: string) => k.length > 1 && k.split(/\s+/).length <= 7,
-              );
-            const keywordList = normalizeAcademicTags(rawTokens);
-            if (keywordList.length > 0) {
-              unpdfExtractedMetadata.keywords = keywordList;
-            }
-          }
+      if (this.trustedExtractor) {
+        try {
+          trustedResult = await this.trustedExtractor.extract(
+            buffer,
+            undefined,
+            sharedDocumentProxy,
+          );
+        } catch (err: unknown) {
+          this.logger.debug(
+            `TrustedExtractor local execution skipped: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
-      } catch {
-        // Optional metadata inspection
       }
 
-      const totalNumPages = document.numPages;
-      unpdfExtractedMetadata.numberOfPages = totalNumPages;
+      const _localDurationMs = performance.now() - localStart;
 
-      const configuredLimit = libraryConfig().extraction.pdfMaxIndexPages;
-      const requestedLimit = options?.headerOnly
-        ? 3
-        : options?.maxPages && options.maxPages > 0
-          ? options.maxPages
-          : configuredLimit > 0
-            ? configuredLimit
-            : totalNumPages;
-      const maxPagesToExtract = Math.min(totalNumPages, requestedLimit);
+      let combinedText = '';
+      const unpdfExtractedMetadata: ExtractedPdfMetadata = {};
 
-      let currentOffset = 0;
+      // 3. Extract metadata from header stream first using safe regex before any parsing
+      const headerExtractedMetadata = this.extractMetadataFromBuffer(buffer);
 
-      for (let pageIndex = 1; pageIndex <= maxPagesToExtract; pageIndex++) {
-        const page = await document.getPage(pageIndex);
-        const content = (await page.getTextContent()) as {
-          items: Array<{ str?: string; hasEOL?: boolean }>;
-        };
-        let pageText = content.items
-          .map((it) => (it.str || '') + (it.hasEOL ? '\n' : ' '))
-          .join('');
+      // 4. Reuse pre-parsed PDF document proxy (or fallback to getDocumentProxy)
+      try {
+        const document =
+          sharedDocumentProxy ??
+          (fallbackDocumentProxy = await (async () => {
+            const clonedBinaryDataArray = new Uint8Array(buffer.byteLength);
+            clonedBinaryDataArray.set(buffer);
+            return getDocumentProxy(clonedBinaryDataArray);
+          })());
 
-        const scanDetection = this.ocrProvider?.detectScannedPage
-          ? await this.ocrProvider.detectScannedPage(
-              page as unknown as Parameters<
-                NonNullable<typeof this.ocrProvider>['detectScannedPage']
-              >[0],
-              content,
-            )
-          : {
-              isScanned: pageText.replace(/\s/g, '').length < 32,
-              isHybrid: false,
-            };
-
-        const shouldOcr =
-          this.ocrProvider?.enabled &&
-          (scanDetection.isScanned || scanDetection.isHybrid) &&
-          pageIndex <= this.ocrProvider.maxPages;
-
-        if (shouldOcr) {
-          const res = await this.ocrProvider.recognizePdfPage(
-            page,
-            pageIndex - 1,
-          );
-          if (res) {
-            const rawOcrText = typeof res === 'string' ? res : res.text;
-            if (scanDetection.isHybrid) {
-              if (rawOcrText && rawOcrText.length > pageText.length) {
-                pageText = rawOcrText;
+        try {
+          const documentInformation = await getMeta(document);
+          if (documentInformation?.info) {
+            const informationRecord = documentInformation.info;
+            if (typeof informationRecord.Title === 'string') {
+              const cleanTitle = informationRecord.Title.trim();
+              if (
+                cleanTitle.length > 5 &&
+                !cleanTitle.toLowerCase().endsWith('.pdf') &&
+                !/^(untitled|document|microsoft word)/i.test(cleanTitle)
+              ) {
+                unpdfExtractedMetadata.title = cleanTitle;
               }
-            } else if (rawOcrText) {
-              pageText = rawOcrText;
             }
-            if (typeof res !== 'string' && res.wasOcr) {
-              ocrPageResults.push(res);
-              if (typeof page.getViewport === 'function') {
-                try {
-                  const viewport = page.getViewport({ scale: 2 });
-                  imageDimensionsMap.set(pageIndex - 1, {
-                    width: viewport.width,
-                    height: viewport.height,
-                  });
-                } catch {
-                  // ignore
+            if (typeof informationRecord.Author === 'string') {
+              const cleanAuthor = informationRecord.Author.trim();
+              if (
+                cleanAuthor.length > 2 &&
+                !/^(administrator|user|owner|unknown)$/i.test(cleanAuthor)
+              ) {
+                const authorList = cleanAuthor
+                  .split(/[,;\n]|\band\b/i)
+                  .map((authorItem: string) => authorItem.trim())
+                  .filter(
+                    (authorItem: string) =>
+                      authorItem.length > 1 && !/^\d+$/.test(authorItem),
+                  );
+                if (authorList.length > 0) {
+                  unpdfExtractedMetadata.authors = authorList;
                 }
               }
             }
+            if (typeof informationRecord.CreationDate === 'string') {
+              const yearMatch =
+                informationRecord.CreationDate.match(/D:(\d{4})/);
+              if (yearMatch?.[1]) {
+                unpdfExtractedMetadata.year = parseInt(yearMatch[1], 10);
+              }
+            }
+            if (typeof informationRecord.Keywords === 'string') {
+              const rawTokens = informationRecord.Keywords.split(/[,;•|]/)
+                .map((k: string) => k.trim())
+                .filter(
+                  (k: string) => k.length > 1 && k.split(/\s+/).length <= 7,
+                );
+              const keywordList = normalizeAcademicTags(rawTokens);
+              if (keywordList.length > 0) {
+                unpdfExtractedMetadata.keywords = keywordList;
+              }
+            }
           }
+        } catch {
+          // Optional metadata inspection
         }
 
-        pages.push({
-          pageIndex: pageIndex - 1,
-          textContent: pageText,
-          charOffset: currentOffset,
-        });
-        currentOffset += pageText.length + 1;
-        combinedText += (combinedText ? '\n' : '') + pageText;
-      }
-    } catch (caughtError: unknown) {
-      const errorMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : String(caughtError);
-      this.logger.warn(
-        `PDF unpdf parse failed (encrypted or corrupted): ${errorMessage}`,
-      );
-    }
+        const totalNumPages = document.numPages;
+        unpdfExtractedMetadata.numberOfPages = totalNumPages;
 
-    const textExtractedMetadata = combinedText
-      ? this.extractMetadataFromText(combinedText)
-      : {};
+        const configuredLimit = libraryConfig().extraction.pdfMaxIndexPages;
+        const requestedLimit = options?.headerOnly
+          ? 3
+          : options?.maxPages && options.maxPages > 0
+            ? options.maxPages
+            : configuredLimit > 0
+              ? configuredLimit
+              : totalNumPages;
+        const maxPagesToExtract = Math.min(totalNumPages, requestedLimit);
+
+        let currentOffset = 0;
+
+        for (let pageIndex = 1; pageIndex <= maxPagesToExtract; pageIndex++) {
+          const page = await document.getPage(pageIndex);
+          try {
+            const content = (await page.getTextContent()) as {
+              items: Array<{ str?: string; hasEOL?: boolean }>;
+            };
+            let pageText = content.items
+              .map((it) => (it.str || '') + (it.hasEOL ? '\n' : ' '))
+              .join('');
+
+            const scanDetection = this.ocrProvider?.detectScannedPage
+              ? await this.ocrProvider.detectScannedPage(
+                  page as unknown as Parameters<
+                    NonNullable<typeof this.ocrProvider>['detectScannedPage']
+                  >[0],
+                  content,
+                )
+              : {
+                  isScanned: pageText.replace(/\s/g, '').length < 32,
+                  isHybrid: false,
+                };
+
+            const shouldOcr =
+              this.ocrProvider?.enabled &&
+              (scanDetection.isScanned || scanDetection.isHybrid) &&
+              pageIndex <= this.ocrProvider.maxPages;
+
+            if (shouldOcr) {
+              const res = await this.ocrProvider.recognizePdfPage(
+                page,
+                pageIndex - 1,
+              );
+              if (res) {
+                const rawOcrText = res.text;
+                if (scanDetection.isHybrid) {
+                  if (rawOcrText && rawOcrText.length > pageText.length) {
+                    pageText = rawOcrText;
+                  }
+                } else if (rawOcrText) {
+                  pageText = rawOcrText;
+                }
+                if (res.wasOcr) {
+                  ocrPageResults.push(res);
+                  if (typeof page.getViewport === 'function') {
+                    try {
+                      const viewport = page.getViewport({ scale: 2 });
+                      imageDimensionsMap.set(pageIndex - 1, {
+                        width: viewport.width,
+                        height: viewport.height,
+                      });
+                    } catch {
+                      // ignore
+                    }
+                  }
+                }
+              }
+            }
+
+            pages.push({
+              pageIndex: pageIndex - 1,
+              textContent: pageText,
+              charOffset: currentOffset,
+            });
+            currentOffset += pageText.length + 1;
+            combinedText += (combinedText ? '\n' : '') + pageText;
+          } finally {
+            try {
+              page?.cleanup?.();
+            } catch {
+              // Ignore page cleanup errors
+            }
+          }
+        }
+      } catch (caughtError: unknown) {
+        const errorMessage =
+          caughtError instanceof Error
+            ? caughtError.message
+            : String(caughtError);
+        this.logger.warn(
+          `PDF unpdf parse failed (encrypted or corrupted): ${errorMessage}`,
+        );
+      }
+
+      const textExtractedMetadata = combinedText
+        ? this.extractMetadataFromText(combinedText)
+        : {};
 
     const metadata: ExtractedPdfMetadata = {
       doi:
@@ -480,12 +422,6 @@ export class PdfProvider {
       engineUsed: trustedResult?.provenance?.engineUsed,
     };
 
-    const references: BibliographicReference[] = [];
-    const sections: DocumentSection[] = [];
-    const figures: DocumentFigure[] = [];
-    const tables: DocumentTable[] = [];
-    const formulas: DocumentFormula[] = [];
-
     let searchablePdfBuffer: Buffer | undefined;
 
     if (ocrPageResults.length > 0 && this.ocrProvider?.generateSearchablePdf) {
@@ -499,10 +435,6 @@ export class PdfProvider {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Failed to generate sandwich PDF: ${message}`);
       }
-    }
-
-    if (references && references.length > 0) {
-      metadata.referenceCount = references.length;
     }
 
     let ocrProvenance: OcrProvenanceData | undefined;
@@ -538,45 +470,26 @@ export class PdfProvider {
       };
     }
 
-    return {
-      metadata,
-      pages,
-      references,
-      sections,
-      figures,
-      tables,
-      formulas,
-      ocrProvenance,
-      searchablePdfBuffer,
-    };
-  }
-
-  async extractMetadataFromUrl(fileUrl: string): Promise<ExtractedPdfMetadata> {
-    try {
-      const guard = this.ssrfGuard || new SsrfGuardService();
-      const response = await guard.safeFetch(fileUrl, {
-        headers: { 'User-Agent': 'Flux-Extractor/1.0' },
-      });
-
-      if (!response.ok) {
-        throw new ExtractionProcessException(
-          `Failed to fetch PDF from URL: ${response.status} ${response.statusText}`,
-          { url: fileUrl, status: response.status },
-        );
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      const extractedDocument = await this.extractDocumentFromBuffer(buffer);
-      return extractedDocument.metadata;
-    } catch (caughtError: unknown) {
-      const errorMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : String(caughtError);
-      this.logger.warn(`Remote PDF extraction failed: ${errorMessage}`);
-      return {};
+      return {
+        metadata,
+        pages,
+        ocrProvenance,
+        searchablePdfBuffer,
+      };
+    } finally {
+      const disposeProxy = async (
+        proxy?: Awaited<ReturnType<typeof getDocumentProxy>>,
+      ) => {
+        if (!proxy) return;
+        const disposable = proxy as {
+          cleanup?: () => Promise<void> | void;
+          destroy?: () => Promise<void> | void;
+        };
+        await Promise.resolve(disposable.cleanup?.()).catch(() => {});
+        await Promise.resolve(disposable.destroy?.()).catch(() => {});
+      };
+      await disposeProxy(fallbackDocumentProxy);
+      await disposeProxy(sharedDocumentProxy);
     }
   }
 
@@ -638,22 +551,5 @@ export class PdfProvider {
 
   extractMetadataFromText(text: string): ExtractedPdfMetadata {
     return this.textMetadataExtractor.extractMetadataFromText(text);
-  }
-
-  async extractFromBuffer(buffer: Buffer): Promise<string | null> {
-    try {
-      const extractedDocument = await this.extractDocumentFromBuffer(buffer);
-      if (extractedDocument.metadata.doi) return extractedDocument.metadata.doi;
-    } catch (caughtError: unknown) {
-      const errorMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : String(caughtError);
-      this.logger.warn(`extractFromBuffer failed: ${errorMessage}`);
-    }
-
-    return this.extractFromText(
-      buffer.subarray(0, PdfProvider.TEXT_SCAN_LIMIT).toString('latin1'),
-    );
   }
 }

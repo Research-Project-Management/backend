@@ -90,7 +90,7 @@ export interface ICatalogFacade {
   ): Promise<NoteEntity[]>;
   listCollections?(userId: string, projectId?: string): Promise<unknown[]>;
   findMatchCandidates?(
-    scope: { userId?: string; projectId?: string | null } | string,
+    scope: { userId?: string; projectId?: string | null },
     criteria: {
       doi?: string | null;
       arxivId?: string | null;

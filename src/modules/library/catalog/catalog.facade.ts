@@ -9,14 +9,11 @@ import { StateService } from './services/state.service';
 import { NotesService } from './services/notes.service';
 import {
   ItemDetail,
-  ItemSummary,
   DuplicateCandidateItem,
   QualityAuditCandidateItem,
   CreateItemData,
   UpdateItemData,
-} from './types/items.types';
-import { TagEntity } from './types/tags.types';
-import { StateData } from './types/state.types';
+} from '@/modules/library/core/types/bibliographic.types';
 import { NoteEntity, CreateNoteData } from './types/notes.types';
 import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';
 import { LibraryItemSource } from '@/modules/library/core';
@@ -26,6 +23,7 @@ import {
 } from '@/modules/library/core/ports/catalog.port';
 export { CATALOG_FACADE };
 export type { ICatalogFacade };
+export type CatalogItemSummary = ItemDetail;
 
 /**
  * Public Facade for Catalog Bounded Context.
@@ -51,35 +49,12 @@ export class CatalogFacade {
     return this.queryService.findById(userId, itemId, projectId);
   }
 
-  async getItemSummary(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<ItemSummary | null> {
-    return this.queryService.findSummaryById(userId, itemId, projectId);
-  }
-
   async itemExists(
     userId: string,
     itemId: string,
     projectId?: string,
   ): Promise<boolean> {
     return this.queryService.exists(userId, itemId, projectId);
-  }
-
-  async getTags(
-    userId: string,
-    options?: { includeInactive?: boolean; projectId?: string },
-  ): Promise<TagEntity[]> {
-    return this.tagsService.getTags(userId, options);
-  }
-
-  async getItemState(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<StateData | null> {
-    return this.stateService.getState(userId, itemId, projectId);
   }
 
   async createItem(
@@ -150,14 +125,6 @@ export class CatalogFacade {
     return this.queryService.findMany(userId, options || {});
   }
 
-  validateItemType(type: string): Promise<boolean> {
-    return Promise.resolve(this.typesService.isValidType(type));
-  }
-
-  getPrimaryCreatorType(itemType: string): string {
-    return this.typesService.getPrimaryCreatorType(itemType);
-  }
-
   getOrderedFields(itemType: string): ItemFieldDefinition[] {
     return this.typesService.getOrderedFields(itemType);
   }
@@ -198,7 +165,7 @@ export class CatalogFacade {
       duplicateItemIds,
       primaryItemId,
     );
-    if (typeof this.notesService?.reassignToItem === 'function') {
+    if (this.notesService) {
       await this.notesService.reassignToItem(
         duplicateItemIds,
         primaryItemId,
@@ -222,12 +189,13 @@ export class CatalogFacade {
   async listCollections(
     userId: string,
     projectId?: string,
-  ): Promise<Awaited<ReturnType<CollectionsService['findAll']>>> {
-    return this.collectionsService.findAll(userId, projectId);
+  ): Promise<Awaited<ReturnType<CollectionsService['getCollections']>>['collections']> {
+    const res = await this.collectionsService.getCollections(userId, projectId);
+    return res.collections;
   }
 
   async findMatchCandidates(
-    scope: { userId?: string; projectId?: string | null } | string,
+    scope: { userId?: string; projectId?: string | null },
     criteria: {
       doi?: string | null;
       arxivId?: string | null;

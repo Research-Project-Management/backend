@@ -1,86 +1,34 @@
 import {
   IsString,
-  IsNotEmpty,
   IsIn,
   IsOptional,
   IsArray,
   IsUUID,
   IsObject,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import {
   SubmissionKind,
   IdentifierType,
   RecordFormat,
 } from '@/modules/library/ingestion/types/submission.types';
 
-export class IdentifierPayloadDto {
-  @IsIn(['IDENTIFIER'])
-  kind!: 'IDENTIFIER';
-
-  @IsIn(['DOI', 'PMID', 'ARXIV', 'ISBN'])
-  identifierType!: IdentifierType;
-
-  @IsString()
-  @IsNotEmpty()
-  value!: string;
-}
-
-export class RecordPayloadDto {
-  @IsIn(['RECORD'])
-  kind!: 'RECORD';
-
-  @IsIn(['BIBTEX', 'RIS', 'CSL_JSON', 'ENDNOTE_XML', 'MODS', 'REFER'])
-  format!: RecordFormat;
-
-  @IsString()
-  @IsNotEmpty()
-  content!: string;
-}
-
-export class UrlPayloadDto {
-  @IsIn(['URL'])
-  kind!: 'URL';
-
-  @IsString()
-  @IsNotEmpty()
-  url!: string;
-
-  @IsOptional()
-  @IsString()
-  previewToken?: string;
-}
-
-export class FilePayloadDto {
-  @IsIn(['FILE'])
-  kind!: 'FILE';
-
-  @IsString()
-  @IsNotEmpty()
-  fileId!: string;
-
-  @IsOptional()
-  @IsString()
-  filename?: string;
-}
-
-export class ConnectorPayloadDto {
-  @IsIn(['CONNECTOR'])
-  kind!: 'CONNECTOR';
-
-  @IsString()
-  @IsNotEmpty()
-  connectionId!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  externalObjectId!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  externalVersion!: string;
-}
-
 export class IngestionSubmissionDto {
+  @Transform(({ value, obj }) => {
+    if (value && typeof value === 'string') {
+      const upper = value.toUpperCase();
+      if (['IDENTIFIER', 'RECORD', 'URL', 'FILE', 'CONNECTOR'].includes(upper)) {
+        return upper as SubmissionKind;
+      }
+    }
+    const src = String(obj?.source || '').toLowerCase();
+    if (src === 'pdf' || obj?.fileId) return 'FILE';
+    if (src === 'doi' || src === 'arxiv' || src === 'isbn' || src === 'pmid' || obj?.doi || obj?.arxivId || obj?.isbn || obj?.pmid) return 'IDENTIFIER';
+    if (src === 'bibtex' || src === 'ris' || obj?.format || obj?.recordFormat) return 'RECORD';
+    if (src === 'url' || obj?.url) return 'URL';
+    if (src === 'zotero' || src === 'connector' || obj?.connectionId) return 'CONNECTOR';
+    return value;
+  })
   @IsIn(['IDENTIFIER', 'RECORD', 'URL', 'FILE', 'CONNECTOR'])
   kind!: SubmissionKind;
 

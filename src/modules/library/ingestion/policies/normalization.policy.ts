@@ -23,7 +23,7 @@ import {
   stripLatexBraces,
   convertAcademicHtmlToMarkdown,
 } from '@/modules/library/core';
-import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import { resolveBidirectionalBaseFields } from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
 import { normalizeCreators } from './creator-normalization.policy';
 
@@ -387,7 +387,7 @@ export class NormalizationPolicy {
     if (Array.isArray(raw.labels)) rawTagList.push(...(raw.labels as string[]));
 
     if (rawTagList.length > 0) {
-      const normalizedTags = normalizeTags(rawTagList);
+      const normalizedTags = normalizeAcademicTags(rawTagList);
       if (normalizedTags.length > 0) {
         result.tags = normalizedTags;
         result.keywords = normalizedTags;
@@ -461,7 +461,7 @@ export class NormalizationPolicy {
           noteItem.source = noteObj.source.trim();
         }
         if (Array.isArray(noteObj?.tags) && noteObj.tags.length > 0) {
-          noteItem.tags = normalizeTags(noteObj.tags as string[]);
+          noteItem.tags = normalizeAcademicTags(noteObj.tags as string[]);
         }
         cleanNotes.push(noteItem);
       }

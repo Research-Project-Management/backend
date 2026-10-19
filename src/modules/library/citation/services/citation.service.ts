@@ -34,8 +34,6 @@ export { AcademicQueryResolverService };
 @Injectable()
 export class CitationService {
   private readonly logger = new Logger(CitationService.name);
-  private readonly registry = new CslStyleRegistry();
-  private readonly queryResolver: AcademicQueryResolverService;
 
   constructor(
     @Optional()
@@ -58,16 +56,14 @@ export class CitationService {
     @Optional()
     private readonly httpClient?: AcademicHttpClient,
     @Optional()
-    queryResolver?: AcademicQueryResolverService,
-  ) {
-    this.queryResolver =
-      queryResolver ??
-      new AcademicQueryResolverService(
-        this.doiService,
-        this.metadataPort,
-        this.httpClient,
-      );
-  }
+    private readonly queryResolver: AcademicQueryResolverService = new AcademicQueryResolverService(
+      this.doiService,
+      this.metadataPort,
+      this.httpClient,
+    ),
+    @Optional()
+    private readonly registry: CslStyleRegistry = new CslStyleRegistry(),
+  ) {}
 
   /**
    * Search across 10,000+ CSL styles from official repository.
@@ -360,93 +356,10 @@ export class CitationService {
     }
 
     return this.formatItem(
-      this.mapCatalogItemToCitationInput(item),
+      item as unknown as CitationItemInput,
       styleId,
       index,
     );
-  }
-
-  private mapCatalogItemToCitationInput(
-    item: CatalogItemRecord,
-  ): CitationItemInput {
-    const mappedCreators = item.contributors?.map((c) => ({
-      creatorType: c.creatorType || 'author',
-      firstName: c.firstName || '',
-      lastName: c.lastName || '',
-      fullName: c.fullName || undefined,
-      name: c.fullName || undefined,
-    }));
-
-    return {
-      id: item.id,
-      title: item.title,
-      itemType: item.itemType || 'journalArticle',
-      authors:
-        item.contributors
-          ?.filter((c) => (c.creatorType || 'author') === 'author')
-          .map(
-            (c) =>
-              c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-          ) || [],
-      contributors: mappedCreators,
-      creators: mappedCreators,
-      publicationTitle: item.publicationTitle || undefined,
-      journal: item.publicationTitle || undefined,
-      publisher: item.publisher || undefined,
-      volume: item.volume || undefined,
-      issue: item.issue || undefined,
-      pages: item.pages || undefined,
-      year: item.year || undefined,
-      publicationDate:
-        typeof item.publicationDate === 'string'
-          ? item.publicationDate
-          : undefined,
-      doi: item.doi || undefined,
-      isbn: typeof item.isbn === 'string' ? item.isbn : undefined,
-      issn: typeof item.issn === 'string' ? item.issn : undefined,
-      pmid: typeof item.pmid === 'string' ? item.pmid : undefined,
-      pmcid: typeof item.pmcid === 'string' ? item.pmcid : undefined,
-      arxivId: typeof item.arxivId === 'string' ? item.arxivId : undefined,
-      url: item.url || undefined,
-      citationKey: item.citationKey || undefined,
-      place: typeof item.place === 'string' ? item.place : undefined,
-      edition:
-        typeof item.edition === 'string' || typeof item.edition === 'number'
-          ? String(item.edition)
-          : undefined,
-      series: typeof item.series === 'string' ? item.series : undefined,
-      bookTitle:
-        typeof item.bookTitle === 'string' ? item.bookTitle : undefined,
-      proceedingsTitle:
-        typeof item.proceedingsTitle === 'string'
-          ? item.proceedingsTitle
-          : undefined,
-      conferenceName:
-        typeof item.conferenceName === 'string'
-          ? item.conferenceName
-          : undefined,
-      thesisType:
-        typeof item.thesisType === 'string' ? item.thesisType : undefined,
-      reportType:
-        typeof item.reportType === 'string' ? item.reportType : undefined,
-      versionNumber:
-        typeof item.versionNumber === 'string' ? item.versionNumber : undefined,
-      accessedAt:
-        item.accessedAt instanceof Date || typeof item.accessedAt === 'string'
-          ? item.accessedAt
-          : undefined,
-      abstract: typeof item.abstract === 'string' ? item.abstract : undefined,
-      extra: typeof item.extra === 'string' ? item.extra : undefined,
-      metadata: item.metadata,
-      updatedAt:
-        item.updatedAt instanceof Date || typeof item.updatedAt === 'string'
-          ? item.updatedAt
-          : undefined,
-      version:
-        typeof item.version === 'number' || typeof item.version === 'string'
-          ? item.version
-          : undefined,
-    };
   }
 
   /**
@@ -477,7 +390,9 @@ export class CitationService {
       await this.cslEngine.ensureTemplate(styleId);
       try {
         const cslItems = items.map((it) => CslJsonMapper.toCsl(it));
-        const batchRes = this.cslEngine.formatBatch(cslItems, styleId);
+        const batchRes = this.cslEngine.formatBatchAsync
+          ? await this.cslEngine.formatBatchAsync(cslItems, styleId)
+          : this.cslEngine.formatBatch(cslItems, styleId);
         combinedInText = batchRes.combinedInText;
         bibliographyText = batchRes.bibliographyText;
         bibliographyHtml = batchRes.bibliographyHtml;
@@ -538,7 +453,7 @@ export class CitationService {
 
       if (!formatted) {
         formatted = this.formatItem(
-          this.mapCatalogItemToCitationInput(item),
+          item as unknown as CitationItemInput,
           styleId,
           index + 1,
         );
@@ -549,7 +464,6 @@ export class CitationService {
 
     const citations = itemIds.map((id) => ({
       itemId: id,
-      paperId: id,
       citation: citationMap.get(id) || {
         styleId,
         inText: '',

@@ -16,10 +16,6 @@ export class TypesService {
     return this.snapshot.version;
   }
 
-  getSchemaVersion(): number {
-    return this.snapshot.version;
-  }
-
   getSource(): string {
     return this.snapshot.source;
   }
@@ -36,14 +32,6 @@ export class TypesService {
     return types.filter((t: ItemTypeDefinition) => t.isBibliographic);
   }
 
-  getItemTypes(
-    options?: boolean | { bibliographicOnly?: boolean },
-  ): ItemTypeDefinition[] {
-    const includeSpecial =
-      typeof options === 'boolean' ? options : !options?.bibliographicOnly;
-    return this.getAllItemTypes(includeSpecial);
-  }
-
   getItemType(itemType: string): ItemTypeDefinition | undefined {
     if (!itemType) return undefined;
     const normalized = this.normalizeTypeKey(itemType);
@@ -54,10 +42,6 @@ export class TypesService {
     if (!itemType) return false;
     const normalized = this.normalizeTypeKey(itemType);
     return normalized in this.snapshot.itemTypes;
-  }
-
-  isValidType(itemType: string): boolean {
-    return this.isValidItemType(itemType);
   }
 
   isBibliographic(itemType: string): boolean {

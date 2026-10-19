@@ -4,6 +4,10 @@ import {
   IsOptional,
   MaxLength,
   IsEnum,
+  IsInt,
+  Min,
+  Max,
+  ValidateIf,
 } from 'class-validator';
 import { TagType } from '@prisma/client';
 
@@ -17,6 +21,13 @@ export class CreateTagDto {
   @IsOptional()
   @MaxLength(50)
   color?: string;
+
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsInt()
+  @Min(1)
+  @Max(9)
+  @IsOptional()
+  shortcut?: number | null;
 
   @IsEnum(TagType)
   @IsOptional()
@@ -38,8 +49,16 @@ export class UpdateTagDto {
   @MaxLength(50)
   color?: string;
 
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsInt()
+  @Min(1)
+  @Max(9)
+  @IsOptional()
+  shortcut?: number | null;
+
   @IsString()
   @IsOptional()
   @MaxLength(50)
   type?: string;
 }
+

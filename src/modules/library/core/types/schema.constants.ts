@@ -181,22 +181,6 @@ const MONO_FIELDS = new Set([
   'pmcid',
 ]);
 
-export const BASE_SEMANTICS = [
-  'title',
-  'publicationTitle',
-  'publisher',
-  'place',
-  'date',
-  'volume',
-  'pages',
-  'type',
-  'number',
-  'medium',
-  'originalDate',
-  'status',
-  'authority',
-] as const;
-
 interface ZoteroRawSchema {
   version?: number;
   locales?: Record<
@@ -224,12 +208,12 @@ interface ZoteroRawSchema {
   csl?: {
     types?: Record<string, string[]>;
     names?: Record<string, string>;
-    fields?: Record<string, Record<string, string[]>>;
+    fields?: Record<string, Record<string, string | string[]>>;
   };
 }
 
 function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
-  const schema = rawZoteroSchema as unknown as ZoteroRawSchema;
+  const schema: ZoteroRawSchema = rawZoteroSchema;
   const en = schema.locales?.['en-US'] || {
     fields: {},
     itemTypes: {},

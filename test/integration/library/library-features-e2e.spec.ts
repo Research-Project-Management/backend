@@ -16,9 +16,9 @@ import {
 import {
   ARXIV_CATEGORY_MAP,
   resolveCanonicalArxivCategory,
-  normalizeTags,
+  normalizeAcademicTags,
   cleanSingleTag,
-} from '@/modules/library/core/domain/tag.domain';
+} from '@/modules/library/core';
 import { formatLiteratureNoteMarkdown } from '@/modules/library/catalog/domain/notes.domain';
 import {
   isValidRating,
@@ -206,7 +206,7 @@ describe('Comprehensive Library End-to-End (E2E) Feature Matrix Simulation', () 
       abstract: cleanAbstractText(raw.abstract || ''),
       extra: (validated.sanitizedItem as any).extra || '',
       creators: raw.creators || [],
-      tags: normalizeTags(raw.tags || []),
+      tags: normalizeAcademicTags(raw.tags || []),
       collections: raw.collections || [],
       citationKey,
       version: 1,
@@ -249,7 +249,7 @@ describe('Comprehensive Library End-to-End (E2E) Feature Matrix Simulation', () 
     const updated: E2EItem = {
       ...item,
       ...patch,
-      tags: patch.tags ? normalizeTags(patch.tags) : item.tags,
+      tags: patch.tags ? normalizeAcademicTags(patch.tags) : item.tags,
       version: item.version + 1,
       updatedAt: new Date(),
     };
@@ -320,8 +320,8 @@ describe('Comprehensive Library End-to-End (E2E) Feature Matrix Simulation', () 
       const cleanArxiv = normalizeArxivId(arxivUrl);
       expect(cleanArxiv).toBe('1706.03762v7');
 
-      // Canonical arXiv benchmark category resolution
-      const category = resolveCanonicalArxivCategory('1706.03762');
+      // Canonical arXiv category resolution from tags/metadata
+      const category = resolveCanonicalArxivCategory('1706.03762', ['cs.cl']);
       expect(category).toBe('cs.CL');
 
       const humanTaxonomy = ARXIV_CATEGORY_MAP['cs.cl'];
@@ -445,7 +445,7 @@ describe('Comprehensive Library End-to-End (E2E) Feature Matrix Simulation', () 
       const mergedCollections = Array.from(
         new Set([...item1.collections, ...item2.collections]),
       );
-      const mergedTags = normalizeTags([...item1.tags, ...item2.tags]);
+      const mergedTags = normalizeAcademicTags([...item1.tags, ...item2.tags]);
 
       const mergedMaster = updateItem(
         item1.id,

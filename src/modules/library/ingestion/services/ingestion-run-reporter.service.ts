@@ -61,11 +61,14 @@ export class IngestionRunReporterService {
   }
 
   async getRunStatus(
-    /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
-    scopeId: string,
+    userIdOrScopeId: string,
     runId: string,
+    projectId?: string,
   ): Promise<IngestionRunSnapshot> {
-    const run = await this.repo.findRunById(scopeId, runId);
+    const scope = projectId
+      ? { userId: userIdOrScopeId, projectId }
+      : userIdOrScopeId;
+    const run = await this.repo.findRunById(scope, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
@@ -102,11 +105,15 @@ export class IngestionRunReporterService {
   }
 
   async getRunProgress(
-    /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
-    scopeId: string,
+    userIdOrScopeId: string,
     runId: string,
+    projectId?: string,
   ): Promise<IngestionRunProgressResult> {
-    const run = await this.repo.findRunById(scopeId, runId);
+    const scope = projectId
+      ? { userId: userIdOrScopeId, projectId }
+      : userIdOrScopeId;
+    const effectiveScopeId = projectId || userIdOrScopeId;
+    const run = await this.repo.findRunById(scope, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
@@ -167,7 +174,7 @@ export class IngestionRunReporterService {
 
     return {
       runId: run.id,
-      projectId: scopeId,
+      projectId: effectiveScopeId,
       status: String(run.status),
       currentStage: run.currentStage || undefined,
       total,
@@ -184,29 +191,35 @@ export class IngestionRunReporterService {
   }
 
   async retryRun(
-    /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
-    scopeId: string,
+    userIdOrScopeId: string,
     runId: string,
+    projectId?: string,
   ): Promise<{
     runId: string;
     status: IngestionStatus;
     message: string;
   }> {
-    const run = await this.repo.findRunById(scopeId, runId);
+    const scope = projectId
+      ? { userId: userIdOrScopeId, projectId }
+      : userIdOrScopeId;
+    const effectiveScopeId = projectId || userIdOrScopeId;
+    const run = await this.repo.findRunById(scope, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
 
-    await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.PENDING);
+    await this.repo.updateRunStatus(scope, runId, IngestionStatus.PENDING);
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
     if (envelope && typeof envelope === 'object') {
-      void this.queue.enqueue(runId, scopeId, {
+      void this.queue.enqueue(runId, effectiveScopeId, {
         ...envelope,
-        projectId: scopeId,
+        ...(projectId
+          ? { userId: userIdOrScopeId, projectId }
+          : { projectId: effectiveScopeId }),
       });
       this.logger.log(
-        `Retry initiated and re-enqueued for run ${runId} (scope: ${scopeId})`,
+        `Retry initiated and re-enqueued for run ${runId} (scope: ${effectiveScopeId})`,
       );
     } else {
       this.logger.warn(

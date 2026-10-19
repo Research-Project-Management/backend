@@ -147,10 +147,9 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       expect(Array.isArray(prismaWhere.OR)).toBe(true);
     });
 
-    it('should compose specifications using .and(), .or(), and .not()', () => {
+    it('should compose specifications using .and()', () => {
       const activeSpec = new ActiveItemsSpecification();
       const typeSpec = new ItemTypeSpecification('journalArticle');
-      const bookSpec = new ItemTypeSpecification('book');
 
       // AND composition
       const activeArticleSpec = activeSpec.and(typeSpec);
@@ -164,26 +163,6 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       expect(activeArticleSpec.toPrismaWhere()).toEqual({
         AND: [{ deletedAt: null }, { itemType: 'journalArticle' }],
       });
-
-      // OR composition
-      const articleOrBookSpec = typeSpec.or(bookSpec);
-      expect(articleOrBookSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(
-        articleOrBookSpec.isSatisfiedBy({ ...sampleItem, itemType: 'book' }),
-      ).toBe(true);
-      expect(
-        articleOrBookSpec.isSatisfiedBy({ ...sampleItem, itemType: 'webpage' }),
-      ).toBe(false);
-      expect(articleOrBookSpec.toPrismaWhere()).toEqual({
-        OR: [{ itemType: 'journalArticle' }, { itemType: 'book' }],
-      });
-
-      // NOT composition
-      const notBookSpec = bookSpec.not();
-      expect(notBookSpec.isSatisfiedBy(sampleItem)).toBe(true);
-      expect(
-        notBookSpec.isSatisfiedBy({ ...sampleItem, itemType: 'book' }),
-      ).toBe(false);
     });
 
     it('should build combined composite specification via SearchSpecificationBuilder', () => {
@@ -287,30 +266,6 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       );
     });
 
-    it('should gracefully degrade to findMany scan fallback if groupBy fails', async () => {
-      (mockCache.get as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.item.groupBy as jest.Mock).mockRejectedValueOnce(
-        new Error('groupBy not supported on mocked client'),
-      );
-
-      (mockPrisma.item.findMany as jest.Mock).mockResolvedValueOnce([
-        {
-          itemType: 'journalArticle',
-          year: 2024,
-          itemTags: [{ tag: { name: 'Robotics' } }],
-        },
-      ]);
-
-      const facets = await searchRepo.computeFacets('user-1', {});
-
-      expect(facets).toEqual({
-        itemTypes: { journalArticle: 1 },
-        years: { 2024: 1 },
-        tags: { Robotics: 1 },
-      });
-      expect(mockPrisma.item.findMany).toHaveBeenCalled();
-    });
-
     it('should invalidate facet cache by scope pattern', async () => {
       await searchRepo.invalidateFacets('user-1');
 
@@ -328,9 +283,13 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
     beforeEach(() => {
       searchRepo = {
         invalidateFacets: jest.fn().mockResolvedValue(undefined),
+        deleteFullTextIndexByItemId: jest.fn().mockResolvedValue(undefined),
       };
       searchService = new SearchService(searchRepo as any, {} as any);
-      subscriber = new SearchEventsSubscriber(searchService as any);
+      subscriber = new SearchEventsSubscriber(
+        searchService as any,
+        searchRepo as any,
+      );
     });
 
     it('should delegate facet invalidation from SearchService to SearchRepository', async () => {
@@ -338,18 +297,18 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       expect(searchRepo.invalidateFacets).toHaveBeenCalledWith('user-1');
     });
 
-    it('should invalidate facet cache when CATALOG_ITEM_CREATED integration event arrives', async () => {
+    it('should invalidate facet cache when ITEM_CREATED domain event arrives', async () => {
       const invalidateSpy = jest.spyOn(searchService, 'invalidateFacetsCache');
 
-      await subscriber.handleIntegrationItemCreated({
+      await subscriber.handleItemChanged({
         eventId: 'evt-1',
-        topic: 'library.integration.catalog.item_created',
-        occurredAt: new Date().toISOString(),
-        sourceContext: 'catalog',
-        scope: {
-          userId: 'user-1',
-          projectId: 'proj-1',
-        },
+        eventType: 'library.item.created',
+        aggregateId: 'item-100',
+        userId: 'user-1',
+        projectId: 'proj-1',
+        scopeId: 'proj-1',
+        createdAt: new Date(),
+        schemaVersion: 1,
         payload: {
           itemId: 'item-100',
           title: 'New Paper',
@@ -361,23 +320,25 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       expect(searchRepo.invalidateFacets).toHaveBeenCalledWith('proj-1');
     });
 
-    it('should invalidate facet cache when CATALOG_ITEM_DELETED integration event arrives', async () => {
+    it('should clean up FTS index and invalidate facet cache when ITEM_DELETED domain event arrives', async () => {
       const invalidateSpy = jest.spyOn(searchService, 'invalidateFacetsCache');
 
-      await subscriber.handleIntegrationItemDeleted({
+      await subscriber.handleItemDeletedOrPurged({
         eventId: 'evt-2',
-        topic: 'library.integration.catalog.item_deleted',
-        occurredAt: new Date().toISOString(),
-        sourceContext: 'catalog',
-        scope: {
-          userId: 'user-1',
-          projectId: null,
-        },
+        eventType: 'library.item.deleted',
+        aggregateId: 'item-100',
+        userId: 'user-1',
+        scopeId: 'user-1',
+        createdAt: new Date(),
+        schemaVersion: 1,
         payload: {
           itemId: 'item-100',
-        } as any,
+        },
       });
 
+      expect(searchRepo.deleteFullTextIndexByItemId).toHaveBeenCalledWith(
+        'item-100',
+      );
       expect(invalidateSpy).toHaveBeenCalledWith('user-1');
       expect(searchRepo.invalidateFacets).toHaveBeenCalledWith('user-1');
     });

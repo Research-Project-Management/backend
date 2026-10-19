@@ -46,15 +46,6 @@ export interface OcrPageResult {
   imageHeight?: number;
 }
 
-export interface OcrDocumentResult {
-  pages: OcrPageResult[];
-  combinedText: string;
-  avgConfidence: number;
-  totalOcrPages: number;
-  executionTimeMs: number;
-  searchablePdfBuffer?: Buffer;
-}
-
 export interface OcrPreprocessOptions {
   autoRotate?: boolean;
   deskew?: boolean;

@@ -22,6 +22,7 @@ import {
   RIS_ITEM_TYPE_MAP,
   RIS_CSL_TYPE_MAP,
 } from './csl-style-formatter.service';
+import { TcvnCitationFormatterService } from './tcvn-citation-formatter.service';
 
 interface CiteInstance {
   format(
@@ -64,23 +65,24 @@ export {
 @Injectable()
 export class CslEngineService implements OnModuleInit {
   private readonly logger = new Logger(CslEngineService.name);
-  private readonly citationCache = new Map<string, EngineCitationResult>();
+  private static readonly CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+  private static readonly EVENT_LOOP_YIELD_BATCH_SIZE = 25;
+  private readonly citationCache = new Map<
+    string,
+    { result: EngineCitationResult; expiresAt: number }
+  >();
   private readonly maxCacheEntries = 2000;
-  private readonly loader: CslLocaleLoaderService;
-  private readonly formatter: CslStyleFormatterService;
-
   constructor(
     @Optional()
     @Inject(CslRepositoryService)
     private readonly cslRepo?: CslRepositoryService,
     @Optional()
-    loader?: CslLocaleLoaderService,
+    private readonly loader: CslLocaleLoaderService = new CslLocaleLoaderService(
+      this.cslRepo,
+    ),
     @Optional()
-    formatter?: CslStyleFormatterService,
-  ) {
-    this.loader = loader ?? new CslLocaleLoaderService(this.cslRepo);
-    this.formatter = formatter ?? new CslStyleFormatterService();
-  }
+    private readonly formatter: CslStyleFormatterService = new CslStyleFormatterService(),
+  ) {}
 
   private getCacheKey(
     cslItem: CslItemData,
@@ -106,15 +108,38 @@ export class CslEngineService implements OnModuleInit {
     return `${rawId}::${style}::${date}::${ver}::${updated}${index !== undefined ? `::${index}` : ''}`;
   }
 
+  private getCached(key: string): EngineCitationResult | null {
+    const entry = this.citationCache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      this.citationCache.delete(key);
+      return null;
+    }
+    this.citationCache.delete(key);
+    this.citationCache.set(key, entry);
+    return entry.result;
+  }
+
   private setCache(
     key: string,
     result: EngineCitationResult,
   ): EngineCitationResult {
+    const now = Date.now();
     if (this.citationCache.size >= this.maxCacheEntries) {
-      const oldestKey = this.citationCache.keys().next().value;
-      if (oldestKey) this.citationCache.delete(oldestKey);
+      for (const [k, v] of this.citationCache.entries()) {
+        if (now > v.expiresAt) {
+          this.citationCache.delete(k);
+        }
+      }
+      if (this.citationCache.size >= this.maxCacheEntries) {
+        const oldestKey = this.citationCache.keys().next().value;
+        if (oldestKey) this.citationCache.delete(oldestKey);
+      }
     }
-    this.citationCache.set(key, result);
+    this.citationCache.set(key, {
+      result,
+      expiresAt: now + CslEngineService.CACHE_TTL_MS,
+    });
     return result;
   }
 
@@ -152,6 +177,25 @@ export class CslEngineService implements OnModuleInit {
     styleId: string = 'apa',
   ) {
     await this.ensureTemplate(styleId);
+    const normalizedStyle = this.normalizeStyle(styleId);
+    if (
+      normalizedStyle !== 'bibtex' &&
+      normalizedStyle !== 'ris' &&
+      normalizedStyle !== 'tcvn' &&
+      normalizedStyle !== 'tcvn-numeric' &&
+      normalizedStyle !== 'auto' &&
+      normalizedStyle !== 'auto-numeric'
+    ) {
+      for (let i = 0; i < cslItems.length; i++) {
+        if (
+          i > 0 &&
+          i % CslEngineService.EVENT_LOOP_YIELD_BATCH_SIZE === 0
+        ) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        this.format(cslItems[i], normalizedStyle, i + 1);
+      }
+    }
     return this.formatBatch(cslItems, styleId);
   }
 
@@ -164,15 +208,13 @@ export class CslEngineService implements OnModuleInit {
     const normalizedStyle = this.normalizeStyle(styleId);
 
     const cacheKey = this.getCacheKey(cslItem, normalizedStyle, index);
-    const cached = this.citationCache.get(cacheKey);
+    const cached = this.getCached(cacheKey);
     if (cached) {
-      this.citationCache.delete(cacheKey);
-      this.citationCache.set(cacheKey, cached);
       return cached;
     }
 
     if (normalizedStyle === 'auto' || normalizedStyle === 'auto-numeric') {
-      const isVn = CslEngineService.isVietnameseItem(cslItem);
+      const isVn = TcvnCitationFormatterService.isVietnameseItem(cslItem);
       const targetStyle =
         normalizedStyle === 'auto-numeric'
           ? isVn
@@ -371,7 +413,7 @@ export class CslEngineService implements OnModuleInit {
 
     if (normalizedStyle === 'auto' || normalizedStyle === 'auto-numeric') {
       const hasVn = cslItems.some((item) =>
-        CslEngineService.isVietnameseItem(item),
+        TcvnCitationFormatterService.isVietnameseItem(item),
       );
       const targetStyle =
         normalizedStyle === 'auto-numeric'
@@ -475,35 +517,5 @@ export class CslEngineService implements OnModuleInit {
 
   public formatTcvnBatch(cslItems: CslItemData[], isNumeric: boolean = false) {
     return this.formatter.formatTcvnBatch(cslItems, isNumeric);
-  }
-
-  public static isVietnameseAuthor(author?: CslName | null): boolean {
-    return CslStyleFormatterService.isVietnameseAuthor(author);
-  }
-
-  public static getVietnameseSortKey(author?: CslName | null): {
-    primary: string;
-    secondary: string;
-  } {
-    return CslStyleFormatterService.getVietnameseSortKey(author);
-  }
-
-  public static isVietnameseItem(item: CslItemData): boolean {
-    return CslStyleFormatterService.isVietnameseItem(item);
-  }
-
-  public static compareTcvnEntries(
-    itemA: CslItemData,
-    itemB: CslItemData,
-  ): number {
-    return CslStyleFormatterService.compareTcvnEntries(itemA, itemB);
-  }
-
-  public static formatTcvnAuthorName(author?: CslName | null): string {
-    return CslStyleFormatterService.formatTcvnAuthorName(author);
-  }
-
-  public static formatTcvnInTextAuthor(author?: CslName | null): string {
-    return CslStyleFormatterService.formatTcvnInTextAuthor(author);
   }
 }

@@ -16,7 +16,7 @@ import {
 
 @Injectable()
 export class EnrichStage implements IWorkflowStage<
-  EnrichStageInput | string,
+  EnrichStageInput,
   MetadataCandidate[]
 > {
   readonly stageName = 'ENRICH' as const;
@@ -36,18 +36,8 @@ export class EnrichStage implements IWorkflowStage<
    * before accepting such a result, so a filename fallback cannot be promoted
    * into unrelated bibliographic data.
    */
-  async execute(
-    scopeIdOrInput: string | EnrichStageInput,
-    candidatesArg?: MetadataCandidate[],
-  ): Promise<MetadataCandidate[]> {
-    const scopeId =
-      typeof scopeIdOrInput === 'string'
-        ? scopeIdOrInput
-        : scopeIdOrInput.scopeId;
-    const candidates =
-      typeof scopeIdOrInput === 'string'
-        ? candidatesArg || []
-        : scopeIdOrInput.candidates;
+  async execute(input: EnrichStageInput): Promise<MetadataCandidate[]> {
+    const { scopeId, candidates } = input;
 
     if (!this.metadataService) {
       this.logger.debug(
@@ -60,45 +50,74 @@ export class EnrichStage implements IWorkflowStage<
     const seenQueries = new Set<string>();
 
     for (const candidate of candidates) {
+      const isFilenameTitle =
+        candidate.normalizedMetadata?.extraFields?.isFilenameTitle === true;
       const hasTitle = Boolean(
+        !isFilenameTitle &&
         candidate.normalizedMetadata?.title &&
         candidate.normalizedMetadata.title !== 'Untitled Document' &&
         candidate.normalizedMetadata.title !== 'Uploaded Document',
       );
       const hasAuthors = Boolean(
-        candidate.normalizedMetadata?.authors &&
-        candidate.normalizedMetadata.authors.length > 0,
+        (candidate.normalizedMetadata?.authors &&
+          candidate.normalizedMetadata.authors.length > 0) ||
+        (candidate.normalizedMetadata?.creators &&
+          candidate.normalizedMetadata.creators.length > 0),
       );
-
-      // Only skip external enrichment if the candidate ALREADY has complete verified metadata
-      // (both title and authors, or marked self-sufficient by local trusted extraction).
-      // Bare identifiers without a title must always be resolved via authoritative doi.org/providers.
-      const isAlreadyComplete =
-        candidate.sourceName === 'TrustedPaper' ||
-        candidate.normalizedMetadata?.extraFields?.isSelfSufficient === true ||
-        candidate.normalizedMetadata?.isSelfSufficient === true ||
-        (hasTitle && hasAuthors && (candidate.confidenceScore ?? 0) >= 0.85) ||
-        (hasTitle &&
-          Boolean(
-            candidate.normalizedMetadata?.doi ||
-            candidate.normalizedMetadata?.arxivId,
-          ) &&
-          (candidate.confidenceScore ?? 0) >= 0.75);
-
-      if (isAlreadyComplete) {
-        this.logger.debug(
-          `[EnrichStage] Candidate ${candidate.candidateId} (source=${candidate.sourceName}, score=${candidate.confidenceScore}) has sufficient local/verified metadata. Skipping external API enrichment.`,
-        );
-        continue;
-      }
+      const hasVenueAndYear = Boolean(
+        (candidate.normalizedMetadata?.publicationTitle ||
+          candidate.normalizedMetadata?.journal ||
+          candidate.normalizedMetadata?.publisher) &&
+        candidate.normalizedMetadata?.year,
+      );
 
       const doi = candidate.normalizedMetadata.doi;
       const arxivId = candidate.normalizedMetadata.arxivId;
       const pmid = candidate.normalizedMetadata.pmid;
       const isbn = candidate.normalizedMetadata.isbn;
       const url = candidate.normalizedMetadata.url;
+      const hasAuthoritativeId = Boolean(doi || arxivId || pmid || isbn);
+
+      // Official Zotero RecognizePDF standard:
+      // 1. If a FILE candidate has an authoritative identifier (DOI, arXiv, PMID, ISBN),
+      //    ALWAYS query external registries (Crossref/arXiv/PubMed/OpenAlex) so registry
+      //    metadata populates canonical title, authors, venue, volume, issue, pages, abstract.
+      // 2. For non-FILE candidates (e.g. already-resolved PROVIDER or complete RECORD),
+      //    only skip enrichment when title + authors + venue/year are already complete.
+      const isAlreadyComplete =
+        candidate.sourceKind !== 'FILE' &&
+        hasTitle &&
+        hasAuthors &&
+        hasVenueAndYear &&
+        (candidate.confidenceScore ?? 0) >= 0.9;
+
+      if (isAlreadyComplete) {
+        this.logger.debug(
+          `[EnrichStage] Candidate ${candidate.candidateId} (source=${candidate.sourceName}, score=${candidate.confidenceScore}) has complete verified metadata. Skipping external API enrichment.`,
+        );
+        continue;
+      }
+
+      // If a FILE candidate has NO identifier and is already self-sufficient from PDF extraction
+      // (has real extracted title, authors, year), skip noisy title-search fallback.
+      if (
+        candidate.sourceKind === 'FILE' &&
+        !hasAuthoritativeId &&
+        (candidate.sourceName === 'TrustedPaper' ||
+          candidate.normalizedMetadata?.extraFields?.isSelfSufficient ===
+            true) &&
+        hasTitle &&
+        hasAuthors
+      ) {
+        this.logger.debug(
+          `[EnrichStage] PDF candidate ${candidate.candidateId} has no identifier but is self-sufficient from local extraction. Skipping title search.`,
+        );
+        continue;
+      }
+
       const title = candidate.normalizedMetadata.title?.trim();
       const isCredibleTitle =
+        !isFilenameTitle &&
         Boolean(title) &&
         title!.length >= 10 &&
         !/\.(pdf|eps|png|jpe?g|svg)$/i.test(title!) &&
@@ -121,10 +140,6 @@ export class EnrichStage implements IWorkflowStage<
         continue;
       }
       seenQueries.add(normalizedQueryKey);
-
-      if (candidates.length > 1) {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-      }
 
       try {
         const resolved = await this.metadataService.resolve({

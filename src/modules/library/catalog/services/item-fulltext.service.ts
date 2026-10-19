@@ -1,13 +1,19 @@
-﻿import {
+import {
   Injectable,
   Logger,
   NotFoundException,
   Optional,
+  Inject,
 } from '@nestjs/common';
+import zlib from 'zlib';
+import { promisify } from 'util';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
+import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+
+const gunzipAsync = promisify(zlib.gunzip);
 
 /**
  * ItemFulltextService — Dedicated Domain Service for Academic Document Intelligence.
@@ -21,6 +27,9 @@ export class ItemFulltextService {
   constructor(
     private readonly query: QueryRepository,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
   ) {}
 
   /**
@@ -65,19 +74,73 @@ export class ItemFulltextService {
       throw new NotFoundException(`Item ${id} not found or access denied`);
     }
 
-    // 1. Look for authoritative pdf_fulltext, trusted_extraction, or ocr record via QueryRepository
-    const fulltextRecord =
-      (await this.query.findMetadataSourceRecord(id, 'pdf_fulltext')) ||
-      (await this.query.findMetadataSourceRecord(id, 'trusted_extraction')) ||
-      (await this.query.findMetadataSourceRecord(id, 'ocr')) ||
-      (await this.query.findMetadataSourceRecord(id, 'mextract_fulltext'));
+    // 1. Look for authoritative full-text or header extraction record in a single query via QueryRepository
+    const matchedRecord = await this.query.findItemMetadataByProviders(id, [
+      'pdf_fulltext',
+      'trusted_extraction',
+      'ocr',
+      'mextract_fulltext',
+      'mextract',
+    ]);
+
+    const isFulltextProvider =
+      matchedRecord && matchedRecord.sourceProvider !== 'mextract';
 
     let result: DocumentFulltextResponse;
     if (
-      fulltextRecord?.rawPayload &&
-      typeof fulltextRecord.rawPayload === 'object'
+      isFulltextProvider &&
+      matchedRecord?.rawPayload &&
+      typeof matchedRecord.rawPayload === 'object'
     ) {
-      const payload = fulltextRecord.rawPayload as Record<string, unknown>;
+      let payload = matchedRecord.rawPayload as Record<string, unknown>;
+
+      if (
+        payload.isOffloaded === true &&
+        typeof payload.fileId === 'string' &&
+        this.storagePort
+      ) {
+        try {
+          const port = this.storagePort as IStoragePort & {
+            downloadFile?: (fileId: string) => Promise<Buffer | { buffer?: Buffer }>;
+          };
+          let rawDownloaded: unknown;
+          if (typeof port.downloadFile === 'function') {
+            rawDownloaded = await port.downloadFile(payload.fileId);
+          } else if (typeof port.readOwnedFile === 'function') {
+            rawDownloaded = await port.readOwnedFile({
+              fileId: payload.fileId,
+              userId: item.userId,
+              projectId: item.projectId ?? undefined,
+            });
+          }
+
+          const compressedBuffer = Buffer.isBuffer(rawDownloaded)
+            ? rawDownloaded
+            : rawDownloaded &&
+                typeof rawDownloaded === 'object' &&
+                'buffer' in rawDownloaded &&
+                Buffer.isBuffer((rawDownloaded as { buffer?: unknown }).buffer)
+              ? (rawDownloaded as { buffer: Buffer }).buffer
+              : null;
+
+          if (compressedBuffer) {
+            const decompressed = await gunzipAsync(compressedBuffer);
+            const hydrated = JSON.parse(
+              decompressed.toString('utf8'),
+            ) as Record<string, unknown>;
+            payload = {
+              ...payload,
+              ...hydrated,
+            };
+          }
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Failed to download/decompress offloaded fulltext for item ${id} (fileId=${payload.fileId}), falling back to inline fields: ${message}`,
+          );
+        }
+      }
+
       result = {
         title:
           (typeof payload.title === 'string' ? payload.title : undefined) ||
@@ -103,49 +166,51 @@ export class ItemFulltextService {
         references: (Array.isArray(payload.references)
           ? payload.references
           : []) as DocumentFulltextResponse['references'],
+        ...(typeof payload.markdown === 'string'
+          ? { markdown: payload.markdown }
+          : {}),
+        ...(typeof payload.plainText === 'string'
+          ? { plainText: payload.plainText }
+          : {}),
+        ...(typeof payload.pageCount === 'number'
+          ? { pageCount: payload.pageCount }
+          : {}),
+      };
+    } else if (
+      matchedRecord?.rawPayload &&
+      typeof matchedRecord.rawPayload === 'object'
+    ) {
+      // 2. Fallback to header/metadata extraction record ('mextract') if available
+      const payload = matchedRecord.rawPayload as Record<string, unknown>;
+      result = {
+        title:
+          (typeof payload.title === 'string' ? payload.title : undefined) ||
+          item.title,
+        abstract:
+          (typeof payload.abstract === 'string'
+            ? payload.abstract
+            : undefined) ||
+          item.abstract ||
+          undefined,
+        sections: [],
+        figures: [],
+        tables: [],
+        formulas: [],
+        references: (Array.isArray(payload.references)
+          ? payload.references
+          : []) as DocumentFulltextResponse['references'],
       };
     } else {
-      // 2. Fallback to header/metadata extraction record if available
-      const headerRecord = await this.query.findMetadataSourceRecord(
-        id,
-        'mextract',
-      );
-
-      if (
-        headerRecord?.rawPayload &&
-        typeof headerRecord.rawPayload === 'object'
-      ) {
-        const payload = headerRecord.rawPayload as Record<string, unknown>;
-        result = {
-          title:
-            (typeof payload.title === 'string' ? payload.title : undefined) ||
-            item.title,
-          abstract:
-            (typeof payload.abstract === 'string'
-              ? payload.abstract
-              : undefined) ||
-            item.abstract ||
-            undefined,
-          sections: [],
-          figures: [],
-          tables: [],
-          formulas: [],
-          references: (Array.isArray(payload.references)
-            ? payload.references
-            : []) as DocumentFulltextResponse['references'],
-        };
-      } else {
-        // 3. Return clean empty structure instead of 404 so Reader renders gracefully
-        result = {
-          title: item.title,
-          abstract: item.abstract || undefined,
-          sections: [],
-          figures: [],
-          tables: [],
-          formulas: [],
-          references: [],
-        };
-      }
+      // 3. Return clean empty structure instead of 404 so Reader renders gracefully
+      result = {
+        title: item.title,
+        abstract: item.abstract || undefined,
+        sections: [],
+        figures: [],
+        tables: [],
+        formulas: [],
+        references: [],
+      };
     }
 
     if (this.cache) {

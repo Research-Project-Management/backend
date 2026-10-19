@@ -133,32 +133,6 @@ export class ItemMatchQueryRepository {
     });
   }
 
-  async findDuplicateInProject(
-    client: PrismaClientOrTx | undefined,
-    projectId: string,
-    criteria: {
-      doi?: string | null;
-      citationKey?: string | null;
-      title: string;
-    },
-  ) {
-    if (!isUuid(projectId)) return null;
-    const activeClient = this.getClient(client);
-    return activeClient.item.findFirst({
-      where: {
-        projectId,
-        deletedAt: null,
-        OR: [
-          ...(criteria.doi ? [{ doi: criteria.doi }] : []),
-          ...(criteria.citationKey
-            ? [{ citationKey: criteria.citationKey }]
-            : []),
-          { title: criteria.title },
-        ],
-      },
-    });
-  }
-
   async findDuplicatesInProject(
     client: PrismaClientOrTx | undefined,
     projectId: string,
@@ -265,7 +239,7 @@ export class ItemMatchQueryRepository {
 
   async findMatchCandidates(
     client: PrismaClientOrTx | undefined,
-    scope: { userId?: string; projectId?: string | null } | string,
+    scope: { userId?: string; projectId?: string | null },
     criteria: {
       doi?: string | null;
       arxivId?: string | null;
@@ -276,17 +250,10 @@ export class ItemMatchQueryRepository {
     },
   ): Promise<MatchCandidateResult> {
     let scopeWhere: Prisma.ItemWhereInput | null = null;
-    if (typeof scope === 'object' && scope !== null) {
-      if (scope.projectId && isUuid(scope.projectId)) {
-        scopeWhere = { projectId: scope.projectId, deletedAt: null };
-      } else if (scope.userId && isUuid(scope.userId)) {
-        scopeWhere = { userId: scope.userId, projectId: null, deletedAt: null };
-      }
-    } else if (typeof scope === 'string' && isUuid(scope)) {
-      scopeWhere = {
-        deletedAt: null,
-        OR: [{ projectId: scope }, { userId: scope }],
-      };
+    if (scope.projectId && isUuid(scope.projectId)) {
+      scopeWhere = { projectId: scope.projectId, deletedAt: null };
+    } else if (scope.userId && isUuid(scope.userId)) {
+      scopeWhere = { userId: scope.userId, projectId: null, deletedAt: null };
     }
 
     if (!scopeWhere) {

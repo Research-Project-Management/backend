@@ -129,7 +129,7 @@ describe('Library OCR Pipeline (Integration)', () => {
         ),
     } as any;
 
-    pdfProvider = new PdfProvider(undefined, ocrProvider);
+    pdfProvider = new PdfProvider(ocrProvider);
   });
 
   it('detects scanned page, executes OCR, generates Sandwich PDF and produces OCR provenance', async () => {

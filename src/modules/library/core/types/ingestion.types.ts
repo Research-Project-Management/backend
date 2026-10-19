@@ -86,11 +86,7 @@ export type IngestionStatus =
   | 'FAILED_RETRYABLE'
   | 'FAILED_FINAL'
   | 'CANCELLED'
-  | 'STALLED'
-  | 'pending'
-  | 'processing'
-  | 'completed'
-  | 'failed';
+  | 'STALLED';
 
 export interface IngestionStageSnapshot {
   id: string;
@@ -162,7 +158,6 @@ export interface IngestionRunSnapshot {
   candidates: IngestionCandidateSnapshot[];
   decisions: IngestionDecisionSnapshot[];
   reviews?: IngestionReviewCaseSnapshot[];
-  reviewCases?: IngestionReviewCaseSnapshot[];
   errors: unknown[];
 }
 
@@ -202,7 +197,6 @@ export interface DuplicateClusterResult {
   confidence: number;
   recommendedMasterId?: string;
   items: DuplicateClusterItemSnapshot[];
-  papers?: DuplicateClusterItemSnapshot[];
 }
 
 export type RetractionNature =

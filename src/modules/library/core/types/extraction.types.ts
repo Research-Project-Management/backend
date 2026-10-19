@@ -1,3 +1,4 @@
+import type { AttachmentExtractionStatus as PrismaExtractionStatus } from '@prisma/client';
 import type {
   BibliographicReference,
   DocumentSection,
@@ -5,8 +6,8 @@ import type {
   DocumentTable,
   DocumentFormula,
   AcademicCreator,
+  ItemMetadata,
 } from './bibliographic.types';
-import type { ItemMetadata } from './bibliographic.types';
 
 export type AttachmentKind = 'stored_file' | 'linked_resource' | 'snapshot';
 
@@ -23,6 +24,8 @@ export type AttachmentType =
   | 'snapshot'
   | 'other'
   | 'preview';
+
+export type AttachmentExtractionStatus = PrismaExtractionStatus;
 
 export interface AttachmentRevisionEntity {
   id: string;
@@ -49,7 +52,7 @@ export interface AttachmentEntity {
   attachmentType: AttachmentType;
   uploadedAt?: Date;
   createdAt?: Date;
-  extractionStatus?: unknown;
+  extractionStatus?: AttachmentExtractionStatus;
   extractionAttempts?: number;
   extractionStartedAt?: Date | null;
   extractionCompletedAt?: Date | null;
@@ -59,15 +62,18 @@ export interface AttachmentEntity {
 
 export interface CreateAttachmentInput {
   userId?: string;
-  itemId: string;
+  projectId?: string;
+  itemId?: string;
+  title?: string;
   filename: string;
-  url: string;
-  size?: number | bigint;
+  url?: string;
   mimeType?: string;
-  linkMode?: LinkMode;
-  attachmentType?: AttachmentType;
+  size?: number | bigint;
   fileHash?: string;
   fileId?: string;
+  linkMode?: LinkMode;
+  attachmentType?: AttachmentType;
+  isPrimary?: boolean;
 }
 
 export const AnnotationType = {
@@ -106,38 +112,49 @@ export interface CreateAnnotationData {
   attachmentId: string;
   type?: AnnotationType;
   pageIndex: number;
+  y?: number;
+  x?: number;
   color?: string;
   quoteText?: string;
   comment?: string;
   tags?: string[];
   rectCoords?: unknown;
   annotationSortIndex?: string;
+  authorId: string;
 }
 
 export interface UpdateAnnotationData {
   color?: string;
+  quoteText?: string;
   comment?: string;
   tags?: string[];
-  quoteText?: string;
   rectCoords?: unknown;
   annotationSortIndex?: string;
 }
 
+export interface UpsertAnnotationItem {
+  id?: string;
+  type?: AnnotationType;
+  pageIndex: number;
+  y?: number;
+  x?: number;
+  color?: string;
+  quoteText?: string;
+  comment?: string;
+  tags?: string[];
+  rectCoords?: unknown;
+  expectedVersion?: number;
+}
+
 export interface BatchAnnotationsData {
-  created?: CreateAnnotationData[];
-  updated?: Array<{
-    id: string;
-    expectedVersion: number;
-    data: UpdateAnnotationData;
-  }>;
-  deleted?: Array<{ id: string; expectedVersion?: number }>;
+  upserts: UpsertAnnotationItem[];
+  deletes: string[];
 }
 
 export interface BatchAnnotationsResult {
   created: AnnotationEntity[];
   updated: AnnotationEntity[];
   deleted: string[];
-  conflicts: Array<{ id: string; reason: string }>;
 }
 
 export interface ExtractedPdfMetadata {
@@ -213,15 +230,21 @@ export interface ExtractedPdfDocument {
   fullText?: string;
 }
 
+/**
+ * Breakdown of individual field quality scores evaluating extraction reliability.
+ */
 export interface QualityScoreBreakdown {
-  titleScore: number;
-  authorScore: number;
-  identifierScore: number;
-  yearScore: number;
-  venueScore: number;
-  totalScore: number;
+  titleScore: number; // Weight: 0.30
+  authorScore: number; // Weight: 0.25
+  identifierScore: number; // Weight: 0.20 (DOI / arXiv ID / PMID / ISBN)
+  yearScore: number; // Weight: 0.15
+  venueScore: number; // Weight: 0.10
+  totalScore: number; // Normalized total score S ∈ [0.0, 1.0]
 }
 
+/**
+ * Extraction engine tags indicating which local tier produced the metadata.
+ */
 export type ExtractionEngineKind =
   | 'XMP_BINARY'
   | 'ACADEMIC_REGEX'
@@ -229,15 +252,47 @@ export type ExtractionEngineKind =
   | 'MEXTRACT_SLM'
   | 'HYBRID';
 
+/**
+ * Full provenance audit for local-first trusted extraction.
+ */
+export interface TrustedExtractionProvenance {
+  extractedAt: string;
+  engineUsed: ExtractionEngineKind;
+  executionTimeMs: number;
+  qualityBreakdown: QualityScoreBreakdown;
+  rawMatches?: {
+    xmpFound?: boolean;
+    detectedDoi?: string;
+    detectedArxivId?: string;
+    detectedPmid?: string;
+    detectedIsbn?: string;
+    matchedPublisherBanner?: string;
+    maxFontSize?: number;
+    mextract?: {
+      engine: string;
+      confidence: number;
+      durationMs: number;
+    };
+    [key: string]: unknown;
+  };
+}
+
+/**
+ * Canonical result contract returned by the TrustedExtractor port.
+ */
 export interface TrustedExtractionResult {
   metadata: ItemMetadata;
   quality: QualityScoreBreakdown;
-  isAuthoritative: boolean;
-  provenance: {
-    extractedAt: string;
-    engineUsed: ExtractionEngineKind;
-    executionTimeMs: number;
-    qualityBreakdown: QualityScoreBreakdown;
-    rawMatches?: Record<string, unknown>;
-  };
+
+  /**
+   * CRITICAL DECISION GATE FLAG:
+   * When true (totalScore >= 0.85), this candidate possesses verified, authoritative
+   * metadata directly from the document itself. Downstream stages MUST bypass
+   * heavy external API calls (CrossRef, OpenAlex, Semantic Scholar) and slow network round-trips.
+   */
+  isSelfSufficient: boolean;
+  missingFields?: string[];
+
+  provenance: TrustedExtractionProvenance;
 }
+

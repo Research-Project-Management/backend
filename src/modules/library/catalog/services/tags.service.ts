@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { Prisma, TagType } from '@prisma/client';
 import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repository';
-import { TransactionService } from '@/modules/library/core';
+import { normalizeProjectScopeId } from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 import { cleanSingleTag } from '@/modules/library/core/domain/tag.domain';
 import { resolveOrCreateTags } from '@/modules/library/catalog/domain/command-payload.builder';
 import { RedisCacheService } from '@/core';
@@ -39,12 +40,13 @@ export class TagsService {
         await this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId));
         await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId));
       }
-      if (projectId && projectId !== 'user') {
+      const validProjectId = normalizeProjectScopeId(projectId);
+      if (validProjectId) {
         await this.cache.delPattern(
-          LIBRARY_REDIS_KEYS.tagsPattern(`proj:${projectId}`),
+          LIBRARY_REDIS_KEYS.tagsPattern(`proj:${validProjectId}`),
         );
         await this.cache.delPattern(
-          LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`),
+          LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
         );
       }
     }
@@ -55,10 +57,8 @@ export class TagsService {
     options?: { includeInactive?: boolean; projectId?: ProjectId | string },
   ) {
     if (this.cache) {
-      const scopeKey =
-        options?.projectId && options.projectId !== 'user'
-          ? `proj:${options.projectId}`
-          : userId;
+      const validProjectId = normalizeProjectScopeId(options?.projectId);
+      const scopeKey = validProjectId ? `proj:${validProjectId}` : userId;
       const cacheKey = options?.includeInactive
         ? `${LIBRARY_REDIS_KEYS.tags(scopeKey)}:all`
         : LIBRARY_REDIS_KEYS.tags(scopeKey);
@@ -84,6 +84,7 @@ export class TagsService {
         `Invalid or disallowed tag name: "${name}"`,
       );
     }
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
         const tag = await this.repo.create(
@@ -91,17 +92,10 @@ export class TagsService {
           cleanName,
           color,
           type,
-          projectId,
+          effectiveProjectId,
           tx,
         );
 
-        const effectiveProjectId =
-          projectId &&
-          projectId !== 'user' &&
-          projectId !== 'me' &&
-          projectId !== 'personal'
-            ? projectId
-            : undefined;
         const eventScope = { userId, projectId: effectiveProjectId };
 
         await helpers.appendChange(eventScope, {
@@ -123,14 +117,19 @@ export class TagsService {
       },
     );
 
-    await this.invalidateTagsCache(userId, projectId ?? undefined);
+    await this.invalidateTagsCache(userId, effectiveProjectId);
     return result;
   }
 
   async updateTag(
     userId: UserId | string,
     tagId: TagId | string,
-    data: { name?: string; color?: string; type?: TagType },
+    data: {
+      name?: string;
+      color?: string;
+      type?: TagType;
+      shortcut?: number | null;
+    },
     projectId?: ProjectId | string,
   ) {
     if (data.name) {
@@ -143,13 +142,7 @@ export class TagsService {
       data.name = cleanName;
     }
 
-    const effectiveProjectId =
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal'
-        ? projectId
-        : undefined;
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
     const eventScope = { userId, projectId: effectiveProjectId };
 
     const result = await this.libraryTx.executeInTransaction(
@@ -193,13 +186,7 @@ export class TagsService {
     tagId: TagId | string,
     projectId?: ProjectId | string,
   ) {
-    const effectiveProjectId =
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal'
-        ? projectId
-        : undefined;
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
     const eventScope = { userId, projectId: effectiveProjectId };
 
     const result = await this.libraryTx.executeInTransaction(
@@ -239,13 +226,7 @@ export class TagsService {
     userId: UserId | string,
     projectId?: ProjectId | string,
   ) {
-    const effectiveProjectId =
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal'
-        ? projectId
-        : undefined;
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
     const eventScope = { userId, projectId: effectiveProjectId };
 
     const result = await this.libraryTx.executeInTransaction(
@@ -285,13 +266,7 @@ export class TagsService {
     itemId: ItemId | string,
     projectId?: ProjectId | string,
   ) {
-    const effectiveProjectId =
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal'
-        ? projectId
-        : undefined;
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
 
     await this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const tagWhere: Prisma.TagWhereInput = effectiveProjectId
@@ -338,29 +313,13 @@ export class TagsService {
     await this.invalidateTagsCache(userId, effectiveProjectId, itemId);
   }
 
-  async assignTagToItem(
-    userId: UserId | string,
-    itemId: ItemId | string,
-    tagId: TagId | string,
-    _type?: TagType,
-    projectId?: ProjectId | string,
-  ) {
-    return this.assignTag(userId, tagId, itemId, projectId);
-  }
-
   async removeTag(
     userId: UserId | string,
     tagId: TagId | string,
     itemId: ItemId | string,
     projectId?: ProjectId | string,
   ) {
-    const effectiveProjectId =
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal'
-        ? projectId
-        : undefined;
+    const effectiveProjectId = normalizeProjectScopeId(projectId);
 
     await this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const tagWhere: Prisma.TagWhereInput = effectiveProjectId
@@ -402,15 +361,6 @@ export class TagsService {
     });
 
     await this.invalidateTagsCache(userId, effectiveProjectId, itemId);
-  }
-
-  async detachTagFromItem(
-    userId: UserId | string,
-    itemId: ItemId | string,
-    tagId: TagId | string,
-    projectId?: ProjectId | string,
-  ) {
-    return this.removeTag(userId, tagId, itemId, projectId);
   }
 
   async syncTagsToItem(
@@ -469,31 +419,13 @@ export class TagsService {
     );
 
     if (newTagIds.length > 0) {
-      if (typeof tx.itemTag.createMany === 'function') {
-        await tx.itemTag.createMany({
-          data: newTagIds.map((tagId) => ({
-            itemId: targetItemId,
-            tagId,
-          })),
-          skipDuplicates: true,
-        });
-      } else {
-        for (const tagId of newTagIds) {
-          await tx.itemTag.upsert({
-            where: {
-              tagId_itemId: {
-                tagId,
-                itemId: targetItemId,
-              },
-            },
-            create: {
-              itemId: targetItemId,
-              tagId,
-            },
-            update: {},
-          });
-        }
-      }
+      await tx.itemTag.createMany({
+        data: newTagIds.map((tagId) => ({
+          itemId: targetItemId,
+          tagId,
+        })),
+        skipDuplicates: true,
+      });
     }
 
     await tx.itemTag.deleteMany({

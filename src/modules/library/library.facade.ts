@@ -1,15 +1,18 @@
 import { Injectable, Optional } from '@nestjs/common';
+import { Prisma, AttachmentExtractionStatus } from '@prisma/client';
+import { PrismaService, RedisCacheService } from '@/core';
 import { CatalogFacade } from './catalog/catalog.facade';
 import { SearchFacade } from './search/search.facade';
 import { CitationFacade } from './citation/citation.facade';
 import { ExtractionFacade } from './extraction/extraction.facade';
 import { CslJsonMapper } from './citation';
-import { TransactionService } from './sync';
-import { LibraryChange, Tombstone } from '@prisma/client';
-
-import { ExtractedPdfDocument, AttachmentEntity } from './extraction';
-import { cleanSingleTag } from './core/domain/tag.domain';
-import { SubsystemUnavailableException } from './core';
+import { ExportLibraryDto } from './citation/dto/exports.dto';
+import { ExportResult } from './citation/types/exports.types';
+import {
+  ExtractedPdfDocument,
+  LIBRARY_REDIS_KEYS,
+  normalizeProjectScopeId,
+} from './core';
 
 export interface LibraryItemSummary {
   id: string;
@@ -21,108 +24,22 @@ export interface LibraryItemSummary {
   authors: string[];
 }
 
-export interface AttachmentSummaryDto {
-  id: string;
-  filename: string;
-  mimeType: string;
-  size?: number | bigint | null;
-  url?: string | null;
-  linkMode?: string | null;
-  attachmentType?: string | null;
-}
-
-export interface NoteSummaryDto {
-  id: string;
-  title?: string | null;
-  content?: string | null;
-  contentMd?: string | null;
-  createdAt?: Date | string;
-  updatedAt?: Date | string;
-}
-
-export interface TagSummaryDto {
-  id?: string;
-  name: string;
-  color?: string | null;
-}
-
-export interface CollectionSummaryDto {
-  id: string;
-  name: string;
-  color?: string | null;
-  parentId?: string | null;
-}
-
-export interface LibraryItemDetail extends LibraryItemSummary {
-  attachments: AttachmentSummaryDto[];
-  notes: NoteSummaryDto[];
-  tags: TagSummaryDto[];
-  collections: CollectionSummaryDto[];
-}
-
-export type SyncChangeDto = LibraryChange;
-export type SyncTombstoneDto = Tombstone;
-
-interface RawNoteLike {
-  id: string;
-  title?: string | null;
-  content?: string | null;
-  contentMd?: string | null;
-  createdAt?: Date | string;
-  updatedAt?: Date | string;
-}
-
-interface ItemTagLike {
-  tag?: { id?: string; name?: string; color?: string | null };
-  tagId?: string;
-  name?: string;
-  color?: string | null;
-}
-
-interface CollectionItemLike {
-  collection?: {
-    id?: string;
-    name?: string;
-    color?: string | null;
-    parentId?: string | null;
-  };
-  collectionId?: string;
-  id?: string;
-  name?: string;
-  color?: string | null;
-  parentId?: string | null;
-}
-
-interface CatalogItemWithRelations {
-  id: string;
-  title: string;
-  doi?: string | null;
-  abstract?: string | null;
-  year?: number | null;
-  itemType?: string | null;
-  itemTags?: ItemTagLike[];
-  tags?: Array<
-    string | { id?: string; name?: string; tag?: string; color?: string | null }
-  >;
-  collectionItems?: CollectionItemLike[];
-  collections?: Array<{
-    id?: string;
-    name?: string;
-    color?: string | null;
-    parentId?: string | null;
-  }>;
-}
-
 export interface ILibraryFacade {
-  readonly catalog?: CatalogFacade;
-  readonly extraction?: ExtractionFacade;
-  readonly citation?: CitationFacade;
-  readonly search?: SearchFacade;
-  exportBibByCitationKeys(
+  listCollections(
     userId: string,
-    citeKeys: string[],
     projectId?: string,
-  ): Promise<{ content: string } | null>;
+  ): Promise<
+    Array<{
+      id: string;
+      name: string;
+      itemCount?: number;
+      _count?: { collectionItems?: number };
+    }>
+  >;
+  exportLibrary(
+    userId: string,
+    options?: ExportLibraryDto,
+  ): Promise<ExportResult | null>;
   exportByCitationKeys(
     userId: string,
     citeKeys: string[],
@@ -138,11 +55,6 @@ export interface ILibraryFacade {
     itemId: string,
     projectId?: string,
   ): Promise<LibraryItemSummary | null>;
-  getItemWithDetails(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<LibraryItemDetail | null>;
   countItems(userId: string, options?: { projectId?: string }): Promise<number>;
   searchItems(
     userId: string,
@@ -153,19 +65,26 @@ export interface ILibraryFacade {
     buffer: Buffer,
     options?: { maxPages?: number; headerOnly?: boolean },
   ): Promise<ExtractedPdfDocument>;
-  getSyncVersion(
-    scope: { userId?: string; projectId?: string } | string,
-  ): Promise<bigint>;
-  getSyncChanges(
-    scope: { userId?: string; projectId?: string } | string,
-    sinceSeq?: bigint,
-    limit?: number,
-  ): Promise<SyncChangeDto[]>;
-  getSyncTombstones(
-    scope: { userId?: string; projectId?: string } | string,
-    sinceSeq?: bigint,
-    limit?: number,
-  ): Promise<SyncTombstoneDto[]>;
+  extractPdfBuffer(
+    buffer: Buffer,
+    filename?: string,
+  ): Promise<ExtractedPdfDocument>;
+  updateAttachmentProcessingStatus(
+    attachmentId: string,
+    status: string,
+    metadataPatch?: Record<string, unknown>,
+  ): Promise<void>;
+  updateItemAiMetadata(
+    itemId: string,
+    aiMetadataPatch: Record<string, unknown>,
+  ): Promise<void>;
+  findAttachmentByFileId(
+    fileId: string,
+  ): Promise<{
+    id: string;
+    itemId: string;
+    metadata?: unknown;
+  } | null>;
 }
 
 export const LIBRARY_FACADE = 'LIBRARY_FACADE';
@@ -177,36 +96,35 @@ export const LIBRARY_FACADE = 'LIBRARY_FACADE';
 @Injectable()
 export class LibraryFacade implements ILibraryFacade {
   constructor(
-    @Optional() private readonly catalogFacade?: CatalogFacade,
-    @Optional() private readonly extractionFacade?: ExtractionFacade,
-    @Optional() private readonly searchFacade?: SearchFacade,
-    @Optional() private readonly citationFacade?: CitationFacade,
-    @Optional() private readonly transactionService?: TransactionService,
+    private readonly catalogFacade: CatalogFacade,
+    private readonly extractionFacade: ExtractionFacade,
+    private readonly searchFacade: SearchFacade,
+    private readonly citationFacade: CitationFacade,
+    @Optional()
+    private readonly prisma?: PrismaService,
+    @Optional()
+    private readonly cache?: RedisCacheService,
   ) {}
 
-  get catalog(): CatalogFacade | undefined {
-    return this.catalogFacade;
-  }
-
-  get extraction(): ExtractionFacade | undefined {
-    return this.extractionFacade;
-  }
-
-  get citation(): CitationFacade | undefined {
-    return this.citationFacade;
-  }
-
-  get search(): SearchFacade | undefined {
-    return this.searchFacade;
-  }
-
-  async exportBibByCitationKeys(
+  async listCollections(
     userId: string,
-    citeKeys: string[],
     projectId?: string,
-  ): Promise<{ content: string } | null> {
-    if (!this.citationFacade) return null;
-    return this.citationFacade.exportBibliography(userId, citeKeys, projectId);
+  ): Promise<
+    Array<{
+      id: string;
+      name: string;
+      itemCount?: number;
+      _count?: { collectionItems?: number };
+    }>
+  > {
+    return this.catalogFacade.listCollections(userId, projectId);
+  }
+
+  async exportLibrary(
+    userId: string,
+    options: ExportLibraryDto = { format: 'bibtex' },
+  ): Promise<ExportResult | null> {
+    return this.citationFacade.exportLibrary(userId, options);
   }
 
   async exportByCitationKeys(
@@ -219,9 +137,6 @@ export class LibraryFacade implements ILibraryFacade {
     foundKeys: string[];
     missingKeys: string[];
   }> {
-    if (!this.citationFacade) {
-      return { content: '', count: 0, foundKeys: [], missingKeys: citeKeys };
-    }
     return this.citationFacade.exportByCitationKeys(
       userId,
       citeKeys,
@@ -234,7 +149,6 @@ export class LibraryFacade implements ILibraryFacade {
     itemId: string,
     projectId?: string,
   ): Promise<LibraryItemSummary | null> {
-    if (!this.catalogFacade) return null;
     const item = await this.catalogFacade.getItem(userId, itemId, projectId);
     if (!item) return null;
 
@@ -249,151 +163,10 @@ export class LibraryFacade implements ILibraryFacade {
     };
   }
 
-  async getItemWithDetails(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<LibraryItemDetail | null> {
-    if (!this.catalogFacade) return null;
-
-    const [catalogItem, attachmentsRes] = await Promise.all([
-      this.catalogFacade.getItem(userId, itemId, projectId),
-      this.extractionFacade
-        ? this.extractionFacade.getItemAttachments(userId, itemId, projectId)
-        : Promise.resolve([]),
-    ]);
-
-    if (!catalogItem) return null;
-
-    const rawAttachments: AttachmentEntity[] = Array.isArray(attachmentsRes)
-      ? attachmentsRes
-      : Array.isArray(
-            (catalogItem as unknown as { attachments?: AttachmentEntity[] })
-              .attachments,
-          )
-        ? ((catalogItem as unknown as { attachments: AttachmentEntity[] })
-            .attachments ?? [])
-        : [];
-
-    const attachments: AttachmentSummaryDto[] = rawAttachments.map(
-      (attachment) => ({
-        id: attachment.id,
-        filename: attachment.filename || 'untitled',
-        mimeType: attachment.mimeType || 'application/octet-stream',
-        size: attachment.size !== undefined ? attachment.size : null,
-        url:
-          attachment.url ||
-          (attachment.fileId
-            ? `/api/v1/storage/files/${attachment.fileId}/content`
-            : null),
-        linkMode: attachment.linkMode || 'imported_file',
-        attachmentType: attachment.attachmentType || null,
-      }),
-    );
-
-    const existingNotes = (catalogItem as unknown as { notes?: RawNoteLike[] })
-      .notes;
-    const notes = Array.isArray(existingNotes)
-      ? existingNotes
-      : await this.catalogFacade.listNotes(userId, itemId, projectId);
-    const rawNotes = Array.isArray(notes) ? (notes as RawNoteLike[]) : [];
-    const noteSummaries: NoteSummaryDto[] = rawNotes.map((note) => ({
-      id: note.id,
-      title: note.title || null,
-      content: note.content || note.contentMd || null,
-      contentMd: note.contentMd || note.content || null,
-      createdAt: note.createdAt,
-      updatedAt: note.updatedAt,
-    }));
-
-    return {
-      id: catalogItem.id,
-      title: catalogItem.title,
-      doi: catalogItem.doi,
-      abstract: catalogItem.abstract,
-      year: catalogItem.year,
-      itemType: catalogItem.itemType || 'journalArticle',
-      authors: CslJsonMapper.getAuthorNames(catalogItem),
-      attachments,
-      notes: noteSummaries,
-      tags: this.extractTagSummaries(catalogItem),
-      collections: this.extractCollectionSummaries(catalogItem),
-    };
-  }
-
-  private extractTagSummaries(
-    item?: CatalogItemWithRelations | null,
-  ): TagSummaryDto[] {
-    if (!item) return [];
-    const seenLower = new Set<string>();
-    const result: TagSummaryDto[] = [];
-    const addUnique = (rawName: string, id?: string, color?: string | null) => {
-      const cleaned = cleanSingleTag(rawName);
-      if (!cleaned) return;
-      const key = cleaned.toLowerCase();
-      if (seenLower.has(key)) return;
-      seenLower.add(key);
-      result.push({
-        ...(id ? { id } : {}),
-        name: cleaned,
-        ...(color !== undefined ? { color } : {}),
-      });
-    };
-
-    const sourceList = Array.isArray(item.itemTags)
-      ? item.itemTags.map((it) => ({
-          name: it.tag?.name || it.name || '',
-          id: it.tag?.id || it.tagId || undefined,
-          color: it.tag?.color || null,
-        }))
-      : Array.isArray(item.tags)
-        ? item.tags.map((t) =>
-            typeof t === 'string'
-              ? { name: t, id: undefined, color: undefined }
-              : {
-                  name: t?.name || t?.tag || '',
-                  id: t?.id || undefined,
-                  color: t?.color || null,
-                },
-          )
-        : [];
-
-    for (const entry of sourceList) {
-      addUnique(entry.name, entry.id, entry.color);
-    }
-    return result;
-  }
-
-  private extractCollectionSummaries(
-    item?: CatalogItemWithRelations | null,
-  ): CollectionSummaryDto[] {
-    if (!item) return [];
-    const rawCollections = Array.isArray(item.collectionItems)
-      ? item.collectionItems.map((ci) => ({
-          id: ci.collection?.id || ci.collectionId,
-          name: ci.collection?.name || '',
-          color: ci.collection?.color || null,
-          parentId: ci.collection?.parentId || null,
-        }))
-      : Array.isArray(item.collections)
-        ? item.collections
-        : [];
-
-    return rawCollections
-      .filter((c): c is typeof c & { id: string } => Boolean(c?.id))
-      .map((c) => ({
-        id: c.id,
-        name: c.name || '',
-        color: c.color || null,
-        parentId: c.parentId || null,
-      }));
-  }
-
   async countItems(
     userId: string,
     options?: { projectId?: string },
   ): Promise<number> {
-    if (!this.catalogFacade) return 0;
     return this.catalogFacade.countItems(userId, {
       view: 'all',
       ...(options?.projectId ? { projectId: options.projectId } : {}),
@@ -405,14 +178,14 @@ export class LibraryFacade implements ILibraryFacade {
     query: string,
     projectId?: string,
   ): Promise<LibraryItemSummary[]> {
-    if (!this.catalogFacade) return [];
-    const items = await this.catalogFacade.findMany(userId, {
-      search: query,
+    const searchRes = await this.searchFacade.search(userId, {
+      query,
       limit: 20,
       ...(projectId ? { projectId } : {}),
     });
+    const rawItems = searchRes.items ?? [];
 
-    return items.map((catalogItem) => ({
+    return rawItems.map((catalogItem) => ({
       id: catalogItem.id,
       title: catalogItem.title,
       doi: catalogItem.doi,
@@ -427,37 +200,128 @@ export class LibraryFacade implements ILibraryFacade {
     buffer: Buffer,
     options?: { maxPages?: number; headerOnly?: boolean },
   ): Promise<ExtractedPdfDocument> {
-    if (!this.extractionFacade) {
-      throw new SubsystemUnavailableException(
-        'ExtractionFacade is not available',
-        { subsystem: 'ExtractionFacade' },
-      );
-    }
     return this.extractionFacade.extractDocumentFromBuffer(buffer, options);
   }
 
-  async getSyncVersion(
-    scope: { userId?: string; projectId?: string } | string,
-  ): Promise<bigint> {
-    if (!this.transactionService) return BigInt(0);
-    return this.transactionService.getLatestSequence(scope);
+  async extractPdfBuffer(
+    buffer: Buffer,
+    _filename?: string,
+  ): Promise<ExtractedPdfDocument> {
+    return this.extractionFacade.extractDocumentFromBuffer(buffer);
   }
 
-  async getSyncChanges(
-    scope: { userId?: string; projectId?: string } | string,
-    sinceSeq: bigint = BigInt(0),
-    limit: number = 100,
-  ): Promise<SyncChangeDto[]> {
-    if (!this.transactionService) return [];
-    return this.transactionService.getChangesSince(scope, sinceSeq, limit);
+  async findAttachmentByFileId(
+    fileId: string,
+  ): Promise<{
+    id: string;
+    itemId: string;
+    metadata?: unknown;
+  } | null> {
+    if (!this.prisma || !fileId) return null;
+    return this.prisma.attachment.findFirst({
+      where: { fileId, deletedAt: null },
+      select: { id: true, itemId: true, metadata: true },
+    });
   }
 
-  async getSyncTombstones(
-    scope: { userId?: string; projectId?: string } | string,
-    sinceSeq?: bigint,
-    limit: number = 100,
-  ): Promise<SyncTombstoneDto[]> {
-    if (!this.transactionService) return [];
-    return this.transactionService.getTombstonesSince(scope, sinceSeq, limit);
+  async updateAttachmentProcessingStatus(
+    attachmentId: string,
+    status: string,
+    metadataPatch?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.prisma || !attachmentId) return;
+    const existing = await this.prisma.attachment.findUnique({
+      where: { id: attachmentId },
+      select: { id: true, itemId: true, metadata: true },
+    });
+    if (!existing) return;
+
+    const currentMeta =
+      existing.metadata &&
+      typeof existing.metadata === 'object' &&
+      !Array.isArray(existing.metadata)
+        ? (existing.metadata as Record<string, unknown>)
+        : {};
+
+    const validExtractionStatuses = new Set<string>([
+      'PENDING',
+      'PROCESSING',
+      'READY',
+      'FAILED_RETRYABLE',
+      'FAILED_FINAL',
+    ]);
+    const normalizedUpper = status.toUpperCase();
+    const isExtractionEnum = validExtractionStatuses.has(normalizedUpper);
+
+    await this.prisma.attachment.update({
+      where: { id: attachmentId },
+      data: {
+        ...(isExtractionEnum
+          ? {
+              extractionStatus:
+                normalizedUpper as AttachmentExtractionStatus,
+            }
+          : {}),
+        metadata: {
+          ...currentMeta,
+          ragStatus: status,
+          ...(metadataPatch ?? {}),
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    if (this.cache && existing.itemId) {
+      await Promise.all([
+        this.cache.del(LIBRARY_REDIS_KEYS.item(existing.itemId)),
+        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(existing.itemId)),
+        this.cache.del(`library:item:${existing.itemId}:attachments`),
+      ]);
+    }
+  }
+
+  async updateItemAiMetadata(
+    itemId: string,
+    aiMetadataPatch: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.prisma || !itemId) return;
+    const existing = await this.prisma.item.findUnique({
+      where: { id: itemId },
+      select: { id: true, userId: true, projectId: true, metadata: true },
+    });
+    if (!existing) return;
+
+    const currentMeta =
+      existing.metadata &&
+      typeof existing.metadata === 'object' &&
+      !Array.isArray(existing.metadata)
+        ? (existing.metadata as Record<string, unknown>)
+        : {};
+
+    await this.prisma.item.update({
+      where: { id: itemId },
+      data: {
+        metadata: {
+          ...currentMeta,
+          ...aiMetadataPatch,
+        } as Prisma.InputJsonValue,
+        version: { increment: 1 },
+      },
+    });
+
+    if (this.cache) {
+      const validProjectId = normalizeProjectScopeId(existing.projectId);
+      const scopeId = validProjectId || existing.userId;
+      const tasks: Promise<unknown>[] = [
+        this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
+        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
+      ];
+      if (scopeId) {
+        tasks.push(
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
+        );
+      }
+      await Promise.all(tasks);
+    }
   }
 }

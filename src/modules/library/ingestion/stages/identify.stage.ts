@@ -22,13 +22,10 @@ import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
-  EXTRACTION_FACADE,
-  IExtractionFacade,
   normalizeArxivId,
   normalizePmid,
   normalizeIsbn,
 } from '@/modules/library/core';
-import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import {
   IWorkflowStage,
   IdentifyStageInput,
@@ -55,13 +52,11 @@ export {
 
 @Injectable()
 export class IdentifyStage implements IWorkflowStage<
-  IdentifyStageInput | string,
+  IdentifyStageInput,
   MetadataCandidate[]
 > {
   readonly stageName = 'IDENTIFY' as const;
   private readonly logger = new Logger(IdentifyStage.name);
-  private readonly activeFileResolver: IdentifyFileResolver;
-  private readonly activeUrlResolver: IdentifyUrlResolver;
 
   constructor(
     private readonly doiParser: DoiParser,
@@ -72,38 +67,18 @@ export class IdentifyStage implements IWorkflowStage<
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
     @Optional()
-    @Inject(EXTRACTION_FACADE)
-    private readonly extractionGateway?: IExtractionFacade,
-    @Optional() private readonly urlScraper?: UrlMetadataScraperService,
-    @Optional() private readonly cslParser: CslParser = new CslParser(),
-    @Optional() private readonly fileResolver?: IdentifyFileResolver,
-    @Optional() private readonly urlResolver?: IdentifyUrlResolver,
-  ) {
-    this.activeFileResolver =
-      fileResolver ??
-      new IdentifyFileResolver(
-        this.normalizer,
-        this.storagePort,
-        this.extractionGateway,
-      );
-    this.activeUrlResolver =
-      urlResolver ?? new IdentifyUrlResolver(this.normalizer, this.urlScraper);
-  }
+    private readonly cslParser?: CslParser,
+    @Optional()
+    private readonly fileResolver?: IdentifyFileResolver,
+    @Optional()
+    private readonly urlResolver?: IdentifyUrlResolver,
+  ) {}
 
   /**
    * Executes identification and initial format translation into candidate envelopes.
    */
-  async execute(
-    runIdOrInput: string | IdentifyStageInput,
-    payloadArg?: SubmissionPayload,
-    scopeIdArg?: string,
-  ): Promise<MetadataCandidate[]> {
-    const _runId =
-      typeof runIdOrInput === 'string' ? runIdOrInput : runIdOrInput.runId;
-    const payload =
-      typeof runIdOrInput === 'string' ? payloadArg! : runIdOrInput.payload;
-    const scopeId =
-      typeof runIdOrInput === 'string' ? scopeIdArg : runIdOrInput.scopeId;
+  async execute(input: IdentifyStageInput): Promise<MetadataCandidate[]> {
+    const { runId: _runId, payload, scopeId } = input;
     const candidates: MetadataCandidate[] = [];
 
     switch (payload.kind) {
@@ -151,7 +126,9 @@ export class IdentifyStage implements IWorkflowStage<
           format === 'JSON' ||
           (payload.format as string) === 'csl_json'
         ) {
-          const parsedList = this.cslParser.parse(recordContent);
+          const parsedList = this.cslParser
+            ? this.cslParser.parse(recordContent)
+            : [];
           for (const item of parsedList) {
             candidates.push(
               this.createCandidate({
@@ -163,12 +140,8 @@ export class IdentifyStage implements IWorkflowStage<
               }),
             );
           }
-        } else if (
-          format === 'ENDNOTE_XML' ||
-          format === 'MODS' ||
-          format === 'REFER'
-        ) {
-          const parsedList = await this.risParser.parseAsync(recordContent);
+        } else if (format === 'REFER') {
+          const parsedList = this.risParser.parse(recordContent);
           for (const item of parsedList) {
             candidates.push(
               this.createCandidate({
@@ -180,6 +153,10 @@ export class IdentifyStage implements IWorkflowStage<
               }),
             );
           }
+        } else if (format === 'ENDNOTE_XML' || format === 'MODS') {
+          throw new BadRequestException(
+            `Record format "${format}" is not supported by the ingestion parser`,
+          );
         }
         break;
       }
@@ -193,6 +170,49 @@ export class IdentifyStage implements IWorkflowStage<
       case 'FILE': {
         const candidate = await this.resolveFileCandidate(payload, scopeId);
         if (candidate) candidates.push(candidate);
+        break;
+      }
+
+      case 'CONNECTOR': {
+        const connectorRaw = payload as unknown as Record<string, unknown>;
+        const inlineContent =
+          typeof connectorRaw.content === 'string'
+            ? connectorRaw.content
+            : '';
+        if (inlineContent.trim()) {
+          const parsedList = this.bibtexParser.parse(inlineContent);
+          for (const item of parsedList) {
+            candidates.push(
+              this.createCandidate({
+                sourceKind: 'RECORD',
+                sourceName: connectorRaw.connectionId
+                  ? `Connector:${String(connectorRaw.connectionId)}`
+                  : 'ZoteroConnector',
+                sourceRecordId:
+                  item.citationKey ||
+                  item.doi ||
+                  payload.externalObjectId ||
+                  undefined,
+                rawMetadata: this.mapBibtexToRaw(item),
+                confidenceScore: 0.95,
+              }),
+            );
+          }
+        } else if (payload.externalObjectId) {
+          const idCandidate =
+            this.buildIdentifierCandidate('DOI', payload.externalObjectId) ||
+            this.createCandidate({
+              sourceKind: 'RECORD',
+              sourceName: 'ZoteroConnector',
+              sourceRecordId: payload.externalObjectId,
+              rawMetadata: {
+                title: `Zotero Item (${payload.externalObjectId})`,
+                citationKey: payload.externalObjectId,
+              },
+              confidenceScore: 0.85,
+            });
+          if (idCandidate) candidates.push(idCandidate);
+        }
         break;
       }
     }
@@ -262,11 +282,7 @@ export class IdentifyStage implements IWorkflowStage<
     payload: SubmissionPayload & { kind: 'RECORD' },
   ): Promise<string> {
     let content = payload.content || '';
-    if (
-      payload.isOffloaded &&
-      payload.fileId &&
-      typeof this.storagePort?.readOwnedFile === 'function'
-    ) {
+    if (payload.isOffloaded && payload.fileId && this.storagePort?.readOwnedFile) {
       try {
         const file = await this.storagePort.readOwnedFile({
           fileId: payload.fileId,
@@ -291,15 +307,17 @@ export class IdentifyStage implements IWorkflowStage<
   private async resolveUrlCandidate(
     payload: SubmissionPayload & { kind: 'URL' },
     scopeId?: string,
-  ): Promise<MetadataCandidate> {
-    return this.activeUrlResolver.resolve(payload, scopeId);
+  ): Promise<MetadataCandidate | null> {
+    if (!this.urlResolver) return null;
+    return this.urlResolver.resolve(payload, scopeId);
   }
 
   private async resolveFileCandidate(
     payload: SubmissionPayload & { kind: 'FILE' },
     scopeId?: string,
-  ): Promise<MetadataCandidate> {
-    return this.activeFileResolver.resolve(payload, scopeId);
+  ): Promise<MetadataCandidate | null> {
+    if (!this.fileResolver) return null;
+    return this.fileResolver.resolve(payload, scopeId);
   }
 
   cleanPdfTitle(

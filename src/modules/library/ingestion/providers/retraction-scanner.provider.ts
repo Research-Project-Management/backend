@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   RetractionDetails,
   RetractionLookupResult,
@@ -19,7 +19,7 @@ export class RetractionScannerProvider {
   private readonly logger = new Logger(RetractionScannerProvider.name);
   constructor(
     private readonly retractionDb: RetractionDatabaseService,
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    private readonly httpClient: AcademicHttpClient,
   ) {}
 
   /**
@@ -106,17 +106,10 @@ export class RetractionScannerProvider {
           Accept: 'application/json',
         };
         const oaSignal = AbortSignal.timeout(3500);
-        const oaRes = this.httpClient
-          ? (
-              await this.httpClient.request(oaUrl, {
-                headers: oaHeaders,
-                signal: oaSignal,
-              })
-            ).response
-          : await fetch(oaUrl, {
-              signal: oaSignal,
-              headers: oaHeaders,
-            });
+        const { response: oaRes } = await this.httpClient.request(oaUrl, {
+          headers: oaHeaders,
+          signal: oaSignal,
+        });
 
         if (oaRes.ok) {
           const oaData = (await oaRes.json()) as {
@@ -159,17 +152,10 @@ export class RetractionScannerProvider {
           Accept: 'application/json',
         };
         const crSignal = AbortSignal.timeout(3500);
-        const crRes = this.httpClient
-          ? (
-              await this.httpClient.request(crUrl, {
-                headers: crHeaders,
-                signal: crSignal,
-              })
-            ).response
-          : await fetch(crUrl, {
-              signal: crSignal,
-              headers: crHeaders,
-            });
+        const { response: crRes } = await this.httpClient.request(crUrl, {
+          headers: crHeaders,
+          signal: crSignal,
+        });
 
         if (crRes.ok) {
           const crData = (await crRes.json()) as {

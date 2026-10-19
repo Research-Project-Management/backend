@@ -7,6 +7,7 @@ import {
   PageTextExtraction,
 } from './full-text.provider';
 import { SearchItemsQueryDto } from '@/modules/library/search/dto/search.dto';
+import { isProjectScopeId } from '@/modules/library/core';
 
 @Injectable()
 export class SearchService {
@@ -21,7 +22,7 @@ export class SearchService {
    * Faceted search returning items, facets, and cursor pagination metadata.
    */
   async search(userId: string, dto: SearchItemsQueryDto) {
-    const effectiveQuery = dto.query ?? dto.q ?? '';
+    const effectiveQuery = dto.query ?? '';
     const searchOptions: SearchOptions = {
       q: effectiveQuery,
       collectionId: dto.collectionId,
@@ -78,13 +79,7 @@ export class SearchService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    const isProjectScope = Boolean(
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal',
-    );
-    if (isProjectScope) {
+    if (isProjectScopeId(projectId)) {
       if (attachment.item.projectId !== projectId) {
         throw new NotFoundException(`Attachment ${attachmentId} not found`);
       }
@@ -101,37 +96,13 @@ export class SearchService {
 
   async indexAttachmentPages(
     attachmentId: string,
-    pages: PageTextExtraction[],
+    itemIdOrPages: string | PageTextExtraction[],
+    maybePages?: PageTextExtraction[],
   ): Promise<void> {
+    const pages = Array.isArray(itemIdOrPages)
+      ? itemIdOrPages
+      : (maybePages ?? []);
     await this.fullText.indexAttachmentPages(attachmentId, pages);
-  }
-
-  /**
-   * Rebuilds full-text and faceted search index for a given user library scope.
-   */
-  async rebuildIndex(
-    userId: string,
-  ): Promise<{ indexedItems: number; indexedAttachments: number }> {
-    this.logger.log(`Rebuilding search index for user ${userId}...`);
-    if (typeof this.repo.invalidateFacets === 'function') {
-      await this.repo.invalidateFacets(userId);
-    }
-    const facets = await this.repo.computeFacets(userId, {});
-    const totalTypes = Object.values(facets.itemTypes).reduce<number>(
-      (a: number, b: unknown) => a + Number(b || 0),
-      0,
-    );
-    const indexedAttachments =
-      typeof this.repo.countIndexedAttachments === 'function'
-        ? await this.repo.countIndexedAttachments(userId)
-        : 0;
-    this.logger.log(
-      `Search index validated for user ${userId}: ${totalTypes} active items, ${indexedAttachments} attachments indexed.`,
-    );
-    return {
-      indexedItems: totalTypes,
-      indexedAttachments,
-    };
   }
 
   async invalidateFacetsCache(scopeId: string): Promise<void> {

@@ -1,10 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { Prisma, TagType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { resolveOrCreateTags } from '@/modules/library/catalog';
+import { resolveOrCreateTags } from '@/modules/library/catalog/domain/creator-tag-payload.builder';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
-import { EntityNotFoundException } from '@/modules/library/core';
+import {
+  EntityNotFoundException,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
 
 @Injectable()
 export class ExtractionRepository {
@@ -83,29 +86,64 @@ export class ExtractionRepository {
     });
   }
 
-  async saveItemMetadata(
-    itemId: string,
-    sourceProvider: string,
-    rawPayload: Prisma.InputJsonValue,
-    tx?: Prisma.TransactionClient,
-  ) {
-    const client = this.getClient(tx);
-    return client.itemMetadata.create({
-      data: {
-        itemId,
-        sourceProvider,
-        rawPayload,
-      },
-    });
-  }
-
   async saveMetadataSourceRecord(
     itemId: string,
     sourceProvider: string,
     rawPayload: Prisma.InputJsonValue,
     tx?: Prisma.TransactionClient,
   ) {
-    return this.saveItemMetadata(itemId, sourceProvider, rawPayload, tx);
+    const client = this.getClient(tx);
+    const existingRecords = await client.itemMetadata.findMany({
+      where: { itemId, sourceProvider },
+      select: { id: true, rawPayload: true },
+    });
+
+    const newFileId =
+      rawPayload &&
+      typeof rawPayload === 'object' &&
+      !Array.isArray(rawPayload) &&
+      typeof (rawPayload as Record<string, unknown>).fileId === 'string'
+        ? ((rawPayload as Record<string, unknown>).fileId as string)
+        : undefined;
+
+    const supersededFileIds: string[] = [];
+    if (existingRecords.length > 0) {
+      for (const existing of existingRecords) {
+        const payloadObj =
+          existing.rawPayload &&
+          typeof existing.rawPayload === 'object' &&
+          !Array.isArray(existing.rawPayload)
+            ? (existing.rawPayload as Record<string, unknown>)
+            : null;
+        if (
+          payloadObj?.isOffloaded === true &&
+          typeof payloadObj.fileId === 'string' &&
+          payloadObj.fileId.length > 0 &&
+          payloadObj.fileId !== newFileId
+        ) {
+          supersededFileIds.push(payloadObj.fileId);
+        }
+      }
+
+      await client.itemMetadata.deleteMany({
+        where: {
+          id: { in: existingRecords.map((r) => r.id) },
+        },
+      });
+    }
+
+    const created = await client.itemMetadata.create({
+      data: {
+        itemId,
+        sourceProvider,
+        rawPayload,
+      },
+    });
+
+    return {
+      ...created,
+      supersededFileIds,
+    };
   }
 
   async updateAttachmentMetadata(
@@ -125,11 +163,87 @@ export class ExtractionRepository {
     data: Prisma.ItemUpdateInput,
     tx?: Prisma.TransactionClient,
   ) {
+    return this.updateItemWithExtractedMetadata(itemId, data, tx);
+  }
+
+  async updateItemWithExtractedMetadata(
+    itemId: string,
+    data: Prisma.ItemUpdateInput,
+    tx?: Prisma.TransactionClient,
+  ) {
     const client = this.getClient(tx);
+    let mergedMetadata = data.metadata;
+
+    if (
+      data.metadata &&
+      typeof data.metadata === 'object' &&
+      !Array.isArray(data.metadata)
+    ) {
+      const freshItem = await client.item.findUnique({
+        where: { id: itemId },
+        select: { metadata: true },
+      });
+      const freshestMeta =
+        freshItem?.metadata &&
+        typeof freshItem.metadata === 'object' &&
+        !Array.isArray(freshItem.metadata)
+          ? (freshItem.metadata as Record<string, unknown>)
+          : {};
+      mergedMetadata = {
+        ...freshestMeta,
+        ...(data.metadata as Record<string, unknown>),
+      } as Prisma.InputJsonValue;
+    }
+
     return client.item.update({
       where: { id: itemId },
-      data,
+      data: {
+        ...data,
+        ...(mergedMetadata !== undefined ? { metadata: mergedMetadata } : {}),
+        version: { increment: 1 },
+      },
     });
+  }
+
+  async indexAttachmentPages(
+    attachmentId: string,
+    pages: Array<{
+      pageIndex: number;
+      textContent: string;
+      charOffset?: number;
+    }>,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (!pages || pages.length === 0) return;
+    const execute = async (client: Prisma.TransactionClient) => {
+      if (typeof client.fullTextIndex?.deleteMany !== 'function') return;
+      await client.fullTextIndex.deleteMany({
+        where: { attachmentId },
+      });
+
+      const CHUNK_SIZE = 100;
+      for (let i = 0; i < pages.length; i += CHUNK_SIZE) {
+        const chunk = pages.slice(i, i + CHUNK_SIZE);
+        await client.fullTextIndex.createMany({
+          data: chunk.map((page, idx) => ({
+            attachmentId,
+            pageIndex: page.pageIndex ?? i + idx,
+            textContent: (page.textContent || '').replace(/\0/g, ''),
+            charOffset: page.charOffset ?? 0,
+          })),
+        });
+      }
+    };
+
+    if (tx) {
+      await execute(tx);
+    } else if (typeof this.prisma.$transaction === 'function') {
+      await this.prisma.$transaction(async (innerTx) => {
+        await execute(innerTx);
+      });
+    } else {
+      await execute(this.prisma as unknown as Prisma.TransactionClient);
+    }
   }
 
   async countContributors(itemId: string, tx?: Prisma.TransactionClient) {
@@ -182,27 +296,72 @@ export class ExtractionRepository {
   async findScopePapers(
     scope: { userId?: string; projectId?: string | null } | string,
     excludeItemId: string,
+    hintsOrTx?:
+      | { dois?: string[]; years?: number[]; limit?: number }
+      | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    const client = this.getClient(tx);
-    const scopeWhere: Prisma.ItemWhereInput =
-      typeof scope === 'object' && scope !== null
-        ? scope.projectId &&
-          scope.projectId !== 'user' &&
-          scope.projectId !== 'me' &&
-          scope.projectId !== 'personal'
-          ? { projectId: scope.projectId }
-          : { userId: scope.userId, projectId: null }
+    const isHintsObj =
+      hintsOrTx &&
+      typeof hintsOrTx === 'object' &&
+      !('item' in hintsOrTx) &&
+      ('dois' in hintsOrTx || 'years' in hintsOrTx || 'limit' in hintsOrTx);
+    const hints = isHintsObj
+      ? (hintsOrTx as { dois?: string[]; years?: number[]; limit?: number })
+      : undefined;
+    const effectiveTx = isHintsObj
+      ? tx
+      : (hintsOrTx as Prisma.TransactionClient | undefined);
+
+    const client = this.getClient(effectiveTx);
+    let scopeWhere: Prisma.ItemWhereInput;
+    if (typeof scope === 'object' && scope !== null) {
+      const normalizedProjectId = normalizeProjectScopeId(scope.projectId);
+      scopeWhere = normalizedProjectId
+        ? { projectId: normalizedProjectId }
+        : { userId: scope.userId, projectId: null };
+    } else {
+      scopeWhere = {
+        OR: [{ projectId: scope }, { userId: scope, projectId: null }],
+      };
+    }
+
+    const cleanDois =
+      hints?.dois?.filter((d): d is string => Boolean(d && d.trim())) ?? [];
+    const cleanYears =
+      hints?.years?.filter(
+        (y): y is number => typeof y === 'number' && Number.isFinite(y),
+      ) ?? [];
+
+    const hintOrFilters: Prisma.ItemWhereInput[] = [];
+    if (cleanDois.length > 0) {
+      hintOrFilters.push({ doi: { in: cleanDois } });
+    }
+    if (cleanYears.length > 0) {
+      hintOrFilters.push({ year: { in: cleanYears } });
+    }
+
+    const combinedWhere: Prisma.ItemWhereInput =
+      hintOrFilters.length > 0
+        ? {
+            AND: [
+              scopeWhere,
+              { id: { not: excludeItemId }, deletedAt: null },
+              { OR: hintOrFilters },
+            ],
+          }
         : {
-            OR: [{ projectId: scope }, { userId: scope, projectId: null }],
+            ...scopeWhere,
+            id: { not: excludeItemId },
+            deletedAt: null,
           };
 
+    const takeLimit =
+      hints?.limit && hints.limit > 0 ? Math.min(hints.limit, 2000) : 500;
+
     return client.item.findMany({
-      where: {
-        ...scopeWhere,
-        id: { not: excludeItemId },
-        deletedAt: null,
-      },
+      where: combinedWhere,
+      take: takeLimit,
       select: {
         id: true,
         title: true,
@@ -345,40 +504,19 @@ export class ExtractionRepository {
       client,
       params.userId,
       normalized,
-      TagType.automatic,
+      'automatic',
       params.projectId ?? null,
     );
 
     if (resolvedTags.length > 0) {
-      if (typeof client.itemTag?.createMany === 'function') {
-        await client.itemTag.createMany({
-          data: resolvedTags.map((t) => ({
-            tagId: t.id,
-            itemId: params.itemId,
-            type: 'automatic',
-          })),
-          skipDuplicates: true,
-        });
-      } else {
-        await Promise.all(
-          resolvedTags.map((t) =>
-            client.itemTag.upsert({
-              where: {
-                tagId_itemId: {
-                  tagId: t.id,
-                  itemId: params.itemId,
-                },
-              },
-              create: {
-                tagId: t.id,
-                itemId: params.itemId,
-                type: 'automatic',
-              },
-              update: {},
-            }),
-          ),
-        );
-      }
+      await client.itemTag.createMany({
+        data: resolvedTags.map((t) => ({
+          tagId: t.id,
+          itemId: params.itemId,
+          type: 'automatic',
+        })),
+        skipDuplicates: true,
+      });
     }
 
     const item = await client.item.findUnique({
@@ -405,6 +543,7 @@ export class ExtractionRepository {
             keywords: mergedTags,
             labels: mergedTags,
           },
+          version: { increment: 1 },
         },
       });
     }
@@ -472,6 +611,7 @@ export class ExtractionRepository {
         where: { id: params.itemId },
         data: {
           noteCount: { increment: createdCount },
+          version: { increment: 1 },
         },
       });
     }

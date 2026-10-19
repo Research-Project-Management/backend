@@ -15,7 +15,7 @@ import {
   cleanAbstractText,
   cleanCommentText,
   decodeHtmlEntities,
-  normalizeTags,
+  normalizeAcademicTags,
   parseCreatorString,
   AcademicHttpClient,
   LibraryConfigService,
@@ -35,7 +35,7 @@ export class ArxivProvider implements MetadataProvider {
   };
 
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    private readonly httpClient: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -49,10 +49,6 @@ export class ArxivProvider implements MetadataProvider {
   supports(input: QueryType | MetadataRequest): boolean {
     const type = typeof input === 'string' ? input : input?.queryType;
     return type ? this.capabilities.queryTypes.includes(type) : false;
-  }
-
-  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
-    return this.resolve(request);
   }
 
   async resolve(
@@ -69,9 +65,10 @@ export class ArxivProvider implements MetadataProvider {
       Accept: 'application/atom+xml, application/xml, text/xml',
     };
 
-    const response = this.httpClient
-      ? (await this.httpClient.request(url, { headers, signal })).response
-      : await fetch(url, { headers, signal });
+    const { response } = await this.httpClient.request(url, {
+      headers,
+      signal,
+    });
 
     if (response.status === 404) return null;
 
@@ -159,7 +156,7 @@ export class ArxivProvider implements MetadataProvider {
       ? decodeHtmlEntities(primaryCatMatch[1].trim())
       : undefined;
 
-    const keywords = normalizeTags(rawCategories);
+    const keywords = normalizeAcademicTags(rawCategories);
 
     let doi: string | undefined;
     const doiMatchResult = entry.match(

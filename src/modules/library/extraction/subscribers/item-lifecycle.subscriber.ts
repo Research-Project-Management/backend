@@ -1,18 +1,16 @@
 import {
   Injectable,
   Logger,
-  OnModuleInit,
   Optional,
   Inject,
 } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { IOutboxRegistry, OUTBOX_REGISTRY_PORT } from '@/modules/library/core';
-import { OutboxEvent } from '@prisma/client';
 import {
-  INTEGRATION_EVENT_TOPICS,
-  BaseIntegrationEvent,
-  ItemDeletedIntegrationPayload,
-} from '@/modules/library/core/events/integration-events';
+  LIBRARY_EVENT_TYPES,
+  DomainEventEnvelope,
+  extractFileIdFromUrl,
+} from '@/modules/library/core';
+import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 
@@ -21,7 +19,7 @@ import { AttachmentsRepository } from '@/modules/library/extraction/repositories
  * Listens to Catalog item deletion events to clean up or soft-delete content attachments and annotations.
  */
 @Injectable()
-export class ItemLifecycleSubscriber implements OnModuleInit {
+export class ItemLifecycleSubscriber {
   private readonly logger = new Logger(ItemLifecycleSubscriber.name);
 
   constructor(
@@ -29,35 +27,25 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
     @Optional()
     private readonly annotationsRepository?: AnnotationsRepository,
     @Optional()
-    @Inject(OUTBOX_REGISTRY_PORT)
-    private readonly outboxWorker?: IOutboxRegistry,
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
   ) {}
 
-  onModuleInit() {
-    if (this.outboxWorker) {
-      this.outboxWorker.registerHandler(
-        INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_DELETED,
-        {
-          handle: async (event: OutboxEvent) => {
-            await this.handleItemDeleted(
-              event.payload as unknown as BaseIntegrationEvent<ItemDeletedIntegrationPayload>,
-            );
-          },
-        },
-      );
-      this.outboxWorker.registerHandler('library.item.purged', {
-        handle: async (event: OutboxEvent) => {
-          await this.handleItemPurged(event.payload);
-        },
-      });
-    }
-  }
-
-  @OnEvent('library.item.purged', { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_PURGED, { async: true })
   async handleItemPurged(event: unknown): Promise<void> {
     const payload = event as
-      { id?: string; payload?: { id?: string } } | null | undefined;
-    const itemId = payload?.id || payload?.payload?.id;
+      | {
+          id?: string;
+          aggregateId?: string;
+          payload?: { id?: string; itemId?: string };
+        }
+      | null
+      | undefined;
+    const itemId =
+      payload?.id ||
+      payload?.aggregateId ||
+      payload?.payload?.id ||
+      payload?.payload?.itemId;
     if (!itemId) return;
 
     this.logger.log(
@@ -65,6 +53,41 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
     );
 
     try {
+      if (this.storagePort?.deleteFile && this.attachmentsRepository?.findMany) {
+        const attachments = await this.attachmentsRepository.findMany(
+          { itemId },
+          { revisions: true },
+        );
+        const fileIdsToDelete = new Set<string>();
+        for (const att of attachments || []) {
+          const attFileId = att.fileId || extractFileIdFromUrl(att.url);
+          if (attFileId) fileIdsToDelete.add(attFileId);
+          const revisions = (
+            att as {
+              revisions?: Array<{ fileId?: string | null; url?: string | null }>;
+            }
+          ).revisions;
+          if (Array.isArray(revisions)) {
+            for (const rev of revisions) {
+              const revFileId =
+                rev.fileId || extractFileIdFromUrl(rev.url ?? undefined);
+              if (revFileId) fileIdsToDelete.add(revFileId);
+            }
+          }
+        }
+        for (const fid of fileIdsToDelete) {
+          try {
+            await this.storagePort.deleteFile(fid);
+          } catch (delErr: unknown) {
+            const msg =
+              delErr instanceof Error ? delErr.message : String(delErr);
+            this.logger.warn(
+              `[ExtractionSubscriber] Failed to delete storage file ${fid} for purged item ${itemId}: ${msg}`,
+            );
+          }
+        }
+      }
+
       if (this.annotationsRepository) {
         await this.annotationsRepository.deleteManyByItemId(itemId);
       }
@@ -79,11 +102,15 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
     }
   }
 
-  @OnEvent(INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_DELETED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_DELETED, { async: true })
   async handleItemDeleted(
-    event: BaseIntegrationEvent<ItemDeletedIntegrationPayload>,
+    event:
+      | DomainEventEnvelope
+      | { aggregateId?: string; payload?: { itemId?: string } },
   ): Promise<void> {
-    const itemId = event?.payload?.itemId;
+    const itemId =
+      event?.aggregateId ||
+      (event?.payload as { itemId?: string } | undefined)?.itemId;
     if (!itemId) return;
 
     this.logger.log(

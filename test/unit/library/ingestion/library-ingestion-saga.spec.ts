@@ -10,7 +10,7 @@ import { IngestionStatus } from '@prisma/client';
 
 describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle', () => {
   describe('IngestionRunAggregate Saga Step Tracking', () => {
-    it('should create an aggregate with RUNNING status and emit started event', () => {
+    it('should create an aggregate with RUNNING status', () => {
       const run = IngestionRunAggregate.create({
         userId: 'user-123',
         sourceType: 'doi',
@@ -23,36 +23,21 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       expect(run.totalItems).toBe(1);
       expect(run.completedSteps).toEqual([]);
       expect(run.currentStep).toBeNull();
-
-      const events = run.pullDomainEvents();
-      expect(events).toHaveLength(1);
-      expect(events[0].eventType).toBe('processing.ingestion_run.started');
     });
 
-    it('should track forward steps and emit step domain events', () => {
+    it('should track forward steps', () => {
       const run = IngestionRunAggregate.create({
         userId: 'user-123',
         sourceType: 'doi',
         totalItems: 1,
       });
-      run.pullDomainEvents(); // clear start event
 
       run.startStep('IDENTIFY');
       expect(run.currentStep).toBe('IDENTIFY');
-      const startEvents = run.pullDomainEvents();
-      expect(startEvents).toHaveLength(1);
-      expect(startEvents[0].eventType).toBe(
-        'processing.ingestion_run.step_started',
-      );
 
       run.completeStep('IDENTIFY', 45);
       expect(run.currentStep).toBeNull();
       expect(run.completedSteps).toContain('IDENTIFY');
-      const compEvents = run.pullDomainEvents();
-      expect(compEvents).toHaveLength(1);
-      expect(compEvents[0].eventType).toBe(
-        'processing.ingestion_run.step_completed',
-      );
     });
 
     it('should record step failure and trigger compensation transition', () => {
@@ -61,20 +46,10 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         sourceType: 'file',
         totalItems: 1,
       });
-      run.pullDomainEvents();
 
       run.startStep('NORMALIZE');
       run.failStep('NORMALIZE', 'Malformed metadata encoding');
       expect(run.currentStep).toBeNull();
-
-      const failEvents = run.pullDomainEvents();
-      expect(failEvents).toHaveLength(2);
-      expect(failEvents[0].eventType).toBe(
-        'processing.ingestion_run.step_started',
-      );
-      expect(failEvents[1].eventType).toBe(
-        'processing.ingestion_run.step_failed',
-      );
 
       // Start compensation
       run.startCompensation('NORMALIZE', 'Malformed metadata encoding');
@@ -87,25 +62,6 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       run.completeCompensation();
       expect(run.status).toBe('FAILED_FINAL');
       expect(run.errorReason).toBe('Malformed metadata encoding');
-
-      const compEvents = run.pullDomainEvents();
-      expect(
-        compEvents.some(
-          (e) =>
-            e.eventType === 'processing.ingestion_run.compensation_started',
-        ),
-      ).toBe(true);
-      expect(
-        compEvents.some(
-          (e) =>
-            e.eventType === 'processing.ingestion_run.compensation_completed',
-        ),
-      ).toBe(true);
-      expect(
-        compEvents.some(
-          (e) => e.eventType === 'processing.ingestion_run.failed',
-        ),
-      ).toBe(true);
     });
 
     it('should disallow starting a step when not in RUNNING status', () => {
@@ -239,7 +195,6 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
   describe('PipelineService Saga Integration', () => {
     let mockRepo: any;
     let mockIdentify: any;
-    let mockNormalize: any;
     let mockEnrich: any;
     let mockReconcile: any;
     let mockMatch: any;
@@ -277,15 +232,10 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
           },
         ]),
       };
-      mockNormalize = {
-        execute: jest
-          .fn()
-          .mockImplementation((cands) => Promise.resolve(cands)),
-      };
       mockEnrich = {
         execute: jest
           .fn()
-          .mockImplementation((_scope, cands) => Promise.resolve(cands)),
+          .mockImplementation((input) => Promise.resolve(input.candidates)),
       };
       mockReconcile = {
         execute: jest.fn().mockResolvedValue({
@@ -318,7 +268,6 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       pipelineService = new PipelineService(
         mockRepo,
         mockIdentify,
-        mockNormalize,
         mockEnrich,
         mockReconcile,
         mockMatch,
@@ -338,7 +287,6 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       await pipelineService.executePipeline('run-100', 'user-42', envelope);
 
       expect(mockIdentify.execute).toHaveBeenCalled();
-      expect(mockNormalize.execute).toHaveBeenCalled();
       expect(mockEnrich.execute).toHaveBeenCalled();
       expect(mockReconcile.execute).toHaveBeenCalled();
       expect(mockMatch.execute).toHaveBeenCalled();
@@ -378,19 +326,20 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
 
     it('should auto-scan and flag retracted paper during ingestion before commit', async () => {
       const mockScanner: any = {
-        scan: jest.fn().mockResolvedValue({
-          doi: '10.1016/s0140-6736(97)11096-0',
-          nature: 'retraction',
-          reason: 'Data falsification (Wakefield MMR)',
-          noticeUrl: 'https://doi.org/10.1016/S0140-6736(10)60175-4',
-          source: 'retraction_watch',
+        lookup: jest.fn().mockResolvedValue({
+          status: 'retracted',
+          details: {
+            doi: '10.1016/s0140-6736(97)11096-0',
+            nature: 'retraction',
+            reasons: ['Data falsification (Wakefield MMR)'],
+            retractionDoi: '10.1016/S0140-6736(10)60175-4',
+          },
         }),
       };
 
       const svcWithScanner = new PipelineServiceClass(
         mockRepo,
         mockIdentify,
-        mockNormalize,
         mockEnrich,
         mockReconcile,
         mockMatch,
@@ -415,15 +364,18 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         envelope,
       );
 
-      expect(mockScanner.scan).toHaveBeenCalled();
+      expect(mockScanner.lookup).toHaveBeenCalled();
       expect(mockCommit.execute).toHaveBeenCalledWith(
-        'user-42',
         expect.objectContaining({
-          isRetracted: true,
-          retractionNature: 'retraction',
+          scopeId: 'user-42',
+          item: expect.objectContaining({
+            isRetracted: true,
+            retractionNature: 'retraction',
+          }),
+          options: expect.any(Object),
         }),
-        expect.any(Object),
       );
     });
   });
 });
+

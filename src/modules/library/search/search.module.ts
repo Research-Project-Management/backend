@@ -33,6 +33,6 @@ import { SearchEventsSubscriber } from './subscribers/search-events.subscriber';
     FullTextProvider,
     SearchEventsSubscriber,
   ],
-  exports: [SearchFacade, SEARCH_FACADE, SearchService],
+  exports: [SEARCH_FACADE, SearchFacade],
 })
 export class SearchModule {}

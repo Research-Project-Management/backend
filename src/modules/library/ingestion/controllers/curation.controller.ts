@@ -6,16 +6,13 @@ import {
   Param,
   Query,
   UseGuards,
-  Optional,
 } from '@nestjs/common';
-import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
+import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
+import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { QualityService } from '@/modules/library/ingestion/services/quality.service';
-import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
-import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
 import {
   MergeDuplicatesDto,
   DismissDuplicatesDto,
-  ReResolveMetadataDto,
 } from '@/modules/library/ingestion/dto/curation.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -30,9 +27,9 @@ import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class CurationController {
   constructor(
-    private readonly duplicateService: DuplicateService,
+    private readonly duplicateDetector: DuplicateDetectorService,
+    private readonly duplicateMerger: DuplicateMergerService,
     private readonly qualityService: QualityService,
-    @Optional() private readonly ingestionService?: IngestionService,
   ) {}
 
   @Get('duplicates')
@@ -43,7 +40,7 @@ export class CurationController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
-    return this.duplicateService.detectDuplicates(userId, effectiveProjectId);
+    return this.duplicateDetector.detectDuplicates(userId, effectiveProjectId);
   }
 
   /**
@@ -61,7 +58,7 @@ export class CurationController {
   ) {
     const effectiveProjectId =
       paramProjectId || queryProjectId || dto.projectId;
-    return this.duplicateService.mergeDuplicates(
+    return this.duplicateMerger.mergeDuplicates(
       userId,
       dto,
       effectiveProjectId,
@@ -78,7 +75,7 @@ export class CurationController {
   ) {
     const effectiveProjectId =
       paramProjectId || queryProjectId || dto?.projectId;
-    return this.duplicateService.dismissDuplicates(
+    return this.duplicateDetector.dismissDuplicates(
       userId,
       dto.itemIds,
       effectiveProjectId,
@@ -94,34 +91,5 @@ export class CurationController {
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
     return this.qualityService.getQualityAudit(userId, effectiveProjectId);
-  }
-
-  /**
-   * On-demand bibliographic re-resolution against Open Academic Mirrors.
-   * User can trigger re-fetch to repair missing DOI, metadata, or author diacritics.
-   */
-  @Post(['items/:id/re-resolve', ':id/re-resolve'])
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  async reResolveMetadata(
-    @CurrentUser('id') userId: string,
-    @Param('id') id: string,
-    @Body() dto: ReResolveMetadataDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
-  ) {
-    if (!this.ingestionService) {
-      throw new SubsystemUnavailableException(
-        'IngestionService is not available in CurationController',
-        { subsystem: 'IngestionService' },
-      );
-    }
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || dto?.projectId;
-    return this.ingestionService.reResolveMetadata(
-      userId,
-      id,
-      dto,
-      effectiveProjectId,
-    );
   }
 }

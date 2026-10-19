@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { getDocumentProxy } from 'unpdf';
 import {
   cleanAuthorName,
@@ -31,7 +31,6 @@ interface PositionedTextLine {
  *   - The largest font size in the top 50% of Page 1 is the Title.
  *   - Lines immediately following the Title and preceding the Abstract belong to Authors.
  */
-@Injectable()
 export class LayoutHeuristicExtractor {
   private static readonly logger = new Logger(LayoutHeuristicExtractor.name);
 
@@ -41,8 +40,11 @@ export class LayoutHeuristicExtractor {
   ): Promise<LayoutExtractedFields> {
     if (!buffer || buffer.length === 0) return {};
 
+    const ownsDoc = !pdfDocument;
+    let doc: Awaited<ReturnType<typeof getDocumentProxy>> | undefined;
+
     try {
-      const doc =
+      doc =
         pdfDocument ??
         (await (async () => {
           const cloned = new Uint8Array(buffer.byteLength);
@@ -52,7 +54,16 @@ export class LayoutHeuristicExtractor {
       if (!doc || doc.numPages === 0) return {};
 
       const page = await doc.getPage(1);
-      const textContent = await page.getTextContent();
+      let textContent: Awaited<ReturnType<typeof page.getTextContent>>;
+      try {
+        textContent = await page.getTextContent();
+      } finally {
+        try {
+          page?.cleanup?.();
+        } catch {
+          // Ignore page cleanup errors
+        }
+      }
 
       const rawItems = textContent.items as Array<{
         str?: string;
@@ -273,6 +284,15 @@ export class LayoutHeuristicExtractor {
         `LayoutHeuristicExtractor failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return {};
+    } finally {
+      if (ownsDoc && doc) {
+        const disposableDoc = doc as {
+          cleanup?: () => Promise<void> | void;
+          destroy?: () => Promise<void> | void;
+        };
+        await Promise.resolve(disposableDoc.cleanup?.()).catch(() => {});
+        await Promise.resolve(disposableDoc.destroy?.()).catch(() => {});
+      }
     }
   }
 }

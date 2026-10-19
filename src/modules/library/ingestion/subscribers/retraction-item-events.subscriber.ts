@@ -1,9 +1,9 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { LIBRARY_EVENT_TYPES } from '@/modules/library/core';
 import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
 
-const CATALOG_ITEM_UPDATED_EVENT = 'catalog.item.updated';
-const IDENTIFIER_FIELD_GROUPS = ['doi', 'fields'];
+const IDENTIFIER_FIELD_GROUPS = ['doi', 'pmid', 'fields', 'metadata'];
 
 @Injectable()
 export class RetractionItemEventsSubscriber {
@@ -11,20 +11,27 @@ export class RetractionItemEventsSubscriber {
 
   constructor(@Optional() private readonly retraction?: RetractionService) {}
 
-  @OnEvent(CATALOG_ITEM_UPDATED_EVENT, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_UPDATED, { async: true })
   async handleItemUpdated(event: {
     aggregateId?: string;
     userId?: string | null;
     projectId?: string | null;
-    payload?: { updatedFields?: string[] };
+    payload?: { updatedFields?: string[]; userId?: string; projectId?: string };
   }): Promise<void> {
     if (!this.retraction) return;
 
     const itemId = event?.aggregateId;
-    const userId = event?.userId ?? undefined;
+    const userId = event?.userId ?? event?.payload?.userId ?? undefined;
     if (!itemId || !userId) return;
 
     const updatedFields = event.payload?.updatedFields;
+    if (
+      Array.isArray(updatedFields) &&
+      (updatedFields.includes('retractionCheckedAt') ||
+        updatedFields.includes('isRetracted'))
+    ) {
+      return;
+    }
     const mayAffectIdentifier =
       !Array.isArray(updatedFields) ||
       updatedFields.some((f) => IDENTIFIER_FIELD_GROUPS.includes(f));
@@ -34,7 +41,7 @@ export class RetractionItemEventsSubscriber {
       await this.retraction.checkItem(
         userId,
         itemId,
-        event.projectId ?? undefined,
+        event.projectId ?? event.payload?.projectId ?? undefined,
       );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

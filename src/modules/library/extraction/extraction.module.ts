@@ -1,6 +1,5 @@
 import { Module, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { CoreModule } from '@/core';
-import { StorageModule } from '@/modules/storage/storage.module';
 import { CatalogModule } from '@/modules/library/catalog/catalog.module';
 import {
   LibraryCoreModule,
@@ -9,14 +8,8 @@ import {
 } from '@/modules/library/core';
 
 // Presentation
-import {
-  AttachmentController,
-  ProjectAttachmentController,
-} from './controllers/attachments.controller';
-import {
-  AttachmentStorageController,
-  ProjectAttachmentStorageController,
-} from './controllers/attachment-storage.controller';
+import { AttachmentController } from './controllers/attachments.controller';
+import { AttachmentStorageController } from './controllers/attachment-storage.controller';
 import { AnnotationsController } from './controllers/annotations.controller';
 import { ExtractionTelemetryController } from './controllers/extraction-telemetry.controller';
 
@@ -25,7 +18,6 @@ import { ExtractionFacade, EXTRACTION_FACADE } from './extraction.facade';
 
 // Services
 import { AttachmentsService } from './services/attachments.service';
-import { AttachmentSyncService } from './services/attachment-sync.service';
 import { AttachmentRenamerService } from './services/attachment-renamer.service';
 import { AttachmentThumbnailService } from './services/attachment-thumbnail.service';
 import { WebSnapshotService } from './services/web-snapshot.service';
@@ -52,19 +44,12 @@ import {
 } from './services/extraction.handler';
 import { ItemLifecycleSubscriber } from './subscribers/item-lifecycle.subscriber';
 import { AnnotationNormalizer } from './domain/annotation.normalizer';
-import { XmpParser } from './extractors/xmp.parser';
-import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
-import { MetadataQualityGate } from './extractors/metadata-quality.gate';
-import { LayoutHeuristicExtractor } from './extractors/layout-heuristic.extractor';
-import { MeXtractExtractor } from './extractors/mextract.extractor';
 
 @Module({
-  imports: [CoreModule, StorageModule, LibraryCoreModule, CatalogModule],
+  imports: [CoreModule, LibraryCoreModule, CatalogModule],
   controllers: [
     AttachmentStorageController,
-    ProjectAttachmentStorageController,
     AttachmentController,
-    ProjectAttachmentController,
     AnnotationsController,
     ExtractionTelemetryController,
   ],
@@ -83,7 +68,6 @@ import { MeXtractExtractor } from './extractors/mextract.extractor';
 
     // Services
     AttachmentsService,
-    AttachmentSyncService,
     AttachmentRenamerService,
     AttachmentThumbnailService,
     WebSnapshotService,
@@ -102,41 +86,8 @@ import { MeXtractExtractor } from './extractors/mextract.extractor';
     ExtractionHandler,
     ItemLifecycleSubscriber,
     AnnotationNormalizer,
-    XmpParser,
-    AcademicRegexCatalog,
-    MetadataQualityGate,
-    LayoutHeuristicExtractor,
-    MeXtractExtractor,
   ],
-  exports: [
-    ExtractionFacade,
-    EXTRACTION_FACADE,
-    AttachmentsService,
-    AttachmentSyncService,
-    AttachmentRenamerService,
-    AttachmentThumbnailService,
-    PdfProvider,
-    PdfTextMetadataExtractor,
-    OcrProvider,
-    ExtractionHandler,
-    ReferenceMatcherService,
-    OcrSandwichPdfService,
-    OcrWorkerPoolService,
-    OcrPreprocessorService,
-
-    // Trusted Extraction Exports
-    TrustedExtractionService,
-    XmpParser,
-    AcademicRegexCatalog,
-    MetadataQualityGate,
-    LayoutHeuristicExtractor,
-    MeXtractExtractor,
-
-    // Annotation domain exports
-    AnnotationsService,
-    AnnotationNormalizer,
-    PdfAnnotationImporterService,
-  ],
+  exports: [EXTRACTION_FACADE, ExtractionFacade],
 })
 export class ExtractionModule implements OnModuleInit {
   constructor(
@@ -156,3 +107,4 @@ export class ExtractionModule implements OnModuleInit {
     }
   }
 }
+

@@ -8,7 +8,6 @@ import { libraryConfig, LibraryConfigService } from './config/library.config';
 // Core Cross-Cutting Concerns
 import { SsrfGuardService } from './services/ssrf-guard.service';
 import { AcademicHttpClient } from './services/academic-http.client';
-import { IdempotencyMiddleware } from './middlewares/idempotency.middleware';
 
 // Resilience Patterns
 import { ResilienceRegistryService } from './resilience/resilience-registry.service';
@@ -19,7 +18,7 @@ import { ResilienceRegistryService } from './resilience/resilience-registry.serv
  * Provides:
  * - Domain Primitives (Zotero v42 schema, Bibliographic mappings, CSL utilities)
  * - Resilience (Circuit Breaker, Rate Limiter, Resilience Registry)
- * - Security & Middleware (SSRF Guard, Idempotency)
+ * - Security (SSRF Guard)
  * - 12-Factor Typed Configuration
  */
 @Module({
@@ -28,14 +27,12 @@ import { ResilienceRegistryService } from './resilience/resilience-registry.serv
     LibraryConfigService,
     SsrfGuardService,
     AcademicHttpClient,
-    IdempotencyMiddleware,
     ResilienceRegistryService,
   ],
   exports: [
     LibraryConfigService,
     SsrfGuardService,
     AcademicHttpClient,
-    IdempotencyMiddleware,
     ResilienceRegistryService,
   ],
 })

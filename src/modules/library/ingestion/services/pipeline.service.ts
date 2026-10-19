@@ -8,11 +8,11 @@ import {
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
-import { NormalizeStage } from '@/modules/library/ingestion/stages/normalize.stage';
 import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
 import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
 import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
 import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
+import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import {
   LibraryItemSource,
@@ -32,6 +32,7 @@ import {
 } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import { PipelineBatchExecutor } from './pipeline-batch.executor';
+import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 function resolveScope(
   scopeId: string,
@@ -72,11 +73,11 @@ export class PipelineService {
   private readonly orchestrator: IngestionSagaOrchestrator;
   private readonly sideEffects: PipelineSideEffectsService;
   private readonly batchExecutor: PipelineBatchExecutor;
+  private readonly normalizer = new NormalizationPolicy();
 
   constructor(
     private readonly repo: IngestionRepository,
     private readonly identify: IdentifyStage,
-    private readonly normalize: NormalizeStage,
     private readonly enrich: EnrichStage,
     private readonly reconcile: ReconcileStage,
     private readonly match: MatchStage,
@@ -95,6 +96,9 @@ export class PipelineService {
     batchExecutor?: PipelineBatchExecutor,
     @Optional()
     sideEffects?: PipelineSideEffectsService,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
   ) {
     this.orchestrator = sagaOrchestrator ?? new IngestionSagaOrchestrator(repo);
     this.sideEffects =
@@ -124,6 +128,90 @@ export class PipelineService {
     scopeId: string,
     envelope: IngestionSubmissionEnvelope,
   ): Promise<void> {
+    try {
+      await this.executePipelineStages(runId, scopeId, envelope);
+      await this.runTerminalMaintenanceGc(envelope);
+    } catch (err) {
+      throw err;
+    }
+  }
+
+  private async runTerminalMaintenanceGc(
+    envelope: IngestionSubmissionEnvelope,
+  ): Promise<void> {
+    const payload = envelope?.payload;
+    const claimCheckFileId =
+      payload?.kind === 'RECORD' &&
+      payload.isOffloaded === true &&
+      typeof payload.fileId === 'string'
+        ? payload.fileId
+        : undefined;
+
+    if (claimCheckFileId && typeof this.storagePort?.deleteFile === 'function') {
+      try {
+        await this.storagePort.deleteFile(claimCheckFileId);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `[PipelineGC] Failed to delete offloaded claim-check blob ${claimCheckFileId}: ${msg}`,
+        );
+      }
+    }
+
+    try {
+      const now = new Date();
+      if (
+        typeof this.repo.findExpiredCapturePreviews === 'function' &&
+        typeof this.storagePort?.deleteFile === 'function'
+      ) {
+        const expiredPreviews = await this.repo.findExpiredCapturePreviews(now);
+        for (const p of expiredPreviews) {
+          if (p.claimedAt) continue;
+          const meta =
+            p.canonicalMetadata &&
+            typeof p.canonicalMetadata === 'object' &&
+            !Array.isArray(p.canonicalMetadata)
+              ? (p.canonicalMetadata as Record<string, unknown>)
+              : {};
+          const extra =
+            meta.extraFields &&
+            typeof meta.extraFields === 'object' &&
+            !Array.isArray(meta.extraFields)
+              ? (meta.extraFields as Record<string, unknown>)
+              : {};
+          const scraped =
+            meta.scrapedData &&
+            typeof meta.scrapedData === 'object' &&
+            !Array.isArray(meta.scrapedData)
+              ? (meta.scrapedData as Record<string, unknown>)
+              : {};
+          const pdfFileId =
+            (typeof scraped.pdfFileId === 'string' && scraped.pdfFileId) ||
+            (typeof meta.pdfFileId === 'string' && meta.pdfFileId) ||
+            (typeof extra.pdfFileId === 'string' && extra.pdfFileId) ||
+            (typeof extra.fileId === 'string' && extra.fileId) ||
+            (typeof meta.fileId === 'string' && meta.fileId);
+          if (pdfFileId) {
+            await this.storagePort.deleteFile(pdfFileId).catch(() => undefined);
+          }
+        }
+      }
+      if (typeof this.repo.deleteExpiredCapturePreviews === 'function') {
+        await this.repo.deleteExpiredCapturePreviews(now).catch(() => undefined);
+      }
+      if (typeof this.repo.purgeOldRuns === 'function') {
+        await this.repo.purgeOldRuns(7).catch(() => undefined);
+      }
+    } catch {
+      // Non-critical background GC
+    }
+  }
+
+  private async executePipelineStages(
+    runId: string,
+    scopeId: string,
+    envelope: IngestionSubmissionEnvelope,
+  ): Promise<void> {
     const resolvedScope = resolveScope(scopeId, envelope);
 
     const existingRun = await this.repo
@@ -131,7 +219,9 @@ export class PipelineService {
       .catch(() => null);
 
     const existingInputParams = existingRun?.inputParams as
-      Record<string, unknown> | null | undefined;
+      | Record<string, unknown>
+      | null
+      | undefined;
     const aggregate = existingRun
       ? IngestionRunAggregate.reconstitute({
           id: existingRun.id,
@@ -160,54 +250,51 @@ export class PipelineService {
 
     const session = this.orchestrator.createSession(runId, scopeId, aggregate);
 
-    // Stage 1: IDENTIFY & PARSE
-    const { initialCandidates } = await session.executeStep(
-      'IDENTIFY',
-      async () => {
-        const identifiedCandidates = await this.identify.execute(
-          runId,
-          envelope.payload,
-          scopeId,
-        );
-        const overrides = sanitizeOverrides(envelope.overrides);
-        const candidates = identifiedCandidates.map((candidate) => ({
-          ...candidate,
-          normalizedMetadata: {
-            ...candidate.normalizedMetadata,
-            ...overrides,
-          },
-        }));
+    // Stage 1: IDENTIFY & NORMALIZE
+    const { initialCandidates: normalizedCandidates } =
+      await session.executeStep(
+        'IDENTIFY',
+        async () => {
+          const identifiedCandidates = await this.identify.execute({
+            runId,
+            payload: envelope.payload,
+            scopeId,
+          });
+          const overrides = sanitizeOverrides(envelope.overrides);
+          const candidates = identifiedCandidates.map((candidate) => ({
+            ...candidate,
+            normalizedMetadata: this.normalizer.normalize({
+              ...candidate.normalizedMetadata,
+              ...overrides,
+            }),
+          }));
 
-        if (candidates.length === 0) {
-          throw new BadRequestException(
-            'No valid bibliographic metadata could be identified from input',
-          );
-        }
+          if (candidates.length === 0) {
+            throw new BadRequestException(
+              'No valid bibliographic metadata could be identified from input',
+            );
+          }
 
-        return { initialCandidates: candidates, sanitizedOverrides: overrides };
-      },
-      {
-        outputSnapshot: (res) => ({
-          candidateCount: res.initialCandidates.length,
-        }),
-      },
-    );
+          return {
+            initialCandidates: candidates,
+            sanitizedOverrides: overrides,
+          };
+        },
+        {
+          outputSnapshot: (res) => ({
+            candidateCount: res.initialCandidates.length,
+          }),
+        },
+      );
 
-    // Stage 2: NORMALIZE
-    const normalizedCandidates = await session.executeStep(
-      'NORMALIZE',
-      async () => this.normalize.execute(initialCandidates),
-      {
-        outputSnapshot: (res) => ({
-          candidateCount: res.length,
-        }),
-      },
-    );
-
-    // Stage 3: ENRICH (Crossref, OpenAlex, PubMed, arXiv)
+    // Stage 2: ENRICH (Crossref, OpenAlex, PubMed, arXiv)
     const enrichedCandidates = await session.executeStep(
       'ENRICH',
-      async () => this.enrich.execute(scopeId, normalizedCandidates),
+      async () =>
+        this.enrich.execute({
+          scopeId,
+          candidates: normalizedCandidates,
+        }),
       {
         outputSnapshot: (res) => ({
           candidateCount: res.length,
@@ -215,8 +302,12 @@ export class PipelineService {
       },
     );
 
-    // Multi-Record Ingestion Handling (BibTeX / RIS batches)
-    if (envelope.payload.kind === 'RECORD' && normalizedCandidates.length > 1) {
+    // Multi-Record Ingestion Handling (BibTeX / RIS / Connector batches)
+    if (
+      (envelope.payload.kind === 'RECORD' ||
+        envelope.payload.kind === 'CONNECTOR') &&
+      normalizedCandidates.length > 1
+    ) {
       await this.batchExecutor.processRecordBatch({
         scopeId,
         runId,
@@ -262,7 +353,11 @@ export class PipelineService {
     // Stage 5: MATCH (Duplicate Detection)
     const matchResult = await session.executeStep(
       'MATCH',
-      async () => this.match.execute(resolvedScope, decision.proposedItem),
+      async () =>
+        this.match.execute({
+          scope: resolvedScope,
+          proposedItem: decision.proposedItem,
+        }),
       {
         outputSnapshot: (res) => res as unknown as Prisma.InputJsonValue,
       },
@@ -323,6 +418,10 @@ export class PipelineService {
               uploadedFileIdentifier,
               uploadedFilename,
               payloadSize,
+              {
+                ...(existingRec || {}),
+                ...(decision.proposedItem || {}),
+              },
             );
 
             await this.sideEffects.materializeNotes(
@@ -411,10 +510,10 @@ export class PipelineService {
     const createdItem = await session.executeStep(
       'COMMIT',
       async () => {
-        return this.commit.execute(
-          resolvedScope.projectId || resolvedScope.userId,
-          decision.proposedItem,
-          {
+        return this.commit.execute({
+          scopeId: resolvedScope.projectId || resolvedScope.userId,
+          item: decision.proposedItem,
+          options: {
             collectionIds: envelope.collectionIds,
             tagIds: envelope.tagIds,
             userId: resolvedScope.userId,
@@ -422,7 +521,7 @@ export class PipelineService {
             fileId: uploadedFileIdentifier,
             filename: uploadedFilename,
           },
-        );
+        });
       },
       {
         outputSnapshot: (res) => ({ itemId: res?.id }),
@@ -449,6 +548,10 @@ export class PipelineService {
         uploadedFileIdentifier,
         uploadedFilename,
         payloadSize,
+        {
+          ...(decision.proposedItem || {}),
+          ...(createdItem as unknown as Record<string, unknown>),
+        },
       );
 
       await this.sideEffects.materializeNotes(

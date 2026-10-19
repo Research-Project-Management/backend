@@ -1,5 +1,5 @@
 import {
-  buildCollectionTree,
+  TreeEngine,
   ConditionEvaluatorEngine,
 } from '@/modules/library/catalog';
 import { cleanDoi, isValidDoi } from '@/modules/library/core';
@@ -18,14 +18,14 @@ describe('Catalog Bounded Context - Modular Monolith Domain Engines', () => {
   });
 
   describe('Collection Tree Engine', () => {
-    it('buildCollectionTree should hierarchically nest child collections', () => {
+    it('TreeEngine.buildTree should hierarchically nest child collections', () => {
       const collections = [
         { id: 'c1', name: 'Root', parentId: null, sortOrder: 0 },
         { id: 'c2', name: 'Child A', parentId: 'c1', sortOrder: 0 },
         { id: 'c3', name: 'Child B', parentId: 'c1', sortOrder: 1 },
       ];
 
-      const tree = buildCollectionTree(collections);
+      const tree = new TreeEngine().buildTree(collections);
       expect(tree).toHaveLength(1);
       expect(tree[0].id).toBe('c1');
       expect((tree[0] as any).children).toHaveLength(2);

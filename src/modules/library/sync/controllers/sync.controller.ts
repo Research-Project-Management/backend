@@ -15,6 +15,7 @@ import { ResilienceRegistryService } from '@/modules/library/core/resilience/res
 import { OutboxWorker } from '@/modules/library/sync/services/outbox.worker';
 import { OutboxMetrics } from '@/modules/library/sync/services/outbox.metrics';
 import { compactLibraryChanges } from '@/modules/library/sync/domain/outbox.domain';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 
 function parseSafeBigInt(val?: string): bigint | undefined {
   if (!val) return undefined;
@@ -43,14 +44,7 @@ export class SyncController {
     routeProjectId?: string,
     queryProjectId?: string,
   ): string | undefined {
-    const raw = routeProjectId ?? queryProjectId;
-    return raw &&
-      raw !== 'user' &&
-      raw !== 'me' &&
-      raw !== 'personal' &&
-      raw !== 'undefined'
-      ? raw
-      : undefined;
+    return normalizeProjectScopeId(routeProjectId ?? queryProjectId);
   }
 
   @Get('version')
@@ -185,9 +179,7 @@ export class SyncController {
         workerId: this.outboxWorker?.getWorkerId() ?? 'disabled',
         metrics: {
           dispatches:
-            this.outboxMetrics?.getCounter('outbox_dispatched_total') ||
-            this.outboxMetrics?.getCounter('outbox_dispatches') ||
-            0,
+            this.outboxMetrics?.getCounter('outbox_dispatched_total') ?? 0,
         },
       },
     };

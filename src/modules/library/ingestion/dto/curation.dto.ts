@@ -4,9 +4,6 @@ import {
   ArrayNotEmpty,
   IsOptional,
   IsObject,
-  IsString,
-  IsBoolean,
-  IsNumber,
 } from 'class-validator';
 
 export class MergeDuplicatesDto {
@@ -44,45 +41,3 @@ export class DismissDuplicatesDto {
   projectId?: string;
 }
 
-export class ReResolveMetadataDto {
-  @IsOptional()
-  @IsString()
-  doi?: string;
-
-  @IsOptional()
-  @IsString()
-  arxivId?: string;
-
-  @IsOptional()
-  @IsString()
-  pmid?: string;
-
-  @IsOptional()
-  @IsString()
-  isbn?: string;
-
-  @IsOptional()
-  @IsString()
-  title?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  forceRefresh?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  aggressive?: boolean;
-
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  fields?: string[];
-
-  @IsOptional()
-  @IsNumber()
-  expectedVersion?: number;
-
-  @IsOptional()
-  @IsUUID(undefined, { message: 'projectId must be a valid UUID' })
-  projectId?: string;
-}

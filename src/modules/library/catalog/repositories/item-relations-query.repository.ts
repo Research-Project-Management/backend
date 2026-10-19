@@ -133,23 +133,6 @@ export class ItemRelationsQueryRepository {
       }
     }
 
-    const item = await activeClient.item.findUnique({
-      where: { id: itemId },
-      select: { metadata: true },
-    });
-    if (!item || !item.metadata) return [];
-    try {
-      const meta =
-        item.metadata &&
-        typeof item.metadata === 'object' &&
-        !Array.isArray(item.metadata)
-          ? (item.metadata as Record<string, unknown>)
-          : {};
-      return Array.isArray(meta.relations)
-        ? (meta.relations as Record<string, unknown>[])
-        : [];
-    } catch {
-      return [];
-    }
+    return [];
   }
 }

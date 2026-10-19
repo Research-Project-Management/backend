@@ -121,14 +121,6 @@ describe('Library Search Module Architecture & Isolation', () => {
       expect(anchors[0].pageIndex).toBe(1);
       expect(anchors[0].snippet).toContain('quantum');
     });
-
-    it('should rebuild local search index cleanly', async () => {
-      const stats = await searchService.rebuildIndex('user-1');
-
-      expect(mockSearchRepo.computeFacets).toHaveBeenCalledWith('user-1', {});
-      expect(stats.indexedItems).toBe(1);
-      expect(stats.indexedAttachments).toBe(0);
-    });
   });
 
   describe('SearchFacade Bounded Context Boundary', () => {

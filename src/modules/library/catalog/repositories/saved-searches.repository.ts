@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 import {
   CreateSavedSearchDto,
   UpdateSavedSearchDto,
@@ -11,19 +12,24 @@ import { ExecuteSavedSearchOptions } from '@/modules/library/catalog/types/saved
 export class SavedSearchesRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  private normalizeProjectId(projectId?: string | null): string | undefined {
-    return projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal'
-      ? projectId
-      : undefined;
+  private getClient(tx?: Prisma.TransactionClient) {
+    return tx ?? this.prisma;
   }
 
-  async create(userId: string, dto: CreateSavedSearchDto, projectId?: string) {
+  private normalizeProjectId(projectId?: string | null): string | undefined {
+    return normalizeProjectScopeId(projectId);
+  }
+
+  async create(
+    userId: string,
+    dto: CreateSavedSearchDto,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
     const effectiveProjectId =
       this.normalizeProjectId(projectId || dto.projectId) || null;
-    return this.prisma.savedSearch.create({
+    return client.savedSearch.create({
       data: {
         userId,
         projectId: effectiveProjectId,
@@ -40,7 +46,13 @@ export class SavedSearchesRepository {
     });
   }
 
-  async findById(userId: string, id: string, projectId?: string) {
+  async findById(
+    userId: string,
+    id: string,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
     const effectiveProjectId = this.normalizeProjectId(projectId);
     const scopeWhere = effectiveProjectId
       ? { projectId: effectiveProjectId }
@@ -50,7 +62,7 @@ export class SavedSearchesRepository {
       deletedAt: null,
       ...scopeWhere,
     };
-    return this.prisma.savedSearch.findFirst({
+    return client.savedSearch.findFirst({
       where,
     });
   }
@@ -75,7 +87,9 @@ export class SavedSearchesRepository {
     id: string,
     dto: UpdateSavedSearchDto,
     projectId?: string,
+    tx?: Prisma.TransactionClient,
   ) {
+    const client = this.getClient(tx);
     const effectiveProjectId = this.normalizeProjectId(projectId);
     const scopeWhere = effectiveProjectId
       ? { projectId: effectiveProjectId }
@@ -85,7 +99,7 @@ export class SavedSearchesRepository {
       deletedAt: null,
       ...scopeWhere,
     };
-    return this.prisma.savedSearch.updateMany({
+    return client.savedSearch.updateMany({
       where,
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
@@ -110,8 +124,13 @@ export class SavedSearchesRepository {
     });
   }
 
-  async updateCachedCount(id: string, cachedCount: number) {
-    return this.prisma.savedSearch.update({
+  async updateCachedCount(
+    id: string,
+    cachedCount: number,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
+    return client.savedSearch.update({
       where: { id },
       data: {
         cachedCount,
@@ -120,7 +139,13 @@ export class SavedSearchesRepository {
     });
   }
 
-  async softDelete(userId: string, id: string, projectId?: string) {
+  async softDelete(
+    userId: string,
+    id: string,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
     const effectiveProjectId = this.normalizeProjectId(projectId);
     const scopeWhere = effectiveProjectId
       ? { projectId: effectiveProjectId }
@@ -130,7 +155,7 @@ export class SavedSearchesRepository {
       deletedAt: null,
       ...scopeWhere,
     };
-    return this.prisma.savedSearch.updateMany({
+    return client.savedSearch.updateMany({
       where,
       data: {
         deletedAt: new Date(),

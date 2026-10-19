@@ -216,14 +216,10 @@ export class SsrfGuardService {
     init: RequestInit = {},
     options: SsrfGuardOptions = {},
   ): Promise<Response> {
-    await this.assertSafeUrl(rawUrl, options);
-    const { response } = await SsrfGuardService.executeSafeRedirectFetch(
+    const { response } = await this.safeFetchWithRedirects(
       rawUrl,
       init,
-      {
-        maxRedirects: options.maxRedirects,
-        validateUrl: (nextUrl) => this.assertSafeUrl(nextUrl, options),
-      },
+      options,
     );
     return response;
   }
@@ -235,6 +231,7 @@ export class SsrfGuardService {
       beforeHop?: (url: string, signal?: AbortSignal | null) => Promise<void>;
     } = {},
   ): Promise<{ response: Response; finalUrl: string }> {
+    await this.assertSafeUrl(rawUrl, options);
     return SsrfGuardService.executeSafeRedirectFetch(rawUrl, init, {
       maxRedirects: options.maxRedirects,
       validateUrl: (nextUrl) => this.assertSafeUrl(nextUrl, options),

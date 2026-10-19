@@ -16,10 +16,6 @@ export type Brand<T, TBrand extends string> = T & { readonly [_brand]: TBrand };
 
 export type ItemId = Brand<string, 'ItemId'>;
 export type AttachmentId = Brand<string, 'AttachmentId'>;
-export type AnnotationId = Brand<string, 'AnnotationId'>;
-export type CollectionId = Brand<string, 'CollectionId'>;
 export type TagId = Brand<string, 'TagId'>;
-export type NoteId = Brand<string, 'NoteId'>;
-export type SavedSearchId = Brand<string, 'SavedSearchId'>;
 export type UserId = Brand<string, 'UserId'>;
 export type ProjectId = Brand<string, 'ProjectId'>;

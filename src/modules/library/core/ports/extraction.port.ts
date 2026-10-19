@@ -31,15 +31,15 @@ export interface IExtractionFacade {
     data: CreateAttachmentInput,
     projectId?: string,
   ): Promise<AttachmentEntity>;
-  extractDocumentFromBuffer<T = ExtractedPdfDocument>(
+  extractDocumentFromBuffer(
     buffer: Buffer,
     options?: { maxPages?: number; headerOnly?: boolean },
-  ): Promise<T>;
-  extractMetadataFromBuffer<T = ExtractedPdfMetadata>(buffer: Buffer): T;
-  extractTrustedMetadata<T = TrustedExtractionResult>(
+  ): Promise<ExtractedPdfDocument>;
+  extractMetadataFromBuffer(buffer: Buffer): ExtractedPdfMetadata;
+  extractTrustedMetadata(
     buffer: Buffer,
     preferredFilename?: string,
-  ): Promise<T>;
+  ): Promise<TrustedExtractionResult>;
   captureWebSnapshot(
     url: string,
     itemId: string,
@@ -53,12 +53,9 @@ export interface IExtractionFacade {
   getAnnotationsByAttachment(
     userId: string,
     attachmentId: string,
-  ): Promise<AnnotationEntity[]>;
-  getAnnotationsByAttachmentFull(
-    userId: string,
-    attachmentId: string,
     pageIndex?: number,
     type?: AnnotationType,
+    projectId?: string,
   ): Promise<AnnotationEntity[]>;
   getAnnotation(
     userId: string,
@@ -68,29 +65,26 @@ export interface IExtractionFacade {
   createAnnotation(
     userId: string,
     data: CreateAnnotationData,
+    projectId?: string,
   ): Promise<AnnotationEntity>;
   updateAnnotation(
     userId: string,
     annotationId: string,
     expectedVersion: number,
     data: UpdateAnnotationData,
+    projectId?: string,
   ): Promise<AnnotationEntity>;
   deleteAnnotation(
     userId: string,
     annotationId: string,
     expectedVersion?: number,
+    projectId?: string,
   ): Promise<boolean>;
   batchUpsertAnnotations(
     userId: string,
     attachmentId: string,
     data: BatchAnnotationsData,
+    projectId?: string,
   ): Promise<BatchAnnotationsResult>;
-  listAnnotations(
-    userId: string,
-    filters?: {
-      attachmentId?: string;
-      pageIndex?: number;
-      type?: AnnotationType;
-    },
-  ): Promise<AnnotationEntity[]>;
 }
+

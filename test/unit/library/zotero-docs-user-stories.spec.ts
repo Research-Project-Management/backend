@@ -24,6 +24,7 @@ import { TransactionService } from '@/modules/library/core';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
+import { ItemRelationsService } from '@/modules/library/catalog/services/item-relations.service';
 import { ItemTypeConversionService } from '@/modules/library/catalog/services/item-type-conversion.service';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { QueryClassifier } from '@/modules/library/ingestion/parsers/query.classifier';
@@ -439,8 +440,14 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
           .mockImplementation((id, newFilename) =>
             Promise.resolve({ id, filename: newFilename }),
           ),
+        batchRename: jest
+          .fn()
+          .mockImplementation((updates: Array<{ id: string; filename: string }>) =>
+            Promise.resolve(updates.length),
+          ),
       };
       const mockCatalogGateway = {
+        itemExists: jest.fn().mockResolvedValue(true),
         getItem: jest
           .fn()
           .mockResolvedValue({ id: 'item-1', userId: 'user-1' }),
@@ -449,13 +456,9 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
       const service = new AttachmentsService(
         mockRepo as unknown as AttachmentsRepository,
         {} as unknown as TransactionService,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
         mockCatalogGateway as unknown as ConstructorParameters<
           typeof AttachmentsService
-        >[6],
+        >[2],
       );
 
       const directRename = await service.renameAttachment('user-1', 'att-1', {
@@ -570,35 +573,32 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
       const itemService = new ItemService(
         mockQueryRepo as unknown as QueryRepository,
         mockCommandRepo as unknown as CommandRepository,
-        mockLibraryTx,
+        mockLibraryTx as unknown as TransactionService,
         mockTagsService as unknown as ConstructorParameters<
           typeof ItemService
         >[3],
-        {} as unknown as ConstructorParameters<typeof ItemService>[4],
-        {} as unknown as ConstructorParameters<typeof ItemService>[5],
-        {} as unknown as ConstructorParameters<typeof ItemService>[6],
       );
 
       const trashRes = await itemService.bulkTrash('user-1', [
         'item-1',
         'item-2',
       ]);
-      expect(trashRes.count).toBe(2);
-      expect(trashRes.trashedIds).toEqual(['item-1', 'item-2']);
+      expect(trashRes.trashedCount).toBe(2);
+      expect(trashRes.succeededIds).toEqual(['item-1', 'item-2']);
 
       const restoreRes = await itemService.bulkRestore('user-1', [
         'item-1',
         'item-2',
       ]);
-      expect(restoreRes.count).toBe(2);
-      expect(restoreRes.restoredIds).toEqual(['item-1', 'item-2']);
+      expect(restoreRes.restoredCount).toBe(2);
+      expect(restoreRes.succeededIds).toEqual(['item-1', 'item-2']);
 
       const purgeRes = await itemService.bulkPurge('user-1', [
         'item-1',
         'item-2',
       ]);
-      expect(purgeRes.count).toBe(2);
-      expect(purgeRes.purgedIds).toEqual(['item-1', 'item-2']);
+      expect(purgeRes.purgedCount).toBe(2);
+      expect(purgeRes.succeededIds).toEqual(['item-1', 'item-2']);
       expect(mockCommandRepo.purge).toHaveBeenCalledTimes(2);
     });
   });
@@ -897,38 +897,33 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
         >[0],
       );
 
-      const itemService = new ItemService(
+      const relationsService = new ItemRelationsService(
         queryRepo,
         commandRepo,
-        {} as unknown as TransactionService,
-        {} as unknown as ConstructorParameters<typeof ItemService>[3],
-        {} as unknown as ConstructorParameters<typeof ItemService>[4],
-        {} as unknown as ConstructorParameters<typeof ItemService>[5],
-        {} as unknown as ConstructorParameters<typeof ItemService>[6],
       );
 
       // 1. Self-relation must be rejected
       await expect(
-        itemService.linkItems(userId, itemAId, {
+        relationsService.linkItems(userId, itemAId, {
           targetItemIds: [itemAId],
           relationType: 'related',
         }),
       ).rejects.toThrow(BadRequestException);
 
       // 2. Link item-a -> item-b as is_preprint_of (and link to trashed item which is ignored)
-      await itemService.linkItems(userId, itemAId, {
+      await relationsService.linkItems(userId, itemAId, {
         targetItemIds: [itemBId, itemTrashedId],
         relationType: 'is_preprint_of',
       });
 
       // Duplicate link should be idempotent
-      const linkResult = await itemService.linkItems(userId, itemAId, {
+      const linkResult = await relationsService.linkItems(userId, itemAId, {
         targetItemIds: [itemBId],
         relationType: 'is_preprint_of',
       });
       expect(linkResult.totalLinked).toBe(1);
 
-      const fromA = await itemService.getRelatedItems(userId, itemAId);
+      const fromA = await relationsService.getRelatedItems(userId, itemAId);
       expect(fromA.relatedItems).toHaveLength(1);
       expect(fromA.relatedItems[0]).toMatchObject({
         targetItemId: itemBId,
@@ -937,7 +932,7 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
       });
 
       // 3. Reciprocal visibility from item-b shows `is_published_version_of`
-      const fromB = await itemService.getRelatedItems(userId, itemBId);
+      const fromB = await relationsService.getRelatedItems(userId, itemBId);
       expect(fromB.relatedItems).toHaveLength(1);
       expect(fromB.relatedItems[0]).toMatchObject({
         targetItemId: itemAId,
@@ -946,9 +941,9 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
       });
 
       // 4. Unlinking from item-b removes the bidirectional relation
-      const unlinkRes = await itemService.unlinkItems(userId, itemBId, itemAId);
+      const unlinkRes = await relationsService.unlinkItems(userId, itemBId, itemAId);
       expect(unlinkRes.unlinked).toBe(true);
-      const afterUnlink = await itemService.getRelatedItems(userId, itemBId);
+      const afterUnlink = await relationsService.getRelatedItems(userId, itemBId);
       expect(afterUnlink.relatedItems).toHaveLength(0);
     });
   });

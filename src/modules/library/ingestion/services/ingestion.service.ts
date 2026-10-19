@@ -25,6 +25,7 @@ import { ConfirmCapturedUrlDto } from '@/modules/library/ingestion/dto/capture-u
 import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
 import { createHash, randomUUID } from 'crypto';
 import zlib from 'zlib';
+import { promisify } from 'util';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   METADATA_PORT,
@@ -40,11 +41,15 @@ import {
   IngestionRunProgressResult,
 } from './ingestion-run-reporter.service';
 
+const gzipAsync = promisify(zlib.gzip);
+
 @Injectable()
 export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
   private readonly metadataResolver: MetadataResolverService;
   private readonly runReporter: IngestionRunReporterService;
+  private submissionCountSinceLastGc = 0;
+  private static readonly GC_SUBMISSION_INTERVAL = 25;
 
   constructor(
     private readonly repo: IngestionRepository,
@@ -130,7 +135,7 @@ export class IngestionService {
     ) {
       try {
         const rawBuffer = Buffer.from(envelope.payload.content, 'utf-8');
-        const compressed = zlib.gzipSync(rawBuffer);
+        const compressed = await gzipAsync(rawBuffer);
         const uploadResult = await this.storagePort.uploadFile({
           userId: envelope.userId,
           projectId: envelope.projectId || undefined,
@@ -229,6 +234,15 @@ export class IngestionService {
       void this.queue.enqueue(runId, projectId, envelopeToPersist);
     }
 
+    this.submissionCountSinceLastGc++;
+    if (
+      this.submissionCountSinceLastGc >=
+      IngestionService.GC_SUBMISSION_INTERVAL
+    ) {
+      this.submissionCountSinceLastGc = 0;
+      void this.runMaintenanceGc().catch(() => undefined);
+    }
+
     return {
       runId,
       statusUrl,
@@ -255,31 +269,31 @@ export class IngestionService {
   }
 
   async getRunStatus(
-    /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
-    scopeId: string,
+    userIdOrScopeId: string,
     runId: string,
+    projectId?: string,
   ): Promise<IngestionRunSnapshot> {
-    return this.runReporter.getRunStatus(scopeId, runId);
+    return this.runReporter.getRunStatus(userIdOrScopeId, runId, projectId);
   }
 
   async getRunProgress(
-    /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
-    scopeId: string,
+    userIdOrScopeId: string,
     runId: string,
+    projectId?: string,
   ): Promise<IngestionRunProgressResult> {
-    return this.runReporter.getRunProgress(scopeId, runId);
+    return this.runReporter.getRunProgress(userIdOrScopeId, runId, projectId);
   }
 
   async retryRun(
-    /** scopeId: may be userId (user library) or projectId — repo ignores it, kept for interface parity */
-    scopeId: string,
+    userIdOrScopeId: string,
     runId: string,
+    projectId?: string,
   ): Promise<{
     runId: string;
     status: IngestionStatus;
     message: string;
   }> {
-    return this.runReporter.retryRun(scopeId, runId);
+    return this.runReporter.retryRun(userIdOrScopeId, runId, projectId);
   }
 
   /**
@@ -474,6 +488,115 @@ export class IngestionService {
 
   async cleanupExpiredPreviews(retentionDays = 7): Promise<number> {
     return this.urlCapture.cleanupExpiredPreviews(retentionDays);
+  }
+
+  /**
+   * Scheduled/triggered maintenance GC that reaps:
+   * 1. Offloaded claim-check blobs (`inputParams.payload.fileId`) when an IngestionRun reaches terminal status,
+   * 2. Expired CapturePreview rows and their unconfirmed PDF blobs (`pdfFileId` / `fileId`) from storagePort,
+   * 3. Old terminal IngestionRun rows (> 7 days).
+   */
+  async runMaintenanceGc(options?: {
+    envelope?: IngestionSubmissionEnvelope;
+    retentionDays?: number;
+  }): Promise<{
+    deletedClaimCheckBlob: boolean;
+    expiredPreviewsDeleted: number;
+    purgedRuns: number;
+  }> {
+    let deletedClaimCheckBlob = false;
+    const payload = options?.envelope?.payload;
+    const claimCheckFileId =
+      payload?.kind === 'RECORD' &&
+      payload.isOffloaded === true &&
+      typeof payload.fileId === 'string'
+        ? payload.fileId
+        : undefined;
+
+    if (claimCheckFileId && typeof this.storagePort?.deleteFile === 'function') {
+      try {
+        await this.storagePort.deleteFile(claimCheckFileId);
+        deletedClaimCheckBlob = true;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `[MaintenanceGC] Failed to delete claim-check blob ${claimCheckFileId}: ${msg}`,
+        );
+      }
+    }
+
+    let expiredPreviewsDeleted = 0;
+    try {
+      const now = new Date();
+      if (
+        typeof this.repo.findExpiredCapturePreviews === 'function' &&
+        typeof this.storagePort?.deleteFile === 'function'
+      ) {
+        const expiredList = await this.repo.findExpiredCapturePreviews(now);
+        for (const p of expiredList) {
+          if (p.claimedAt) continue;
+          const meta =
+            p.canonicalMetadata &&
+            typeof p.canonicalMetadata === 'object' &&
+            !Array.isArray(p.canonicalMetadata)
+              ? (p.canonicalMetadata as Record<string, unknown>)
+              : {};
+          const extra =
+            meta.extraFields &&
+            typeof meta.extraFields === 'object' &&
+            !Array.isArray(meta.extraFields)
+              ? (meta.extraFields as Record<string, unknown>)
+              : {};
+          const scraped =
+            meta.scrapedData &&
+            typeof meta.scrapedData === 'object' &&
+            !Array.isArray(meta.scrapedData)
+              ? (meta.scrapedData as Record<string, unknown>)
+              : {};
+          const pdfFileId =
+            (typeof scraped.pdfFileId === 'string' && scraped.pdfFileId) ||
+            (typeof meta.pdfFileId === 'string' && meta.pdfFileId) ||
+            (typeof extra.pdfFileId === 'string' && extra.pdfFileId) ||
+            (typeof extra.fileId === 'string' && extra.fileId) ||
+            (typeof meta.fileId === 'string' && meta.fileId);
+          if (pdfFileId) {
+            try {
+              await this.storagePort.deleteFile(pdfFileId);
+            } catch {
+              // Ignore individual blob deletion errors
+            }
+          }
+        }
+      }
+      if (typeof this.repo.deleteExpiredCapturePreviews === 'function') {
+        expiredPreviewsDeleted =
+          await this.repo.deleteExpiredCapturePreviews(now);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `[MaintenanceGC] Failed to reap expired capture previews: ${msg}`,
+      );
+    }
+
+    let purgedRuns = 0;
+    try {
+      if (typeof this.repo.purgeOldRuns === 'function') {
+        const retentionDays = options?.retentionDays ?? 7;
+        purgedRuns = await this.repo.purgeOldRuns(retentionDays);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `[MaintenanceGC] Failed to purge old ingestion runs: ${msg}`,
+      );
+    }
+
+    return {
+      deletedClaimCheckBlob,
+      expiredPreviewsDeleted,
+      purgedRuns,
+    };
   }
 
   /**

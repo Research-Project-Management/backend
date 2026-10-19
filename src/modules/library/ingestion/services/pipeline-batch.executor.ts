@@ -79,10 +79,10 @@ export class PipelineBatchExecutor {
         );
         const candidatesForRecord = [initialCand, ...matchingEnriched];
         const itemDecision = await this.reconcile.execute(candidatesForRecord);
-        const matchRes = await this.match.execute(
-          resolvedScope,
-          itemDecision.proposedItem,
-        );
+        const matchRes = await this.match.execute({
+          scope: resolvedScope,
+          proposedItem: itemDecision.proposedItem,
+        });
 
         if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
           createdItemIds.push(matchRes.targetItemId);
@@ -93,18 +93,36 @@ export class PipelineBatchExecutor {
             itemId: matchRes.targetItemId,
           });
         } else {
+          if (matchRes.matchType === 'PROBABLE' && matchRes.targetItemId) {
+            await this.repo
+              .createReviewCase(resolvedScope, runId, {
+                targetItemId: matchRes.targetItemId,
+                reason: `Probable match with existing item "${matchRes.targetItemTitle}"`,
+                evidence: {
+                  matchReason: matchRes.matchReason,
+                  confidence: matchRes.confidence,
+                  details: matchRes.evidence,
+                } as unknown as Prisma.InputJsonValue,
+                options: {
+                  proposedMetadata: itemDecision.proposedItem,
+                } as unknown as Prisma.InputJsonValue,
+                assignedToId: resolvedScope.userId,
+              })
+              .catch(() => undefined);
+          }
+
           await this.sideEffects.scanRetraction(itemDecision.proposedItem);
 
-          const created = await this.commit.execute(
-            resolvedScope.projectId || resolvedScope.userId,
-            itemDecision.proposedItem,
-            {
+          const created = await this.commit.execute({
+            scopeId: resolvedScope.projectId || resolvedScope.userId,
+            item: itemDecision.proposedItem,
+            options: {
               collectionIds: envelope.collectionIds,
               tagIds: envelope.tagIds,
               userId: resolvedScope.userId,
               source: mapPayloadToSource(envelope.payload.kind),
             },
-          );
+          });
           if (created?.id) {
             createdItemIds.push(created.id);
             succeeded++;

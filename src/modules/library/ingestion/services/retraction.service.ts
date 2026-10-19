@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, Optional } from '@nestjs/common';
+import { RedisCacheService } from '@/core';
+import {
+  LIBRARY_REDIS_KEYS,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import {
@@ -30,7 +35,43 @@ export class RetractionService {
     private readonly scanner: RetractionScannerProvider,
     private readonly retractionDb: RetractionDatabaseService,
     private readonly syncService: RetractionSyncService,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
+
+  private async invalidateRetractionCache(
+    itemIds: string[],
+    userId: string,
+    projectId?: string,
+  ): Promise<void> {
+    if (!this.cache || itemIds.length === 0) return;
+    try {
+      const validProjectId = normalizeProjectScopeId(projectId);
+      const scopeId = validProjectId || userId;
+      const tasks: Promise<unknown>[] = [];
+      for (const itemId of itemIds) {
+        tasks.push(
+          this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
+          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
+        );
+      }
+      tasks.push(
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
+      );
+      if (validProjectId) {
+        tasks.push(
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
+          ),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+        );
+      }
+      await Promise.all(tasks);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to invalidate retraction cache: ${msg}`);
+    }
+  }
 
   async checkItem(
     userId: string,
@@ -62,9 +103,16 @@ export class RetractionService {
       };
     }
 
-    const pmid = typeof meta.pmid === 'string' ? meta.pmid : null;
+    const topPmid = (item as { pmid?: string | null }).pmid;
+    const pmid =
+      typeof topPmid === 'string' && topPmid.trim()
+        ? topPmid
+        : typeof meta.pmid === 'string'
+          ? meta.pmid
+          : null;
     const lookup = await this.scanner.lookup(item.doi, pmid);
     const now = new Date();
+    const effectiveProjectId = projectId || item.projectId || undefined;
 
     if (lookup.status === 'retracted') {
       await this.repo.updateItemRetraction(
@@ -73,6 +121,11 @@ export class RetractionService {
         lookup.details.nature,
         lookup.details,
         now,
+      );
+      await this.invalidateRetractionCache(
+        [itemId],
+        userId,
+        effectiveProjectId,
       );
       return {
         itemId,
@@ -86,6 +139,11 @@ export class RetractionService {
 
     if (lookup.status === 'clean') {
       await this.repo.updateItemRetraction(itemId, false, null, null, now);
+      await this.invalidateRetractionCache(
+        [itemId],
+        userId,
+        effectiveProjectId,
+      );
       return {
         itemId,
         isRetracted: false,
@@ -127,6 +185,7 @@ export class RetractionService {
       projectId,
     );
     let newlyRetracted = 0;
+    const updatedItemIds: string[] = [];
 
     for (const item of items) {
       if (item.isRetracted && item.retractionNature === 'manual') {
@@ -146,14 +205,20 @@ export class RetractionService {
             result.details,
             now,
           );
+          updatedItemIds.push(item.id);
         } else if (result.status === 'clean') {
           await this.repo.updateItemRetraction(item.id, false, null, null, now);
+          updatedItemIds.push(item.id);
         }
         // unknown: leave stored status untouched
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Error scanning item ${item.id}: ${msg}`);
       }
+    }
+
+    if (updatedItemIds.length > 0) {
+      await this.invalidateRetractionCache(updatedItemIds, userId, projectId);
     }
 
     return {
@@ -182,13 +247,21 @@ export class RetractionService {
       source: 'manual' as const,
     };
 
-    return this.repo.updateItemRetraction(
+    const updated = await this.repo.updateItemRetraction(
       itemId,
       true,
       nature,
       details,
       new Date(),
     );
+
+    await this.invalidateRetractionCache(
+      [itemId],
+      userId,
+      projectId || item.projectId || undefined,
+    );
+
+    return updated;
   }
 
   async removeManualFlag(userId: string, itemId: string, projectId?: string) {
@@ -197,13 +270,21 @@ export class RetractionService {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
-    return this.repo.updateItemRetraction(
+    const updated = await this.repo.updateItemRetraction(
       itemId,
       false,
       null,
       null,
       new Date(),
     );
+
+    await this.invalidateRetractionCache(
+      [itemId],
+      userId,
+      projectId || item.projectId || undefined,
+    );
+
+    return updated;
   }
 
   async getRetractedItems(userId: string, projectId?: string) {

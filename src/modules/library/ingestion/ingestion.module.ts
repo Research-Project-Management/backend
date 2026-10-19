@@ -1,25 +1,17 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
-import { StorageModule } from '@/modules/storage/storage.module';
 import { CatalogModule } from '@/modules/library/catalog/catalog.module';
 import { ExtractionModule } from '@/modules/library/extraction/extraction.module';
 import { BullModule } from '@nestjs/bullmq';
-import {
-  LIBRARY_INGESTION_QUEUE_PRIORITY,
-  LIBRARY_INGESTION_QUEUE_STANDARD,
-  LIBRARY_INGESTION_QUEUE_CAPTURE,
-} from './types/queue.constants';
+import { LIBRARY_INGESTION_QUEUE_STANDARD } from './types/queue.constants';
 import { shouldRunWorkerConsumers } from '@/core';
 
 // Facade
 import { IngestionFacade, INGESTION_FACADE } from './ingestion.facade';
 
 // Controllers
-import {
-  IngestionController,
-  ProjectIngestionController,
-} from './controllers/ingestion.controller';
+import { IngestionController } from './controllers/ingestion.controller';
 import { CurationController } from './controllers/curation.controller';
 import { RetractionController } from './controllers/retraction.controller';
 
@@ -39,11 +31,8 @@ import { IngestionQueueConsumer } from './services/ingestion-queue.consumer';
 import { MetadataReconciliationService } from './services/metadata-reconciliation.service';
 import { MetadataExecutorService } from './services/metadata-executor.service';
 import { MetadataService } from './services/metadata.service';
-import {
-  DuplicateService,
-  DuplicateDetectorService,
-  DuplicateMergerService,
-} from './services/duplicate.service';
+import { DuplicateDetectorService } from './services/duplicate-detector.service';
+import { DuplicateMergerService } from './services/duplicate-merger.service';
 import { QualityService } from './services/quality.service';
 import { RetractionService } from './services/retraction.service';
 import { RetractionDatabaseService } from './services/retraction-database.service';
@@ -58,7 +47,6 @@ import { WEB_FETCH_PORT } from './types/web-fetch.types';
 
 // Repositories
 import { IngestionRepository } from './repositories/ingestion.repository';
-import { IdempotencyRepository } from './repositories/idempotency.repository';
 import { MetadataCache } from './repositories/metadata.cache';
 import { RetractionRepository } from './repositories/retraction.repository';
 
@@ -80,7 +68,6 @@ import { DuplicatePolicy } from './policies/duplicate.policy';
 import { IdentifyStage } from './stages/identify.stage';
 import { IdentifyFileResolver } from './stages/identify-file.resolver';
 import { IdentifyUrlResolver } from './stages/identify-url.resolver';
-import { NormalizeStage } from './stages/normalize.stage';
 import { EnrichStage } from './stages/enrich.stage';
 import { ReconcileStage } from './stages/reconcile.stage';
 import { MatchStage } from './stages/match.stage';
@@ -93,11 +80,8 @@ import { OpenLibraryProvider } from './providers/openlibrary.provider';
 import { OpenAlexProvider } from './providers/openalex.provider';
 import { UnpaywallProvider } from './providers/unpaywall.provider';
 import { RetractionScannerProvider } from './providers/retraction-scanner.provider';
-import { SearxngSearchProvider } from './providers/searxng.provider';
-import { EuropePmcSearchProvider } from './providers/europe-pmc-search.provider';
 import { DblpProvider } from './providers/dblp.provider';
 import { SemanticScholarProvider } from './providers/semantic-scholar.provider';
-import { ExternalSearchComparatorService } from './services/external-search-comparator.service';
 import { RetractionItemEventsSubscriber } from './subscribers/retraction-item-events.subscriber';
 
 const ingestionWorkerProviders = shouldRunWorkerConsumers()
@@ -108,18 +92,12 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
   imports: [
     CoreModule,
     LibraryCoreModule,
-    StorageModule,
     CatalogModule,
     ExtractionModule,
-    BullModule.registerQueue(
-      { name: LIBRARY_INGESTION_QUEUE_PRIORITY },
-      { name: LIBRARY_INGESTION_QUEUE_STANDARD },
-      { name: LIBRARY_INGESTION_QUEUE_CAPTURE },
-    ),
+    BullModule.registerQueue({ name: LIBRARY_INGESTION_QUEUE_STANDARD }),
   ],
   controllers: [
     IngestionController,
-    ProjectIngestionController,
     CurationController,
     RetractionController,
   ],
@@ -133,7 +111,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
 
     // Repositories
     IngestionRepository,
-    IdempotencyRepository,
     MetadataCache,
     RetractionRepository,
 
@@ -170,7 +147,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     IdentifyFileResolver,
     IdentifyUrlResolver,
     IdentifyStage,
-    NormalizeStage,
     EnrichStage,
     ReconcileStage,
     MatchStage,
@@ -228,7 +204,6 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     },
 
     // Curation
-    DuplicateService,
     DuplicateDetectorService,
     DuplicateMergerService,
     QualityService,
@@ -239,27 +214,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     RetractionScannerProvider,
     RetractionSyncService,
     RetractionItemEventsSubscriber,
-
-    // External Search Providers & Benchmark Comparator
-    SearxngSearchProvider,
-    EuropePmcSearchProvider,
-    ExternalSearchComparatorService,
   ],
-  exports: [
-    IngestionFacade,
-    INGESTION_FACADE,
-    METADATA_PORT,
-    IngestionSagaOrchestrator,
-    IngestionVerifierService,
-    WebMirrorResolverService,
-    WebFetchLadderService,
-    WEB_FETCH_PORT,
-    ExternalSearchComparatorService,
-    SearxngSearchProvider,
-    EuropePmcSearchProvider,
-    DomainRateLimiterService,
-    DblpProvider,
-    SemanticScholarProvider,
-  ],
+  exports: [INGESTION_FACADE, IngestionFacade],
 })
 export class IngestionModule {}

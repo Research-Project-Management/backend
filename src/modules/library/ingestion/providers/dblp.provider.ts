@@ -41,7 +41,7 @@ export class DblpProvider implements MetadataProvider {
 
   constructor(
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -55,10 +55,6 @@ export class DblpProvider implements MetadataProvider {
   supports(input: QueryType | MetadataRequest): boolean {
     const type = typeof input === 'string' ? input : input?.queryType;
     return type ? this.capabilities.queryTypes.includes(type) : false;
-  }
-
-  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
-    return this.resolve(request);
   }
 
   async resolve(
@@ -80,13 +76,14 @@ export class DblpProvider implements MetadataProvider {
 
     let response: Response;
     try {
+      if (!this.httpClient) {
+        throw new Error('AcademicHttpClient is required for DblpProvider');
+      }
       const headers = {
         'User-Agent': getAcademicUserAgent('Dblp'),
         Accept: 'application/json, text/json',
       };
-      response = this.httpClient
-        ? (await this.httpClient.request(url, { headers, signal })).response
-        : await fetch(url, { headers, signal });
+      ({ response } = await this.httpClient.request(url, { headers, signal }));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.debug(`DBLP fetch skipped/failed non-fatally: ${message}`);

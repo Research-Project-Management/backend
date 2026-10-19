@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import {
   normalizeDoi,
@@ -74,17 +74,37 @@ export class ReferenceMatcherService {
     sourceItemId: string,
     references: ExtractedReferenceCandidate[],
   ): Promise<ReferenceMatchResult[]> {
-    if (
-      !references ||
-      references.length === 0 ||
-      typeof this.extractionRepo?.findScopePapers !== 'function'
-    ) {
+    if (!references || references.length === 0) {
       return [];
+    }
+
+    const candidateDois = new Set<string>();
+    const candidateYears = new Set<number>();
+    for (const ref of references) {
+      const normDoi = normalizeDoi(ref.doi || ref.rawText);
+      if (normDoi) {
+        candidateDois.add(normDoi);
+      }
+      const refYear = ref.year
+        ? Number(ref.year)
+        : ref.rawText?.match(/\b(19\d{2}|20\d{2})\b/)?.[1]
+          ? Number(ref.rawText.match(/\b(19\d{2}|20\d{2})\b/)![1])
+          : undefined;
+      if (refYear && Number.isFinite(refYear)) {
+        candidateYears.add(refYear);
+        candidateYears.add(refYear - 1);
+        candidateYears.add(refYear + 1);
+      }
     }
 
     const scopePapers = (await this.extractionRepo.findScopePapers(
       scope,
       sourceItemId,
+      {
+        dois: Array.from(candidateDois),
+        years: Array.from(candidateYears),
+        limit: 500,
+      },
     )) as ScopePaperRecord[];
 
     if (!scopePapers || scopePapers.length === 0) {

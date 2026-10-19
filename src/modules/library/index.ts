@@ -22,12 +22,3 @@ export type { IIngestionFacade } from './ingestion/ingestion.facade';
 
 export { SearchFacade, SEARCH_FACADE } from './search/search.facade';
 export type { ISearchFacade } from './search/search.facade';
-
-// Export canonical bounded contexts as isolated namespaces
-export * as Catalog from './catalog';
-export * as Citation from './citation';
-export * as Extraction from './extraction';
-export * as Ingestion from './ingestion';
-export * as Search from './search';
-export * as Sync from './sync';
-export * as Core from './core';

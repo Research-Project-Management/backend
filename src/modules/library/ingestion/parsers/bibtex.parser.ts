@@ -8,6 +8,7 @@ import {
 import {
   BibtexFallbackParser,
   extractBibtexFields,
+  CUSTOM_BIBTEX_ENRICHMENT_KEYS,
 } from './bibtex-fallback.parser';
 
 export {
@@ -23,6 +24,7 @@ export {
 export {
   BibtexFallbackParser,
   extractBibtexFields,
+  CUSTOM_BIBTEX_ENRICHMENT_KEYS,
 } from './bibtex-fallback.parser';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -37,16 +39,6 @@ export class BibtexParser {
   private readonly logger = new Logger(BibtexParser.name);
 
   /**
-   * Parse a raw BibTeX string asynchronously using in-process @citation-js.
-   */
-  parseAsync(rawBibtex: string): Promise<ParsedBibtexEntry[]> {
-    if (!rawBibtex || typeof rawBibtex !== 'string' || !rawBibtex.trim()) {
-      return Promise.resolve([]);
-    }
-    return Promise.resolve(this.parse(rawBibtex));
-  }
-
-  /**
    * Parse a raw BibTeX string containing one or multiple entries using @citation-js engine.
    */
   parse(rawBibtex: string): ParsedBibtexEntry[] {
@@ -58,8 +50,12 @@ export class BibtexParser {
       const cite = new Cite(rawBibtex);
       const data: CslItem[] = cite.data || [];
 
-      // Pre-scan raw BibTeX entries by citationKey and index so we can enrich fields
-      // that @citation-js/plugin-bibtex drops (e.g. eprint, archivePrefix, file, raw entry type).
+      if (data.length === 0) {
+        return this.fallbackParse(rawBibtex);
+      }
+
+      // Lightweight pass for custom/enrichment BibTeX keys by citationKey and index
+      // without re-parsing standard fields already extracted by @citation-js/plugin-bibtex.
       const rawEntriesByKey = new Map<
         string,
         { rawType: string; fields: Record<string, string> }
@@ -79,7 +75,10 @@ export class BibtexParser {
           continue;
         }
         const cKey = rawMatch[2]?.trim() || '';
-        const extractedFields = extractBibtexFields(rawMatch[3] || '');
+        const extractedFields = extractBibtexFields(
+          rawMatch[3] || '',
+          CUSTOM_BIBTEX_ENRICHMENT_KEYS,
+        );
         const entryInfo = {
           rawType: rType,
           citationKey: cKey,

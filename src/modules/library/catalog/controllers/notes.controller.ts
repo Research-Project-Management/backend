@@ -4,22 +4,23 @@ import {
   Post,
   Patch,
   Delete,
+  Body,
   Param,
   Query,
-  Body,
   UseGuards,
-  NotFoundException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
+import { normalizeProjectScopeId } from '@/modules/library/core';
+import { NotesService } from '@/modules/library/catalog/services/notes.service';
 import {
   CreateNoteDto,
   UpdateNoteDto,
 } from '@/modules/library/catalog/dto/notes.dto';
-import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
-import { NotesService } from '@/modules/library/catalog/services/notes.service';
 
 @ApiTags('Library Notes')
 @ApiBearerAuth('JWT-auth')
@@ -40,15 +41,9 @@ export class NoteController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const rawProjectId = paramProjectId || queryProjectId;
-    const effectiveProjectId =
-      rawProjectId &&
-      rawProjectId !== 'me' &&
-      rawProjectId !== 'user' &&
-      rawProjectId !== 'undefined'
-        ? rawProjectId
-        : undefined;
-
+    const effectiveProjectId = normalizeProjectScopeId(
+      paramProjectId || queryProjectId,
+    );
     return this.notesService.listNotes(
       currentUserId,
       itemId,
@@ -65,19 +60,12 @@ export class NoteController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const rawProjectId = paramProjectId || queryProjectId;
-    const effectiveProjectId =
-      rawProjectId &&
-      rawProjectId !== 'me' &&
-      rawProjectId !== 'user' &&
-      rawProjectId !== 'undefined'
-        ? rawProjectId
-        : undefined;
-
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
     }
-
+    const effectiveProjectId = normalizeProjectScopeId(
+      paramProjectId || queryProjectId,
+    );
     const note = await this.notesService.getNote(
       currentUserId,
       id,
@@ -98,15 +86,9 @@ export class NoteController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const rawProjectId = paramProjectId || queryProjectId || dto.projectId;
-    const effectiveProjectId =
-      rawProjectId &&
-      rawProjectId !== 'me' &&
-      rawProjectId !== 'user' &&
-      rawProjectId !== 'undefined'
-        ? rawProjectId
-        : undefined;
-
+    const effectiveProjectId = normalizeProjectScopeId(
+      paramProjectId || queryProjectId || dto.projectId,
+    );
     return this.notesService.createNote(currentUserId, {
       ...dto,
       createdById: currentUserId,
@@ -127,17 +109,15 @@ export class NoteController {
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
     }
-    const rawProjectId = paramProjectId || queryProjectId;
-    const effectiveProjectId =
-      rawProjectId &&
-      rawProjectId !== 'me' &&
-      rawProjectId !== 'user' &&
-      rawProjectId !== 'undefined'
-        ? rawProjectId
-        : undefined;
-    return effectiveProjectId
-      ? this.notesService.updateNote(currentUserId, id, dto, effectiveProjectId)
-      : this.notesService.updateNote(currentUserId, id, dto);
+    const effectiveProjectId = normalizeProjectScopeId(
+      paramProjectId || queryProjectId,
+    );
+    return this.notesService.updateNote(
+      currentUserId,
+      id,
+      dto,
+      effectiveProjectId,
+    );
   }
 
   @Delete(':id')
@@ -153,14 +133,9 @@ export class NoteController {
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid note UUID: ${id}`);
     }
-    const rawProjectId = paramProjectId || queryProjectId;
-    const effectiveProjectId =
-      rawProjectId &&
-      rawProjectId !== 'me' &&
-      rawProjectId !== 'user' &&
-      rawProjectId !== 'undefined'
-        ? rawProjectId
-        : undefined;
+    const effectiveProjectId = normalizeProjectScopeId(
+      paramProjectId || queryProjectId,
+    );
     const parsedVersion =
       rawExpectedVersion !== undefined && rawExpectedVersion !== ''
         ? Number(rawExpectedVersion)
@@ -169,16 +144,12 @@ export class NoteController {
       parsedVersion !== undefined && Number.isFinite(parsedVersion)
         ? parsedVersion
         : undefined;
-    return effectiveProjectId
-      ? this.notesService.deleteNote(
-          currentUserId,
-          id,
-          expectedVersion,
-          effectiveProjectId,
-        )
-      : expectedVersion !== undefined
-        ? this.notesService.deleteNote(currentUserId, id, expectedVersion)
-        : this.notesService.deleteNote(currentUserId, id);
+    return this.notesService.deleteNote(
+      currentUserId,
+      id,
+      expectedVersion,
+      effectiveProjectId,
+    );
   }
 
   @Post('items/:itemId/from-annotations')
@@ -202,41 +173,27 @@ export class NoteController {
     if (!isUUID(itemId)) {
       throw new BadRequestException(`Invalid item UUID: ${itemId}`);
     }
-    const rawProjectId = paramProjectId || queryProjectId || body?.projectId;
-    const effectiveProjectId =
-      rawProjectId &&
-      rawProjectId !== 'me' &&
-      rawProjectId !== 'user' &&
-      rawProjectId !== 'undefined'
-        ? rawProjectId
-        : undefined;
-
+    const effectiveProjectId = normalizeProjectScopeId(
+      paramProjectId || queryProjectId || body?.projectId,
+    );
     const options =
       body &&
       (body.noteId !== undefined ||
         body.tagColor !== undefined ||
         body.includeComments !== undefined)
-        ? { ...body, projectId: effectiveProjectId }
-        : effectiveProjectId;
+        ? {
+            noteId: body.noteId,
+            tagColor: body.tagColor,
+            includeComments: body.includeComments,
+            projectId: effectiveProjectId,
+          }
+        : undefined;
 
     return this.notesService.extractNotesFromAnnotations(
       currentUserId,
       itemId,
       options,
-    );
-  }
-
-  async extractNotesFromAnnotations(
-    currentUserId: string,
-    itemId: string,
-    queryProjectId?: string,
-    paramProjectId?: string,
-  ) {
-    return this.extractNotes(
-      currentUserId,
-      itemId,
-      queryProjectId,
-      paramProjectId,
+      effectiveProjectId,
     );
   }
 }

@@ -60,17 +60,6 @@ import { CslStyleRegistry } from './domain/csl-style-registry';
     ExportsRepository,
     PdfBakerService,
   ],
-  exports: [
-    CitationFacade,
-    CITATION_FACADE,
-    CslRepositoryService,
-    CitationService,
-    AcademicQueryResolverService,
-    CslEngineService,
-    CslLocaleLoaderService,
-    CslStyleFormatterService,
-    TcvnCitationFormatterService,
-    ExportsService,
-  ],
+  exports: [CITATION_FACADE, CitationFacade],
 })
 export class CitationModule {}

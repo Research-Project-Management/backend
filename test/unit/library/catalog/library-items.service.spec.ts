@@ -4,18 +4,14 @@ import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { TransactionService } from '@/modules/library/core';
-import { PrismaService } from '@/core';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
-import { TypesService } from '@/modules/library/catalog/services/types.service';
-import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { sanitizeItemTitle } from '@/modules/library/core';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import {
   resolveExtraPlainText,
   extractNonColumnExtraFields,
 } from '@/modules/library/catalog/repositories/command.repository';
-import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
+import { ItemRelationsService } from '@/modules/library/catalog/services/item-relations.service';
 
 describe('Library Items — Authoritative Backend & Sanitization', () => {
   describe('sanitizeItemTitle (Domain Utility)', () => {
@@ -61,6 +57,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
 
   describe('ItemService', () => {
     let service: ItemService;
+    let relationsService: ItemRelationsService;
     let queryRepo: jest.Mocked<QueryRepository>;
     let commandRepo: jest.Mocked<CommandRepository>;
     let libraryTx: jest.Mocked<TransactionService>;
@@ -103,10 +100,10 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
 
       queryRepo = mockQueryRepo as any;
       commandRepo = mockCommandRepo as any;
-      libraryTx = mockLibraryTx;
+      libraryTx = mockLibraryTx as unknown as jest.Mocked<TransactionService>;
       tagsService = mockTagsService as any;
 
-      const mockQueryService = new ItemQueryService(queryRepo, undefined);
+      relationsService = new ItemRelationsService(queryRepo, commandRepo);
       const mockValidator = {
         validateAndSanitizeItem: jest.fn((_type, d) => ({
           sanitizedItem: d,
@@ -119,12 +116,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         commandRepo,
         libraryTx,
         tagsService,
-        mockQueryService,
-        {} as any,
-        {} as any,
-        {} as any,
         mockValidator as any,
-        {} as any,
         undefined,
       );
     });
@@ -227,7 +219,10 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
           },
         ]);
 
-        const res = await service.getRelatedItems(mockUserId, sourceId);
+        const res = await relationsService.getRelatedItems(
+          mockUserId,
+          sourceId,
+        );
         expect(res.total).toBe(1);
         expect(res.relatedItems[0].title).toBe('Related Paper 1');
       });
@@ -244,7 +239,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
             }),
           );
 
-        const res = await service.linkItems(mockUserId, sourceId, {
+        const res = await relationsService.linkItems(mockUserId, sourceId, {
           targetItemId: targetId1,
           relationType: 'cites',
         });
@@ -278,7 +273,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
             }),
           );
 
-        const res = await service.linkItems(mockUserId, sourceId, {
+        const res = await relationsService.linkItems(mockUserId, sourceId, {
           targetItemIds: [targetId1, targetId2],
           relationType: 'related',
         });
@@ -297,7 +292,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         );
 
         await expect(
-          service.linkItems(mockUserId, sourceId, {
+          relationsService.linkItems(mockUserId, sourceId, {
             targetItemId: sourceId,
           }),
         ).rejects.toThrow();
@@ -311,7 +306,11 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
           }),
         );
 
-        const res = await service.unlinkItems(mockUserId, sourceId, targetId1);
+        const res = await relationsService.unlinkItems(
+          mockUserId,
+          sourceId,
+          targetId1,
+        );
         expect(res.success).toBe(true);
         expect(res.unlinked).toBe(true);
         expect(commandRepo.removeRelation).toHaveBeenCalledWith(

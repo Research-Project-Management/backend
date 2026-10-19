@@ -24,7 +24,6 @@ import {
   CreatorInput,
   CreatorType,
   ItemMetadata as CanonicalItemMetadata,
-  IStrategyHandler,
 } from '@/modules/library/core';
 
 export type { CreatorCreditInput, CreatorInput, CreatorType };
@@ -181,10 +180,7 @@ export interface MetadataPort {
 
 // Metadata Provider Interface
 
-export interface MetadataProvider extends IStrategyHandler<
-  MetadataRequest | QueryType,
-  ProviderResult | null
-> {
+export interface MetadataProvider {
   readonly id: ProviderName;
   readonly capabilities: ProviderCapability;
   supports(input: QueryType | MetadataRequest): boolean;
@@ -192,5 +188,4 @@ export interface MetadataProvider extends IStrategyHandler<
     request: MetadataRequest,
     signal?: AbortSignal,
   ): Promise<ProviderResult | null>;
-  execute(request: MetadataRequest): Promise<ProviderResult | null>;
 }

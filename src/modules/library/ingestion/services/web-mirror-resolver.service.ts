@@ -3,12 +3,11 @@ import { MirrorBibliographicMetadata } from '@/modules/library/ingestion/types/w
 import {
   AcademicHttpClient,
   LibraryConfigService,
-  libraryConfig,
-  normalizeDoi,
-  normalizeArxivId,
   cleanAbstractText,
-  cleanBibliographicText,
 } from '@/modules/library/core';
+import { CrossRefProvider } from '@/modules/library/ingestion/providers/crossref.provider';
+import { ArxivProvider } from '@/modules/library/ingestion/providers/arxiv.provider';
+import { OpenAlexProvider } from '@/modules/library/ingestion/providers/openalex.provider';
 
 interface EuropePmcAuthor {
   fullName?: string;
@@ -41,58 +40,6 @@ interface EuropePmcResponse {
   resultList?: { result?: EuropePmcRecord[] };
 }
 
-interface CrossRefAuthor {
-  name?: string;
-  given?: string;
-  family?: string;
-}
-
-interface CrossRefDateParts {
-  'date-parts'?: number[][];
-}
-
-interface CrossRefWork {
-  title?: string | string[];
-  author?: CrossRefAuthor[];
-  'published-print'?: CrossRefDateParts;
-  'published-online'?: CrossRefDateParts;
-  created?: CrossRefDateParts;
-  'container-title'?: string | string[];
-  publisher?: string;
-  abstract?: string;
-  DOI?: string;
-}
-
-interface CrossRefResponse {
-  message?: CrossRefWork;
-}
-
-interface OpenAlexAuthorship {
-  author?: { display_name?: string };
-}
-
-interface OpenAlexWork {
-  title?: string;
-  display_name?: string;
-  authorships?: OpenAlexAuthorship[];
-  primary_location?: {
-    source?: { display_name?: string };
-    pdf_url?: string;
-  };
-  host_venue?: { display_name?: string };
-  open_access?: {
-    oa_url?: string;
-    is_oa?: boolean;
-  };
-  abstract_inverted_index?: Record<string, number[]>;
-  publication_year?: number;
-  doi?: string;
-}
-
-interface OpenAlexResponse extends OpenAlexWork {
-  results?: OpenAlexWork[];
-}
-
 /**
  * Open Academic Mirror Resolver Service (Ladder Step 2).
  * Queries public, free academic APIs (EuropePMC, CrossRef, arXiv, OpenAlex)
@@ -106,7 +53,48 @@ export class WebMirrorResolverService {
   constructor(
     @Optional() private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
+    private readonly crossRefProvider?: CrossRefProvider,
+    private readonly arxivProvider?: ArxivProvider,
+    private readonly openAlexProvider?: OpenAlexProvider,
   ) {}
+
+  private mapProviderResultToMirror(
+    metadata: Record<string, unknown>,
+    sourceMirror: 'CrossRef' | 'arXiv' | 'OpenAlex',
+    fallbackDoi?: string,
+  ): MirrorBibliographicMetadata | null {
+    const title =
+      typeof metadata.title === 'string' ? metadata.title.trim() : '';
+    if (!title) return null;
+    const authors = Array.isArray(metadata.authors)
+      ? (metadata.authors as string[]).filter(Boolean)
+      : undefined;
+    const journal =
+      (typeof metadata.journal === 'string' && metadata.journal) ||
+      (typeof metadata.publicationTitle === 'string' &&
+        metadata.publicationTitle) ||
+      (typeof metadata.publisher === 'string' && metadata.publisher) ||
+      undefined;
+    const pdfUrl =
+      (typeof metadata.openAccessPdfUrl === 'string' &&
+        metadata.openAccessPdfUrl) ||
+      (typeof metadata.pdfUrl === 'string' && metadata.pdfUrl) ||
+      undefined;
+    return {
+      title,
+      abstract:
+        typeof metadata.abstract === 'string' ? metadata.abstract : undefined,
+      authors: authors && authors.length > 0 ? authors : undefined,
+      year: typeof metadata.year === 'number' ? metadata.year : undefined,
+      doi: (typeof metadata.doi === 'string' && metadata.doi) || fallbackDoi,
+      pmid: typeof metadata.pmid === 'string' ? metadata.pmid : undefined,
+      pmcid: typeof metadata.pmcid === 'string' ? metadata.pmcid : undefined,
+      journal,
+      isOpenAccess: sourceMirror === 'arXiv' || Boolean(pdfUrl),
+      pdfUrl,
+      sourceMirror,
+    };
+  }
 
   /**
    * Ladder Step 2: Query EuropePMC public open API to resolve metadata without WAF interference.
@@ -218,163 +206,65 @@ export class WebMirrorResolverService {
 
   /**
    * Free & Open CrossRef Works API mirror resolver (0đ, polite pool).
-   * Covers 150M+ DOIs across Springer, IEEE, ACM, Nature, Wiley, bioRxiv, arXiv, etc.
+   * Delegates to CrossRefProvider.
    */
   async resolveCrossRef(
     doi: string,
   ): Promise<MirrorBibliographicMetadata | null> {
+    if (!this.crossRefProvider) return null;
     try {
-      const crossrefMailto =
-        this.configService?.providers.crossrefEmail ??
-        libraryConfig().providers.crossrefEmail ??
-        'contact@flux.academic';
-      let targetDoi = doi;
-      let endpoint = `https://api.crossref.org/works/${encodeURIComponent(targetDoi)}?mailto=${encodeURIComponent(crossrefMailto)}`;
-      const signal = AbortSignal.timeout(6000);
-      const headers = { Accept: 'application/json' };
-      let res = this.httpClient
-        ? (
-            await this.httpClient.request(endpoint, {
-              headers,
-              signal,
-              timeoutMs: 6000,
-            })
-          ).response
-        : await fetch(endpoint, {
-            headers,
-            signal,
-          });
-
-      // BioRxiv/MedRxiv DOIs in URLs often have version suffix (e.g. 10.1101/2020.03.22.002386v1)
-      // which CrossRef indexes under base DOI without version.
-      if (!res.ok && /v\d+$/i.test(targetDoi)) {
-        targetDoi = targetDoi.replace(/v\d+$/i, '');
-        endpoint = `https://api.crossref.org/works/${encodeURIComponent(targetDoi)}?mailto=${encodeURIComponent(crossrefMailto)}`;
-        res = this.httpClient
-          ? (
-              await this.httpClient.request(endpoint, {
-                headers,
-                signal,
-                timeoutMs: 6000,
-              })
-            ).response
-          : await fetch(endpoint, {
-              headers,
-              signal,
-            });
+      const targetDoi = doi.replace(/v\d+$/i, '');
+      const res = await this.crossRefProvider.resolve(
+        { query: targetDoi, queryType: 'DOI' },
+        AbortSignal.timeout(6000),
+      );
+      if (res?.metadata) {
+        return this.mapProviderResultToMirror(
+          res.metadata as Record<string, unknown>,
+          'CrossRef',
+          targetDoi,
+        );
       }
-
-      if (!res.ok) return null;
-
-      const data = (await res.json()) as CrossRefResponse;
-      const item = data?.message;
-      if (!item) return null;
-
-      const rawTitle = Array.isArray(item.title) ? item.title[0] : item.title;
-      if (!rawTitle) return null;
-
-      const authors: string[] = [];
-      if (Array.isArray(item.author)) {
-        for (const a of item.author) {
-          if (a.name) {
-            authors.push(a.name.trim());
-          } else if (a.family) {
-            authors.push(`${a.given ? a.given + ' ' : ''}${a.family}`.trim());
-          }
-        }
-      }
-
-      const year =
-        item['published-print']?.['date-parts']?.[0]?.[0] ||
-        item['published-online']?.['date-parts']?.[0]?.[0] ||
-        item['created']?.['date-parts']?.[0]?.[0];
-
-      const journal =
-        (Array.isArray(item['container-title'])
-          ? item['container-title'][0]
-          : item['container-title']) || item.publisher;
-
-      const cleanAbstract = item.abstract
-        ? cleanAbstractText(item.abstract.replace(/<[^>]+>/g, ' '))
-        : undefined;
-
-      return {
-        title: cleanBibliographicText(rawTitle),
-        abstract: cleanAbstract,
-        authors: authors.length > 0 ? authors : undefined,
-        year: typeof year === 'number' ? year : undefined,
-        doi: item.DOI || targetDoi,
-        journal: journal ? cleanBibliographicText(journal) : undefined,
-        isOpenAccess: false,
-        sourceMirror: 'CrossRef',
-      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.debug(
-        `Open mirror resolution (CrossRef) failed for DOI "${doi}": ${msg}`,
+        `CrossRefProvider resolution failed for DOI "${doi}": ${msg}`,
       );
-      return null;
     }
+    return null;
   }
 
   /**
    * Free & Open arXiv Export API resolver (0đ, polite open mirror).
+   * Delegates to ArxivProvider.
    */
   async resolveArxiv(
     arxivId: string,
   ): Promise<MirrorBibliographicMetadata | null> {
+    if (!this.arxivProvider) return null;
     try {
-      const cleanId = normalizeArxivId(arxivId);
-      if (!cleanId) return null;
-      const endpoint = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanId)}`;
-      const signal = AbortSignal.timeout(6000);
-      const res = this.httpClient
-        ? (await this.httpClient.request(endpoint, { signal, timeoutMs: 6000 }))
-            .response
-        : await fetch(endpoint, { signal });
-      if (!res.ok) return null;
-
-      const xml = await res.text();
-      const titleMatch = xml.match(/<entry>[\s\S]*?<title>([\s\S]*?)<\/title>/);
-      const rawTitle = titleMatch?.[1]?.replace(/\s+/g, ' ').trim();
-      if (!rawTitle) return null;
-
-      const summaryMatch = xml.match(/<summary>([\s\S]*?)<\/summary>/);
-      const rawAbstract = summaryMatch?.[1]?.replace(/\s+/g, ' ').trim();
-
-      const authorMatches = [
-        ...xml.matchAll(/<author>[\s\S]*?<name>([\s\S]*?)<\/name>/g),
-      ];
-      const authors = authorMatches.map((m) => m[1].trim()).filter(Boolean);
-
-      const pubYearMatch = xml.match(/<published>(\d{4})/);
-      const year = pubYearMatch ? parseInt(pubYearMatch[1], 10) : undefined;
-
-      const doiMatch = xml.match(/<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/);
-      const doi = doiMatch ? doiMatch[1].trim() : `10.48550/arXiv.${cleanId}`;
-
-      return {
-        title: cleanBibliographicText(rawTitle),
-        abstract: rawAbstract ? cleanAbstractText(rawAbstract) : undefined,
-        authors: authors.length > 0 ? authors : undefined,
-        year,
-        doi,
-        journal: 'arXiv',
-        isOpenAccess: true,
-        sourceMirror: 'arXiv',
-      };
+      const res = await this.arxivProvider.resolve(
+        { query: arxivId, queryType: 'ARXIV' },
+        AbortSignal.timeout(6000),
+      );
+      if (res?.metadata) {
+        return this.mapProviderResultToMirror(
+          res.metadata as Record<string, unknown>,
+          'arXiv',
+        );
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.debug(
-        `Open mirror resolution (arXiv) failed for ID "${arxivId}": ${msg}`,
+        `ArxivProvider resolution failed for ID "${arxivId}": ${msg}`,
       );
-      return null;
     }
+    return null;
   }
 
   /**
    * Free & Open OpenAlex Works API resolver (0đ, polite pool).
-   * Covers 250M+ scientific publications across all publishers, preprints, and open repositories.
+   * Delegates to OpenAlexProvider.
    */
   async resolveOpenAlex(target: {
     doi?: string;
@@ -382,105 +272,36 @@ export class WebMirrorResolverService {
     pmcid?: string;
     url?: string;
   }): Promise<MirrorBibliographicMetadata | null> {
+    if (!this.openAlexProvider) return null;
     try {
-      let endpoint: string;
-      const mailto =
-        this.configService?.providers.openAlexEmail ??
-        libraryConfig().providers.openAlexEmail ??
-        'contact@flux.academic';
-
-      if (target.doi) {
-        endpoint = `https://api.openalex.org/works/https://doi.org/${encodeURIComponent(target.doi)}?mailto=${encodeURIComponent(mailto)}`;
-      } else if (target.pmid) {
-        endpoint = `https://api.openalex.org/works/pmid:${encodeURIComponent(target.pmid)}?mailto=${encodeURIComponent(mailto)}`;
-      } else if (target.pmcid) {
-        endpoint = `https://api.openalex.org/works/pmcid:${encodeURIComponent(target.pmcid)}?mailto=${encodeURIComponent(mailto)}`;
-      } else if (target.url) {
-        endpoint = `https://api.openalex.org/works?filter=locations.landing_page_url:${encodeURIComponent(target.url)}&mailto=${encodeURIComponent(mailto)}`;
-      } else {
-        return null;
-      }
-
       const signal = AbortSignal.timeout(6000);
-      const headers = {
-        Accept: 'application/json',
-        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${mailto})`,
-      };
-      const res = this.httpClient
-        ? (
-            await this.httpClient.request(endpoint, {
-              headers,
-              signal,
-              timeoutMs: 6000,
-            })
-          ).response
-        : await fetch(endpoint, {
-            headers,
+      const res = target.doi
+        ? await this.openAlexProvider.resolve(
+            { query: target.doi, queryType: 'DOI' },
             signal,
-          });
+          )
+        : target.pmid
+          ? await this.openAlexProvider.resolve(
+              { query: target.pmid, queryType: 'PMID' },
+              signal,
+            )
+          : target.pmcid
+            ? await this.openAlexProvider.fetchByPmcid(target.pmcid, signal)
+            : target.url
+              ? await this.openAlexProvider.fetchByUrl(target.url, signal)
+              : null;
 
-      if (!res.ok) return null;
-      const data = (await res.json()) as OpenAlexResponse;
-      const item: OpenAlexWork | undefined = Array.isArray(data.results)
-        ? data.results[0]
-        : data;
-      if (!item || (!item.title && !item.display_name)) return null;
-
-      const rawTitle = item.title || item.display_name || '';
-      const authors: string[] = [];
-      if (Array.isArray(item.authorships)) {
-        for (const auth of item.authorships) {
-          if (auth?.author?.display_name) {
-            authors.push(auth.author.display_name.trim());
-          }
-        }
+      if (res?.metadata) {
+        return this.mapProviderResultToMirror(
+          res.metadata as Record<string, unknown>,
+          'OpenAlex',
+          target.doi,
+        );
       }
-
-      const primLoc = item.primary_location;
-      const journal =
-        primLoc?.source?.display_name || item.host_venue?.display_name;
-      const pdfUrl = item.open_access?.oa_url || primLoc?.pdf_url;
-
-      let abstract: string | undefined;
-      if (
-        item.abstract_inverted_index &&
-        typeof item.abstract_inverted_index === 'object'
-      ) {
-        const wordPositions: Array<{ word: string; pos: number }> = [];
-        for (const [word, positions] of Object.entries(
-          item.abstract_inverted_index,
-        )) {
-          if (Array.isArray(positions)) {
-            for (const pos of positions) {
-              wordPositions.push({ word, pos });
-            }
-          }
-        }
-        wordPositions.sort((a, b) => a.pos - b.pos);
-        abstract = wordPositions
-          .map((wp) => wp.word)
-          .join(' ')
-          .trim();
-      }
-
-      return {
-        title: cleanBibliographicText(rawTitle),
-        abstract: abstract ? cleanAbstractText(abstract) : undefined,
-        authors: authors.length > 0 ? authors : undefined,
-        year:
-          typeof item.publication_year === 'number'
-            ? item.publication_year
-            : undefined,
-        doi: normalizeDoi(item.doi) || target.doi,
-        journal: journal ? cleanBibliographicText(journal) : undefined,
-        isOpenAccess: Boolean(item.open_access?.is_oa),
-        pdfUrl: pdfUrl || undefined,
-        sourceMirror: 'OpenAlex',
-      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.debug(`OpenAlex mirror resolution failed: ${msg}`);
-      return null;
+      this.logger.debug(`OpenAlexProvider resolution failed: ${msg}`);
     }
+    return null;
   }
 }

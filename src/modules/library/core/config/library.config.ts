@@ -23,7 +23,6 @@ export interface LibraryConfig {
     semanticScholarBaseUrl: string;
     unpaywallEmail?: string;
     unpaywallBaseUrl: string;
-    searxngUrl: string;
     dblpBaseUrl: string;
     arxivBaseUrl: string;
     openLibraryBaseUrl: string;
@@ -33,9 +32,6 @@ export interface LibraryConfig {
     pollIntervalMs: number;
     batchSize: number;
     maxRetries: number;
-    lockTtlMs: number;
-    batchDelayMs: number;
-    metricsIntervalMs: number;
     leaseMs: number;
     workerEnabled?: string;
   };
@@ -44,7 +40,6 @@ export interface LibraryConfig {
     standardQueue: string;
     captureQueue: string;
     concurrency: number;
-    retractionCheckIntervalDays: number;
   };
   extraction: {
     ocrMaxWorkers: number;
@@ -90,7 +85,6 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
 
   const contactEmail =
     process.env.ACADEMIC_POLITE_EMAIL ||
-    process.env.ACADEMIC_EMAIL ||
     process.env.CROSSREF_EMAIL ||
     'support@flux.study';
 
@@ -108,7 +102,7 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
       openAlexApiKey: process.env.OPENALEX_API_KEY,
       openAlexEmail: process.env.OPENALEX_EMAIL || contactEmail,
       crossrefEmail: process.env.CROSSREF_EMAIL || contactEmail,
-      ncbiApiKey: process.env.NCBI_API_KEY || process.env.PUBMED_API_KEY,
+      ncbiApiKey: process.env.NCBI_API_KEY,
       ncbiEmail: process.env.NCBI_EMAIL || contactEmail,
       ncbiBaseUrl:
         process.env.NCBI_EUTILS_BASE_URL ||
@@ -120,10 +114,6 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
       unpaywallEmail: process.env.UNPAYWALL_EMAIL || contactEmail,
       unpaywallBaseUrl:
         process.env.UNPAYWALL_API_URL || 'https://api.unpaywall.org/v2',
-      searxngUrl:
-        process.env.SEARXNG_BASE_URL ||
-        process.env.SEARXNG_URL ||
-        'http://localhost:8080',
       dblpBaseUrl:
         process.env.DBLP_API_URL || 'https://dblp.org/search/publ/api',
       arxivBaseUrl:
@@ -136,11 +126,10 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
       pollIntervalMs: Number(process.env.OUTBOX_POLL_INTERVAL_MS) || 2000,
       batchSize: Number(process.env.OUTBOX_BATCH_SIZE) || 50,
       maxRetries: Number(process.env.OUTBOX_MAX_RETRIES) || 5,
-      lockTtlMs: Number(process.env.OUTBOX_LOCK_TTL_MS) || 30000,
-      batchDelayMs: Number(process.env.OUTBOX_BATCH_DELAY_MS) || 100,
-      metricsIntervalMs:
-        Number(process.env.OUTBOX_METRICS_INTERVAL_MS) || 60000,
-      leaseMs: Number(process.env.OUTBOX_LEASE_MS) || 60000,
+      leaseMs:
+        Number(
+          process.env.OUTBOX_LEASE_MS || process.env.OUTBOX_LOCK_TTL_MS,
+        ) || 30000,
       workerEnabled: process.env.OUTBOX_WORKER_ENABLED,
     },
     ingestion: {
@@ -153,13 +142,7 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
       captureQueue:
         process.env.LIBRARY_INGESTION_QUEUE_CAPTURE ||
         'flux_library_ingestion_capture',
-      concurrency:
-        Number(
-          process.env.INGESTION_QUEUE_CONCURRENCY ||
-            process.env.INGESTION_CONCURRENCY,
-        ) || 4,
-      retractionCheckIntervalDays:
-        Number(process.env.RETRACTION_SYNC_INTERVAL_DAYS) || 7,
+      concurrency: Number(process.env.INGESTION_QUEUE_CONCURRENCY) || 4,
     },
     extraction: {
       ocrMaxWorkers: Number(process.env.OCR_MAX_WORKERS) || 2,
@@ -168,7 +151,9 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
       pdfMaxPages: Number(process.env.PDF_MAX_PAGES) || 100,
       webFetchTimeoutMs: Number(process.env.WEB_FETCH_TIMEOUT_MS) || 10000,
       pdfMaxIndexPages: Number.parseInt(
-        process.env.PDF_MAX_INDEX_PAGES || '0',
+        process.env.LIBRARY_PDF_MAX_INDEX_PAGES ||
+          process.env.PDF_MAX_INDEX_PAGES ||
+          '100',
         10,
       ),
     },
@@ -183,7 +168,7 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
     mextract: {
       modelName:
         process.env.MEXTRACT_MODEL_NAME || 'Xenova/Qwen2.5-0.5B-Instruct',
-      apiUrl: process.env.MEXTRACT_API_URL || process.env.MEXTRACT_URL,
+      apiUrl: process.env.MEXTRACT_API_URL,
     },
     webFetch: {
       stealthScraperUrl: process.env.STEALTH_SCRAPER_URL,

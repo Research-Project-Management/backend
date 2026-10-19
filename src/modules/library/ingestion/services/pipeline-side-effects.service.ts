@@ -12,6 +12,11 @@ import { IngestionStatus, Prisma } from '@prisma/client';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 import { ReconciliationDecision } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import {
+  formatAttachmentFilename,
+  DEFAULT_RENAME_PATTERN,
+  RenamerItemMetadata,
+} from '@/modules/library/extraction/domain/renamer.domain';
 
 @Injectable()
 export class PipelineSideEffectsService {
@@ -32,15 +37,17 @@ export class PipelineSideEffectsService {
   async scanRetraction(proposedItem?: Record<string, unknown>): Promise<void> {
     if (!this.retractionScanner || !proposedItem) return;
     try {
-      const lookupRes = await this.retractionScanner.lookup(
-        typeof proposedItem.doi === 'string' ? proposedItem.doi : undefined,
-        typeof proposedItem.pmid === 'string' ? proposedItem.pmid : undefined,
-      );
-      if (lookupRes.status === 'retracted') {
-        const details = lookupRes.details;
+      const doi =
+        typeof proposedItem.doi === 'string' ? proposedItem.doi : undefined;
+      const pmid =
+        typeof proposedItem.pmid === 'string' ? proposedItem.pmid : undefined;
+
+      const res = await this.retractionScanner.lookup(doi, pmid);
+
+      if (res.status === 'retracted' && res.details) {
         proposedItem.isRetracted = true;
-        proposedItem.retractionNature = details.nature;
-        proposedItem.retractionDetails = details;
+        proposedItem.retractionNature = res.details.nature;
+        proposedItem.retractionDetails = res.details;
         proposedItem.retractionCheckedAt = new Date().toISOString();
         const titleStr =
           typeof proposedItem.title === 'string' ||
@@ -48,8 +55,11 @@ export class PipelineSideEffectsService {
             ? String(proposedItem.title)
             : '';
         this.logger.warn(
-          `[RETRACTION_INGESTION_GUARD] Flagged imported item "${titleStr}" as ${details.nature}`,
+          `[RETRACTION_INGESTION_GUARD] Flagged imported item "${titleStr}" as ${res.details.nature}`,
         );
+      } else if (res.status === 'clean') {
+        proposedItem.isRetracted = false;
+        proposedItem.retractionCheckedAt = new Date().toISOString();
       }
     } catch (scanErr: unknown) {
       const msg = scanErr instanceof Error ? scanErr.message : String(scanErr);
@@ -64,14 +74,101 @@ export class PipelineSideEffectsService {
     fileId?: string,
     filename?: string,
     size?: number,
+    parentMetadata?: Record<string, unknown> | null,
   ): Promise<void> {
     if (!fileId || !this.extractionGateway?.createAttachment) return;
     try {
+      const fallbackFilename = filename || 'document.pdf';
+      let resolvedFilename = fallbackFilename;
+
+      if (parentMetadata) {
+        const rawTitle =
+          typeof parentMetadata.title === 'string'
+            ? parentMetadata.title.trim()
+            : '';
+        const isGenericTitle =
+          !rawTitle ||
+          /^(uploaded document|untitled|untitled document|untitled record|document)$/i.test(
+            rawTitle,
+          ) ||
+          (parentMetadata.extraFields &&
+            typeof parentMetadata.extraFields === 'object' &&
+            (parentMetadata.extraFields as Record<string, unknown>)
+              .isFilenameTitle === true);
+
+        if (!isGenericTitle) {
+          const rawContributors = Array.isArray(parentMetadata.contributors)
+            ? parentMetadata.contributors
+            : Array.isArray(parentMetadata.creators)
+              ? parentMetadata.creators
+              : Array.isArray(parentMetadata.authors)
+                ? parentMetadata.authors.map((a, idx) =>
+                    typeof a === 'string'
+                      ? { fullName: a, name: a, orderIndex: idx }
+                      : a,
+                  )
+                : [];
+
+          const renamerInput: RenamerItemMetadata = {
+            title: rawTitle,
+            shortTitle:
+              typeof parentMetadata.shortTitle === 'string'
+                ? parentMetadata.shortTitle
+                : undefined,
+            year:
+              typeof parentMetadata.year === 'number'
+                ? parentMetadata.year
+                : undefined,
+            publicationDate:
+              typeof parentMetadata.publicationDate === 'string'
+                ? parentMetadata.publicationDate
+                : undefined,
+            publicationTitle:
+              typeof parentMetadata.publicationTitle === 'string'
+                ? parentMetadata.publicationTitle
+                : typeof parentMetadata.journal === 'string'
+                  ? parentMetadata.journal
+                  : undefined,
+            journalAbbr:
+              typeof parentMetadata.journalAbbr === 'string'
+                ? parentMetadata.journalAbbr
+                : undefined,
+            publisher:
+              typeof parentMetadata.publisher === 'string'
+                ? parentMetadata.publisher
+                : undefined,
+            citationKey:
+              typeof parentMetadata.citationKey === 'string'
+                ? parentMetadata.citationKey
+                : undefined,
+            itemType:
+              typeof parentMetadata.itemType === 'string'
+                ? parentMetadata.itemType
+                : undefined,
+            doi:
+              typeof parentMetadata.doi === 'string'
+                ? parentMetadata.doi
+                : undefined,
+            contributors:
+              rawContributors as RenamerItemMetadata['contributors'],
+          };
+
+          const formatted = formatAttachmentFilename(
+            DEFAULT_RENAME_PATTERN,
+            renamerInput,
+            fallbackFilename,
+          );
+          if (formatted && formatted.trim().length > 4) {
+            resolvedFilename = formatted;
+          }
+        }
+      }
+
       await this.extractionGateway.createAttachment(
         {
           itemId,
           fileId,
-          filename: filename || 'document.pdf',
+          filename: resolvedFilename,
           url: getFileContentPath(fileId),
           mimeType: 'application/pdf',
           size: size || 0,
@@ -79,7 +176,9 @@ export class PipelineSideEffectsService {
         },
         projectId,
       );
-      this.logger.log(`[ATTACHMENT] Attached file ${fileId} to item ${itemId}`);
+      this.logger.log(
+        `[ATTACHMENT] Attached file ${fileId} ("${resolvedFilename}") to item ${itemId}`,
+      );
     } catch (err: unknown) {
       this.logger.warn(
         `[ATTACHMENT] Failed to attach file ${fileId} to item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,

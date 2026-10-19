@@ -7,9 +7,13 @@ import {
   Inject,
 } from '@nestjs/common';
 import { ReferenceData } from '@/modules/library/citation/types/citation.types';
-import { AcademicHttpClient } from '@/modules/library/core';
+import {
+  normalizeWork,
+  RawCslWorkInput,
+} from '@/modules/library/citation/domain/citation.domain';
+import { AcademicHttpClient, normalizeDoi } from '@/modules/library/core';
 import { DoiContentNegotiationService } from './doi-content-negotiation.service';
-import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import {
   getAcademicContactEmail,
   getAcademicUserAgent,
@@ -202,7 +206,7 @@ export class AcademicQueryResolverService {
       }
     }
 
-    const combinedTags = normalizeTags([
+    const combinedTags = normalizeAcademicTags([
       ...((metadata.keywords as string[]) || []),
       ...((metadata.tags as string[]) || []),
     ]);
@@ -283,8 +287,6 @@ export class AcademicQueryResolverService {
   ): Promise<{
     found: boolean;
     work: ReferenceData | null;
-    data: ReferenceData | null;
-    metadata: ReferenceData | null;
     provider: string;
     queryType:
       | 'doi'
@@ -301,8 +303,6 @@ export class AcademicQueryResolverService {
       return {
         found: false,
         work: null,
-        data: null,
-        metadata: null,
         provider: 'CrossRef',
         queryType: 'unknown',
       };
@@ -332,8 +332,6 @@ export class AcademicQueryResolverService {
           return {
             found: true,
             work,
-            data: work,
-            metadata: work,
             provider: primaryProvider,
             queryType: (resolved.queryType || 'unknown').toLowerCase(),
           };
@@ -347,17 +345,11 @@ export class AcademicQueryResolverService {
     }
 
     // 2. DOI Fallback
-    const cleanDoiCandidate = this.doiService
-      ? this.doiService.cleanDoi(input) || input
-      : input
-          .replace(/^https?:\/\/doi\.org\//i, '')
-          .replace(/^https?:\/\/dx\.doi\.org\//i, '')
-          .replace(/^doi:\s*/i, '')
-          .trim();
+    const cleanDoiCandidate = normalizeDoi(input) || input.trim();
 
     const isDoi = this.doiService
       ? this.doiService.isDoi(cleanDoiCandidate)
-      : /^10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+$/i.test(cleanDoiCandidate);
+      : Boolean(normalizeDoi(cleanDoiCandidate));
 
     if (isDoi) {
       try {
@@ -365,8 +357,6 @@ export class AcademicQueryResolverService {
         return {
           found: true,
           work,
-          data: work,
-          metadata: work,
           provider: 'CrossRef',
           queryType: 'doi',
         };
@@ -379,8 +369,6 @@ export class AcademicQueryResolverService {
               return {
                 found: true,
                 work: cslWork,
-                data: cslWork,
-                metadata: cslWork,
                 provider: 'doi.org/DataCite',
                 queryType: 'doi',
               };
@@ -397,8 +385,6 @@ export class AcademicQueryResolverService {
       return {
         found: false,
         work: null,
-        data: null,
-        metadata: null,
         provider: 'CrossRef',
         queryType: 'doi',
       };
@@ -412,8 +398,6 @@ export class AcademicQueryResolverService {
         return {
           found: true,
           work: topWork,
-          data: topWork,
-          metadata: topWork,
           provider: 'CrossRef',
           queryType: 'title',
         };
@@ -428,85 +412,14 @@ export class AcademicQueryResolverService {
     return {
       found: false,
       work: null,
-      data: null,
-      metadata: null,
       provider: 'CrossRef',
       queryType: 'title',
     };
   }
 
   public mapCrossRefMessage(
-    message:
-      | {
-          title?: string | string[];
-          author?: Array<{ given?: string; family?: string; name?: string }>;
-          'published-print'?: { 'date-parts'?: (number | string)[][] };
-          'published-online'?: { 'date-parts'?: (number | string)[][] };
-          issued?: { 'date-parts'?: (number | string)[][] };
-          DOI?: string;
-          'container-title'?: string | string[];
-          publisher?: string;
-          volume?: string;
-          issue?: string;
-          page?: string;
-          ISSN?: string | string[];
-          ISBN?: string | string[];
-          URL?: string;
-          abstract?: string;
-          type?: string;
-          score?: number;
-        }
-      | null
-      | undefined,
+    message: RawCslWorkInput | null | undefined,
   ): ReferenceData {
-    const title = Array.isArray(message?.title)
-      ? message.title[0] || 'Untitled'
-      : message?.title || 'Untitled';
-    const authors: string[] = [];
-    if (Array.isArray(message?.author)) {
-      for (const auth of message.author) {
-        if (auth.given && auth.family)
-          authors.push(`${auth.family}, ${auth.given}`);
-        else if (auth.family) authors.push(auth.family);
-        else if (auth.name) authors.push(auth.name);
-      }
-    }
-    let year: number | string = '';
-    const dateParts =
-      message?.['published-print']?.['date-parts']?.[0] ||
-      message?.['published-online']?.['date-parts']?.[0] ||
-      message?.issued?.['date-parts']?.[0];
-    if (dateParts && dateParts[0]) year = Number(dateParts[0]);
-
-    return {
-      doi: message?.DOI || '',
-      title,
-      authors,
-      year,
-      journal: Array.isArray(message?.['container-title'])
-        ? message['container-title'][0]
-        : message?.['container-title'] || '',
-      publisher: message?.publisher || '',
-      volume: message?.volume || '',
-      issue: message?.issue || '',
-      pages: message?.page || '',
-      issn: Array.isArray(message?.ISSN)
-        ? message.ISSN[0]
-        : message?.ISSN || '',
-      isbn: Array.isArray(message?.ISBN)
-        ? message.ISBN[0]
-        : message?.ISBN || '',
-      url:
-        message?.URL || (message?.DOI ? `https://doi.org/${message.DOI}` : ''),
-      abstract: message?.abstract
-        ? message.abstract.replace(/<[^>]*>/g, '')
-        : '',
-      type: message?.type || 'journal-article',
-      itemType:
-        message?.type === 'journal-article'
-          ? 'journalArticle'
-          : message?.type || 'journalArticle',
-      score: message?.score || 0,
-    };
+    return normalizeWork(message);
   }
 }

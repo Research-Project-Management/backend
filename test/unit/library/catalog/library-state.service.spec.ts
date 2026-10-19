@@ -1,4 +1,4 @@
-﻿import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { StateService } from '@/modules/library/catalog/services/state.service';
 import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
@@ -15,7 +15,7 @@ import {
   toStateResponse,
 } from '@/modules/library/catalog/domain/state.domain';
 import { TransactionService, TransactionHelpers } from '@/modules/library/core';
-import { ITEM_EXISTENCE_PORT } from '@/modules/library/catalog/types/items.types';
+import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { PrismaService } from '@/core';
 
 describe('Library State Service — Reading Progress, Ratings & Viewer Position', () => {
@@ -142,7 +142,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
           },
           { provide: TransactionService, useValue: mockLibraryTx },
           { provide: PrismaService, useValue: {} },
-          { provide: ITEM_EXISTENCE_PORT, useValue: mockItemExistencePort },
+          { provide: ItemQueryService, useValue: mockItemExistencePort },
         ],
       }).compile();
 

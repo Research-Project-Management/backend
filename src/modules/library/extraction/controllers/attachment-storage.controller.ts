@@ -14,10 +14,12 @@ import {
   BadRequestException,
   NotFoundException,
   Inject,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import {
@@ -28,20 +30,34 @@ import {
 } from '@/modules/library/extraction/dto/attachments.dto';
 
 /**
- * Shared Base Adapter for Library Attachment Binary Storage Operations.
+ * Unified Library Storage Controller (`/api/v1/library` and `/api/v1/projects/:projectId/library`).
+ * Enforces JwtAuthGuard and ProjectAccessGuard.
  */
-export abstract class BaseAttachmentStorageController {
+@ApiTags('Library Attachments - Storage Gateway')
+@ApiBearerAuth('JWT-auth')
+@Controller(['api/v1/library', 'api/v1/projects/:projectId/library'])
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
+export class AttachmentStorageController {
   constructor(
     @Inject(STORAGE_PORT)
-    protected readonly storagePort: IStoragePort,
-    protected readonly attachmentsService: AttachmentsService,
+    private readonly storagePort: IStoragePort,
+    private readonly attachmentsService: AttachmentsService,
   ) {}
 
-  protected async executeUploadLibraryFile(
-    userId: string,
-    req: FastifyRequest,
-    projectId?: string,
+  @Post('upload')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Upload a binary file directly via multipart stream to library',
+  })
+  async uploadLibraryFile(
+    @CurrentUser('id') userId: string,
+    @Req() req: FastifyRequest,
+    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
+    const projectId = paramProjectId || queryProjectId;
     if (!this.storagePort?.uploadFile) {
       throw new BadRequestException('Storage service is unavailable');
     }
@@ -88,18 +104,16 @@ export abstract class BaseAttachmentStorageController {
     };
   }
 
-  getPresignedUploadUrl(
-    userId: string,
-    dto: PresignUploadDto,
-    projectId?: string,
-  ) {
-    return this.executePresignUpload(userId, dto, projectId);
-  }
-
-  protected async executePresignUpload(
-    userId: string,
-    dto: PresignUploadDto,
-    projectId?: string,
+  @Post('attachments/presign')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Obtain presigned upload URL for direct S3 upload' })
+  async presignUpload(
+    @CurrentUser('id') userId: string,
+    @Body() dto: PresignUploadDto,
+    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.getPresignedUploadUrl) {
       throw new BadRequestException('Direct presigned upload unavailable');
@@ -107,7 +121,7 @@ export abstract class BaseAttachmentStorageController {
 
     return this.storagePort.getPresignedUploadUrl({
       userId,
-      projectId,
+      projectId: paramProjectId || queryProjectId,
       filename: dto.filename,
       mimeType: dto.mimeType || 'application/octet-stream',
       sizeBytes: dto.sizeBytes || 0,
@@ -116,10 +130,16 @@ export abstract class BaseAttachmentStorageController {
     });
   }
 
-  protected async executeCompletePresignedUpload(
-    userId: string,
-    dto: CompletePresignDto,
-    projectId?: string,
+  @Post('attachments/presign/complete')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Complete and verify presigned S3 upload' })
+  async completePresignedUpload(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CompletePresignDto,
+    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.completePresignedUpload) {
       return { success: true, storageKey: dto.storageKey };
@@ -132,14 +152,20 @@ export abstract class BaseAttachmentStorageController {
       sizeBytes: dto.sizeBytes,
       contentHash: dto.contentHash,
       userId,
-      projectId,
+      projectId: paramProjectId || queryProjectId,
     });
   }
 
-  protected async executeInitiateMultipart(
-    userId: string,
-    dto: InitiateMultipartDto,
-    projectId?: string,
+  @Post('attachments/multipart/initiate')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Initiate S3 multipart upload session' })
+  async initiateMultipart(
+    @CurrentUser('id') userId: string,
+    @Body() dto: InitiateMultipartDto,
+    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.initiateMultipartUpload) {
       throw new BadRequestException('Multipart upload unavailable');
@@ -150,17 +176,24 @@ export abstract class BaseAttachmentStorageController {
       filename: dto.filename || 'document.bin',
       mimeType: dto.mimeType || 'application/octet-stream',
       totalSize: dto.totalSize,
-      projectId,
+      projectId: paramProjectId || queryProjectId,
       scope: 'library',
       expectedHash: dto.expectedHash,
     });
   }
 
-  protected async executeGetMultipartPartUrl(
-    userId: string,
-    sessionId: string,
-    partNumberStr: string,
-    projectId?: string,
+  @Get('attachments/multipart/:sessionId/part-url')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary: 'Get presigned URL for specific S3 multipart chunk',
+  })
+  async getMultipartPartUrl(
+    @CurrentUser('id') userId: string,
+    @Param('sessionId') sessionId: string,
+    @Query('partNumber') partNumberStr: string,
+    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.getMultipartPartUrl) {
       throw new BadRequestException('Multipart part URL unavailable');
@@ -174,15 +207,21 @@ export abstract class BaseAttachmentStorageController {
     const partUrl = await this.storagePort.getMultipartPartUrl(
       sessionId,
       partNumber,
-      { userId, projectId },
+      { userId, projectId: paramProjectId || queryProjectId },
     );
     return { partNumber, partUrl };
   }
 
-  protected async executeCompleteMultipart(
-    userId: string,
-    dto: CompleteMultipartDto,
-    projectId?: string,
+  @Post('attachments/multipart/complete')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Complete S3 multipart upload session' })
+  async completeMultipart(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CompleteMultipartDto,
+    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.completeMultipartUpload) {
       throw new BadRequestException('Multipart completion unavailable');
@@ -191,30 +230,41 @@ export abstract class BaseAttachmentStorageController {
     return this.storagePort.completeMultipartUpload({
       sessionId: dto.sessionId,
       parts: dto.parts,
-      actor: { userId, projectId },
+      actor: { userId, projectId: paramProjectId || queryProjectId },
     });
   }
 
-  protected async executeAbortMultipart(
-    userId: string,
-    sessionId: string,
-    projectId?: string,
+  @Delete('attachments/multipart/:sessionId')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({ summary: 'Abort S3 multipart upload session' })
+  async abortMultipart(
+    @CurrentUser('id') userId: string,
+    @Param('sessionId') sessionId: string,
+    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (this.storagePort?.abortMultipartUpload) {
       await this.storagePort.abortMultipartUpload(sessionId, {
         userId,
-        projectId,
+        projectId: paramProjectId || queryProjectId,
       });
     }
     return { success: true };
   }
 
-  protected async executeStreamLibraryFile(
-    fileId: string,
-    userId: string,
-    res: FastifyReply,
-    projectId?: string,
+  @Get(['files/:fileId', 'files/:fileId/content'])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({ summary: 'Stream binary content directly by fileId' })
+  async streamLibraryFile(
+    @CurrentUser('id') userId: string,
+    @Param('fileId') fileId: string,
+    @Res() res: FastifyReply,
+    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
+    const projectId = paramProjectId || queryProjectId;
     if (!this.storagePort) {
       throw new NotFoundException('Storage port unavailable');
     }
@@ -252,11 +302,19 @@ export abstract class BaseAttachmentStorageController {
     throw new NotFoundException('Storage port read capability unavailable');
   }
 
-  protected async executeGetAttachmentPresignedUrl(
-    userId: string,
-    attachmentId: string,
-    projectId?: string,
+  @Get('attachments/:attachmentId/presigned-url')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary: 'Get direct S3 presigned URL for downloading attachment',
+  })
+  async getAttachmentPresignedUrl(
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
+    const projectId = paramProjectId || queryProjectId;
     const { attachment } = await this.attachmentsService.getItemAttachment(
       userId,
       undefined,
@@ -295,13 +353,24 @@ export abstract class BaseAttachmentStorageController {
     );
   }
 
-  protected async executeStreamAttachmentContent(
-    userId: string,
-    attachmentId: string,
-    req: FastifyRequest,
-    res: FastifyReply,
-    projectId?: string,
+  @Get([
+    'attachments/:attachmentId/content',
+    'items/:itemId/attachments/:attachmentId/content',
+  ])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary: 'Stream attachment binary content with byte-range support',
+  })
+  async streamAttachmentContent(
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Req() req: FastifyRequest,
+    @Res() res: FastifyReply,
+    @Param('projectId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
+    const projectId = paramProjectId || queryProjectId;
     const { attachment } = await this.attachmentsService.getItemAttachment(
       userId,
       undefined,
@@ -376,7 +445,7 @@ export abstract class BaseAttachmentStorageController {
     );
   }
 
-  protected sendAttachmentPayload(
+  private sendAttachmentPayload(
     res: FastifyReply,
     payload: {
       content: Buffer | Uint8Array | NodeJS.ReadableStream | string;
@@ -404,213 +473,3 @@ export abstract class BaseAttachmentStorageController {
     return res.send(payload.content);
   }
 }
-
-/**
- * User Library Storage Controller (/api/v1/library).
- * Guarded purely by JwtAuthGuard — scoped to authenticated user.
- */
-@ApiTags('Library Attachments - User Storage Gateway')
-@ApiBearerAuth('JWT-auth')
-@Controller('api/v1/library')
-@UseGuards(JwtAuthGuard)
-export class AttachmentStorageController extends BaseAttachmentStorageController {
-  constructor(
-    @Inject(STORAGE_PORT)
-    storagePort: IStoragePort,
-    attachmentsService: AttachmentsService,
-  ) {
-    super(storagePort, attachmentsService);
-  }
-
-  @Post(['attachments/upload', 'upload', 'files/upload'])
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({
-    summary:
-      'Upload a binary file directly via multipart stream to user library',
-  })
-  async uploadLibraryFile(
-    @CurrentUser('id') userId: string,
-    @Req() req: FastifyRequest,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-  ) {
-    return this.executeUploadLibraryFile(
-      userId,
-      req,
-      paramProjectId || queryProjectId,
-    );
-  }
-
-  @Post([
-    'attachments/presign-upload',
-    'attachments/presign',
-    'files/presign-upload',
-    'files/presign',
-  ])
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Obtain presigned upload URL for direct S3 upload' })
-  async presignUpload(
-    @CurrentUser('id') userId: string,
-    @Body() dto: PresignUploadDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-  ) {
-    return this.executePresignUpload(
-      userId,
-      dto,
-      paramProjectId || queryProjectId,
-    );
-  }
-
-  @Post([
-    'attachments/complete-upload',
-    'attachments/presign/complete',
-    'files/complete-upload',
-    'files/presign/complete',
-  ])
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Complete and verify presigned S3 upload' })
-  async completePresignedUpload(
-    @CurrentUser('id') userId: string,
-    @Body() dto: CompletePresignDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-  ) {
-    return this.executeCompletePresignedUpload(
-      userId,
-      dto,
-      paramProjectId || queryProjectId,
-    );
-  }
-
-  @Post(['attachments/multipart/initiate', 'files/multipart/initiate'])
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Initiate S3 multipart upload session' })
-  async initiateMultipart(
-    @CurrentUser('id') userId: string,
-    @Body() dto: InitiateMultipartDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-  ) {
-    return this.executeInitiateMultipart(
-      userId,
-      dto,
-      paramProjectId || queryProjectId,
-    );
-  }
-
-  @Get([
-    'attachments/multipart/:sessionId/part-url',
-    'files/multipart/:sessionId/part-url',
-  ])
-  @ApiOperation({
-    summary: 'Get presigned URL for specific S3 multipart chunk',
-  })
-  async getMultipartPartUrl(
-    @CurrentUser('id') userId: string,
-    @Param('sessionId') sessionId: string,
-    @Query('partNumber') partNumber: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-  ) {
-    return this.executeGetMultipartPartUrl(
-      userId,
-      sessionId,
-      partNumber,
-      paramProjectId || queryProjectId,
-    );
-  }
-
-  @Post(['attachments/multipart/complete', 'files/multipart/complete'])
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Complete S3 multipart upload session' })
-  async completeMultipart(
-    @CurrentUser('id') userId: string,
-    @Body() dto: CompleteMultipartDto,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-  ) {
-    return this.executeCompleteMultipart(
-      userId,
-      dto,
-      paramProjectId || queryProjectId,
-    );
-  }
-
-  @Delete(['attachments/multipart/:sessionId', 'files/multipart/:sessionId'])
-  @ApiOperation({ summary: 'Abort S3 multipart upload session' })
-  async abortMultipart(
-    @CurrentUser('id') userId: string,
-    @Param('sessionId') sessionId: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-  ) {
-    return this.executeAbortMultipart(
-      userId,
-      sessionId,
-      paramProjectId || queryProjectId,
-    );
-  }
-
-  @Get(['files/:fileId', 'files/:fileId/content'])
-  @ApiOperation({ summary: 'Stream binary content directly by fileId' })
-  async streamLibraryFile(
-    @CurrentUser('id') userId: string,
-    @Param('fileId') fileId: string,
-    @Res() res: FastifyReply,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-  ) {
-    return this.executeStreamLibraryFile(
-      fileId,
-      userId,
-      res,
-      paramProjectId || queryProjectId,
-    );
-  }
-
-  @Get('attachments/:attachmentId/presigned-url')
-  @ApiOperation({
-    summary: 'Get direct S3 presigned URL for downloading user attachment',
-  })
-  async getAttachmentPresignedUrl(
-    @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-  ) {
-    return this.executeGetAttachmentPresignedUrl(
-      userId,
-      attachmentId,
-      paramProjectId || queryProjectId,
-    );
-  }
-
-  @Get([
-    'attachments/:attachmentId/content',
-    'items/:itemId/attachments/:attachmentId/content',
-    'attachments/:attachmentId/pdf',
-    'items/:itemId/attachments/:attachmentId/pdf',
-  ])
-  @ApiOperation({
-    summary: 'Stream user attachment binary content with byte-range support',
-  })
-  async streamAttachmentContent(
-    @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
-    @Req() req: FastifyRequest,
-    @Res() res: FastifyReply,
-    @Param('projectId') paramProjectId?: string,
-    @Query('projectId') queryProjectId?: string,
-  ) {
-    return this.executeStreamAttachmentContent(
-      userId,
-      attachmentId,
-      req,
-      res,
-      paramProjectId || queryProjectId,
-    );
-  }
-}
-
-export { ProjectAttachmentStorageController } from './project-attachment-storage.controller';

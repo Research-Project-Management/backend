@@ -14,7 +14,7 @@ import {
   normalizePmid,
   normalizePmcid,
   normalizeIsbn,
-  normalizeTags,
+  normalizeAcademicTags,
   cleanAbstractText,
   cleanBibliographicText,
   titleSimilarity,
@@ -40,7 +40,7 @@ export class OpenAlexProvider implements MetadataProvider {
   private readonly BASE_URL = 'https://api.openalex.org/works';
 
   constructor(
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    private readonly httpClient: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -63,32 +63,19 @@ export class OpenAlexProvider implements MetadataProvider {
     url: string,
     signal?: AbortSignal,
   ): Promise<Response> {
-    if (this.httpClient) {
-      const { response } = await this.httpClient.request(url, {
-        headers: {
-          'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
-          Accept: 'application/json',
-        },
-        signal,
-      });
-      return response;
-    }
-    return fetch(url, {
+    const { response } = await this.httpClient.request(url, {
       headers: {
         'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
         Accept: 'application/json',
       },
       signal,
     });
+    return response;
   }
 
   supports(input: QueryType | MetadataRequest): boolean {
     const type = typeof input === 'string' ? input : input?.queryType;
     return type ? this.capabilities.queryTypes.includes(type) : false;
-  }
-
-  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
-    return this.resolve(request);
   }
 
   async resolve(
@@ -112,7 +99,73 @@ export class OpenAlexProvider implements MetadataProvider {
       return this.fetchByPmid(cleanPmid, signal);
     }
 
+    const cleanPmcid = normalizePmcid(query);
+    if (cleanPmcid) {
+      return this.fetchByPmcid(cleanPmcid, signal);
+    }
+
+    if (/^https?:\/\//i.test(query.trim())) {
+      return this.fetchByUrl(query.trim(), signal);
+    }
+
     return this.searchByTitle(query, signal);
+  }
+
+  async fetchByPmcid(
+    pmcid: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderResult | null> {
+    let url = `${this.BASE_URL}/pmcid:${encodeURIComponent(pmcid)}?mailto=${encodeURIComponent(this.mailto)}`;
+    if (this.apiKey) {
+      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
+    }
+
+    const response = await this.executeFetch(url, signal);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      const retryAfterHeader = response.headers.get('retry-after');
+      const retryAfterMs = retryAfterHeader
+        ? parseInt(retryAfterHeader, 10) * 1000
+        : undefined;
+      throw new ProviderFetchError(
+        `OpenAlex API HTTP ${response.status} for PMCID: ${pmcid}`,
+        response.status,
+        retryAfterMs,
+      );
+    }
+
+    const item = (await response.json()) as Record<string, unknown> | null;
+    if (!item || typeof item !== 'object') return null;
+    return this.transformPayload(item, `pmcid:${pmcid}`, 0.95);
+  }
+
+  async fetchByUrl(
+    targetUrl: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderResult | null> {
+    let url = `${this.BASE_URL}?filter=locations.landing_page_url:${encodeURIComponent(targetUrl)}&mailto=${encodeURIComponent(this.mailto)}`;
+    if (this.apiKey) {
+      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
+    }
+
+    const response = await this.executeFetch(url, signal);
+    if (response.status === 404 || !response.ok) return null;
+
+    const data = (await response.json()) as {
+      results?: Array<Record<string, unknown>>;
+    } | null;
+    const item = Array.isArray(data?.results)
+      ? data.results[0]
+      : (data as Record<string, unknown> | null);
+    if (
+      !item ||
+      (typeof item.title !== 'string' && typeof item.display_name !== 'string')
+    ) {
+      return null;
+    }
+    const itemDoi = typeof item.doi === 'string' ? item.doi : '';
+    const identifier = normalizeDoi(itemDoi) || targetUrl;
+    return this.transformPayload(item, identifier, 0.9);
   }
 
   private async fetchByPmid(
@@ -540,7 +593,7 @@ export class OpenAlexProvider implements MetadataProvider {
       }
     }
 
-    const keywords = normalizeTags(rawKeywords).slice(0, 4);
+    const keywords = normalizeAcademicTags(rawKeywords).slice(0, 4);
 
     const creators = authors.map((name, idx) =>
       parseCreatorString(name, idx, 'author'),

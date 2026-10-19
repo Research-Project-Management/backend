@@ -34,7 +34,6 @@ export class SearchController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Query('term') term?: string,
-    @Query('q') q?: string,
     @Query('pageIndex') pageIndex?: string,
     @Param('projectId') routeProjectId?: string,
     @Query('projectId') queryProjectId?: string,
@@ -44,7 +43,7 @@ export class SearchController {
     return this.searchService.searchPageAnchors(
       userId,
       attachmentId,
-      term ?? q ?? '',
+      term ?? '',
       parsedPage,
       routeProjectId || queryProjectId,
     );

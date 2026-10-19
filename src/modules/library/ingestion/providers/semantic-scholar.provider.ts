@@ -48,7 +48,7 @@ export class SemanticScholarProvider implements MetadataProvider {
 
   constructor(
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
-    @Optional() private readonly httpClient?: AcademicHttpClient,
+    private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -62,10 +62,6 @@ export class SemanticScholarProvider implements MetadataProvider {
   supports(input: QueryType | MetadataRequest): boolean {
     const type = typeof input === 'string' ? input : input?.queryType;
     return type ? this.capabilities.queryTypes.includes(type) : false;
-  }
-
-  async execute(request: MetadataRequest): Promise<ProviderResult | null> {
-    return this.resolve(request);
   }
 
   async resolve(
@@ -106,17 +102,19 @@ export class SemanticScholarProvider implements MetadataProvider {
 
     let response: Response;
     try {
+      if (!this.httpClient) {
+        throw new Error(
+          'AcademicHttpClient is required for SemanticScholarProvider',
+        );
+      }
       const headers = {
         'User-Agent': getAcademicUserAgent('SemanticScholar'),
         Accept: 'application/json',
       };
-      response = this.httpClient
-        ? (await this.httpClient.request(targetUrl, { headers, signal }))
-            .response
-        : await fetch(targetUrl, {
-            headers,
-            signal,
-          });
+      ({ response } = await this.httpClient.request(targetUrl, {
+        headers,
+        signal,
+      }));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.debug(`Semantic Scholar fetch failed non-fatally: ${msg}`);

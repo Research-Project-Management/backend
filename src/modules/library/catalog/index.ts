@@ -25,7 +25,7 @@ export * from './services/item-query.service';
 export * from './services/item-fulltext.service';
 export * from './services/item-type-conversion.service';
 export * from './services/item-curation.service';
-export * from './services/item-sync.delegate';
+export * from './services/item-relations.service';
 export * from './services/collections.service';
 export * from './services/tags.service';
 export * from './services/types.service';
@@ -44,7 +44,6 @@ export * from './repositories/saved-searches.repository';
 export * from './repositories/state.repository';
 
 // Types
-export * from './types/items.types';
 export * from './types/items.constants';
 export * from './types/collections.types';
 export * from './types/tags.types';
@@ -61,3 +60,5 @@ export * from './domain/notes.domain';
 export * from './domain/collections.domain';
 export * from './domain/state.domain';
 export * from './domain/command-payload.builder';
+export * from './domain/creator-tag-payload.builder';
+export * from './domain/item-bibliographic.mapper';

@@ -6,7 +6,7 @@ import {
   FieldMappingChange,
   DroppedField,
   CreatorRoleChange,
-} from '@/modules/library/catalog/types/items.types';
+} from '@/modules/library/core/types/bibliographic.types';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
@@ -139,7 +139,7 @@ export class ItemTransformer implements IItemTransformerPort {
       item.type ||
       'journalArticle') as string;
 
-    if (!this.typesService.isValidType(targetType)) {
+    if (!this.typesService.isValidItemType(targetType)) {
       throw new BadRequestException(`Invalid target itemType: ${targetType}`);
     }
 

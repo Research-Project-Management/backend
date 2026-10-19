@@ -2,7 +2,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  BadRequestException,
   UnprocessableEntityException,
   Optional,
 } from '@nestjs/common';
@@ -12,61 +11,32 @@ import { CommandRepository } from '@/modules/library/catalog/repositories/comman
 import {
   CreateItemData,
   UpdateItemData,
-  TypeConversionPreview,
-  ConvertTypeOptions,
-  IItemReadPort,
-  IItemExistencePort,
-  QualityAuditCandidateItem,
-  DuplicateCandidateItem,
   ItemDetail,
   ItemTransactionContext,
-} from '@/modules/library/catalog/types/items.types';
-import { sanitizeItemTitle } from '@/modules/library/core';
+} from '@/modules/library/core/types/bibliographic.types';
 import {
-  TransactionService,
+  sanitizeItemTitle,
+  normalizeProjectScopeId,
   TransactionHelpers,
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
   LibraryItemSource,
 } from '@/modules/library/core';
-import {
-  CursorPaginatedResult,
-  DocumentFulltextResponse,
-} from '@/modules/library/catalog/dto/items.dto';
+import { TransactionService } from '@/modules/library/sync';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { TagsService } from './tags.service';
-import { ItemSyncDelegate } from './item-sync.delegate';
 import { ZoteroSchemaValidatorService } from './zotero-schema-validator.service';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
-import { BibliographicReference } from '@/modules/library/core/types/bibliographic.types';
-
-import type {
-  UpsertSyncItemCommand,
-  DeleteSyncEntityCommand,
-  UpsertSyncEntityResult,
-} from '@/modules/library/core/types/entity-commands.types';
-
-// Specialized Sub-Services (Divide & Conquer)
-import { ItemQueryService } from './item-query.service';
-import { ItemFulltextService } from './item-fulltext.service';
-import { ItemTypeConversionService } from './item-type-conversion.service';
-import { ItemCurationService } from './item-curation.service';
-import { ItemRelationsService } from './item-relations.service';
-import { ItemBulkService } from './item-bulk.service';
-import { ItemCacheService } from './item-cache.service';
-import { ItemLifecycleService } from './item-lifecycle.service';
 
 export type { ItemTransactionContext };
 
 /**
  * ItemService — Root Coordinator and Lifecycle Orchestrator for Library Items.
- * Handles core creation, updates, deletions, bulk operations, and outbox event publishing.
- * Delegates querying, fulltext tree building, type conversion, and scholarly curation
- * to specialized domain services following Single Responsibility & Clean Architecture.
+ * Handles core creation, updates, deletions, bulk operations, cache invalidation, and outbox event publishing.
  */
 @Injectable()
-export class ItemService implements IItemReadPort, IItemExistencePort {
+export class ItemService {
   private readonly logger = new Logger(ItemService.name);
 
   constructor(
@@ -74,41 +44,10 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     private readonly command: CommandRepository,
     private readonly libraryTx: TransactionService,
     private readonly tagsService: TagsService,
-    private readonly queryService: ItemQueryService,
-    @Optional()
-    private readonly fulltextService?: ItemFulltextService,
-    @Optional()
-    private readonly typeConversionService?: ItemTypeConversionService,
-    @Optional()
-    private readonly curationService?: ItemCurationService,
     @Optional()
     private readonly validator?: ZoteroSchemaValidatorService,
-    @Optional() private readonly syncDelegate?: ItemSyncDelegate,
     @Optional() private readonly cache?: RedisCacheService,
-    @Optional() relationsService?: ItemRelationsService,
-    @Optional() bulkService?: ItemBulkService,
-    @Optional() itemCache?: ItemCacheService,
-    @Optional() lifecycleService?: ItemLifecycleService,
-  ) {
-    this.relationsService =
-      relationsService ?? new ItemRelationsService(this.query, this.command);
-    this.bulkService = bulkService ?? new ItemBulkService();
-    this.itemCache =
-      itemCache ?? new ItemCacheService(this.tagsService, this.cache);
-    this.lifecycleService =
-      lifecycleService ??
-      new ItemLifecycleService(
-        this.command,
-        this.libraryTx,
-        this.tagsService,
-        this.itemCache,
-      );
-  }
-
-  private readonly relationsService: ItemRelationsService;
-  private readonly bulkService: ItemBulkService;
-  private readonly itemCache: ItemCacheService;
-  private readonly lifecycleService: ItemLifecycleService;
+  ) {}
 
   /**
    * Invalidates Redis cache entries for an item and affected library lists.
@@ -119,214 +58,57 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     projectId?: string,
     options?: { skipScopeInvalidation?: boolean },
   ): Promise<void> {
-    return this.itemCache.invalidateItemCache(id, userId, projectId, options);
+    if (!this.cache) return;
+    try {
+      await Promise.all([
+        this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
+        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
+        this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(id)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
+      ]);
+      if (!options?.skipScopeInvalidation && userId) {
+        await this.invalidateScopeListCache(userId, projectId);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to invalidate cache for item ${id}: ${message}`);
+    }
   }
 
-  async invalidateScopeCachesOnce(
+  /**
+   * Performs a single scope-level cache invalidation for list/count/tag caches.
+   */
+  async invalidateScopeListCache(
     userId: string,
     projectId?: string,
   ): Promise<void> {
-    return this.itemCache.invalidateScopeCachesOnce(userId, projectId);
-  }
-
-  // Delegated Query Operations (ItemQueryService)
-
-  async getCounts(
-    userId: string,
-    projectId?: string,
-    accessHint?: Parameters<ItemQueryService['getCounts']>[2],
-  ) {
-    return this.queryService.getCounts(userId, projectId, accessHint);
-  }
-
-  async getPermissions(
-    userId: string,
-    projectId?: string,
-    accessHint?: Parameters<ItemQueryService['getPermissions']>[2],
-  ) {
-    return this.queryService.getPermissions(userId, projectId, accessHint);
+    if (!this.cache) return;
+    try {
+      const validProjectId = normalizeProjectScopeId(projectId);
+      const tasks: Promise<unknown>[] = [
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+        this.cache.del(`library:counts:user:${userId}`),
+        this.tagsService.invalidateTagsCache(userId, validProjectId),
+      ];
+      if (validProjectId) {
+        tasks.push(
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
+          ),
+          this.cache.del(`library:counts:proj:${validProjectId}`),
+        );
+      }
+      await Promise.all(tasks);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to invalidate scope caches: ${message}`);
+    }
   }
 
   async getItem(userId: string, id: string, projectId?: string) {
-    return this.queryService.getItem(userId, id, projectId);
+    const item = await this.query.findById(userId, id, projectId);
+    return item ? ItemsMapper.toDomain(item) : null;
   }
-
-  async listItems(
-    userId: string,
-    options: Parameters<ItemQueryService['listItems']>[1],
-  ): Promise<CursorPaginatedResult<ItemDetail | Record<string, unknown>>> {
-    return this.queryService.listItems(userId, options);
-  }
-
-  async getItemSnapshot(userId: string, itemId: string) {
-    return this.queryService.getItemSnapshot(userId, itemId);
-  }
-
-  async getItemSnapshots(userId: string, itemIds: string[]) {
-    return this.queryService.getItemSnapshots(userId, itemIds);
-  }
-
-  async exists(userId: string, itemId: string, projectId?: string) {
-    return this.queryService.exists(userId, itemId, projectId);
-  }
-
-  async assertExists(userId: string, itemId: string, projectId?: string) {
-    return this.queryService.assertExists(userId, itemId, projectId);
-  }
-
-  async existMany(userId: string, itemIds: string[], projectId?: string) {
-    return this.queryService.existMany(userId, itemIds, projectId);
-  }
-
-  async validateItemsBelongToUser(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-  ) {
-    return this.queryService.validateItemsBelongToUser(
-      userId,
-      itemIds,
-      projectId,
-    );
-  }
-
-  async findById(userId: string, itemId: string, projectId?: string) {
-    return this.queryService.findById(userId, itemId, projectId);
-  }
-
-  async findByIds(userId: string, itemIds: string[], projectId?: string) {
-    return this.queryService.findByIds(userId, itemIds, projectId);
-  }
-
-  async findByDoi(userId: string, doi: string, projectId?: string) {
-    return this.queryService.findByDoi(userId, doi, projectId);
-  }
-
-  async findSummaryById(userId: string, itemId: string, projectId?: string) {
-    return this.queryService.findSummaryById(userId, itemId, projectId);
-  }
-
-  async findSummariesByIds(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-  ) {
-    return this.queryService.findSummariesByIds(userId, itemIds, projectId);
-  }
-
-  async findQualityAuditItems(
-    userId: string,
-    limit?: number,
-    projectId?: string,
-  ): Promise<QualityAuditCandidateItem[]> {
-    return this.queryService.findQualityAuditItems(userId, limit, projectId);
-  }
-
-  async findDuplicateCandidateItems(
-    userId: string,
-    limit?: number,
-    projectId?: string,
-  ): Promise<DuplicateCandidateItem[]> {
-    return this.queryService.findDuplicateCandidateItems(
-      userId,
-      limit,
-      projectId,
-    );
-  }
-
-  async findCandidateItemsForQualityAudit(
-    limit: number,
-  ): Promise<QualityAuditCandidateItem[]> {
-    return this.queryService.findCandidateItemsForQualityAudit(limit);
-  }
-
-  async findCandidateItemsForDuplicateDetection(
-    limit: number,
-  ): Promise<DuplicateCandidateItem[]> {
-    return this.queryService.findCandidateItemsForDuplicateDetection(limit);
-  }
-
-  // Delegated Fulltext Operations (ItemFulltextService)
-
-  async getFulltext(
-    userId: string,
-    id: string,
-    projectId?: string,
-  ): Promise<DocumentFulltextResponse> {
-    if (!this.fulltextService) {
-      throw new BadRequestException('Fulltext service unavailable');
-    }
-    return this.fulltextService.getFulltext(userId, id, projectId);
-  }
-
-  // Delegated Type Conversion (ItemTypeConversionService)
-
-  previewTypeConversion(
-    rawItem: Record<string, unknown>,
-    targetType: string,
-    options: { retainUnmappedInExtra?: boolean } = {},
-  ): TypeConversionPreview {
-    if (!this.typeConversionService) {
-      throw new BadRequestException('Type conversion service unavailable');
-    }
-    return this.typeConversionService.previewTypeConversion(
-      rawItem,
-      targetType,
-      options,
-    );
-  }
-
-  async convertItemType(
-    userId: string,
-    itemId: string,
-    targetType: string,
-    options: ConvertTypeOptions = {},
-    projectIdOrTx?: string | Prisma.TransactionClient,
-    tx?: Prisma.TransactionClient,
-  ) {
-    if (!this.typeConversionService) {
-      throw new BadRequestException('Type conversion service unavailable');
-    }
-    return this.typeConversionService.convertItemType(
-      userId,
-      itemId,
-      targetType,
-      options,
-      projectIdOrTx,
-      tx,
-    );
-  }
-
-  // Delegated Curation Operations (ItemCurationService)
-
-  async parseCitations(
-    rawCitations: string,
-  ): Promise<BibliographicReference[]> {
-    if (!this.curationService) return [];
-    return this.curationService.parseCitations(rawCitations);
-  }
-
-  async importItemsToProject(
-    userId: string,
-    projectId: string,
-    itemIds: string[],
-  ): Promise<{ success: boolean; importedCount: number }> {
-    if (!this.curationService) {
-      throw new BadRequestException('Curation service unavailable');
-    }
-    return this.curationService.importItemsToProject(
-      userId,
-      projectId,
-      itemIds,
-    );
-  }
-
-  async getMetadataSources(userId: string, itemId: string, projectId?: string) {
-    if (!this.curationService) return { sources: [] };
-    return this.curationService.getMetadataSources(userId, itemId, projectId);
-  }
-
-  // Core Lifecycle Mutations & Transactions
 
   async createItem(
     userId: string,
@@ -363,8 +145,9 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       : { sanitizedItem: data, warnings: [] };
     const itemPayload = valRes.sanitizedItem as CreateItemData;
 
-    const effectiveProjectId =
-      projectId || context?.projectId || itemPayload.projectId || undefined;
+    const effectiveProjectId = normalizeProjectScopeId(
+      projectId || context?.projectId || itemPayload.projectId,
+    );
     const execute = async (
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
@@ -413,14 +196,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       result = await this.libraryTx.executeInTransaction(execute);
     }
 
-    await this.tagsService.invalidateTagsCache(userId, effectiveProjectId);
-    if (this.cache) {
-      const scopeKey =
-        effectiveProjectId && effectiveProjectId !== 'user'
-          ? `proj:${effectiveProjectId}`
-          : userId;
-      await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeKey));
-    }
+    await this.invalidateScopeListCache(userId, effectiveProjectId);
     return result;
   }
 
@@ -440,7 +216,6 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       data.title = cleanTitle;
     }
 
-    // Resolve target itemType
     let targetItemType = data.itemType;
     if (!targetItemType) {
       const existing = await this.query.findById(
@@ -464,7 +239,7 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       updatePayload = valRes.sanitizedItem;
     }
 
-    let resolvedProjectId = projectId;
+    let resolvedProjectId = normalizeProjectScopeId(projectId);
 
     const effectiveExpectedVersion =
       expectedVersion ??
@@ -483,10 +258,11 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
         effectiveExpectedVersion,
         updatePayload,
         tx,
-        projectId,
+        resolvedProjectId,
       );
 
-      const effectiveProjectId = projectId || updated.projectId || undefined;
+      const effectiveProjectId =
+        resolvedProjectId || updated.projectId || undefined;
       resolvedProjectId = effectiveProjectId;
       const eventScope = { userId, projectId: effectiveProjectId };
 
@@ -508,13 +284,10 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       return ItemsMapper.toDomain(updated);
     };
 
-    if (context) {
-      const res = await executeUpdate(context.tx, context.helpers);
-      await this.invalidateItemCache(id, userId, resolvedProjectId);
-      return res;
-    }
+    const res = context
+      ? await executeUpdate(context.tx, context.helpers)
+      : await this.libraryTx.executeInTransaction(executeUpdate);
 
-    const res = await this.libraryTx.executeInTransaction(executeUpdate);
     await this.invalidateItemCache(id, userId, resolvedProjectId);
     return res;
   }
@@ -530,25 +303,19 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       includeAttachments?: boolean;
       includeNotes?: boolean;
       authorshipConfirmed?: boolean;
+      projectId?: string;
     },
   ): Promise<ItemDetail> {
     let resolvedProjectId: string | undefined;
     const res = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
-        const updated = options
-          ? await this.command.setMyPublication(
-              userId,
-              id,
-              isMyPublication,
-              options,
-              tx,
-            )
-          : await this.command.setMyPublication(
-              userId,
-              id,
-              isMyPublication,
-              tx,
-            );
+        const updated = await this.command.setMyPublication(
+          userId,
+          id,
+          isMyPublication,
+          options,
+          tx,
+        );
 
         const effectiveProjectId = updated.projectId || undefined;
         resolvedProjectId = effectiveProjectId;
@@ -583,7 +350,8 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
       throw new NotFoundException(`Item ${id} not found in user library`);
     }
 
-    const effectiveProjectId = projectId ?? item.projectId ?? undefined;
+    const effectiveProjectId =
+      normalizeProjectScopeId(projectId) ?? item.projectId ?? undefined;
     const eventScope = { userId, projectId: effectiveProjectId };
 
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
@@ -609,14 +377,48 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     projectId?: string,
     skipScopeInvalidation?: boolean,
   ): Promise<boolean> {
-    return this.lifecycleService.deleteItem(
-      userId,
-      id,
-      expectedVersion,
-      context,
-      projectId,
-      skipScopeInvalidation,
-    );
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const executeDelete = async (
+      tx: Prisma.TransactionClient,
+      helpers: TransactionHelpers,
+    ): Promise<boolean> => {
+      const deleted = await this.command.softDelete(
+        userId,
+        id,
+        expectedVersion,
+        tx,
+        validProjectId,
+      );
+
+      if (deleted) {
+        const eventScope = { userId, projectId: validProjectId };
+
+        await helpers.recordTombstone(eventScope, {
+          entityType: 'Item',
+          entityId: id,
+        });
+
+        await helpers.publishOutbox(
+          eventScope,
+          id,
+          LIBRARY_EVENT_TYPES.ITEM_DELETED,
+          { id, deletedAt: new Date(), projectId: validProjectId },
+        );
+      }
+
+      return deleted;
+    };
+
+    const deleted = context
+      ? await executeDelete(context.tx, context.helpers)
+      : await this.libraryTx.executeInTransaction(executeDelete);
+
+    if (deleted) {
+      await this.invalidateItemCache(id, userId, validProjectId, {
+        skipScopeInvalidation,
+      });
+    }
+    return deleted;
   }
 
   async restoreItem(
@@ -626,13 +428,44 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     projectId?: string,
     skipScopeInvalidation?: boolean,
   ) {
-    return this.lifecycleService.restoreItem(
-      userId,
-      id,
-      expectedVersion,
-      projectId,
-      skipScopeInvalidation,
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const res = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        const restored = await this.command.restore(
+          userId,
+          id,
+          expectedVersion,
+          tx,
+          validProjectId,
+        );
+
+        const effectiveProjectId =
+          validProjectId || restored.projectId || undefined;
+        const eventScope = { userId, projectId: effectiveProjectId };
+
+        await helpers.appendChange(eventScope, {
+          entityType: 'Item',
+          entityId: id,
+          action: 'update',
+          version: restored.version,
+          data: restored,
+        });
+
+        await helpers.publishOutbox(eventScope, id, 'library.item.restored', {
+          itemId: id,
+          userId,
+          projectId: effectiveProjectId,
+          restoredAt: new Date().toISOString(),
+        });
+
+        return ItemsMapper.toDomain(restored);
+      },
     );
+
+    await this.invalidateItemCache(id, userId, validProjectId, {
+      skipScopeInvalidation,
+    });
+    return res;
   }
 
   async purgeItem(
@@ -641,102 +474,363 @@ export class ItemService implements IItemReadPort, IItemExistencePort {
     projectId?: string,
     skipScopeInvalidation?: boolean,
   ): Promise<boolean> {
-    return this.lifecycleService.purgeItem(
-      userId,
-      id,
-      projectId,
-      skipScopeInvalidation,
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const purged = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        const isPurged = await this.command.purge(
+          userId,
+          id,
+          tx,
+          validProjectId,
+        );
+
+        if (isPurged) {
+          await helpers.publishOutbox(
+            { userId, projectId: validProjectId },
+            id,
+            'library.item.purged',
+            {
+              itemId: id,
+              userId,
+              projectId: validProjectId,
+              purgedAt: new Date().toISOString(),
+            },
+          );
+        }
+
+        return isPurged;
+      },
     );
-  }
 
-  async bulkTrash(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-  ): Promise<{ success: boolean; count: number; trashedIds: string[] }> {
-    return this.bulkService.bulkTrash(this, userId, itemIds, projectId);
-  }
-
-  async bulkRestore(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-  ): Promise<{ success: boolean; count: number; restoredIds: string[] }> {
-    return this.bulkService.bulkRestore(this, userId, itemIds, projectId);
-  }
-
-  async bulkPurge(
-    userId: string,
-    itemIds: string[],
-    projectId?: string,
-  ): Promise<{ success: boolean; count: number; purgedIds: string[] }> {
-    return this.bulkService.bulkPurge(this, userId, itemIds, projectId);
-  }
-
-  async getRelatedItems(userId: string, itemId: string, projectId?: string) {
-    return this.relationsService.getRelatedItems(userId, itemId, projectId);
-  }
-
-  async linkItems(
-    userId: string,
-    sourceItemId: string,
-    data: {
-      targetItemId?: string;
-      targetItemIds?: string[];
-      relationType?: string;
-      note?: string;
-    },
-    projectId?: string,
-  ) {
-    return this.relationsService.linkItems(
-      userId,
-      sourceItemId,
-      data,
-      projectId,
-    );
-  }
-
-  async unlinkItems(
-    userId: string,
-    sourceItemId: string,
-    targetItemId: string,
-    projectId?: string,
-  ) {
-    return this.relationsService.unlinkItems(
-      userId,
-      sourceItemId,
-      targetItemId,
-      projectId,
-    );
-  }
-
-  // Sync Protocol Delegate
-
-  /**
-   * Sync protocol adapter: transactional upsert for a Item from an external sync batch.
-   */
-  async upsertFromSync(
-    command: UpsertSyncItemCommand,
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
-  ): Promise<UpsertSyncEntityResult> {
-    if (!this.syncDelegate) {
-      throw new BadRequestException('Sync delegate unavailable');
+    if (purged) {
+      await this.invalidateItemCache(id, userId, validProjectId, {
+        skipScopeInvalidation,
+      });
     }
-    return this.syncDelegate.upsertFromSync(command, tx, helpers);
+    return purged;
   }
 
-  /**
-   * Sync protocol adapter: transactional soft-delete for a Item from an external sync batch.
-   */
-  async deleteFromSync(
-    command: DeleteSyncEntityCommand,
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
+  private async invalidateBulkItemsCache(
+    itemIds: string[],
+    userId: string,
+    projectId?: string,
+    additionalProjectIds?: Array<string | null | undefined>,
   ): Promise<void> {
-    if (!this.syncDelegate) {
-      throw new BadRequestException('Sync delegate unavailable');
+    if (itemIds.length === 0) return;
+    if (!this.cache) return;
+
+    try {
+      const uniqueIds = Array.from(new Set(itemIds));
+      const directKeyDeletions: Promise<unknown>[] = [];
+      for (const id of uniqueIds) {
+        directKeyDeletions.push(
+          this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
+          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
+          this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(id)),
+        );
+      }
+
+      const uniqueScopes = new Set<string>();
+      const validBaseProject = normalizeProjectScopeId(projectId);
+      uniqueScopes.add(validBaseProject || '');
+      if (additionalProjectIds) {
+        for (const pid of additionalProjectIds) {
+          const norm = normalizeProjectScopeId(pid ?? undefined);
+          uniqueScopes.add(norm || '');
+        }
+      }
+
+      const scopeInvalidations = Array.from(uniqueScopes).map((scopeProjId) =>
+        this.invalidateScopeListCache(userId, scopeProjId || undefined),
+      );
+
+      await Promise.all([...directKeyDeletions, ...scopeInvalidations]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to invalidate bulk item caches (${itemIds.length} items): ${message}`,
+      );
     }
-    return this.syncDelegate.deleteFromSync(command, tx, helpers);
+  }
+
+  async bulkTrash(userId: string, itemIds: string[], projectId?: string) {
+    if (!Array.isArray(itemIds) || itemIds.length === 0) {
+      return {
+        success: true,
+        trashedCount: 0,
+        succeededIds: [] as string[],
+        failedIds: [] as string[],
+      };
+    }
+
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const { succeededIds, failedIds } =
+      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        const res = await this.command.softDeleteMany(
+          userId,
+          itemIds,
+          tx,
+          validProjectId,
+        );
+
+        if (res.succeededIds.length > 0) {
+          const eventScope = { userId, projectId: validProjectId };
+          const deletedAt = new Date();
+
+          if (typeof helpers.recordTombstonesBatch === 'function') {
+            await helpers.recordTombstonesBatch(
+              eventScope,
+              res.succeededIds.map((id) => ({
+                entityType: 'Item',
+                entityId: id,
+              })),
+            );
+          } else {
+            for (const id of res.succeededIds) {
+              await helpers.recordTombstone(eventScope, {
+                entityType: 'Item',
+                entityId: id,
+              });
+            }
+          }
+
+          if (typeof helpers.publishOutboxBatch === 'function') {
+            await helpers.publishOutboxBatch(
+              eventScope,
+              res.succeededIds.map((id) => ({
+                aggregateId: id,
+                eventType: LIBRARY_EVENT_TYPES.ITEM_DELETED,
+                payload: { id, deletedAt, projectId: validProjectId },
+              })),
+            );
+          } else {
+            for (const id of res.succeededIds) {
+              await helpers.publishOutbox(
+                eventScope,
+                id,
+                LIBRARY_EVENT_TYPES.ITEM_DELETED,
+                { id, deletedAt, projectId: validProjectId },
+              );
+            }
+          }
+        }
+
+        return res;
+      });
+
+    if (succeededIds.length > 0) {
+      await this.invalidateBulkItemsCache(
+        succeededIds,
+        userId,
+        validProjectId,
+      );
+    }
+
+    return {
+      success: true,
+      trashedCount: succeededIds.length,
+      succeededIds,
+      failedIds,
+    };
+  }
+
+  async bulkRestore(userId: string, itemIds: string[], projectId?: string) {
+    if (!Array.isArray(itemIds) || itemIds.length === 0) {
+      return {
+        success: true,
+        restoredCount: 0,
+        succeededIds: [] as string[],
+        failedIds: [] as string[],
+      };
+    }
+
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const { succeededIds, failedIds, restoredItems } =
+      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        const res = await this.command.restoreMany(
+          userId,
+          itemIds,
+          tx,
+          validProjectId,
+        );
+
+        if (res.restoredItems.length > 0) {
+          const restoredFullItems =
+            typeof this.query.findByIds === 'function'
+              ? await this.query.findByIds(
+                  userId,
+                  res.succeededIds,
+                  validProjectId,
+                  tx,
+                  false,
+                )
+              : [];
+          const fullItemMap = new Map(
+            (restoredFullItems || []).map((it) => [it.id, it]),
+          );
+
+          const restoredAt = new Date().toISOString();
+          const changeInputs = res.restoredItems.map((restored) => {
+            const effectiveProjectId =
+              validProjectId || restored.projectId || undefined;
+            const fullItem = fullItemMap.get(restored.id);
+            return {
+              userId,
+              projectId: effectiveProjectId,
+              entityType: 'Item',
+              entityId: restored.id,
+              action: 'update' as const,
+              version: restored.version,
+              data: fullItem ?? {
+                id: restored.id,
+                version: restored.version,
+                deletedAt: null,
+                projectId: restored.projectId,
+              },
+            };
+          });
+
+          const outboxInputs = res.restoredItems.map((restored) => {
+            const effectiveProjectId =
+              validProjectId || restored.projectId || undefined;
+            return {
+              userId,
+              projectId: effectiveProjectId,
+              aggregateId: restored.id,
+              eventType: 'library.item.restored',
+              payload: {
+                itemId: restored.id,
+                userId,
+                projectId: effectiveProjectId,
+                restoredAt,
+              },
+            };
+          });
+
+          if (typeof helpers.appendChangesBatch === 'function') {
+            await helpers.appendChangesBatch(changeInputs);
+          } else {
+            for (const c of changeInputs) {
+              await helpers.appendChange(
+                { userId: c.userId, projectId: c.projectId },
+                c,
+              );
+            }
+          }
+
+          if (typeof helpers.publishOutboxBatch === 'function') {
+            await helpers.publishOutboxBatch(outboxInputs);
+          } else {
+            for (const o of outboxInputs) {
+              await helpers.publishOutbox(
+                { userId, projectId: o.projectId },
+                o.aggregateId,
+                o.eventType,
+                o.payload,
+              );
+            }
+          }
+        }
+
+        return res;
+      });
+
+    if (succeededIds.length > 0) {
+      await this.invalidateBulkItemsCache(
+        succeededIds,
+        userId,
+        validProjectId,
+        restoredItems.map((r) => r.projectId),
+      );
+    }
+
+    return {
+      success: true,
+      restoredCount: succeededIds.length,
+      succeededIds,
+      failedIds,
+    };
+  }
+
+  async bulkPurge(userId: string, itemIds: string[], projectId?: string) {
+    if (!Array.isArray(itemIds) || itemIds.length === 0) {
+      return {
+        success: true,
+        purgedCount: 0,
+        succeededIds: [] as string[],
+        failedIds: [] as string[],
+      };
+    }
+
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const { succeededIds, failedIds, fileIdsToDelete } =
+      await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        const res = await this.command.purgeMany(
+          userId,
+          itemIds,
+          tx,
+          validProjectId,
+        );
+
+        if (res.succeededIds.length > 0) {
+          const eventScope = { userId, projectId: validProjectId };
+          const purgedAt = new Date().toISOString();
+
+          if (typeof helpers.publishOutboxBatch === 'function') {
+            await helpers.publishOutboxBatch(
+              eventScope,
+              res.succeededIds.map((id) => ({
+                aggregateId: id,
+                eventType: 'library.item.purged',
+                payload: {
+                  itemId: id,
+                  userId,
+                  projectId: validProjectId,
+                  purgedAt,
+                },
+              })),
+            );
+          } else {
+            for (const id of res.succeededIds) {
+              await helpers.publishOutbox(
+                eventScope,
+                id,
+                'library.item.purged',
+                {
+                  itemId: id,
+                  userId,
+                  projectId: validProjectId,
+                  purgedAt,
+                },
+              );
+            }
+          }
+        }
+
+        return res;
+      });
+
+    if (fileIdsToDelete.length > 0) {
+      await this.command.deleteStorageFilesBatch(fileIdsToDelete);
+    }
+
+    if (succeededIds.length > 0) {
+      await this.invalidateBulkItemsCache(
+        succeededIds,
+        userId,
+        validProjectId,
+      );
+    }
+
+    return {
+      success: true,
+      purgedCount: succeededIds.length,
+      succeededIds,
+      failedIds,
+    };
+  }
+
+  async purgeExpiredTrash(retentionDays: number = 30, limit: number = 200) {
+    return this.command.purgeExpiredTrash(retentionDays, limit);
   }
 }

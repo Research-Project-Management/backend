@@ -10,6 +10,7 @@ export function buildEvidenceFields(
   rawMetadata: Record<string, unknown>,
   normalizedMetadata: Record<string, unknown>,
   sourceName: string,
+  defaultConfidence = 0.95,
 ): Record<string, FieldEvidence> {
   const fields: Record<string, FieldEvidence> = {};
   for (const fieldName of Object.keys(normalizedMetadata)) {
@@ -21,7 +22,7 @@ export function buildEvidenceFields(
         path: fieldName,
         value: rawMetadata[fieldName],
         normalizedValue: normalizedMetadata[fieldName],
-        confidence: 0.95,
+        confidence: defaultConfidence,
         sourceProvider: sourceName,
         retrievedAt: new Date().toISOString(),
       };
@@ -52,7 +53,12 @@ export function createCandidate(params: {
     retrievedAt: new Date().toISOString(),
     schemaVersion: '1.0.0',
     fields: {
-      ...buildEvidenceFields(params.rawMetadata, normalized, params.sourceName),
+      ...buildEvidenceFields(
+        params.rawMetadata,
+        normalized,
+        params.sourceName,
+        params.confidenceScore,
+      ),
       ...(params.fieldOverrides || {}),
     },
     normalizedMetadata: normalized,

@@ -1,5 +1,4 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import { DuplicateMatchResult } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import { DuplicatePolicy } from '@/modules/library/ingestion/policies/duplicate.policy';
 import { tokenizeTitleWords } from '@/modules/library/ingestion/domain/deduplication.domain';
@@ -11,7 +10,7 @@ import {
 
 @Injectable()
 export class MatchStage implements IWorkflowStage<
-  MatchStageInput | { userId?: string; projectId?: string | null } | string,
+  MatchStageInput,
   DuplicateMatchResult
 > {
   readonly stageName = 'MATCH' as const;
@@ -33,19 +32,9 @@ export class MatchStage implements IWorkflowStage<
    *  2. Fast-path: exact DOI/arXiv/PMID/ISBN lookup (O(1) with index). Exits immediately on hit.
    *  3. Fuzzy: Pre-filter by title keywords, then in-memory Jaccard similarity.
    */
-  async execute(
-    scopeOrInput:
-      MatchStageInput | { userId?: string; projectId?: string | null } | string,
-    proposed?: ItemMetadata,
-  ): Promise<DuplicateMatchResult> {
-    const isStageInput =
-      typeof scopeOrInput === 'object' &&
-      scopeOrInput !== null &&
-      'scope' in scopeOrInput;
-    const scope = isStageInput ? scopeOrInput.scope : scopeOrInput;
-    const actualProposed = isStageInput
-      ? scopeOrInput.proposedItem || {}
-      : proposed || {};
+  async execute(input: MatchStageInput): Promise<DuplicateMatchResult> {
+    const { scope, proposedItem } = input;
+    const actualProposed = proposedItem || {};
 
     const nestedMeta =
       'metadata' in actualProposed &&
@@ -86,14 +75,19 @@ export class MatchStage implements IWorkflowStage<
 
     // Query Catalog exclusively via Hexagonal Gateway Port
     if (this.catalogGateway?.findMatchCandidates) {
-      const matchResult = await this.catalogGateway.findMatchCandidates(scope, {
-        doi: proposedDoi,
-        arxivId: cleanArxiv,
-        pmid: cleanPmid,
-        isbn: cleanIsbn,
-        titleWords: significantWords,
-        titlePrefix: proposedTitle,
-      });
+      const normalizedScope =
+        typeof scope === 'string' ? { userId: scope } : scope;
+      const matchResult = await this.catalogGateway.findMatchCandidates(
+        normalizedScope,
+        {
+          doi: proposedDoi,
+          arxivId: cleanArxiv,
+          pmid: cleanPmid,
+          isbn: cleanIsbn,
+          titleWords: significantWords,
+          titlePrefix: proposedTitle,
+        },
+      );
 
       if (matchResult.exactMatch) {
         return {

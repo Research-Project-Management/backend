@@ -1,5 +1,5 @@
 import { ExportItemRecord } from '@/modules/library/citation/repositories/exports.repository';
-import { extractExportMetadata } from './export-metadata.extractor';
+import { CslJsonMapper } from './csl-json.mapper';
 
 /**
  * Extracts merged citation keys (from DuplicateService.mergeDuplicates) and
@@ -11,7 +11,7 @@ export function extractItemCitationAliases(it: ExportItemRecord): string[] {
     it.metadata &&
     typeof it.metadata === 'object' &&
     !Array.isArray(it.metadata)
-      ? (it.metadata as Record<string, unknown>)
+      ? (itemMetaAsRecord(it.metadata))
       : {};
 
   const addKey = (val: unknown) => {
@@ -26,6 +26,9 @@ export function extractItemCitationAliases(it: ExportItemRecord): string[] {
   if (Array.isArray(metaObj.mergedCitationKeys)) {
     for (const k of metaObj.mergedCitationKeys) addKey(k);
   }
+  addKey(metaObj.citationKey);
+  addKey(metaObj['citation-key']);
+  addKey(metaObj['tex.ids']);
 
   if (
     metaObj.extra &&
@@ -42,12 +45,33 @@ export function extractItemCitationAliases(it: ExportItemRecord): string[] {
     addKey(extraObj['bibtex']);
   }
 
-  const parsedMeta = extractExportMetadata(it);
-  if (parsedMeta.citationKey) {
-    addKey(parsedMeta.citationKey);
+  const csl = CslJsonMapper.toCsl(it);
+  if (typeof csl['citation-key'] === 'string') {
+    addKey(csl['citation-key']);
+  }
+
+  const rawExtraStr =
+    typeof metaObj.extra === 'string'
+      ? metaObj.extra
+      : typeof (it as Record<string, unknown>).extra === 'string'
+        ? ((it as Record<string, unknown>).extra as string)
+        : '';
+  if (rawExtraStr) {
+    const match = rawExtraStr.match(
+      /(?:^|\r?\n)\s*(?:citation[-_\s]?key|cite[-_\s]?key|bibtex|tex\.ids)\s*:\s*([^\r\n]+)/i,
+    );
+    if (match?.[1]) {
+      addKey(match[1]);
+    }
   }
 
   return Array.from(aliases);
+}
+
+function itemMetaAsRecord(meta: unknown): Record<string, unknown> {
+  return meta && typeof meta === 'object' && !Array.isArray(meta)
+    ? (meta as Record<string, unknown>)
+    : {};
 }
 
 export interface EmittedCitationEntry {

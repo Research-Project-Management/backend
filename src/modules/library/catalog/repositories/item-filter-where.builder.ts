@@ -1,5 +1,6 @@
 import { Prisma, ReadStatus } from '@prisma/client';
 import { isUUID } from 'class-validator';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 
 export const isUuid = (val: unknown): val is string =>
   typeof val === 'string' && isUUID(val);
@@ -22,6 +23,8 @@ export interface ItemFilterOptions {
   search?: string;
   hasFile?: boolean;
   hasNotes?: boolean;
+  isRetracted?: boolean;
+  onlyFlagged?: boolean;
   projectId?: string;
   itemType?: string;
   type?: string;
@@ -69,16 +72,11 @@ export function buildItemWhereClause(
   options: ItemFilterOptions,
 ): Prisma.ItemWhereInput {
   const view = options.view ?? 'all';
-  const hasValidProject = Boolean(
-    options.projectId &&
-    options.projectId !== 'user' &&
-    options.projectId !== 'me' &&
-    options.projectId !== 'personal' &&
-    isUuid(options.projectId),
-  );
-  const where: Prisma.ItemWhereInput = hasValidProject
-    ? { projectId: options.projectId }
-    : { userId, projectId: null };
+  const validProjectId = normalizeProjectScopeId(options.projectId);
+  const where: Prisma.ItemWhereInput =
+    validProjectId && isUuid(validProjectId)
+      ? { projectId: validProjectId }
+      : { userId, projectId: null };
 
   const andConditions: Prisma.ItemWhereInput[] = [];
 
@@ -102,6 +100,27 @@ export function buildItemWhereClause(
         metadata: { path: ['isRetracted'], equals: true },
       });
     }
+  }
+
+  if (options.isRetracted !== undefined && view !== 'retracted') {
+    if (options.isRetracted) {
+      andConditions.push({
+        metadata: { path: ['isRetracted'], equals: true },
+      });
+    } else {
+      andConditions.push({
+        NOT: { metadata: { path: ['isRetracted'], equals: true } },
+      });
+    }
+  }
+
+  if (options.onlyFlagged) {
+    where.states = {
+      some: {
+        userId,
+        isStarred: true,
+      },
+    };
   }
 
   if (options.hasFile !== undefined) {

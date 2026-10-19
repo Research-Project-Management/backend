@@ -3,11 +3,21 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { RedisCacheService } from '@/core';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { ItemDetail } from '@/modules/library/catalog/types/items.types';
+import { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
+import {
+  LIBRARY_EVENT_TYPES,
+  LIBRARY_REDIS_KEYS,
+  TransactionHelpers,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 
 @Injectable()
 export class ItemRelationsService {
@@ -16,7 +26,25 @@ export class ItemRelationsService {
   constructor(
     private readonly query: QueryRepository,
     private readonly command: CommandRepository,
+    @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly libraryTx?: TransactionService,
   ) {}
+
+  private async invalidateRelationCaches(itemIds: string[]): Promise<void> {
+    if (!this.cache || itemIds.length === 0) return;
+    const uniqueIds = Array.from(new Set(itemIds.filter(Boolean)));
+    try {
+      await Promise.all(
+        uniqueIds.flatMap((id) => [
+          this.cache!.del(LIBRARY_REDIS_KEYS.item(id)),
+          this.cache!.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
+        ]),
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to invalidate relation caches: ${msg}`);
+    }
+  }
 
   async getRelatedItems(userId: string, itemId: string, projectId?: string) {
     const item = await this.query.findById(userId, itemId, projectId);
@@ -67,7 +95,15 @@ export class ItemRelationsService {
 
     const type = data.relationType ?? 'related';
     const now = new Date().toISOString();
-    const linkedRelations = [];
+    const linkedRelations: Array<{
+      id: string;
+      targetItemId: string;
+      relationType: string;
+      description: string | undefined;
+      note: string | undefined;
+      linkedAt: string;
+      targetTitle: string;
+    }> = [];
 
     // Batch fetch target items to eliminate N+1 queries
     let targetItemMap = new Map<string, ItemDetail>();
@@ -82,6 +118,18 @@ export class ItemRelationsService {
       }
     }
 
+    const resolvedTargets: Array<{
+      targetItem: ItemDetail;
+      relation: {
+        id: string;
+        targetItemId: string;
+        relationType: string;
+        description: string | undefined;
+        note: string | undefined;
+        linkedAt: string;
+      };
+    }> = [];
+
     for (const targetId of targetIds) {
       const targetItem =
         targetItemMap.get(targetId) ||
@@ -92,16 +140,61 @@ export class ItemRelationsService {
         id: randomUUID(),
         targetItemId: targetId,
         relationType: type,
+        description: data.note,
         note: data.note,
         linkedAt: now,
       };
-
-      await this.command.putRelation(sourceItemId, relation);
-      linkedRelations.push({
-        ...relation,
-        targetTitle: targetItem.title,
-      });
+      resolvedTargets.push({ targetItem, relation });
     }
+
+    const effectiveProjectId =
+      normalizeProjectScopeId(projectId ?? sourceItem.projectId) ?? undefined;
+    const eventScope = { userId, projectId: effectiveProjectId };
+
+    if (this.libraryTx && resolvedTargets.length > 0) {
+      await this.libraryTx.executeInTransaction(
+        async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          for (const { targetItem, relation } of resolvedTargets) {
+            await this.command.putRelation(sourceItemId, relation, tx);
+            linkedRelations.push({
+              ...relation,
+              targetTitle: targetItem.title,
+            });
+          }
+          await helpers.appendChange(eventScope, {
+            entityType: 'Item',
+            entityId: sourceItemId,
+            action: 'update',
+            version: sourceItem.version ?? 1,
+            data: { id: sourceItemId, relations: linkedRelations },
+          });
+          await helpers.publishOutbox(
+            eventScope,
+            sourceItemId,
+            LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+            {
+              itemId: sourceItemId,
+              relatedItemIds: resolvedTargets.map((r) => r.targetItem.id),
+              userId,
+              projectId: effectiveProjectId,
+            },
+          );
+        },
+      );
+    } else {
+      for (const { targetItem, relation } of resolvedTargets) {
+        await this.command.putRelation(sourceItemId, relation);
+        linkedRelations.push({
+          ...relation,
+          targetTitle: targetItem.title,
+        });
+      }
+    }
+
+    await this.invalidateRelationCaches([
+      sourceItemId,
+      ...linkedRelations.map((r) => r.targetItemId),
+    ]);
 
     return {
       success: true,
@@ -113,6 +206,22 @@ export class ItemRelationsService {
           ? `Linked "${sourceItem.title}" to "${linkedRelations[0].targetTitle}"`
           : `Linked ${linkedRelations.length} item(s) to "${sourceItem.title}"`,
     };
+  }
+
+  async addRelation(
+    userId: string,
+    itemId: string,
+    relatedItemId: string,
+    relationType?: string,
+    note?: string,
+    projectId?: string,
+  ) {
+    return this.linkItems(
+      userId,
+      itemId,
+      { targetItemId: relatedItemId, relationType, note },
+      projectId,
+    );
   }
 
   async unlinkItems(
@@ -130,12 +239,53 @@ export class ItemRelationsService {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
 
-    await this.command.removeRelation(sourceItemId, targetItemId);
+    const effectiveProjectId =
+      normalizeProjectScopeId(projectId ?? sourceItem.projectId) ?? undefined;
+    const eventScope = { userId, projectId: effectiveProjectId };
+
+    if (this.libraryTx) {
+      await this.libraryTx.executeInTransaction(
+        async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          await this.command.removeRelation(sourceItemId, targetItemId, tx);
+          await helpers.appendChange(eventScope, {
+            entityType: 'Item',
+            entityId: sourceItemId,
+            action: 'update',
+            version: sourceItem.version ?? 1,
+            data: { id: sourceItemId, unlinkedTargetItemId: targetItemId },
+          });
+          await helpers.publishOutbox(
+            eventScope,
+            sourceItemId,
+            LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+            {
+              itemId: sourceItemId,
+              relatedItemId: targetItemId,
+              userId,
+              projectId: effectiveProjectId,
+            },
+          );
+        },
+      );
+    } else {
+      await this.command.removeRelation(sourceItemId, targetItemId);
+    }
+
+    await this.invalidateRelationCaches([sourceItemId, targetItemId]);
 
     return {
       success: true,
       unlinked: true,
       message: `Removed relation between "${sourceItem.title}" and "${targetItemId}"`,
     };
+  }
+
+  async removeRelation(
+    userId: string,
+    itemId: string,
+    relatedItemId: string,
+    projectId?: string,
+  ) {
+    return this.unlinkItems(userId, itemId, relatedItemId, projectId);
   }
 }

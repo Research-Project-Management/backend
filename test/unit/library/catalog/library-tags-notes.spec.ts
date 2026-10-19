@@ -46,6 +46,8 @@ describe('Academic Tags & Notes Synchronization', () => {
         },
         tag: {
           findFirst: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([]),
+          createMany: jest.fn().mockResolvedValue({ count: 0 }),
           create: jest.fn(),
         },
         item: {
@@ -81,10 +83,18 @@ describe('Academic Tags & Notes Synchronization', () => {
     });
 
     it('should synchronize academic tags with type "automatic" and update item metadata', async () => {
-      mockPrisma.tag.findFirst.mockResolvedValue(null);
-      mockPrisma.tag.create.mockImplementation((args: any) =>
-        Promise.resolve({ id: `tag-${args.data.name}`, ...args.data }),
-      );
+      mockPrisma.tag.findMany
+        .mockResolvedValueOnce([])
+        .mockImplementationOnce((args: any) =>
+          Promise.resolve(
+            (args.where?.OR || []).map((clause: any) => ({
+              id: `tag-${clause.name?.equals}`,
+              name: clause.name?.equals,
+              type: 'automatic',
+            })),
+          ),
+        );
+      mockPrisma.tag.createMany.mockResolvedValue({ count: 3 });
       mockPrisma.itemTag.upsert.mockResolvedValue({});
       mockPrisma.item.findUnique.mockResolvedValue({
         metadata: { tags: ['Existing Tag'] },
@@ -104,11 +114,13 @@ describe('Academic Tags & Notes Synchronization', () => {
       expect(normalized).toContain('nlp');
 
       // Tag created with type automatic
-      expect(mockPrisma.tag.create).toHaveBeenCalledWith(
+      expect(mockPrisma.tag.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            type: 'automatic',
-          }),
+          data: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'automatic',
+            }),
+          ]),
         }),
       );
 

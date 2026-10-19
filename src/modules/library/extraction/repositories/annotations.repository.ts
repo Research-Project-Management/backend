@@ -202,14 +202,26 @@ export class AnnotationsRepository {
   ): Promise<BatchAnnotationsResult> {
     const created: AnnotationEntity[] = [];
     const updated: AnnotationEntity[] = [];
-    const deleted: string[] = [];
+    let deleted: string[] = [];
+
+    const upsertIds = upserts
+      .map((item) => item.id)
+      .filter((id): id is string => Boolean(id));
+
+    const existingMap = new Map<string, AnnotationEntity>();
+    if (upsertIds.length > 0) {
+      const existingRows = await tx.annotation.findMany({
+        where: { id: { in: upsertIds }, attachmentId, deletedAt: null },
+        select: ANNOTATION_SELECT,
+      });
+      for (const row of existingRows) {
+        existingMap.set(row.id, row);
+      }
+    }
 
     for (const item of upserts) {
       if (item.id) {
-        const current = await tx.annotation.findFirst({
-          where: { id: item.id, attachmentId, deletedAt: null },
-          select: ANNOTATION_SELECT,
-        });
+        const current = existingMap.get(item.id);
         if (!current)
           throw new NotFoundException(`Annotation ${item.id} not found`);
 
@@ -251,7 +263,7 @@ export class AnnotationsRepository {
             annotationSortIndex:
               item.y !== undefined || item.x !== undefined
                 ? buildAnnotationSortIndex(item.pageIndex, item.y, item.x)
-                : current.annotationSortIndex,
+                : (current.annotationSortIndex ?? ''),
             version: { increment: 1 },
           },
           select: ANNOTATION_SELECT,
@@ -285,17 +297,15 @@ export class AnnotationsRepository {
       }
     }
 
-    for (const id of deletes) {
-      const result = await tx.annotation.updateMany({
+    if (deletes.length > 0) {
+      await tx.annotation.deleteMany({
         where: {
-          id,
+          id: { in: deletes },
           attachmentId,
-          deletedAt: null,
           authorId,
         },
-        data: { deletedAt: new Date() },
       });
-      if (result.count > 0) deleted.push(id);
+      deleted = [...deletes];
     }
 
     return { created, updated, deleted };

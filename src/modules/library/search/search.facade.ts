@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { SearchService } from './services/search.service';
 import { SearchItemsQueryDto } from './dto/search.dto';
+import { CatalogItemSummary } from '../catalog/catalog.facade';
 
 export const SEARCH_FACADE = 'SEARCH_FACADE';
 
@@ -9,7 +10,7 @@ export interface ISearchFacade {
     userId: string,
     queryDto: SearchItemsQueryDto,
   ): Promise<{
-    items: unknown[];
+    items: CatalogItemSummary[];
     facets?: unknown;
     meta?: {
       cursor?: string;
@@ -17,8 +18,16 @@ export interface ISearchFacade {
       pageCount: number;
     };
   }>;
-  indexItem(item: { id: string }): Promise<void>;
-  reindexItem(item: { id: string }): Promise<{
+  indexItem(item: {
+    id: string;
+    userId?: string;
+    projectId?: string;
+  }): Promise<void>;
+  reindexItem(item: {
+    id: string;
+    userId?: string;
+    projectId?: string;
+  }): Promise<{
     localIndexed: boolean;
     error?: string;
   }>;
@@ -32,7 +41,7 @@ export class SearchFacade implements ISearchFacade {
     userId: string,
     queryDto: SearchItemsQueryDto,
   ): Promise<{
-    items: unknown[];
+    items: CatalogItemSummary[];
     facets?: unknown;
     meta?: {
       cursor?: string;
@@ -63,10 +72,7 @@ export class SearchFacade implements ISearchFacade {
     error?: string;
   }> {
     try {
-      const scopeId = item.projectId || item.userId;
-      if (scopeId) {
-        await this.searchService.invalidateFacetsCache(scopeId);
-      }
+      await this.indexItem(item);
       return { localIndexed: true };
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);

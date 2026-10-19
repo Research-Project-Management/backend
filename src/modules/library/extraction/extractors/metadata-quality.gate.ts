@@ -1,7 +1,5 @@
-﻿import { Injectable } from '@nestjs/common';
-import { ItemMetadata } from '@/modules/library/core';
+import { ItemMetadata, isInstitutionName } from '@/modules/library/core';
 import { QualityScoreBreakdown } from '@/modules/library/extraction/types/trusted-extraction.types';
-import { isInstitutionName } from '@/modules/library/core';
 
 export interface EvaluationResult {
   breakdown: QualityScoreBreakdown;
@@ -13,7 +11,6 @@ export interface EvaluationResult {
  * Deterministic Decision Gate evaluating whether extracted local metadata
  * is sufficiently authoritative to bypass external APIs and heavy ML sidecars.
  */
-@Injectable()
 export class MetadataQualityGate {
   public static readonly SELF_SUFFICIENCY_THRESHOLD = 0.85;
 

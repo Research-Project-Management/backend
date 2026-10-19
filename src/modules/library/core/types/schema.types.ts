@@ -88,12 +88,6 @@ export interface ItemTypeDefinition {
   schemaVersion: number;
 }
 
-export interface BaseFieldMapping {
-  itemType: string;
-  field: string;
-  baseField: string;
-}
-
 export interface SchemaRegistrySnapshot {
   version: number;
   registryVersion?: number;
@@ -123,54 +117,4 @@ export interface SchemaValidationResult {
   warnings: string[];
   demotedToExtra: Record<string, unknown>;
   creatorChanges: CreatorHarmonizationChange[];
-}
-
-const CANONICAL_ITEM_TYPES_SET = new Set<string>([
-  'journalArticle',
-  'preprint',
-  'conferencePaper',
-  'thesis',
-  'report',
-  'dataset',
-  'presentation',
-  'standard',
-  'book',
-  'bookSection',
-  'manuscript',
-  'dictionaryEntry',
-  'encyclopediaArticle',
-  'magazineArticle',
-  'newspaperArticle',
-  'bill',
-  'case',
-  'hearing',
-  'statute',
-  'patent',
-  'audioRecording',
-  'videoRecording',
-  'film',
-  'radioBroadcast',
-  'tvBroadcast',
-  'podcast',
-  'artwork',
-  'map',
-  'blogPost',
-  'webpage',
-  'forumPost',
-  'letter',
-  'interview',
-  'document',
-  'email',
-  'instantMessage',
-  'computerProgram',
-  'annotation',
-  'attachment',
-  'note',
-]);
-
-/**
- * Type guard for CanonicalItemType (Matt Pocock Pattern).
- */
-export function isCanonicalItemType(type: unknown): type is CanonicalItemType {
-  return typeof type === 'string' && CANONICAL_ITEM_TYPES_SET.has(type);
 }

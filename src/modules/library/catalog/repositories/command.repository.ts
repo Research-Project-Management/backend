@@ -9,20 +9,20 @@ import {
 import { Prisma, RelationType } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
-import { extractFileIdFromUrl } from '@/modules/library/core';
+import {
+  extractFileIdFromUrl,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   CreateItemData,
   UpdateItemData,
-} from '@/modules/library/catalog/types/items.types';
-import { isUUID } from 'class-validator';
+} from '@/modules/library/core/types/bibliographic.types';
 
 import {
   isUuid,
   cleanSingleIdentifier,
   normalizeItemIdentifiers,
-  unpackExtraFromDb,
-  packExtraPayload,
   resolveExtraPlainText,
   extractNonColumnExtraFields,
   prepareNotesToCreate,
@@ -30,15 +30,12 @@ import {
   syncTagsForCatalogItem,
   buildCommandCreateInput,
   buildCommandUpdateInput,
-  calculateIdentifierChanges,
 } from '@/modules/library/catalog/domain/command-payload.builder';
 
 export {
   isUuid,
   cleanSingleIdentifier,
   normalizeItemIdentifiers,
-  unpackExtraFromDb,
-  packExtraPayload,
   resolveExtraPlainText,
   extractNonColumnExtraFields,
   prepareNotesToCreate,
@@ -46,7 +43,6 @@ export {
   syncTagsForCatalogItem,
   buildCommandCreateInput,
   buildCommandUpdateInput,
-  calculateIdentifierChanges,
 };
 
 @Injectable()
@@ -75,7 +71,7 @@ export class CommandRepository {
       userId,
       data,
       client,
-      projectId,
+      normalizeProjectScopeId(projectId),
     );
 
     const item = await client.item.create({
@@ -112,13 +108,17 @@ export class CommandRepository {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
     const client = this.getClient(tx);
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeWhere: Prisma.ItemWhereInput =
+      validProjectId && isUuid(validProjectId)
+        ? { projectId: validProjectId }
+        : { userId, projectId: null };
+
     const existing = await client.item.findFirst({
       where: {
         id,
         deletedAt: null,
-        ...(projectId && projectId !== 'user' && isUUID(projectId)
-          ? { projectId }
-          : { userId }),
+        ...scopeWhere,
       },
       include: {
         notesList: { where: { deletedAt: null } },
@@ -139,15 +139,12 @@ export class CommandRepository {
         });
       }
 
-      // Atomic OCC reservation: ensure no concurrent write modified the version between findFirst and now
       const affected = await client.item.updateMany({
         where: {
           id,
           version: expectedVersion,
           deletedAt: null,
-          ...(projectId && projectId !== 'user' && isUUID(projectId)
-            ? { projectId }
-            : { userId }),
+          ...scopeWhere,
         },
         data: {
           version: { increment: 1 },
@@ -208,7 +205,7 @@ export class CommandRepository {
         updated.id,
         rawTags,
         undefined,
-        projectId ?? existing.projectId,
+        validProjectId ?? existing.projectId,
       );
 
       const reloaded = await client.item.findUnique({
@@ -232,12 +229,13 @@ export class CommandRepository {
       return false;
     }
     const client = this.getClient(tx);
+    const validProjectId = normalizeProjectScopeId(projectId);
     const scopeWhere: Prisma.ItemWhereInput = {
       id,
       deletedAt: null,
-      ...(projectId && projectId !== 'user' && isUUID(projectId)
-        ? { projectId }
-        : { userId }),
+      ...(validProjectId && isUuid(validProjectId)
+        ? { projectId: validProjectId }
+        : { userId, projectId: null }),
     };
 
     if (expectedVersion !== undefined) {
@@ -281,16 +279,6 @@ export class CommandRepository {
     return result.count > 0;
   }
 
-  async delete(
-    userId: string,
-    id: string,
-    expectedVersion?: number,
-    tx?: Prisma.TransactionClient,
-    projectId?: string,
-  ): Promise<boolean> {
-    return this.softDelete(userId, id, expectedVersion, tx, projectId);
-  }
-
   async restore(
     userId: string,
     id: string,
@@ -302,11 +290,16 @@ export class CommandRepository {
       throw new NotFoundException(`Trashed item ${id} not found`);
     }
     const client = this.getClient(tx);
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeFilter: Prisma.ItemWhereInput = validProjectId
+      ? { projectId: validProjectId }
+      : { userId, projectId: null };
+
     const existing = await client.item.findFirst({
       where: {
         id,
         deletedAt: { not: null },
-        ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
+        ...scopeFilter,
       },
     });
 
@@ -314,7 +307,6 @@ export class CommandRepository {
       throw new NotFoundException(`Trashed item ${id} not found`);
     }
 
-    // Protection against restoring merged items
     const metadataObj =
       existing.metadata &&
       typeof existing.metadata === 'object' &&
@@ -346,7 +338,7 @@ export class CommandRepository {
           id,
           deletedAt: { not: null },
           version: expectedVersion,
-          ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
+          ...scopeFilter,
         },
         data: {
           version: { increment: 1 },
@@ -367,42 +359,15 @@ export class CommandRepository {
       }
     }
 
-    // Cascade restore associated notes, attachments, and annotations
-    await client.note.updateMany({
-      where: { itemId: id, deletedAt: { not: null } },
-      data: { deletedAt: null },
+    const activeNoteCount = await client.note.count({
+      where: { itemId: id, deletedAt: null },
     });
-
-    const restoredNoteCount =
-      typeof client.note?.count === 'function'
-        ? await client.note.count({
-            where: { itemId: id, deletedAt: null },
-          })
-        : undefined;
-
-    const attachments = await client.attachment.findMany({
-      where: { itemId: id },
-      select: { id: true },
-    });
-    if (attachments.length > 0) {
-      const attIds = attachments.map((a) => a.id);
-      await client.attachment.updateMany({
-        where: { id: { in: attIds }, deletedAt: { not: null } },
-        data: { deletedAt: null },
-      });
-      await client.annotation.updateMany({
-        where: { attachmentId: { in: attIds }, deletedAt: { not: null } },
-        data: { deletedAt: null },
-      });
-    }
 
     return client.item.update({
       where: { id },
       data: {
         deletedAt: null,
-        ...(restoredNoteCount !== undefined
-          ? { noteCount: restoredNoteCount }
-          : {}),
+        noteCount: activeNoteCount,
         ...(expectedVersion !== undefined ? {} : { version: { increment: 1 } }),
       },
       include: {
@@ -415,6 +380,59 @@ export class CommandRepository {
     });
   }
 
+  private async collectStoragePathsForItems(
+    client: Prisma.TransactionClient | PrismaService,
+    itemIds: string[],
+  ): Promise<string[]> {
+    if (itemIds.length === 0) return [];
+    const paths = new Set<string>();
+
+    const attachments = await client.attachment.findMany({
+      where: { itemId: { in: itemIds } },
+      select: { id: true, fileId: true, url: true },
+    });
+    const attachmentIds: string[] = [];
+    for (const att of attachments) {
+      if (att.id) attachmentIds.push(att.id);
+      const fileId = att.fileId || extractFileIdFromUrl(att.url);
+      if (fileId) paths.add(fileId);
+    }
+
+    if (
+      attachmentIds.length > 0 &&
+      typeof client.attachmentRevision?.findMany === 'function'
+    ) {
+      const revisions = await client.attachmentRevision.findMany({
+        where: { attachmentId: { in: attachmentIds } },
+        select: { fileId: true, url: true },
+      });
+      for (const rev of revisions) {
+        const fileId = rev.fileId || extractFileIdFromUrl(rev.url);
+        if (fileId) paths.add(fileId);
+      }
+    }
+
+    if (typeof client.itemMetadata?.findMany === 'function') {
+      const metadataRecords = await client.itemMetadata.findMany({
+        where: { itemId: { in: itemIds } },
+        select: { rawPayload: true },
+      });
+      for (const rec of metadataRecords) {
+        const raw = rec.rawPayload as
+          | (Record<string, unknown> & {
+              isOffloaded?: boolean;
+              fileId?: string;
+            })
+          | null;
+        if (raw?.isOffloaded && typeof raw.fileId === 'string' && raw.fileId) {
+          paths.add(raw.fileId);
+        }
+      }
+    }
+
+    return Array.from(paths);
+  }
+
   async purge(
     userId: string,
     id: string,
@@ -425,10 +443,13 @@ export class CommandRepository {
       throw new NotFoundException(`Item ${id} not found`);
     }
     const client = this.getClient(tx);
+    const validProjectId = normalizeProjectScopeId(projectId);
     const existing = await client.item.findFirst({
       where: {
         id,
-        ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
+        ...(validProjectId
+          ? { projectId: validProjectId }
+          : { userId, projectId: null }),
       },
     });
 
@@ -442,44 +463,327 @@ export class CommandRepository {
       );
     }
 
-    const attachments = await client.attachment.findMany({
-      where: { itemId: id },
-      select: { id: true, fileId: true, url: true },
-    });
-
-    for (const att of attachments) {
-      const fileId = att.fileId || extractFileIdFromUrl(att.url);
-      if (fileId && this.storagePort?.deleteFile) {
-        try {
-          await this.storagePort.deleteFile(fileId);
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.logger.warn(
-            `Failed to delete storage file ${fileId} during item purge: ${message}`,
-          );
-        }
-      }
-    }
+    const storagePaths = await this.collectStoragePathsForItems(client, [id]);
 
     await client.item.delete({
       where: { id },
     });
 
+    if (storagePaths.length > 0) {
+      await this.deleteStorageFilesBatch(storagePaths);
+    }
+
     return true;
+  }
+
+  async softDeleteMany(
+    userId: string,
+    itemIds: string[],
+    tx?: Prisma.TransactionClient,
+    projectId?: string,
+  ): Promise<{ succeededIds: string[]; failedIds: string[] }> {
+    const validUserId = isUuid(userId);
+    const validIds = Array.from(
+      new Set(itemIds.filter((id) => isUuid(id))),
+    );
+    if (!validUserId || validIds.length === 0) {
+      return { succeededIds: [], failedIds: [...itemIds] };
+    }
+
+    const client = this.getClient(tx);
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeFilter: Prisma.ItemWhereInput =
+      validProjectId && isUuid(validProjectId)
+        ? { projectId: validProjectId }
+        : { userId, projectId: null };
+
+    const existingItems = await client.item.findMany({
+      where: {
+        id: { in: validIds },
+        deletedAt: null,
+        ...scopeFilter,
+      },
+      select: { id: true },
+    });
+
+    const foundSet = new Set(existingItems.map((it) => it.id));
+    const succeededIds = itemIds.filter((id, idx) => foundSet.has(id) && itemIds.indexOf(id) === idx);
+    const failedIds = itemIds.filter((id, idx) => !foundSet.has(id) || itemIds.indexOf(id) !== idx);
+
+    if (succeededIds.length > 0) {
+      const deletedAt = new Date();
+      await client.item.updateMany({
+        where: {
+          id: { in: succeededIds },
+          deletedAt: null,
+          ...scopeFilter,
+        },
+        data: {
+          deletedAt,
+          version: { increment: 1 },
+        },
+      });
+    }
+
+    return { succeededIds, failedIds };
+  }
+
+  async restoreMany(
+    userId: string,
+    itemIds: string[],
+    tx?: Prisma.TransactionClient,
+    projectId?: string,
+  ): Promise<{
+    restoredItems: Array<{ id: string; version: number; projectId: string | null }>;
+    succeededIds: string[];
+    failedIds: string[];
+  }> {
+    const validUserId = isUuid(userId);
+    const validIds = Array.from(
+      new Set(itemIds.filter((id) => isUuid(id))),
+    );
+    if (!validUserId || validIds.length === 0) {
+      return { restoredItems: [], succeededIds: [], failedIds: [...itemIds] };
+    }
+
+    const client = this.getClient(tx);
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeFilter: Prisma.ItemWhereInput = validProjectId
+      ? { projectId: validProjectId }
+      : { userId, projectId: null };
+
+    const existingItems = await client.item.findMany({
+      where: {
+        id: { in: validIds },
+        deletedAt: { not: null },
+        ...scopeFilter,
+      },
+      select: { id: true, version: true, projectId: true, metadata: true },
+    });
+
+    const restorableMap = new Map<
+      string,
+      { id: string; version: number; projectId: string | null }
+    >();
+    for (const item of existingItems) {
+      const metadataObj =
+        item.metadata &&
+        typeof item.metadata === 'object' &&
+        !Array.isArray(item.metadata)
+          ? (item.metadata as Record<string, unknown>)
+          : {};
+      if (
+        typeof metadataObj.mergedIntoId === 'string' &&
+        metadataObj.mergedIntoId
+      ) {
+        continue;
+      }
+      restorableMap.set(item.id, {
+        id: item.id,
+        version: item.version + 1,
+        projectId: item.projectId,
+      });
+    }
+
+    const succeededIds = itemIds.filter(
+      (id, idx) => restorableMap.has(id) && itemIds.indexOf(id) === idx,
+    );
+    const failedIds = itemIds.filter(
+      (id, idx) => !restorableMap.has(id) || itemIds.indexOf(id) !== idx,
+    );
+
+    if (succeededIds.length > 0) {
+      await client.item.updateMany({
+        where: {
+          id: { in: succeededIds },
+          deletedAt: { not: null },
+          ...scopeFilter,
+        },
+        data: {
+          deletedAt: null,
+          version: { increment: 1 },
+        },
+      });
+    }
+
+    const restoredItems = succeededIds
+      .map((id) => restorableMap.get(id)!)
+      .filter(Boolean);
+
+    return { restoredItems, succeededIds, failedIds };
+  }
+
+  async purgeMany(
+    userId: string,
+    itemIds: string[],
+    tx?: Prisma.TransactionClient,
+    projectId?: string,
+  ): Promise<{
+    succeededIds: string[];
+    failedIds: string[];
+    fileIdsToDelete: string[];
+    storagePaths: string[];
+  }> {
+    const validUserId = isUuid(userId);
+    const validIds = Array.from(
+      new Set(itemIds.filter((id) => isUuid(id))),
+    );
+    if (!validUserId || validIds.length === 0) {
+      return {
+        succeededIds: [],
+        failedIds: [...itemIds],
+        fileIdsToDelete: [],
+        storagePaths: [],
+      };
+    }
+
+    const client = this.getClient(tx);
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeFilter: Prisma.ItemWhereInput = validProjectId
+      ? { projectId: validProjectId }
+      : { userId, projectId: null };
+
+    const existingItems = await client.item.findMany({
+      where: {
+        id: { in: validIds },
+        deletedAt: { not: null },
+        ...scopeFilter,
+      },
+      select: { id: true },
+    });
+
+    const purgeableSet = new Set(existingItems.map((it) => it.id));
+    const succeededIds = itemIds.filter(
+      (id, idx) => purgeableSet.has(id) && itemIds.indexOf(id) === idx,
+    );
+    const failedIds = itemIds.filter(
+      (id, idx) => !purgeableSet.has(id) || itemIds.indexOf(id) !== idx,
+    );
+
+    let storagePaths: string[] = [];
+    if (succeededIds.length > 0) {
+      storagePaths = await this.collectStoragePathsForItems(
+        client,
+        succeededIds,
+      );
+
+      await client.item.deleteMany({
+        where: {
+          id: { in: succeededIds },
+          ...scopeFilter,
+        },
+      });
+    }
+
+    return {
+      succeededIds,
+      failedIds,
+      fileIdsToDelete: storagePaths,
+      storagePaths,
+    };
+  }
+
+  async purgeExpiredTrash(
+    retentionDays: number = 30,
+    limit: number = 200,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{
+    purgedItems: number;
+    purgedNotes: number;
+    purgedCollections: number;
+    storagePaths: string[];
+  }> {
+    const client = this.getClient(tx);
+    const cutoff = new Date(Date.now() - retentionDays * 86400 * 1000);
+
+    const expiredItems = await client.item.findMany({
+      where: { deletedAt: { lt: cutoff } },
+      select: { id: true },
+      orderBy: { deletedAt: 'asc' },
+      take: limit,
+    });
+    const expiredItemIds = expiredItems.map((it) => it.id);
+
+    let storagePaths: string[] = [];
+    let purgedItems = 0;
+    if (expiredItemIds.length > 0) {
+      storagePaths = await this.collectStoragePathsForItems(
+        client,
+        expiredItemIds,
+      );
+      const delItems = await client.item.deleteMany({
+        where: { id: { in: expiredItemIds } },
+      });
+      purgedItems = delItems.count;
+    }
+
+    const expiredNotes = await client.note.findMany({
+      where: { deletedAt: { lt: cutoff } },
+      select: { id: true },
+      orderBy: { deletedAt: 'asc' },
+      take: limit,
+    });
+    let purgedNotes = 0;
+    if (expiredNotes.length > 0) {
+      const delNotes = await client.note.deleteMany({
+        where: { id: { in: expiredNotes.map((n) => n.id) } },
+      });
+      purgedNotes = delNotes.count;
+    }
+
+    const expiredCollections = await client.collection.findMany({
+      where: { deletedAt: { lt: cutoff } },
+      select: { id: true },
+      orderBy: { deletedAt: 'asc' },
+      take: limit,
+    });
+    let purgedCollections = 0;
+    if (expiredCollections.length > 0) {
+      const delCollections = await client.collection.deleteMany({
+        where: { id: { in: expiredCollections.map((c) => c.id) } },
+      });
+      purgedCollections = delCollections.count;
+    }
+
+    if (storagePaths.length > 0) {
+      await this.deleteStorageFilesBatch(storagePaths);
+    }
+
+    return {
+      purgedItems,
+      purgedNotes,
+      purgedCollections,
+      storagePaths,
+    };
+  }
+
+  async deleteStorageFilesBatch(fileIds: string[]): Promise<void> {
+    if (!this.storagePort?.deleteFile || fileIds.length === 0) return;
+    const uniqueFileIds = Array.from(new Set(fileIds.filter(Boolean)));
+    const results = await Promise.allSettled(
+      uniqueFileIds.map((fileId) => this.storagePort!.deleteFile(fileId)),
+    );
+    results.forEach((res, idx) => {
+      if (res.status === 'rejected') {
+        const err = res.reason;
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Failed to delete storage file ${uniqueFileIds[idx]} during item purge: ${message}`,
+        );
+      }
+    });
   }
 
   async putRelation(
     itemId: string,
     relation: {
       targetItemId?: string;
-      targetId?: string;
       relationType?: string;
       description?: string;
-      [key: string]: unknown;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    const targetItemId = relation.targetItemId || relation.targetId;
+    const targetItemId = relation.targetItemId;
     if (
       !targetItemId ||
       !isUuid(itemId) ||
@@ -517,6 +821,8 @@ export class CommandRepository {
       ? (rawType as RelationType)
       : RelationType.related;
 
+    const description = relation.description || '';
+
     await client.itemRelation.upsert({
       where: {
         sourceItemId_targetItemId_relationType: {
@@ -529,16 +835,10 @@ export class CommandRepository {
         sourceItemId: itemId,
         targetItemId,
         relationType,
-        description:
-          relation.description ||
-          (typeof relation.note === 'string' ? relation.note : '') ||
-          '',
+        description,
       },
       update: {
-        description:
-          relation.description ||
-          (typeof relation.note === 'string' ? relation.note : '') ||
-          '',
+        description,
       },
     });
   }
@@ -558,72 +858,35 @@ export class CommandRepository {
         ],
       },
     });
-
-    const item = await client.item.findUnique({
-      where: { id: itemId },
-      select: { metadata: true },
-    });
-    if (item?.metadata) {
-      try {
-        const metadataObj =
-          typeof item.metadata === 'object' &&
-          item.metadata !== null &&
-          !Array.isArray(item.metadata)
-            ? { ...(item.metadata as Record<string, unknown>) }
-            : {};
-        if (Array.isArray(metadataObj.relations)) {
-          metadataObj.relations = metadataObj.relations.filter((r: unknown) => {
-            const rel = r as Record<string, unknown> | null;
-            return (rel?.targetItemId || rel?.targetId) !== targetItemId;
-          });
-          await client.item.update({
-            where: { id: itemId },
-            data: { metadata: metadataObj as Prisma.InputJsonValue },
-          });
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `Failed to parse or sanitize relations JSON for item ${itemId}: ${message}`,
-        );
-      }
-    }
   }
 
   async setMyPublication(
     userId: string,
     id: string,
     isMyPublication: boolean,
-    txOrOptions?:
-      | Prisma.TransactionClient
-      | {
-          contributorId?: string | null;
-          isPublic?: boolean;
-          openAccessLicense?: string | null;
-          includeAttachments?: boolean;
-          includeNotes?: boolean;
-          authorshipConfirmed?: boolean;
-        },
-    maybeTx?: Prisma.TransactionClient,
+    options?: {
+      contributorId?: string | null;
+      isPublic?: boolean;
+      openAccessLicense?: string | null;
+      includeAttachments?: boolean;
+      includeNotes?: boolean;
+      authorshipConfirmed?: boolean;
+      projectId?: string;
+    },
+    tx?: Prisma.TransactionClient,
   ) {
     if (!isUuid(id) || !isUuid(userId)) {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
 
-    const isTxClient = (val: unknown): val is Prisma.TransactionClient =>
-      Boolean(
-        val &&
-        typeof val === 'object' &&
-        ('item' in val || '$executeRaw' in val || 'userPublication' in val),
-      );
-
-    const tx = isTxClient(txOrOptions) ? txOrOptions : maybeTx;
-    const options =
-      txOrOptions && !isTxClient(txOrOptions) ? txOrOptions : undefined;
+    const validProjectId = normalizeProjectScopeId(options?.projectId);
+    const scopeWhere = validProjectId
+      ? { projectId: validProjectId }
+      : { userId, projectId: null };
 
     const client = this.getClient(tx);
     const existing = await client.item.findFirst({
-      where: { id, userId, deletedAt: null },
+      where: { id, ...scopeWhere, deletedAt: null },
     });
 
     if (!existing) {

@@ -13,10 +13,10 @@ export interface IdempotentResult<T = unknown> {
   result?: T;
 }
 
-export const IDEMPOTENT_CONSUMER_PORT = Symbol('IDEMPOTENT_CONSUMER_PORT');
+export const IDEMPOTENT_CONSUMER = Symbol('IDEMPOTENT_CONSUMER');
 
-export abstract class IdempotentConsumerService {
-  abstract executeIdempotent<T>(
+export interface IIdempotentConsumer {
+  executeIdempotent<T>(
     options: IdempotentConsumerOptions<T>,
   ): Promise<IdempotentResult<T>>;
 }

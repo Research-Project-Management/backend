@@ -1,27 +1,23 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AttachmentsService } from './services/attachments.service';
-import {
-  PdfProvider,
-  ExtractedPdfDocument,
-  ExtractedPdfMetadata,
-} from './providers/pdf.provider';
+import { PdfProvider } from './providers/pdf.provider';
 import { WebSnapshotService } from './services/web-snapshot.service';
 import { AnnotationsService } from './services/annotations.service';
 import { TrustedExtractionService } from './services/trusted-extraction.service';
-import { TrustedExtractionResult } from './types/trusted-extraction.types';
 import {
+  ExtractedPdfDocument,
+  ExtractedPdfMetadata,
+  TrustedExtractionResult,
   AttachmentEntity,
   CreateAttachmentInput,
-} from './types/attachments.types';
-import {
   AnnotationEntity,
   CreateAnnotationData,
   UpdateAnnotationData,
   BatchAnnotationsData,
   BatchAnnotationsResult,
   AnnotationType,
-} from './types/annotations.types';
+} from '@/modules/library/core/types/extraction.types';
 import {
   EXTRACTION_FACADE,
   IExtractionFacade,
@@ -30,7 +26,7 @@ export { EXTRACTION_FACADE };
 export type { IExtractionFacade };
 
 @Injectable()
-export class ExtractionFacade {
+export class ExtractionFacade implements IExtractionFacade {
   constructor(
     private readonly attachmentsService: AttachmentsService,
     private readonly pdfProvider: PdfProvider,
@@ -122,40 +118,37 @@ export class ExtractionFacade {
   async getAnnotationsByAttachment(
     userId: string,
     attachmentId: string,
-  ): Promise<AnnotationEntity[]> {
-    return this.annotationsService.getAnnotationsByAttachment(
-      userId,
-      attachmentId,
-    );
-  }
-
-  async getAnnotationsByAttachmentFull(
-    userId: string,
-    attachmentId: string,
     pageIndex?: number,
     type?: AnnotationType,
+    projectId?: string,
   ): Promise<AnnotationEntity[]> {
     return this.annotationsService.getAnnotationsByAttachment(
       userId,
       attachmentId,
       pageIndex,
       type,
+      projectId,
     );
   }
 
   async getAnnotation(
     userId: string,
     annotationId: string,
-    _projectId?: string,
+    projectId?: string,
   ): Promise<AnnotationEntity | null> {
-    return this.annotationsService.getAnnotation(userId, annotationId);
+    return this.annotationsService.getAnnotation(
+      userId,
+      annotationId,
+      projectId,
+    );
   }
 
   async createAnnotation(
     userId: string,
     data: CreateAnnotationData,
+    projectId?: string,
   ): Promise<AnnotationEntity> {
-    return this.annotationsService.createAnnotation(userId, data);
+    return this.annotationsService.createAnnotation(userId, data, projectId);
   }
 
   async updateAnnotation(
@@ -163,12 +156,14 @@ export class ExtractionFacade {
     annotationId: string,
     expectedVersion: number,
     data: UpdateAnnotationData,
+    projectId?: string,
   ): Promise<AnnotationEntity> {
     return this.annotationsService.updateAnnotation(
       userId,
       annotationId,
       expectedVersion,
       data,
+      projectId,
     );
   }
 
@@ -176,11 +171,13 @@ export class ExtractionFacade {
     userId: string,
     annotationId: string,
     expectedVersion?: number,
+    projectId?: string,
   ): Promise<boolean> {
     return this.annotationsService.deleteAnnotation(
       userId,
       annotationId,
       expectedVersion,
+      projectId,
     );
   }
 
@@ -188,30 +185,14 @@ export class ExtractionFacade {
     userId: string,
     attachmentId: string,
     data: BatchAnnotationsData,
+    projectId?: string,
   ): Promise<BatchAnnotationsResult> {
     return this.annotationsService.batchUpsertAnnotations(
       userId,
       attachmentId,
       data,
+      projectId,
     );
   }
-
-  async listAnnotations(
-    userId: string,
-    filters?: {
-      attachmentId?: string;
-      pageIndex?: number;
-      type?: AnnotationType;
-    },
-  ): Promise<AnnotationEntity[]> {
-    if (filters?.attachmentId) {
-      return this.annotationsService.getAnnotationsByAttachment(
-        userId,
-        filters.attachmentId,
-        filters.pageIndex,
-        filters.type,
-      );
-    }
-    return [];
-  }
 }
+

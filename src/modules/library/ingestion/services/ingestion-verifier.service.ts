@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
+import { calculateMetadataQualityScore } from '@/modules/library/ingestion/domain/metadata.validator';
 import {
   titleSimilarity,
   TITLE_MATCH_THRESHOLD,
@@ -312,11 +313,16 @@ export class IngestionVerifierService {
   public evaluateLocalResult(
     metadata: ItemMetadata,
     engineUsed: string = 'LOCAL_IN_PROCESS',
-    qualityScore: number = 0.85,
+    qualityScore?: number,
   ): VerificationResult {
     const missingFields: string[] = [];
     const fieldProvenance: Record<string, VerificationFieldProvenance> = {};
     const warnings: string[] = [];
+    const effectiveQualityScore =
+      qualityScore ??
+      calculateMetadataQualityScore(
+        metadata as unknown as Record<string, unknown>,
+      ).score / 100;
 
     const assignProv = (fieldName: string, conf: number, verified: boolean) => {
       fieldProvenance[fieldName] = {
@@ -380,7 +386,7 @@ export class IngestionVerifierService {
     if (!hasCredibleTitle) {
       status = 'FAILED';
       warnings.push('missing_or_corrupt_title');
-    } else if (qualityScore < 0.5) {
+    } else if (effectiveQualityScore < 0.5) {
       status = 'NEEDS_REVIEW';
       warnings.push('low_extraction_quality_score');
     } else if (missingFields.length > 0) {
@@ -390,8 +396,8 @@ export class IngestionVerifierService {
     }
 
     return {
-      verificationScore: qualityScore,
-      isVerified: qualityScore >= 0.8,
+      verificationScore: effectiveQualityScore,
+      isVerified: effectiveQualityScore >= 0.8,
       status,
       matchedSignals: ['local_heuristic_verified'],
       missingFields,

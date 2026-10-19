@@ -2,8 +2,9 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, Annotation } from '@prisma/client';
 import { isUUID } from 'class-validator';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
-import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
+import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 import {
   CreateNoteData,
@@ -23,39 +24,31 @@ export class NotesRepository {
     return tx ?? this.prisma;
   }
 
+  private buildScopeWhere(userId: string, projectId?: string) {
+    const validProjectId = normalizeProjectScopeId(projectId);
+    return validProjectId && isUuid(validProjectId)
+      ? { projectId: validProjectId }
+      : { userId, projectId: null };
+  }
+
   async findMany(
     userId: string,
     itemId?: string,
-    projectIdOrTx?: string | Prisma.TransactionClient,
+    projectId?: string,
     tx?: Prisma.TransactionClient,
+    limit?: number,
   ) {
-    const projectId =
-      typeof projectIdOrTx === 'string' &&
-      projectIdOrTx !== 'user' &&
-      projectIdOrTx !== 'me' &&
-      projectIdOrTx !== 'personal' &&
-      isUuid(projectIdOrTx)
-        ? projectIdOrTx
-        : undefined;
-    const client = this.getClient(
-      typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
-    );
-    const where: Prisma.NoteWhereInput = projectId
-      ? {
-          projectId,
-          ...(itemId !== undefined ? { itemId } : {}),
-          deletedAt: null,
-        }
-      : {
-          userId,
-          projectId: null,
-          ...(itemId !== undefined ? { itemId } : {}),
-          deletedAt: null,
-        };
+    const client = this.getClient(tx);
+    const where: Prisma.NoteWhereInput = {
+      ...this.buildScopeWhere(userId, projectId),
+      ...(itemId !== undefined ? { itemId } : {}),
+      deletedAt: null,
+    };
 
     return client.note.findMany({
       where,
       orderBy: { updatedAt: 'desc' },
+      take: limit ?? 500,
     });
   }
 
@@ -66,14 +59,7 @@ export class NotesRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
-    const scopeWhere =
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal' &&
-      isUuid(projectId)
-        ? { projectId }
-        : { userId, projectId: null };
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
     return client.note.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
@@ -85,12 +71,6 @@ export class NotesRepository {
   ): Promise<void> {
     if (!itemId || !isUuid(itemId)) return;
     const client = this.getClient(tx);
-    if (
-      typeof client.note?.count !== 'function' ||
-      typeof client.item?.updateMany !== 'function'
-    ) {
-      return;
-    }
     const activeCount = await client.note.count({
       where: { itemId, deletedAt: null },
     });
@@ -110,7 +90,7 @@ export class NotesRepository {
     const created = await client.note.create({
       data: {
         userId,
-        projectId: data.projectId ?? null,
+        projectId: normalizeProjectScopeId(data.projectId) ?? null,
         itemId: data.itemId ?? null,
         title: data.title ?? 'Untitled Note',
         contentJson:
@@ -118,7 +98,7 @@ export class NotesRepository {
             ? (data.contentJson as Prisma.InputJsonValue)
             : (buildTipTapDocFromText(contentMd) as Prisma.InputJsonValue),
         contentMd,
-        tags: data.tags ? normalizeTags(data.tags) : [],
+        tags: data.tags ? normalizeAcademicTags(data.tags) : [],
         createdById: data.createdById || userId,
         version: 1,
       },
@@ -136,14 +116,7 @@ export class NotesRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
-    const scopeWhere =
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal' &&
-      isUuid(projectId)
-        ? { projectId }
-        : { userId, projectId: null };
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
     const existing = await client.note.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
@@ -154,22 +127,16 @@ export class NotesRepository {
 
     const effectiveExpectedVersion = expectedVersion ?? data?.expectedVersion;
 
-    if (
-      effectiveExpectedVersion !== undefined &&
-      existing.version !== effectiveExpectedVersion
-    ) {
-      throw new VersionMismatchException({
-        aggregateType: 'Note',
-        entityId: id,
-        currentVersion: existing.version,
-        providedVersion: effectiveExpectedVersion,
-      });
-    }
+    if (effectiveExpectedVersion !== undefined) {
+      if (existing.version !== effectiveExpectedVersion) {
+        throw new VersionMismatchException({
+          aggregateType: 'Note',
+          entityId: id,
+          currentVersion: existing.version,
+          providedVersion: effectiveExpectedVersion,
+        });
+      }
 
-    if (
-      effectiveExpectedVersion !== undefined &&
-      typeof client.note.updateMany === 'function'
-    ) {
       const affected = await client.note.updateMany({
         where: {
           id,
@@ -183,13 +150,10 @@ export class NotesRepository {
       });
 
       if (affected.count === 0) {
-        const fresh =
-          typeof client.note.findUnique === 'function'
-            ? await client.note.findUnique({
-                where: { id },
-                select: { version: true },
-              })
-            : null;
+        const fresh = await client.note.findUnique({
+          where: { id },
+          select: { version: true },
+        });
         throw new VersionMismatchException({
           aggregateType: 'Note',
           entityId: id,
@@ -215,7 +179,7 @@ export class NotesRepository {
           contentMd:
             data.contentMd !== undefined ? data.contentMd : existing.contentMd,
           tags:
-            data.tags !== undefined ? normalizeTags(data.tags) : existing.tags,
+            data.tags !== undefined ? normalizeAcademicTags(data.tags) : existing.tags,
         },
       });
     }
@@ -237,7 +201,7 @@ export class NotesRepository {
         contentMd:
           data.contentMd !== undefined ? data.contentMd : existing.contentMd,
         tags:
-          data.tags !== undefined ? normalizeTags(data.tags) : existing.tags,
+          data.tags !== undefined ? normalizeAcademicTags(data.tags) : existing.tags,
         version: { increment: 1 },
       },
     });
@@ -251,20 +215,10 @@ export class NotesRepository {
     projectId?: string,
   ): Promise<boolean> {
     const client = this.getClient(tx);
-    const scopeWhere =
-      projectId &&
-      projectId !== 'user' &&
-      projectId !== 'me' &&
-      projectId !== 'personal' &&
-      isUuid(projectId)
-        ? { projectId }
-        : { userId, projectId: null };
-    const existing =
-      typeof client.note?.findFirst === 'function'
-        ? await client.note.findFirst({
-            where: { id, ...scopeWhere, deletedAt: null },
-          })
-        : null;
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
+    const existing = await client.note.findFirst({
+      where: { id, ...scopeWhere, deletedAt: null },
+    });
     if (expectedVersion !== undefined) {
       if (existing && existing.version !== expectedVersion) {
         throw new VersionMismatchException({
@@ -333,7 +287,7 @@ export class NotesRepository {
         contentMd: trimmed,
         contentJson: buildTipTapDocFromText(trimmed) as Prisma.InputJsonValue,
         createdById: userId,
-        tags: normalizeTags(['imported', ...(source ? [source] : [])]),
+        tags: normalizeAcademicTags(['imported', ...(source ? [source] : [])]),
         version: 1,
       },
     });

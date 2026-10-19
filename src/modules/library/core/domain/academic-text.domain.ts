@@ -11,31 +11,6 @@ import {
   MATH_BLOCK_REGEX,
 } from './academic-text.lexicon';
 
-export {
-  BANNED_STRINGS,
-  HTML_ENTITY_CODEPOINTS,
-  HTML_ENTITY_REGEX,
-  DOUBLE_ENCODED_TAG_REGEX,
-  INLINE_FORMAT_TAG_REGEX,
-  LATEX_SPECIAL_MACROS,
-  LATEX_COMBINING_MAP,
-  UNICODE_SUB_MAP,
-  UNICODE_SUP_MAP,
-  MATH_BLOCK_REGEX,
-  ITEM_TYPE_ALIASES,
-  CSL_TYPE_TO_ITEM_TYPE,
-  BIBLIOGRAPHIC_ITEM_TYPES,
-  SPECIAL_ITEM_TYPES,
-  CANONICAL_ITEM_TYPES,
-  SPECIAL_CASE_WORDS,
-  COMMON_ACADEMIC_ACRONYMS,
-  MINOR_WORDS,
-  TITLE_SIMILARITY_STOPWORDS,
-  TITLE_MATCH_THRESHOLD,
-  BOT_CHALLENGE_TITLE_RE,
-  BOT_CHALLENGE_HTML_RE,
-} from './academic-text.lexicon';
-
 function safeFromCodePoint(code: number): string {
   if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return '';
   if (code >= 0xd800 && code <= 0xdfff) return '';
@@ -602,25 +577,3 @@ export function normalizePageRange(pages?: string | null): string | undefined {
   );
   return cleaned || undefined;
 }
-
-// Re-export academic item types & heuristics
-export {
-  mapCslTypeToZoteroItemType,
-  inferItemTypeFromPdfSignals,
-  normalizeCanonicalItemType,
-  normalizeItemType,
-} from './academic-item-types.domain';
-export type {
-  PdfItemTypeSignals,
-  InferredItemType,
-} from './academic-item-types.domain';
-
-// Re-export academic title casing, sanitization, and similarity
-export {
-  normalizeAcademicTitleCase,
-  collapseFragmentedSmallCapsTokens,
-  sanitizeItemTitle,
-  titleSimilarity,
-  isBotChallengePage,
-  repairFragmentedTitle,
-} from './academic-title.domain';

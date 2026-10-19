@@ -31,7 +31,7 @@ import {
   UpdateAnnotationDto,
   BatchAnnotationsDto,
 } from '@/modules/library/extraction/dto/annotations.dto';
-import { ProjectAccessGuard } from '@/modules/project/access';
+import { ProjectAccessGuard, ProjectRoles, ProjectRole } from '@/modules/project/access';
 import { AnnotationsService } from '@/modules/library/extraction/services/annotations.service';
 
 @ApiTags('Annotations')
@@ -50,6 +50,12 @@ export class AnnotationsController {
   // GET /
 
   @Get()
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+    ProjectRole.REVIEWER,
+  )
   @ApiOperation({
     summary: 'List annotations for an attachment, sorted by position',
   })
@@ -60,7 +66,7 @@ export class AnnotationsController {
     @Param('attachmentId') attachmentId: string,
     @Query('pageIndex') pageIndexRaw?: string,
     @Query('type') type?: AnnotationType,
-    @Query('projectId') projectId?: string,
+    @Param('projectId') projectId?: string,
   ) {
     let pageIndex: number | undefined;
     if (pageIndexRaw !== undefined) {
@@ -78,34 +84,39 @@ export class AnnotationsController {
       );
     }
 
-    if (
-      typeof this.annotationsService.getAnnotationsByAttachment === 'function'
-    ) {
+    if (projectId !== undefined) {
       return this.annotationsService.getAnnotationsByAttachment(
         userId,
         attachmentId,
         pageIndex,
         type,
+        projectId,
       );
     }
 
-    return this.annotationsService.listAnnotations(
+    return this.annotationsService.getAnnotationsByAttachment(
       userId,
       attachmentId,
-      { pageIndex, type },
-      projectId,
+      pageIndex,
+      type,
     );
   }
 
   // POST /
 
   @Post()
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+  )
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create an annotation' })
   async createAnnotation(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Body() body: CreateAnnotationDto,
+    @Param('projectId') projectId?: string,
   ) {
     if (!userId) {
       throw new UnauthorizedException(
@@ -126,12 +137,25 @@ export class AnnotationsController {
       authorId: userId,
     };
 
+    if (projectId !== undefined) {
+      return this.annotationsService.createAnnotation(
+        userId,
+        createData,
+        projectId,
+      );
+    }
+
     return this.annotationsService.createAnnotation(userId, createData);
   }
 
   // PATCH /:id
 
   @Patch(':id')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+  )
   @ApiOperation({
     summary:
       'Update an annotation (optimistic lock via If-Match or expectedVersion)',
@@ -143,6 +167,7 @@ export class AnnotationsController {
     @Param('id') id: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateAnnotationDto,
+    @Param('projectId') projectId?: string,
   ) {
     const rawVersion =
       body.expectedVersion ??
@@ -156,6 +181,16 @@ export class AnnotationsController {
 
     const { expectedVersion: _, ...updateData } = body;
 
+    if (projectId !== undefined) {
+      return this.annotationsService.updateAnnotation(
+        userId,
+        id,
+        rawVersion,
+        updateData,
+        projectId,
+      );
+    }
+
     return this.annotationsService.updateAnnotation(
       userId,
       id,
@@ -167,6 +202,11 @@ export class AnnotationsController {
   // DELETE /:id
 
   @Delete(':id')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+  )
   @ApiOperation({ summary: 'Soft-delete an annotation' })
   @ApiParam({ name: 'id', description: 'Annotation UUID' })
   async deleteAnnotation(
@@ -175,6 +215,7 @@ export class AnnotationsController {
     @Param('id') id: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
+    @Param('projectId') projectId?: string,
   ) {
     let expectedVersion: number | undefined;
     if (expectedVersionQuery !== undefined) {
@@ -193,19 +234,30 @@ export class AnnotationsController {
       }
     }
 
-    const deleted = await this.annotationsService.deleteAnnotation(
-      userId,
-      id,
-      expectedVersion,
-    );
+    const deleted =
+      projectId !== undefined
+        ? await this.annotationsService.deleteAnnotation(
+            userId,
+            id,
+            expectedVersion,
+            projectId,
+          )
+        : await this.annotationsService.deleteAnnotation(
+            userId,
+            id,
+            expectedVersion,
+          );
 
     if (!deleted) throw new NotFoundException(`Annotation ${id} not found`);
     return { id, deleted: true };
   }
 
-  // PUT /batch
-
   @Put('batch')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+  )
   @ApiOperation({
     summary:
       'Batch upsert/delete annotations (max 200 items, single transaction)',
@@ -214,9 +266,19 @@ export class AnnotationsController {
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Body() body: BatchAnnotationsDto,
+    @Param('projectId') projectId?: string,
   ) {
     if (!userId) {
       throw new UnauthorizedException('Authentication required');
+    }
+
+    if (projectId !== undefined) {
+      return this.annotationsService.batchUpsertAnnotations(
+        userId,
+        attachmentId,
+        { upserts: body.upserts, deletes: body.deletes },
+        projectId,
+      );
     }
 
     return this.annotationsService.batchUpsertAnnotations(
@@ -226,9 +288,34 @@ export class AnnotationsController {
     );
   }
 
+  @Post('batch')
+  @HttpCode(HttpStatus.OK)
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+  )
+  @ApiOperation({
+    summary:
+      'Batch upsert/delete annotations via POST (alias for PUT /batch)',
+  })
+  async batchUpsertAnnotationsPost(
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Body() body: BatchAnnotationsDto,
+    @Param('projectId') projectId?: string,
+  ) {
+    return this.batchUpsertAnnotations(userId, attachmentId, body, projectId);
+  }
+
   // POST /import-external
 
   @Post('import-external')
+  @ProjectRoles(
+    ProjectRole.OWNER,
+    ProjectRole.COORDINATOR,
+    ProjectRole.CONTRIBUTOR,
+  )
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Import annotations from underlying PDF (/Annots dictionary)',
@@ -236,9 +323,18 @@ export class AnnotationsController {
   async importExternalAnnotations(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
+    @Param('projectId') projectId?: string,
   ) {
     if (!userId) {
       throw new UnauthorizedException('Authentication required');
+    }
+
+    if (projectId !== undefined) {
+      return this.pdfAnnotationImporterService.importFromAttachment(
+        userId,
+        attachmentId,
+        projectId,
+      );
     }
 
     return this.pdfAnnotationImporterService.importFromAttachment(

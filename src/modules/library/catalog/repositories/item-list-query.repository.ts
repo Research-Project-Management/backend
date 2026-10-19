@@ -2,10 +2,11 @@ import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
+import { normalizeProjectScopeId } from '@/modules/library/core';
 import {
   ItemDetail,
   ItemSummary,
-} from '@/modules/library/catalog/types/items.types';
+} from '@/modules/library/core/types/bibliographic.types';
 import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 import {
   ItemFilterOptions,
@@ -56,16 +57,11 @@ export class ItemListQueryRepository {
       return [options.collectionId];
     }
 
-    const hasValidProject = Boolean(
-      options.projectId &&
-      options.projectId !== 'user' &&
-      options.projectId !== 'me' &&
-      options.projectId !== 'personal' &&
-      isUuid(options.projectId),
-    );
+    const validProjectId = normalizeProjectScopeId(options.projectId);
+    const hasValidProject = Boolean(validProjectId && isUuid(validProjectId));
 
     const scopeWhere: Prisma.CollectionWhereInput = hasValidProject
-      ? { projectId: options.projectId, deletedAt: null }
+      ? { projectId: validProjectId, deletedAt: null }
       : { userId, projectId: null, deletedAt: null };
 
     const allCollections = await client.collection.findMany({
@@ -144,7 +140,7 @@ export class ItemListQueryRepository {
       attachments: {
         where: { deletedAt: null },
       },
-      notes: {
+      notesList: {
         where: { deletedAt: null },
       },
     };
@@ -156,12 +152,18 @@ export class ItemListQueryRepository {
     );
 
     if (view === 'recent' && effectiveUserId) {
+      const validProjectId = normalizeProjectScopeId(options.projectId);
+      const itemScopeWhere: Prisma.ItemWhereInput =
+        validProjectId && isUuid(validProjectId)
+          ? { projectId: validProjectId }
+          : { userId, projectId: null };
+
       const userStates = await client.state.findMany({
         where: {
           userId: effectiveUserId,
           lastReadAt: { not: null },
           item: {
-            userId,
+            ...itemScopeWhere,
             deletedAt: null,
             ...(options.search
               ? {
@@ -281,12 +283,18 @@ export class ItemListQueryRepository {
 
     const effectiveUserId = options.userId || userId;
     if (view === 'recent' && effectiveUserId) {
+      const validProjectId = normalizeProjectScopeId(options.projectId);
+      const itemScopeWhere: Prisma.ItemWhereInput =
+        validProjectId && isUuid(validProjectId)
+          ? { projectId: validProjectId }
+          : { userId, projectId: null };
+
       return client.state.count({
         where: {
           userId: effectiveUserId,
           lastReadAt: { not: null },
           item: {
-            userId,
+            ...itemScopeWhere,
             deletedAt: null,
             ...(options.search
               ? {
@@ -334,13 +342,11 @@ export class ItemListQueryRepository {
     projectId?: string,
   ): Promise<Record<string, number>> {
     if (!isUuid(userId)) return {};
-    if (typeof client?.item?.groupBy !== 'function') {
-      return {};
-    }
 
+    const validProjectId = normalizeProjectScopeId(projectId);
     const where: Prisma.ItemWhereInput =
-      projectId && projectId !== 'user' && isUuid(projectId)
-        ? { projectId, deletedAt: null }
+      validProjectId && isUuid(validProjectId)
+        ? { projectId: validProjectId, deletedAt: null }
         : { userId, projectId: null, deletedAt: null };
 
     try {
@@ -385,9 +391,10 @@ export class ItemListQueryRepository {
     projectId?: string,
   ): Promise<ItemSummary | null> {
     if (!isUuid(itemId)) return null;
+    const validProjectId = normalizeProjectScopeId(projectId);
     const scopeWhere =
-      projectId && projectId !== 'user' && isUuid(projectId)
-        ? { projectId }
+      validProjectId && isUuid(validProjectId)
+        ? { projectId: validProjectId }
         : isUuid(userId)
           ? { userId, projectId: null }
           : null;
@@ -441,9 +448,11 @@ export class ItemListQueryRepository {
     const validIds = itemIds.filter(isUuid);
     if (validIds.length === 0) return [];
 
-    const scopeWhere: Prisma.ItemWhereInput = projectId
-      ? { projectId }
-      : { userId, projectId: null };
+    const validProjectId = normalizeProjectScopeId(projectId);
+    const scopeWhere: Prisma.ItemWhereInput =
+      validProjectId && isUuid(validProjectId)
+        ? { projectId: validProjectId }
+        : { userId, projectId: null };
 
     const items = await client.item.findMany({
       where: { id: { in: validIds }, ...scopeWhere, deletedAt: null },

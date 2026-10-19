@@ -1,22 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { OutboxStatus, OutboxEvent, Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
+import { PublishOutboxInput } from '@/modules/library/core/ports/unit-of-work.port';
+
+export type { PublishOutboxInput };
 
 export interface ClaimedOutboxEvent {
   event: OutboxEvent;
   isLeaseRecovery: boolean;
-}
-
-export interface OutboxQueueMetrics {
-  statusCounts: Record<string, number>;
-  oldestPendingCreatedAt: Date | null;
-  oldestPendingAgeMs: number;
-  failedCount: number;
-}
-
-export interface DeadLetterEventsPage {
-  items: OutboxEvent[];
-  total: number;
 }
 
 @Injectable()
@@ -25,10 +17,101 @@ export class OutboxRepository {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  private getClient(tx?: Prisma.TransactionClient) {
+    return tx || this.prisma;
+  }
+
+  async publishOutboxBatch(
+    events: PublishOutboxInput[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<string[]> {
+    if (!events || events.length === 0) return [];
+    const client = this.getClient(tx);
+
+    const data: Prisma.OutboxEventCreateManyInput[] = events.map((ev) => ({
+      id: randomUUID(),
+      userId: ev.userId || '',
+      projectId: ev.projectId || null,
+      aggregateId: ev.aggregateId,
+      eventType: ev.eventType,
+      payload: (ev.payload as Prisma.InputJsonValue) ?? {},
+      status: OutboxStatus.PENDING,
+      retryCount: 0,
+    }));
+
+    if (typeof client.outboxEvent?.createMany === 'function') {
+      await client.outboxEvent.createMany({ data });
+      return data.map((d) => d.id!);
+    }
+
+    const createdIds: string[] = [];
+    for (const row of data) {
+      const created = await client.outboxEvent.create({ data: row });
+      createdIds.push(created.id);
+    }
+    return createdIds;
+  }
+
+  async purgeProcessedOutboxEvents(
+    publishedRetentionDays: number = 3,
+    failedRetentionDays: number = 30,
+    batchLimit: number = 1000,
+  ): Promise<{ purgedPublished: number; purgedFailed: number }> {
+    const publishedCutoff = new Date(
+      Date.now() - publishedRetentionDays * 86400 * 1000,
+    );
+    const failedCutoff = new Date(
+      Date.now() - failedRetentionDays * 86400 * 1000,
+    );
+
+    const oldPublished = await this.prisma.outboxEvent.findMany({
+      where: {
+        status: OutboxStatus.PUBLISHED,
+        updatedAt: { lt: publishedCutoff },
+      },
+      select: { id: true },
+      orderBy: { updatedAt: 'asc' },
+      take: batchLimit,
+    });
+
+    let purgedPublished = 0;
+    if (oldPublished.length > 0) {
+      const res = await this.prisma.outboxEvent.deleteMany({
+        where: { id: { in: oldPublished.map((e) => e.id) } },
+      });
+      purgedPublished = res.count;
+    }
+
+    const oldFailed = await this.prisma.outboxEvent.findMany({
+      where: {
+        status: OutboxStatus.FAILED,
+        updatedAt: { lt: failedCutoff },
+      },
+      select: { id: true },
+      orderBy: { updatedAt: 'asc' },
+      take: batchLimit,
+    });
+
+    let purgedFailed = 0;
+    if (oldFailed.length > 0) {
+      const res = await this.prisma.outboxEvent.deleteMany({
+        where: { id: { in: oldFailed.map((e) => e.id) } },
+      });
+      purgedFailed = res.count;
+    }
+
+    return { purgedPublished, purgedFailed };
+  }
+
   async findById(id: string): Promise<OutboxEvent | null> {
     return this.prisma.outboxEvent.findUnique({
       where: { id },
     });
+  }
+
+  async findPending(batchSize: number = 50): Promise<OutboxEvent[]> {
+    const claimed = await this.claimBatch(batchSize);
+    return claimed.map((c) => c.event);
   }
 
   async claimSingleEvent(
@@ -36,37 +119,23 @@ export class OutboxRepository {
     workerId: string,
     leaseMs: number = 60000,
   ): Promise<boolean> {
+    const now = new Date();
     const claimResult = await this.prisma.outboxEvent.updateMany({
       where: {
         id,
-        status: { in: [OutboxStatus.PENDING, OutboxStatus.FAILED] },
+        OR: [
+          { status: { in: [OutboxStatus.PENDING, OutboxStatus.FAILED] } },
+          { status: OutboxStatus.PROCESSING, leaseExpiresAt: { lte: now } },
+        ],
       },
       data: {
         status: OutboxStatus.PROCESSING,
-        claimedAt: new Date(),
-        leaseExpiresAt: new Date(Date.now() + leaseMs),
+        claimedAt: now,
+        leaseExpiresAt: new Date(now.getTime() + leaseMs),
         claimedBy: workerId,
       },
     });
     return claimResult.count > 0;
-  }
-
-  async markMissingHandler(
-    id: string,
-    retryCount: number,
-    isMax: boolean,
-    eventType: string,
-  ): Promise<void> {
-    await this.prisma.outboxEvent.updateMany({
-      where: { id, status: OutboxStatus.PROCESSING },
-      data: {
-        status: isMax ? OutboxStatus.FAILED : OutboxStatus.PENDING,
-        retryCount,
-        error: `No handler registered for event type "${eventType}"`,
-        claimedAt: null,
-        claimedBy: null,
-      },
-    });
   }
 
   async markPublished(id: string, workerId?: string): Promise<boolean> {
@@ -86,24 +155,6 @@ export class OutboxRepository {
       },
     });
     return res.count > 0;
-  }
-
-  async markFailed(
-    id: string,
-    retryCount: number,
-    isMax: boolean,
-    errorMessage: string,
-  ): Promise<void> {
-    await this.prisma.outboxEvent.updateMany({
-      where: { id, status: OutboxStatus.PROCESSING },
-      data: {
-        status: isMax ? OutboxStatus.FAILED : OutboxStatus.PENDING,
-        retryCount,
-        error: errorMessage,
-        claimedAt: null,
-        claimedBy: null,
-      },
-    });
   }
 
   async markDeadLetter(
@@ -162,196 +213,99 @@ export class OutboxRepository {
     const now = new Date();
     const newLeaseExpiresAt = new Date(Date.now() + leaseMs);
 
-    // 1. Production PostgreSQL path: Atomic batch claim with SKIP LOCKED
-    if (typeof this.prisma.$queryRaw === 'function') {
-      try {
-        const rows = await this.prisma.$queryRaw<
-          Array<{
-            id: string;
-            userId: string;
-            projectId: string | null;
-            aggregateId: string;
-            eventType: string;
-            payload: Prisma.JsonValue;
-            status: OutboxStatus;
-            retryCount: number;
-            error: string | null;
-            scheduledAt: Date | string | null;
-            claimedAt: Date | string | null;
-            leaseExpiresAt: Date | string | null;
-            claimedBy: string | null;
-            dedupeKey: string | null;
-            createdAt: Date | string;
-            updatedAt: Date | string;
-            processedAt: Date | string | null;
-            previousStatus: OutboxStatus;
-            previousLeaseExpiresAt: Date | string | null;
-          }>
-        >`
-          WITH candidates AS (
-            SELECT id, status, lease_expires_at
-            FROM outbox_events
-            WHERE (
-              (status = 'PENDING'::"OutboxStatus" AND (scheduled_at IS NULL OR scheduled_at <= ${now}))
-              OR
-              (status = 'PROCESSING'::"OutboxStatus" AND lease_expires_at <= ${now})
-            )
-            ORDER BY created_at ASC
-            LIMIT ${batchSize}
-            FOR UPDATE SKIP LOCKED
-          )
-          UPDATE outbox_events e
-          SET status = 'PROCESSING'::"OutboxStatus",
-              claimed_at = ${now},
-              lease_expires_at = ${newLeaseExpiresAt},
-              claimed_by = ${workerId}
-          FROM candidates c
-          WHERE e.id = c.id
-          RETURNING 
-            e.id,
-            e.user_id AS "userId",
-            e.project_id AS "projectId",
-            e.aggregate_id AS "aggregateId",
-            e.event_type AS "eventType",
-            e.payload,
-            e.status,
-            e.retry_count AS "retryCount",
-            e.error,
-            e.scheduled_at AS "scheduledAt",
-            e.claimed_at AS "claimedAt",
-            e.lease_expires_at AS "leaseExpiresAt",
-            e.claimed_by AS "claimedBy",
-            e.dedupe_key AS "dedupeKey",
-            e.created_at AS "createdAt",
-            e.updated_at AS "updatedAt",
-            e.processed_at AS "processedAt",
-            c.status AS "previousStatus",
-            c.lease_expires_at AS "previousLeaseExpiresAt";
-        `;
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        userId: string;
+        projectId: string | null;
+        aggregateId: string;
+        eventType: string;
+        payload: Prisma.JsonValue;
+        status: OutboxStatus;
+        retryCount: number;
+        error: string | null;
+        scheduledAt: Date | string | null;
+        claimedAt: Date | string | null;
+        leaseExpiresAt: Date | string | null;
+        claimedBy: string | null;
+        dedupeKey: string | null;
+        createdAt: Date | string;
+        updatedAt: Date | string;
+        processedAt: Date | string | null;
+        previousStatus: OutboxStatus;
+        previousLeaseExpiresAt: Date | string | null;
+      }>
+    >`
+      WITH candidates AS (
+        SELECT id, status, lease_expires_at
+        FROM outbox_events
+        WHERE (
+          (status = 'PENDING'::"OutboxStatus" AND (scheduled_at IS NULL OR scheduled_at <= ${now}))
+          OR
+          (status = 'PROCESSING'::"OutboxStatus" AND lease_expires_at <= ${now})
+        )
+        ORDER BY created_at ASC
+        LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE outbox_events e
+      SET status = 'PROCESSING'::"OutboxStatus",
+          claimed_at = ${now},
+          lease_expires_at = ${newLeaseExpiresAt},
+          claimed_by = ${workerId}
+      FROM candidates c
+      WHERE e.id = c.id
+      RETURNING 
+        e.id,
+        e.user_id AS "userId",
+        e.project_id AS "projectId",
+        e.aggregate_id AS "aggregateId",
+        e.event_type AS "eventType",
+        e.payload,
+        e.status,
+        e.retry_count AS "retryCount",
+        e.error,
+        e.scheduled_at AS "scheduledAt",
+        e.claimed_at AS "claimedAt",
+        e.lease_expires_at AS "leaseExpiresAt",
+        e.claimed_by AS "claimedBy",
+        e.dedupe_key AS "dedupeKey",
+        e.created_at AS "createdAt",
+        e.updated_at AS "updatedAt",
+        e.processed_at AS "processedAt",
+        c.status AS "previousStatus",
+        c.lease_expires_at AS "previousLeaseExpiresAt";
+    `;
 
-        if (Array.isArray(rows) && rows.length > 0) {
-          return rows.map((r) => ({
-            event: {
-              id: r.id,
-              userId: r.userId,
-              projectId: r.projectId,
-              aggregateId: r.aggregateId,
-              eventType: r.eventType,
-              payload: r.payload,
-              status: r.status,
-              retryCount: r.retryCount,
-              error: r.error,
-              scheduledAt: r.scheduledAt ? new Date(r.scheduledAt) : null,
-              claimedAt: r.claimedAt ? new Date(r.claimedAt) : null,
-              leaseExpiresAt: r.leaseExpiresAt
-                ? new Date(r.leaseExpiresAt)
-                : null,
-              claimedBy: r.claimedBy,
-              dedupeKey: r.dedupeKey,
-              createdAt: new Date(r.createdAt),
-              updatedAt: new Date(r.updatedAt),
-              processedAt: r.processedAt ? new Date(r.processedAt) : null,
-            },
-            isLeaseRecovery:
-              r.previousStatus === OutboxStatus.PROCESSING &&
-              r.previousLeaseExpiresAt !== null &&
-              new Date(r.previousLeaseExpiresAt) <= now,
-          }));
-        }
-        return [];
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.debug(
-          `PostgreSQL SKIP LOCKED query raw unavailable or failed: ${message}. Falling back to optimistic findMany+updateMany.`,
-        );
-      }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return [];
     }
 
-    // 2. Fallback: Optimistic locking
-    return this.claimBatchOptimistic(batchSize, newLeaseExpiresAt, workerId);
-  }
-
-  private async claimBatchOptimistic(
-    batchSize: number,
-    newLeaseExpiresAt: Date,
-    workerId: string,
-  ): Promise<ClaimedOutboxEvent[]> {
-    const now = new Date();
-    const candidates = await this.prisma.outboxEvent.findMany({
-      where: {
-        OR: [
-          {
-            status: OutboxStatus.PENDING,
-            OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
-          },
-          {
-            status: OutboxStatus.PROCESSING,
-            leaseExpiresAt: { lte: now },
-          },
-        ],
+    return rows.map((r) => ({
+      event: {
+        id: r.id,
+        userId: r.userId,
+        projectId: r.projectId,
+        aggregateId: r.aggregateId,
+        eventType: r.eventType,
+        payload: r.payload,
+        status: r.status,
+        retryCount: r.retryCount,
+        error: r.error,
+        scheduledAt: r.scheduledAt ? new Date(r.scheduledAt) : null,
+        claimedAt: r.claimedAt ? new Date(r.claimedAt) : null,
+        leaseExpiresAt: r.leaseExpiresAt ? new Date(r.leaseExpiresAt) : null,
+        claimedBy: r.claimedBy,
+        dedupeKey: r.dedupeKey,
+        createdAt: new Date(r.createdAt),
+        updatedAt: new Date(r.updatedAt),
+        processedAt: r.processedAt ? new Date(r.processedAt) : null,
       },
-      orderBy: [{ createdAt: 'asc' }],
-      take: batchSize,
-    });
-
-    if (candidates.length === 0) return [];
-
-    const claimed: ClaimedOutboxEvent[] = [];
-    for (const candidate of candidates) {
-      const claimResult = await this.prisma.outboxEvent.updateMany({
-        where: {
-          id: candidate.id,
-          status: candidate.status,
-          ...(candidate.status === OutboxStatus.PROCESSING
-            ? { leaseExpiresAt: candidate.leaseExpiresAt }
-            : {}),
-        },
-        data: {
-          status: OutboxStatus.PROCESSING,
-          claimedAt: now,
-          leaseExpiresAt: newLeaseExpiresAt,
-          claimedBy: workerId,
-        },
-      });
-
-      if (claimResult.count > 0) {
-        claimed.push({
-          event: {
-            ...candidate,
-            status: OutboxStatus.PROCESSING,
-            claimedAt: now,
-            leaseExpiresAt: newLeaseExpiresAt,
-            claimedBy: workerId,
-          },
-          isLeaseRecovery:
-            candidate.status === OutboxStatus.PROCESSING &&
-            candidate.leaseExpiresAt !== null &&
-            candidate.leaseExpiresAt <= now,
-        });
-      }
-    }
-    return claimed;
-  }
-
-  async reclaimStalled(
-    _batchSize: number = 50,
-    _leaseMs: number = 60000,
-    _workerId: string = 'outbox-worker',
-  ): Promise<number> {
-    const now = new Date();
-    const result = await this.prisma.outboxEvent.updateMany({
-      where: {
-        status: OutboxStatus.PROCESSING,
-        leaseExpiresAt: { lte: now },
-      },
-      data: {
-        status: OutboxStatus.PENDING,
-        claimedAt: null,
-        claimedBy: null,
-        leaseExpiresAt: null,
-      },
-    });
-    return result.count;
+      isLeaseRecovery:
+        r.previousStatus === OutboxStatus.PROCESSING &&
+        r.previousLeaseExpiresAt !== null &&
+        new Date(r.previousLeaseExpiresAt) <= now,
+    }));
   }
 
   async renewLease(
@@ -378,40 +332,15 @@ export class OutboxRepository {
     oldestPendingCreatedAt: Date | null;
     processingCount: number;
   }> {
-    if (
-      typeof this.prisma.outboxEvent.groupBy === 'function' &&
-      typeof this.prisma.outboxEvent.findFirst === 'function'
-    ) {
-      const [grouped, oldest, processing] = await Promise.all([
-        this.prisma.outboxEvent.groupBy({
-          by: ['eventType'],
-          where: { status: OutboxStatus.PENDING },
-          _count: { _all: true },
-        }),
-        this.prisma.outboxEvent.findFirst({
-          where: { status: OutboxStatus.PENDING },
-          select: { createdAt: true },
-          orderBy: { createdAt: 'asc' },
-        }),
-        this.prisma.outboxEvent.count({
-          where: { status: OutboxStatus.PROCESSING },
-        }),
-      ]);
-
-      return {
-        groupedPending: grouped.map((g) => ({
-          eventType: g.eventType,
-          count: g._count._all,
-        })),
-        oldestPendingCreatedAt: oldest?.createdAt ?? null,
-        processingCount: processing,
-      };
-    }
-
-    const [pendingEvents, processingCount] = await Promise.all([
-      this.prisma.outboxEvent.findMany({
+    const [grouped, oldest, processing] = await Promise.all([
+      this.prisma.outboxEvent.groupBy({
+        by: ['eventType'],
         where: { status: OutboxStatus.PENDING },
-        select: { eventType: true, createdAt: true },
+        _count: { _all: true },
+      }),
+      this.prisma.outboxEvent.findFirst({
+        where: { status: OutboxStatus.PENDING },
+        select: { createdAt: true },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.outboxEvent.count({
@@ -419,134 +348,13 @@ export class OutboxRepository {
       }),
     ]);
 
-    const counts: Record<string, number> = {};
-    for (const e of pendingEvents) {
-      counts[e.eventType] = (counts[e.eventType] || 0) + 1;
-    }
-
     return {
-      groupedPending: Object.entries(counts).map(([eventType, count]) => ({
-        eventType,
-        count,
+      groupedPending: grouped.map((g) => ({
+        eventType: g.eventType,
+        count: g._count._all,
       })),
-      oldestPendingCreatedAt: pendingEvents[0]?.createdAt ?? null,
-      processingCount,
+      oldestPendingCreatedAt: oldest?.createdAt ?? null,
+      processingCount: processing,
     };
-  }
-
-  async getQueueMetrics(): Promise<OutboxQueueMetrics> {
-    if (
-      typeof this.prisma.outboxEvent.groupBy === 'function' &&
-      typeof this.prisma.outboxEvent.findFirst === 'function'
-    ) {
-      const [grouped, oldestPending, totalFailed] = await Promise.all([
-        this.prisma.outboxEvent.groupBy({
-          by: ['status'],
-          _count: { id: true },
-        }),
-        this.prisma.outboxEvent.findFirst({
-          where: { status: OutboxStatus.PENDING },
-          orderBy: { createdAt: 'asc' },
-          select: { createdAt: true },
-        }),
-        this.prisma.outboxEvent.count({
-          where: { status: OutboxStatus.FAILED },
-        }),
-      ]);
-
-      const statusCounts: Record<string, number> = {};
-      for (const g of grouped) {
-        statusCounts[g.status] = g._count.id;
-      }
-
-      const oldestPendingCreatedAt = oldestPending?.createdAt ?? null;
-      const oldestPendingAgeMs = oldestPendingCreatedAt
-        ? Math.max(0, Date.now() - oldestPendingCreatedAt.getTime())
-        : 0;
-
-      return {
-        statusCounts,
-        oldestPendingCreatedAt,
-        oldestPendingAgeMs,
-        failedCount: totalFailed,
-      };
-    }
-
-    return {
-      statusCounts: {},
-      oldestPendingCreatedAt: null,
-      oldestPendingAgeMs: 0,
-      failedCount: 0,
-    };
-  }
-
-  async getDeadLetterEvents(
-    options: { skip?: number; take?: number } = {},
-  ): Promise<DeadLetterEventsPage> {
-    const skip = options.skip ?? 0;
-    const take = options.take ?? 50;
-
-    const [items, total] = await Promise.all([
-      this.prisma.outboxEvent.findMany({
-        where: { status: OutboxStatus.FAILED },
-        orderBy: { updatedAt: 'desc' },
-        skip,
-        take,
-      }),
-      this.prisma.outboxEvent.count({
-        where: { status: OutboxStatus.FAILED },
-      }),
-    ]);
-
-    return { items, total };
-  }
-
-  async retryFailedEvent(id: string): Promise<boolean> {
-    const res = await this.prisma.outboxEvent.updateMany({
-      where: { id, status: OutboxStatus.FAILED },
-      data: {
-        status: OutboxStatus.PENDING,
-        retryCount: 0,
-        error: null,
-        claimedAt: null,
-        claimedBy: null,
-        leaseExpiresAt: null,
-      },
-    });
-    return res.count > 0;
-  }
-
-  async retryAllDeadLetterEvents(limit: number = 100): Promise<number> {
-    const failedEvents = await this.prisma.outboxEvent.findMany({
-      where: { status: OutboxStatus.FAILED },
-      select: { id: true },
-      take: limit,
-    });
-
-    if (failedEvents.length === 0) return 0;
-
-    const ids = failedEvents.map((e) => e.id);
-    const res = await this.prisma.outboxEvent.updateMany({
-      where: { id: { in: ids } },
-      data: {
-        status: OutboxStatus.PENDING,
-        retryCount: 0,
-        error: null,
-        claimedAt: null,
-        claimedBy: null,
-        leaseExpiresAt: null,
-      },
-    });
-    return res.count;
-  }
-
-  async cleanupPublished(retentionCutoff: Date): Promise<number> {
-    const result = await this.prisma.outboxEvent.deleteMany({
-      where: {
-        status: OutboxStatus.PUBLISHED,
-        processedAt: { lte: retentionCutoff },
-      },
-    });
-    return result.count;
   }
 }

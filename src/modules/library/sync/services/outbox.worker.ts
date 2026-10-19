@@ -4,6 +4,7 @@ import {
   Optional,
   OnApplicationBootstrap,
   OnApplicationShutdown,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -19,6 +20,7 @@ import {
   OutboxRepository,
   ClaimedOutboxEvent,
 } from '../repositories/outbox.repository';
+import { ChangeLogRepository } from '../repositories/changelog.repository';
 import {
   libraryConfig,
   LibraryConfigService,
@@ -30,16 +32,19 @@ export type { OutboxDispatchHandler };
 
 @Injectable()
 export class OutboxWorker
-  implements OnApplicationBootstrap, OnApplicationShutdown
+  implements OnApplicationBootstrap, OnApplicationShutdown, OnModuleDestroy
 {
   private readonly logger = new Logger(OutboxWorker.name);
-  private readonly handlers = new Map<string, OutboxDispatchHandler>();
+  private readonly handlers = new Map<string, OutboxDispatchHandler[]>();
   private defaultHandler?: OutboxDispatchHandler;
   private readonly maxRetries = 5;
+  private static readonly CONCURRENCY = 5;
+  private static readonly GC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
   private readonly workerId: string;
   private readonly repo: OutboxRepository;
 
   private pollTimer: NodeJS.Timeout | null = null;
+  private gcTimer: NodeJS.Timeout | null = null;
   private isProcessing = false;
   private isShuttingDown = false;
 
@@ -51,6 +56,7 @@ export class OutboxWorker
     @Optional()
     @InjectQueue(LIBRARY_OUTBOX_QUEUE)
     private readonly bullQueue?: Queue,
+    @Optional() private readonly changeLogRepo?: ChangeLogRepository,
   ) {
     this.workerId = `outbox-worker-${process.pid}-${randomUUID().slice(0, 8)}`;
     if (!this.outboxRepo) {
@@ -61,7 +67,7 @@ export class OutboxWorker
     }
     this.repo = this.outboxRepo;
 
-    if (typeof this.bullQueue?.on === 'function') {
+    if (this.bullQueue) {
       this.bullQueue.on('error', (err: Error) => {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Outbox BullMQ queue notice: ${message}`);
@@ -74,7 +80,11 @@ export class OutboxWorker
   }
 
   registerHandler(eventType: string, handler: OutboxDispatchHandler) {
-    this.handlers.set(eventType, handler);
+    const existing = this.handlers.get(eventType) ?? [];
+    if (!existing.includes(handler)) {
+      existing.push(handler);
+    }
+    this.handlers.set(eventType, existing);
     this.logger.log(`Registered Outbox dispatch handler for: ${eventType}`);
   }
 
@@ -84,7 +94,16 @@ export class OutboxWorker
   }
 
   hasHandler(eventType: string): boolean {
-    return this.handlers.has(eventType);
+    const list = this.handlers.get(eventType);
+    return Boolean(list && list.length > 0);
+  }
+
+  private getEffectiveHandlers(eventType: string): OutboxDispatchHandler[] {
+    const registered = this.handlers.get(eventType) ?? [];
+    if (this.defaultHandler && !registered.includes(this.defaultHandler)) {
+      return [...registered, this.defaultHandler];
+    }
+    return [...registered];
   }
 
   /**
@@ -100,7 +119,7 @@ export class OutboxWorker
       removeOnComplete: true,
     };
 
-    if (this.bullQueue && typeof this.bullQueue.addBulk === 'function') {
+    if (this.bullQueue) {
       await this.bullQueue
         .addBulk(
           eventIds.map((eventId) => ({
@@ -136,9 +155,9 @@ export class OutboxWorker
     }
 
     const leaseMs =
-      this.libraryConfigService?.outbox.lockTtlMs ??
+      this.libraryConfigService?.outbox.leaseMs ??
       (Number(this.configService?.get('OUTBOX_LEASE_MS')) ||
-        libraryConfig().outbox.lockTtlMs);
+        libraryConfig().outbox.leaseMs);
 
     const claimed = await this.repo.claimSingleEvent(
       eventId,
@@ -149,48 +168,101 @@ export class OutboxWorker
       return true;
     }
 
-    const handler = this.handlers.get(event.eventType) || this.defaultHandler;
-    if (!handler) {
-      const newRetryCount = event.retryCount + 1;
-      const isMax = newRetryCount >= this.maxRetries;
-      await this.repo.markMissingHandler(
-        eventId,
-        newRetryCount,
-        isMax,
-        event.eventType,
-      );
+    const effectiveHandlers = this.getEffectiveHandlers(event.eventType);
+    if (effectiveHandlers.length === 0) {
+      await this.handleMissingHandler(event);
       return false;
     }
 
     const start = performance.now();
     try {
-      await handler.handle(event);
+      await Promise.all(effectiveHandlers.map((h) => h.handle(event)));
       const durationMs = Math.round(performance.now() - start);
 
       await this.repo.markPublished(eventId, this.workerId);
-
       this.metricsService?.recordOutboxDispatch(durationMs, true);
-      this.metricsService?.incrementCounter('outbox_dispatched_total');
       return true;
     } catch (err: unknown) {
       const durationMs = Math.round(performance.now() - start);
-      const newRetryCount = event.retryCount + 1;
-      const isMax = newRetryCount >= this.maxRetries;
-      const errMsg = err instanceof Error ? err.message : String(err);
-
-      this.logger.error(
-        `[OutboxWorker] Event ${eventId} (${event.eventType}) failed (attempt ${newRetryCount}/${this.maxRetries}): ${errMsg}`,
-      );
-
-      await this.repo.markFailed(eventId, newRetryCount, isMax, errMsg);
-
       this.metricsService?.recordOutboxDispatch(durationMs, false);
-      this.metricsService?.incrementCounter('outbox_retry_total');
-      if (isMax) {
-        this.metricsService?.incrementCounter('outbox_dlq_total');
-      }
+      await this.handleDispatchFailure(event, err);
       throw err;
     }
+  }
+
+  private async handleMissingHandler(event: {
+    id: string;
+    eventType: string;
+    retryCount: number;
+  }): Promise<'deadLettered' | 'retried'> {
+    const newRetryCount = event.retryCount + 1;
+    this.metricsService?.incrementCounter('outbox_unhandled_event_total');
+
+    if (newRetryCount >= this.maxRetries) {
+      this.logger.error(
+        `Unrecognized event type "${event.eventType}" on event ${event.id} reached max retries (${this.maxRetries}). Moving to DLQ.`,
+      );
+      this.metricsService?.incrementCounter('outbox_dlq_total');
+      await this.repo.markDeadLetter(
+        event.id,
+        newRetryCount,
+        `No handler registered for event type "${event.eventType}"`,
+        this.workerId,
+      );
+      return 'deadLettered';
+    }
+
+    const delaySec = Math.pow(2, newRetryCount) * 10;
+    this.logger.warn(
+      `No handler registered for event type "${event.eventType}" on event ${event.id}. Retrying in ${delaySec}s (attempt ${newRetryCount}/${this.maxRetries})`,
+    );
+    await this.repo.scheduleRetry(
+      event.id,
+      newRetryCount,
+      new Date(Date.now() + delaySec * 1000),
+      `No handler registered for event type "${event.eventType}"`,
+      this.workerId,
+    );
+    return 'retried';
+  }
+
+  private async handleDispatchFailure(
+    event: { id: string; eventType: string; retryCount: number },
+    err: unknown,
+  ): Promise<'deadLettered' | 'retried'> {
+    const newRetryCount = event.retryCount + 1;
+    const errMsg = err instanceof Error ? err.message : String(err);
+    this.metricsService?.incrementCounter('outbox_retry_total');
+
+    if (newRetryCount >= this.maxRetries) {
+      this.logger.error(
+        `Event ${event.id} (${event.eventType}) reached max retries (${this.maxRetries}). Moving to FAILED / DLQ: ${errMsg}`,
+      );
+      this.metricsService?.incrementCounter('outbox_dlq_total');
+      await this.repo.markDeadLetter(
+        event.id,
+        newRetryCount,
+        errMsg || 'Exceeded maximum retry attempts',
+        this.workerId,
+      );
+      return 'deadLettered';
+    }
+
+    const delaySec = Math.pow(2, newRetryCount);
+    const nextSchedule = new Date(Date.now() + delaySec * 1000);
+
+    this.logger.warn(
+      `Event ${event.id} (${event.eventType}) failed (attempt ${newRetryCount}/${this.maxRetries}). Retrying in ${delaySec}s: ${errMsg}`,
+    );
+
+    await this.repo.scheduleRetry(
+      event.id,
+      newRetryCount,
+      nextSchedule,
+      errMsg,
+      this.workerId,
+    );
+    return 'retried';
   }
 
   onApplicationBootstrap() {
@@ -221,11 +293,78 @@ export class OutboxWorker
       );
       void this.logStartupDiagnostics();
       this.startPolling(intervalMs);
+      this.startGcSweep();
     } else {
       this.logger.log(
         `Outbox consumer runner is disabled (NODE_ENV=${this.libraryConfigService?.app.nodeEnv ?? libraryConfig().app.nodeEnv}).`,
       );
     }
+  }
+
+  startGcSweep(intervalMs: number = OutboxWorker.GC_INTERVAL_MS) {
+    if (this.gcTimer) {
+      clearInterval(this.gcTimer);
+    }
+    this.gcTimer = setInterval(() => {
+      void this.runDatabaseGarbageCollection();
+    }, intervalMs);
+    this.gcTimer.unref();
+  }
+
+  stopGcSweep() {
+    if (this.gcTimer) {
+      clearInterval(this.gcTimer);
+      this.gcTimer = null;
+    }
+  }
+
+  async runDatabaseGarbageCollection(): Promise<{
+    purgedPublished: number;
+    purgedFailed: number;
+    purgedChanges: number;
+    purgedTombstones: number;
+  }> {
+    let purgedPublished = 0;
+    let purgedFailed = 0;
+    let purgedChanges = 0;
+    let purgedTombstones = 0;
+
+    try {
+      if (typeof this.repo.purgeProcessedOutboxEvents === 'function') {
+        const outboxRes = await this.repo.purgeProcessedOutboxEvents(3, 30, 1000);
+        purgedPublished = outboxRes.purgedPublished;
+        purgedFailed = outboxRes.purgedFailed;
+      }
+      if (
+        this.changeLogRepo &&
+        typeof this.changeLogRepo.compactAndPurgeChangeLog === 'function'
+      ) {
+        const changeLogRes =
+          await this.changeLogRepo.compactAndPurgeChangeLog(30, 1000);
+        purgedChanges = changeLogRes.purgedChanges;
+        purgedTombstones = changeLogRes.purgedTombstones;
+      }
+      if (
+        purgedPublished > 0 ||
+        purgedFailed > 0 ||
+        purgedChanges > 0 ||
+        purgedTombstones > 0
+      ) {
+        this.logger.log(
+          `[OutboxGC] Purged ${purgedPublished} published outbox events, ${purgedFailed} failed outbox events, ${purgedChanges} change log entries, and ${purgedTombstones} tombstones.`,
+        );
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Outbox database GC sweep encountered error: ${errMsg}`);
+    }
+
+    return {
+      purgedPublished,
+      purgedFailed,
+      purgedChanges,
+      purgedTombstones,
+    };
   }
 
   async logStartupDiagnostics(): Promise<void> {
@@ -329,9 +468,9 @@ export class OutboxWorker
         (Number(this.configService?.get('OUTBOX_BATCH_SIZE')) ||
           libraryConfig().outbox.batchSize);
       const leaseMs =
-        this.libraryConfigService?.outbox.lockTtlMs ??
+        this.libraryConfigService?.outbox.leaseMs ??
         (Number(this.configService?.get('OUTBOX_LEASE_MS')) ||
-          libraryConfig().outbox.lockTtlMs);
+          libraryConfig().outbox.leaseMs);
 
       await this.processPendingEvents(batchSize, leaseMs);
     } catch (err: unknown) {
@@ -349,6 +488,111 @@ export class OutboxWorker
     return this.repo.claimBatch(batchSize, leaseMs, this.workerId);
   }
 
+  private async processClaimedItem(
+    claimed: ClaimedOutboxEvent,
+    leaseMs: number,
+  ): Promise<{
+    processed: number;
+    failed: number;
+    deadLettered: number;
+    reclaimed: number;
+  }> {
+    const { event, isLeaseRecovery } = claimed;
+    let processed = 0;
+    let failed = 0;
+    let deadLettered = 0;
+    let reclaimed = 0;
+
+    if (isLeaseRecovery) {
+      reclaimed++;
+      this.metricsService?.incrementCounter('outbox_lease_reclaimed_total');
+      this.logger.warn(
+        `Reclaimed expired PROCESSING event ${event.id} (type: ${event.eventType}, previousWorker: ${event.claimedBy || 'unknown'})`,
+      );
+    }
+
+    const effectiveHandlers = this.getEffectiveHandlers(event.eventType);
+    if (effectiveHandlers.length === 0) {
+      const outcome = await this.handleMissingHandler(event);
+      if (outcome === 'deadLettered') {
+        deadLettered++;
+      }
+      return { processed, failed, deadLettered, reclaimed };
+    }
+
+    const abortController = new AbortController();
+    let isLeaseLost = false;
+    const heartbeatIntervalMs = Math.max(1000, Math.floor(leaseMs / 3));
+    const heartbeatTimer = setInterval(() => {
+      void (async () => {
+        try {
+          const renewed = await this.repo.renewLease(
+            event.id,
+            this.workerId,
+            leaseMs,
+          );
+          if (!renewed) {
+            isLeaseLost = true;
+            abortController.abort();
+            this.logger.error(
+              `Worker [${this.workerId}] LOST LEASE on OutboxEvent ${event.id}. Aborting handler execution.`,
+            );
+            this.metricsService?.incrementCounter('outbox_lease_lost_total');
+            clearInterval(heartbeatTimer);
+          }
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Heartbeat renewal failed for event ${event.id}: ${errMsg}`,
+          );
+        }
+      })();
+    }, heartbeatIntervalMs);
+    heartbeatTimer.unref();
+
+    try {
+      await Promise.all(
+        effectiveHandlers.map((h) => h.handle(event, abortController.signal)),
+      );
+      clearInterval(heartbeatTimer);
+
+      if (isLeaseLost) {
+        this.logger.error(
+          `Worker [${this.workerId}] refused to publish event ${event.id} due to lost lease.`,
+        );
+        return { processed, failed, deadLettered, reclaimed };
+      }
+
+      const published = await this.repo.markPublished(event.id, this.workerId);
+      if (!published) {
+        this.logger.warn(
+          `Worker [${this.workerId}] lost claim before publishing event ${event.id}.`,
+        );
+        this.metricsService?.incrementCounter('outbox_lease_lost_total');
+      } else {
+        processed++;
+      }
+    } catch (err: unknown) {
+      clearInterval(heartbeatTimer);
+
+      if (isLeaseLost) {
+        this.logger.error(
+          `Worker [${this.workerId}] aborted error handling for event ${event.id} due to lost lease.`,
+        );
+        return { processed, failed, deadLettered, reclaimed };
+      }
+
+      const outcome = await this.handleDispatchFailure(event, err);
+      if (outcome === 'deadLettered') {
+        deadLettered++;
+      } else {
+        failed++;
+      }
+    }
+
+    return { processed, failed, deadLettered, reclaimed };
+  }
+
   async processPendingEvents(
     batchSize: number = 50,
     leaseMs: number = 60000,
@@ -359,172 +603,60 @@ export class OutboxWorker
     reclaimed: number;
   }> {
     const claimedItems = await this.claimBatch(batchSize, leaseMs);
+    if (!claimedItems || claimedItems.length === 0) {
+      return { processed: 0, failed: 0, deadLettered: 0, reclaimed: 0 };
+    }
 
+    // Group claimed items by aggregateId so events for the same aggregate stay strictly ordered
+    // while independent aggregates process concurrently with bounded concurrency (CONCURRENCY = 5).
+    const aggregateGroups = new Map<string, ClaimedOutboxEvent[]>();
+    for (const item of claimedItems) {
+      const aggKey = item.event.aggregateId || item.event.id;
+      let group = aggregateGroups.get(aggKey);
+      if (!group) {
+        group = [];
+        aggregateGroups.set(aggKey, group);
+      }
+      group.push(item);
+    }
+
+    const groups = Array.from(aggregateGroups.values());
     let processed = 0;
     let failed = 0;
     let deadLettered = 0;
     let reclaimed = 0;
+    let groupCursor = 0;
 
-    for (const { event, isLeaseRecovery } of claimedItems) {
-      if (isLeaseRecovery) {
-        reclaimed++;
-        this.metricsService?.incrementCounter('outbox_lease_reclaimed_total');
-        this.logger.warn(
-          `Reclaimed expired PROCESSING event ${event.id} (type: ${event.eventType}, previousWorker: ${event.claimedBy || 'unknown'})`,
-        );
-      }
-
-      const handler = this.handlers.get(event.eventType) || this.defaultHandler;
-      if (!handler) {
-        const newRetryCount = event.retryCount + 1;
-        this.metricsService?.incrementCounter('outbox_unhandled_event_total');
-
-        if (newRetryCount >= this.maxRetries) {
-          this.logger.error(
-            `Unrecognized event type "${event.eventType}" on event ${event.id} reached max retries (${this.maxRetries}). Moving to DLQ.`,
-          );
-          this.metricsService?.incrementCounter('outbox_dlq_total');
-          await this.repo.markDeadLetter(
-            event.id,
-            newRetryCount,
-            `No handler registered for event type "${event.eventType}"`,
-            this.workerId,
-          );
-          deadLettered++;
-        } else {
-          const delaySec = Math.pow(2, newRetryCount) * 10;
-          this.logger.warn(
-            `No handler registered for event type "${event.eventType}" on event ${event.id}. Retrying in ${delaySec}s (attempt ${newRetryCount}/${this.maxRetries})`,
-          );
-          await this.repo.scheduleRetry(
-            event.id,
-            newRetryCount,
-            new Date(Date.now() + delaySec * 1000),
-            undefined,
-            this.workerId,
-          );
-        }
-        continue;
-      }
-
-      const abortController = new AbortController();
-      let isLeaseLost = false;
-      const heartbeatIntervalMs = Math.max(1000, Math.floor(leaseMs / 3));
-      const heartbeatTimer = setInterval(() => {
-        void (async () => {
-          try {
-            const renewed = await this.repo.renewLease(
-              event.id,
-              this.workerId,
-              leaseMs,
-            );
-            if (!renewed) {
-              isLeaseLost = true;
-              abortController.abort();
-              this.logger.error(
-                `Worker [${this.workerId}] LOST LEASE on OutboxEvent ${event.id}. Aborting handler execution.`,
-              );
-              this.metricsService?.incrementCounter('outbox_lease_lost_total');
-              clearInterval(heartbeatTimer);
-            }
-          } catch (err: unknown) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            this.logger.warn(
-              `Heartbeat renewal failed for event ${event.id}: ${errMsg}`,
-            );
-          }
-        })();
-      }, heartbeatIntervalMs);
-      heartbeatTimer.unref();
-
-      try {
-        await handler.handle(event, abortController.signal);
-        clearInterval(heartbeatTimer);
-
-        if (isLeaseLost) {
-          this.logger.error(
-            `Worker [${this.workerId}] refused to publish event ${event.id} due to lost lease.`,
-          );
-          continue;
-        }
-
-        const published = await this.repo.markPublished(
-          event.id,
-          this.workerId,
-        );
-        if (!published) {
-          this.logger.warn(
-            `Worker [${this.workerId}] lost claim before publishing event ${event.id}.`,
-          );
-          this.metricsService?.incrementCounter('outbox_lease_lost_total');
-        } else {
-          processed++;
-        }
-      } catch (err: unknown) {
-        clearInterval(heartbeatTimer);
-
-        if (isLeaseLost) {
-          this.logger.error(
-            `Worker [${this.workerId}] aborted error handling for event ${event.id} due to lost lease.`,
-          );
-          continue;
-        }
-
-        const newRetryCount = event.retryCount + 1;
-        const errMsg = err instanceof Error ? err.message : String(err);
-        this.metricsService?.incrementCounter('outbox_retry_total');
-
-        if (newRetryCount >= this.maxRetries) {
-          this.logger.error(
-            `Event ${event.id} (${event.eventType}) reached max retries (${this.maxRetries}). Moving to FAILED / DLQ: ${errMsg}`,
-          );
-          this.metricsService?.incrementCounter('outbox_dlq_total');
-          await this.repo.markDeadLetter(
-            event.id,
-            newRetryCount,
-            errMsg || 'Exceeded maximum retry attempts',
-            this.workerId,
-          );
-          deadLettered++;
-        } else {
-          const delaySec = Math.pow(2, newRetryCount);
-          const nextSchedule = new Date(Date.now() + delaySec * 1000);
-
-          this.logger.warn(
-            `Event ${event.id} (${event.eventType}) failed (attempt ${newRetryCount}/${this.maxRetries}). Retrying in ${delaySec}s: ${errMsg}`,
-          );
-
-          await this.repo.scheduleRetry(
-            event.id,
-            newRetryCount,
-            nextSchedule,
-            errMsg,
-            this.workerId,
-          );
-          failed++;
+    const workerCount = Math.min(OutboxWorker.CONCURRENCY, groups.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (groupCursor < groups.length) {
+        const currentGroup = groups[groupCursor++];
+        if (!currentGroup) break;
+        for (const item of currentGroup) {
+          const res = await this.processClaimedItem(item, leaseMs);
+          processed += res.processed;
+          failed += res.failed;
+          deadLettered += res.deadLettered;
+          reclaimed += res.reclaimed;
         }
       }
-    }
+    });
+
+    await Promise.all(workers);
 
     return { processed, failed, deadLettered, reclaimed };
   }
 
-  async purgeCompletedEvents(
-    olderThanMs: number = 7 * 24 * 60 * 60 * 1000,
-  ): Promise<number> {
-    const cutoff = new Date(Date.now() - olderThanMs);
-    const count = await this.repo.cleanupPublished(cutoff);
-    if (count > 0) {
-      this.logger.log(
-        `Purged ${count} completed outbox events older than ${cutoff.toISOString()}`,
-      );
-    }
-    return count;
+  onModuleDestroy() {
+    this.isShuttingDown = true;
+    this.stopPolling();
+    this.stopGcSweep();
   }
 
   onApplicationShutdown() {
     this.isShuttingDown = true;
     this.stopPolling();
+    this.stopGcSweep();
     this.logger.log(`Outbox consumer [${this.workerId}] shut down gracefully.`);
   }
 }

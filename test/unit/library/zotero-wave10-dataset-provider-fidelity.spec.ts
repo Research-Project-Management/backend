@@ -9,7 +9,11 @@ import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { parseCreatorString } from '@/modules/library/core/domain/author.domain';
 import { stripLatexBraces } from '@/modules/library/core/domain/academic-text.domain';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
-import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
+import {
+  DuplicateService,
+  DuplicateDetectorService,
+  DuplicateMergerService,
+} from '@/modules/library/ingestion/services/duplicate.service';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { Prisma } from '@prisma/client';
@@ -559,8 +563,22 @@ describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Reme
     it('merges cross-type duplicate items (e.g. webpage + journalArticle) and custom metadata fields without arbitrary 400 rejection', async () => {
       const updatedItems: Record<string, unknown>[] = [];
       const mockTx = {
+        $executeRaw: jest.fn().mockResolvedValue(1),
         itemRelation: {
           findMany: jest.fn().mockResolvedValue([]),
+        },
+        userPublication: {
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+        contributor: {
+          count: jest.fn().mockResolvedValue(0),
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+          createMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+        itemMetadata: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          update: jest.fn().mockResolvedValue({}),
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
         item: {
           update: jest.fn().mockImplementation(async ({ data }) => {
@@ -612,8 +630,8 @@ describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Reme
       } as unknown as ICatalogFacade;
 
       const duplicateService = new DuplicateService(
-        mockTxService,
-        mockCatalogGateway,
+        new DuplicateDetectorService(mockCatalogGateway, undefined, mockTxService),
+        new DuplicateMergerService(mockTxService, mockCatalogGateway),
       );
 
       const res = await duplicateService.mergeDuplicates('user-1', {

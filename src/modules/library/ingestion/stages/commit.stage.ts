@@ -10,10 +10,11 @@ import {
   parseCreatorString,
   cleanAbstractText,
   cleanCommentText,
-  normalizeTags,
+  normalizeAcademicTags,
   getEffectiveBaseFieldMap,
   harmonizeZoteroFields,
   resolveCanonicalCreatorRole,
+  generateCitationKey,
 } from '@/modules/library/core';
 import {
   IWorkflowStage,
@@ -220,66 +221,6 @@ function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
   return creators.length > 0 ? creators : undefined;
 }
 
-const CITATION_KEY_STOP_WORDS = new Set([
-  'a',
-  'an',
-  'the',
-  'on',
-  'in',
-  'for',
-  'of',
-  'and',
-  'with',
-  'via',
-  'to',
-  'is',
-  'are',
-]);
-
-function generateBibtexCitationKey(
-  metadata: ItemMetadata,
-  existingKeys?: Set<string>,
-): string | undefined {
-  if (metadata.citationKey && metadata.citationKey.trim()) {
-    return metadata.citationKey.trim().replace(/\s+/g, '');
-  }
-  const firstAuthor =
-    metadata.authors?.[0] ||
-    metadata.creators?.[0]?.lastName ||
-    metadata.creators?.[0]?.fullName;
-  if (!firstAuthor && !metadata.title) return undefined;
-
-  let authorPart = 'ref';
-  if (firstAuthor) {
-    const authorTokens = firstAuthor.trim().split(/\s+/);
-    authorPart = (authorTokens[authorTokens.length - 1] || firstAuthor)
-      .toLowerCase()
-      .replace(/[^a-z0-9]/gi, '');
-  }
-  const yearPart = metadata.year ? String(metadata.year) : '';
-  let titlePart = 'paper';
-  if (metadata.title) {
-    for (const wordItem of metadata.title.trim().split(/\s+/)) {
-      const cleanWord = wordItem.replace(/[^a-z0-9]/gi, '').toLowerCase();
-      if (cleanWord && !CITATION_KEY_STOP_WORDS.has(cleanWord)) {
-        titlePart = cleanWord;
-        break;
-      }
-    }
-  }
-
-  const baseKey = `${authorPart || 'ref'}${yearPart}${titlePart || 'paper'}`;
-  if (!existingKeys || !existingKeys.has(baseKey)) return baseKey;
-
-  for (const ch of 'abcdefghijklmnopqrstuvwxyz') {
-    const candidate = `${baseKey}${ch}`;
-    if (!existingKeys.has(candidate)) return candidate;
-  }
-  let counter = 2;
-  while (existingKeys.has(`${baseKey}_${counter}`)) counter++;
-  return `${baseKey}_${counter}`;
-}
-
 const EXCLUDED_RAW_METADATA_KEYS = new Set([
   'title',
   'abstract',
@@ -313,7 +254,7 @@ export function toItemData(
   options?: CommitStageOptions,
   primaryRole: string = 'author',
 ): CreateItemData {
-  const rawTags = normalizeTags(
+  const rawTags = normalizeAcademicTags(
     metadata.tags || metadata.keywords || metadata.labels || [],
   );
   const extraFields: Record<string, unknown> = {
@@ -449,7 +390,7 @@ export function toItemData(
     seriesNumber: harmonized.seriesNumber,
     abstract: cleanAbstractText(harmonized.abstract) ?? undefined,
     url: harmonized.url,
-    citationKey: harmonized.citationKey || generateBibtexCitationKey(metadata),
+    citationKey: harmonized.citationKey || generateCitationKey(metadata),
     shortTitle: metadata.shortTitle,
     creators: mergeCreators(metadata, primaryRole),
     tags: rawTags,
@@ -463,7 +404,8 @@ export function toItemData(
       metadata.openAccessPdfUrl ||
       undefined,
     openAccessPdfUrl: metadata.openAccessPdfUrl || undefined,
-    attachments: metadata.attachments || undefined,
+    attachments:
+      (metadata.attachments as CreateItemData['attachments']) || undefined,
     language: metadata.language,
     rights: harmonized.rights,
     license: harmonized.license,
@@ -488,14 +430,19 @@ export function toItemData(
     uploadedById: options?.userId || '',
     isRetracted: metadata.isRetracted,
     retractionNature: metadata.retractionNature,
-    retractionDetails: metadata.retractionDetails,
+    retractionDetails:
+      metadata.retractionDetails &&
+      typeof metadata.retractionDetails === 'object' &&
+      !Array.isArray(metadata.retractionDetails)
+        ? (metadata.retractionDetails as Record<string, unknown>)
+        : null,
     retractionCheckedAt: metadata.retractionCheckedAt,
   };
 }
 
 @Injectable()
 export class CommitStage implements IWorkflowStage<
-  CommitStageInput | { userId?: string; projectId?: string | null } | string,
+  CommitStageInput,
   ItemDetail
 > {
   readonly stageName = 'COMMIT' as const;
@@ -504,22 +451,12 @@ export class CommitStage implements IWorkflowStage<
     private readonly catalogGateway: ICatalogFacade,
   ) {}
 
-  async execute(
-    scopeOrInput:
-      | CommitStageInput
-      | { userId?: string; projectId?: string | null }
-      | string,
-    metadata?: ItemMetadata,
-    options?: CommitStageOptions,
-  ): Promise<ItemDetail> {
-    const isStageInput =
-      typeof scopeOrInput === 'object' &&
-      scopeOrInput !== null &&
-      'scopeId' in scopeOrInput &&
-      'item' in scopeOrInput;
-    const scope = isStageInput ? scopeOrInput.scopeId : scopeOrInput;
-    const actualMetadata = isStageInput ? scopeOrInput.item : metadata!;
-    const actualOptions = isStageInput ? scopeOrInput.options : options;
+  async execute(input: CommitStageInput): Promise<ItemDetail> {
+    const {
+      scopeId: scope,
+      item: actualMetadata,
+      options: actualOptions,
+    } = input;
 
     const primaryRole =
       this.catalogGateway?.getPrimaryCreatorType?.(

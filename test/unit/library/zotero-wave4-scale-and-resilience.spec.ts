@@ -13,7 +13,11 @@ import { ItemService } from '../../../src/modules/library/catalog/services/items
 import { ItemQueryService } from '../../../src/modules/library/catalog/services/item-query.service';
 import { QueryRepository } from '../../../src/modules/library/catalog/repositories/query.repository';
 import { TagsService } from '../../../src/modules/library/catalog/services/tags.service';
-import { DuplicateService } from '../../../src/modules/library/ingestion/services/duplicate.service';
+import {
+  DuplicateService,
+  DuplicateDetectorService,
+  DuplicateMergerService,
+} from '../../../src/modules/library/ingestion/services/duplicate.service';
 import { ExportsService } from '../../../src/modules/library/citation/services/exports.service';
 import { CitationService } from '../../../src/modules/library/citation/services/citation.service';
 import {
@@ -1134,15 +1138,15 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
         }),
       };
 
+      const tagsServiceMock = {
+        invalidateTagsCache: jest.fn().mockResolvedValue(undefined),
+      } as never;
       const itemQueryService = new ItemQueryService(queryRepoMock as never);
       const itemService = new ItemService(
         queryRepoMock as never,
         commandRepoMock as never,
         txServiceMock as never,
-        {
-          invalidateTagsCache: jest.fn().mockResolvedValue(undefined),
-        } as never,
-        itemQueryService,
+        tagsServiceMock,
       );
 
       // Soft-delete item-1 and item-2
@@ -1150,8 +1154,8 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
         'item-1',
         'item-2',
       ]);
-      expect(trashRes.count).toBe(2);
-      expect(trashRes.trashedIds).toEqual(['item-1', 'item-2']);
+      expect(trashRes.trashedCount).toBe(2);
+      expect(trashRes.succeededIds).toEqual(['item-1', 'item-2']);
 
       // Active library query now returns 0 items, while Trash returns 2 items
       const activeAfterTrash = await itemQueryService.listItems(USER_ID, {
@@ -1166,8 +1170,8 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
 
       // Restore item-1 -> reappears in active library with its collection intact
       const restoreRes = await itemService.bulkRestore(USER_ID, ['item-1']);
-      expect(restoreRes.count).toBe(1);
-      expect(restoreRes.restoredIds).toEqual(['item-1']);
+      expect(restoreRes.restoredCount).toBe(1);
+      expect(restoreRes.succeededIds).toEqual(['item-1']);
 
       const activeAfterRestore = await itemQueryService.listItems(USER_ID, {
         view: 'all',
@@ -1177,7 +1181,7 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
 
       // Permanently purge item-2 from Trash
       const purgeRes = await itemService.bulkPurge(USER_ID, ['item-2']);
-      expect(purgeRes.count).toBe(1);
+      expect(purgeRes.purgedCount).toBe(1);
       const trashedAfterPurge = await itemQueryService.listItems(USER_ID, {
         view: 'trash',
       });
@@ -1364,8 +1368,8 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
           .mockResolvedValue(syntheticItems),
       };
       const duplicateService = new DuplicateService(
-        {} as never,
-        catalogGatewayMock as never,
+        new DuplicateDetectorService(catalogGatewayMock as never),
+        new DuplicateMergerService({} as never, catalogGatewayMock as never),
       );
 
       const startMs = performance.now();

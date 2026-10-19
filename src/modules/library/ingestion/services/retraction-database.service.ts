@@ -33,6 +33,9 @@ export interface RetractionDatabaseStats {
 export class RetractionDatabaseService implements OnModuleInit {
   private readonly logger = new Logger(RetractionDatabaseService.name);
 
+  public static readonly MAX_MEMORY_INDEX_ENTRIES = 5000;
+  public static readonly MAX_CLEAN_DOI_CACHE = 10000;
+
   // Fast In-Memory Indexes for 0ms lookup without DB roundtrip
   private readonly memoryDoiMap = new Map<string, RetractionDetails>();
   private readonly memoryPmidMap = new Map<string, RetractionDetails>();
@@ -41,6 +44,45 @@ export class RetractionDatabaseService implements OnModuleInit {
   private readonly CLEAN_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
   constructor(private readonly repo: RetractionRepository) {}
+
+  private setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
+    if (map.has(key)) {
+      map.delete(key);
+    } else if (map.size >= max) {
+      const oldestKey = map.keys().next().value;
+      if (oldestKey !== undefined) {
+        map.delete(oldestKey);
+      }
+    }
+    map.set(key, value);
+  }
+
+  private setMemoryDoi(doi: string, details: RetractionDetails): void {
+    this.setBoundedMap(
+      this.memoryDoiMap,
+      doi,
+      details,
+      RetractionDatabaseService.MAX_MEMORY_INDEX_ENTRIES,
+    );
+  }
+
+  private setMemoryPmid(pmid: string, details: RetractionDetails): void {
+    this.setBoundedMap(
+      this.memoryPmidMap,
+      pmid,
+      details,
+      RetractionDatabaseService.MAX_MEMORY_INDEX_ENTRIES,
+    );
+  }
+
+  private setCleanDoiCache(doi: string, expiresAt: number): void {
+    this.setBoundedMap(
+      this.cleanDoiCache,
+      doi,
+      expiresAt,
+      RetractionDatabaseService.MAX_CLEAN_DOI_CACHE,
+    );
+  }
 
   onModuleInit(): void {
     // Non-blocking initialization of seed data and memory cache
@@ -80,7 +122,9 @@ export class RetractionDatabaseService implements OnModuleInit {
    */
   async warmMemoryIndex(): Promise<void> {
     try {
-      const records = await this.repo.findRetractionRecordsForMemoryIndex();
+      const records = await this.repo.findRetractionRecordsForMemoryIndex(
+        RetractionDatabaseService.MAX_MEMORY_INDEX_ENTRIES,
+      );
 
       for (const r of records) {
         const details: RetractionDetails = {
@@ -94,9 +138,8 @@ export class RetractionDatabaseService implements OnModuleInit {
           source: (r.source as RetractionSource) || 'retraction_watch',
         };
 
-        if (r.doi) this.memoryDoiMap.set(r.doi.toLowerCase().trim(), details);
-        if (r.pmid)
-          this.memoryPmidMap.set(r.pmid.toLowerCase().trim(), details);
+        if (r.doi) this.setMemoryDoi(r.doi.toLowerCase().trim(), details);
+        if (r.pmid) this.setMemoryPmid(r.pmid.toLowerCase().trim(), details);
       }
 
       this.logger.log(
@@ -121,36 +164,57 @@ export class RetractionDatabaseService implements OnModuleInit {
       ? (normalizePmid(pmid) || pmid.trim()).toLowerCase()
       : null;
 
-    // 1. In-Memory Fast Lookup (0ms)
+    // 1. In-Memory Fast Lookup (0ms) with LRU refresh
     if (cleanDoi && this.memoryDoiMap.has(cleanDoi)) {
-      return this.memoryDoiMap.get(cleanDoi)!;
+      const hit = this.memoryDoiMap.get(cleanDoi)!;
+      this.setMemoryDoi(cleanDoi, hit);
+      return hit;
     }
     if (cleanPmid && this.memoryPmidMap.has(cleanPmid)) {
-      return this.memoryPmidMap.get(cleanPmid)!;
+      const hit = this.memoryPmidMap.get(cleanPmid)!;
+      this.setMemoryPmid(cleanPmid, hit);
+      return hit;
     }
 
     // 2. Negative Cache Check (verified clean within TTL)
     if (cleanDoi) {
       const cleanUntil = this.cleanDoiCache.get(cleanDoi);
-      if (cleanUntil && cleanUntil > Date.now()) {
-        return false;
+      if (cleanUntil !== undefined) {
+        if (cleanUntil > Date.now()) {
+          this.setCleanDoiCache(cleanDoi, cleanUntil);
+          return false;
+        }
+        this.cleanDoiCache.delete(cleanDoi);
       }
     }
 
-    // 3. PostgreSQL RetractionRecord Lookup
+    // 3. PostgreSQL RetractionRecord Lookup (indexed lookup by DOI / PMID on cache miss)
     if (cleanDoi || cleanPmid) {
-      const record = await this.repo.findRetractionRecord({
-        OR: [
-          ...(cleanDoi ? [{ doi: cleanDoi }] : []),
-          ...(cleanPmid ? [{ pmid: cleanPmid }] : []),
-        ],
-      });
+      let record =
+        cleanDoi && typeof this.repo.findRetractionRecordByDoi === 'function'
+          ? await this.repo.findRetractionRecordByDoi(cleanDoi)
+          : null;
+      if (
+        !record &&
+        cleanPmid &&
+        typeof this.repo.findRetractionRecordByPmid === 'function'
+      ) {
+        record = await this.repo.findRetractionRecordByPmid(cleanPmid);
+      }
+      if (!record && typeof this.repo.findRetractionRecord === 'function') {
+        record = await this.repo.findRetractionRecord({
+          OR: [
+            ...(cleanDoi ? [{ doi: cleanDoi }] : []),
+            ...(cleanPmid ? [{ pmid: cleanPmid }] : []),
+          ],
+        });
+      }
 
       if (record) {
         // Handle negative cache: verified clean
         if (!record.isRetracted) {
           if (cleanDoi) {
-            this.cleanDoiCache.set(
+            this.setCleanDoiCache(
               cleanDoi,
               Date.now() + this.CLEAN_CACHE_TTL_MS,
             );
@@ -169,8 +233,8 @@ export class RetractionDatabaseService implements OnModuleInit {
         };
 
         // Cache in memory for subsequent 0ms hits
-        if (cleanDoi) this.memoryDoiMap.set(cleanDoi, details);
-        if (cleanPmid) this.memoryPmidMap.set(cleanPmid, details);
+        if (cleanDoi) this.setMemoryDoi(cleanDoi, details);
+        if (cleanPmid) this.setMemoryPmid(cleanPmid, details);
 
         return details;
       }
@@ -215,8 +279,8 @@ export class RetractionDatabaseService implements OnModuleInit {
       },
     });
 
-    this.memoryDoiMap.set(cleanDoi, details);
-    if (cleanPmid) this.memoryPmidMap.set(cleanPmid, details);
+    this.setMemoryDoi(cleanDoi, details);
+    if (cleanPmid) this.setMemoryPmid(cleanPmid, details);
     this.cleanDoiCache.delete(cleanDoi);
   }
 
@@ -227,7 +291,7 @@ export class RetractionDatabaseService implements OnModuleInit {
     const cleanDoi = normalizeDoi(doi) || doi.trim().toLowerCase();
     const cleanPmid = pmid ? normalizePmid(pmid) || pmid.trim() : null;
 
-    this.cleanDoiCache.set(cleanDoi, Date.now() + this.CLEAN_CACHE_TTL_MS);
+    this.setCleanDoiCache(cleanDoi, Date.now() + this.CLEAN_CACHE_TTL_MS);
 
     try {
       await this.repo.upsertRetractionRecord({
@@ -305,8 +369,8 @@ export class RetractionDatabaseService implements OnModuleInit {
             date: r.retractionDate,
             source: r.source,
           };
-          this.memoryDoiMap.set(cleanDoi, details);
-          if (cleanPmid) this.memoryPmidMap.set(cleanPmid, details);
+          this.setMemoryDoi(cleanDoi, details);
+          if (cleanPmid) this.setMemoryPmid(cleanPmid, details);
           imported++;
         }),
       );

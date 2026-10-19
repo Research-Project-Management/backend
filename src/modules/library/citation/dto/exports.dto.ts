@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsNumber } from 'class-validator';
 import { ExportFormatType } from '@/modules/library/citation/types/exports.types';
 
 export type { ExportFormatType };
@@ -22,4 +22,8 @@ export class ExportLibraryDto {
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  limit?: number;
 }

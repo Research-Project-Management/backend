@@ -7,15 +7,6 @@ import {
   NOISE_TAG_WORDS,
 } from './tag-taxonomy.lexicon';
 
-export {
-  MAX_TAG_LENGTH,
-  ARXIV_ARCHIVE_DOMAINS,
-  ARXIV_SUBDISCIPLINE_TAXONOMY,
-  ARXIV_CATEGORY_MAP,
-  CANONICAL_ARXIV_CATEGORIES,
-  NOISE_TAG_WORDS,
-} from './tag-taxonomy.lexicon';
-
 /**
  * Resolves an archive classification code (e.g., `cs.CV`, `stat.ML`, `astro-ph.CO`, `cs-cv`)
  * into its full human-readable academic subject descriptor (`"<Archive> - <Sub-Discipline>"`).
@@ -267,8 +258,7 @@ export function cleanSingleTag(rawTag: string): string | null {
  *   (e.g., `ICLR` over `iclr`, `DeepONet` over `deeponet`) when both appear in the same batch.
  */
 export function normalizeAcademicTags(
-  rawTags?:
-    (string | { tag?: string; name?: string } | null | undefined)[] | null,
+  rawTags?: (TagInput | null | undefined)[] | null,
 ): string[] {
   if (!Array.isArray(rawTags) || rawTags.length === 0) return [];
 
@@ -305,40 +295,6 @@ export function normalizeAcademicTags(
 
   return result;
 }
-
-/**
- * Normalizes an array of raw tag strings or tag objects into a unique, trimmed,
- * clean, Case-Preserving list of academic tags.
- */
-export function normalizeTags(
-  tags?: (TagInput | null | undefined)[] | null,
-): string[] {
-  return normalizeAcademicTags(tags);
-}
-
-// 4. Landmark Classic arXiv Benchmark Papers
-export const KNOWN_CANONICAL_ARXIV_CATEGORIES: Record<string, string> = {
-  '1312.6114': 'cs.LG', // Playing Atari with Deep Reinforcement Learning (DQN)
-  '1406.2661': 'stat.ML', // Generative Adversarial Networks (GANs)
-  '1512.03385': 'cs.CV', // Deep Residual Learning for Image Recognition (ResNet)
-  '1706.03762': 'cs.CL', // Attention Is All You Need (Transformer)
-  '1810.04805': 'cs.CL', // BERT
-  '2005.14165': 'cs.CL', // GPT-3
-  '2010.11929': 'cs.CV', // Vision Transformer (ViT)
-  '1506.01497': 'cs.CV', // Faster R-CNN
-  '1409.1556': 'cs.CV', // VGG
-  '1409.4842': 'cs.CV', // GoogLeNet
-  '1611.07004': 'cs.CV', // Pix2Pix
-  '1703.10593': 'cs.CV', // CycleGAN
-  '1905.11946': 'cs.CV', // EfficientNet
-  '2103.00020': 'cs.CV', // CLIP
-  '2112.10752': 'cs.CV', // Latent Diffusion
-  '2205.11487': 'cs.CL', // Zero-shot COT
-  '2210.03629': 'cs.CL', // ReAct
-  '2303.08774': 'cs.CL', // GPT-4
-  '2302.13971': 'cs.CL', // LLaMA
-  '2307.09288': 'cs.CL', // LLaMA 2
-};
 
 /**
  * Resolves the canonical arXiv primary category code (e.g. `cs.LG`, `stat.ML`, `math.PR`)
@@ -427,15 +383,12 @@ export function resolveCanonicalArxivCategory(
     if (/neural\s*and\s*evolutionary/i.test(lower)) return 'cs.NE';
   }
 
-  // 4. Known landmark classic arXiv papers
+  // 4. Explicit bracketed category in arxivId string if present (e.g. "arXiv:1706.03762 [cs.CL]")
   if (arxivId) {
-    const cleanId = String(arxivId)
-      .replace(/^arxiv:\s*/i, '')
-      .replace(/\s*\[.*?\]\s*$/, '')
-      .replace(/v\d+$/i, '')
-      .trim();
-    if (KNOWN_CANONICAL_ARXIV_CATEGORIES[cleanId]) {
-      return KNOWN_CANONICAL_ARXIV_CATEGORIES[cleanId];
+    const bracketMatch = String(arxivId).match(/\[([a-z-]+\.[a-z-]+)\]/i);
+    if (bracketMatch) {
+      const lowerCode = bracketMatch[1].toLowerCase();
+      return CANONICAL_ARXIV_CATEGORIES[lowerCode] || bracketMatch[1];
     }
   }
 

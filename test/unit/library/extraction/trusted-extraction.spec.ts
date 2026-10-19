@@ -521,7 +521,10 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
         },
       ];
 
-      const result = await enrichStage.execute('test-scope', candidates);
+      const result = await enrichStage.execute({
+        scopeId: 'test-scope',
+        candidates,
+      });
 
       // Verify that metadataService.resolve was NEVER called
       expect(mockMetadataService.resolve).not.toHaveBeenCalled();

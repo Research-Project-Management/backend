@@ -8,7 +8,6 @@ import {
   sanitizeSearchQuery,
 } from '@/modules/library/search';
 import { SyncController } from '@/modules/library/sync/controllers/sync.controller';
-import { ChangeLogService } from '@/modules/library/sync/services/changelog.service';
 import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
 import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 import { compactLibraryChanges } from '@/modules/library/sync/domain/outbox.domain';
@@ -85,11 +84,7 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
       );
       await searchRepo.onModuleInit();
 
-      const fullTextProvider = new FullTextProvider(
-        mockPrisma as unknown as ConstructorParameters<
-          typeof FullTextProvider
-        >[0],
-      );
+      const fullTextProvider = new FullTextProvider(searchRepo);
       const searchService = new SearchService(searchRepo, fullTextProvider);
 
       // 1. Query containing only punctuation/SQL special chars "% _ \ ' ""
@@ -97,7 +92,7 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
       // must bypass raw tsquery and fall back to parameterized Prisma ILIKE without throwing.
       expect(sanitizeSearchQuery(`'"\\*()&|!`)).toBe('');
       const specialOnlyRes = await searchService.search('user-1', {
-        q: `'"\\*()&|!`,
+        query: `'"\\*()&|!`,
         itemType: 'journalArticle',
         yearFrom: 2020,
         yearTo: 2026,
@@ -236,11 +231,7 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
           typeof SearchRepository
         >[0],
       );
-      const fullTextProvider = new FullTextProvider(
-        mockPrisma as unknown as ConstructorParameters<
-          typeof FullTextProvider
-        >[0],
-      );
+      const fullTextProvider = new FullTextProvider(searchRepo);
       const searchService = new SearchService(searchRepo, fullTextProvider);
 
       // 1. Empty / whitespace term returns [] immediately without querying fullTextIndex
@@ -276,13 +267,6 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
           'proj-unauthorized',
         ),
       ).rejects.toThrow(NotFoundException);
-
-      // 4. rebuildIndex computes total active items and indexed attachments
-      const rebuildStats = await searchService.rebuildIndex('user-1');
-      expect(rebuildStats).toEqual({
-        indexedItems: 8,
-        indexedAttachments: 4,
-      });
     });
   });
 
@@ -382,13 +366,10 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
       const itemService = new ItemService(
         queryRepo,
         commandRepo,
-        mockTxService,
+        mockTxService as unknown as TransactionService,
         mockTagsService as unknown as ConstructorParameters<
           typeof ItemService
         >[3],
-        {} as unknown as ConstructorParameters<typeof ItemService>[4],
-        {} as unknown as ConstructorParameters<typeof ItemService>[5],
-        {} as unknown as ConstructorParameters<typeof ItemService>[6],
       );
 
       // Tab A updates item from version 1 -> version 2
@@ -453,25 +434,22 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
           typeof NotesRepository
         >[0],
       );
-      const notesService = new NotesService(notesRepo, mockTxService);
+      const notesService = new NotesService(
+        notesRepo,
+        mockTxService as unknown as TransactionService,
+      );
 
-      const noteTabA = await notesService.updateNote(userId, noteId, 1, {
+      const noteTabA = await notesService.updateNote(userId, noteId, {
         title: 'Tab A Note Title',
         contentMd: 'Tab A content',
+        expectedVersion: 1,
       });
       expect(noteTabA.version).toBe(2);
 
       // Tab B attempts stale update with expectedVersion = 1
       await expect(
-        notesService.updateNote(userId, noteId, 1, {
+        notesService.updateNote(userId, noteId, {
           title: 'Tab B Stale Note',
-        }),
-      ).rejects.toThrow(VersionMismatchException);
-
-      // Tab B attempts stale update via 4-arg (undefined, { expectedVersion: 1 })
-      await expect(
-        notesService.updateNote(userId, noteId, undefined, {
-          title: 'Tab B Stale Note via Data',
           expectedVersion: 1,
         }),
       ).rejects.toThrow(VersionMismatchException);
@@ -633,16 +611,7 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
         getLatestSequence: jest.fn().mockResolvedValue(21n),
       };
 
-      const changeLogService = new ChangeLogService(
-        mockChangeLogRepo as unknown as ChangeLogRepository,
-      );
-
-      const compacted = await changeLogService.getChangesSince(
-        { userId },
-        10n,
-        100,
-        { compact: true },
-      );
+      const compacted = compactLibraryChanges(rawChanges);
 
       // Ephemeral item is completely omitted; only 'item-deleted-later' (final delete at seq 16)
       // and 'note-active' (merged update at seq 21) remain!
@@ -996,8 +965,8 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
       };
       const libraryFacade = new LibraryFacade(
         mockCatalogFacade as unknown as CatalogFacade,
-        undefined,
-        undefined,
+        undefined as any,
+        undefined as any,
         citationFacade,
       );
 
