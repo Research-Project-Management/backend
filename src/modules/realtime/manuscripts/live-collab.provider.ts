@@ -8,10 +8,11 @@ import {
 import {
   LiveCollaborationPort,
   LivePresenceUser,
-} from '@/modules/manuscripts/docstore/domain';
+} from '@/modules/manuscripts/core';
 import { YjsService } from './yjs.service';
 import { RoomStore } from './room.store';
 import { ManuscriptsGateway } from './manuscripts.gateway';
+import { REALTIME_EVENTS } from '../core/realtime.constant';
 
 @Injectable()
 export class LiveCollaborationProvider extends LiveCollaborationPort {
@@ -32,12 +33,16 @@ export class LiveCollaborationProvider extends LiveCollaborationPort {
     docId: string,
     text: string,
   ): Promise<boolean> {
-    if (!this.yjs.isActive(projectId, docId)) return false;
-    const frame = this.yjs.replaceTextIfActive(projectId, docId, text);
+    const { active, frame } = await this.yjs.applyExternalTextAndSyncRedis(
+      projectId,
+      docId,
+      text,
+    );
+    if (!active) return false;
     if (frame && this.gateway?.server) {
       this.gateway.server
         .to(`doc:${projectId}:${docId}`)
-        .emit('doc:sync-update', {
+        .emit(REALTIME_EVENTS.YJS_SYNC_UPDATE, {
           projectId,
           docId,
           data: frame,
@@ -67,12 +72,18 @@ export class LiveCollaborationProvider extends LiveCollaborationPort {
   }
 
   async flushDocs(projectId: string, docIds: string[]): Promise<string[]> {
-    const flushed: string[] = [];
-    for (const docId of docIds) {
-      if (!this.yjs.isActive(projectId, docId)) continue;
-      await this.yjs.flushDoc(projectId, docId);
-      flushed.push(docId);
+    if (!docIds || docIds.length === 0) {
+      return await this.yjs.flushProjectDocs(projectId);
     }
-    return flushed;
+
+    const flushed = new Set<string>();
+    for (const docId of docIds) {
+      if (this.yjs.isActive(projectId, docId)) {
+        await this.yjs.flushDoc(projectId, docId);
+        flushed.add(docId);
+      }
+    }
+    return Array.from(flushed);
   }
 }
+

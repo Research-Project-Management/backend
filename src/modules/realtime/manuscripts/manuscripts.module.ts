@@ -3,9 +3,9 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule, CacheModule } from '@/core';
 import { AccessModule } from '@/modules/project/access';
-import { DocumentUpdaterModule } from '@/modules/manuscripts/document-updater/document-updater.module';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
-import { LiveCollaborationPort } from '@/modules/manuscripts/docstore/domain';
+import { LiveCollaborationPort } from '@/modules/manuscripts/core';
+
 
 import { CoreModule } from '../core/core.module';
 import { WsAccessGuard } from '../core/ws-access.guard';
@@ -25,7 +25,6 @@ import { AccessRevocationListener } from './access-revocation.listener';
     PrismaModule,
     CacheModule,
     AccessModule,
-    DocumentUpdaterModule,
     DocstoreModule,
     CoreModule,
   ],

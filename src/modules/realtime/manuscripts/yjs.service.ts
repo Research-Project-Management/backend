@@ -25,6 +25,7 @@ export interface ActiveDocSession {
   lastActiveAt: number;
   firstUnflushedAt?: number;
   currentVersion?: number;
+  lastFlushedText?: string;
 }
 
 export interface SyncMessageResult {
@@ -39,6 +40,9 @@ export class YjsService implements OnModuleDestroy {
 
   // Active in-memory documents: `${projectId}:${docId}` -> ActiveDocSession
   private readonly activeDocs = new Map<string, ActiveDocSession>();
+
+  // Secondary Index: projectId -> Set<docKey> for O(D_project) project-scoped flush
+  private readonly projectDocKeys = new Map<string, Set<string>>();
 
   // Single-Flight Request Coalescing Map
   private readonly inFlightDocInits = new Map<
@@ -109,6 +113,7 @@ export class YjsService implements OnModuleDestroy {
       }
     }
     this.activeDocs.clear();
+    this.projectDocKeys.clear();
     this.logger.log(
       'Gracefully flushed and destroyed all active Y.Doc sessions',
     );
@@ -120,6 +125,40 @@ export class YjsService implements OnModuleDestroy {
 
   private redisKey(projectId: string, docId: string): string {
     return `manuscript:crdt:bin:${projectId}:${docId}`;
+  }
+
+  public getRedisBinaryKey(projectId: string, docId: string): string {
+    return this.redisKey(projectId, docId);
+  }
+
+  public async deleteRedisSnapshot(
+    projectId: string,
+    docId: string,
+  ): Promise<void> {
+    if (this.redis && this.redis.isReady()) {
+      try {
+        await this.redis.del(this.redisKey(projectId, docId));
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Failed to delete Redis CRDT snapshot for ${projectId}:${docId}: ${(err as Error)?.message}`,
+        );
+      }
+    }
+  }
+
+  private async saveBinaryToRedis(
+    projectId: string,
+    docId: string,
+    doc: Y.Doc,
+  ): Promise<void> {
+    if (this.redis && this.redis.isReady()) {
+      const binarySnapshot = Y.encodeStateAsUpdate(doc);
+      await this.redis.setBuffer(
+        this.redisKey(projectId, docId),
+        Buffer.from(binarySnapshot),
+        this.REDIS_SNAPSHOT_TTL_SECONDS,
+      );
+    }
   }
 
   public async getOrCreateDoc(
@@ -190,14 +229,33 @@ export class YjsService implements OnModuleDestroy {
           projectId,
           docId,
           lastActiveAt: Date.now(),
+          lastFlushedText: yText.toString(),
         };
 
         doc.on('update', (_update: Uint8Array, origin: unknown) => {
           if (origin === 'redis-init' || origin === 'docstore-init') return;
+          if (origin === 'rest-api') {
+            session.lastActiveAt = Date.now();
+            session.lastFlushedText = session.yText.toString();
+            void this.saveBinaryToRedis(projectId, docId, session.doc).catch(
+              (err: unknown) => {
+                this.logger.warn(
+                  `Failed to save rest-api Y.Doc update to Redis for ${key}: ${(err as Error)?.message}`,
+                );
+              },
+            );
+            return;
+          }
           this.handleDocUpdated(projectId, docId, session);
         });
 
         this.activeDocs.set(key, session);
+        let projSet = this.projectDocKeys.get(projectId);
+        if (!projSet) {
+          projSet = new Set();
+          this.projectDocKeys.set(projectId, projSet);
+        }
+        projSet.add(key);
         return session;
       } finally {
         this.inFlightDocInits.delete(key);
@@ -419,7 +477,10 @@ export class YjsService implements OnModuleDestroy {
     const session = this.activeDocs.get(this.docKey(projectId, docId));
     if (!session) return null;
     const current = session.yText.toString();
-    if (current === nextText) return null;
+    if (current === nextText) {
+      session.lastFlushedText = nextText;
+      return null;
+    }
 
     let prefix = 0;
     const maxPrefix = Math.min(current.length, nextText.length);
@@ -466,10 +527,34 @@ export class YjsService implements OnModuleDestroy {
     } finally {
       session.doc.off('update', capture);
     }
+    session.lastFlushedText = nextText;
     if (!captured) return null;
     const encoder = encoding.createEncoder();
     syncProtocol.writeUpdate(encoder, captured);
     return Buffer.from(encoding.toUint8Array(encoder));
+  }
+
+  public async applyExternalTextAndSyncRedis(
+    projectId: string,
+    docId: string,
+    nextText: string,
+  ): Promise<{ active: boolean; frame: Buffer | null }> {
+    if (!this.isActive(projectId, docId)) {
+      await this.deleteRedisSnapshot(projectId, docId);
+      return { active: false, frame: null };
+    }
+    const frame = this.replaceTextIfActive(projectId, docId, nextText);
+    const session = this.activeDocs.get(this.docKey(projectId, docId));
+    if (session) {
+      await this.saveBinaryToRedis(projectId, docId, session.doc).catch(
+        (err: unknown) => {
+          this.logger.warn(
+            `Failed to persist external text Y.Doc to Redis for ${projectId}:${docId}: ${(err as Error)?.message}`,
+          );
+        },
+      );
+    }
+    return { active: true, frame };
   }
 
   public async flushDoc(projectId: string, docId: string): Promise<void> {
@@ -487,14 +572,7 @@ export class YjsService implements OnModuleDestroy {
       const tasks: Promise<unknown>[] = [];
 
       if (this.redis && this.redis.isReady()) {
-        const binarySnapshot = Y.encodeStateAsUpdate(session.doc);
-        tasks.push(
-          this.redis.setBuffer(
-            this.redisKey(projectId, docId),
-            Buffer.from(binarySnapshot),
-            this.REDIS_SNAPSHOT_TTL_SECONDS,
-          ),
-        );
+        tasks.push(this.saveBinaryToRedis(projectId, docId, session.doc));
       }
 
       if (this.docstoreService) {
@@ -513,6 +591,7 @@ export class YjsService implements OnModuleDestroy {
             .updateDoc(projectId, docId, { lines, version: nextVersion })
             .then((res) => {
               session.currentVersion = res.doc?.version ?? nextVersion;
+              session.lastFlushedText = text;
               this.logger.debug(
                 `Flushed Y.Doc to Docstore (${lines.length} lines, v${session.currentVersion}): ${key}`,
               );
@@ -538,10 +617,16 @@ export class YjsService implements OnModuleDestroy {
     }
   }
 
-  public async flushProject(projectId: string): Promise<number> {
+  public async flushProjectDocs(projectId: string): Promise<string[]> {
+    const docKeys = this.projectDocKeys.get(projectId);
+    if (!docKeys || docKeys.size === 0) return [];
+
+    const flushedDocIds: string[] = [];
     const promises: Promise<void>[] = [];
-    for (const session of this.activeDocs.values()) {
-      if (session.projectId === projectId) {
+    for (const key of docKeys) {
+      const session = this.activeDocs.get(key);
+      if (session) {
+        flushedDocIds.push(session.docId);
         promises.push(this.flushDoc(session.projectId, session.docId));
       }
     }
@@ -551,7 +636,12 @@ export class YjsService implements OnModuleDestroy {
         `Pre-compile flush barrier completed for ${promises.length} active doc(s) in project ${projectId}`,
       );
     }
-    return promises.length;
+    return flushedDocIds;
+  }
+
+  public async flushProject(projectId: string): Promise<number> {
+    const flushed = await this.flushProjectDocs(projectId);
+    return flushed.length;
   }
 
   public async evictDoc(projectId: string, docId: string): Promise<void> {
@@ -559,8 +649,23 @@ export class YjsService implements OnModuleDestroy {
     const session = this.activeDocs.get(key);
     if (!session) return;
 
-    await this.flushDoc(projectId, docId);
+    try {
+      await this.flushDoc(projectId, docId);
+    } catch {
+      // Ignore flush errors on forced eviction
+    }
+    if (session.flushTimeout) {
+      clearTimeout(session.flushTimeout);
+      session.flushTimeout = undefined;
+    }
     this.activeDocs.delete(key);
+    const projSet = this.projectDocKeys.get(projectId);
+    if (projSet) {
+      projSet.delete(key);
+      if (projSet.size === 0) {
+        this.projectDocKeys.delete(projectId);
+      }
+    }
     session.doc.destroy();
     this.logger.debug(`Evicted inactive Y.Doc: ${key}`);
   }

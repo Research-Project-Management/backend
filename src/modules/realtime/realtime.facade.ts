@@ -38,8 +38,10 @@ export class RealtimeFacade {
    * Flushes all active Y.Doc documents for a project to storage.
    */
   public async flushProject(projectId: string): Promise<number> {
-    if (!this.yjs) return 0;
-    return await this.yjs.flushProject(projectId);
+    if (this.yjs) {
+      return await this.yjs.flushProject(projectId);
+    }
+    return 0;
   }
 
   /**

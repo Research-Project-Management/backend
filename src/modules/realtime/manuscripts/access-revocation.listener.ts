@@ -1,7 +1,10 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { RealtimeAccessService } from './realtime-access.service';
 import { ManuscriptsGateway } from './manuscripts.gateway';
+import { RoomStore } from './room.store';
+import { PresenceMapper } from './presence.mapper';
+import { REALTIME_EVENTS } from '../core/realtime.constant';
 
 export interface MemberRemovedPayload {
   projectId?: string;
@@ -30,6 +33,7 @@ export class AccessRevocationListener {
     private readonly realtimeAccess: RealtimeAccessService,
     @Inject(forwardRef(() => ManuscriptsGateway))
     private readonly gateway: ManuscriptsGateway,
+    @Optional() private readonly roomStore?: RoomStore,
   ) {}
 
   @OnEvent('project.member_removed')
@@ -64,10 +68,32 @@ export class AccessRevocationListener {
           // Notify client of revocation (RT-08 / SC-007)
           socket.emit('access:revoked', { projectId });
 
+          const activeDocId = socket.data?.activeDocId;
+          if (activeDocId) {
+            this.gateway.broadcastToDoc?.(
+              projectId,
+              activeDocId,
+              REALTIME_EVENTS.USER_LEFT_DOC,
+              PresenceMapper.toLeavePresence(userId, socket.id),
+              socket.id,
+            );
+          }
+
+          this.gateway.broadcastToProject?.(
+            projectId,
+            REALTIME_EVENTS.USER_LEFT_PROJECT,
+            PresenceMapper.toLeavePresence(userId, socket.id),
+            socket.id,
+          );
+
+          if (this.roomStore) {
+            await this.roomStore.removeProjectSession(projectId, socket.id).catch(() => null);
+          }
+
           // Leave rooms
           socket.leave(`project:${projectId}`);
-          if (socket.data?.activeDocId) {
-            socket.leave(`doc:${projectId}:${socket.data.activeDocId}`);
+          if (activeDocId) {
+            socket.leave(`doc:${projectId}:${activeDocId}`);
           }
 
           // Clear joined context

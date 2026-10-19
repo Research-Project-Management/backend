@@ -1,16 +1,17 @@
 import {
   Injectable,
   Logger,
-  Optional,
   ForbiddenException,
   NotFoundException,
   ServiceUnavailableException,
+  Optional,
 } from '@nestjs/common';
-import { DocumentUpdaterService } from '@/modules/manuscripts/document-updater/document-updater.service';
 import { RoomStore } from './room.store';
 import { UserPresence, CursorPosition } from './types/presence.type';
 import { SendUpdateDto } from './dto/events.dto';
 import { RealtimeAccessService } from './realtime-access.service';
+import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import { YjsService } from './yjs.service';
 
 export interface ProjectAccess {
   canRead: boolean;
@@ -23,6 +24,7 @@ export interface DocUpdateResult {
   clientRev: number;
   version: number;
   inFlightSeq: number;
+  yjsFrame?: Buffer | null;
 }
 
 @Injectable()
@@ -32,7 +34,8 @@ export class ManuscriptsService {
   constructor(
     private readonly roomStore: RoomStore,
     private readonly realtimeAccess: RealtimeAccessService,
-    @Optional() private readonly docUpdater?: DocumentUpdaterService,
+    @Optional() private readonly docstoreService?: DocstoreService,
+    @Optional() private readonly yjsService?: YjsService,
   ) {}
 
   public async verifyAccess(
@@ -154,25 +157,61 @@ export class ManuscriptsService {
       );
     }
 
-    if (!this.docUpdater) {
-      throw new ServiceUnavailableException(
-        'Document updater service is not available',
-      );
+    let nextLines: string[] | undefined = dto.lines;
+    let serverRev = (dto.clientRev || 0) + 1;
+    let version = (dto.clientRev || 0) + 1;
+    let yjsFrame: Buffer | null = null;
+
+    if (this.docstoreService && (dto.lines || dto.splice)) {
+      try {
+        if (!nextLines && dto.splice) {
+          const existing = await this.docstoreService.getDoc(
+            dto.projectId,
+            dto.docId,
+          );
+          const cloned = [...(existing.lines || [])];
+          cloned.splice(
+            dto.splice.startLine,
+            dto.splice.deleteCount,
+            ...(dto.splice.newLines || []),
+          );
+          nextLines = cloned;
+        }
+
+        if (nextLines) {
+          const updated = await this.docstoreService.updateDoc(
+            dto.projectId,
+            dto.docId,
+            {
+              lines: nextLines,
+              version: (dto.clientRev || 0) + 1,
+            },
+          );
+          serverRev = updated.rev;
+          version = updated.doc.version;
+        }
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Failed to persist DOC_UPDATE for ${dto.projectId}:${dto.docId}: ${(err as Error)?.message}`,
+        );
+      }
     }
 
-    const res = await this.docUpdater.queueUpdate(dto.projectId, dto.docId, {
-      lines: dto.lines,
-      splice: dto.splice,
-      clientRev: dto.clientRev,
-      userId,
-      debounceMs: dto.debounceMs,
-    });
+    if (nextLines && this.yjsService) {
+      const { frame } = await this.yjsService.applyExternalTextAndSyncRedis(
+        dto.projectId,
+        dto.docId,
+        nextLines.join('\n'),
+      );
+      yjsFrame = frame;
+    }
 
     return {
-      serverRev: res.rev,
+      serverRev,
       clientRev: dto.clientRev,
-      version: res.inFlightSeq,
-      inFlightSeq: res.inFlightSeq,
+      version,
+      inFlightSeq: 1,
+      yjsFrame,
     };
   }
 

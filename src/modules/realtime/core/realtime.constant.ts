@@ -40,5 +40,4 @@ export const REDIS_KEYS = {
   projectRoom: (projectId: string) => `manuscript:project_rooms:${projectId}`,
   docRoom: (projectId: string, docId: string) =>
     `manuscript:doc_rooms:${projectId}:${docId}`,
-  yjsDoc: (projectId: string, docId: string) => `yjs:doc:${projectId}:${docId}`,
 } as const;

@@ -67,6 +67,20 @@ export class YjsUpdateValidator {
     doc: Y.Doc,
     maxDocumentSizeBytes: number = 20 * 1024 * 1024,
   ): void {
+    // Fast path: for production threshold (e.g. 20MB), skip full serialization if all shared types are well under bound
+    if (maxDocumentSizeBytes > 1024) {
+      let approxChars = 0;
+      for (const item of doc.share.values()) {
+        const anyItem = item as unknown as { length?: number };
+        if (typeof anyItem?.length === 'number') {
+          approxChars += anyItem.length;
+        }
+      }
+      if (approxChars * 4 <= maxDocumentSizeBytes - 64 * 1024) {
+        return;
+      }
+    }
+
     const encoded = Y.encodeStateAsUpdate(doc);
     if (encoded.byteLength > maxDocumentSizeBytes) {
       throw new RealtimeValidationFailedException(

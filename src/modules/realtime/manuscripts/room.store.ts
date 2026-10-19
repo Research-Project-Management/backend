@@ -14,6 +14,9 @@ export class RoomStore {
   private readonly projectRooms = new Map<string, Set<string>>();
   // `${projectId}:${docId}` -> Set<socketId>
   private readonly docRooms = new Map<string, Set<string>>();
+  // socketId -> last Redis cursor sync timestamp (ms)
+  private readonly lastCursorRedisSync = new Map<string, number>();
+  private static readonly CURSOR_REDIS_THROTTLE_MS = 2000;
 
   private static readonly COLOR_PALETTE = [
     '#3B82F6',
@@ -70,16 +73,18 @@ export class RoomStore {
     if (this.isRedisActive()) {
       try {
         const client = this.redis!.getClient()!;
-        await client.set(
-          REDIS_KEYS.presence(session.socketId),
-          JSON.stringify(session),
-          'EX',
-          86400,
-        );
-        await client.sadd(
-          REDIS_KEYS.projectRoom(session.projectId),
-          session.socketId,
-        );
+        await Promise.all([
+          client.set(
+            REDIS_KEYS.presence(session.socketId),
+            JSON.stringify(session),
+            'EX',
+            86400,
+          ),
+          client.sadd(
+            REDIS_KEYS.projectRoom(session.projectId),
+            session.socketId,
+          ),
+        ]);
       } catch (err) {
         this.logger.warn(`Redis addProjectSession error: ${String(err)}`);
       }
@@ -94,6 +99,7 @@ export class RoomStore {
     let activeDocId = session?.activeDocId;
 
     this.sessions.delete(socketId);
+    this.lastCursorRedisSync.delete(socketId);
 
     const projectRoom = this.projectRooms.get(projectId);
     if (projectRoom) {
@@ -125,14 +131,16 @@ export class RoomStore {
           }
         }
 
-        await client.del(sessionKey);
-        await client.srem(projectKey, socketId);
+        const tasks: Promise<unknown>[] = [
+          client.del(sessionKey),
+          client.srem(projectKey, socketId),
+        ];
         if (activeDocId) {
-          await client.srem(
-            REDIS_KEYS.docRoom(projectId, activeDocId),
-            socketId,
+          tasks.push(
+            client.srem(REDIS_KEYS.docRoom(projectId, activeDocId), socketId),
           );
         }
+        await Promise.all(tasks);
       } catch (err) {
         this.logger.warn(`Redis removeProjectSession error: ${String(err)}`);
       }
@@ -219,13 +227,15 @@ export class RoomStore {
     if (this.isRedisActive()) {
       try {
         const client = this.redis!.getClient()!;
-        await client.sadd(REDIS_KEYS.docRoom(projectId, docId), socketId);
-        await client.set(
-          REDIS_KEYS.presence(socketId),
-          JSON.stringify(session),
-          'EX',
-          86400,
-        );
+        await Promise.all([
+          client.sadd(REDIS_KEYS.docRoom(projectId, docId), socketId),
+          client.set(
+            REDIS_KEYS.presence(socketId),
+            JSON.stringify(session),
+            'EX',
+            86400,
+          ),
+        ]);
       } catch (err) {
         this.logger.warn(`Redis joinDocRoom error: ${String(err)}`);
       }
@@ -239,6 +249,7 @@ export class RoomStore {
     docId: string,
     socketId: string,
   ): Promise<void> {
+    this.lastCursorRedisSync.delete(socketId);
     const session = this.sessions.get(socketId);
     if (session && session.activeDocId === docId) {
       session.activeDocId = null;
@@ -257,15 +268,20 @@ export class RoomStore {
     if (this.isRedisActive()) {
       try {
         const client = this.redis!.getClient()!;
-        await client.srem(REDIS_KEYS.docRoom(projectId, docId), socketId);
+        const tasks: Promise<unknown>[] = [
+          client.srem(REDIS_KEYS.docRoom(projectId, docId), socketId),
+        ];
         if (session) {
-          await client.set(
-            REDIS_KEYS.presence(socketId),
-            JSON.stringify(session),
-            'EX',
-            86400,
+          tasks.push(
+            client.set(
+              REDIS_KEYS.presence(socketId),
+              JSON.stringify(session),
+              'EX',
+              86400,
+            ),
           );
         }
+        await Promise.all(tasks);
       } catch (err) {
         this.logger.warn(`Redis leaveDocRoom error: ${String(err)}`);
       }
@@ -354,19 +370,24 @@ export class RoomStore {
           }
         : undefined,
     };
-    session.lastHeartbeat = Date.now();
+    const now = Date.now();
+    session.lastHeartbeat = now;
 
     if (this.isRedisActive()) {
-      try {
-        const client = this.redis!.getClient()!;
-        await client.set(
-          REDIS_KEYS.presence(socketId),
-          JSON.stringify(session),
-          'EX',
-          86400,
-        );
-      } catch (err) {
-        this.logger.warn(`Redis updateSessionCursor error: ${String(err)}`);
+      const lastSync = this.lastCursorRedisSync.get(socketId) ?? 0;
+      if (now - lastSync >= RoomStore.CURSOR_REDIS_THROTTLE_MS) {
+        this.lastCursorRedisSync.set(socketId, now);
+        try {
+          const client = this.redis!.getClient()!;
+          await client.set(
+            REDIS_KEYS.presence(socketId),
+            JSON.stringify(session),
+            'EX',
+            86400,
+          );
+        } catch (err) {
+          this.logger.warn(`Redis updateSessionCursor error: ${String(err)}`);
+        }
       }
     }
 

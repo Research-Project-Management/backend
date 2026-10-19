@@ -7,6 +7,7 @@ import * as crypto from 'crypto';
 export class ChatService {
   private readonly projectChatStore = new Map<string, ChatMessage[]>();
   private static readonly MAX_CHAT_HISTORY = 200;
+  private static readonly MAX_PROJECT_CHATS = 500;
 
   public saveMessage(
     dto: ProjectChatSendDto,
@@ -25,10 +26,19 @@ export class ChatService {
     };
 
     let history = this.projectChatStore.get(dto.projectId);
-    if (!history) {
+    if (history) {
+      // Refresh LRU order
+      this.projectChatStore.delete(dto.projectId);
+    } else {
       history = [];
-      this.projectChatStore.set(dto.projectId, history);
+      if (this.projectChatStore.size >= ChatService.MAX_PROJECT_CHATS) {
+        const oldestKey = this.projectChatStore.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.projectChatStore.delete(oldestKey);
+        }
+      }
     }
+    this.projectChatStore.set(dto.projectId, history);
     history.push(message);
 
     if (history.length > ChatService.MAX_CHAT_HISTORY) {

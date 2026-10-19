@@ -395,6 +395,20 @@ export class ManuscriptsGateway
         clientData.userId,
       );
 
+      if (updateResult.yjsFrame) {
+        this.broadcastToDoc(
+          projectId,
+          docId,
+          REALTIME_EVENTS.YJS_SYNC_UPDATE,
+          {
+            projectId,
+            docId,
+            data: updateResult.yjsFrame,
+          },
+          client.id,
+        );
+      }
+
       // Broadcast update to peers in room (exclude sender)
       this.broadcastToDoc(
         projectId,
@@ -422,7 +436,13 @@ export class ManuscriptsGateway
         inFlightSeq: updateResult.inFlightSeq,
       });
 
-      return { success: true, ...updateResult };
+      return {
+        success: true,
+        serverRev: updateResult.serverRev,
+        clientRev: updateResult.clientRev,
+        version: updateResult.version,
+        inFlightSeq: updateResult.inFlightSeq,
+      };
     } catch (err: unknown) {
       return {
         success: false,
@@ -458,6 +478,10 @@ export class ManuscriptsGateway
           {
             docId,
             userId: clientData.userId,
+            socketId: client.id,
+            name: clientData.name,
+            color: clientData.color,
+            avatar: clientData.avatar,
             cursor: updated.cursor,
           },
           client.id,
@@ -481,7 +505,7 @@ export class ManuscriptsGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() dto: DocSyncDto,
   ) {
-    if (!this.yjs) return;
+    if (!this.yjs) return { success: false, error: 'YjsService unavailable' };
     try {
       const reply = await this.yjs.handleSyncStep1(
         dto.projectId,
@@ -494,8 +518,10 @@ export class ManuscriptsGateway
           data: reply,
         });
       }
+      return { success: true, data: reply };
     } catch (err) {
       this.logger.warn(`Yjs SyncStep1 error: ${err}`);
+      return { success: false, error: (err as Error)?.message || String(err) };
     }
   }
 
@@ -505,7 +531,7 @@ export class ManuscriptsGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() dto: DocSyncDto,
   ) {
-    if (!this.yjs) return;
+    if (!this.yjs) return { success: false };
     try {
       await this.yjs.handleSyncStep2(
         dto.projectId,
@@ -513,8 +539,10 @@ export class ManuscriptsGateway
         dto.data as Uint8Array,
         client.id,
       );
+      return { success: true };
     } catch (err) {
       this.logger.warn(`Yjs SyncStep2 error: ${err}`);
+      return { success: false, error: (err as Error)?.message || String(err) };
     }
   }
 
@@ -524,7 +552,7 @@ export class ManuscriptsGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() dto: DocSyncDto,
   ) {
-    if (!this.yjs) return;
+    if (!this.yjs) return { success: false };
     try {
       const updateFrame = await this.yjs.handleSyncUpdate(
         dto.projectId,
@@ -534,19 +562,22 @@ export class ManuscriptsGateway
       );
 
       if (updateFrame.length > 0) {
+        const payload = {
+          docId: dto.docId,
+          data: updateFrame,
+        };
         this.broadcastToDoc(
           dto.projectId,
           dto.docId,
           REALTIME_EVENTS.YJS_SYNC_UPDATE,
-          {
-            docId: dto.docId,
-            data: updateFrame,
-          },
+          payload,
           client.id,
         );
       }
+      return { success: true };
     } catch (err) {
       this.logger.warn(`Yjs SyncUpdate error: ${err}`);
+      return { success: false, error: (err as Error)?.message || String(err) };
     }
   }
 
