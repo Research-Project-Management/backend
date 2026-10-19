@@ -9,7 +9,6 @@ import {
   StorageLifecycleService,
   TrashRetentionJob,
   MultipartCleanupJob,
-  OrphanBlobJob,
 } from './services/lifecycle.service';
 import { StorageEventOutboxService } from './services/outbox.service';
 import { shouldRunWorkerConsumers } from '@/core';
@@ -37,7 +36,6 @@ const storageWorkerProviders = shouldRunWorkerConsumers()
     StorageEventOutboxService,
     TrashRetentionJob,
     MultipartCleanupJob,
-    OrphanBlobJob,
   ],
   exports: [
     StorageQueueProducer,

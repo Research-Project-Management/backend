@@ -9,7 +9,6 @@ export interface IStorageQuotaRepository {
     userId?: string | null,
     projectId?: string | null,
   ): Promise<StorageQuota | null>;
-  upsert(quota: StorageQuota): Promise<StorageQuota>;
   incrementUsage(
     userId: string | null | undefined,
     projectId: string | null | undefined,
@@ -20,11 +19,6 @@ export interface IStorageQuotaRepository {
     projectId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint>;
-  reconcileUsage(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
-    actualBytes: bigint,
-  ): Promise<void>;
 }
 
 export class StorageQuotaMapper {
@@ -37,16 +31,6 @@ export class StorageQuotaMapper {
       maxBytes: record.maxBytes,
       updatedAt: record.updatedAt,
     });
-  }
-
-  public static toPrismaCreate(quota: StorageQuota) {
-    return {
-      id: quota.id,
-      userId: quota.userId,
-      projectId: quota.projectId,
-      usedBytes: quota.usedBytes,
-      maxBytes: quota.maxBytes,
-    };
   }
 }
 
@@ -67,27 +51,6 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
       },
     });
     return record ? StorageQuotaMapper.toDomain(record) : null;
-  }
-
-  async upsert(quota: StorageQuota): Promise<StorageQuota> {
-    const data = StorageQuotaMapper.toPrismaCreate(quota);
-    data.userId = cleanUuid(data.userId);
-    data.projectId = cleanUuid(data.projectId);
-    const existing = await this.findByScope(data.userId, data.projectId);
-
-    if (existing) {
-      const updated = await this.prisma.storageQuota.update({
-        where: { id: existing.id },
-        data: {
-          maxBytes: data.maxBytes,
-          usedBytes: data.usedBytes,
-        },
-      });
-      return StorageQuotaMapper.toDomain(updated);
-    }
-
-    const created = await this.prisma.storageQuota.create({ data });
-    return StorageQuotaMapper.toDomain(created);
   }
 
   async incrementUsage(
@@ -114,15 +77,32 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
       throw new BadRequestException('Storage quota exceeded');
     }
 
-    const created = await this.prisma.storageQuota.create({
-      data: {
-        userId: validUserId,
-        projectId: validProjectId,
-        usedBytes: bytes,
-        maxBytes: DEFAULT_STORAGE_QUOTA_BYTES,
-      },
-    });
-    return created.usedBytes;
+    try {
+      const created = await this.prisma.storageQuota.create({
+        data: {
+          userId: validUserId,
+          projectId: validProjectId,
+          usedBytes: bytes,
+          maxBytes: DEFAULT_STORAGE_QUOTA_BYTES,
+        },
+      });
+      return created.usedBytes;
+    } catch (err: unknown) {
+      if ((err as { code?: string })?.code === 'P2002') {
+        const concurrent = await this.findByScope(validUserId, validProjectId);
+        if (concurrent) {
+          if (concurrent.usedBytes + bytes > concurrent.maxBytes) {
+            throw new BadRequestException('Storage quota exceeded');
+          }
+          const updated = await this.prisma.storageQuota.update({
+            where: { id: concurrent.id },
+            data: { usedBytes: { increment: bytes } },
+          });
+          return updated.usedBytes;
+        }
+      }
+      throw err;
+    }
   }
 
   async decrementUsage(
@@ -143,31 +123,5 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
       data: { usedBytes: { decrement: decrementAmount } },
     });
     return updated.usedBytes;
-  }
-
-  async reconcileUsage(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
-    actualBytes: bigint,
-  ): Promise<void> {
-    const validUserId = cleanUuid(userId);
-    const validProjectId = cleanUuid(projectId);
-    const existing = await this.findByScope(validUserId, validProjectId);
-
-    if (existing) {
-      await this.prisma.storageQuota.update({
-        where: { id: existing.id },
-        data: { usedBytes: actualBytes },
-      });
-    } else {
-      await this.prisma.storageQuota.create({
-        data: {
-          userId: validUserId,
-          projectId: validProjectId,
-          usedBytes: actualBytes,
-          maxBytes: DEFAULT_STORAGE_QUOTA_BYTES,
-        },
-      });
-    }
   }
 }

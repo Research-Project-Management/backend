@@ -72,7 +72,7 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
   });
 
   describe('StorageBlob Entity (CAS Reference Counting)', () => {
-    it('should manage reference counts and tombstone transition', () => {
+    it('should track reference counts and readiness status', () => {
       const hash = ContentHash.fromBuffer(Buffer.from('binary-data'));
       const blob = new StorageBlob({
         id: 'blob-uuid-1',
@@ -86,25 +86,7 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
 
       expect(blob.refCount).toBe(2);
       expect(blob.status).toBe(BlobStatus.READY);
-
-      // 1st deletion: still referenced
-      const isEligible1 = blob.decrementRef();
-      expect(isEligible1).toBe(false);
-      expect(blob.refCount).toBe(1);
-      expect(blob.status).toBe(BlobStatus.READY);
-
-      // 2nd deletion: refCount = 0 -> marks DELETED with tombstone
-      const isEligible2 = blob.decrementRef(48);
-      expect(isEligible2).toBe(true);
-      expect(blob.refCount).toBe(0);
-      expect(blob.status).toBe(BlobStatus.DELETED);
-      expect(blob.tombstoneAt).toBeInstanceOf(Date);
-
-      // Re-upload of same content resurrects the blob
-      blob.incrementRef();
-      expect(blob.refCount).toBe(1);
-      expect(blob.status).toBe(BlobStatus.READY);
-      expect(blob.tombstoneAt).toBeNull();
+      expect(blob.isReady()).toBe(true);
     });
   });
 
@@ -123,8 +105,8 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
       );
     });
 
-    it('should manage soft-delete and restore states', () => {
-      const file = new StorageNode({
+    it('should evaluate soft-delete state from trashedAt', () => {
+      const activeFile = new StorageNode({
         id: 'file-1',
         name: 'experiment_results.csv',
         isFolder: false,
@@ -132,21 +114,23 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
         authorId: 'user-1',
         scope: FileScope.Project,
       });
+      expect(activeFile.isTrashed()).toBe(false);
 
-      expect(file.isTrashed()).toBe(false);
-
-      file.trash();
-      expect(file.isTrashed()).toBe(true);
-      expect(file.trashedAt).toBeInstanceOf(Date);
-
-      file.restore();
-      expect(file.isTrashed()).toBe(false);
-      expect(file.trashedAt).toBeNull();
+      const trashedFile = new StorageNode({
+        id: 'file-2',
+        name: 'trashed_results.csv',
+        isFolder: false,
+        size: 2048n,
+        authorId: 'user-1',
+        scope: FileScope.Project,
+        trashedAt: new Date(),
+      });
+      expect(trashedFile.isTrashed()).toBe(true);
     });
   });
 
-  describe('StorageQuota Entity (Capacity & Limit Enforcement)', () => {
-    it('should correctly evaluate available capacity and consume bytes', () => {
+  describe('StorageQuota Entity', () => {
+    it('should expose usedBytes and maxBytes for scope', () => {
       const quota = new StorageQuota({
         id: 'quota-1',
         userId: 'user-1',
@@ -154,29 +138,8 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
         maxBytes: 2000n,
       });
 
-      expect(quota.hasCapacity(500n)).toBe(true);
-      expect(quota.hasCapacity(1500n)).toBe(false);
-
-      quota.consume(500n);
-      expect(quota.usedBytes).toBe(1500n);
-      expect(quota.getUsagePercentage()).toBe(75);
-
-      expect(() => quota.consume(1000n)).toThrow('Storage quota exceeded');
-    });
-
-    it('should safely release quota bytes without going below zero', () => {
-      const quota = new StorageQuota({
-        id: 'quota-1',
-        userId: 'user-1',
-        usedBytes: 500n,
-        maxBytes: 1000n,
-      });
-
-      quota.release(300n);
-      expect(quota.usedBytes).toBe(200n);
-
-      quota.release(500n); // Release more than used
-      expect(quota.usedBytes).toBe(0n);
+      expect(quota.usedBytes).toBe(1000n);
+      expect(quota.maxBytes).toBe(2000n);
     });
   });
 });

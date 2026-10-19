@@ -2,7 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { File as PrismaFile, Prisma } from '@prisma/client';
 import { isValidUuid } from '@/modules/storage/core';
-import { StorageNode, FileScope, ListDriveFilter } from '../types';
+import {
+  StorageNode,
+  FileScope,
+  normalizeFileScope,
+  ListDriveFilter,
+} from '../types';
 
 export type { ListDriveFilter };
 
@@ -21,7 +26,6 @@ export interface IStorageNodeRepository {
   list(
     filter: ListDriveFilter,
   ): Promise<{ nodes: StorageNode[]; total: number }>;
-  findByBlobId(blobId: string): Promise<StorageNode[]>;
   softDeleteSubtree(rootNodeId: string): Promise<number>;
   restoreSubtree(rootNodeId: string): Promise<number>;
   findSubtreeNodes(rootNodeId: string): Promise<StorageNode[]>;
@@ -32,6 +36,12 @@ export interface IStorageNodeRepository {
     userId: string,
     take: number,
     skip: number,
+    filter?: {
+      search?: string;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+      types?: string[];
+    },
   ): Promise<{ items: SharedNodeItem[]; total: number }>;
   shareNode(
     fileId: string,
@@ -68,20 +78,187 @@ type PrismaFileWithAuthor = PrismaFile & {
   } | null;
 };
 
+function buildFileTypeCondition(rawType: string): Prisma.FileWhereInput | null {
+  const t = rawType.trim().toLowerCase();
+  if (!t) return null;
+  if (t === 'folder' || t === 'directory') {
+    return { isFolder: true };
+  }
+  if (t === 'pdf') {
+    return {
+      isFolder: false,
+      OR: [
+        { mimeType: { contains: 'pdf', mode: 'insensitive' } },
+        { filename: { endsWith: '.pdf', mode: 'insensitive' } },
+      ],
+    };
+  }
+  if (t === 'image' || t === 'images') {
+    return {
+      isFolder: false,
+      mimeType: { startsWith: 'image/', mode: 'insensitive' },
+    };
+  }
+  if (t === 'video' || t === 'videos') {
+    return {
+      isFolder: false,
+      mimeType: { startsWith: 'video/', mode: 'insensitive' },
+    };
+  }
+  if (t === 'audio') {
+    return {
+      isFolder: false,
+      mimeType: { startsWith: 'audio/', mode: 'insensitive' },
+    };
+  }
+  if (t === 'spreadsheet' || t === 'csv' || t === 'excel') {
+    return {
+      isFolder: false,
+      OR: [
+        { mimeType: { contains: 'spreadsheet', mode: 'insensitive' } },
+        { mimeType: { contains: 'excel', mode: 'insensitive' } },
+        { mimeType: { contains: 'csv', mode: 'insensitive' } },
+        { filename: { endsWith: '.csv', mode: 'insensitive' } },
+        { filename: { endsWith: '.xlsx', mode: 'insensitive' } },
+        { filename: { endsWith: '.xls', mode: 'insensitive' } },
+      ],
+    };
+  }
+  if (t === 'document' || t === 'doc' || t === 'text') {
+    return {
+      isFolder: false,
+      OR: [
+        { mimeType: { startsWith: 'text/', mode: 'insensitive' } },
+        { mimeType: { contains: 'word', mode: 'insensitive' } },
+        { mimeType: { contains: 'document', mode: 'insensitive' } },
+        { mimeType: { contains: 'latex', mode: 'insensitive' } },
+        { mimeType: { contains: 'tex', mode: 'insensitive' } },
+      ],
+    };
+  }
+  if (t === 'archive' || t === 'zip') {
+    return {
+      isFolder: false,
+      OR: [
+        { mimeType: { contains: 'zip', mode: 'insensitive' } },
+        { mimeType: { contains: 'tar', mode: 'insensitive' } },
+        { mimeType: { contains: 'gzip', mode: 'insensitive' } },
+        { mimeType: { contains: 'compressed', mode: 'insensitive' } },
+      ],
+    };
+  }
+  return {
+    isFolder: false,
+    OR: [
+      { mimeType: { contains: t, mode: 'insensitive' } },
+      {
+        filename: {
+          endsWith: `.${t.replace(/^\./, '')}`,
+          mode: 'insensitive',
+        },
+      },
+    ],
+  };
+}
+
+function applyFileTypeFilter(
+  where: Prisma.FileWhereInput,
+  types?: string[],
+): void {
+  if (!types || types.length === 0) return;
+  const typeConditions = types
+    .map(buildFileTypeCondition)
+    .filter((c): c is Prisma.FileWhereInput => c !== null);
+
+  if (typeConditions.length === 1) {
+    Object.assign(where, typeConditions[0]);
+  } else if (typeConditions.length > 1) {
+    where.AND = [
+      ...(Array.isArray(where.AND)
+        ? where.AND
+        : where.AND
+          ? [where.AND]
+          : []),
+      { OR: typeConditions },
+    ];
+  }
+}
+
+function parseFileOrderBy(
+  sortBy?: string,
+  sortOrder?: 'asc' | 'desc',
+): Prisma.FileOrderByWithRelationInput[] {
+  const defaultOrder: Prisma.FileOrderByWithRelationInput[] = [
+    { isFolder: 'desc' },
+    { filename: 'asc' },
+  ];
+  if (!sortBy) return defaultOrder;
+
+  const normalized = sortBy.trim().toLowerCase();
+  // Support compound sort strings from Frontend ('date-desc', 'name-asc', 'size-desc', etc.)
+  if (normalized === 'date-desc') {
+    return [{ isFolder: 'desc' }, { updatedAt: 'desc' }];
+  }
+  if (normalized === 'date-asc') {
+    return [{ isFolder: 'desc' }, { updatedAt: 'asc' }];
+  }
+  if (normalized === 'name-asc') {
+    return [{ isFolder: 'desc' }, { filename: 'asc' }];
+  }
+  if (normalized === 'name-desc') {
+    return [{ isFolder: 'desc' }, { filename: 'desc' }];
+  }
+  if (normalized === 'size-desc') {
+    return [{ isFolder: 'desc' }, { size: 'desc' }];
+  }
+  if (normalized === 'size-asc') {
+    return [{ isFolder: 'desc' }, { size: 'asc' }];
+  }
+
+  const orderDir: 'asc' | 'desc' = sortOrder === 'desc' ? 'desc' : 'asc';
+  if (
+    normalized === 'updatedat' ||
+    normalized === 'updated_at' ||
+    normalized === 'date'
+  ) {
+    return [{ isFolder: 'desc' }, { updatedAt: orderDir }];
+  }
+  if (normalized === 'createdat' || normalized === 'created_at') {
+    return [{ isFolder: 'desc' }, { createdAt: orderDir }];
+  }
+  if (normalized === 'size') {
+    return [{ isFolder: 'desc' }, { size: orderDir }];
+  }
+  if (normalized === 'name' || normalized === 'filename') {
+    return [{ isFolder: 'desc' }, { filename: orderDir }];
+  }
+
+  return defaultOrder;
+}
+
 export class StorageNodeMapper {
   public static toDomain(record: PrismaFileWithAuthor): StorageNode {
+    const scope = normalizeFileScope(record.linkedToType);
+    const metadata = (record.metaData as Record<string, unknown>) || {};
+    const projectId =
+      (record as { projectId?: string | null }).projectId ??
+      (typeof metadata.projectId === 'string' ? metadata.projectId : null) ??
+      (scope === FileScope.Project || scope === FileScope.Library
+        ? record.linkedToId
+        : null);
     return new StorageNode({
       id: record.id,
-      projectId: record.linkedToType === 'Project' ? record.linkedToId : null,
+      projectId,
+      linkedToId: record.linkedToId,
       parentId: record.parentId,
       name: record.filename,
       isFolder: record.isFolder,
       size: BigInt(record.size),
       mimeType: record.mimeType,
       blobId: record.blobId,
-      scope: (record.linkedToType as FileScope) || FileScope.Personal,
+      scope,
       starred: record.starred,
-      metadata: (record.metaData as Record<string, unknown>) || {},
+      metadata,
       authorId: record.authorId,
       author: record.author
         ? {
@@ -98,6 +275,10 @@ export class StorageNodeMapper {
   }
 
   public static toPrismaCreate(node: StorageNode) {
+    const metadata =
+      node.projectId && node.scope !== FileScope.Project
+        ? { ...node.metadata, projectId: node.projectId }
+        : node.metadata;
     return {
       id: node.id,
       filename: node.name,
@@ -105,10 +286,10 @@ export class StorageNodeMapper {
       mimeType: node.mimeType,
       isFolder: node.isFolder,
       starred: node.starred,
-      metaData: node.metadata as Prisma.InputJsonValue,
+      metaData: metadata as Prisma.InputJsonValue,
       parentId: node.parentId,
       linkedToType: node.scope,
-      linkedToId: node.projectId,
+      linkedToId: node.linkedToId ?? node.projectId,
       blobId: node.blobId,
       authorId: node.authorId,
       trashedAt: node.trashedAt,
@@ -150,6 +331,8 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
         size: data.size,
         mimeType: data.mimeType,
         parentId: data.parentId,
+        linkedToType: data.linkedToType,
+        linkedToId: data.linkedToId,
         starred: data.starred,
         metaData: data.metaData,
         blobId: data.blobId,
@@ -185,6 +368,12 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
 
     if (filter.trashedOnly) {
       where.trashedAt = { not: null };
+      if (filter.parentId === undefined && !filter.search?.trim()) {
+        where.OR = [
+          { parentId: null },
+          { parent: { trashedAt: null } },
+        ];
+      }
     } else {
       where.trashedAt = null;
     }
@@ -201,129 +390,27 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
       where.filename = { contains: filter.search.trim(), mode: 'insensitive' };
     }
 
-    if (filter.types && filter.types.length > 0) {
-      const typeConditions: Prisma.FileWhereInput[] = [];
-      for (const rawType of filter.types) {
-        const t = rawType.trim().toLowerCase();
-        if (!t) continue;
-        if (t === 'folder' || t === 'directory') {
-          typeConditions.push({ isFolder: true });
-        } else if (t === 'pdf') {
-          typeConditions.push({
-            isFolder: false,
-            OR: [
-              { mimeType: { contains: 'pdf', mode: 'insensitive' } },
-              { filename: { endsWith: '.pdf', mode: 'insensitive' } },
-            ],
-          });
-        } else if (t === 'image' || t === 'images') {
-          typeConditions.push({
-            isFolder: false,
-            mimeType: { startsWith: 'image/', mode: 'insensitive' },
-          });
-        } else if (t === 'video' || t === 'videos') {
-          typeConditions.push({
-            isFolder: false,
-            mimeType: { startsWith: 'video/', mode: 'insensitive' },
-          });
-        } else if (t === 'audio') {
-          typeConditions.push({
-            isFolder: false,
-            mimeType: { startsWith: 'audio/', mode: 'insensitive' },
-          });
-        } else if (t === 'spreadsheet' || t === 'csv' || t === 'excel') {
-          typeConditions.push({
-            isFolder: false,
-            OR: [
-              { mimeType: { contains: 'spreadsheet', mode: 'insensitive' } },
-              { mimeType: { contains: 'excel', mode: 'insensitive' } },
-              { mimeType: { contains: 'csv', mode: 'insensitive' } },
-              { filename: { endsWith: '.csv', mode: 'insensitive' } },
-              { filename: { endsWith: '.xlsx', mode: 'insensitive' } },
-              { filename: { endsWith: '.xls', mode: 'insensitive' } },
-            ],
-          });
-        } else if (t === 'document' || t === 'doc' || t === 'text') {
-          typeConditions.push({
-            isFolder: false,
-            OR: [
-              { mimeType: { startsWith: 'text/', mode: 'insensitive' } },
-              { mimeType: { contains: 'word', mode: 'insensitive' } },
-              { mimeType: { contains: 'document', mode: 'insensitive' } },
-              { mimeType: { contains: 'latex', mode: 'insensitive' } },
-              { mimeType: { contains: 'tex', mode: 'insensitive' } },
-            ],
-          });
-        } else if (t === 'archive' || t === 'zip') {
-          typeConditions.push({
-            isFolder: false,
-            OR: [
-              { mimeType: { contains: 'zip', mode: 'insensitive' } },
-              { mimeType: { contains: 'tar', mode: 'insensitive' } },
-              { mimeType: { contains: 'gzip', mode: 'insensitive' } },
-              { mimeType: { contains: 'compressed', mode: 'insensitive' } },
-            ],
-          });
-        } else {
-          typeConditions.push({
-            isFolder: false,
-            OR: [
-              { mimeType: { contains: t, mode: 'insensitive' } },
-              {
-                filename: {
-                  endsWith: `.${t.replace(/^\./, '')}`,
-                  mode: 'insensitive',
-                },
-              },
-            ],
-          });
-        }
-      }
-      if (typeConditions.length === 1) {
-        Object.assign(where, typeConditions[0]);
-      } else if (typeConditions.length > 1) {
-        where.AND = [
-          ...(Array.isArray(where.AND)
-            ? where.AND
-            : where.AND
-              ? [where.AND]
-              : []),
-          { OR: typeConditions },
-        ];
-      }
-    }
+    applyFileTypeFilter(where, filter.types);
 
     if (filter.scope) {
-      where.linkedToType = filter.scope;
-      if (filter.projectId) {
-        where.linkedToId = filter.projectId;
+      const normalizedScope = normalizeFileScope(filter.scope);
+      where.linkedToType = { equals: normalizedScope, mode: 'insensitive' };
+      const targetLinkedId = filter.linkedToId ?? filter.projectId;
+      if (targetLinkedId) {
+        where.linkedToId = targetLinkedId;
       }
+    } else if (filter.projectId) {
+      where.linkedToType = { equals: FileScope.Project, mode: 'insensitive' };
+      where.linkedToId = filter.projectId;
     } else {
-      // Default: Exclude Library and Paper files from Personal Drive
+      // Default: Exclude Library and Paper files from Personal Drive (case-insensitive)
       where.NOT = [
-        { linkedToType: { in: [FileScope.Library, FileScope.Paper] } },
+        { linkedToType: { equals: FileScope.Library, mode: 'insensitive' } },
+        { linkedToType: { equals: FileScope.Paper, mode: 'insensitive' } },
       ];
     }
 
-    let orderBy: Prisma.FileOrderByWithRelationInput[] = [
-      { isFolder: 'desc' },
-      { filename: 'asc' },
-    ];
-    if (filter.sortBy) {
-      const orderDir = filter.sortOrder === 'desc' ? 'desc' : 'asc';
-      if (filter.sortBy === 'updatedAt' || filter.sortBy === 'updated_at') {
-        orderBy = [{ isFolder: 'desc' }, { updatedAt: orderDir }];
-      } else if (
-        filter.sortBy === 'createdAt' ||
-        filter.sortBy === 'created_at'
-      ) {
-        orderBy = [{ isFolder: 'desc' }, { createdAt: orderDir }];
-      } else if (filter.sortBy === 'size') {
-        orderBy = [{ isFolder: 'desc' }, { size: orderDir }];
-      } else if (filter.sortBy === 'name' || filter.sortBy === 'filename') {
-        orderBy = [{ isFolder: 'desc' }, { filename: orderDir }];
-      }
-    }
+    const orderBy = parseFileOrderBy(filter.sortBy, filter.sortOrder);
 
     const [records, total] = await Promise.all([
       this.prisma.file.findMany({
@@ -340,14 +427,6 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
       nodes: records.map((r) => StorageNodeMapper.toDomain(r)),
       total,
     };
-  }
-
-  async findByBlobId(blobId: string): Promise<StorageNode[]> {
-    const records = await this.prisma.file.findMany({
-      where: { blobId },
-      include: { author: { select: FILE_AUTHOR_SELECT } },
-    });
-    return records.map((r) => StorageNodeMapper.toDomain(r));
   }
 
   async softDeleteSubtree(rootNodeId: string): Promise<number> {
@@ -464,6 +543,12 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     userId: string,
     take: number,
     skip: number,
+    filter?: {
+      search?: string;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+      types?: string[];
+    },
   ): Promise<{
     items: Array<{
       node: StorageNode;
@@ -472,12 +557,23 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     }>;
     total: number;
   }> {
+    const fileWhere: Prisma.FileWhereInput = { trashedAt: null };
+    if (filter?.search && filter.search.trim()) {
+      fileWhere.filename = {
+        contains: filter.search.trim(),
+        mode: 'insensitive',
+      };
+    }
+    applyFileTypeFilter(fileWhere, filter?.types);
+
+    const where: Prisma.FileShareWhereInput = {
+      userId,
+      file: fileWhere,
+    };
+
     const [shares, total] = await Promise.all([
       this.prisma.fileShare.findMany({
-        where: {
-          userId,
-          file: { trashedAt: null },
-        },
+        where,
         include: {
           file: {
             include: { author: { select: FILE_AUTHOR_SELECT } },
@@ -487,12 +583,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
         take,
         skip,
       }),
-      this.prisma.fileShare.count({
-        where: {
-          userId,
-          file: { trashedAt: null },
-        },
-      }),
+      this.prisma.fileShare.count({ where }),
     ]);
 
     const items = shares

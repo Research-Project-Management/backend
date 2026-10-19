@@ -2,21 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { UploadSession as PrismaSession } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { UploadSession, UploadSessionStatus } from '../types';
-import { CompletedPart } from '@/modules/storage/core';
 import { FileScope } from '@/modules/storage/drive';
 
 export interface IUploadSessionRepository {
   findById(id: string): Promise<UploadSession | null>;
   create(session: UploadSession): Promise<UploadSession>;
   update(session: UploadSession): Promise<UploadSession>;
-  delete(id: string): Promise<void>;
-  recordPart(
-    sessionId: string,
-    partNumber: number,
-    etag: string,
-    sizeBytes: number,
-  ): Promise<void>;
-  getParts(sessionId: string): Promise<CompletedPart[]>;
   findExpiredSessions(threshold: Date, limit: number): Promise<UploadSession[]>;
 }
 
@@ -101,46 +92,6 @@ export class PrismaUploadSessionRepository implements IUploadSessionRepository {
       },
     });
     return UploadSessionMapper.toDomain(updated);
-  }
-
-  async delete(id: string): Promise<void> {
-    await this.prisma.uploadSession.delete({
-      where: { id },
-    });
-  }
-
-  async recordPart(
-    sessionId: string,
-    partNumber: number,
-    etag: string,
-    sizeBytes: number,
-  ): Promise<void> {
-    await this.prisma.uploadPart.upsert({
-      where: {
-        sessionId_partNumber: { sessionId, partNumber },
-      },
-      create: {
-        sessionId,
-        partNumber,
-        etag,
-        sizeBytes,
-      },
-      update: {
-        etag,
-        sizeBytes,
-      },
-    });
-  }
-
-  async getParts(sessionId: string): Promise<CompletedPart[]> {
-    const records = await this.prisma.uploadPart.findMany({
-      where: { sessionId },
-      orderBy: { partNumber: 'asc' },
-    });
-    return records.map((p) => ({
-      partNumber: p.partNumber,
-      eTag: p.etag,
-    }));
   }
 
   async findExpiredSessions(

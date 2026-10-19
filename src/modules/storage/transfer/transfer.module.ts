@@ -2,11 +2,7 @@ import { Module } from '@nestjs/common';
 import { UPLOAD_SESSION_REPOSITORY } from '@/modules/storage/storage.tokens';
 import { PrismaUploadSessionRepository } from './repositories/prisma-session.repository';
 
-import {
-  DirectUploadService,
-  PresignService,
-  CompletePresignService,
-} from './services/upload.service';
+import { UploadService } from './services/upload.service';
 import { MultipartService } from './services/multipart.service';
 import { StreamService } from './services/stream.service';
 
@@ -27,17 +23,13 @@ const transferControllers = shouldMountTransferControllers()
       provide: UPLOAD_SESSION_REPOSITORY,
       useClass: PrismaUploadSessionRepository,
     },
-    DirectUploadService,
-    PresignService,
-    CompletePresignService,
+    UploadService,
     MultipartService,
     StreamService,
   ],
   exports: [
     UPLOAD_SESSION_REPOSITORY,
-    DirectUploadService,
-    PresignService,
-    CompletePresignService,
+    UploadService,
     MultipartService,
     StreamService,
   ],

@@ -9,22 +9,35 @@ export enum FileScope {
   Paper = 'Paper', // Ingested research paper binary
 }
 
-export function isDriveVisible(
+export function normalizeFileScope(
   scope: FileScope | string | null | undefined,
-): boolean {
-  if (!scope) return true;
-  const strScope = String(scope);
-  return (
-    strScope !== (FileScope.Library as string) &&
-    strScope !== (FileScope.Paper as string)
-  );
+  hasProjectId = false,
+): FileScope {
+  if (!scope) {
+    return hasProjectId ? FileScope.Project : FileScope.Personal;
+  }
+  const lower = String(scope).trim().toLowerCase();
+  switch (lower) {
+    case 'project':
+      return FileScope.Project;
+    case 'page':
+      return FileScope.Page;
+    case 'library':
+      return FileScope.Library;
+    case 'paper':
+      return FileScope.Paper;
+    case 'personal':
+    default:
+      return FileScope.Personal;
+  }
 }
 
 export interface ListDriveFilter {
   userId?: string;
   parentId?: string | null;
-  scope?: FileScope;
+  scope?: FileScope | string;
   projectId?: string | null;
+  linkedToId?: string | null;
   starredOnly?: boolean;
   trashedOnly?: boolean;
   authorId?: string;
@@ -50,13 +63,14 @@ export interface StorageNodeAuthor {
 export interface StorageNodeProps {
   id: string;
   projectId?: string | null;
+  linkedToId?: string | null;
   parentId?: string | null;
   name: string;
   isFolder: boolean;
   size: bigint;
   mimeType?: string;
   blobId?: string | null;
-  scope?: FileScope;
+  scope?: FileScope | string;
   starred?: boolean;
   metadata?: Record<string, unknown>;
   authorId: string;
@@ -77,6 +91,7 @@ export class StorageNode {
   public readonly createdAt: Date;
 
   private _projectId: string | null;
+  private _linkedToId: string | null;
   private _parentId: string | null;
   private _name: string;
   private _size: bigint;
@@ -90,12 +105,20 @@ export class StorageNode {
 
   constructor(props: StorageNodeProps) {
     this.id = props.id;
-    this._projectId = props.projectId ?? null;
     this.isFolder = props.isFolder;
     this.authorId = props.authorId;
     this.author = props.author ?? null;
     this.createdAt = props.createdAt ?? new Date();
 
+    const resolvedScope = normalizeFileScope(
+      props.scope,
+      Boolean(props.projectId),
+    );
+    this._scope = resolvedScope;
+    this._linkedToId = props.linkedToId ?? props.projectId ?? null;
+    this._projectId =
+      props.projectId ??
+      (resolvedScope === FileScope.Project ? this._linkedToId : null);
     this._parentId = props.parentId ?? null;
     this._name = props.name;
     this._size = props.size;
@@ -103,7 +126,6 @@ export class StorageNode {
       props.mimeType ??
       (props.isFolder ? 'application/x-directory' : 'application/octet-stream');
     this._blobId = props.blobId ?? null;
-    this._scope = props.scope ?? FileScope.Personal;
     this._starred = props.starred ?? false;
     this._metadata = props.metadata ?? {};
     this._trashedAt = props.trashedAt ?? null;
@@ -112,6 +134,10 @@ export class StorageNode {
 
   get projectId(): string | null {
     return this._projectId;
+  }
+
+  get linkedToId(): string | null {
+    return this._linkedToId;
   }
 
   get parentId(): string | null {
@@ -145,9 +171,71 @@ export class StorageNode {
     return this._updatedAt;
   }
 
-  public setScope(scope: FileScope, projectId?: string | null): void {
-    this._scope = scope;
-    this._projectId = projectId ?? null;
+  public toJSON(): Record<string, unknown> {
+    return {
+      id: this.id,
+      projectId: this._projectId,
+      linkedToId: this._linkedToId,
+      parentId: this._parentId,
+      name: this._name,
+      isFolder: this.isFolder,
+      size: this._size.toString(),
+      mimeType: this._mimeType,
+      blobId: this._blobId,
+      scope: this._scope,
+      starred: this._starred,
+      metadata: this._metadata,
+      authorId: this.authorId,
+      author: this.author,
+      trashedAt: this._trashedAt ? this._trashedAt.toISOString() : null,
+      createdAt: this.createdAt.toISOString(),
+      updatedAt: this._updatedAt.toISOString(),
+    };
+  }
+
+  public static fromSerialized(raw: unknown): StorageNode {
+    if (raw instanceof StorageNode) return raw;
+    const obj = (raw || {}) as Record<string, unknown>;
+    const rawSize = obj.size ?? obj._size ?? 0;
+    const size =
+      typeof rawSize === 'bigint'
+        ? rawSize
+        : BigInt(String(rawSize || '0'));
+    const rawTrashedAt = obj.trashedAt ?? obj._trashedAt;
+    const rawCreatedAt = obj.createdAt;
+    const rawUpdatedAt = obj.updatedAt ?? obj._updatedAt;
+
+    return new StorageNode({
+      id: String(obj.id || ''),
+      projectId: (obj.projectId ?? obj._projectId ?? null) as string | null,
+      linkedToId: (obj.linkedToId ?? obj._linkedToId ?? null) as string | null,
+      parentId: (obj.parentId ?? obj._parentId ?? null) as string | null,
+      name: String(obj.name ?? obj._name ?? ''),
+      isFolder: Boolean(obj.isFolder),
+      size,
+      mimeType: (obj.mimeType ?? obj._mimeType) as string | undefined,
+      blobId: (obj.blobId ?? obj._blobId ?? null) as string | null,
+      scope: (obj.scope ?? obj._scope) as FileScope | string | undefined,
+      starred: Boolean(obj.starred ?? obj._starred ?? false),
+      metadata: ((obj.metadata ?? obj._metadata) as Record<string, unknown>) || {},
+      authorId: String(obj.authorId || ''),
+      author: (obj.author as StorageNodeAuthor | null) ?? null,
+      trashedAt: rawTrashedAt ? new Date(String(rawTrashedAt)) : null,
+      createdAt: rawCreatedAt ? new Date(String(rawCreatedAt)) : new Date(),
+      updatedAt: rawUpdatedAt ? new Date(String(rawUpdatedAt)) : new Date(),
+    });
+  }
+
+  public setScope(
+    scope: FileScope | string,
+    linkedToId?: string | null,
+  ): void {
+    const normalized = normalizeFileScope(scope, Boolean(linkedToId));
+    this._scope = normalized;
+    this._linkedToId = linkedToId ?? null;
+    if (normalized === FileScope.Project) {
+      this._projectId = linkedToId ?? null;
+    }
     this._updatedAt = new Date();
   }
 
@@ -166,16 +254,6 @@ export class StorageNode {
     this._updatedAt = new Date();
   }
 
-  public trash(): void {
-    this._trashedAt = new Date();
-    this._updatedAt = new Date();
-  }
-
-  public restore(): void {
-    this._trashedAt = null;
-    this._updatedAt = new Date();
-  }
-
   public isTrashed(): boolean {
     return this._trashedAt !== null;
   }
@@ -184,17 +262,6 @@ export class StorageNode {
     this._starred = !this._starred;
     this._updatedAt = new Date();
     return this._starred;
-  }
-
-  public updateSize(newSize: bigint): void {
-    this._size = newSize;
-    this._updatedAt = new Date();
-  }
-
-  public linkBlob(blobId: string, sizeBytes: bigint): void {
-    this._blobId = blobId;
-    this._size = sizeBytes;
-    this._updatedAt = new Date();
   }
 
   public updateBlob(
@@ -213,23 +280,6 @@ export class StorageNode {
   public updateMetadata(metadata: Record<string, unknown>): void {
     this._metadata = { ...this._metadata, ...metadata };
     this._updatedAt = new Date();
-  }
-
-  public toJSON() {
-    return {
-      id: this.id,
-      name: this._name,
-      isFolder: this.isFolder,
-      size: Number(this._size),
-      mimeType: this._mimeType,
-      parentId: this._parentId,
-      starred: this._starred,
-      metadata: this._metadata,
-      authorId: this.authorId,
-      createdAt: this.createdAt,
-      updatedAt: this._updatedAt,
-      trashedAt: this._trashedAt,
-    };
   }
 
   /**
@@ -308,30 +358,6 @@ export class StorageQuota {
   get updatedAt(): Date {
     return this._updatedAt;
   }
-
-  public hasCapacity(requestedBytes: bigint): boolean {
-    return this._usedBytes + requestedBytes <= this._maxBytes;
-  }
-
-  public consume(bytes: bigint): void {
-    if (!this.hasCapacity(bytes)) {
-      throw new Error(
-        `Storage quota exceeded: requested ${bytes} bytes, available ${this._maxBytes - this._usedBytes} bytes`,
-      );
-    }
-    this._usedBytes += bytes;
-    this._updatedAt = new Date();
-  }
-
-  public release(bytes: bigint): void {
-    this._usedBytes = this._usedBytes > bytes ? this._usedBytes - bytes : 0n;
-    this._updatedAt = new Date();
-  }
-
-  public getUsagePercentage(): number {
-    if (this._maxBytes === 0n) return 100;
-    return Number((this._usedBytes * 10000n) / this._maxBytes) / 100;
-  }
 }
 
 // ============================================================================
@@ -385,25 +411,11 @@ export class StorageVersion {
     this.mimeType = props.mimeType ?? 'application/octet-stream';
     this.author = props.author ?? null;
   }
-
-  isInitial(): boolean {
-    return this.versionNumber === 1;
-  }
 }
 
 // ============================================================================
 // DRIVE EVENTS
 // ============================================================================
-
-export class FileDeletedEvent {
-  constructor(
-    public readonly fileId: string,
-    public readonly blobId: string | null,
-    public readonly authorId: string,
-    public readonly projectId?: string | null,
-    public readonly permanent = false,
-  ) {}
-}
 
 export class FileTrashedEvent {
   constructor(
@@ -411,15 +423,5 @@ export class FileTrashedEvent {
     public readonly authorId: string,
     public readonly trashedAt: Date,
     public readonly projectId?: string | null,
-  ) {}
-}
-
-export class QuotaExceededEvent {
-  constructor(
-    public readonly userId: string | null,
-    public readonly projectId: string | null,
-    public readonly requestedBytes: bigint,
-    public readonly currentUsedBytes: bigint,
-    public readonly maxBytes: bigint,
   ) {}
 }

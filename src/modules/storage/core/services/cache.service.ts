@@ -83,46 +83,4 @@ export class StorageRedisCacheService {
   ): Promise<void> {
     await this.redis.set(`flux:storage:url:${blobId}`, url, ttlSeconds);
   }
-
-  async invalidatePresignedUrl(blobId: string): Promise<void> {
-    await this.redis.del(`flux:storage:url:${blobId}`);
-  }
-
-  private getQuotaKey(
-    userId?: string | null,
-    projectId?: string | null,
-  ): string {
-    return `flux:quota:${userId ?? 'global'}:${projectId ?? 'personal'}`;
-  }
-
-  async getCachedQuota(
-    userId?: string | null,
-    projectId?: string | null,
-  ): Promise<{ usedBytes: string; maxBytes: string } | null> {
-    const key = this.getQuotaKey(userId, projectId);
-    return this.redis.get<{ usedBytes: string; maxBytes: string }>(key);
-  }
-
-  async setCachedQuota(
-    userId: string | null | undefined,
-    projectId: string | null | undefined,
-    usedBytes: bigint,
-    maxBytes: bigint,
-    ttlSeconds = 3600,
-  ): Promise<void> {
-    const key = this.getQuotaKey(userId, projectId);
-    await this.redis.set(
-      key,
-      { usedBytes: usedBytes.toString(), maxBytes: maxBytes.toString() },
-      ttlSeconds,
-    );
-  }
-
-  async invalidateQuota(
-    userId?: string | null,
-    projectId?: string | null,
-  ): Promise<void> {
-    const key = this.getQuotaKey(userId, projectId);
-    await this.redis.del(key);
-  }
 }

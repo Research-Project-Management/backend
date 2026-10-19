@@ -74,7 +74,6 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       delete: jest.fn(),
       deleteMany: jest.fn(),
       list: jest.fn(),
-      findByBlobId: jest.fn(),
       softDeleteSubtree: jest.fn(),
       restoreSubtree: jest.fn(),
       findSubtreeNodes: jest.fn(),
@@ -89,7 +88,6 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       findById: jest.fn(),
       findByHash: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation(async (blob) => blob),
-      update: jest.fn().mockImplementation(async (blob) => blob),
       delete: jest.fn(),
       findTombstonedBlobs: jest.fn(),
       incrementRefCount: jest.fn(),
@@ -100,18 +98,13 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       create: jest.fn().mockImplementation(async (s) => s),
       findById: jest.fn(),
       update: jest.fn().mockImplementation(async (s) => s),
-      delete: jest.fn(),
-      recordPart: jest.fn(),
-      getParts: jest.fn().mockResolvedValue([]),
       findExpiredSessions: jest.fn().mockResolvedValue([]),
     };
 
     mockQuotaRepo = {
       findByScope: jest.fn().mockResolvedValue(null),
-      upsert: jest.fn(),
       incrementUsage: jest.fn().mockResolvedValue(0n),
       decrementUsage: jest.fn().mockResolvedValue(0n),
-      reconcileUsage: jest.fn().mockResolvedValue(undefined),
     };
 
     mockCache = {

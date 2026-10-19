@@ -3,7 +3,9 @@ import {
   Inject,
   Logger,
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
@@ -48,15 +50,19 @@ export type {
 };
 
 @Injectable()
-export class DirectUploadService {
+export class UploadService {
+  private readonly logger = new Logger(UploadService.name);
+
   constructor(
     private readonly blobService: BlobService,
     @Inject(STORAGE_NODE_REPOSITORY)
     private readonly nodeRepo: IStorageNodeRepository,
     @Inject(STORAGE_QUOTA_REPOSITORY)
     private readonly quotaRepo: IStorageQuotaRepository,
-    private readonly cache: StorageRedisCacheService,
-    private readonly eventEmitter: EventEmitter2,
+    @Optional()
+    private readonly cache?: StorageRedisCacheService,
+    @Optional()
+    private readonly eventEmitter?: EventEmitter2,
   ) {}
 
   async upload(input: UploadDirectInput): Promise<UploadDirectOutput> {
@@ -86,30 +92,34 @@ export class DirectUploadService {
 
     // 6. Create logical StorageNode
     const fileId = crypto.randomUUID();
+    const resolvedScope =
+      input.scope ??
+      (input.linkedToType as FileScope | undefined) ??
+      (input.projectId ? FileScope.Project : FileScope.Personal);
     const node = new StorageNode({
       id: fileId,
       projectId: input.projectId ?? null,
+      linkedToId: input.linkedToId ?? input.projectId ?? null,
       parentId: input.parentId ?? null,
       name: cleanFilename,
       isFolder: false,
       size: sizeBytes,
       mimeType: input.mimeType,
       blobId,
-      scope:
-        input.scope ??
-        (input.projectId ? FileScope.Project : FileScope.Personal),
+      scope: resolvedScope,
       metadata: input.source ? { source: input.source } : {},
       authorId: input.userId,
     });
     await this.nodeRepo.create(node);
 
-    // 7. Invalidate folder listing cache and quota
-    await this.cache.invalidateFolder(scopeKey, input.parentId ?? null);
-    await this.cache.invalidateScopeTree(scopeKey);
-    await this.cache.invalidateQuota(input.userId, input.projectId ?? null);
+    // 7. Invalidate folder listing cache
+    if (this.cache) {
+      await this.cache.invalidateFolder(scopeKey, input.parentId ?? null);
+      await this.cache.invalidateScopeTree(scopeKey);
+    }
 
     // 8. Emit domain event for async subscribers (AI indexing, virus scan)
-    this.eventEmitter.emit(
+    this.eventEmitter?.emit(
       'file.uploaded',
       new FileUploadedEvent(
         fileId,
@@ -133,19 +143,6 @@ export class DirectUploadService {
       isDeduplicated,
     };
   }
-}
-
-@Injectable()
-export class PresignService {
-  private readonly logger = new Logger(PresignService.name);
-
-  constructor(
-    private readonly blobService: BlobService,
-    @Inject(STORAGE_NODE_REPOSITORY)
-    private readonly nodeRepo: IStorageNodeRepository,
-    @Inject(STORAGE_QUOTA_REPOSITORY)
-    private readonly quotaRepo: IStorageQuotaRepository,
-  ) {}
 
   async presign(input: PresignUploadInput): Promise<PresignUploadOutput> {
     const cleanFilename = sanitizeFilename(input.filename);
@@ -206,6 +203,26 @@ export class PresignService {
           });
           await this.nodeRepo.create(node);
 
+          const scopeKey = input.projectId ?? input.userId;
+          if (this.cache) {
+            await this.cache.invalidateFolder(scopeKey, input.parentId ?? null);
+            await this.cache.invalidateScopeTree(scopeKey);
+          }
+
+          this.eventEmitter?.emit(
+            'file.uploaded',
+            new FileUploadedEvent(
+              fileId,
+              existingBlob.id,
+              input.userId,
+              cleanFilename,
+              input.mimeType,
+              existingBlob.sizeBytes,
+              existingBlob.s3Key.value(),
+              input.projectId,
+            ),
+          );
+
           return {
             deduplicated: true,
             uploadUrl: '',
@@ -254,23 +271,12 @@ export class PresignService {
       expiresIn: 300,
     };
   }
-}
-
-@Injectable()
-export class CompletePresignService {
-  private readonly logger = new Logger(CompletePresignService.name);
-
-  constructor(
-    private readonly blobService: BlobService,
-    @Inject(STORAGE_NODE_REPOSITORY)
-    private readonly nodeRepo: IStorageNodeRepository,
-    @Inject(STORAGE_QUOTA_REPOSITORY)
-    private readonly quotaRepo: IStorageQuotaRepository,
-    private readonly cache: StorageRedisCacheService,
-    private readonly eventEmitter: EventEmitter2,
-  ) {}
 
   async complete(input: CompletePresignInput): Promise<CompletePresignOutput> {
+    if (!input.storageKey.startsWith(`uploads/${input.userId}/`)) {
+      throw new ForbiddenException('Invalid storage key ownership');
+    }
+
     const cleanFilename = sanitizeFilename(input.filename);
     if (isBlockedExtension(cleanFilename)) {
       throw new BadRequestException(
@@ -289,12 +295,20 @@ export class CompletePresignService {
         if (stat.mimeType && stat.mimeType !== 'application/octet-stream') {
           actualMime = stat.mimeType;
         }
+      } else if (actualSize <= 0n) {
+        throw new NotFoundException(
+          'Uploaded object is empty or not found in storage backend',
+        );
       }
     } catch (err: unknown) {
+      if (err instanceof NotFoundException) {
+        throw new NotFoundException(
+          'Uploaded object not found or verified in storage backend',
+        );
+      }
       this.logger.debug(
         `Physical object stat check deferred for ${input.storageKey}: ${(err as Error)?.message}`,
       );
-      // If stat fails, check if caller provided non-zero size
       if (actualSize <= 0n) {
         throw new NotFoundException(
           'Uploaded object not found or verified in storage backend',
@@ -316,7 +330,6 @@ export class CompletePresignService {
       }
     } catch (err: unknown) {
       if (err instanceof BadRequestException) {
-        // Immediate cleanup of malicious payload from physical storage
         this.blobService.delete(input.storageKey).catch((delErr: unknown) => {
           this.logger.warn(
             `Failed to clean up rejected malicious upload ${input.storageKey}: ${delErr instanceof Error ? delErr.message : String(delErr)}`,
@@ -328,19 +341,28 @@ export class CompletePresignService {
 
     const scopeKey = input.projectId ?? input.userId;
 
-    // 2. Check and consume Quota
+    // 2. Check and consume Quota (with rollback on downstream failure)
     await this.quotaRepo.incrementUsage(
       input.userId,
       input.projectId ?? null,
       actualSize,
     );
 
-    // 3. Register physical StorageBlob via Core BlobService (CAS deduplication + S3 cleanup)
-    const { blob } = await this.blobService.registerUploadedObject({
-      storageKey: input.storageKey,
-      sizeBytes: actualSize,
-      contentHashHex: input.contentHash,
-    });
+    let blob;
+    try {
+      // 3. Register physical StorageBlob via Core BlobService (CAS deduplication + S3 cleanup)
+      const registered = await this.blobService.registerUploadedObject({
+        storageKey: input.storageKey,
+        sizeBytes: actualSize,
+        contentHashHex: input.contentHash,
+      });
+      blob = registered.blob;
+    } catch (err: unknown) {
+      await this.quotaRepo
+        .decrementUsage(input.userId, input.projectId ?? null, actualSize)
+        .catch(() => {});
+      throw err;
+    }
     const blobId = blob.id;
 
     // 4. Create logical StorageNode
@@ -361,13 +383,14 @@ export class CompletePresignService {
     });
     await this.nodeRepo.create(node);
 
-    // 5. Invalidate folder listing cache and quota
-    await this.cache.invalidateFolder(scopeKey, input.parentId ?? null);
-    await this.cache.invalidateScopeTree(scopeKey);
-    await this.cache.invalidateQuota(input.userId, input.projectId ?? null);
+    // 5. Invalidate folder listing cache
+    if (this.cache) {
+      await this.cache.invalidateFolder(scopeKey, input.parentId ?? null);
+      await this.cache.invalidateScopeTree(scopeKey);
+    }
 
-    // 6. Emit domain event
-    this.eventEmitter.emit(
+    // 6. Emit domain event using canonical blob.s3Key.value() (not the potentially deleted input.storageKey)
+    this.eventEmitter?.emit(
       'file.uploaded',
       new FileUploadedEvent(
         fileId,
@@ -376,7 +399,7 @@ export class CompletePresignService {
         cleanFilename,
         actualMime,
         actualSize,
-        input.storageKey,
+        blob.s3Key.value(),
         input.projectId,
       ),
     );

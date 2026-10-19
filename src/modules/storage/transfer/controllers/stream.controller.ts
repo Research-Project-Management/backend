@@ -7,6 +7,7 @@ import {
   Param,
   Req,
   Res,
+  UseGuards,
   HttpStatus,
   NotFoundException,
   ForbiddenException,
@@ -14,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { Public, CurrentUser } from '@/modules/identity/auth';
+import { Public, CurrentUser, JwtAuthGuard } from '@/modules/identity/auth';
 import { StreamService } from '../services/stream.service';
 import {
   isDangerousInlineMime,
@@ -23,7 +24,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 interface StreamRequest extends FastifyRequest {
-  user?: { id?: string };
+  user?: { id?: string; sub?: string };
   params: {
     fileId?: string;
     '*'?: string;
@@ -35,6 +36,7 @@ interface StreamRequest extends FastifyRequest {
 
 @ApiTags('Storage & Streaming')
 @Controller('api/v1/storage/files')
+@UseGuards(JwtAuthGuard)
 export class StreamController {
   private readonly logger = new Logger(StreamController.name);
 
@@ -226,6 +228,18 @@ export class StreamController {
       return res.status(HttpStatus.FORBIDDEN).send({
         statusCode: 403,
         message: 'Access to restricted storage path is forbidden',
+      });
+    }
+
+    // Direct CAS blobs/ and raw uploads/ require authenticated user context to prevent unauthenticated scraping
+    const currentUserId = streamReq.user?.id || streamReq.user?.sub;
+    const isPrivateBlobPath =
+      normalizedKey.startsWith('blobs/') ||
+      normalizedKey.startsWith('uploads/');
+    if (isPrivateBlobPath && !currentUserId) {
+      return res.status(HttpStatus.FORBIDDEN).send({
+        statusCode: 403,
+        message: 'Authentication required to access raw storage objects',
       });
     }
 

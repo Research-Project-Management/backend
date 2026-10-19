@@ -41,15 +41,12 @@ export class LocalStorageDriver implements IStorageDriver {
         'Access denied: Storage key escapes base storage directory',
       );
     }
-    const dir = path.dirname(fullPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
     return fullPath;
   }
 
   async put(key: string, data: Buffer | Readable): Promise<void> {
     const fullPath = this.resolveFilePath(key);
+    await fs.promises.mkdir(path.dirname(fullPath), { recursive: true });
     if (Buffer.isBuffer(data)) {
       await fs.promises.writeFile(fullPath, data);
     } else {
@@ -125,6 +122,7 @@ export class LocalStorageDriver implements IStorageDriver {
   async copy(sourceKey: string, destinationKey: string): Promise<void> {
     const src = this.resolveFilePath(sourceKey);
     const dst = this.resolveFilePath(destinationKey);
+    await fs.promises.mkdir(path.dirname(dst), { recursive: true });
     await fs.promises.copyFile(src, dst);
   }
 

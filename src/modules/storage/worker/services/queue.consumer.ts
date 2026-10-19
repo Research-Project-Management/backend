@@ -19,12 +19,12 @@ import {
 } from '../types';
 import { STORAGE_NODE_REPOSITORY } from '@/modules/storage/storage.tokens';
 import { IStorageNodeRepository, StorageNode } from '@/modules/storage/drive';
-import { BlobService, streamToBuffer } from '@/modules/storage/core';
 import {
-  TrashRetentionJob,
-  MultipartCleanupJob,
-  OrphanBlobJob,
-} from './lifecycle.service';
+  BlobService,
+  StorageRedisCacheService,
+  streamToBuffer,
+} from '@/modules/storage/core';
+import { TrashRetentionJob, MultipartCleanupJob } from './lifecycle.service';
 import { PdfThumbnailService } from '../services/pdf-thumbnail.service';
 
 @Processor(STORAGE_PROCESSING_QUEUE, { concurrency: 3 })
@@ -43,9 +43,9 @@ export class StorageQueueConsumer
     @Optional()
     private readonly multipartCleanupJob?: MultipartCleanupJob,
     @Optional()
-    private readonly orphanBlobJob?: OrphanBlobJob,
-    @Optional()
     private readonly pdfThumbnailService?: PdfThumbnailService,
+    @Optional()
+    private readonly cacheService?: StorageRedisCacheService,
   ) {
     super();
   }
@@ -80,7 +80,7 @@ export class StorageQueueConsumer
         this.logger.log(
           `Starting scheduled maintenance: Orphan Blob GC [${job.id}]`,
         );
-        return this.orphanBlobJob?.processTombstonedBlobs();
+        return this.blobService.reclaimOrphanBlobs(100);
       }
       case STORAGE_JOB_PROCESS_FILE:
       default: {
@@ -120,6 +120,10 @@ export class StorageQueueConsumer
       }
 
       await this.nodeRepo.update(node);
+      await this.cacheService?.invalidateFolder(
+        node.projectId ?? node.authorId,
+        node.parentId,
+      );
       this.logger.log(
         `Completed processing job [${job.id}] for file ${data.fileId}`,
       );

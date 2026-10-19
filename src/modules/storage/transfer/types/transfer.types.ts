@@ -173,6 +173,8 @@ export interface UploadDirectInput {
   buffer: Buffer;
   mimeType: string;
   projectId?: string | null;
+  linkedToId?: string | null;
+  linkedToType?: string;
   parentId?: string | null;
   scope?: FileScope;
   source?: string;
@@ -221,7 +223,6 @@ export interface CompletePresignInput {
   projectId?: string | null;
   parentId?: string | null;
   scope?: FileScope;
-  source?: string;
   contentHash?: string;
 }
 

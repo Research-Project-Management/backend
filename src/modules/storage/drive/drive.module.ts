@@ -8,7 +8,7 @@ import { PrismaStorageNodeRepository } from './repositories/prisma-node.reposito
 import { PrismaStorageQuotaRepository } from './repositories/prisma-quota.repository';
 import { PrismaStorageVersionRepository } from './repositories/prisma-version.repository';
 
-import { DriveService, TrashService, QuotaService } from './services';
+import { DriveService, TrashService } from './services';
 import { VersionService } from './services/version.service';
 import { StorageAccessPolicy } from './services/access.policy';
 
@@ -41,7 +41,6 @@ const driveControllers = shouldMountDriveControllers()
     },
     DriveService,
     TrashService,
-    QuotaService,
     VersionService,
     StorageAccessPolicy,
   ],
@@ -51,7 +50,6 @@ const driveControllers = shouldMountDriveControllers()
     STORAGE_VERSION_REPOSITORY,
     DriveService,
     TrashService,
-    QuotaService,
     VersionService,
     StorageAccessPolicy,
   ],

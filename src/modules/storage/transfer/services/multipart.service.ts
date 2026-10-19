@@ -15,6 +15,10 @@ import {
   BlobService,
   FileUploadedEvent,
   StorageRedisCacheService,
+  isBlockedExtension,
+  validateMagicBytes,
+  sanitizeFilename,
+  streamToBuffer,
 } from '@/modules/storage/core';
 import {
   IStorageNodeRepository,
@@ -59,6 +63,13 @@ export class MultipartService {
    * Calculates dynamic part sizes to guarantee parts count < 8000.
    */
   async initiate(input: InitiateMultipartInput) {
+    const cleanFilename = sanitizeFilename(input.filename);
+    if (isBlockedExtension(cleanFilename)) {
+      throw new BadRequestException(
+        'File extension is prohibited for security reasons',
+      );
+    }
+
     const totalSizeBytes = BigInt(input.totalSize);
 
     // Strict Quota Pre-check: Reject if remaining quota is insufficient before initiating S3 multipart session
@@ -83,7 +94,7 @@ export class MultipartService {
     const totalParts = Math.ceil(input.totalSize / partSize);
 
     const sessionId = crypto.randomUUID();
-    const cleanExt = (input.filename.split('.').pop() || 'bin').replace(
+    const cleanExt = (cleanFilename.split('.').pop() || 'bin').replace(
       /[^a-zA-Z0-9]/g,
       '',
     );
@@ -95,19 +106,24 @@ export class MultipartService {
     });
 
     // Persist UploadSession
+    const expectedHashBuffer =
+      input.expectedHash && /^[a-f0-9]{64}$/i.test(input.expectedHash)
+        ? Buffer.from(input.expectedHash.toLowerCase(), 'hex')
+        : null;
     const session = new UploadSession({
       id: sessionId,
       projectId: input.projectId,
       userId: input.userId,
       s3UploadId: uploadId,
       s3Key,
-      filename: input.filename,
+      filename: cleanFilename,
       mimeType: input.mimeType,
       totalSize: totalSizeBytes,
       partSize,
       totalParts,
       parentId: input.parentId,
       scope: input.scope,
+      expectedHash: expectedHashBuffer,
       expiresAt: new Date(Date.now() + 4 * 3600 * 1000), // 4 hours TTL
     });
     await this.sessionRepo.create(session);
@@ -200,6 +216,13 @@ export class MultipartService {
       input.actor,
     );
 
+    const cleanFilename = sanitizeFilename(session.filename);
+    if (isBlockedExtension(cleanFilename)) {
+      throw new BadRequestException(
+        'File extension is prohibited for security reasons',
+      );
+    }
+
     if (
       !input.parts ||
       !Array.isArray(input.parts) ||
@@ -220,6 +243,25 @@ export class MultipartService {
       normalizedParts,
     );
 
+    // 1.1 Verify binary magic bytes on assembled multipart object (SEC-003)
+    try {
+      const streamRes = await this.blobService.getStream(session.s3Key, {
+        start: 0,
+        end: 511,
+      });
+      if (streamRes?.stream) {
+        const headerBuffer = await streamToBuffer(streamRes.stream);
+        if (headerBuffer.length > 0) {
+          validateMagicBytes(headerBuffer, session.mimeType, cleanFilename);
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof BadRequestException) {
+        await this.blobService.delete(session.s3Key).catch(() => {});
+        throw err;
+      }
+    }
+
     // 2. Consume quota
     await this.quotaRepo.incrementUsage(
       session.userId,
@@ -233,10 +275,16 @@ export class MultipartService {
       .sort((a, b) => a.partNumber - b.partNumber)
       .map((p) => `${p.partNumber}:${p.eTag}`)
       .join(';');
-    const contentHashHex = crypto
-      .createHash('sha256')
-      .update(`${session.totalSize}:${partsSignature}`)
-      .digest('hex');
+    const sessionExpectedHex = session.expectedHash
+      ? session.expectedHash.toString('hex').toLowerCase()
+      : null;
+    const contentHashHex =
+      sessionExpectedHex && /^[a-f0-9]{64}$/i.test(sessionExpectedHex)
+        ? sessionExpectedHex
+        : crypto
+            .createHash('sha256')
+            .update(`${session.totalSize}:${partsSignature}`)
+            .digest('hex');
 
     const { blob } = await this.blobService.registerUploadedObject({
       storageKey: session.s3Key,
@@ -250,7 +298,7 @@ export class MultipartService {
       id: fileId,
       projectId: session.projectId,
       parentId: session.parentId,
-      name: session.filename,
+      name: cleanFilename,
       isFolder: false,
       size: session.totalSize,
       mimeType: session.mimeType,
@@ -265,18 +313,21 @@ export class MultipartService {
     await this.sessionRepo.update(session);
     const scopeKey = session.projectId ?? session.userId;
     await this.cache.invalidateFolder(scopeKey, session.parentId);
+    if (typeof this.cache.invalidateScopeTree === 'function') {
+      await this.cache.invalidateScopeTree(scopeKey);
+    }
 
-    // 5. Emit domain event for async subscribers (AI indexing, virus scan)
+    // 5. Emit domain event for async subscribers (AI indexing, virus scan) using canonical blob.s3Key.value()
     this.eventEmitter.emit(
       'file.uploaded',
       new FileUploadedEvent(
         fileId,
         blobId,
         session.userId,
-        session.filename,
+        cleanFilename,
         session.mimeType,
         session.totalSize,
-        session.s3Key,
+        blob.s3Key.value(),
         session.projectId,
       ),
     );
@@ -285,7 +336,7 @@ export class MultipartService {
       fileId,
       blobId,
       url: getFileContentPath(fileId),
-      filename: session.filename,
+      filename: cleanFilename,
       size: Number(session.totalSize),
     };
   }

@@ -70,18 +70,6 @@ export class StorageKey {
     return new StorageKey(`blobs/${p1}/${p2}/${cleanHex}`);
   }
 
-  public static forMultipartUpload(
-    uploadSessionId: string,
-    partNumber?: number,
-  ): StorageKey {
-    if (partNumber !== undefined) {
-      return new StorageKey(
-        `uploads/multipart/${uploadSessionId}/part-${partNumber}`,
-      );
-    }
-    return new StorageKey(`uploads/multipart/${uploadSessionId}`);
-  }
-
   public static fromString(key: string): StorageKey {
     const sanitized = key.replace(/\0/g, '').replace(/(\.\.[/\\])+/g, '');
     return new StorageKey(sanitized);
@@ -164,29 +152,15 @@ export class StorageBlob {
     return this._tombstoneAt;
   }
 
+  public isReady(): boolean {
+    return this._status === BlobStatus.READY;
+  }
+
   public incrementRef(): void {
     this._refCount += 1;
     if (this._status === BlobStatus.DELETED) {
       this._status = BlobStatus.READY;
       this._tombstoneAt = null;
     }
-  }
-
-  public decrementRef(gracePeriodHours = 48): boolean {
-    this._refCount = Math.max(0, this._refCount - 1);
-    if (this._refCount === 0) {
-      this._status = BlobStatus.DELETED;
-      this._tombstoneAt = new Date(Date.now() + gracePeriodHours * 3600 * 1000);
-      return true;
-    }
-    return false;
-  }
-
-  public markReady(): void {
-    this._status = BlobStatus.READY;
-  }
-
-  public isReady(): boolean {
-    return this._status === BlobStatus.READY;
   }
 }

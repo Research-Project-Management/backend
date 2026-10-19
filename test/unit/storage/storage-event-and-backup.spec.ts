@@ -11,9 +11,7 @@ import {
   StorageKey,
 } from '@/modules/storage/core';
 import {
-  FileDeletedEvent,
   FileTrashedEvent,
-  QuotaExceededEvent,
   StorageNode,
 } from '@/modules/storage/drive';
 import { Readable } from 'stream';
@@ -93,31 +91,6 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
       const recent = outboxService.getRecentEvents();
       expect(recent[0].type).toBe('file.downloaded');
       expect(recent[0].payload.accessedBy).toBe('user-456');
-    });
-
-    it('should dispatch file.deleted and quota.exceeded events', async () => {
-      await outboxService.handleFileDeleted(
-        new FileDeletedEvent(
-          'file-003',
-          'blob-003',
-          'user-123',
-          'project-abc',
-          true,
-        ),
-      );
-      await outboxService.handleQuotaExceeded(
-        new QuotaExceededEvent(
-          'user-123',
-          'project-abc',
-          1024n,
-          5368709120n,
-          5368709120n,
-        ),
-      );
-
-      const recent = outboxService.getRecentEvents();
-      expect(recent.some((e) => e.type === 'file.deleted')).toBe(true);
-      expect(recent.some((e) => e.type === 'quota.exceeded')).toBe(true);
     });
 
     it('should gracefully fallback and maintain memory history when Redis is unavailable', async () => {

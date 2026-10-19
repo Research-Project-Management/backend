@@ -71,17 +71,11 @@ export class StreamService {
     ETag?: string;
   }> {
     let range: { start: number; end: number } | undefined;
-    if (rangeHeader && rangeHeader.startsWith('bytes=')) {
-      const [startStr, endStr] = rangeHeader.slice(6).split('-');
-      const start = parseInt(startStr, 10);
-      const end = parseInt(endStr, 10);
-      if (
-        !Number.isNaN(start) &&
-        !Number.isNaN(end) &&
-        start >= 0 &&
-        end >= start
-      ) {
-        range = { start, end };
+    if (rangeHeader) {
+      const stat = await this.blobService.stat(key);
+      const parsed = ByteRange.parse(rangeHeader, stat.size);
+      if (parsed) {
+        range = { start: parsed.start, end: parsed.end };
       }
     }
     const res = await this.blobService.getStream(key, range);
@@ -171,7 +165,11 @@ export class StreamService {
   async getPresignedDownloadUrl(
     fileId: string,
     expiresInSeconds = 3600,
+    userId?: string,
   ): Promise<string> {
+    if (userId) {
+      await this.verifyReadAccess(fileId, userId);
+    }
     const { node, blob } = await this.resolveNodeAndBlob(fileId);
 
     const cacheKey = `${node.id}:${node.name}`;

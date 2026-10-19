@@ -27,11 +27,23 @@ export class PresignDto {
 
   @IsString()
   @IsOptional()
-  pageId?: string;
+  parentId?: string;
+
+  @IsString()
+  @IsOptional()
+  scope?: string;
+
+  @IsString()
+  @IsOptional()
+  contentHash?: string;
 
   @IsNumber()
   @IsOptional()
   size?: number;
+
+  @IsNumber()
+  @IsOptional()
+  sizeBytes?: number;
 }
 
 export class CompletePresignedDto {
@@ -62,6 +74,14 @@ export class CompletePresignedDto {
   @IsString()
   @IsOptional()
   parentId?: string;
+
+  @IsString()
+  @IsOptional()
+  scope?: string;
+
+  @IsString()
+  @IsOptional()
+  contentHash?: string;
 }
 
 export class InitiateMultipartDto {
@@ -92,6 +112,14 @@ export class InitiateMultipartDto {
   @IsString()
   @IsOptional()
   parentId?: string;
+
+  @IsString()
+  @IsOptional()
+  scope?: string;
+
+  @IsString()
+  @IsOptional()
+  expectedHash?: string;
 }
 
 export class CompletedPartDto {

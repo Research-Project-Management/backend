@@ -1,4 +1,4 @@
-import { CompletePresignService } from '@/modules/storage/transfer';
+import { UploadService } from '@/modules/storage/transfer';
 import { MultipartService } from '@/modules/storage/transfer';
 import { StorageQueueProducer } from '@/modules/storage/worker';
 import { BlobService, IStorageDriver } from '@/modules/storage/core';
@@ -8,8 +8,6 @@ import { IUploadSessionRepository } from '@/modules/storage/transfer';
 import { IStorageQuotaRepository } from '@/modules/storage/drive';
 import { StorageRedisCacheService } from '@/modules/storage/core';
 import { UploadSession } from '@/modules/storage/transfer';
-import { StorageNode } from '@/modules/storage/drive';
-import { StorageBlob } from '@/modules/storage/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
@@ -63,7 +61,6 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       delete: jest.fn(),
       deleteMany: jest.fn(),
       list: jest.fn(),
-      findByBlobId: jest.fn(),
       softDeleteSubtree: jest.fn(),
       restoreSubtree: jest.fn(),
       findSubtreeNodes: jest.fn(),
@@ -78,7 +75,6 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       findById: jest.fn(),
       findByHash: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation(async (blob) => blob),
-      update: jest.fn().mockImplementation(async (blob) => blob),
       delete: jest.fn(),
       findTombstonedBlobs: jest.fn(),
       incrementRefCount: jest.fn(),
@@ -89,24 +85,18 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       create: jest.fn().mockImplementation(async (s) => s),
       findById: jest.fn(),
       update: jest.fn().mockImplementation(async (s) => s),
-      delete: jest.fn(),
-      recordPart: jest.fn(),
-      getParts: jest.fn().mockResolvedValue([]),
       findExpiredSessions: jest.fn().mockResolvedValue([]),
     };
 
     mockQuotaRepo = {
       findByScope: jest.fn(),
-      upsert: jest.fn(),
       incrementUsage: jest.fn().mockResolvedValue(0n),
       decrementUsage: jest.fn().mockResolvedValue(0n),
-      reconcileUsage: jest.fn().mockResolvedValue(undefined),
     };
 
     mockCache = {
       invalidateFolder: jest.fn().mockResolvedValue(undefined),
       invalidateScopeTree: jest.fn().mockResolvedValue(undefined),
-      invalidateQuota: jest.fn().mockResolvedValue(undefined),
       getFolderListing: jest.fn().mockResolvedValue(null),
       setFolderListing: jest.fn().mockResolvedValue(undefined),
     } as any;
@@ -120,11 +110,11 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     } as any;
   });
 
-  describe('CompletePresignService', () => {
-    let service: CompletePresignService;
+  describe('UploadService (complete)', () => {
+    let service: UploadService;
 
     beforeEach(() => {
-      service = new CompletePresignService(
+      service = new UploadService(
         new BlobService(mockDriver, mockBlobRepo),
         mockNodeRepo,
         mockQuotaRepo,

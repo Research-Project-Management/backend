@@ -17,11 +17,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
-import {
-  DirectUploadService,
-  PresignService,
-  CompletePresignService,
-} from '../services/upload.service';
+import { UploadService } from '../services/upload.service';
 import { MultipartService } from '../services/multipart.service';
 import {
   PresignDto,
@@ -29,7 +25,7 @@ import {
   InitiateMultipartDto,
   CompleteMultipartDto,
 } from '../dto/file.dto';
-import { DriveService, FileScope } from '@/modules/storage/drive';
+import { DriveService, FileScope, StorageAccessPolicy } from '@/modules/storage/drive';
 import { cleanUuid } from '@/modules/storage/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 
@@ -63,11 +59,10 @@ const UNVERIFIED_MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
 @UseGuards(JwtAuthGuard)
 export class UploadController {
   constructor(
-    private readonly uploadService: DirectUploadService,
-    private readonly presignService: PresignService,
-    private readonly completePresignService: CompletePresignService,
+    private readonly uploadService: UploadService,
     private readonly multipartService: MultipartService,
     private readonly driveService: DriveService,
+    private readonly accessPolicy: StorageAccessPolicy,
   ) {}
 
   private assertVerifiedUploadLimit(
@@ -146,14 +141,23 @@ export class UploadController {
       throw new UnauthorizedException('User is not authenticated');
     }
 
-    const requestedSize = dto.size || 10 * 1024 * 1024;
+    const requestedSize = dto.size ?? dto.sizeBytes ?? 10 * 1024 * 1024;
     this.assertVerifiedUploadLimit(user, requestedSize);
 
-    return this.presignService.presign({
+    await this.accessPolicy.assertCanWriteScope(userId, {
+      projectId: dto.projectId || null,
+      parentId: dto.parentId || null,
+    });
+
+    return this.uploadService.presign({
       userId,
       filename: dto.filename,
       mimeType: dto.mimeType || dto.contentType || 'application/octet-stream',
       sizeBytes: requestedSize,
+      projectId: dto.projectId,
+      parentId: dto.parentId,
+      scope: dto.scope as FileScope | undefined,
+      contentHash: dto.contentHash,
     });
   }
 
@@ -161,10 +165,23 @@ export class UploadController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Register and finalize a direct presigned upload' })
   async completePresigned(
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: UploadUser | null,
     @Body() dto: CompletePresignedDto,
   ) {
-    const result = await this.completePresignService.complete({
+    const userId = user?.id || user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User is not authenticated');
+    }
+
+    const reportedSize = dto.size ?? dto.sizeBytes ?? 0;
+    this.assertVerifiedUploadLimit(user, reportedSize);
+
+    await this.accessPolicy.assertCanWriteScope(userId, {
+      projectId: dto.projectId || null,
+      parentId: dto.parentId || null,
+    });
+
+    const result = await this.uploadService.complete({
       userId,
       storageKey: dto.storageKey,
       filename: dto.filename,
@@ -172,6 +189,8 @@ export class UploadController {
       mimeType: dto.mimeType,
       projectId: dto.projectId,
       parentId: dto.parentId,
+      scope: dto.scope as FileScope | undefined,
+      contentHash: dto.contentHash,
     });
 
     return this.formatUploadResponse(result);
@@ -196,13 +215,21 @@ export class UploadController {
 
     if (!isMultipart) {
       if (body && (body.filename || body.name)) {
+        const projectId = cleanUuid(body.projectId as string | undefined);
+        const parentId = cleanUuid(body.parentId as string | undefined);
+        if (userId) {
+          await this.accessPolicy.assertCanWriteScope(userId, {
+            projectId,
+            parentId,
+          });
+        }
         const created = await this.driveService.createLogicalNode({
           userId,
-          projectId: (body.projectId as string) || null,
+          projectId,
           name: (body.filename as string) || (body.name as string),
           size: BigInt((body.size as number | string) || 0),
           mimeType: (body.mimeType as string) || 'application/octet-stream',
-          parentId: (body.parentId as string) || null,
+          parentId,
           metadata: {
             url: body.url,
             thumbnail: body.thumbnail,
@@ -234,6 +261,13 @@ export class UploadController {
 
     const projectId = cleanUuid(fields.projectId?.value) ?? undefined;
     const parentId = cleanUuid(fields.parentId?.value) ?? undefined;
+
+    if (userId) {
+      await this.accessPolicy.assertCanWriteScope(userId, {
+        projectId: projectId ?? null,
+        parentId: parentId ?? null,
+      });
+    }
 
     const result = await this.uploadService.upload({
       userId,
@@ -267,9 +301,12 @@ export class UploadController {
     if (isMultipart) {
       const { buffer, filename, mimeType, fields } =
         await this.extractMultipartPayload(uploadReq);
+      this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
       const res = await this.uploadService.upload({
         userId,
-        projectId: pageId,
+        projectId: null,
+        linkedToId: pageId,
+        linkedToType: 'Page',
         scope: FileScope.Page,
         filename,
         buffer,
@@ -289,9 +326,13 @@ export class UploadController {
         )
       : Buffer.alloc(0);
 
+    this.assertVerifiedUploadLimit(uploadReq.user, buffer.length);
+
     const res = await this.uploadService.upload({
       userId,
-      projectId: pageId,
+      projectId: null,
+      linkedToId: pageId,
+      linkedToType: 'Page',
       scope: FileScope.Page,
       filename,
       buffer,
@@ -310,15 +351,24 @@ export class UploadController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Initiate a chunked multipart upload session' })
   async initiateMultipart(
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: UploadUser | null,
     @Body() dto: InitiateMultipartDto,
   ) {
+    const userId = user?.id || user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User is not authenticated');
+    }
     const totalSize = dto.totalSize ?? dto.sizeBytes ?? dto.size;
     if (!totalSize || totalSize <= 0) {
       throw new BadRequestException(
         'Total file size is required and must be greater than 0',
       );
     }
+    this.assertVerifiedUploadLimit(user, totalSize);
+    await this.accessPolicy.assertCanWriteScope(userId, {
+      projectId: dto.projectId || null,
+      parentId: dto.parentId || null,
+    });
     return this.multipartService.initiate({
       userId,
       filename: dto.filename,
@@ -326,6 +376,8 @@ export class UploadController {
       totalSize,
       projectId: dto.projectId,
       parentId: dto.parentId,
+      scope: dto.scope as FileScope | undefined,
+      expectedHash: dto.expectedHash,
     });
   }
 

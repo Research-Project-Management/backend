@@ -3,8 +3,6 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { RedisCacheService } from '@/core';
 import { FileUploadedEvent, FileDownloadedEvent } from '@/modules/storage/core';
 import { FileTrashedEvent } from '@/modules/storage/drive';
-import { FileDeletedEvent } from '@/modules/storage/drive';
-import { QuotaExceededEvent } from '@/modules/storage/drive';
 import { StorageQueueProducer } from './queue.producer';
 
 export interface StorageOutboxEvent {
@@ -85,28 +83,6 @@ export class StorageEventOutboxService {
         ? event.trashedAt.toISOString()
         : new Date().toISOString(),
       projectId: event.projectId ?? null,
-    });
-  }
-
-  @OnEvent('file.deleted')
-  async handleFileDeleted(event: FileDeletedEvent): Promise<void> {
-    await this.dispatch('file.deleted', {
-      fileId: event.fileId,
-      blobId: event.blobId,
-      authorId: event.authorId,
-      projectId: event.projectId ?? null,
-      permanent: event.permanent,
-    });
-  }
-
-  @OnEvent('quota.exceeded')
-  async handleQuotaExceeded(event: QuotaExceededEvent): Promise<void> {
-    await this.dispatch('quota.exceeded', {
-      userId: event.userId,
-      projectId: event.projectId ?? null,
-      requestedBytes: event.requestedBytes.toString(),
-      currentUsage: event.currentUsedBytes.toString(),
-      maxQuota: event.maxBytes.toString(),
     });
   }
 

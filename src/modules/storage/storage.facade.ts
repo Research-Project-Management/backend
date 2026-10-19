@@ -1,6 +1,7 @@
 import {
   Injectable,
   Inject,
+  Optional,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -14,26 +15,23 @@ import {
   getFileContentPath,
 } from './storage.port';
 import { STORAGE_NODE_REPOSITORY } from './storage.tokens';
-import { IStorageNodeRepository } from './drive';
-import { BlobService, streamToBuffer } from './core';
 import {
-  DirectUploadService,
-  PresignService,
-  CompletePresignService,
-} from './transfer/services/upload.service';
-import { MultipartService } from './transfer/services/multipart.service';
-import { StreamService } from './transfer/services/stream.service';
-import {
+  IStorageNodeRepository,
   DriveService,
   TrashService,
-  QuotaService,
-} from './drive/services/drive.service';
-import { FileScope } from './drive/types';
+  StorageAccessPolicy,
+  FileScope,
+} from './drive';
+import { BlobService, streamToBuffer } from './core';
+import { UploadService } from './transfer/services/upload.service';
+import { MultipartService } from './transfer/services/multipart.service';
+import { StreamService } from './transfer/services/stream.service';
+import { PdfThumbnailService } from './worker/services/pdf-thumbnail.service';
 
 /**
  * StorageFacade: The Single Public Reception Desk for Storage
  * Implements IStoragePort for complete platform-wide storage services:
- * CAS deduplication, quota checking, streaming, presigned URLs, and entity attachments.
+ * CAS deduplication, streaming, presigned URLs, PDF thumbnails, and entity attachments.
  */
 @Injectable()
 export class StorageFacade implements IStoragePort {
@@ -41,48 +39,40 @@ export class StorageFacade implements IStoragePort {
     private readonly blobService: BlobService,
     @Inject(STORAGE_NODE_REPOSITORY)
     private readonly nodeRepo: IStorageNodeRepository,
-    private readonly uploadService: DirectUploadService,
-    private readonly presignService: PresignService,
-    private readonly completePresignService: CompletePresignService,
+    private readonly uploadService: UploadService,
     private readonly multipartService: MultipartService,
-    private readonly quotaService: QuotaService,
     private readonly trashService: TrashService,
     private readonly streamService: StreamService,
     private readonly driveService: DriveService,
+    private readonly accessPolicy: StorageAccessPolicy,
+    @Optional()
+    private readonly pdfThumbnailService?: PdfThumbnailService,
   ) {}
 
-  private verifyNodeAccess(
-    node: { authorId: string; projectId: string | null },
+  private async verifyNodeAccess(
+    node: { id: string; authorId: string; projectId: string | null },
     userId?: string,
-    projectId?: string,
-  ): void {
-    if (!userId) return;
-    if (node.authorId === userId) return;
-
-    if (node.projectId) {
-      if (projectId && node.projectId === projectId) {
-        return;
-      }
+    projectId?: string | null,
+  ): Promise<void> {
+    if (projectId && node.projectId && node.projectId !== projectId) {
       throw new ForbiddenException(
         'Access denied: Storage node belongs to a different project context',
       );
     }
-
-    throw new ForbiddenException(
-      'Access denied: You do not have permission to access this storage node',
-    );
+    if (!userId || userId === 'system') return;
+    await this.accessPolicy.assertCanAccess(userId, node.id, 'read');
   }
 
   private async resolveActiveNodeAndBlob(
     fileId: string,
     userId?: string,
-    projectId?: string,
+    projectId?: string | null,
   ) {
     const node = await this.nodeRepo.findById(fileId);
     if (!node || node.isTrashed()) {
       throw new NotFoundException(`Storage node not found: ${fileId}`);
     }
-    this.verifyNodeAccess(node, userId, projectId);
+    await this.verifyNodeAccess(node, userId, projectId);
     if (!node.blobId) {
       throw new NotFoundException(
         `File has no physical binary payload: ${fileId}`,
@@ -145,6 +135,57 @@ export class StorageFacade implements IStoragePort {
     };
   }
 
+  async ensurePdfThumbnail(input: {
+    fileId: string;
+    userId?: string;
+    projectId?: string | null;
+  }): Promise<Buffer | null> {
+    const { node, blob } = await this.resolveActiveNodeAndBlob(
+      input.fileId,
+      input.userId,
+      input.projectId,
+    );
+
+    const thumbKey = `thumbnails/${blob.id}.webp`;
+    try {
+      const exists = await this.blobService.exists(thumbKey);
+      if (exists) {
+        const { stream } = await this.blobService.getStream(thumbKey);
+        return streamToBuffer(stream);
+      }
+    } catch {
+      // Fall through to generate thumbnail from PDF binary
+    }
+
+    if (!this.pdfThumbnailService) {
+      return null;
+    }
+
+    const { stream } = await this.blobService.getStream(blob.s3Key.value());
+    const pdfBuffer = await streamToBuffer(stream);
+    const thumbBuffer =
+      await this.pdfThumbnailService.generateThumbnail(pdfBuffer);
+    if (!thumbBuffer) {
+      return null;
+    }
+
+    try {
+      await this.blobService.put(thumbKey, thumbBuffer, {
+        mimeType: 'image/webp',
+        size: thumbBuffer.length,
+      });
+      node.updateMetadata({
+        ...(node.metadata || {}),
+        thumbnail: `/api/v1/storage/files/r2/${encodeURIComponent(thumbKey)}`,
+      });
+      await this.nodeRepo.update(node);
+    } catch {
+      // Non-fatal if persisting cached thumbnail fails
+    }
+
+    return thumbBuffer;
+  }
+
   async linkFile(input: LinkFileInput): Promise<void> {
     await this.driveService.linkScope(
       input.fileId,
@@ -201,35 +242,16 @@ export class StorageFacade implements IStoragePort {
     await this.blobService.delete(key);
   }
 
-  async getFileStream(
-    fileId: string,
-    range?: { start: number; end: number },
-  ): Promise<{
-    stream: NodeJS.ReadableStream;
-    mimeType: string;
-    size: number;
-    filename: string;
-    contentRange?: string;
-  }> {
-    const rangeHeader = range ? `bytes=${range.start}-${range.end}` : undefined;
-    const res = await this.streamService.stream(fileId, rangeHeader);
-    if (res.stream) {
-      return {
-        stream: res.stream,
-        mimeType: res.mimeType,
-        size: res.contentLength,
-        filename: res.filename,
-        contentRange: res.contentRange,
-      };
-    }
-    return this.getOwnedFileStream({ fileId, range });
-  }
-
   async getPresignedDownloadUrl(
     fileId: string,
     expiresInSeconds = 3600,
+    userId?: string,
   ): Promise<string> {
-    return this.streamService.getPresignedDownloadUrl(fileId, expiresInSeconds);
+    return this.streamService.getPresignedDownloadUrl(
+      fileId,
+      expiresInSeconds,
+      userId,
+    );
   }
 
   async getPresignedUploadUrl(input: {
@@ -253,7 +275,7 @@ export class StorageFacade implements IStoragePort {
     size?: number;
     mimeType?: string;
   }> {
-    return this.presignService.presign({
+    return this.uploadService.presign({
       ...input,
       scope: input.scope as FileScope | undefined,
     });
@@ -277,7 +299,7 @@ export class StorageFacade implements IStoragePort {
     size: number;
     mimeType: string;
   }> {
-    const res = await this.completePresignService.complete({
+    const res = await this.uploadService.complete({
       userId: input.userId,
       storageKey: input.storageKey,
       filename: input.filename,
@@ -346,12 +368,5 @@ export class StorageFacade implements IStoragePort {
     actor?: { userId: string; projectId?: string | null },
   ): Promise<void> {
     await this.multipartService.abort(sessionId, actor);
-  }
-
-  async checkQuota(
-    userId?: string | null,
-    projectId?: string | null,
-  ): Promise<{ usedBytes: number; maxBytes: number; percentage: number }> {
-    return this.quotaService.check(userId, projectId);
   }
 }

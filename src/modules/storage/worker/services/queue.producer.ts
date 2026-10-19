@@ -114,15 +114,4 @@ export class StorageQueueProducer {
       );
     }
   }
-
-  async triggerMaintenance(jobName: string): Promise<void> {
-    if (!this.queue) return;
-    await this.queue.add(
-      jobName,
-      {},
-      {
-        jobId: `manual-${jobName}-${Date.now()}`,
-      },
-    );
-  }
 }

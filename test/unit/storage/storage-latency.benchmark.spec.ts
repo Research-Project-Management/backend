@@ -13,7 +13,7 @@
 
 import { StreamService } from '@/modules/storage/transfer';
 import { DriveService } from '@/modules/storage/drive';
-import { DirectUploadService } from '@/modules/storage/transfer';
+import { UploadService } from '@/modules/storage/transfer';
 import { BlobService, StorageRedisCacheService } from '@/modules/storage/core';
 import { RedisCacheService } from '@/core';
 import { IStorageDriver } from '@/modules/storage/core';
@@ -382,7 +382,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
   // BENCHMARK 3: Content-Addressable Storage (CAS) Deduplication & WAN Bypass
   // =========================================================================
   describe('Benchmark 3: Content-Addressable Storage (CAS) Deduplication Speedup', () => {
-    let uploadService: DirectUploadService;
+    let uploadService: UploadService;
     let mockDriver: jest.Mocked<IStorageDriver>;
     let mockNodeRepo: jest.Mocked<IStorageNodeRepository>;
     let mockBlobRepo: jest.Mocked<IStorageBlobRepository>;
@@ -429,23 +429,39 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         create: jest.fn().mockImplementation(async (blob: StorageBlob) => {
           storedBlobsByHash.set(blob.contentHash.toHex(), blob);
         }),
-        update: jest.fn().mockImplementation(async (blob: StorageBlob) => {
-          storedBlobsByHash.set(blob.contentHash.toHex(), blob);
-        }),
         incrementRefCount: jest.fn().mockImplementation(async (id: string) => {
-          for (const blob of storedBlobsByHash.values()) {
+          for (const [hex, blob] of storedBlobsByHash.entries()) {
             if (blob.id === id) {
-              blob.incrementRef();
-              return blob;
+              const updated = new StorageBlob({
+                id: blob.id,
+                contentHash: blob.contentHash,
+                sizeBytes: blob.sizeBytes,
+                s3Key: blob.s3Key,
+                s3Bucket: blob.s3Bucket,
+                status: BlobStatus.READY,
+                refCount: blob.refCount + 1,
+              });
+              storedBlobsByHash.set(hex, updated);
+              return updated;
             }
           }
           throw new Error('Blob not found');
         }),
         decrementRefCount: jest.fn().mockImplementation(async (id: string) => {
-          for (const blob of storedBlobsByHash.values()) {
+          for (const [hex, blob] of storedBlobsByHash.entries()) {
             if (blob.id === id) {
-              blob.decrementRef();
-              return blob;
+              const newCount = Math.max(0, blob.refCount - 1);
+              const updated = new StorageBlob({
+                id: blob.id,
+                contentHash: blob.contentHash,
+                sizeBytes: blob.sizeBytes,
+                s3Key: blob.s3Key,
+                s3Bucket: blob.s3Bucket,
+                status: newCount === 0 ? BlobStatus.DELETED : BlobStatus.READY,
+                refCount: newCount,
+              });
+              storedBlobsByHash.set(hex, updated);
+              return updated;
             }
           }
           throw new Error('Blob not found');
@@ -489,7 +505,7 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         emit: jest.fn(),
       } as any;
 
-      uploadService = new DirectUploadService(
+      uploadService = new UploadService(
         new BlobService(mockDriver, mockBlobRepo),
         mockNodeRepo,
         mockQuotaRepo,
@@ -533,12 +549,6 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         `Cold Upload Latency (Physical S3 Write): ${firstLat.toFixed(2)}ms`,
       );
 
-      // Mark the blob as READY (as storage lifecycle does)
-      const blob = storedBlobsByHash.get(
-        ContentHash.fromBuffer(samplePdfBuffer).toHex(),
-      )!;
-      blob.markReady();
-
       // 2. 19 Subsequent Duplicate Uploads by various users/projects
       for (let i = 1; i < totalUploads; i++) {
         const start = process.hrtime.bigint();
@@ -556,6 +566,9 @@ describe('Storage Subsystem - Latency, Throughput & Algorithmic Benchmark Suite'
         expect(dupRes.blobId).toBe(firstRes.blobId);
       }
 
+      const blob = storedBlobsByHash.get(
+        ContentHash.fromBuffer(samplePdfBuffer).toHex(),
+      )!;
       // Assert that physical driver was NEVER called again!
       expect(physicalDriverWrites).toBe(1);
       expect(blob.refCount).toBe(totalUploads);

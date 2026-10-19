@@ -1,6 +1,5 @@
 import { StorageFacade } from '@/modules/storage';
-import { DirectUploadService } from '@/modules/storage/transfer';
-import { PresignService } from '@/modules/storage/transfer/services/upload.service';
+import { UploadService } from '@/modules/storage/transfer';
 import { StreamService } from '@/modules/storage/transfer/services/stream.service';
 import { BlobService, IStorageDriver } from '@/modules/storage/core';
 import { IStorageNodeRepository } from '@/modules/storage/drive';
@@ -15,9 +14,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
 import { BadRequestException } from '@nestjs/common';
 
-describe('StorageFacade & DirectUploadService Integration Suite', () => {
+describe('StorageFacade & UploadService Integration Suite', () => {
   let facade: StorageFacade;
-  let uploadService: DirectUploadService;
+  let uploadService: UploadService;
   let mockDriver: jest.Mocked<IStorageDriver>;
   let mockNodeRepo: jest.Mocked<IStorageNodeRepository>;
   let mockBlobRepo: jest.Mocked<IStorageBlobRepository>;
@@ -75,7 +74,6 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
       }),
       deleteMany: jest.fn(),
       list: jest.fn(),
-      findByBlobId: jest.fn(),
       softDeleteSubtree: jest.fn(),
       restoreSubtree: jest.fn(),
       findSubtreeNodes: jest.fn(),
@@ -102,10 +100,6 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
         blobsInDb.set(blob.id, blob);
         return blob;
       }),
-      update: jest.fn().mockImplementation(async (blob: StorageBlob) => {
-        blobsInDb.set(blob.id, blob);
-        return blob;
-      }),
       delete: jest.fn().mockImplementation(async (id: string) => {
         blobsInDb.delete(id);
       }),
@@ -113,23 +107,40 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
       incrementRefCount: jest.fn().mockImplementation(async (id: string) => {
         const blob = blobsInDb.get(id);
         if (!blob) throw new Error('Blob not found');
-        blob.incrementRef();
-        return blob;
+        const updated = new StorageBlob({
+          id: blob.id,
+          contentHash: blob.contentHash,
+          sizeBytes: blob.sizeBytes,
+          s3Key: blob.s3Key,
+          s3Bucket: blob.s3Bucket,
+          status: BlobStatus.READY,
+          refCount: blob.refCount + 1,
+        });
+        blobsInDb.set(id, updated);
+        return updated;
       }),
       decrementRefCount: jest.fn().mockImplementation(async (id: string) => {
         const blob = blobsInDb.get(id);
         if (!blob) throw new Error('Blob not found');
-        blob.decrementRef();
-        return blob;
+        const newCount = Math.max(0, blob.refCount - 1);
+        const updated = new StorageBlob({
+          id: blob.id,
+          contentHash: blob.contentHash,
+          sizeBytes: blob.sizeBytes,
+          s3Key: blob.s3Key,
+          s3Bucket: blob.s3Bucket,
+          status: newCount === 0 ? BlobStatus.DELETED : BlobStatus.READY,
+          refCount: newCount,
+        });
+        blobsInDb.set(id, updated);
+        return updated;
       }),
     };
 
     mockQuotaRepo = {
       findByScope: jest.fn(),
-      upsert: jest.fn(),
       incrementUsage: jest.fn().mockResolvedValue(1000n),
       decrementUsage: jest.fn().mockResolvedValue(0n),
-      reconcileUsage: jest.fn(),
     };
 
     mockCache = {
@@ -139,10 +150,6 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
       invalidateScopeTree: jest.fn(),
       getPresignedUrl: jest.fn(),
       setPresignedUrl: jest.fn().mockResolvedValue(undefined),
-      invalidatePresignedUrl: jest.fn(),
-      getCachedQuota: jest.fn(),
-      setCachedQuota: jest.fn(),
-      invalidateQuota: jest.fn(),
     } as any;
 
     mockEventEmitter = {
@@ -150,7 +157,7 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
     } as any;
 
     const blobService = new BlobService(mockDriver, mockBlobRepo);
-    uploadService = new DirectUploadService(
+    uploadService = new UploadService(
       blobService,
       mockNodeRepo,
       mockQuotaRepo,
@@ -158,23 +165,19 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
       mockEventEmitter,
     );
 
+    const mockAccessPolicy = {
+      assertCanAccess: jest.fn().mockResolvedValue(undefined),
+    } as any;
+
     facade = new StorageFacade(
       blobService,
       mockNodeRepo,
       uploadService,
-      new PresignService(blobService, mockNodeRepo, mockQuotaRepo),
       {} as any,
       {} as any,
-      {
-        check: jest
-          .fn()
-          .mockResolvedValue({ usedBytes: 0, maxBytes: 5e9, percentage: 0 }),
-      } as any,
+      new StreamService(blobService, mockNodeRepo, mockCache, mockAccessPolicy),
       {} as any,
-      new StreamService(blobService, mockNodeRepo, mockCache, {
-        assertCanAccess: jest.fn().mockResolvedValue(undefined),
-      } as any),
-      {} as any,
+      mockAccessPolicy,
     );
   });
 
@@ -275,7 +278,7 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('should stream binary stream directly via getFileStream', async () => {
+  it('should stream binary stream directly via getOwnedFileStream', async () => {
     const content = Buffer.from('%PDF-1.7 Large Dataset or Paper Stream Test');
     const uploaded = await facade.uploadFile({
       userId: 'user-stream',
@@ -284,7 +287,10 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
       mimeType: 'application/pdf',
     });
 
-    const streamResult = await facade.getFileStream(uploaded.fileId);
+    const streamResult = await facade.getOwnedFileStream({
+      fileId: uploaded.fileId,
+      userId: 'user-stream',
+    });
     expect(streamResult.mimeType).toBe('application/pdf');
     expect(streamResult.filename).toBe('paper.pdf');
     expect(streamResult.stream).toBeDefined();
@@ -319,11 +325,5 @@ describe('StorageFacade & DirectUploadService Integration Suite', () => {
       'https://storage.flux.ai/upload/signed-url',
     );
     expect(uploadRes.storageKey).toContain('uploads/user-presign/');
-  });
-
-  it('should check quota usage for system consumers', async () => {
-    const quota = await facade.checkQuota('user-123');
-    expect(quota).toBeDefined();
-    expect(quota.maxBytes).toBeGreaterThan(0);
   });
 });

@@ -9,7 +9,6 @@ export const STORAGE_BLOB_REPOSITORY = Symbol('STORAGE_BLOB_REPOSITORY');
 export const UPLOAD_SESSION_REPOSITORY = Symbol('UPLOAD_SESSION_REPOSITORY');
 export const STORAGE_QUOTA_REPOSITORY = Symbol('STORAGE_QUOTA_REPOSITORY');
 export const STORAGE_VERSION_REPOSITORY = Symbol('STORAGE_VERSION_REPOSITORY');
-export const STORAGE_REDIS_CACHE = Symbol('STORAGE_REDIS_CACHE');
 
 // Public Port Injection Token for modular monolith boundary
 export const STORAGE_PORT = 'STORAGE_PORT';

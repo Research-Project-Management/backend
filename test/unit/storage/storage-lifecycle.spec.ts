@@ -2,7 +2,6 @@ import { S3StorageDriver } from '@/modules/storage/core';
 import { LocalStorageDriver } from '@/modules/storage/core';
 import { TrashRetentionJob } from '@/modules/storage/worker';
 import { MultipartCleanupJob } from '@/modules/storage/worker';
-import { OrphanBlobJob } from '@/modules/storage/worker';
 import { StorageLifecycleService } from '@/modules/storage/worker';
 import { StorageQueueConsumer } from '@/modules/storage/worker';
 import {
@@ -10,15 +9,12 @@ import {
   STORAGE_JOB_MAINTENANCE_MULTIPART,
   STORAGE_JOB_MAINTENANCE_ORPHAN,
 } from '@/modules/storage/worker';
-import { StorageNode } from '@/modules/storage/drive';
-import { BlobService, StorageBlob } from '@/modules/storage/core';
+import { StorageNode, TrashService } from '@/modules/storage/drive';
+import { BlobService, StorageBlob, BlobStatus } from '@/modules/storage/core';
 import { ContentHash } from '@/modules/storage/core';
 import { StorageKey } from '@/modules/storage/core';
 import { UploadSession } from '@/modules/storage/transfer';
-import {
-  PutBucketLifecycleConfigurationCommand,
-  GetBucketLifecycleConfigurationCommand,
-} from '@aws-sdk/client-s3';
+import { PutBucketLifecycleConfigurationCommand } from '@aws-sdk/client-s3';
 
 describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
   describe('S3 & Local Storage Driver - Lifecycle Configuration', () => {
@@ -140,15 +136,8 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       };
       mockBlobRepo = {
         findById: jest.fn(),
-        update: jest.fn(),
         incrementRefCount: jest.fn(),
-        decrementRefCount: jest.fn().mockImplementation(async (id: string) => {
-          const blob = await mockBlobRepo.findById(id);
-          if (blob) {
-            blob.decrementRef();
-          }
-          return blob;
-        }),
+        decrementRefCount: jest.fn(),
       };
       mockQuotaRepo = {
         decrementUsage: jest.fn(),
@@ -157,12 +146,16 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
         invalidateFolder: jest.fn(),
       };
 
-      job = new TrashRetentionJob(
+      const trashService = new TrashService(
         mockNodeRepo,
         new BlobService({} as any, mockBlobRepo),
         mockQuotaRepo,
         mockCache,
+        { emit: jest.fn() } as any,
+        { findByFileId: jest.fn().mockResolvedValue([]), deleteByFileId: jest.fn() } as any,
       );
+
+      job = new TrashRetentionJob(mockNodeRepo, trashService);
     });
 
     it('should purge single expired file, decrement blob ref, reclaim quota, and invalidate cache', async () => {
@@ -194,8 +187,6 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       expect(result.reclaimedBytes).toBe(1048576n);
       expect(result.errors).toBe(0);
 
-      // Verify blob ref decremented
-      expect(blob.refCount).toBe(1);
       expect(mockBlobRepo.decrementRefCount).toHaveBeenCalledWith('blob-001');
 
       // Verify quota decremented
@@ -307,8 +298,8 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
     });
   });
 
-  describe('OrphanBlobJob - Sweep Tombstoned CAS Blobs', () => {
-    let job: OrphanBlobJob;
+  describe('BlobService.reclaimOrphanBlobs - Sweep Tombstoned CAS Blobs', () => {
+    let blobService: BlobService;
     let mockDriver: any;
     let mockBlobRepo: any;
 
@@ -320,7 +311,7 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
         findTombstonedBlobs: jest.fn(),
         delete: jest.fn(),
       };
-      job = new OrphanBlobJob(new BlobService(mockDriver, mockBlobRepo));
+      blobService = new BlobService(mockDriver, mockBlobRepo);
     });
 
     it('should delete zero-reference tombstoned blobs from physical storage and DB', async () => {
@@ -331,11 +322,12 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
         s3Key: StorageKey.fromString('blobs/cc/orphan.pdf'),
         s3Bucket: 'flux',
         refCount: 0,
+        status: BlobStatus.DELETED,
       });
 
       mockBlobRepo.findTombstonedBlobs.mockResolvedValue([deadBlob]);
 
-      const count = await job.processTombstonedBlobs();
+      const count = await blobService.reclaimOrphanBlobs();
 
       expect(count).toBe(1);
       expect(mockDriver.delete).toHaveBeenCalledWith('blobs/cc/orphan.pdf');
@@ -350,20 +342,19 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
     let mockBlobRepo: any;
     let mockTrashJob: any;
     let mockMultipartJob: any;
-    let mockOrphanJob: any;
 
     beforeEach(() => {
-      mockDriver = { getStream: jest.fn() };
+      mockDriver = { getStream: jest.fn(), delete: jest.fn() };
       mockNodeRepo = { findById: jest.fn(), update: jest.fn() };
-      mockBlobRepo = { findById: jest.fn() };
+      mockBlobRepo = {
+        findById: jest.fn(),
+        findTombstonedBlobs: jest.fn().mockResolvedValue([]),
+      };
       mockTrashJob = {
         processExpiredTrash: jest.fn().mockResolvedValue({ purgedCount: 3 }),
       };
       mockMultipartJob = {
         processExpiredSessions: jest.fn().mockResolvedValue(2),
-      };
-      mockOrphanJob = {
-        processTombstonedBlobs: jest.fn().mockResolvedValue(1),
       };
 
       consumer = new StorageQueueConsumer(
@@ -371,7 +362,6 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
         mockNodeRepo,
         mockTrashJob,
         mockMultipartJob,
-        mockOrphanJob,
       );
     });
 
@@ -397,15 +387,15 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       expect(res).toBe(2);
     });
 
-    it('should dispatch to OrphanBlobJob when job name is maintenance-orphan-blob', async () => {
+    it('should dispatch to BlobService.reclaimOrphanBlobs when job name is maintenance-orphan-blob', async () => {
       const res = await consumer.process({
         id: 'job-3',
         name: STORAGE_JOB_MAINTENANCE_ORPHAN,
         data: {},
       } as any);
 
-      expect(mockOrphanJob.processTombstonedBlobs).toHaveBeenCalled();
-      expect(res).toBe(1);
+      expect(mockBlobRepo.findTombstonedBlobs).toHaveBeenCalled();
+      expect(res).toBe(0);
     });
   });
 
@@ -413,9 +403,6 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
     let service: StorageLifecycleService;
     let mockDriver: any;
     let mockProducer: any;
-    let mockTrashJob: any;
-    let mockMultipartJob: any;
-    let mockOrphanJob: any;
 
     beforeEach(() => {
       mockDriver = {
@@ -425,17 +412,8 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       mockProducer = {
         scheduleMaintenanceJobs: jest.fn().mockResolvedValue(undefined),
       };
-      mockTrashJob = { processExpiredTrash: jest.fn() };
-      mockMultipartJob = { processExpiredSessions: jest.fn() };
-      mockOrphanJob = { processTombstonedBlobs: jest.fn() };
 
-      service = new StorageLifecycleService(
-        mockDriver,
-        mockProducer,
-        mockTrashJob,
-        mockMultipartJob,
-        mockOrphanJob,
-      );
+      service = new StorageLifecycleService(mockDriver, mockProducer);
     });
 
     it('onApplicationBootstrap should initialize bucket rules and schedule maintenance in BullMQ', async () => {

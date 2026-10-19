@@ -49,7 +49,11 @@ export class BlobService {
   // --------------------------------------------------------------------------
 
   private async incrementExistingBlob(blob: StorageBlob): Promise<StorageBlob> {
+    const prevCount = blob.refCount;
     const updated = await this.blobRepo.incrementRefCount(blob.id);
+    if (blob.refCount === prevCount) {
+      blob.incrementRef();
+    }
     return updated ?? blob;
   }
 
@@ -105,16 +109,39 @@ export class BlobService {
     }
   }
 
+  private async computeStreamSha256Hex(storageKey: string): Promise<string | null> {
+    try {
+      const res = await this.driver.getStream(storageKey);
+      if (!res?.stream) return null;
+      const hash = crypto.createHash('sha256');
+      for await (const chunk of res.stream) {
+        hash.update(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return hash.digest('hex');
+    } catch {
+      return null;
+    }
+  }
+
   async registerUploadedObject(
     input: RegisterUploadedObjectInput,
   ): Promise<StoreBufferCasResult> {
-    const hashHex =
+    let resolvedHex =
       input.contentHashHex && /^[a-f0-9]{64}$/i.test(input.contentHashHex)
         ? input.contentHashHex.toLowerCase()
-        : crypto
-            .createHash('sha256')
-            .update(`${input.storageKey}:${input.sizeBytes}`)
-            .digest('hex');
+        : null;
+
+    // If client did not provide SHA-256 and object is <= 100MB, stream-hash physical content for genuine CAS deduplication
+    if (!resolvedHex && input.sizeBytes <= 100n * 1024n * 1024n) {
+      resolvedHex = await this.computeStreamSha256Hex(input.storageKey);
+    }
+
+    const hashHex =
+      resolvedHex ||
+      crypto
+        .createHash('sha256')
+        .update(`${input.storageKey}:${input.sizeBytes}`)
+        .digest('hex');
     const contentHash = ContentHash.fromHex(hashHex);
 
     const cleanupRedundantUpload = (canonicalKey: string) => {
@@ -214,10 +241,6 @@ export class BlobService {
     return this.driver.exists(key);
   }
 
-  async copy(sourceKey: string, destinationKey: string): Promise<void> {
-    return this.driver.copy(sourceKey, destinationKey);
-  }
-
   async getPresignedUploadUrl(
     key: string,
     options: {
@@ -269,13 +292,6 @@ export class BlobService {
     return this.driver.abortMultipartUpload(key, uploadId);
   }
 
-  async listUploadedParts(
-    key: string,
-    uploadId: string,
-  ): Promise<CompletedPart[]> {
-    return this.driver.listUploadedParts(key, uploadId);
-  }
-
   async applyLifecycleRules(
     config?: StorageLifecycleConfiguration,
   ): Promise<void> {
@@ -304,17 +320,6 @@ export class BlobService {
 
   async findBlobByHash(hash: ContentHash): Promise<StorageBlob | null> {
     return this.blobRepo.findByHash(hash);
-  }
-
-  async findTombstonedBlobs(
-    threshold: Date,
-    limit = 100,
-  ): Promise<StorageBlob[]> {
-    return this.blobRepo.findTombstonedBlobs(threshold, limit);
-  }
-
-  async deleteBlobRecord(id: string): Promise<void> {
-    return this.blobRepo.delete(id);
   }
 
   /**

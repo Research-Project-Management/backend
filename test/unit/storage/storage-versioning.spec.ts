@@ -66,21 +66,36 @@ describe('Storage File & Dataset Versioning Suite', () => {
         blobsInDb.set(b.id, b);
         return b;
       }),
-      update: jest.fn().mockImplementation(async (b: StorageBlob) => {
-        blobsInDb.set(b.id, b);
-        return b;
-      }),
       incrementRefCount: jest.fn().mockImplementation(async (id: string) => {
         const b = blobsInDb.get(id);
         if (!b) throw new NotFoundException('Blob not found');
-        b.incrementRef();
-        return b;
+        const updated = new StorageBlob({
+          id: b.id,
+          contentHash: b.contentHash,
+          sizeBytes: b.sizeBytes,
+          s3Key: b.s3Key,
+          s3Bucket: b.s3Bucket,
+          status: BlobStatus.READY,
+          refCount: b.refCount + 1,
+        });
+        blobsInDb.set(id, updated);
+        return updated;
       }),
       decrementRefCount: jest.fn().mockImplementation(async (id: string) => {
         const b = blobsInDb.get(id);
         if (!b) return null;
-        b.decrementRef();
-        return b;
+        const newCount = Math.max(0, b.refCount - 1);
+        const updated = new StorageBlob({
+          id: b.id,
+          contentHash: b.contentHash,
+          sizeBytes: b.sizeBytes,
+          s3Key: b.s3Key,
+          s3Bucket: b.s3Bucket,
+          status: newCount === 0 ? BlobStatus.DELETED : BlobStatus.READY,
+          refCount: newCount,
+        });
+        blobsInDb.set(id, updated);
+        return updated;
       }),
     };
 
@@ -428,7 +443,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
       const versions = versionsInDb.get(fileId)!;
       expect(versions.length).toBe(3);
       expect(versions[2].versionNumber).toBe(3);
-      expect(versions[2].changeComment).toContain('Khôi phục về Phiên bản 1');
+      expect(versions[2].changeComment).toBe('Reverted to version 1');
     });
   });
 });

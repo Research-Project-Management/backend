@@ -68,19 +68,15 @@ export interface IStoragePort {
     buffer: Buffer,
     contentType?: string,
   ): Promise<{ path: string; url: string }>;
-  getFileStream(
-    fileId: string,
-    range?: { start: number; end: number },
-  ): Promise<{
-    stream: NodeJS.ReadableStream;
-    mimeType: string;
-    size: number;
-    filename: string;
-    contentRange?: string;
-  }>;
+  ensurePdfThumbnail(input: {
+    fileId: string;
+    userId?: string;
+    projectId?: string | null;
+  }): Promise<Buffer | null>;
   getPresignedDownloadUrl(
     fileId: string,
     expiresInSeconds?: number,
+    userId?: string,
   ): Promise<string>;
   getPresignedUploadUrl(input: {
     userId: string;
@@ -156,10 +152,6 @@ export interface IStoragePort {
     sessionId: string,
     actor?: { userId: string; projectId?: string | null },
   ): Promise<void>;
-  checkQuota(
-    userId?: string | null,
-    projectId?: string | null,
-  ): Promise<{ usedBytes: number; maxBytes: number; percentage: number }>;
 }
 
 export { STORAGE_PORT };

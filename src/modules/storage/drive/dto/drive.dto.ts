@@ -3,15 +3,19 @@ import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 export class CreateFolderDto {
   @IsString()
   @IsOptional()
-  filename?: string;
-
-  @IsString()
-  @IsOptional()
   name?: string;
 
   @IsString()
   @IsOptional()
+  filename?: string;
+
+  @IsString()
+  @IsOptional()
   parentId?: string;
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
 
   @IsString()
   @IsOptional()
@@ -21,17 +25,17 @@ export class CreateFolderDto {
 export class RenameFileDto {
   @IsString()
   @IsOptional()
-  filename?: string;
+  name?: string;
 
   @IsString()
   @IsOptional()
-  name?: string;
+  filename?: string;
 }
 
 export class MoveFileDto {
   @IsString()
   @IsOptional()
-  parentId?: string;
+  parentId?: string | null;
 }
 
 export class ShareFileDto {
@@ -55,4 +59,17 @@ export class BatchStarDto {
 
   @IsBoolean()
   starred!: boolean;
+}
+
+export class BatchMoveDto {
+  @IsNotEmpty({ message: 'File IDs array is required' })
+  ids!: string[];
+
+  @IsString()
+  @IsOptional()
+  parentId?: string | null;
+
+  @IsString()
+  @IsOptional()
+  targetFolderId?: string | null;
 }

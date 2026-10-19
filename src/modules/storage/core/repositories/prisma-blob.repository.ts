@@ -7,7 +7,6 @@ export interface IStorageBlobRepository {
   findById(id: string): Promise<StorageBlob | null>;
   findByHash(contentHash: ContentHash): Promise<StorageBlob | null>;
   create(blob: StorageBlob): Promise<StorageBlob>;
-  update(blob: StorageBlob): Promise<StorageBlob>;
   delete(id: string): Promise<void>;
   findTombstonedBlobs(threshold: Date, limit: number): Promise<StorageBlob[]>;
   incrementRefCount(id: string): Promise<StorageBlob | null>;
@@ -80,19 +79,6 @@ export class PrismaStorageBlobRepository implements IStorageBlobRepository {
       },
     });
     return StorageBlobMapper.toDomain(created);
-  }
-
-  async update(blob: StorageBlob): Promise<StorageBlob> {
-    const data = StorageBlobMapper.toPrismaCreate(blob);
-    const updated = await this.prisma.storageBlob.update({
-      where: { id: blob.id },
-      data: {
-        refCount: data.refCount,
-        status: data.status,
-        tombstoneAt: data.tombstoneAt,
-      },
-    });
-    return StorageBlobMapper.toDomain(updated);
   }
 
   async delete(id: string): Promise<void> {

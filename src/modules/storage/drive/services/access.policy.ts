@@ -2,11 +2,11 @@ import {
   Injectable,
   ForbiddenException,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { StorageNode, FileScope } from '../types';
+import { StorageNode } from '../types';
 import { IStorageNodeRepository } from '../repositories/prisma-node.repository';
-import { Inject } from '@nestjs/common';
 import { STORAGE_NODE_REPOSITORY } from '@/modules/storage/storage.tokens';
 
 export type StorageAction = 'read' | 'write' | 'delete' | 'share';
@@ -22,8 +22,8 @@ export class StorageAccessPolicy {
   /**
    * Evaluates 5-tier ReBAC access permissions:
    * 1. Author bypass (Full access)
-   * 2. Direct FileShare ACL
-   * 3. Project Workbench RBAC
+   * 2. Direct & Ancestor Folder FileShare ACL
+   * 3. Project Workbench RBAC (across Project, Page, and Library scopes)
    * 4. Contextual metadata (Embargo date / isPublic)
    */
   async assertCanAccess(
@@ -57,8 +57,27 @@ export class StorageAccessPolicy {
       throw new ForbiddenException('Insufficient permission for this file');
     }
 
-    // 3. Project Workbench RBAC check
-    if (node.scope === FileScope.Project && node.projectId) {
+    // 2b. Ancestor Folder FileShare ACL inheritance
+    if (node.parentId && typeof this.nodeRepo.getFolderPath === 'function') {
+      const ancestors = await this.nodeRepo.getFolderPath(node.parentId);
+      for (const ancestor of ancestors) {
+        const ancestorShare = await this.prisma.fileShare.findUnique({
+          where: {
+            fileId_userId: { fileId: ancestor.id, userId },
+          },
+        });
+        if (ancestorShare) {
+          if (action === 'read') return node;
+          if (action === 'write' && ancestorShare.permission === 'edit') {
+            return node;
+          }
+          throw new ForbiddenException('Insufficient permission for this file');
+        }
+      }
+    }
+
+    // 3. Project Workbench RBAC check (across Project, Page, and Library scopes)
+    if (node.projectId) {
       const membership = await this.prisma.projectMember.findUnique({
         where: {
           projectId_userId: { projectId: node.projectId, userId },
@@ -100,4 +119,63 @@ export class StorageAccessPolicy {
       'Access denied: you do not have permission to access this resource',
     );
   }
+
+  /**
+   * Verifies that a user has RBAC permission on a project scope.
+   */
+  async assertCanAccessProject(
+    userId: string,
+    projectId: string,
+    action: StorageAction,
+  ): Promise<void> {
+    if (!userId || !projectId) {
+      throw new ForbiddenException('Authentication required for project access');
+    }
+    const membership = await this.prisma.projectMember.findUnique({
+      where: {
+        projectId_userId: { projectId, userId },
+      },
+    });
+    if (!membership) {
+      throw new ForbiddenException(
+        'Access denied: you are not a member of this project',
+      );
+    }
+    const role = String(membership.role || '').toLowerCase();
+    if (action === 'read') return;
+    if (
+      action === 'write' &&
+      ['owner', 'coordinator', 'contributor'].includes(role)
+    ) {
+      return;
+    }
+    if (
+      (action === 'delete' || action === 'share') &&
+      ['owner', 'coordinator'].includes(role)
+    ) {
+      return;
+    }
+    throw new ForbiddenException(
+      `Project role ${membership.role} cannot perform ${action}`,
+    );
+  }
+
+  /**
+   * Verifies that a user can access a page or parent folder when listing or creating nodes.
+   */
+  async assertCanWriteScope(
+    userId: string,
+    options: {
+      projectId?: string | null;
+      parentId?: string | null;
+    },
+  ): Promise<void> {
+    if (options.parentId && options.parentId !== 'null' && options.parentId !== 'root') {
+      await this.assertCanAccess(userId, options.parentId, 'write');
+    }
+    if (options.projectId && options.projectId !== 'null') {
+      await this.assertCanAccessProject(userId, options.projectId, 'write');
+    }
+  }
 }
+

@@ -3,24 +3,18 @@ import {
   Logger,
   Inject,
   OnApplicationBootstrap,
-  Optional,
 } from '@nestjs/common';
 import {
   STORAGE_NODE_REPOSITORY,
-  STORAGE_QUOTA_REPOSITORY,
-  STORAGE_VERSION_REPOSITORY,
   UPLOAD_SESSION_REPOSITORY,
 } from '@/modules/storage/storage.tokens';
 import {
   IStorageNodeRepository,
-  IStorageQuotaRepository,
-  IStorageVersionRepository,
-  StorageNode,
+  TrashService,
 } from '@/modules/storage/drive';
 import { IUploadSessionRepository } from '@/modules/storage/transfer';
 import {
   BlobService,
-  StorageRedisCacheService,
   StorageLifecycleConfiguration,
 } from '@/modules/storage/core';
 import { StorageQueueProducer } from './queue.producer';
@@ -39,14 +33,7 @@ export class TrashRetentionJob {
   constructor(
     @Inject(STORAGE_NODE_REPOSITORY)
     private readonly nodeRepo: IStorageNodeRepository,
-    private readonly blobService: BlobService,
-    @Inject(STORAGE_QUOTA_REPOSITORY)
-    private readonly quotaRepo: IStorageQuotaRepository,
-    @Optional()
-    private readonly cache?: StorageRedisCacheService,
-    @Optional()
-    @Inject(STORAGE_VERSION_REPOSITORY)
-    private readonly versionRepo?: IStorageVersionRepository,
+    private readonly trashService: TrashService,
   ) {}
 
   async processExpiredTrash(retentionDays = 30): Promise<TrashPurgeResult> {
@@ -64,24 +51,12 @@ export class TrashRetentionJob {
       if (processedIds.has(node.id)) continue;
 
       try {
-        if (node.isFolder) {
-          // Cascading subtree purge for folder and all children
-          const subtree = await this.nodeRepo.findSubtreeNodes(node.id);
-          const sortedSubtree = StorageNode.sortBottomUp(subtree);
-
-          for (const subnode of sortedSubtree) {
-            if (processedIds.has(subnode.id)) continue;
-            const nodeReclaimed = await this.purgeSingleNode(subnode);
-            processedIds.add(subnode.id);
-            purgedCount++;
-            reclaimedBytes += nodeReclaimed;
-          }
-        } else {
-          const nodeReclaimed = await this.purgeSingleNode(node);
-          processedIds.add(node.id);
-          purgedCount++;
-          reclaimedBytes += nodeReclaimed;
-        }
+        const result = await this.trashService.purgeNodeAndSubtree(
+          node,
+          processedIds,
+        );
+        purgedCount += result.purgedCount;
+        reclaimedBytes += result.reclaimedBytes;
       } catch (err: unknown) {
         errors++;
         this.logger.error(
@@ -96,43 +71,6 @@ export class TrashRetentionJob {
       );
     }
     return { purgedCount, reclaimedBytes, errors };
-  }
-
-  private async purgeSingleNode(node: StorageNode): Promise<bigint> {
-    let reclaimed = 0n;
-    const versions =
-      this.versionRepo && !node.isFolder
-        ? await this.versionRepo.findByFileId(node.id)
-        : [];
-
-    if (versions.length > 0 && this.versionRepo) {
-      for (const v of versions) {
-        await this.blobService.releaseBlob(v.blobId);
-        await this.quotaRepo.decrementUsage(
-          node.authorId,
-          node.projectId,
-          v.sizeBytes,
-        );
-        reclaimed += BigInt(v.sizeBytes);
-      }
-      await this.versionRepo.deleteByFileId(node.id);
-    } else if (node.blobId) {
-      await this.blobService.releaseBlob(node.blobId);
-      await this.quotaRepo.decrementUsage(
-        node.authorId,
-        node.projectId,
-        node.size,
-      );
-      reclaimed += BigInt(node.size);
-    }
-
-    await this.nodeRepo.delete(node.id);
-
-    if (this.cache) {
-      const scopeKey = node.projectId ?? node.authorId;
-      await this.cache.invalidateFolder(scopeKey, node.parentId);
-    }
-    return reclaimed;
   }
 }
 
@@ -177,32 +115,12 @@ export class MultipartCleanupJob {
 }
 
 @Injectable()
-export class OrphanBlobJob {
-  private readonly logger = new Logger(OrphanBlobJob.name);
-
-  constructor(private readonly blobService: BlobService) {}
-
-  async processTombstonedBlobs(): Promise<number> {
-    const deletedCount = await this.blobService.reclaimOrphanBlobs(100);
-    if (deletedCount > 0) {
-      this.logger.log(
-        `OrphanBlobJob reclaimed ${deletedCount} unused physical blobs from S3 storage`,
-      );
-    }
-    return deletedCount;
-  }
-}
-
-@Injectable()
 export class StorageLifecycleService implements OnApplicationBootstrap {
   private readonly logger = new Logger(StorageLifecycleService.name);
 
   constructor(
     private readonly blobService: BlobService,
     private readonly queueProducer: StorageQueueProducer,
-    private readonly trashRetentionJob: TrashRetentionJob,
-    private readonly multipartCleanupJob: MultipartCleanupJob,
-    private readonly orphanBlobJob: OrphanBlobJob,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -240,27 +158,5 @@ export class StorageLifecycleService implements OnApplicationBootstrap {
         `Failed to initialize bucket lifecycle rules: ${(err as Error)?.message}`,
       );
     }
-  }
-
-  async getLifecycleRules(): Promise<StorageLifecycleConfiguration | null> {
-    return this.blobService.getLifecycleRules();
-  }
-
-  async applyCustomLifecycleRules(
-    config: StorageLifecycleConfiguration,
-  ): Promise<void> {
-    await this.blobService.applyLifecycleRules(config);
-  }
-
-  async runTrashPurge(retentionDays = 30): Promise<TrashPurgeResult> {
-    return this.trashRetentionJob.processExpiredTrash(retentionDays);
-  }
-
-  async runMultipartCleanup(): Promise<number> {
-    return this.multipartCleanupJob.processExpiredSessions();
-  }
-
-  async runOrphanBlobSweep(): Promise<number> {
-    return this.orphanBlobJob.processTombstonedBlobs();
   }
 }

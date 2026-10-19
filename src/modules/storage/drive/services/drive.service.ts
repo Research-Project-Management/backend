@@ -46,10 +46,13 @@ export class DriveService {
     const scopeKey =
       filter.projectId ?? filter.userId ?? filter.authorId ?? 'default';
 
+    const isNonDefaultLimit =
+      filter.limit !== undefined && filter.limit !== 100;
     const isFilterActive =
       filter.trashedOnly ||
       filter.starredOnly ||
       Boolean(filter.offset) ||
+      isNonDefaultLimit ||
       Boolean(filter.search) ||
       Boolean(filter.types && filter.types.length > 0) ||
       Boolean(filter.sortBy);
@@ -65,9 +68,7 @@ export class DriveService {
         120, // 2 minutes TTL
       );
       return {
-        nodes: cached.nodes.map((n: StorageNode) =>
-          n instanceof StorageNode ? n : new StorageNode(n),
-        ),
+        nodes: cached.nodes.map((n: unknown) => StorageNode.fromSerialized(n)),
         total: cached.total,
       };
     }
@@ -91,11 +92,15 @@ export class DriveService {
     name: string;
     parentId?: string | null;
     projectId?: string | null;
+    linkedToId?: string | null;
+    scope?: FileScope | string;
     metadata?: Record<string, unknown>;
   }): Promise<StorageNode> {
     const folder = new StorageNode({
       id: crypto.randomUUID(),
       projectId: input.projectId ?? null,
+      linkedToId: input.linkedToId ?? input.projectId ?? null,
+      scope: input.scope,
       name: input.name || 'New Folder',
       isFolder: true,
       size: 0n,
@@ -115,11 +120,15 @@ export class DriveService {
     mimeType: string;
     parentId?: string | null;
     projectId?: string | null;
+    linkedToId?: string | null;
+    scope?: FileScope | string;
     metadata?: Record<string, unknown>;
   }): Promise<StorageNode> {
     const node = new StorageNode({
       id: crypto.randomUUID(),
       projectId: input.projectId ?? null,
+      linkedToId: input.linkedToId ?? input.projectId ?? null,
+      scope: input.scope,
       name: input.name,
       isFolder: false,
       size: input.size,
@@ -134,7 +143,7 @@ export class DriveService {
   }
 
   async rename(nodeId: string, newName: string): Promise<StorageNode> {
-    if (!newName) throw new NotFoundException('New name is required');
+    if (!newName) throw new BadRequestException('New name is required');
     const node = await this.getActiveNodeOrThrow(nodeId);
     node.rename(newName);
     const updated = await this.nodeRepo.update(node);
@@ -189,8 +198,9 @@ export class DriveService {
   ): Promise<void> {
     const node = await this.nodeRepo.findById(nodeId);
     if (node) {
-      node.setScope(linkedToType as FileScope, linkedToId);
-      await this.nodeRepo.update(node);
+      node.setScope(linkedToType, linkedToId);
+      const updated = await this.nodeRepo.update(node);
+      await this.invalidateNodeFolderCache(updated);
     }
   }
 
@@ -198,6 +208,12 @@ export class DriveService {
     userId: string,
     take: number,
     skip: number,
+    filter?: {
+      search?: string;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+      types?: string[];
+    },
   ): Promise<{
     items: Array<{
       node: StorageNode;
@@ -206,7 +222,7 @@ export class DriveService {
     }>;
     total: number;
   }> {
-    return this.nodeRepo.listSharedWithUser(userId, take, skip);
+    return this.nodeRepo.listSharedWithUser(userId, take, skip, filter);
   }
 
   async shareNode(
@@ -239,6 +255,15 @@ export class DriveService {
         throw new BadRequestException('Destination must be a folder');
       }
 
+      if (
+        node.scope !== targetParent.scope ||
+        (node.projectId ?? null) !== (targetParent.projectId ?? null)
+      ) {
+        throw new BadRequestException(
+          'Cannot move a file or folder across different storage scopes or projects',
+        );
+      }
+
       const isChild = await this.nodeRepo.isDescendant(nodeId, newParentId);
       if (isChild) {
         throw new BadRequestException(
@@ -254,6 +279,9 @@ export class DriveService {
     const scopeKey = node.projectId ?? node.authorId;
     await this.cache.invalidateFolder(scopeKey, oldParentId);
     await this.cache.invalidateFolder(scopeKey, newParentId);
+    if (typeof this.cache.invalidateScopeTree === 'function') {
+      await this.cache.invalidateScopeTree(scopeKey);
+    }
 
     return updated;
   }
@@ -292,4 +320,3 @@ export class DriveService {
   }
 }
 export { TrashService } from './trash.service';
-export { QuotaService } from './quota.service';

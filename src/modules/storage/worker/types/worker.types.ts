@@ -15,16 +15,3 @@ export interface StorageProcessingJobData {
   userId: string;
   projectId?: string | null;
 }
-
-export interface ImageProcessingResult {
-  thumbnailUrl: string;
-  width?: number;
-  height?: number;
-  format?: string;
-}
-
-export interface DatasetPreviewResult {
-  columns: string[];
-  totalSampledRows: number;
-  sampleRows: string[][];
-}

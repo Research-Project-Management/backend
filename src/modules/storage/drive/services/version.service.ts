@@ -177,14 +177,15 @@ export class VersionService {
     const { blob, isDeduplicated } = await this.blobService.storeBuffer(
       input.buffer,
       input.mimeType,
+      async (bytes) => {
+        await this.quotaRepo.incrementUsage(
+          node.authorId,
+          node.projectId,
+          bytes,
+        );
+      },
     );
     const s3Key = blob.s3Key;
-
-    await this.quotaRepo.incrementUsage(
-      node.authorId,
-      node.projectId,
-      sizeBytes,
-    );
 
     const latestVersion = await this.versionRepo.getLatestVersionNumber(
       node.id,
@@ -318,12 +319,36 @@ export class VersionService {
     const { blobId: targetBlobId, sizeBytes: targetSize } =
       await this.resolveVersionBlob(node, targetVersionNumber);
 
+    // Charge quota for the newly created revision snapshot before incrementing refCount
+    await this.quotaRepo.incrementUsage(
+      node.authorId,
+      node.projectId,
+      targetSize,
+    );
+
     const blob = await this.blobService.incrementBlobRef(targetBlobId);
 
     const latestVersion = await this.versionRepo.getLatestVersionNumber(
       node.id,
     );
-    const newVersionNumber = latestVersion + 1;
+    let newVersionNumber = latestVersion + 1;
+
+    if (latestVersion === 0 && node.blobId) {
+      await this.versionRepo.create(
+        new StorageVersion({
+          id: crypto.randomUUID(),
+          fileId: node.id,
+          blobId: node.blobId,
+          versionNumber: 1,
+          changeComment: 'Initial version',
+          createdById: node.authorId,
+          createdAt: node.createdAt,
+          sizeBytes: node.size,
+          mimeType: node.mimeType,
+        }),
+      );
+      newVersionNumber = 2;
+    }
 
     const newVersion = new StorageVersion({
       id: crypto.randomUUID(),
@@ -332,7 +357,7 @@ export class VersionService {
       blobId: blob.id,
       sizeBytes: targetSize,
       createdById: actorId,
-      changeComment: `Reverted to version ${targetVersionNumber} (Khôi phục về Phiên bản ${targetVersionNumber})`,
+      changeComment: `Reverted to version ${targetVersionNumber}`,
       createdAt: new Date(),
     });
 

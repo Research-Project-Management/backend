@@ -36,6 +36,9 @@ export class TrashService {
     const affectedCount = await this.nodeRepo.softDeleteSubtree(nodeId);
     const scopeKey = node.projectId ?? node.authorId;
     await this.cache.invalidateFolder(scopeKey, node.parentId);
+    if (typeof this.cache.invalidateScopeTree === 'function') {
+      await this.cache.invalidateScopeTree(scopeKey);
+    }
 
     this.eventEmitter.emit(
       'file.trashed',
@@ -51,36 +54,89 @@ export class TrashService {
       throw new NotFoundException('Node not found');
     }
 
+    // If parent folder is still in trash (or missing), re-parent to root (null) so restored item does not become invisible
+    if (node.parentId) {
+      const parent = await this.nodeRepo.findById(node.parentId);
+      if (!parent || parent.isTrashed()) {
+        node.moveTo(null);
+        await this.nodeRepo.update(node);
+      }
+    }
+
     const restoredCount = await this.nodeRepo.restoreSubtree(nodeId);
     const scopeKey = node.projectId ?? node.authorId;
     await this.cache.invalidateFolder(scopeKey, node.parentId);
+    if (typeof this.cache.invalidateScopeTree === 'function') {
+      await this.cache.invalidateScopeTree(scopeKey);
+    }
     return restoredCount;
   }
 
-  private async releaseNodeBlobsAndQuota(target: StorageNode): Promise<void> {
-    if (this.versionRepo && !target.isFolder) {
-      const versions = await this.versionRepo.findByFileId(target.id);
-      if (versions.length > 0) {
-        for (const v of versions) {
-          await this.blobService.releaseBlob(v.blobId);
-          await this.quotaRepo.decrementUsage(
-            target.authorId,
-            target.projectId,
-            v.sizeBytes,
-          );
+  async purgeNodeAndSubtree(
+    node: StorageNode,
+    processedIds?: Set<string>,
+  ): Promise<{ purgedCount: number; reclaimedBytes: bigint }> {
+    let purgedCount = 0;
+    let reclaimedBytes = 0n;
+
+    const purgeSingle = async (target: StorageNode): Promise<bigint> => {
+      let reclaimed = 0n;
+      if (this.versionRepo && !target.isFolder) {
+        const versions = await this.versionRepo.findByFileId(target.id);
+        if (versions.length > 0) {
+          for (const v of versions) {
+            await this.blobService.releaseBlob(v.blobId);
+            await this.quotaRepo.decrementUsage(
+              target.authorId,
+              target.projectId,
+              v.sizeBytes,
+            );
+            reclaimed += BigInt(v.sizeBytes);
+          }
+          await this.versionRepo.deleteByFileId(target.id);
+          await this.nodeRepo.delete(target.id);
+          return reclaimed;
         }
-        await this.versionRepo.deleteByFileId(target.id);
-        return;
+      }
+      if (target.blobId) {
+        await this.blobService.releaseBlob(target.blobId);
+        await this.quotaRepo.decrementUsage(
+          target.authorId,
+          target.projectId,
+          target.size,
+        );
+        reclaimed += BigInt(target.size);
+      }
+      await this.nodeRepo.delete(target.id);
+      return reclaimed;
+    };
+
+    if (node.isFolder) {
+      const subtree = await this.nodeRepo.findSubtreeNodes(node.id);
+      const sortedSubtree = StorageNode.sortBottomUp(subtree);
+
+      for (const subnode of sortedSubtree) {
+        if (processedIds?.has(subnode.id)) continue;
+        const reclaimed = await purgeSingle(subnode);
+        processedIds?.add(subnode.id);
+        purgedCount++;
+        reclaimedBytes += reclaimed;
+      }
+    } else {
+      if (!processedIds?.has(node.id)) {
+        const reclaimed = await purgeSingle(node);
+        processedIds?.add(node.id);
+        purgedCount++;
+        reclaimedBytes += reclaimed;
       }
     }
-    if (target.blobId) {
-      await this.blobService.releaseBlob(target.blobId);
-      await this.quotaRepo.decrementUsage(
-        target.authorId,
-        target.projectId,
-        target.size,
-      );
+
+    if (this.cache) {
+      const scopeKey = node.projectId ?? node.authorId;
+      await this.cache.invalidateFolder(scopeKey, node.parentId);
     }
+
+    return { purgedCount, reclaimedBytes };
   }
 
   async permanentDelete(nodeId: string): Promise<void> {
@@ -89,22 +145,7 @@ export class TrashService {
       throw new NotFoundException('Node not found');
     }
 
-    if (node.isFolder) {
-      // Cascading subtree purge for folder and all children
-      const subtree = await this.nodeRepo.findSubtreeNodes(nodeId);
-      const sortedSubtree = StorageNode.sortBottomUp(subtree);
-
-      for (const subnode of sortedSubtree) {
-        await this.releaseNodeBlobsAndQuota(subnode);
-        await this.nodeRepo.delete(subnode.id);
-      }
-    } else {
-      await this.releaseNodeBlobsAndQuota(node);
-      await this.nodeRepo.delete(nodeId);
-    }
-
-    const scopeKey = node.projectId ?? node.authorId;
-    await this.cache.invalidateFolder(scopeKey, node.parentId);
+    await this.purgeNodeAndSubtree(node);
   }
 
   async batchSoftDelete(ids: string[]): Promise<number> {

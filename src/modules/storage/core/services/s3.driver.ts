@@ -164,7 +164,7 @@ export class S3StorageDriver implements IStorageDriver {
     await this.client.send(
       new CopyObjectCommand({
         Bucket: this.bucket,
-        CopySource: `${this.bucket}/${sourceKey}`,
+        CopySource: `${this.bucket}/${encodeURI(sourceKey)}`,
         Key: destinationKey,
       }),
     );
