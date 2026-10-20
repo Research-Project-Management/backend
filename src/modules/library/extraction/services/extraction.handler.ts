@@ -262,7 +262,20 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         }));
 
         try {
-          if (typeof this.searchFacade?.indexAttachmentPages === 'function') {
+          if (this.eventEmitter) {
+            this.eventEmitter.emit('library.attachment.pages.extracted', {
+              attachmentId: attachment.id,
+              itemId: attachment.itemId,
+              pages: normalizedPages.map((p) => ({
+                pageNumber: p.pageNumber,
+                pageIndex: p.pageIndex,
+                textContent: p.textContent,
+                charOffset: p.charOffset,
+              })),
+            });
+          } else if (
+            typeof this.searchFacade?.indexAttachmentPages === 'function'
+          ) {
             await this.searchFacade.indexAttachmentPages(
               attachment.id,
               normalizedPages,
@@ -275,17 +288,6 @@ export class ExtractionHandler implements OutboxDispatchHandler {
               normalizedPages,
             );
           }
-
-          this.eventEmitter?.emit('library.attachment.pages.extracted', {
-            attachmentId: attachment.id,
-            itemId: attachment.itemId,
-            pages: normalizedPages.map((p) => ({
-              pageNumber: p.pageNumber,
-              pageIndex: p.pageIndex,
-              textContent: p.textContent,
-              charOffset: p.charOffset,
-            })),
-          });
         } catch (indexErr: unknown) {
           const msg =
             indexErr instanceof Error ? indexErr.message : String(indexErr);
@@ -773,6 +775,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         projectId: effectiveProjectId,
         attachmentId: attachment.id,
       };
+      let outboxPublished = false;
       if (this.libraryTx?.executeInTransaction) {
         try {
           await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
@@ -783,6 +786,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
               itemUpdatedPayload,
             );
           });
+          outboxPublished = true;
         } catch (outboxErr: unknown) {
           const msg =
             outboxErr instanceof Error ? outboxErr.message : String(outboxErr);
@@ -791,17 +795,19 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           );
         }
       }
-      this.eventEmitter?.emit(LIBRARY_EVENT_TYPES.ITEM_UPDATED, {
-        eventId: event.id,
-        userId: effectiveUserId,
-        projectId: effectiveProjectId,
-        scopeId,
-        aggregateId: attachment.itemId,
-        eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-        payload: itemUpdatedPayload,
-        createdAt: new Date(),
-        schemaVersion: 1,
-      });
+      if (!outboxPublished) {
+        this.eventEmitter?.emit(LIBRARY_EVENT_TYPES.ITEM_UPDATED, {
+          eventId: event.id,
+          userId: effectiveUserId,
+          projectId: effectiveProjectId,
+          scopeId,
+          aggregateId: attachment.itemId,
+          eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+          payload: itemUpdatedPayload,
+          createdAt: new Date(),
+          schemaVersion: 1,
+        });
+      }
 
       // 9. Invalidate all relevant Redis keys after extraction completes
       if (this.cache) {
@@ -816,7 +822,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
               LIBRARY_REDIS_KEYS.itemPattern(attachment.itemId),
             ),
             this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-            this.cache.del(`library:${scopeId}:counts`),
+            this.cache.del(LIBRARY_REDIS_KEYS.counts(scopeId)),
             this.cache.del(`library:counts:user:${effectiveUserId}`),
             this.cache.del(LIBRARY_REDIS_KEYS.tags(scopeId)),
             this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(scopeId)),

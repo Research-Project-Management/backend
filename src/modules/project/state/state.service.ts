@@ -141,6 +141,36 @@ export class StateService {
   /**
    * Drag & drop reorder: update sequence positions of project's states.
    */
+  /**
+   * Reset project states to the 8 standard default states.
+   */
+  async resetProjectStates(
+    projectId: string,
+    actorId?: string,
+  ): Promise<ProjectState[]> {
+    const project = await this.stateRepo.findProjectState(projectId);
+    if (!project) {
+      throw new NotFoundException(`Project with ID "${projectId}" not found`);
+    }
+
+    const resetStates = await this.stateRepo.resetProjectStates(projectId);
+    await this.invalidateProjectCache(projectId);
+
+    this.eventEmitter?.emit(
+      'project.states.reset',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'project_states_reset',
+        field: 'state',
+        actorId: actorId || '',
+        projectId,
+      }),
+    );
+
+    return resetStates;
+  }
+
   async reorderStates(
     projectId: string,
     dto: ReorderProjectStatesDto,

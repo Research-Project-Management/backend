@@ -100,6 +100,19 @@ export class StateController {
     );
   }
 
+  @Post(':projectId/settings/states/reset')
+  @UseGuards(ProjectAccessGuard)
+  @ProjectRoles('owner')
+  @ApiOperation({
+    summary: 'Reset project states to the 8 standard default research states (Owner only)',
+  })
+  resetProjectStates(
+    @Param('projectId') projectId: string,
+    @CurrentUser('id') actorId: string,
+  ) {
+    return this.stateService.resetProjectStates(projectId, actorId);
+  }
+
   @Put(':projectId/settings/states/reorder')
   @UseGuards(ProjectAccessGuard)
   @ProjectRoles('owner')

@@ -194,6 +194,20 @@ export class CatalogFacade {
     return res.collections;
   }
 
+  async assignItemsToCollection(
+    userId: string,
+    collectionId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<unknown> {
+    return this.collectionsService.assignItemsToCollection(
+      userId,
+      collectionId,
+      { itemIds },
+      projectId,
+    );
+  }
+
   async findMatchCandidates(
     scope: { userId?: string; projectId?: string | null },
     criteria: {

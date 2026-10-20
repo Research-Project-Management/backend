@@ -92,6 +92,18 @@ export class PipelineBatchExecutor {
             status: 'DUPLICATE',
             itemId: matchRes.targetItemId,
           });
+
+          // Ensure duplicate items are assigned to target envelope collections
+          if (envelope.collectionIds && envelope.collectionIds.length > 0) {
+            for (const colId of envelope.collectionIds) {
+              await this.sideEffects.assignItemToCollection(
+                resolvedScope.userId,
+                colId,
+                matchRes.targetItemId,
+                resolvedScope.projectId,
+              );
+            }
+          }
         } else {
           if (matchRes.matchType === 'PROBABLE' && matchRes.targetItemId) {
             await this.repo

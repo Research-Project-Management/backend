@@ -13,57 +13,57 @@ export interface DefaultProjectStateTemplate {
  */
 export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
   {
-    name: 'Proposal & Literature Review',
+    name: 'Ideation',
     description:
-      'Drafting research idea, literature review, methodology design, and core objectives.',
-    color: '#0284c7',
+      'Formulating research ideas, preliminary inquiry, hypothesis generation, and literature exploration.',
+    color: '#64748b',
     sequence: 0,
     isDefault: true,
   },
   {
-    name: 'Review & Approval',
+    name: 'Planning',
     description:
-      'Proposal undergoing evaluation by scientific committee, ethics board, or funding agency.',
-    color: '#0d9488',
+      'Designing methodology, study proposal, data management planning, and protocol preparation.',
+    color: '#0284c7',
     sequence: 1,
     isDefault: false,
   },
   {
-    name: 'Execution & Experimentation',
+    name: 'Experimentation',
     description:
-      'Team actively gathering data, executing simulations, laboratory experiments, and analyzing results.',
+      'Data gathering, laboratory procedures, computational simulations, and empirical testing.',
     color: '#d97706',
     sequence: 2,
     isDefault: false,
   },
   {
-    name: 'Drafting & Publication',
+    name: 'Drafting',
     description:
-      'Core findings established; authoring scientific paper (LaTeX), submitting to peer review, or compiling final report.',
-    color: '#3b82f6',
+      'Authoring scientific manuscript, structuring findings, preparing figures, and synthesizing arguments.',
+    color: '#2563eb',
     sequence: 3,
     isDefault: false,
   },
   {
-    name: 'Evaluation & Defense',
+    name: 'Review',
     description:
-      'Independent peer review, evaluation of research findings, and defense before examination committee.',
-    color: '#4f46e5',
+      'Internal peer critique, defense before examination committee, journal submission, or revision rebuttal.',
+    color: '#7c3aed',
     sequence: 4,
     isDefault: false,
   },
   {
-    name: 'Completed & Archived',
+    name: 'Published',
     description:
-      'Project successfully defended, final report archived, research data and formal manuscript published.',
-    color: '#1a7f37',
+      'Research defended, officially accepted/published in journal or conference, and final artifacts archived.',
+    color: '#16a34a',
     sequence: 5,
     isDefault: false,
   },
   {
-    name: 'Suspended',
+    name: 'Paused',
     description:
-      'Project temporarily halted awaiting funding, specimens, equipment repairs, or personnel changes.',
+      'Temporarily on hold awaiting resources, specimen availability, ethical clearance, or reviewer feedback.',
     color: '#f97316',
     sequence: 6,
     isDefault: false,
@@ -71,7 +71,7 @@ export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
   {
     name: 'Cancelled',
     description:
-      'Project terminated due to infeasibility, policy violation, or strategic re-orientation.',
+      'Project permanently discontinued or terminated due to feasibility constraints or policy decisions.',
     color: '#9ca3af',
     sequence: 7,
     isDefault: false,

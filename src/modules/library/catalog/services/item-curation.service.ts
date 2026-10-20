@@ -2,7 +2,11 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
+import { RedisCacheService } from '@/core';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
+import { ItemQueryService } from './item-query.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import {
@@ -65,6 +69,8 @@ export class ItemCurationService {
     private readonly query: QueryRepository,
     private readonly command: CommandRepository,
     private readonly libraryTx: TransactionService,
+    @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly itemQueryService?: ItemQueryService,
   ) {}
 
   /**
@@ -150,6 +156,15 @@ export class ItemCurationService {
       throw new ForbiddenException(
         'You do not have permission to import items to this project',
       );
+    }
+
+    if (this.itemQueryService) {
+      const perms = await this.itemQueryService.getPermissions(userId, projectId);
+      if (!perms.permissions.canImport) {
+        throw new ForbiddenException(
+          'You do not have permission to import items to this project',
+        );
+      }
     }
 
     const sourceItems = await this.query.findByIds(userId, itemIds);
@@ -254,6 +269,16 @@ export class ItemCurationService {
       }
 
       importedCount++;
+    }
+
+    if (this.cache && importedCount > 0) {
+      await Promise.allSettled([
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(projectId)),
+        this.cache.del(LIBRARY_REDIS_KEYS.counts(`proj:${projectId}`)),
+        this.cache.del(LIBRARY_REDIS_KEYS.tags(`proj:${projectId}`)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(`proj:${projectId}`)),
+      ]);
     }
 
     return { success: true, importedCount };

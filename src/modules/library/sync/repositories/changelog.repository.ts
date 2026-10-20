@@ -340,6 +340,45 @@ export class ChangeLogRepository {
     return totalRecorded;
   }
 
+  async removeTombstone(
+    scope: { userId?: string; projectId?: string | null },
+    entityType: string,
+    entityId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const { userId, projectId } = this.resolveScope(scope);
+    const res = await client.tombstone.deleteMany({
+      where: {
+        userId: userId || null,
+        projectId: projectId || null,
+        entityType,
+        entityId,
+      },
+    });
+    return res.count;
+  }
+
+  async removeTombstonesBatch(
+    scope: { userId?: string; projectId?: string | null },
+    entityType: string,
+    entityIds: string[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    if (!entityIds || entityIds.length === 0) return 0;
+    const client = this.getClient(tx);
+    const { userId, projectId } = this.resolveScope(scope);
+    const res = await client.tombstone.deleteMany({
+      where: {
+        userId: userId || null,
+        projectId: projectId || null,
+        entityType,
+        entityId: { in: entityIds },
+      },
+    });
+    return res.count;
+  }
+
   async compactAndPurgeChangeLog(
     retentionDays: number = 30,
     batchLimit: number = 1000,

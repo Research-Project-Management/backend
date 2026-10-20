@@ -451,6 +451,10 @@ export class ItemService {
           data: restored,
         });
 
+        if (typeof helpers.removeTombstone === 'function') {
+          await helpers.removeTombstone(eventScope, 'Item', id);
+        }
+
         await helpers.publishOutbox(eventScope, id, 'library.item.restored', {
           itemId: id,
           userId,
@@ -716,6 +720,14 @@ export class ItemService {
                 c,
               );
             }
+          }
+
+          if (typeof helpers.removeTombstonesBatch === 'function') {
+            await helpers.removeTombstonesBatch(
+              { userId, projectId: validProjectId },
+              'Item',
+              res.restoredItems.map((r) => r.id),
+            );
           }
 
           if (typeof helpers.publishOutboxBatch === 'function') {

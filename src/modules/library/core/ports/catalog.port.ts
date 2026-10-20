@@ -89,6 +89,12 @@ export interface ICatalogFacade {
     projectId?: string,
   ): Promise<NoteEntity[]>;
   listCollections?(userId: string, projectId?: string): Promise<unknown[]>;
+  assignItemsToCollection?(
+    userId: string,
+    collectionId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<unknown>;
   findMatchCandidates?(
     scope: { userId?: string; projectId?: string | null },
     criteria: {

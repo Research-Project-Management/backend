@@ -799,7 +799,7 @@ export class DuplicateMergerService {
           this.cache.del(`library:item:${primary.id}:notes`),
           this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(primary.id)),
           this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-          this.cache.del(`library:${scopeId}:counts`),
+          this.cache.del(LIBRARY_REDIS_KEYS.counts(scopeId)),
           this.cache.del(`library:counts:user:${userId}`),
           this.cache.del(LIBRARY_REDIS_KEYS.collections(scopeId)),
           this.cache.del(LIBRARY_REDIS_KEYS.collectionTree(scopeId)),

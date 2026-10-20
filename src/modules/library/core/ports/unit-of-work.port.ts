@@ -58,6 +58,16 @@ export interface TransactionHelpers {
       | RecordTombstoneInput[],
     entries?: RecordTombstoneEntry[],
   ): Promise<number>;
+  removeTombstone?(
+    scope: { userId?: string; projectId?: string | null },
+    entityType: string,
+    entityId: string,
+  ): Promise<number>;
+  removeTombstonesBatch?(
+    scope: { userId?: string; projectId?: string | null },
+    entityType: string,
+    entityIds: string[],
+  ): Promise<number>;
   publishOutbox(
     scope: { userId: string; projectId?: string | null },
     aggregateId: string,

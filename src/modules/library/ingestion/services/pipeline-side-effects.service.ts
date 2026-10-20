@@ -34,6 +34,27 @@ export class PipelineSideEffectsService {
     private readonly retractionScanner?: RetractionScannerProvider,
   ) {}
 
+  async assignItemToCollection(
+    userId: string,
+    collectionId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<void> {
+    if (!this.catalogGateway?.assignItemsToCollection) return;
+    try {
+      await this.catalogGateway.assignItemsToCollection(
+        userId,
+        collectionId,
+        [itemId],
+        projectId,
+      );
+    } catch (err: unknown) {
+      this.logger.debug(
+        `Could not assign duplicate item ${itemId} to collection ${collectionId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   async scanRetraction(proposedItem?: Record<string, unknown>): Promise<void> {
     if (!this.retractionScanner || !proposedItem) return;
     try {

@@ -94,6 +94,20 @@ export class TransactionService implements IUnitOfWork {
               tx,
             );
           },
+          removeTombstone: async (
+            scope: { userId?: string; projectId?: string | null },
+            entityType: string,
+            entityId: string,
+          ) => {
+            return this.changeLogRepo.removeTombstone(scope, entityType, entityId, tx);
+          },
+          removeTombstonesBatch: async (
+            scope: { userId?: string; projectId?: string | null },
+            entityType: string,
+            entityIds: string[],
+          ) => {
+            return this.changeLogRepo.removeTombstonesBatch(scope, entityType, entityIds, tx);
+          },
           publishOutbox: async (
             scope: { userId: string; projectId?: string | null },
             aggregateId: string,

@@ -22,6 +22,8 @@ import {
   isValidStateTransition,
   isValidScrollPosition,
 } from '@/modules/library/catalog/domain/state.domain';
+import { RedisCacheService } from '@/core';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 
 @Injectable()
 export class StateService {
@@ -30,7 +32,33 @@ export class StateService {
     private readonly libraryTx: TransactionService,
     @Optional()
     private readonly itemExistencePort?: ItemQueryService,
+    @Optional()
+    private readonly cache?: RedisCacheService,
   ) {}
+
+  private async invalidateStateCache(
+    itemId: string,
+    userId: string,
+    projectId?: string,
+  ): Promise<void> {
+    if (!this.cache) return;
+    const tasks: Promise<unknown>[] = [
+      this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
+      this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
+      this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+      this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(`user:${userId}`)),
+      this.cache.del(LIBRARY_REDIS_KEYS.counts(userId)),
+      this.cache.del(LIBRARY_REDIS_KEYS.counts(`user:${userId}`)),
+    ];
+    if (projectId) {
+      tasks.push(
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(projectId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`)),
+        this.cache.del(LIBRARY_REDIS_KEYS.counts(`proj:${projectId}`)),
+      );
+    }
+    await Promise.allSettled(tasks);
+  }
 
   private toResponse(state?: StateEntity | null): StateData {
     return toStateResponse(state);
@@ -166,7 +194,9 @@ export class StateService {
       return this.toResponse(updated);
     };
 
-    return this.libraryTx.executeInTransaction(execute);
+    const result = await this.libraryTx.executeInTransaction(execute);
+    await this.invalidateStateCache(itemId, userId, effectiveProjectId);
+    return result;
   }
 
   async markAsRead(
@@ -229,7 +259,9 @@ export class StateService {
       return this.toResponse(updated);
     };
 
-    return this.libraryTx.executeInTransaction(execute);
+    const result = await this.libraryTx.executeInTransaction(execute);
+    await this.invalidateStateCache(itemId, userId, effectiveProjectId);
+    return result;
   }
 
   private async assertItemExists(

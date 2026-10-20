@@ -65,7 +65,7 @@ export class CollectionsService {
               LIBRARY_REDIS_KEYS.itemsPattern(effectiveProjectId),
             ),
             this.cache.del(LIBRARY_REDIS_KEYS.counts(scopeId)),
-            this.cache.del(LIBRARY_REDIS_KEYS.counts(effectiveProjectId)),
+            this.cache.del(LIBRARY_REDIS_KEYS.counts(`proj:${effectiveProjectId}`)),
           ]
         : []),
       ...(itemIds && itemIds.length > 0

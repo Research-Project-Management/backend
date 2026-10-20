@@ -76,6 +76,43 @@ export class StateRepository {
   }
 
   /**
+   * Reset a project's states to the 8 standard default states.
+   */
+  async resetProjectStates(projectId: string): Promise<ProjectState[]> {
+    await this.prisma.projectState.deleteMany({
+      where: { projectId },
+    });
+
+    const createdStates: ProjectState[] = [];
+    for (const tpl of DEFAULT_PROJECT_STATES) {
+      const state = await this.prisma.projectState.create({
+        data: {
+          projectId,
+          name: tpl.name,
+          description: tpl.description,
+          color: tpl.color,
+          sequence: tpl.sequence,
+          isDefault: tpl.isDefault,
+        },
+      });
+      createdStates.push(state);
+    }
+
+    const defaultState =
+      createdStates.find((s) => s.isDefault) || createdStates[0];
+    if (defaultState) {
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          stateId: defaultState.id,
+        },
+      });
+    }
+
+    return createdStates;
+  }
+
+  /**
    * Retrieve all states configured for a project, sorted by sequence ascending.
    * If user has deleted all states, returns empty array [] without re-seeding.
    */
