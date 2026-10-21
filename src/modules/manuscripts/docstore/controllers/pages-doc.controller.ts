@@ -169,7 +169,11 @@ export class PagesDocController {
       if (targetProjectId) {
         if (isUuid(pageId)) {
           record = await this.prisma.manuscriptDoc.findFirst({
-            where: { id: pageId, projectId: targetProjectId, deleted: false },
+            where: {
+              projectId: targetProjectId,
+              deleted: false,
+              OR: [{ id: pageId }, { node: { id: pageId } }],
+            },
             include: { node: true },
           });
 
@@ -531,14 +535,28 @@ export class PagesDocController {
       let projectId: string | null = null;
       let rootDoc: ManuscriptDoc | null = null;
 
-      const record = await this.prisma.manuscriptDoc.findUnique({
+      let record = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
       });
+
+      if (!record) {
+        const node = await this.prisma.manuscriptNode.findUnique({
+          where: { id: pageId },
+          include: { doc: true },
+        });
+        if (node?.doc) {
+          record = node.doc;
+          projectId = node.projectId;
+          rootDoc = node.doc;
+        } else if (node) {
+          projectId = node.projectId;
+        }
+      }
 
       if (record) {
         projectId = record.projectId;
         rootDoc = record;
-      } else {
+      } else if (!projectId) {
         const project = await this.prisma.project.findUnique({
           where: { id: pageId },
         });
@@ -794,7 +812,14 @@ export class PagesDocController {
       let pages = await Promise.all(
         rootNodes.map(async (node) => {
           const d = node.doc;
-          const title = node.name || d?.path?.replace(/^\//, '') || 'Untitled';
+          const ranges = (
+            d?.ranges && typeof d.ranges === 'object' ? d.ranges : {}
+          ) as PageDocRanges;
+          const title =
+            (ranges as Record<string, unknown>)?.title &&
+            typeof (ranges as Record<string, unknown>).title === 'string'
+              ? ((ranges as Record<string, unknown>).title as string)
+              : node.name || d?.path?.replace(/^\//, '') || 'Untitled';
           const docLines = d
             ? await this.getHydratedDocLines({
                 id: d.id,
@@ -804,10 +829,6 @@ export class PagesDocController {
               })
             : [];
           const content = docLines.join('\n');
-
-          const ranges = (
-            d?.ranges && typeof d.ranges === 'object' ? d.ranges : {}
-          ) as PageDocRanges;
           const pageLabels = Array.isArray(ranges.labels) ? ranges.labels : [];
           const pageStatus = ranges.status || 'published';
           const pageDescription = ranges.description || '';

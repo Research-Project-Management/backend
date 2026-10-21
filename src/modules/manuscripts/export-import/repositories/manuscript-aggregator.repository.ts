@@ -379,7 +379,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
         }
 
         if (existingNode) {
-          await this.structureService.deleteNode(projectId, existingNode.id);
+          await this.structureService.deleteNode(projectId, existingNode.id).catch(() => undefined);
         }
 
         const doc = await this.docstoreService.createDoc(projectId, {
@@ -399,29 +399,65 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
       } else {
         const mimeType = inferMimeType(entry.path);
 
+        if (existingNode && existingNode.type === 'FILE') {
+          const file = await this.filestoreService.uploadFileFromBuffer(
+            projectId,
+            normalizedPath,
+            entry.data,
+            mimeType,
+          );
+          await this.structureService
+            .updateNodeFileId(
+              projectId,
+              existingNode.id,
+              file.id,
+              entry.data.length,
+              file.hash?.getValue() ?? String(file.hash),
+            )
+            .catch(async () => {
+              const recheck = await this.structureService.getNodeByPath(
+                projectId,
+                normalizedPath,
+              );
+              if (recheck) {
+                await this.structureService.updateNodeFileId(
+                  projectId,
+                  recheck.id,
+                  file.id,
+                  entry.data.length,
+                  file.hash?.getValue() ?? String(file.hash),
+                );
+              }
+            });
+          totalFiles++;
+          continue;
+        }
+
         if (existingNode) {
-          if (existingNode.fileId) {
-            await this.filestoreService
-              .deleteFile(projectId, existingNode.fileId, false)
-              .catch(() => undefined);
-          }
-          await this.structureService.deleteNode(projectId, existingNode.id);
+          await this.structureService
+            .deleteNode(projectId, existingNode.id)
+            .catch(() => undefined);
         }
 
         const file = await this.filestoreService.uploadFileFromBuffer(
           projectId,
-          baseName,
+          normalizedPath,
           entry.data,
           mimeType,
         );
 
-        await this.structureService.createNode(projectId, {
-          path: normalizedPath,
-          name: baseName,
-          type: 'FILE',
-          fileId: file.id,
-        });
-
+        const alreadyCreated = await this.structureService.getNodeByPath(
+          projectId,
+          normalizedPath,
+        );
+        if (!alreadyCreated) {
+          await this.structureService.createNode(projectId, {
+            path: normalizedPath,
+            name: baseName,
+            type: 'FILE',
+            fileId: file.id,
+          });
+        }
         totalFiles++;
       }
     }
@@ -444,7 +480,7 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
           projectId,
           match.id,
         );
-        rootDocId = updated.id;
+        rootDocId = updated.docId || updated.id;
         rootDocPath = updated.path;
       }
     }
@@ -456,8 +492,40 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
       );
 
       if (detected) {
-        rootDocId = detected.id;
+        rootDocId = detected.docId || detected.id;
         rootDocPath = detected.path;
+      }
+    }
+
+    if (rootDocId) {
+      const rootLines = docContentsMap.get(rootDocId);
+      if (rootLines) {
+        const fullText = rootLines.join('\n');
+        const titleMatch = fullText.match(/\\title\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/);
+        if (titleMatch && titleMatch[1]) {
+          const cleanTitle = titleMatch[1]
+            .replace(/\\[a-zA-Z]+(?:\*|\b)?/g, '')
+            .replace(/[\{\}]/g, '')
+            .trim();
+          if (cleanTitle) {
+            const current = await this.docstoreService
+              .getDoc(projectId, rootDocId)
+              .catch(() => null);
+            if (current) {
+              const currentRanges =
+                current.ranges && typeof current.ranges === 'object'
+                  ? (current.ranges as Record<string, unknown>)
+                  : {};
+              await this.docstoreService
+                .updateDoc(projectId, rootDocId, {
+                  lines: rootLines,
+                  version: (current.version ?? 0) + 1,
+                  ranges: { ...currentRanges, title: cleanTitle },
+                })
+                .catch(() => undefined);
+            }
+          }
+        }
       }
     }
 

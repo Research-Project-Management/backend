@@ -104,6 +104,9 @@ export class Snapshot {
   }
 
   public addLabel(label: VersionLabel): void {
+    if (this._labels.some((l) => l.id === label.id)) {
+      return;
+    }
     this._labels.push(label);
   }
 

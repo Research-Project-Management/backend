@@ -566,6 +566,8 @@ export class FilestoreRepository extends IManuscriptFileRepository {
       },
     });
 
+    // Only sync node if an existing node already points to this file or path;
+    // Node creation/tree topology belongs to StructureService.
     await this.syncFileNode(data);
 
     return ManuscriptFileMapper.toDomain(upserted);
@@ -676,21 +678,7 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         return;
       }
 
-      await this.prisma.manuscriptNode.create?.({
-        data: {
-          projectId: data.projectId,
-          parentId,
-          type: 'FILE',
-          name: leafName,
-          path: normalizedPath,
-          depth,
-          fileId: data.id,
-          isRootDoc: false,
-          sizeBytes: data.sizeBytes,
-          hash: data.hash,
-          sortOrder: 0,
-        },
-      });
+      // Node creation in file tree is managed by StructureService.
     } catch (err) {
       this.logger.warn(
         `Failed to sync ManuscriptNode for file '${data.id}' in project '${data.projectId}': ${(err as Error).message}`,
