@@ -35,8 +35,7 @@ export class NotesService {
   constructor(
     private readonly repo: NotesRepository,
     private readonly libraryTx: TransactionService,
-    @Optional()
-    private readonly itemQuery?: Pick<ItemQueryService, 'exists' | 'findById'>,
+    private readonly itemQuery?: ItemQueryService,
     @Optional()
     private readonly cache?: RedisCacheService,
   ) {}
@@ -89,7 +88,7 @@ export class NotesService {
   }
 
   async createNote(userId: string, data: CreateNoteData) {
-    if (data.itemId && this.itemQuery?.exists) {
+    if (data.itemId && this.itemQuery) {
       const exists = await this.itemQuery.exists(
         userId,
         data.itemId,
@@ -291,9 +290,12 @@ export class NotesService {
       ...options,
       ...(projectId ? { projectId } : {}),
     };
-    const item = this.itemQuery?.findById
-      ? await this.itemQuery.findById(userId, itemId, opts.projectId)
-      : null;
+    if (!this.itemQuery) {
+      throw new Error(
+        'ItemQueryService is required to extract notes from annotations',
+      );
+    }
+    const item = await this.itemQuery.findById(userId, itemId, opts.projectId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
