@@ -8,9 +8,14 @@ import type { BullRootModuleOptions } from '@nestjs/bullmq';
  * to ensure uniform retry policies, cleanup thresholds, and socket resilience.
  */
 export function getBullMqConfig(config: ConfigService): BullRootModuleOptions {
+  const rawUrl =
+    config.get<string>('REDIS_QUEUE_URL') ||
+    config.get<string>('REDIS_URL') ||
+    process.env.REDIS_QUEUE_URL ||
+    process.env.REDIS_URL;
   const redisUrl = resolveServiceUrl(
-    'REDIS_URL',
-    config.get<string>('REDIS_URL') || process.env.REDIS_URL,
+    'REDIS_QUEUE_URL',
+    rawUrl,
     'redis://localhost:6379',
   );
 

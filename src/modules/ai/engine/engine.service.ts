@@ -14,12 +14,17 @@ import {
   SyncChatResponse,
   StreamChatOptions,
 } from './types/engine.types';
-import { getErrorMessage, isOriginAllowed, tryCatch } from '@/core';
+import { getErrorMessage, isOriginAllowed, tryCatch, CircuitBreaker } from '@/core';
 
 @Injectable()
 export class EngineService {
   private readonly fluxUrl: string;
   private readonly logger = new Logger(EngineService.name);
+  private readonly circuitBreaker = new CircuitBreaker({
+    name: 'FluxAIEngine',
+    failureThreshold: 3,
+    cooldownMs: 20000,
+  });
 
   constructor(
     private readonly configService: ConfigService,
@@ -163,6 +168,15 @@ export class EngineService {
       ...this.getInternalHeaders(delegationToken),
     };
 
+    if (this.circuitBreaker.isOpen()) {
+      const errMsg =
+        'AI Engine is temporarily unavailable (circuit breaker is open). Please try again shortly.';
+      this.logger.warn(`Fast-failing AI streamChat: ${errMsg}`);
+      rawRes.write(`event: error\ndata: ${JSON.stringify({ error: errMsg })}\n\n`);
+      rawRes.end();
+      return;
+    }
+
     const result = await tryCatch(
       fetch(`${this.fluxUrl}/chat`, {
         method: 'POST',
@@ -176,11 +190,14 @@ export class EngineService {
         ? `AI Engine error: status ${result.value.status}`
         : getErrorMessage(result.error);
       this.logger.warn(`AI Engine streaming error: ${errMsg}`);
+      this.circuitBreaker.recordFailure(errMsg);
 
       rawRes.write(`event: error\ndata: ${JSON.stringify({ error: errMsg })}\n\n`);
       rawRes.end();
       return;
     }
+
+    this.circuitBreaker.recordSuccess();
 
     const responseBody = result.value.body;
     if (!responseBody) {
@@ -281,6 +298,12 @@ export class EngineService {
       ...this.getInternalHeaders(delegationToken),
     };
 
+    if (this.circuitBreaker.isOpen()) {
+      throw new ServiceUnavailableException(
+        'AI Assistant service is temporarily unavailable (circuit breaker is open). Please try again shortly.',
+      );
+    }
+
     const result = await tryCatch(
       fetch(`${this.fluxUrl}/chat/sync`, {
         method: 'POST',
@@ -292,6 +315,7 @@ export class EngineService {
     if (result.ok && result.value.ok) {
       const jsonResult = await tryCatch(result.value.json());
       if (jsonResult.ok) {
+        this.circuitBreaker.recordSuccess();
         const val = jsonResult.value;
         if (val?.output?.content !== undefined) {
           return {
@@ -310,6 +334,7 @@ export class EngineService {
     const errMsg = result.ok
       ? `AI Engine error: status ${result.value.status}`
       : getErrorMessage(result.error);
+    this.circuitBreaker.recordFailure(errMsg);
     this.logger.warn(`AI Engine syncChat failed: ${errMsg}`);
     throw new ServiceUnavailableException(
       `AI Assistant service is currently unavailable: ${errMsg}`,
