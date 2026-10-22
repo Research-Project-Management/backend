@@ -17,7 +17,7 @@ import { ResilienceRegistryService } from '@/modules/library/core/resilience/res
 import { OutboxWorker } from '@/modules/library/sync/services/outbox.worker';
 import { OutboxMetrics } from '@/modules/library/sync/services/outbox.metrics';
 import { compactLibraryChanges } from '@/modules/library/sync/domain/outbox.domain';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectScopeId } from '@/modules/library/core/domain/scope.specification';
 
 function parseSafeBigInt(val?: string): bigint | undefined {
   if (!val) return undefined;

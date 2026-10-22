@@ -73,6 +73,8 @@ const syncWorkerProviders = shouldRunWorkerConsumers()
   ],
   exports: [
     TransactionService,
+    ChangeLogRepository,
+    OutboxRepository,
     UNIT_OF_WORK,
     OUTBOX_REGISTRY_PORT,
     OutboxDispatcher,

@@ -49,7 +49,6 @@ export * from './ports/ingestion.port';
 export * from './ports/unit-of-work.port';
 export * from './ports/outbox.port';
 export * from './ports/idempotent-consumer.port';
-export { TransactionService } from '../sync/services/transaction.service';
 
 // Resilience
 export * from './resilience/circuit-breaker';
