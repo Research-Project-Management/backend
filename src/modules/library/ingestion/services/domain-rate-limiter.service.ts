@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { RedisCacheService } from '@/core';
 
 export interface DomainRateLimitConfig {
   minIntervalMs: number;
@@ -27,6 +28,8 @@ export class DomainRateLimiterService {
 
   // Flag to bypass artificial delay during unit tests if requested
   public bypassDelay = false;
+
+  constructor(@Optional() private readonly redis?: RedisCacheService) {}
 
   private readonly domainConfigs: Record<string, DomainRateLimitConfig> = {
     // arXiv: strict 1 request per 3 seconds guideline
@@ -138,7 +141,28 @@ export class DomainRateLimiterService {
     const lastExec = this.lastExecutionMap.get(key) || 0;
     const now = Date.now();
     const elapsed = now - lastExec;
-    const waitTime = Math.max(0, config.minIntervalMs - elapsed);
+    let waitTime = Math.max(0, config.minIntervalMs - elapsed);
+
+    // Multi-Pod Distributed Check: Synchronize with cluster via Redis
+    if (this.redis && typeof this.redis.isReady === 'function' && this.redis.isReady()) {
+      try {
+        const client = this.redis.getClient?.();
+        if (client) {
+          const redisKey = `library:ratelimit:${key}:last_exec`;
+          const redisLastExecStr = await client.get(redisKey);
+          const redisLastExec = redisLastExecStr ? Number(redisLastExecStr) : 0;
+          const distElapsed = now - redisLastExec;
+          const distWait = Math.max(0, config.minIntervalMs - distElapsed);
+          if (distWait > waitTime) {
+            waitTime = distWait;
+          }
+          await client.set(redisKey, (now + waitTime).toString(), 'PX', Math.max(config.minIntervalMs * 3, 5000));
+        }
+      } catch (redisErr) {
+        // Non-blocking fallback to local memory
+        this.logger.debug(`[DomainRateLimiter] Distributed rate-limit fallback: ${redisErr instanceof Error ? redisErr.message : String(redisErr)}`);
+      }
+    }
 
     if (waitTime > 0) {
       this.logger.debug(

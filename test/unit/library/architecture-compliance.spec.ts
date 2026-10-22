@@ -189,4 +189,38 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
 
     expect(oversizedFiles).toEqual([]);
   });
+  it('SC-005: Zero duck-typing degradation shims on core domain services (strict port interfaces required)', () => {
+    const violations: Array<{ file: string; line: number; match: string }> = [];
+
+    const domainServiceFiles = allFiles.filter((file) => {
+      const normalized = file.replace(/\\/g, '/');
+      return (
+        normalized.endsWith('/catalog/services/items.service.ts') ||
+        normalized.endsWith('/catalog/services/item-query.service.ts') ||
+        normalized.endsWith('/catalog/services/collections.service.ts') ||
+        normalized.endsWith('/extraction/services/pdf-annotation-importer.service.ts') ||
+        normalized.endsWith('/extraction/services/attachment-renamer.service.ts') ||
+        normalized.endsWith('/library.facade.ts')
+      );
+    });
+
+    for (const file of domainServiceFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      const lines = content.split(/\r?\n/);
+      lines.forEach((line, index) => {
+        if (
+          /typeof\s+(this\.\w+|helpers)\.\w+\s*===\s*['"]function['"]/.test(line) &&
+          !line.trim().startsWith('//')
+        ) {
+          violations.push({
+            file: path.relative(libraryRoot, file),
+            line: index + 1,
+            match: line.trim(),
+          });
+        }
+      });
+    }
+
+    expect(violations).toEqual([]);
+  });
 });

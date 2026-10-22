@@ -382,6 +382,7 @@ export class ExportsService {
   ): Promise<{
     filename: string;
     mimeType: string;
+    buffer: Buffer;
     base64: string;
   }> {
     const effectiveProjectId = normalizeProjectScopeId(projectId);
@@ -440,10 +441,13 @@ export class ExportsService {
 
     const safeFilename = `${item.title.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)}_annotated.pdf`;
 
+    const burnedBuffer = Buffer.isBuffer(burned) ? burned : Buffer.from(burned);
+
     return {
       filename: safeFilename,
       mimeType: 'application/pdf',
-      base64: Buffer.from(burned).toString('base64'),
+      buffer: burnedBuffer,
+      base64: burnedBuffer.toString('base64'),
     };
   }
 
@@ -517,10 +521,12 @@ export class ExportsService {
       resolveEmittedCitationEntries(Array.from(itemById.values()), trimmedKeys);
 
     if (missingKeys.length > 0) {
-      const aliasItems = await this.exportsRepo.findItemsByMetadataAliases(
-        scopeWhere,
-        missingKeys,
-      );
+      const aliasItems = this.exportsRepo.findItemsByMetadataAliases
+        ? await this.exportsRepo.findItemsByMetadataAliases(
+            scopeWhere,
+            missingKeys,
+          )
+        : await this.exportsRepo.findItemsByScope(scopeWhere);
       for (const it of aliasItems) {
         if (it?.id && !itemById.has(it.id)) {
           itemById.set(it.id, it);

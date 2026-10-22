@@ -30,7 +30,7 @@ export class OpenLibraryProvider implements MetadataProvider {
   };
 
   constructor(
-    private readonly httpClient: AcademicHttpClient,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -44,6 +44,18 @@ export class OpenLibraryProvider implements MetadataProvider {
   supports(input: QueryType | MetadataRequest): boolean {
     const type = typeof input === 'string' ? input : input?.queryType;
     return type ? this.capabilities.queryTypes.includes(type) : false;
+  }
+
+  private async executeFetch(
+    url: string,
+    options?: RequestInit,
+  ): Promise<{ response: Response; attempts: number }> {
+    if (this.httpClient) {
+      const res = await this.httpClient.request(url, options as any);
+      return { response: res.response, attempts: 1 };
+    }
+    const response = await fetch(url, options);
+    return { response, attempts: 1 };
   }
 
   async resolve(
@@ -61,7 +73,7 @@ export class OpenLibraryProvider implements MetadataProvider {
       Accept: 'application/json',
     };
 
-    const { response } = await this.httpClient.request(url, {
+    const { response } = await this.executeFetch(url, {
       headers,
       signal,
     });

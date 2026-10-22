@@ -57,14 +57,15 @@ export class CrossRefProvider implements MetadataProvider {
     url: string,
     signal?: AbortSignal,
   ): Promise<Response> {
-    const { response } = await this.httpClient.request(url, {
-      headers: {
-        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
-        Accept: 'application/json',
-      },
-      signal,
-    });
-    return response;
+    const headers = {
+      'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
+      Accept: 'application/json',
+    };
+    if (this.httpClient) {
+      const { response } = await this.httpClient.request(url, { headers, signal });
+      return response;
+    }
+    return fetch(url, { headers, signal });
   }
 
   supports(input: QueryType | MetadataRequest): boolean {

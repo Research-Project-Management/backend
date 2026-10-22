@@ -1,0 +1,83 @@
+// ============================================================================
+// Library Shared Kernel: Feeds Sub-Domain
+// Modeled directly after Zotero's proven feeds architecture (feeds & feed_items)
+// ============================================================================
+
+model Feed {
+  id               String             @id @default(uuid(7)) @db.Uuid
+  url              String             @unique @map("url")
+  title            String
+  siteUrl          String?            @map("site_url")
+  description      String?
+  etag             String?            @map("etag")
+  lastModified     String?            @map("last_modified")
+  lastFetchedAt    DateTime?          @map("last_fetched_at") @db.Timestamptz(6)
+  lastStatus       Int?               @map("last_status")
+  errorCount       Int                @default(0) @map("error_count")
+  refreshInterval  Int                @default(7200) @map("refresh_interval") // seconds
+
+  items            FeedItem[]
+  subscriptions    FeedSubscription[]
+
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("feeds")
+}
+
+model FeedItem {
+  id               String              @id @default(uuid(7)) @db.Uuid
+  feedId           String              @db.Uuid @map("feed_id")
+  feed             Feed                @relation(fields: [feedId], references: [id], onDelete: Cascade)
+
+  guid             String              @map("guid") // Unique key per feed (DOI / arXiv ID / URL)
+  title            String
+  url              String
+  pdfUrl           String?             @map("pdf_url")
+  doi              String?             @map("doi")
+  arxivId          String?             @map("arxiv_id")
+  primaryCategory  String?             @map("primary_category")
+  authors          Json                @default("[]") @db.JsonB
+  abstract         String?             @db.Text
+  license          String?             @map("license")
+  comments         String?             @map("comments")
+  publishedAt      DateTime            @map("published_at") @db.Timestamptz(6)
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  readStates       FeedItemReadState[]
+
+  @@unique([feedId, guid])
+  @@index([feedId, publishedAt(sort: Desc)])
+  @@index([publishedAt])
+  @@map("feed_items")
+}
+
+model FeedSubscription {
+  id                 String    @id @default(uuid(7)) @db.Uuid
+  userId             String    @db.Uuid @map("user_id")
+  feedId             String    @db.Uuid @map("feed_id")
+  feed               Feed      @relation(fields: [feedId], references: [id], onDelete: Cascade)
+
+  customTitle        String?   @map("custom_title")
+  cleanupReadAfter   Int       @default(30) @map("cleanup_read_after")   // Days to keep read items (Zotero standard)
+  cleanupUnreadAfter Int       @default(30) @map("cleanup_unread_after") // Days to keep unread items
+
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([userId, feedId])
+  @@index([userId])
+  @@map("feed_subscriptions")
+}
+
+model FeedItemReadState {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  userId           String    @db.Uuid @map("user_id")
+  itemId           String    @db.Uuid @map("item_id")
+  item             FeedItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  readAt           DateTime  @default(now()) @map("read_at") @db.Timestamptz(6)
+
+  @@unique([userId, itemId])
+  @@index([userId])
+  @@map("feed_item_read_states")
+}

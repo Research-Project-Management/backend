@@ -30,7 +30,9 @@ model Collection {
 
   @@index([parentId])
   @@index([userId, parentId, sortOrder, deletedAt])
+  @@index([userId, projectId, deletedAt, createdAt])
   @@index([projectId, parentId, deletedAt])
+  @@index([projectId, deletedAt, createdAt])
   @@map("collections")
 }
 

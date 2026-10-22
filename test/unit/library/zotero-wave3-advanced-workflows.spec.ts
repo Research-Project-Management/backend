@@ -963,10 +963,16 @@ describe('Wave 3: Advanced Zotero 7 Workflows — Search & Facets, Sync & OCC, 2
           .fn()
           .mockResolvedValue([survivorVaswaniItem, krawczykItem]),
       };
+      const mockSearchFacade = {
+        search: jest.fn().mockResolvedValue({
+          items: [survivorVaswaniItem, krawczykItem],
+          total: 2,
+        }),
+      };
       const libraryFacade = new LibraryFacade(
         mockCatalogFacade as unknown as CatalogFacade,
         undefined as any,
-        undefined as any,
+        mockSearchFacade as unknown as any,
         citationFacade,
       );
 

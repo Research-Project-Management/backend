@@ -599,19 +599,31 @@ export class CslJsonMapper {
     const langVal = getStr('language');
     if (langVal) csl.language = langVal;
 
-    const rawKeywordsSource =
-      item.tags ??
-      item.keywords ??
-      (Array.isArray(item.itemTags) && item.itemTags.length > 0
+    const metaKeywords =
+      (item as Record<string, unknown>)?.metadata &&
+      typeof (item as Record<string, unknown>).metadata === 'object'
+        ? ((item as Record<string, unknown>).metadata as Record<string, unknown>).keywords
+        : undefined;
+
+    const rawKeywordsSources = [
+      item.tags,
+      item.keywords,
+      Array.isArray(item.itemTags) && item.itemTags.length > 0
         ? item.itemTags.map((it) => it.tag?.name || it.name)
-        : undefined) ??
-      effectiveExtra.keywords ??
-      effectiveExtra.tags;
-    const kwInput = Array.isArray(rawKeywordsSource)
-      ? (rawKeywordsSource as Array<string | { name?: string; tag?: string }>)
-      : typeof rawKeywordsSource === 'string' && rawKeywordsSource.trim()
-        ? [rawKeywordsSource]
-        : [];
+        : undefined,
+      metaKeywords,
+      effectiveExtra.keywords,
+      effectiveExtra.tags,
+    ];
+
+    const kwInput: Array<string | { name?: string; tag?: string }> = [];
+    for (const src of rawKeywordsSources) {
+      if (Array.isArray(src)) {
+        kwInput.push(...(src as Array<string | { name?: string; tag?: string }>));
+      } else if (typeof src === 'string' && src.trim()) {
+        kwInput.push(src);
+      }
+    };
     if (kwInput.length > 0) {
       const kwStrings = normalizeAcademicTags(kwInput);
       if (kwStrings.length > 0) {

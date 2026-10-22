@@ -58,12 +58,12 @@ export interface TransactionHelpers {
       | RecordTombstoneInput[],
     entries?: RecordTombstoneEntry[],
   ): Promise<number>;
-  removeTombstone?(
+  removeTombstone(
     scope: { userId?: string; projectId?: string | null },
     entityType: string,
     entityId: string,
   ): Promise<number>;
-  removeTombstonesBatch?(
+  removeTombstonesBatch(
     scope: { userId?: string; projectId?: string | null },
     entityType: string,
     entityIds: string[],

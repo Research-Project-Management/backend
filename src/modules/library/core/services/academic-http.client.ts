@@ -88,7 +88,7 @@ export class AcademicHttpClient {
   ): Promise<{ response: Response; finalUrl: string }> {
     const timeoutMs = options.timeoutMs ?? this.config.http.defaultTimeoutMs;
     const maxRedirects = options.maxRedirects ?? this.config.http.maxRedirects;
-    const requireSsrf = options.requireSsrfCheck ?? false;
+    const requireSsrf = options.requireSsrfCheck ?? true;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);

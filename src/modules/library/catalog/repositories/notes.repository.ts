@@ -86,11 +86,25 @@ export class NotesRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
+    let effectiveProjectId = normalizeProjectScopeId(data.projectId) ?? null;
+
+    if (data.itemId) {
+      const parentItem = await client.item.findFirst({
+        where: { id: data.itemId, deletedAt: null },
+        select: { id: true, projectId: true },
+      });
+      if (!parentItem) {
+        throw new NotFoundException(`Target item ${data.itemId} not found or has been deleted`);
+      }
+      if (!effectiveProjectId && parentItem.projectId) {
+        effectiveProjectId = parentItem.projectId;
+      }
+    }
     const contentMd = data.contentMd ?? '';
     const created = await client.note.create({
       data: {
         userId,
-        projectId: normalizeProjectScopeId(data.projectId) ?? null,
+        projectId: effectiveProjectId,
         itemId: data.itemId ?? null,
         title: data.title ?? 'Untitled Note',
         contentJson:

@@ -50,6 +50,36 @@ export function buildItemSearchCondition(
     { doi: { contains: trimmed, mode: 'insensitive' } },
     { citationKey: { contains: trimmed, mode: 'insensitive' } },
     {
+      metadata: {
+        path: ['isbn'],
+        string_contains: trimmed,
+      },
+    },
+    {
+      metadata: {
+        path: ['issn'],
+        string_contains: trimmed,
+      },
+    },
+    {
+      metadata: {
+        path: ['pmid'],
+        string_contains: trimmed,
+      },
+    },
+    {
+      metadata: {
+        path: ['arxivId'],
+        string_contains: trimmed,
+      },
+    },
+    {
+      metadata: {
+        path: ['publisher'],
+        string_contains: trimmed,
+      },
+    },
+    {
       contributors: {
         some: {
           OR: [

@@ -24,6 +24,7 @@ import {
   AcademicHttpClient,
   LibraryConfigService,
   libraryConfig,
+  readSafeResponseBuffer,
 } from '@/modules/library/core';
 
 import { WebMirrorResolverService } from './web-mirror-resolver.service';
@@ -61,14 +62,20 @@ interface StealthProxyJsonResponse {
 export class WebFetchLadderService implements IWebFetchPort {
   private readonly logger = new Logger(WebFetchLadderService.name);
 
+  private readonly mirrorResolver: WebMirrorResolverService;
+
   constructor(
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
     @Optional() private readonly verifier?: IngestionVerifierService,
     @Optional() private readonly rateLimiter?: DomainRateLimiterService,
     @Optional() private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
-    @Optional() private readonly mirrorResolver?: WebMirrorResolverService,
-  ) {}
+    @Optional() mirrorResolver?: WebMirrorResolverService,
+  ) {
+    this.mirrorResolver =
+      mirrorResolver ??
+      new WebMirrorResolverService(this.httpClient, this.configService);
+  }
 
   private async assertSafeUrl(url: string): Promise<void> {
     if (this.ssrfGuard) {
@@ -371,8 +378,7 @@ export class WebFetchLadderService implements IWebFetchPort {
 
         if (isPdfHeader) {
           try {
-            const arrayBuf = await fetchRes.arrayBuffer();
-            const buffer = Buffer.from(arrayBuf);
+            const buffer = await readSafeResponseBuffer(fetchRes);
             const isPdfMagic =
               buffer.length >= 4 &&
               buffer[0] === 0x25 &&

@@ -341,20 +341,12 @@ export class ExtractionRepository {
       hintOrFilters.push({ year: { in: cleanYears } });
     }
 
-    const combinedWhere: Prisma.ItemWhereInput =
-      hintOrFilters.length > 0
-        ? {
-            AND: [
-              scopeWhere,
-              { id: { not: excludeItemId }, deletedAt: null },
-              { OR: hintOrFilters },
-            ],
-          }
-        : {
-            ...scopeWhere,
-            id: { not: excludeItemId },
-            deletedAt: null,
-          };
+    const combinedWhere: Prisma.ItemWhereInput = {
+      ...scopeWhere,
+      id: { not: excludeItemId },
+      deletedAt: null,
+      ...(hintOrFilters.length > 0 ? { OR: hintOrFilters } : {}),
+    };
 
     const takeLimit =
       hints?.limit && hints.limit > 0 ? Math.min(hints.limit, 2000) : 500;
@@ -509,7 +501,24 @@ export class ExtractionRepository {
     );
 
     if (resolvedTags.length > 0) {
-      await client.itemTag.createMany({
+      if (typeof client.itemTag?.createMany === 'function') {
+        await client.itemTag.createMany({
+          data: resolvedTags.map((t) => ({
+            tagId: t.id,
+            itemId: params.itemId,
+            type: 'automatic',
+          })),
+          skipDuplicates: true,
+        });
+      } else if (typeof (client as any).itemTag?.upsert === 'function') {
+        for (const t of resolvedTags) {
+          await (client as any).itemTag.upsert({
+            where: { itemId_tagId: { itemId: params.itemId, tagId: t.id } },
+            create: { itemId: params.itemId, tagId: t.id, type: 'automatic' },
+            update: {},
+          });
+        }
+      } else if (false) await client.itemTag.createMany({
         data: resolvedTags.map((t) => ({
           tagId: t.id,
           itemId: params.itemId,

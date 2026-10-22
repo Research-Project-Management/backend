@@ -220,6 +220,12 @@ export class TransactionService implements IUnitOfWork {
     return this.changeLogRepo.getTombstonesSince(scope, sinceSeq, limit);
   }
 
+  async getMinRetainedSequence(
+    scope: { userId?: string; projectId?: string | null },
+  ): Promise<bigint | null> {
+    return this.changeLogRepo.getMinRetainedSequence(scope);
+  }
+
   async getLatestSequence(
     scope: { userId?: string; projectId?: string | null },
   ) {

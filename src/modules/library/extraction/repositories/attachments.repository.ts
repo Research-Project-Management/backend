@@ -374,17 +374,23 @@ export class AttachmentsRepository {
   async setPrimaryAttachment(
     itemId: string,
     attachmentId: string,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await tx.attachment.updateMany({
+    const run = async (client: Prisma.TransactionClient) => {
+      await client.attachment.updateMany({
         where: { itemId, attachmentType: 'primary_pdf' },
         data: { attachmentType: 'supplementary' },
       });
-      await tx.attachment.update({
+      await client.attachment.update({
         where: { id: attachmentId },
         data: { attachmentType: 'primary_pdf' },
       });
-    });
+    };
+    if (tx) {
+      await run(tx);
+    } else {
+      await this.prisma.$transaction(run);
+    }
   }
 
   async renameAttachment(
@@ -462,4 +468,17 @@ export class AttachmentsRepository {
     });
     return result.count;
   }
+
+  async restoreByItemId(
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const result = await client.attachment.updateMany({
+      where: { itemId, deletedAt: { not: null } },
+      data: { deletedAt: null },
+    });
+    return result.count;
+  }
+
 }

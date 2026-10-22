@@ -196,5 +196,25 @@ describe('SyncController (Library Distributed Sync API)', () => {
       expect(result.hasMore).toBe(true);
       expect(result.tombstones).toHaveLength(2);
     });
+
+    it('should throw HTTP 410 Gone with SYNC_RESET_REQUIRED when client sinceSeq is older than retention period', async () => {
+      transactionServiceMock.getMinRetainedSequence = jest
+        .fn()
+        .mockResolvedValue(BigInt(100));
+
+      await expect(
+        controller.getChanges('user-123', { since: '50' }),
+      ).rejects.toThrow();
+
+      try {
+        await controller.getChanges('user-123', { since: '50' });
+      } catch (err: any) {
+        expect(err.getStatus()).toBe(410);
+        expect(err.getResponse()).toMatchObject({
+          code: 'SYNC_RESET_REQUIRED',
+          minRetainedSequence: '100',
+        });
+      }
+    });
   });
 });

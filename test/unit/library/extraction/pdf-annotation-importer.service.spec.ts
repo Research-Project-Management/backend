@@ -35,10 +35,14 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
 
     mockAnnotationsService = {
       getAnnotationsByAttachment: jest.fn().mockResolvedValue([]),
-      createAnnotation: jest
+      batchUpsertAnnotations: jest
         .fn()
-        .mockImplementation((_userId, dto) =>
-          Promise.resolve({ id: 'anno-created', ...dto }),
+        .mockImplementation((_userId, _attId, data) =>
+          Promise.resolve({
+            created: (data.upserts || []).map((u: any, idx: number) => ({ id: 'anno-' + idx, ...u })),
+            updated: [],
+            deleted: [],
+          }),
         ),
     };
 
@@ -96,7 +100,7 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
       totalFound: 0,
       pagesScanned: 1,
     });
-    expect(mockAnnotationsService.createAnnotation).not.toHaveBeenCalled();
+    expect(mockAnnotationsService.batchUpsertAnnotations).not.toHaveBeenCalled();
   });
 
   it('should convert standard PDF Annots (Highlight, Underline, StrikeOut, FreeText) and persist them', async () => {
@@ -148,43 +152,43 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
     // normY = (1000 - 750) / 1000 = 0.25
     // normWidth = (250 - 50) / 500 = 0.4
     // normHeight = (750 - 700) / 1000 = 0.05
-    expect(mockAnnotationsService.createAnnotation).toHaveBeenCalledWith(
+    expect(mockAnnotationsService.batchUpsertAnnotations).toHaveBeenCalledWith(
       'user-1',
+      'att-1',
       {
-        attachmentId: 'att-1',
-        type: AnnotationType.highlight,
-        pageIndex: 0,
-        y: 0.25,
-        x: 0.1,
-        quoteText: 'Important research finding',
-        comment: '',
-        color: '#ffd400',
-        rectCoords: [
-          {
-            x1: 0.1,
-            y1: 0.25,
-            x2: 0.5,
-            y2: 0.3,
-            width: 0.4,
-            height: 0.05,
-          },
+        upserts: [
+          expect.objectContaining({
+            type: AnnotationType.highlight,
+            pageIndex: 0,
+            y: 0.25,
+            x: 0.1,
+            quoteText: 'Important research finding',
+            comment: '',
+            color: '#ffd400',
+            rectCoords: [
+              {
+                x1: 0.1,
+                y1: 0.25,
+                x2: 0.5,
+                y2: 0.3,
+                width: 0.4,
+                height: 0.05,
+              },
+            ],
+            authorId: 'user-1',
+          }),
+          expect.objectContaining({
+            type: AnnotationType.strike,
+            pageIndex: 0,
+            quoteText: 'Outdated hypothesis',
+            color: '#ff0000',
+          }),
         ],
-        authorId: 'user-1',
+        deletes: [],
       },
       undefined,
     );
 
-    // Verify StrikeOut conversion
-    expect(mockAnnotationsService.createAnnotation).toHaveBeenCalledWith(
-      'user-1',
-      expect.objectContaining({
-        type: AnnotationType.strike,
-        pageIndex: 0,
-        quoteText: 'Outdated hypothesis',
-        color: '#ff0000',
-      }),
-      undefined,
-    );
   });
 
   it('should skip annotations that already exist (deduplication)', async () => {
@@ -225,6 +229,6 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
 
     expect(result.totalFound).toBe(1);
     expect(result.imported).toBe(0); // Deduplicated!
-    expect(mockAnnotationsService.createAnnotation).not.toHaveBeenCalled();
+    expect(mockAnnotationsService.batchUpsertAnnotations).not.toHaveBeenCalled();
   });
 });

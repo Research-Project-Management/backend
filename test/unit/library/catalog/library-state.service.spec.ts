@@ -108,7 +108,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
     let service: StateService;
     let repo: jest.Mocked<StateRepository>;
     let mockItemExistencePort: { assertExists: jest.Mock };
-    let mockHelpers: jest.Mocked<TransactionHelpers>;
+    let mockHelpers: any;
     let mockLibraryTx: { executeInTransaction: jest.Mock };
 
     beforeEach(async () => {

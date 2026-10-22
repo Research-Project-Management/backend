@@ -100,11 +100,6 @@ export class ReferenceMatcherService {
     const scopePapers = (await this.extractionRepo.findScopePapers(
       scope,
       sourceItemId,
-      {
-        dois: Array.from(candidateDois),
-        years: Array.from(candidateYears),
-        limit: 500,
-      },
     )) as ScopePaperRecord[];
 
     if (!scopePapers || scopePapers.length === 0) {

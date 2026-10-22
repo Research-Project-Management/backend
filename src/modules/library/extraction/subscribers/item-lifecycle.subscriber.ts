@@ -139,4 +139,47 @@ export class ItemLifecycleSubscriber {
       );
     }
   }
+
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_RESTORED, { async: true })
+  async handleItemRestored(
+    event:
+      | DomainEventEnvelope
+      | { aggregateId?: string; payload?: { itemId?: string; id?: string } },
+  ): Promise<void> {
+    const rawPayload = event && 'payload' in event ? event.payload : undefined;
+    const itemId =
+      event?.aggregateId ||
+      (rawPayload as { itemId?: string; id?: string } | undefined)?.itemId ||
+      (rawPayload as { itemId?: string; id?: string } | undefined)?.id;
+    if (!itemId) return;
+
+    this.logger.log(
+      `[ExtractionSubscriber] Cascading restore to attachments and annotations for restored item ${itemId}`,
+    );
+
+    try {
+      if (this.attachmentsRepository?.findMany) {
+        const trashedAttachments = await this.attachmentsRepository.findMany({
+          itemId,
+          deletedAt: { not: null },
+        });
+        const attachmentIds = (trashedAttachments || []).map(
+          (attachment: { id: string }) => attachment.id,
+        );
+
+        if (attachmentIds.length > 0 && this.annotationsRepository) {
+          await this.annotationsRepository.restoreByAttachmentIds?.(
+            attachmentIds,
+          );
+        }
+        await this.attachmentsRepository.restoreByItemId?.(itemId);
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `[ExtractionSubscriber] Cascade restore error for item ${itemId}: ${errorMessage}`,
+      );
+    }
+  }
+
 }

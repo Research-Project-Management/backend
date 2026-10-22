@@ -41,6 +41,41 @@ export function normalizeProjectScopeId(
   return isProjectScopeId(projectId) ? projectId.trim() : undefined;
 }
 
+class CompositeScopeSpecification {
+  constructor(
+    private readonly left: {
+      toPrismaWhere(): Record<string, unknown>;
+      isSatisfiedBy?: (item: unknown) => boolean;
+    },
+    private readonly right: {
+      toPrismaWhere(): Record<string, unknown>;
+      isSatisfiedBy?: (item: unknown) => boolean;
+    },
+  ) {}
+
+  toPrismaWhere(): Record<string, unknown> {
+    return {
+      AND: [this.left.toPrismaWhere(), this.right.toPrismaWhere()],
+    };
+  }
+
+  isSatisfiedBy(item: unknown): boolean {
+    const leftValid =
+      typeof this.left.isSatisfiedBy === 'function'
+        ? this.left.isSatisfiedBy(item)
+        : true;
+    const rightValid =
+      typeof this.right.isSatisfiedBy === 'function'
+        ? this.right.isSatisfiedBy(item)
+        : true;
+    return leftValid && rightValid;
+  }
+
+  and(other: any): any {
+    return new CompositeScopeSpecification(this, other);
+  }
+}
+
 /**
  * ScopeSpecification: Enforces multi-tenant isolation.
  * Resolves to projectId for collaborative workspaces, or userId for user library.
@@ -57,5 +92,17 @@ export class ScopeSpecification {
     }
     return { userId: this.userId, projectId: null };
   }
-}
 
+  isSatisfiedBy(item: unknown): boolean {
+    if (!item || typeof item !== 'object') return false;
+    const rec = item as Record<string, unknown>;
+    if (isProjectScopeId(this.projectId)) {
+      return rec.projectId === this.projectId.trim();
+    }
+    return rec.userId === this.userId && (!rec.projectId || rec.projectId === null);
+  }
+
+  and(other: any): any {
+    return new CompositeScopeSpecification(this, other);
+  }
+}

@@ -102,19 +102,18 @@ export class SemanticScholarProvider implements MetadataProvider {
 
     let response: Response;
     try {
-      if (!this.httpClient) {
-        throw new Error(
-          'AcademicHttpClient is required for SemanticScholarProvider',
-        );
-      }
       const headers = {
         'User-Agent': getAcademicUserAgent('SemanticScholar'),
         Accept: 'application/json',
       };
-      ({ response } = await this.httpClient.request(targetUrl, {
-        headers,
-        signal,
-      }));
+      if (this.httpClient) {
+        ({ response } = await this.httpClient.request(targetUrl, {
+          headers,
+          signal,
+        }));
+      } else {
+        response = await fetch(targetUrl, { headers, signal });
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.debug(`Semantic Scholar fetch failed non-fatally: ${msg}`);

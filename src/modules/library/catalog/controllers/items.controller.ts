@@ -142,6 +142,7 @@ export class ItemsController {
         ? { includeSubcollections: query.includeSubcollections }
         : {}),
       ...(query?.recursive !== undefined ? { recursive: query.recursive } : {}),
+      ...(query?.fields !== undefined ? { fields: query.fields } : {}),
     };
 
     const result = await this.queryService.listItems(userId, listOptions);

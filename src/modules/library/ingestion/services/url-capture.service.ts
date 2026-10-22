@@ -32,6 +32,8 @@ import {
 } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 import { createHash } from 'crypto';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { PrismaService } from '@/core';
+import { FeedRetrievalService } from './feed-retrieval.service';
 
 @Injectable()
 export class UrlCaptureService {
@@ -51,163 +53,23 @@ export class UrlCaptureService {
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
-  ) {}
-
-  /**
-   * Fetches and parses an external RSS 2.0, RDF/PRISM, or Atom XML feed safely.
-   */
-  async fetchAcademicFeed(feedUrl: string): Promise<ParsedAcademicFeed> {
-    if (!feedUrl || typeof feedUrl !== 'string') {
-      throw new BadRequestException('A valid feed URL is required');
-    }
-    const trimmed = feedUrl.trim();
-    const headers: Record<string, string> = {
-      'User-Agent':
-        'Mozilla/5.0 (compatible; FluxAcademicReader/1.0; +https://zotero.org)',
-      Accept:
-        'application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml, */*;q=0.8',
-    };
-
-    let response: Response;
-    try {
-      if (this.ssrfGuard) {
-        response = await this.ssrfGuard.safeFetch(trimmed, {
-          method: 'GET',
-          headers,
-        });
-      } else {
-        response = await fetch(trimmed, { method: 'GET', headers });
-      }
-    } catch (err: unknown) {
-      this.logger.warn(
-        `Direct fetch failed for feed "${trimmed}": ${err instanceof Error ? err.message : String(err)}. Attempting search fallback...`,
-      );
-      return this.fallbackSearchFeed(trimmed);
-    }
-
-    if (!response.ok || response.status === 403 || response.status === 503) {
-      this.logger.warn(
-        `Feed returned HTTP ${response.status} (likely Cloudflare / Bot Protection) for "${trimmed}". Initiating academic search fallback...`,
-      );
-      return this.fallbackSearchFeed(trimmed);
-    }
-
-    const xml = await response.text();
-    if (xml.includes('<!DOCTYPE html') || xml.includes('challenge-running') || xml.includes('cf-browser-verification')) {
-      this.logger.warn(
-        `Feed URL "${trimmed}" returned HTML Cloudflare challenge page. Initiating academic search fallback...`,
-      );
-      return this.fallbackSearchFeed(trimmed);
-    }
-
-    const parsed = parseAcademicFeedXml(xml);
-    return {
-      ...parsed,
-      feedUrl: parsed.feedUrl || trimmed,
-    };
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() feedRetrieval?: FeedRetrievalService,
+  ) {
+    this.feedRetrieval = feedRetrieval ?? new FeedRetrievalService(prisma, ssrfGuard);
   }
 
+  private readonly feedRetrieval: FeedRetrievalService;
+
   /**
-   * Resilient Fallback: When direct RSS XML is blocked by Cloudflare/WAF (e.g. bioRxiv, MDPI),
-   * query official academic search registries (Crossref Registry API) by journal/publisher prefix
-   * to transparently synthesize the latest real papers with 100% full metadata.
+   * Resilient Academic RSS / Atom Feed Fetcher.
+   * Delegates to FeedRetrievalService.
    */
-  private async fallbackSearchFeed(feedUrl: string): Promise<ParsedAcademicFeed> {
-    try {
-      let filter = '';
-      let searchFeedTitle = 'Academic Search Feed';
-
-      if (/biorxiv\.org/i.test(feedUrl)) {
-        filter = 'prefix:10.1101';
-        searchFeedTitle = 'bioRxiv Preprints';
-      } else if (/medrxiv\.org/i.test(feedUrl)) {
-        filter = 'prefix:10.1101';
-        searchFeedTitle = 'medRxiv Preprints';
-      } else if (/mdpi\.com/i.test(feedUrl)) {
-        filter = 'prefix:10.3390';
-        searchFeedTitle = 'MDPI Open Access';
-      } else {
-        try {
-          const parsedUrl = new URL(feedUrl);
-          const domain = parsedUrl.hostname.replace(/^www\./, '');
-          searchFeedTitle = `${domain} Feed`;
-        } catch {
-          searchFeedTitle = 'Academic Feed';
-        }
-      }
-
-      const crossrefUrl = filter
-        ? `https://api.crossref.org/works?filter=${filter}&rows=30&sort=published&order=desc`
-        : `https://api.crossref.org/works?query=${encodeURIComponent(feedUrl)}&rows=30&sort=published&order=desc`;
-
-      const fallbackRes = await fetch(crossrefUrl, {
-        headers: {
-          'User-Agent': 'FluxAcademicBot/1.0 (mailto:admin@flux.app)',
-          Accept: 'application/json',
-        },
-      });
-
-      if (!fallbackRes.ok) {
-        throw new Error(`Academic registry search responded with HTTP ${fallbackRes.status}`);
-      }
-
-      const json = await fallbackRes.json();
-      const items = json?.message?.items;
-      if (!Array.isArray(items) || items.length === 0) {
-        throw new Error('No articles found in fallback academic registry');
-      }
-
-      const entries = items.map((item: any, idx: number) => {
-        const rawTitle = Array.isArray(item.title) ? item.title[0] : item.title || 'Untitled Article';
-        const doi = item.DOI || undefined;
-        const journal = Array.isArray(item['container-title'])
-          ? item['container-title'][0]
-          : item['container-title'] || searchFeedTitle;
-        const authors = Array.isArray(item.author)
-          ? item.author.map((a: any) => [a.given, a.family].filter(Boolean).join(' ') || a.name || 'Author')
-          : [];
-        const pubDateParts = item.published?.['date-parts']?.[0] || item.created?.['date-parts']?.[0];
-        const publishedDate = pubDateParts
-          ? `${pubDateParts[0]}-${String(pubDateParts[1] || 1).padStart(2, '0')}-${String(pubDateParts[2] || 1).padStart(2, '0')}`
-          : undefined;
-
-        return {
-          id: doi ? `doi:${doi}` : `search-item-${idx}`,
-          title: rawTitle,
-          url: item.URL || (doi ? `https://doi.org/${doi}` : undefined),
-          pdfUrl: item.link?.find((l: any) => l['content-type'] === 'application/pdf')?.URL || (doi ? `https://doi.org/${doi}` : undefined),
-          doi,
-          authors,
-          creators: authors.map((name: string) => ({
-            name,
-            creatorType: 'author',
-          })),
-          abstract: item.abstract?.replace(/<[^>]+>/g, '').trim() || undefined,
-          publicationTitle: journal,
-          volume: item.volume || undefined,
-          issue: item.issue || undefined,
-          pages: item.page || undefined,
-          publicationDate: publishedDate,
-          year: pubDateParts ? pubDateParts[0] : undefined,
-          keywords: Array.isArray(item.subject) ? item.subject : [],
-          rights: item.license?.[0]?.URL || 'Open Access',
-          itemType: 'journalArticle' as const,
-        };
-      });
-
-      return {
-        format: 'rss2',
-        feedTitle: searchFeedTitle,
-        feedUrl,
-        updatedAt: new Date().toISOString(),
-        entries,
-      };
-    } catch (err: unknown) {
-      this.logger.error(`Academic search fallback failed for ${feedUrl}: ${err instanceof Error ? err.message : String(err)}`);
-      throw new BadRequestException(
-        `Failed to fetch feed and academic search fallback was unable to retrieve articles: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+  async fetchAcademicFeed(
+    feedUrl: string,
+    forceRefresh = false,
+  ): Promise<ParsedAcademicFeed> {
+    return this.feedRetrieval.fetchAcademicFeed(feedUrl, forceRefresh);
   }
 
   /**

@@ -50,6 +50,7 @@ export * from './logger/logger.module';
 export * from './logger/logger.service';
 
 // Utils
+export * from './utils/circuit-breaker.util';
 export * from './utils/concurrency.util';
 export * from './utils/error.util';
 export * from './utils/uuid.util';

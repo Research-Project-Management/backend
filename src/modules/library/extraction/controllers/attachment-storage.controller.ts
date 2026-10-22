@@ -28,6 +28,7 @@ import {
   InitiateMultipartDto,
   CompleteMultipartDto,
 } from '@/modules/library/extraction/dto/attachments.dto';
+import { MAX_SAFE_HTTP_PAYLOAD_BYTES } from '@/modules/library/core';
 
 /**
  * Unified Library Storage Controller (`/api/v1/library` and `/api/v1/projects/:projectId/library`).
@@ -78,6 +79,11 @@ export class AttachmentStorageController {
     for await (const part of parts) {
       if (part.type === 'file') {
         buffer = await part.toBuffer();
+        if (buffer.length > MAX_SAFE_HTTP_PAYLOAD_BYTES) {
+          throw new BadRequestException(
+            `File size (${(buffer.length / (1024 * 1024)).toFixed(1)} MB) exceeds direct upload limit of ${MAX_SAFE_HTTP_PAYLOAD_BYTES / (1024 * 1024)} MB. Please use presigned S3 upload.`,
+          );
+        }
         filename = part.filename || filename;
         mimeType = part.mimetype || mimeType;
       }

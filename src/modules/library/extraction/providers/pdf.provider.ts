@@ -101,9 +101,13 @@ export class PdfProvider {
         const document =
           sharedDocumentProxy ??
           (fallbackDocumentProxy = await (async () => {
-            const clonedBinaryDataArray = new Uint8Array(buffer.byteLength);
-            clonedBinaryDataArray.set(buffer);
-            return getDocumentProxy(clonedBinaryDataArray);
+            // Zero-copy TypedArray view over existing buffer ArrayBuffer (avoids duplicating multi-megabyte buffers on V8 heap)
+            const binaryDataView = new Uint8Array(
+              buffer.buffer,
+              buffer.byteOffset,
+              buffer.byteLength,
+            );
+            return getDocumentProxy(binaryDataView);
           })());
 
         try {
@@ -209,7 +213,12 @@ export class PdfProvider {
                 pageIndex - 1,
               );
               if (res) {
-                const rawOcrText = res.text;
+                const rawOcrText =
+                  typeof res === 'string'
+                    ? res
+                    : typeof (res as { text?: string })?.text === 'string'
+                      ? (res as { text?: string }).text
+                      : '';
                 if (scanDetection.isHybrid) {
                   if (rawOcrText && rawOcrText.length > pageText.length) {
                     pageText = rawOcrText;
@@ -217,7 +226,7 @@ export class PdfProvider {
                 } else if (rawOcrText) {
                   pageText = rawOcrText;
                 }
-                if (res.wasOcr) {
+                if (typeof res === 'object' && res !== null && (res as { wasOcr?: boolean }).wasOcr) {
                   ocrPageResults.push(res);
                   if (typeof page.getViewport === 'function') {
                     try {

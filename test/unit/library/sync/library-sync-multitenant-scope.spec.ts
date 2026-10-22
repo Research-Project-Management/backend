@@ -22,7 +22,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
   const mockAnnotationId = '66666666-6666-4666-8666-666666666666';
   const mockTagId = '77777777-7777-4777-8777-777777777777';
 
-  let mockHelpers: jest.Mocked<TransactionHelpers>;
+  let mockHelpers: any;
   let mockLibraryTx: { executeInTransaction: jest.Mock };
 
   beforeEach(() => {

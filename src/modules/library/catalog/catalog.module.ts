@@ -20,6 +20,7 @@ import { NoteController } from './controllers/notes.controller';
 
 // Services
 import { ItemService } from './services/items.service';
+import { ItemCacheCoordinator } from './services/item-cache.coordinator';
 import { ItemQueryService } from './services/item-query.service';
 import { ItemFulltextService } from './services/item-fulltext.service';
 import { ItemTypeConversionService } from './services/item-type-conversion.service';
@@ -84,6 +85,7 @@ import { CatalogFacade, CATALOG_FACADE } from './catalog.facade';
     ItemTypeConversionService,
     ItemCurationService,
     ItemRelationsService,
+    ItemCacheCoordinator,
     ItemService,
     CollectionsService,
     TagsService,

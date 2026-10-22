@@ -679,7 +679,8 @@ export class DuplicateDetectorService {
     if (
       rawClusters.length > 0 &&
       groupedItemIds.size > 0 &&
-      this.catalogGateway
+      this.catalogGateway &&
+      typeof this.catalogGateway.findByIds === 'function'
     ) {
       try {
         const fullRawItems = await this.catalogGateway.findByIds(

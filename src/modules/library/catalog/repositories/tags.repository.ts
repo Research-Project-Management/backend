@@ -103,16 +103,32 @@ export class TagsRepository {
         return existingProjectTag;
       }
 
-      return client.tag.create({
-        data: {
-          userId,
-          createdById: userId,
-          name,
-          color,
-          type: resolvedType,
-          projectId: effectiveProjectId,
-        },
-      });
+      try {
+        return await client.tag.create({
+          data: {
+            userId,
+            createdById: userId,
+            name,
+            color,
+            type: resolvedType,
+            projectId: effectiveProjectId,
+          },
+        });
+      } catch (err: unknown) {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          const raceTag = await client.tag.findFirst({
+            where: {
+              projectId: effectiveProjectId,
+              name: { equals: name, mode: 'insensitive' },
+            },
+          });
+          if (raceTag) return raceTag;
+        }
+        throw err;
+      }
     }
 
     const existingPersonalTag = await client.tag.findFirst({
@@ -133,16 +149,33 @@ export class TagsRepository {
       return existingPersonalTag;
     }
 
-    return client.tag.create({
-      data: {
-        userId,
-        createdById: userId,
-        name,
-        color,
-        type: resolvedType,
-        projectId: null,
-      },
-    });
+    try {
+      return await client.tag.create({
+        data: {
+          userId,
+          createdById: userId,
+          name,
+          color,
+          type: resolvedType,
+          projectId: null,
+        },
+      });
+    } catch (err: unknown) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        const raceTag = await client.tag.findFirst({
+          where: {
+            userId,
+            projectId: null,
+            name: { equals: name, mode: 'insensitive' },
+          },
+        });
+        if (raceTag) return raceTag;
+      }
+      throw err;
+    }
   }
 
   async update(

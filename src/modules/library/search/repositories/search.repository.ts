@@ -345,7 +345,7 @@ export class SearchRepository implements OnModuleInit {
           const ftsRows = await this.prisma.$queryRawUnsafe<
             Array<{ id: string }>
           >(
-            `SELECT id FROM "items" WHERE ${scopeSql} AND deleted_at IS NULL AND search_vector @@ plainto_tsquery('english', $2)`,
+            `SELECT id FROM "items" WHERE ${scopeSql} AND deleted_at IS NULL AND search_vector @@ plainto_tsquery('english', $2) LIMIT 5000`,
             hasProject ? options.projectId : userId,
             ftsSanitized,
           );

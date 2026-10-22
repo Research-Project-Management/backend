@@ -14,6 +14,12 @@ export class ActiveItemsSpecification extends CompositeSpecification {
   toPrismaWhere(): QueryCriteria {
     return { deletedAt: null };
   }
+
+  isSatisfiedBy(item: unknown): boolean {
+    if (!item || typeof item !== 'object') return false;
+    const rec = item as Record<string, unknown>;
+    return rec.deletedAt === null || rec.deletedAt === undefined;
+  }
 }
 
 /**
@@ -32,6 +38,12 @@ export class ItemTypeSpecification extends CompositeSpecification {
       return { itemType: this.itemTypes[0] };
     }
     return { itemType: { in: this.itemTypes } };
+  }
+
+  isSatisfiedBy(item: unknown): boolean {
+    if (!item || typeof item !== 'object') return false;
+    const rec = item as Record<string, unknown>;
+    return typeof rec.itemType === 'string' && this.itemTypes.includes(rec.itemType);
   }
 }
 
@@ -52,6 +64,15 @@ export class YearRangeSpecification extends CompositeSpecification {
     if (this.yearTo !== undefined) yearFilter.lte = this.yearTo;
     return { year: yearFilter };
   }
+
+  isSatisfiedBy(item: unknown): boolean {
+    if (!item || typeof item !== 'object') return false;
+    const rec = item as Record<string, unknown>;
+    const year = typeof rec.year === 'number' ? rec.year : undefined;
+    if (this.yearFrom !== undefined && (year === undefined || year < this.yearFrom)) return false;
+    if (this.yearTo !== undefined && (year === undefined || year > this.yearTo)) return false;
+    return true;
+  }
 }
 
 /**
@@ -69,6 +90,13 @@ export class CollectionSpecification extends CompositeSpecification {
       },
     };
   }
+
+  isSatisfiedBy(item: unknown): boolean {
+    if (!item || typeof item !== 'object') return false;
+    const rec = item as Record<string, unknown>;
+    const list = Array.isArray(rec.collectionItems) ? rec.collectionItems : [];
+    return list.some((c: any) => c?.collectionId === this.collectionId);
+  }
 }
 
 /**
@@ -85,6 +113,13 @@ export class TagSpecification extends CompositeSpecification {
         some: { tagId: this.tagId },
       },
     };
+  }
+
+  isSatisfiedBy(item: unknown): boolean {
+    if (!item || typeof item !== 'object') return false;
+    const rec = item as Record<string, unknown>;
+    const list = Array.isArray(rec.itemTags) ? rec.itemTags : [];
+    return list.some((t: any) => t?.tagId === this.tagId);
   }
 }
 
@@ -151,5 +186,57 @@ export class TextSearchSpecification extends CompositeSpecification {
       ],
     };
   }
-}
 
+  isSatisfiedBy(item: unknown): boolean {
+    if (!this.query) return true;
+    if (!item || typeof item !== 'object') return false;
+    const q = this.query.toLowerCase();
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.title === 'string' && rec.title.toLowerCase().includes(q)) return true;
+    if (typeof rec.abstract === 'string' && rec.abstract.toLowerCase().includes(q)) return true;
+    if (typeof rec.doi === 'string' && rec.doi.toLowerCase().includes(q)) return true;
+    if (typeof rec.citationKey === 'string' && rec.citationKey.toLowerCase().includes(q)) return true;
+    if (Array.isArray(rec.contributors)) {
+      if (
+        rec.contributors.some(
+          (c: any) =>
+            (c?.fullName && String(c.fullName).toLowerCase().includes(q)) ||
+            (c?.lastName && String(c.lastName).toLowerCase().includes(q)),
+        )
+      ) {
+        return true;
+      }
+    }
+    if (Array.isArray(rec.notesList)) {
+      if (
+        rec.notesList.some(
+          (n: any) =>
+            !n?.deletedAt &&
+            ((n?.title && String(n.title).toLowerCase().includes(q)) ||
+              (n?.contentMd && String(n.contentMd).toLowerCase().includes(q))),
+        )
+      ) {
+        return true;
+      }
+    }
+    if (Array.isArray(rec.attachments)) {
+      if (
+        rec.attachments.some(
+          (a: any) =>
+            !a?.deletedAt &&
+            Array.isArray(a?.annotations) &&
+            a.annotations.some(
+              (ann: any) =>
+                !ann?.deletedAt &&
+                ((ann?.quoteText &&
+                  String(ann.quoteText).toLowerCase().includes(q)) ||
+                  (ann?.comment && String(ann.comment).toLowerCase().includes(q))),
+            ),
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+}

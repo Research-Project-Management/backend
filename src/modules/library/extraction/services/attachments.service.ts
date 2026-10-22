@@ -97,7 +97,23 @@ export class AttachmentsService {
     const userId = input.userId || 'system';
     await this.assertItemExists(userId, targetItemId, projectId);
 
-    const resolvedFileId = input.fileId || extractFileIdFromUrl(input.url);
+    let resolvedFileId = input.fileId || extractFileIdFromUrl(input.url);
+
+    // Content-Addressable Storage (CAS) Deduplication:
+    // If incoming upload has a valid fileHash, reuse existing storage blob if available
+    let storageKey = input.storageKey;
+    if (input.fileHash && input.fileHash.trim().length >= 32) {
+      const existingWithHash = await this.repo.findFirst({
+        fileHash: input.fileHash.trim(),
+        storageKey: { not: null },
+      });
+      if (existingWithHash?.storageKey) {
+        storageKey = existingWithHash.storageKey;
+        if (!resolvedFileId && existingWithHash.fileId) {
+          resolvedFileId = existingWithHash.fileId;
+        }
+      }
+    }
 
     const effectiveUrl =
       input.url && input.url.trim() !== ''
@@ -146,6 +162,7 @@ export class AttachmentsService {
           attachmentType: resolvedAttachmentType,
           filename: input.filename,
           url: effectiveUrl,
+          storageKey: storageKey ?? undefined,
           mimeType:
             input.mimeType ??
             (resolvedLinkMode === 'linked_url'
@@ -355,6 +372,11 @@ export class AttachmentsService {
           data: { id: attachment.id },
         });
 
+        await helpers.recordTombstone?.(eventScope, {
+          entityType: 'Attachment',
+          entityId: attachment.id,
+        });
+
         await helpers.publishOutbox(
           eventScope,
           attachment.id,
@@ -439,7 +461,9 @@ export class AttachmentsService {
         if (item.projectId !== projectId) {
           throw new NotFoundException(`Attachment ${attachmentId} not found`);
         }
-      } else if (userId && !item.projectId && item.userId && item.userId !== userId) {
+      } else if (item.projectId) {
+        throw new NotFoundException(`Attachment ${attachmentId} not found`);
+      } else if (userId && item.userId && item.userId !== userId) {
         throw new NotFoundException(`Attachment ${attachmentId} not found`);
       }
     }
@@ -466,7 +490,26 @@ export class AttachmentsService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    await this.repo.setPrimaryAttachment(itemId, attachmentId);
+    const effectiveProjectId =
+      projectId && projectId !== 'user' ? projectId : undefined;
+
+    await this.libraryTx.executeInTransaction(
+      async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+        await this.repo.setPrimaryAttachment(itemId, attachmentId, tx);
+        const eventScope = { userId, projectId: effectiveProjectId };
+        await helpers.appendChange(eventScope, {
+          entityType: 'Attachment',
+          entityId: attachmentId,
+          action: 'update',
+          version: 1,
+          data: {
+            id: attachmentId,
+            itemId,
+            attachmentType: AttachmentType.primary_pdf,
+          },
+        });
+      },
+    );
 
     if (this.cache) {
       const validProjectId = normalizeProjectScopeId(projectId);

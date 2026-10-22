@@ -172,7 +172,7 @@ const CANONICAL_ALIAS_GROUPS: ReadonlyArray<{
   { canonical: ['pmid'], sources: ['pmid', 'PMID'] },
   { canonical: ['pmcid'], sources: ['pmcid', 'PMCID'] },
   { canonical: ['arxivId', 'archiveId'], sources: ['arxivId', 'archiveId', 'archiveID'] },
-  { canonical: ['journalAbbreviation'], sources: ['journalAbbreviation', 'journalAbbr'] },
+  { canonical: ['journalAbbreviation', 'journalAbbr'], sources: ['journalAbbreviation', 'journalAbbr'] },
   { canonical: ['abstract', 'abstractNote'], sources: ['abstract', 'abstractNote'] },
   { canonical: ['accessDate'], sources: ['accessDate', 'accessedAt'] },
   { canonical: ['citationKey'], sources: ['citationKey', 'citeKey'] },

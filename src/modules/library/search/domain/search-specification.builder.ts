@@ -38,12 +38,8 @@ export class SearchSpecificationBuilder {
     options: SearchOptions,
   ): ISpecification {
     const scopeSpec = new ScopeSpecification(userId, options.projectId);
-    let spec: ISpecification = new ActiveItemsSpecification().and({
-      toPrismaWhere: () => scopeSpec.toPrismaWhere(),
-      and(other: ISpecification) {
-        return new ActiveItemsSpecification().and(this).and(other);
-      },
-    });
+    const activeSpec = new ActiveItemsSpecification();
+    let spec: ISpecification = scopeSpec.and(activeSpec);
 
     if (options.itemType) {
       spec = spec.and(new ItemTypeSpecification(options.itemType));

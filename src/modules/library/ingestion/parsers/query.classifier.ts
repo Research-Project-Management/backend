@@ -79,6 +79,22 @@ export class QueryClassifier {
     const results: ClassifiedQuery[] = [];
 
     for (const line of lines) {
+      // If line contains delimiters (, or ;), try splitting first
+      if (/[,;\t]/.test(line)) {
+        const tokens = line
+          .split(/[\s,;]+/)
+          .map((t) => t.trim())
+          .filter(Boolean);
+        const tokenClassified = tokens.map((t) => this.classify(t));
+        if (
+          tokenClassified.length > 1 &&
+          tokenClassified.every((c) => c.type !== 'TITLE')
+        ) {
+          results.push(...tokenClassified);
+          continue;
+        }
+      }
+
       const single = this.classify(line);
       if (single.type !== 'TITLE') {
         results.push(single);

@@ -240,17 +240,30 @@ export class ItemQueryService {
           ItemDetail | Record<string, unknown>
         >(cacheKey);
         if (cached) {
-          const isOwner = cached.userId === userId;
+          const isOwner = cached.userId === userId && !cached.projectId;
           const isProjectMatch =
-            validProjectId && cached.projectId === validProjectId;
+            Boolean(validProjectId && cached.projectId === validProjectId);
           if (isOwner || isProjectMatch) {
-            if (
-              Array.isArray((cached as Record<string, unknown>).states) ||
-              (cached as Record<string, unknown>).readStatus !== undefined
-            ) {
-              return this.mapFlattenedState(cached, userId);
+            const cachedStates = Array.isArray(
+              (cached as Record<string, unknown>).states,
+            )
+              ? ((cached as Record<string, unknown>).states as Array<{
+                  userId?: string;
+                }>)
+              : null;
+            const hasMatchingUserState =
+              !cachedStates ||
+              cachedStates.length === 0 ||
+              cachedStates.some((s) => !s.userId || s.userId === userId);
+            if (hasMatchingUserState && (!isProjectMatch || cached.userId === userId)) {
+              if (
+                cachedStates !== null ||
+                (cached as Record<string, unknown>).readStatus !== undefined
+              ) {
+                return this.mapFlattenedState(cached, userId);
+              }
+              return cached;
             }
-            return cached;
           }
         }
       } catch (err: unknown) {
@@ -311,6 +324,8 @@ export class ItemQueryService {
       hasNotes?: boolean;
       projectId?: string;
       include?: string;
+      fields?: string;
+      includeNotes?: boolean;
       isRetracted?: boolean;
       onlyFlagged?: boolean;
     },
@@ -320,6 +335,7 @@ export class ItemQueryService {
     const scopeKey = validProjectId ? `proj:${validProjectId}` : userId;
     const canCache = !options.search && !options.cursor;
     const extraCacheParts = [
+      validProjectId ? `u=${userId}` : '',
       options.page !== undefined && options.page > 1 ? `p=${options.page}` : '',
       options.orderBy ? `ob=${options.orderBy}` : '',
       options.orderDirection ? `od=${options.orderDirection}` : '',
@@ -339,6 +355,7 @@ export class ItemQueryService {
         ? `sub=${options.includeSubcollections}`
         : '',
       options.recursive !== undefined ? `rec=${options.recursive}` : '',
+      options.fields ? `f=${options.fields}` : '',
     ]
       .filter(Boolean)
       .join(':');
@@ -367,7 +384,19 @@ export class ItemQueryService {
       }
     }
 
-    const queryOptions = { ...options, userId };
+    const preResolvedCollectionIds =
+      options.collectionId &&
+      (!options.collectionIds || options.collectionIds.length === 0)
+        ? await this.query.resolveTargetCollectionIds(userId, options)
+        : undefined;
+
+    const queryOptions = {
+      ...options,
+      userId,
+      ...(preResolvedCollectionIds
+        ? { targetCollectionIds: preResolvedCollectionIds }
+        : {}),
+    };
     const isInitialPage = !options.cursor;
     const shouldCount = isInitialPage;
     const [totalCount, rawItems] = await Promise.all([

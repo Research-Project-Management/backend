@@ -304,6 +304,7 @@ export class CollectionsService {
     const effectiveProjectId =
       normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
 
+    const expectedVersion = dto.expectedVersion ?? dto.version;
     const collection = this.libraryTx
       ? await this.libraryTx.executeInTransaction(
           async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
@@ -313,6 +314,7 @@ export class CollectionsService {
               updatePayload,
               tx,
               projectId,
+              expectedVersion,
             );
             const eventScope = { userId, projectId: effectiveProjectId };
             await helpers.appendChange(eventScope, {
@@ -337,6 +339,7 @@ export class CollectionsService {
           updatePayload,
           undefined,
           projectId,
+          expectedVersion,
         );
 
     await this.invalidateCollectionsCache(userId, projectId);
@@ -362,10 +365,7 @@ export class CollectionsService {
     const effectiveProjectId =
       normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
 
-    const affectedItemIds =
-      typeof this.repo.findItemIdsByCollection === 'function'
-        ? await this.repo.findItemIdsByCollection(userId, collectionId)
-        : [];
+    const affectedItemIds = await this.repo.findItemIdsByCollection(userId, collectionId);
 
     if (this.libraryTx) {
       await this.libraryTx.executeInTransaction(
@@ -728,6 +728,7 @@ export class CollectionsService {
     userId: string,
     itemId: string,
     targetCollectionIds: string[],
+    projectId?: string,
   ): Promise<void> {
     const rawIds = targetCollectionIds.filter(
       (id): id is string => typeof id === 'string' && id.trim().length > 0,
@@ -743,10 +744,14 @@ export class CollectionsService {
 
     if (uniqueIds.length === 0) return;
 
+    const scopeWhere: Prisma.CollectionWhereInput = projectId
+      ? { projectId }
+      : { userId, projectId: null };
+
     const validCollections = await tx.collection.findMany({
       where: {
         id: { in: uniqueIds },
-        userId,
+        ...scopeWhere,
         deletedAt: null,
       },
       select: { id: true },

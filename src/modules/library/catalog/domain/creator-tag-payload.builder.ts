@@ -239,6 +239,7 @@ export function prepareNotesToCreate(
   userId: string,
   createdById: string,
   existingNotesList?: unknown,
+  projectId?: string | null,
 ) {
   if (!Array.isArray(notes)) return [];
 
@@ -316,6 +317,7 @@ export function prepareNotesToCreate(
       return {
         userId,
         createdById: createdById || userId,
+        projectId: projectId ?? null,
         title: noteTitle,
         contentMd,
         contentJson: contentJson as Prisma.InputJsonValue,

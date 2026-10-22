@@ -75,6 +75,7 @@ model Attachment {
   @@index([itemId, attachmentType])
   @@index([itemId, deletedAt])
   @@index([fileId])
+  @@index([fileHash])
   @@index([extractionStatus, extractionStartedAt])
   @@map("attachments")
 }

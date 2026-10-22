@@ -1,6 +1,13 @@
-import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  BeforeApplicationShutdown,
+  Optional,
+} from '@nestjs/common';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { createScheduler, createWorker, Scheduler, Worker } from 'tesseract.js';
 import {
   OcrBlock,
@@ -22,7 +29,8 @@ export interface RawOcrRecognitionResult {
 }
 
 @Injectable()
-export class OcrWorkerPoolService implements OnModuleDestroy {
+export class OcrWorkerPoolService
+  implements OnModuleDestroy, BeforeApplicationShutdown {
   private readonly logger = new Logger(OcrWorkerPoolService.name);
   private scheduler?: Scheduler;
   private workers: Worker[] = [];
@@ -36,7 +44,15 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
   get concurrency(): number {
     const parsed =
       this.configService?.ocr.concurrency ?? libraryConfig().ocr.concurrency;
-    return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 4) : 2;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.min(parsed, 4);
+    }
+    // OS Core & Memory Aware Safe Concurrency
+    const cpuCores = os.cpus()?.length || 2;
+    const freeMemMB = os.freemem() / (1024 * 1024);
+    const memoryMaxWorkers = Math.max(1, Math.floor(freeMemMB / 250));
+    const coreMaxWorkers = Math.max(1, cpuCores - 1);
+    return Math.max(1, Math.min(2, coreMaxWorkers, memoryMaxWorkers));
   }
 
   get defaultLanguages(): string[] {
@@ -301,9 +317,18 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
       'Recycling Tesseract Worker Pool due to worker timeout or unrecoverable error...',
     );
     const deadScheduler = this.scheduler;
+    const deadWorkers = [...this.workers];
     this.scheduler = undefined;
     this.workers = [];
     this.initPromise = undefined;
+
+    for (const w of deadWorkers) {
+      try {
+        await w.terminate();
+      } catch {
+        // ignore individual worker termination failure
+      }
+    }
 
     if (deadScheduler) {
       try {
@@ -317,19 +342,41 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
     }
   }
 
+  async beforeApplicationShutdown(signal?: string): Promise<void> {
+    this.logger.log(
+      `Received OS shutdown signal "${signal || 'SIGTERM'}". Terminating Tesseract worker pool...`,
+    );
+    await this.shutdownPool();
+  }
+
   async onModuleDestroy(): Promise<void> {
+    await this.shutdownPool();
+  }
+
+  private async shutdownPool(): Promise<void> {
+    if (this.isDestroyed) return;
     this.isDestroyed = true;
-    if (this.scheduler) {
-      this.logger.log('Gracefully terminating Tesseract Worker Pool...');
+    const currentScheduler = this.scheduler;
+    const currentWorkers = [...this.workers];
+    this.scheduler = undefined;
+    this.workers = [];
+    this.initPromise = undefined;
+
+    for (const w of currentWorkers) {
       try {
-        await this.scheduler.terminate();
+        await w.terminate();
+      } catch {
+        // ignore
+      }
+    }
+
+    if (currentScheduler) {
+      try {
+        await currentScheduler.terminate();
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Error terminating Tesseract scheduler: ${message}`);
       }
-      this.scheduler = undefined;
-      this.workers = [];
-      this.initPromise = undefined;
     }
   }
 }

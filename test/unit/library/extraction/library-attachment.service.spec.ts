@@ -134,6 +134,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
     const helpersMock = {
       appendChange: jest.fn().mockResolvedValue(undefined),
+      recordTombstone: jest.fn().mockResolvedValue(undefined),
       publishOutbox: jest.fn().mockResolvedValue(undefined),
     };
     mockTx = {
@@ -310,21 +311,10 @@ describe('Library Attachments & Storage Integration Suite', () => {
       );
     });
 
-    it('should return cached thumbnail from storage driver if it exists', async () => {
-      const mockDriver: any = {
-        exists: jest.fn().mockResolvedValue(true),
-        getStream: jest.fn().mockResolvedValue({
-          stream: (async function* () {
-            yield Buffer.from('CACHED_WEBP_THUMBNAIL');
-          })(),
-        }),
-      };
-      const mockNodeRepo: any = {
-        findById: jest.fn().mockResolvedValue({
-          id: 'file-1',
-          blobId: 'blob-123',
-        }),
-      };
+    it('should return cached thumbnail from storagePort.ensurePdfThumbnail', async () => {
+      mockStoragePort.ensurePdfThumbnail = jest
+        .fn()
+        .mockResolvedValue(Buffer.from('CACHED_WEBP_THUMBNAIL'));
 
       const thumbnailService = new AttachmentsService(
         mockRepo,
@@ -332,11 +322,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         { itemExists: jest.fn().mockResolvedValue(true) } as any,
         mockStoragePort,
         undefined,
-        new AttachmentThumbnailService(
-          mockDriver,
-          mockNodeRepo,
-          mockStoragePort,
-        ),
+        new AttachmentThumbnailService(mockStoragePort),
       );
 
       mockRepo.findFirst.mockResolvedValue({
@@ -349,31 +335,17 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
       expect(result.mimeType).toBe('image/webp');
       expect(result.buffer.toString()).toBe('CACHED_WEBP_THUMBNAIL');
-      expect(mockDriver.exists).toHaveBeenCalledWith(
-        'thumbnails/blob-123.webp',
-      );
+      expect(mockStoragePort.ensurePdfThumbnail).toHaveBeenCalledWith({
+        fileId: 'file-1',
+        userId: 'user-1',
+        projectId: undefined,
+      });
     });
 
-    it('should generate thumbnail on-the-fly and cache when not present in driver', async () => {
-      const mockDriver: any = {
-        exists: jest.fn().mockResolvedValue(false),
-        put: jest.fn().mockResolvedValue(undefined),
-      };
-      const mockNode: any = {
-        id: 'file-1',
-        blobId: 'blob-123',
-        metadata: {},
-        updateMetadata: jest.fn(),
-      };
-      const mockNodeRepo: any = {
-        findById: jest.fn().mockResolvedValue(mockNode),
-        update: jest.fn().mockResolvedValue(mockNode),
-      };
-      const mockThumbGenerator: any = {
-        generateThumbnail: jest
-          .fn()
-          .mockResolvedValue(Buffer.from('GENERATED_WEBP')),
-      };
+    it('should generate thumbnail on-the-fly via storagePort.ensurePdfThumbnail', async () => {
+      mockStoragePort.ensurePdfThumbnail = jest
+        .fn()
+        .mockResolvedValue(Buffer.from('GENERATED_WEBP'));
 
       const thumbnailService = new AttachmentsService(
         mockRepo,
@@ -381,12 +353,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         { itemExists: jest.fn().mockResolvedValue(true) } as any,
         mockStoragePort,
         undefined,
-        new AttachmentThumbnailService(
-          mockDriver,
-          mockNodeRepo,
-          mockStoragePort,
-          mockThumbGenerator,
-        ),
+        new AttachmentThumbnailService(mockStoragePort),
       );
 
       mockRepo.findFirst.mockResolvedValue({
@@ -399,14 +366,11 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
       expect(result.mimeType).toBe('image/webp');
       expect(result.buffer.toString()).toBe('GENERATED_WEBP');
-      expect(mockThumbGenerator.generateThumbnail).toHaveBeenCalledWith(
-        expect.any(Buffer),
-      );
-      expect(mockDriver.put).toHaveBeenCalledWith(
-        'thumbnails/blob-123.webp',
-        expect.any(Buffer),
-        expect.objectContaining({ mimeType: 'image/webp' }),
-      );
+      expect(mockStoragePort.ensurePdfThumbnail).toHaveBeenCalledWith({
+        fileId: 'file-1',
+        userId: 'user-1',
+        projectId: undefined,
+      });
     });
   });
 

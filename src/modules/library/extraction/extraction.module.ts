@@ -28,6 +28,7 @@ import { TrustedExtractionService } from './services/trusted-extraction.service'
 import { AnnotationsService } from './services/annotations.service';
 import { PdfAnnotationImporterService } from './services/pdf-annotation-importer.service';
 import { ReferenceMatcherService } from './services/reference-matcher.service';
+import { ExtractionMetadataSynchronizer } from './services/extraction-metadata.synchronizer';
 
 // Repositories
 import { AttachmentsRepository } from './repositories/attachments.repository';
@@ -78,6 +79,7 @@ import { AnnotationNormalizer } from './domain/annotation.normalizer';
     AnnotationsService,
     PdfAnnotationImporterService,
     ReferenceMatcherService,
+    ExtractionMetadataSynchronizer,
 
     // Utilities & Providers
     OcrProvider,

@@ -23,6 +23,7 @@ import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.dom
 import {
   TransactionHelpers,
   normalizeProjectScopeId,
+  ConfigurationException,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
@@ -35,6 +36,7 @@ export class NotesService {
   constructor(
     private readonly repo: NotesRepository,
     private readonly libraryTx: TransactionService,
+    @Optional()
     private readonly itemQuery?: ItemQueryService,
     @Optional()
     private readonly cache?: RedisCacheService,
@@ -291,7 +293,7 @@ export class NotesService {
       ...(projectId ? { projectId } : {}),
     };
     if (!this.itemQuery) {
-      throw new Error(
+      throw new ConfigurationException(
         'ItemQueryService is required to extract notes from annotations',
       );
     }

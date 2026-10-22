@@ -183,7 +183,7 @@ export class LibraryFacade implements ILibraryFacade {
       limit: 20,
       ...(projectId ? { projectId } : {}),
     });
-    const rawItems = searchRes.items ?? [];
+    const rawItems = searchRes?.items ?? [];
 
     return rawItems.map((catalogItem) => ({
       id: catalogItem.id,

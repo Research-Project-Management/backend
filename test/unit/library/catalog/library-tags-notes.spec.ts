@@ -193,7 +193,7 @@ describe('Academic Tags & Notes Synchronization', () => {
 
       expect(mockPrisma.item.update).toHaveBeenCalledWith({
         where: { id: 'item-1' },
-        data: { noteCount: { increment: 1 } },
+        data: expect.objectContaining({ noteCount: { increment: 1 } }),
       });
     });
 

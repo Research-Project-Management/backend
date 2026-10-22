@@ -100,6 +100,7 @@ export class ItemListQueryRepository {
       userId?: string;
       collectionId?: string;
       collectionIds?: string[];
+      targetCollectionIds?: string[];
       includeSubcollections?: boolean;
       recursive?: boolean;
       tagId?: string;
@@ -119,6 +120,7 @@ export class ItemListQueryRepository {
       toYear?: number;
       readStatus?: string;
       includeNotes?: boolean;
+      fields?: string;
     },
   ): Promise<ItemDetail[]> {
     if (!isUuid(userId)) return [];
@@ -126,6 +128,21 @@ export class ItemListQueryRepository {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
 
     const effectiveUserId = options.userId || userId;
+    const requestedFields = options.fields
+      ? new Set(
+          options.fields
+            .split(',')
+            .map((f) => f.trim())
+            .filter(Boolean),
+        )
+      : null;
+    const shouldIncludeNotes =
+      options.includeNotes === true ||
+      Boolean(
+        requestedFields &&
+          (requestedFields.has('notes') ||
+            requestedFields.has('notesList')),
+      );
 
     const itemInclude = {
       contributors: {
@@ -140,16 +157,22 @@ export class ItemListQueryRepository {
       attachments: {
         where: { deletedAt: null },
       },
-      notesList: {
-        where: { deletedAt: null },
+      ...(shouldIncludeNotes
+        ? {
+            notesList: {
+              where: { deletedAt: null },
+            },
+          }
+        : {}),
+      states: {
+        where: { userId: effectiveUserId },
+        take: 1,
       },
     };
 
-    const targetCollectionIds = await this.resolveTargetCollectionIds(
-      userId,
-      options,
-      client,
-    );
+    const targetCollectionIds =
+      options.targetCollectionIds ??
+      (await this.resolveTargetCollectionIds(userId, options, client));
 
     if (view === 'recent' && effectiveUserId) {
       const validProjectId = normalizeProjectScopeId(options.projectId);
@@ -275,11 +298,9 @@ export class ItemListQueryRepository {
     if (!isUuid(userId)) return 0;
     const view = options.view ?? 'all';
 
-    const targetCollectionIds = await this.resolveTargetCollectionIds(
-      userId,
-      options,
-      client,
-    );
+    const targetCollectionIds =
+      options.targetCollectionIds ??
+      (await this.resolveTargetCollectionIds(userId, options, client));
 
     const effectiveUserId = options.userId || userId;
     if (view === 'recent' && effectiveUserId) {

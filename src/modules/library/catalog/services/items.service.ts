@@ -26,6 +26,7 @@ import { TransactionService } from '@/modules/library/sync';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { TagsService } from './tags.service';
+import { ItemCacheCoordinator } from './item-cache.coordinator';
 import { ZoteroSchemaValidatorService } from './zotero-schema-validator.service';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 
@@ -39,6 +40,8 @@ export type { ItemTransactionContext };
 export class ItemService {
   private readonly logger = new Logger(ItemService.name);
 
+  private readonly cacheCoordinator: ItemCacheCoordinator;
+
   constructor(
     private readonly query: QueryRepository,
     private readonly command: CommandRepository,
@@ -47,7 +50,11 @@ export class ItemService {
     @Optional()
     private readonly validator?: ZoteroSchemaValidatorService,
     @Optional() private readonly cache?: RedisCacheService,
-  ) {}
+    @Optional() cacheCoordinator?: ItemCacheCoordinator,
+  ) {
+    this.cacheCoordinator =
+      cacheCoordinator ?? new ItemCacheCoordinator(cache, tagsService);
+  }
 
   /**
    * Invalidates Redis cache entries for an item and affected library lists.
@@ -58,21 +65,12 @@ export class ItemService {
     projectId?: string,
     options?: { skipScopeInvalidation?: boolean },
   ): Promise<void> {
-    if (!this.cache) return;
-    try {
-      await Promise.all([
-        this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
-        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
-        this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(id)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
-      ]);
-      if (!options?.skipScopeInvalidation && userId) {
-        await this.invalidateScopeListCache(userId, projectId);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to invalidate cache for item ${id}: ${message}`);
-    }
+    return this.cacheCoordinator.invalidateItemCache(
+      id,
+      userId,
+      projectId,
+      options,
+    );
   }
 
   /**
@@ -82,27 +80,7 @@ export class ItemService {
     userId: string,
     projectId?: string,
   ): Promise<void> {
-    if (!this.cache) return;
-    try {
-      const validProjectId = normalizeProjectScopeId(projectId);
-      const tasks: Promise<unknown>[] = [
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-        this.cache.del(`library:counts:user:${userId}`),
-        this.tagsService.invalidateTagsCache(userId, validProjectId),
-      ];
-      if (validProjectId) {
-        tasks.push(
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
-          ),
-          this.cache.del(`library:counts:proj:${validProjectId}`),
-        );
-      }
-      await Promise.all(tasks);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to invalidate scope caches: ${message}`);
-    }
+    return this.cacheCoordinator.invalidateScopeListCache(userId, projectId);
   }
 
   async getItem(userId: string, id: string, projectId?: string) {
@@ -451,9 +429,7 @@ export class ItemService {
           data: restored,
         });
 
-        if (typeof helpers.removeTombstone === 'function') {
-          await helpers.removeTombstone(eventScope, 'Item', id);
-        }
+        await helpers.removeTombstone(eventScope, 'Item', id);
 
         await helpers.publishOutbox(eventScope, id, 'library.item.restored', {
           itemId: id,
@@ -520,41 +496,12 @@ export class ItemService {
     projectId?: string,
     additionalProjectIds?: Array<string | null | undefined>,
   ): Promise<void> {
-    if (itemIds.length === 0) return;
-    if (!this.cache) return;
-
-    try {
-      const uniqueIds = Array.from(new Set(itemIds));
-      const directKeyDeletions: Promise<unknown>[] = [];
-      for (const id of uniqueIds) {
-        directKeyDeletions.push(
-          this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
-          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
-          this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(id)),
-        );
-      }
-
-      const uniqueScopes = new Set<string>();
-      const validBaseProject = normalizeProjectScopeId(projectId);
-      uniqueScopes.add(validBaseProject || '');
-      if (additionalProjectIds) {
-        for (const pid of additionalProjectIds) {
-          const norm = normalizeProjectScopeId(pid ?? undefined);
-          uniqueScopes.add(norm || '');
-        }
-      }
-
-      const scopeInvalidations = Array.from(uniqueScopes).map((scopeProjId) =>
-        this.invalidateScopeListCache(userId, scopeProjId || undefined),
-      );
-
-      await Promise.all([...directKeyDeletions, ...scopeInvalidations]);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Failed to invalidate bulk item caches (${itemIds.length} items): ${message}`,
-      );
-    }
+    return this.cacheCoordinator.invalidateBulkItemsCache(
+      itemIds,
+      userId,
+      projectId,
+      additionalProjectIds,
+    );
   }
 
   async bulkTrash(userId: string, itemIds: string[], projectId?: string) {
@@ -570,53 +517,28 @@ export class ItemService {
     const validProjectId = normalizeProjectScopeId(projectId);
     const { succeededIds, failedIds } =
       await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-        const res = await this.command.softDeleteMany(
-          userId,
-          itemIds,
-          tx,
-          validProjectId,
-        );
+        const res = await this.command.softDeleteMany(userId, itemIds, tx, validProjectId);
 
         if (res.succeededIds.length > 0) {
           const eventScope = { userId, projectId: validProjectId };
           const deletedAt = new Date();
 
-          if (typeof helpers.recordTombstonesBatch === 'function') {
-            await helpers.recordTombstonesBatch(
-              eventScope,
-              res.succeededIds.map((id) => ({
-                entityType: 'Item',
-                entityId: id,
-              })),
-            );
-          } else {
-            for (const id of res.succeededIds) {
-              await helpers.recordTombstone(eventScope, {
-                entityType: 'Item',
-                entityId: id,
-              });
-            }
-          }
+          await helpers.recordTombstonesBatch(
+            eventScope,
+            res.succeededIds.map((id) => ({
+              entityType: 'Item',
+              entityId: id,
+            })),
+          );
 
-          if (typeof helpers.publishOutboxBatch === 'function') {
-            await helpers.publishOutboxBatch(
-              eventScope,
-              res.succeededIds.map((id) => ({
-                aggregateId: id,
-                eventType: LIBRARY_EVENT_TYPES.ITEM_DELETED,
-                payload: { id, deletedAt, projectId: validProjectId },
-              })),
-            );
-          } else {
-            for (const id of res.succeededIds) {
-              await helpers.publishOutbox(
-                eventScope,
-                id,
-                LIBRARY_EVENT_TYPES.ITEM_DELETED,
-                { id, deletedAt, projectId: validProjectId },
-              );
-            }
-          }
+          await helpers.publishOutboxBatch(
+            eventScope,
+            res.succeededIds.map((id) => ({
+              aggregateId: id,
+              eventType: LIBRARY_EVENT_TYPES.ITEM_DELETED,
+              payload: { id, deletedAt, projectId: validProjectId },
+            })),
+          );
         }
 
         return res;
@@ -651,24 +573,16 @@ export class ItemService {
     const validProjectId = normalizeProjectScopeId(projectId);
     const { succeededIds, failedIds, restoredItems } =
       await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-        const res = await this.command.restoreMany(
-          userId,
-          itemIds,
-          tx,
-          validProjectId,
-        );
+        const res = await this.command.restoreMany(userId, itemIds, tx, validProjectId);
 
         if (res.restoredItems.length > 0) {
-          const restoredFullItems =
-            typeof this.query.findByIds === 'function'
-              ? await this.query.findByIds(
-                  userId,
-                  res.succeededIds,
-                  validProjectId,
-                  tx,
-                  false,
-                )
-              : [];
+          const restoredFullItems = await this.query.findByIds(
+            userId,
+            res.succeededIds,
+            validProjectId,
+            tx,
+            false,
+          );
           const fullItemMap = new Map(
             (restoredFullItems || []).map((it) => [it.id, it]),
           );
@@ -678,6 +592,7 @@ export class ItemService {
             const effectiveProjectId =
               validProjectId || restored.projectId || undefined;
             const fullItem = fullItemMap.get(restored.id);
+
             return {
               userId,
               projectId: effectiveProjectId,
@@ -685,18 +600,28 @@ export class ItemService {
               entityId: restored.id,
               action: 'update' as const,
               version: restored.version,
-              data: fullItem ?? {
-                id: restored.id,
-                version: restored.version,
-                deletedAt: null,
-                projectId: restored.projectId,
-              },
+              data: fullItem
+                ? ItemsMapper.toDomain(fullItem)
+                : {
+                    id: restored.id,
+                    version: restored.version,
+                    projectId: effectiveProjectId,
+                  },
             };
           });
+
+          await helpers.appendChangesBatch(changeInputs);
+
+          await helpers.removeTombstonesBatch(
+            { userId, projectId: validProjectId },
+            'Item',
+            res.restoredItems.map((r) => r.id),
+          );
 
           const outboxInputs = res.restoredItems.map((restored) => {
             const effectiveProjectId =
               validProjectId || restored.projectId || undefined;
+
             return {
               userId,
               projectId: effectiveProjectId,
@@ -711,37 +636,7 @@ export class ItemService {
             };
           });
 
-          if (typeof helpers.appendChangesBatch === 'function') {
-            await helpers.appendChangesBatch(changeInputs);
-          } else {
-            for (const c of changeInputs) {
-              await helpers.appendChange(
-                { userId: c.userId, projectId: c.projectId },
-                c,
-              );
-            }
-          }
-
-          if (typeof helpers.removeTombstonesBatch === 'function') {
-            await helpers.removeTombstonesBatch(
-              { userId, projectId: validProjectId },
-              'Item',
-              res.restoredItems.map((r) => r.id),
-            );
-          }
-
-          if (typeof helpers.publishOutboxBatch === 'function') {
-            await helpers.publishOutboxBatch(outboxInputs);
-          } else {
-            for (const o of outboxInputs) {
-              await helpers.publishOutbox(
-                { userId, projectId: o.projectId },
-                o.aggregateId,
-                o.eventType,
-                o.payload,
-              );
-            }
-          }
+          await helpers.publishOutboxBatch(outboxInputs);
         }
 
         return res;
@@ -777,46 +672,25 @@ export class ItemService {
     const validProjectId = normalizeProjectScopeId(projectId);
     const { succeededIds, failedIds, fileIdsToDelete } =
       await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-        const res = await this.command.purgeMany(
-          userId,
-          itemIds,
-          tx,
-          validProjectId,
-        );
+        const res = await this.command.purgeMany(userId, itemIds, tx, validProjectId);
 
         if (res.succeededIds.length > 0) {
           const eventScope = { userId, projectId: validProjectId };
           const purgedAt = new Date().toISOString();
 
-          if (typeof helpers.publishOutboxBatch === 'function') {
-            await helpers.publishOutboxBatch(
-              eventScope,
-              res.succeededIds.map((id) => ({
-                aggregateId: id,
-                eventType: 'library.item.purged',
-                payload: {
-                  itemId: id,
-                  userId,
-                  projectId: validProjectId,
-                  purgedAt,
-                },
-              })),
-            );
-          } else {
-            for (const id of res.succeededIds) {
-              await helpers.publishOutbox(
-                eventScope,
-                id,
-                'library.item.purged',
-                {
-                  itemId: id,
-                  userId,
-                  projectId: validProjectId,
-                  purgedAt,
-                },
-              );
-            }
-          }
+          await helpers.publishOutboxBatch(
+            eventScope,
+            res.succeededIds.map((id) => ({
+              aggregateId: id,
+              eventType: 'library.item.purged',
+              payload: {
+                itemId: id,
+                userId,
+                projectId: validProjectId,
+                purgedAt,
+              },
+            })),
+          );
         }
 
         return res;

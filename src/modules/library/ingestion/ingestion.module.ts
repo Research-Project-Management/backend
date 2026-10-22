@@ -14,6 +14,8 @@ import { IngestionFacade, INGESTION_FACADE } from './ingestion.facade';
 import { IngestionController } from './controllers/ingestion.controller';
 import { CurationController } from './controllers/curation.controller';
 import { RetractionController } from './controllers/retraction.controller';
+import { FeedsController } from './controllers/feeds.controller';
+import { FeedsService } from './services/feeds.service';
 
 import { IngestionService } from './services/ingestion.service';
 import { PipelineService } from './services/pipeline.service';
@@ -24,6 +26,8 @@ import { IngestionRunReporterService } from './services/ingestion-run-reporter.s
 import { IngestionSagaOrchestrator } from './services/ingestion-saga.orchestrator';
 import { QueueService } from './services/queue.service';
 import { UrlCaptureService } from './services/url-capture.service';
+import { FeedRetrievalService } from './services/feed-retrieval.service';
+import { FeedsEngine } from './services/feeds.engine';
 import { UrlMetadataScraperService } from './services/url-metadata-scraper.service';
 import { PublisherDomExtractor } from './services/publisher-dom.extractor';
 import { HtmlMetaTagExtractor } from './services/html-meta-tag.extractor';
@@ -100,8 +104,10 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     IngestionController,
     CurationController,
     RetractionController,
+    FeedsController,
   ],
   providers: [
+    FeedsService,
     // Facade
     IngestionFacade,
     {
@@ -124,6 +130,8 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     IngestionSagaOrchestrator,
     QueueService,
     UrlCaptureService,
+    FeedRetrievalService,
+    FeedsEngine,
     UrlMetadataScraperService,
     PublisherDomExtractor,
     HtmlMetaTagExtractor,

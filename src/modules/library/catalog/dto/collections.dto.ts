@@ -78,6 +78,12 @@ export class UpdateCollectionDto {
   )
   @IsUUID()
   parentId?: string | null;
+
+  @IsOptional()
+  expectedVersion?: number;
+
+  @IsOptional()
+  version?: number;
 }
 
 export class AssignItemsToCollectionDto {

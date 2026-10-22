@@ -884,12 +884,14 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
         parentId: string | null;
       }> = [];
 
+      
       const repoMock = {
         findById: jest.fn().mockResolvedValue({
           id: 'col-parent',
           name: 'Parent Folder',
           parentId: null,
         }),
+        findItemIdsByCollection: jest.fn().mockResolvedValue([]),
         delete: jest
           .fn()
           .mockImplementation(
@@ -978,8 +980,13 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
         executeInTransaction: jest.fn().mockImplementation(async (cb) =>
           cb(txMock, {
             appendChange: jest.fn().mockResolvedValue(undefined),
+            appendChangesBatch: jest.fn().mockResolvedValue(1),
             publishOutbox: jest.fn().mockResolvedValue(undefined),
+            publishOutboxBatch: jest.fn().mockResolvedValue([]),
             recordTombstone: jest.fn().mockResolvedValue(undefined),
+            recordTombstonesBatch: jest.fn().mockResolvedValue(1),
+            removeTombstone: jest.fn().mockResolvedValue(1),
+            removeTombstonesBatch: jest.fn().mockResolvedValue(1),
           }),
         ),
       };
@@ -1095,6 +1102,9 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
       ]);
 
       const queryRepoMock = {
+        findByIds: jest.fn().mockImplementation(async (_u: string, ids: string[]) => {
+          return ids.map((id: string) => itemState.get(id)).filter(Boolean);
+        }),
         findMany: jest
           .fn()
           .mockImplementation(async (_u: string, opts?: { view?: string }) => {
@@ -1122,6 +1132,19 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
             it.deletedAt = new Date();
             return true;
           }),
+        softDeleteMany: jest
+          .fn()
+          .mockImplementation(async (_u: string, ids: string[]) => {
+            const succeededIds: string[] = [];
+            for (const id of ids) {
+              const it = itemState.get(id);
+              if (it && it.deletedAt === null) {
+                it.deletedAt = new Date();
+                succeededIds.push(id);
+              }
+            }
+            return { succeededIds, failedIds: [] };
+          }),
         restore: jest
           .fn()
           .mockImplementation(async (_u: string, id: string) => {
@@ -1133,8 +1156,33 @@ describe('Wave 4: Zotero 7 Web Translators & WAF Resilience, Retraction Watch & 
             it.version += 1;
             return it;
           }),
+        restoreMany: jest
+          .fn()
+          .mockImplementation(async (_u: string, ids: string[]) => {
+            const restoredItems: Array<{ id: string; version: number; projectId: string | null }> = [];
+            const succeededIds: string[] = [];
+            for (const id of ids) {
+              const it = itemState.get(id);
+              if (it && it.deletedAt !== null) {
+                it.deletedAt = null;
+                it.version += 1;
+                succeededIds.push(id);
+                restoredItems.push({ id, version: it.version, projectId: it.projectId });
+              }
+            }
+            return { succeededIds, failedIds: [], restoredItems };
+          }),
         purge: jest.fn().mockImplementation(async (_u: string, id: string) => {
           return itemState.delete(id);
+        }),
+        purgeMany: jest.fn().mockImplementation(async (_u: string, ids: string[]) => {
+          const succeededIds: string[] = [];
+          for (const id of ids) {
+            if (itemState.delete(id)) {
+              succeededIds.push(id);
+            }
+          }
+          return { succeededIds, failedIds: [], fileIdsToDelete: [], storagePaths: [] };
         }),
       };
 

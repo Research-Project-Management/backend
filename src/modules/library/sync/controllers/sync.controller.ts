@@ -1,5 +1,7 @@
 import {
   Controller,
+  HttpException,
+  HttpStatus,
   Get,
   Query,
   Param,
@@ -86,6 +88,20 @@ export class SyncController {
     const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId } : { userId };
     const sinceSeq = parseSafeBigInt(query.since) ?? 0n;
+    const minRetainedSeq = await this.transactionService.getMinRetainedSequence?.(scope);
+    if (minRetainedSeq && sinceSeq > 0n && sinceSeq < minRetainedSeq - 1n) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.GONE,
+          error: 'Gone',
+          code: 'SYNC_RESET_REQUIRED',
+          message:
+            'Client sync cursor is older than retention period. Full library re-seed required.',
+          minRetainedSequence: minRetainedSeq.toString(),
+        },
+        HttpStatus.GONE,
+      );
+    }
     const limit = query.limit ?? 100;
 
     const changes = await this.transactionService.getChangesSince(
@@ -135,6 +151,20 @@ export class SyncController {
     const projectId = this.resolveProjectId(routeProjectId, queryProjectId);
     const scope = projectId ? { projectId } : { userId };
     const sinceSeq = parseSafeBigInt(query.since);
+    const minRetainedTombSeq = await this.transactionService.getMinRetainedSequence?.(scope);
+    if (minRetainedTombSeq && sinceSeq !== undefined && sinceSeq > 0n && sinceSeq < minRetainedTombSeq - 1n) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.GONE,
+          error: 'Gone',
+          code: 'SYNC_RESET_REQUIRED',
+          message:
+            'Client sync cursor is older than retention period. Full library re-seed required.',
+          minRetainedSequence: minRetainedTombSeq.toString(),
+        },
+        HttpStatus.GONE,
+      );
+    }
     const limit = query.limit ?? 100;
 
     const tombstones = await this.transactionService.getTombstonesSince(

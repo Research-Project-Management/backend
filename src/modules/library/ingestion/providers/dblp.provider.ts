@@ -76,14 +76,15 @@ export class DblpProvider implements MetadataProvider {
 
     let response: Response;
     try {
-      if (!this.httpClient) {
-        throw new Error('AcademicHttpClient is required for DblpProvider');
-      }
       const headers = {
         'User-Agent': getAcademicUserAgent('Dblp'),
         Accept: 'application/json, text/json',
       };
-      ({ response } = await this.httpClient.request(url, { headers, signal }));
+      if (this.httpClient) {
+        ({ response } = await this.httpClient.request(url, { headers, signal }));
+      } else {
+        response = await fetch(url, { headers, signal });
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.debug(`DBLP fetch skipped/failed non-fatally: ${message}`);

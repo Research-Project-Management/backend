@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   RetractionDetails,
   RetractionLookupResult,
@@ -19,7 +19,7 @@ export class RetractionScannerProvider {
   private readonly logger = new Logger(RetractionScannerProvider.name);
   constructor(
     private readonly retractionDb: RetractionDatabaseService,
-    private readonly httpClient: AcademicHttpClient,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
   ) {}
 
   /**
@@ -82,6 +82,17 @@ export class RetractionScannerProvider {
    * 1. OpenAlex API: Ingests the entire Retraction Watch database (~55,000+ papers). Catches historical and preprint retractions.
    * 2. CrossRef CrossMark API: Real-time publisher update-to notices and retraction assertions.
    */
+    private async executeFetch(
+    url: string,
+    options?: RequestInit,
+  ): Promise<{ response: Response; attempts: number }> {
+    if (this.httpClient) {
+      return this.executeFetch(url, options);
+    }
+    const response = await fetch(url, options);
+    return { response, attempts: 1 };
+  }
+
   private async queryOnlineRetraction(
     doi?: string | null,
     pmid?: string | null,
@@ -106,7 +117,7 @@ export class RetractionScannerProvider {
           Accept: 'application/json',
         };
         const oaSignal = AbortSignal.timeout(3500);
-        const { response: oaRes } = await this.httpClient.request(oaUrl, {
+        const { response: oaRes } = await this.executeFetch(oaUrl, {
           headers: oaHeaders,
           signal: oaSignal,
         });
@@ -152,7 +163,7 @@ export class RetractionScannerProvider {
           Accept: 'application/json',
         };
         const crSignal = AbortSignal.timeout(3500);
-        const { response: crRes } = await this.httpClient.request(crUrl, {
+        const { response: crRes } = await this.executeFetch(crUrl, {
           headers: crHeaders,
           signal: crSignal,
         });

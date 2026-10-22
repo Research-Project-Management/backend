@@ -337,4 +337,21 @@ export class AnnotationsRepository {
     });
     return result.count;
   }
+
+  async restoreByAttachmentIds(
+    attachmentIds: string[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    if (!attachmentIds || attachmentIds.length === 0) return 0;
+    const client = this.getClient(tx);
+    const result = await client.annotation.updateMany({
+      where: {
+        attachmentId: { in: attachmentIds },
+        deletedAt: { not: null },
+      },
+      data: { deletedAt: null },
+    });
+    return result.count;
+  }
+
 }

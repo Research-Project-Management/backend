@@ -265,9 +265,9 @@ export class ItemCurationController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
-    const item = await this.itemService.setMyPublication(userId, id, true, {
-      projectId,
-    });
+    const item = projectId
+      ? await this.itemService.setMyPublication(userId, id, true, { projectId })
+      : await this.itemService.setMyPublication(userId, id, true);
     return { success: true, data: item, item };
   }
 
@@ -281,9 +281,9 @@ export class ItemCurationController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
-    const item = await this.itemService.setMyPublication(userId, id, false, {
-      projectId,
-    });
+    const item = projectId
+      ? await this.itemService.setMyPublication(userId, id, false, { projectId })
+      : await this.itemService.setMyPublication(userId, id, false);
     return { success: true, data: item, item };
   }
 }

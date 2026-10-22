@@ -65,6 +65,19 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
           references: [],
         },
       }),
+      findItemMetadataByProviders: jest.fn().mockResolvedValue({
+        id: 'meta-1',
+        sourceProvider: 'pdf_fulltext',
+        rawPayload: {
+          title: 'Attention Is All You Need',
+          abstract: 'We propose the Transformer...',
+          sections: [{ title: 'Introduction', text: 'Recurrent models...' }],
+          figures: [],
+          tables: [],
+          formulas: [],
+          references: [],
+        },
+      }),
       count: jest.fn().mockResolvedValue(1),
       findMany: jest.fn().mockResolvedValue([mockDbItem]),
     } as unknown as jest.Mocked<QueryRepository>;
@@ -92,6 +105,11 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
           appendChange: jest.fn().mockResolvedValue(BigInt(1)),
           publishOutbox: jest.fn().mockResolvedValue(undefined),
           recordTombstone: jest.fn().mockResolvedValue(undefined),
+          removeTombstone: jest.fn().mockResolvedValue(1),
+          removeTombstonesBatch: jest.fn().mockResolvedValue(1),
+          appendChangesBatch: jest.fn().mockResolvedValue(1),
+          recordTombstonesBatch: jest.fn().mockResolvedValue(1),
+          publishOutboxBatch: jest.fn().mockResolvedValue([]),
         };
         return callback({} as any, helpers as any);
       }),
@@ -208,9 +226,9 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       expect(cache.get).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),
       );
-      expect(queryRepo.findItemMetadata).toHaveBeenCalledWith(
+      expect(queryRepo.findItemMetadataByProviders).toHaveBeenCalledWith(
         mockItemId,
-        'pdf_fulltext',
+        expect.arrayContaining(['pdf_fulltext']),
       );
       expect(cache.set).toHaveBeenCalledWith(
         LIBRARY_REDIS_KEYS.itemFulltext(mockItemId),

@@ -179,7 +179,13 @@ export class OutboxWorker
       await Promise.all(effectiveHandlers.map((h) => h.handle(event)));
       const durationMs = Math.round(performance.now() - start);
 
-      await this.repo.markPublished(eventId, this.workerId);
+      const published = await this.repo.markPublished(eventId, this.workerId);
+      if (!published) {
+        this.logger.warn(
+          `[OutboxWorker] Fencing token check aborted duplicate publication for event ${eventId} (workerId: ${this.workerId}). Another worker has claimed or committed it.`,
+        );
+        return false;
+      }
       this.metricsService?.recordOutboxDispatch(durationMs, true);
       return true;
     } catch (err: unknown) {
@@ -330,15 +336,11 @@ export class OutboxWorker
     let purgedTombstones = 0;
 
     try {
-      if (typeof this.repo.purgeProcessedOutboxEvents === 'function') {
-        const outboxRes = await this.repo.purgeProcessedOutboxEvents(3, 30, 1000);
-        purgedPublished = outboxRes.purgedPublished;
-        purgedFailed = outboxRes.purgedFailed;
-      }
-      if (
-        this.changeLogRepo &&
-        typeof this.changeLogRepo.compactAndPurgeChangeLog === 'function'
-      ) {
+      const outboxRes = await this.repo.purgeProcessedOutboxEvents(3, 30, 1000);
+      purgedPublished = outboxRes.purgedPublished;
+      purgedFailed = outboxRes.purgedFailed;
+
+      if (this.changeLogRepo) {
         const changeLogRes =
           await this.changeLogRepo.compactAndPurgeChangeLog(30, 1000);
         purgedChanges = changeLogRes.purgedChanges;

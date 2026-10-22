@@ -72,6 +72,11 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
           ) => Promise<T>,
         ) => {
           const helpers: TransactionHelpers = {
+            appendChangesBatch: jest.fn().mockResolvedValue(1),
+            recordTombstonesBatch: jest.fn().mockResolvedValue(1),
+            removeTombstone: jest.fn().mockResolvedValue(1),
+            removeTombstonesBatch: jest.fn().mockResolvedValue(1),
+            publishOutboxBatch: jest.fn().mockResolvedValue([]),
             appendChange: jest.fn(async (scope, change) => {
               changes.push({ scope, change });
             }) as any,

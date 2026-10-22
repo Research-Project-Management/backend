@@ -391,7 +391,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
               appendChange: jest.fn(async () => undefined) as any,
               publishOutbox: jest.fn(async () => undefined) as any,
               recordTombstone: jest.fn(async () => undefined) as any,
-            };
+            } as any;
             return fn(
               mockTxClient as unknown as Prisma.TransactionClient,
               helpers,
@@ -633,7 +633,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
               appendChange: jest.fn(async () => undefined) as any,
               publishOutbox: jest.fn(async () => undefined) as any,
               recordTombstone: jest.fn(async () => undefined) as any,
-            }),
+            } as any),
         ),
       } as unknown as TransactionService;
 
@@ -931,7 +931,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
               appendChange: jest.fn(async () => undefined) as any,
               publishOutbox: jest.fn(async () => undefined) as any,
               recordTombstone: jest.fn(async () => undefined) as any,
-            }),
+            } as any),
         ),
       } as unknown as TransactionService;
 
@@ -1107,9 +1107,9 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
             ) =>
               fn({} as unknown as Prisma.TransactionClient, {
                 appendChange: jest.fn(async () => undefined) as any,
-                publishOutbox: jest.fn(async () => undefined) as any,
-                recordTombstone: jest.fn(async () => undefined) as any,
-              }),
+              publishOutbox: jest.fn(async () => undefined) as any,
+              recordTombstone: jest.fn(async () => undefined) as any,
+            } as any),
           ),
         } as unknown as TransactionService,
         mockItemQueryService,

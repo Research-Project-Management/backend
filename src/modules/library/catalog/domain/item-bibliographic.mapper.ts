@@ -545,7 +545,7 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
     const canonicalVal =
       (it[lowerKey] as string) || (it[upperKey] as string) || '';
     it[lowerKey] = canonicalVal;
-    delete it[upperKey];
+    it[upperKey] = canonicalVal;
   }
 
   const canonicalArxivId =
@@ -568,7 +568,7 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
       ? `arXiv:${cleanArxiv.replace(/v\d+$/i, '')}`
       : cleanArxiv
     : it.archiveId || it.archiveID || '';
-  delete it.archiveID;
+  it.archiveID = it.archiveID || it.archiveId;
 
   if (it.extraFields && typeof it.extraFields === 'object') {
     for (const fieldKey of TYPE_SPECIFIC_EXTRA_FIELDS) {

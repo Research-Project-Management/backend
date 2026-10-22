@@ -528,10 +528,7 @@ export class IngestionService {
     let expiredPreviewsDeleted = 0;
     try {
       const now = new Date();
-      if (
-        typeof this.repo.findExpiredCapturePreviews === 'function' &&
-        typeof this.storagePort?.deleteFile === 'function'
-      ) {
+      if (this.storagePort?.deleteFile) {
         const expiredList = await this.repo.findExpiredCapturePreviews(now);
         for (const p of expiredList) {
           if (p.claimedAt) continue;
@@ -568,10 +565,7 @@ export class IngestionService {
           }
         }
       }
-      if (typeof this.repo.deleteExpiredCapturePreviews === 'function') {
-        expiredPreviewsDeleted =
-          await this.repo.deleteExpiredCapturePreviews(now);
-      }
+      expiredPreviewsDeleted = await this.repo.deleteExpiredCapturePreviews(now);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
@@ -581,10 +575,8 @@ export class IngestionService {
 
     let purgedRuns = 0;
     try {
-      if (typeof this.repo.purgeOldRuns === 'function') {
-        const retentionDays = options?.retentionDays ?? 7;
-        purgedRuns = await this.repo.purgeOldRuns(retentionDays);
-      }
+      const retentionDays = options?.retentionDays ?? 7;
+      purgedRuns = await this.repo.purgeOldRuns(retentionDays);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(

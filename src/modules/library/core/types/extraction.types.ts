@@ -71,6 +71,7 @@ export interface CreateAttachmentInput {
   size?: number | bigint;
   fileHash?: string;
   fileId?: string;
+  storageKey?: string;
   linkMode?: LinkMode;
   attachmentType?: AttachmentType;
   isPrimary?: boolean;

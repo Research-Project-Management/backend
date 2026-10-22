@@ -84,6 +84,19 @@ export class EnrichStage implements IWorkflowStage<
       //    metadata populates canonical title, authors, venue, volume, issue, pages, abstract.
       // 2. For non-FILE candidates (e.g. already-resolved PROVIDER or complete RECORD),
       //    only skip enrichment when title + authors + venue/year are already complete.
+      // Strangler Fig / Trusted In-Process Engine:
+      // If candidate is a TrustedPaper (or marked self-sufficient), skip external remote API resolution
+      if (
+        candidate.sourceName === 'TrustedPaper' ||
+        candidate.normalizedMetadata?.isSelfSufficient === true ||
+        candidate.normalizedMetadata?.extraFields?.isSelfSufficient === true
+      ) {
+        this.logger.debug(
+          `[EnrichStage] Candidate ${candidate.candidateId} (source=${candidate.sourceName}) is self-sufficient from trusted in-process extraction. Skipping external API enrichment.`,
+        );
+        continue;
+      }
+
       const isAlreadyComplete =
         candidate.sourceKind !== 'FILE' &&
         hasTitle &&

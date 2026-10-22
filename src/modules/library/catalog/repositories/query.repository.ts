@@ -85,6 +85,10 @@ export class QueryRepository {
         itemTags: {
           include: { tag: true },
         },
+        states: {
+          where: { userId },
+          take: 1,
+        },
         ...(includeContent
           ? {
               notesList: {
@@ -164,6 +168,10 @@ export class QueryRepository {
         },
         itemTags: {
           include: { tag: true },
+        },
+        states: {
+          where: { userId },
+          take: 1,
         },
         ...(includeContent
           ? {
@@ -389,9 +397,13 @@ export class QueryRepository {
       recursive?: boolean;
       projectId?: string;
     },
-    client: Prisma.TransactionClient | PrismaService,
+    client?: Prisma.TransactionClient | PrismaService,
   ): Promise<string[] | undefined> {
-    return this.listRepo.resolveTargetCollectionIds(userId, options, client);
+    return this.listRepo.resolveTargetCollectionIds(
+      userId,
+      options,
+      client ?? this.prisma,
+    );
   }
 
   async findMany(

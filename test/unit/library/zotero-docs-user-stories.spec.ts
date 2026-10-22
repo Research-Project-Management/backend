@@ -537,6 +537,9 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
     it('ItemService executes bulkTrash -> bulkRestore -> bulkPurge lifecycle cleanly', async () => {
       const mockQueryRepo = {
         findById: jest.fn().mockResolvedValue({ id: 'item-1', title: 'Test' }),
+        findByIds: jest.fn().mockImplementation(async (_u, ids) =>
+          ids.map((id: string) => ({ id, title: `Test ${id}`, version: 3 })),
+        ),
       };
       const mockCommandRepo = {
         softDelete: jest.fn().mockResolvedValue({
@@ -544,6 +547,10 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
           version: 2,
           deletedAt: new Date(),
         }),
+        softDeleteMany: jest.fn().mockImplementation(async (_u, itemIds) => ({
+          succeededIds: itemIds,
+          failedIds: [],
+        })),
         delete: jest.fn().mockResolvedValue({ id: 'item-1', version: 2 }),
         restore: jest.fn().mockResolvedValue({
           id: 'item-1',
@@ -552,7 +559,22 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
           version: 3,
           metadata: {},
         }),
+        restoreMany: jest.fn().mockImplementation(async (_u, itemIds) => ({
+          succeededIds: itemIds,
+          failedIds: [],
+          restoredItems: itemIds.map((id: string) => ({
+            id,
+            version: 3,
+            projectId: null,
+          })),
+        })),
         purge: jest.fn().mockResolvedValue(true),
+        purgeMany: jest.fn().mockImplementation(async (_u, itemIds) => ({
+          succeededIds: itemIds,
+          failedIds: [],
+          fileIdsToDelete: [],
+          storagePaths: [],
+        })),
       };
       const mockLibraryTx = {
         executeInTransaction: jest.fn().mockImplementation(async (fn) =>
@@ -560,8 +582,13 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
             {},
             {
               appendChange: jest.fn().mockResolvedValue(undefined),
+              appendChangesBatch: jest.fn().mockResolvedValue(2),
               publishOutbox: jest.fn().mockResolvedValue(undefined),
+              publishOutboxBatch: jest.fn().mockResolvedValue(['ev-1', 'ev-2']),
               recordTombstone: jest.fn().mockResolvedValue(undefined),
+              recordTombstonesBatch: jest.fn().mockResolvedValue(2),
+              removeTombstone: jest.fn().mockResolvedValue(1),
+              removeTombstonesBatch: jest.fn().mockResolvedValue(2),
             },
           ),
         ),
@@ -599,7 +626,7 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
       ]);
       expect(purgeRes.purgedCount).toBe(2);
       expect(purgeRes.succeededIds).toEqual(['item-1', 'item-2']);
-      expect(mockCommandRepo.purge).toHaveBeenCalledTimes(2);
+      expect(mockCommandRepo.purgeMany).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -18,12 +18,13 @@ describe('Library Security Hardening & Performance Optimization', () => {
       mockQueryRepo = {
         findById: jest.fn(),
         findItemMetadata: jest.fn(),
+        findItemMetadataByProviders: jest.fn(),
         count: jest.fn(),
         findMany: jest.fn(),
       };
       mockCache = {
         get: jest.fn(),
-        set: jest.fn(),
+        set: jest.fn().mockResolvedValue(undefined),
         del: jest.fn(),
         delPattern: jest.fn(),
       };
@@ -43,7 +44,8 @@ describe('Library Security Hardening & Performance Optimization', () => {
         title: 'Confidential Research Findings',
         abstract: 'Secret data',
       });
-      mockQueryRepo.findItemMetadata.mockResolvedValueOnce({
+      mockQueryRepo.findItemMetadataByProviders.mockResolvedValueOnce({
+        sourceProvider: 'pdf_fulltext',
         rawPayload: {
           title: 'Confidential Research Findings',
           sections: [{ title: 'Section 1', text: 'Top secret findings' }],
@@ -125,6 +127,78 @@ describe('Library Security Hardening & Performance Optimization', () => {
       };
 
       queryService = new ItemQueryService(mockQueryRepo, undefined);
+    });
+
+    it('should prevent User A cached reading state from poisoning User B on a shared project item', async () => {
+      const sharedItemId = '11111111-1111-1111-1111-111111111111';
+      const mockCacheService: any = {
+        get: jest.fn().mockResolvedValueOnce({
+          id: sharedItemId,
+          userId: 'user-a',
+          projectId: 'proj-shared-1',
+          title: 'Shared Project Paper',
+          itemType: 'journalArticle',
+          version: 1,
+          deletedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          contributors: [],
+          collectionItems: [],
+          itemTags: [],
+          attachments: [],
+          states: [
+            {
+              userId: 'user-a',
+              readStatus: 'finished',
+              rating: 5,
+              lastPageRead: 42,
+            },
+          ],
+        }),
+        set: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const sharedQueryService = new ItemQueryService(
+        mockQueryRepo,
+        mockCacheService,
+      );
+      mockQueryRepo.findById = jest.fn().mockResolvedValueOnce({
+        id: sharedItemId,
+        userId: 'user-a',
+        projectId: 'proj-shared-1',
+        title: 'Shared Project Paper',
+        itemType: 'journalArticle',
+        version: 1,
+        deletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        contributors: [],
+        collectionItems: [],
+        itemTags: [],
+        attachments: [],
+        states: [
+          {
+            userId: 'user-b',
+            readStatus: 'unread',
+            rating: 1,
+            lastPageRead: 1,
+          },
+        ],
+      });
+
+      const resultForUserB = await sharedQueryService.getItem(
+        'user-b',
+        sharedItemId,
+        'proj-shared-1',
+      );
+
+      expect(resultForUserB!.readStatus).toBe('unread');
+      expect(resultForUserB!.rating).toBe(1);
+      expect(mockQueryRepo.findById).toHaveBeenCalledWith(
+        'user-b',
+        sharedItemId,
+        'proj-shared-1',
+      );
     });
 
     it('should execute COUNT(*) query on initial page (when cursor is undefined)', async () => {

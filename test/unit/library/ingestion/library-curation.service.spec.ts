@@ -3,9 +3,11 @@ import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma } from '@prisma/client';
 import {
   DuplicateService,
-  DuplicateDetectorService,
-  DuplicateMergerService,
+
+
 } from '@/modules/library/ingestion/services/duplicate.service';
+import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
+import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { PrismaService } from '@/core';
 import {
   CATALOG_FACADE,
@@ -60,7 +62,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     let mockBibliographyFacade: jest.Mocked<ICatalogFacade>;
     let mockReaderFacade: jest.Mocked<IExtractionFacade>;
     let mockTx: any;
-    let mockHelpers: jest.Mocked<TransactionHelpers>;
+    let mockHelpers: any;
     let mockIngestionRepo: any;
 
     beforeEach(async () => {
@@ -140,8 +142,8 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           DuplicateService,
-          DuplicateDetectorService,
-          DuplicateMergerService,
+        
+        
           { provide: PrismaService, useValue: mockPrisma },
           { provide: TransactionService, useValue: mockLibraryTx },
           { provide: CATALOG_FACADE, useValue: mockBibliographyFacade },

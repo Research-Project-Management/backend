@@ -100,19 +100,11 @@ export class ItemFulltextService {
         this.storagePort
       ) {
         try {
-          const port = this.storagePort as IStoragePort & {
-            downloadFile?: (fileId: string) => Promise<Buffer | { buffer?: Buffer }>;
-          };
-          let rawDownloaded: unknown;
-          if (typeof port.downloadFile === 'function') {
-            rawDownloaded = await port.downloadFile(payload.fileId);
-          } else if (typeof port.readOwnedFile === 'function') {
-            rawDownloaded = await port.readOwnedFile({
-              fileId: payload.fileId,
-              userId: item.userId,
-              projectId: item.projectId ?? undefined,
-            });
-          }
+          const rawDownloaded = await this.storagePort.readOwnedFile({
+            fileId: payload.fileId,
+            userId: item.userId,
+            projectId: item.projectId ?? undefined,
+          });
 
           const compressedBuffer = Buffer.isBuffer(rawDownloaded)
             ? rawDownloaded

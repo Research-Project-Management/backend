@@ -31,6 +31,7 @@ import {
   buildCommandCreateInput,
   buildCommandUpdateInput,
 } from '@/modules/library/catalog/domain/command-payload.builder';
+import { CommandBulkOperations } from './command-bulk.operations';
 
 export {
   isUuid,
@@ -238,6 +239,7 @@ export class CommandRepository {
         : { userId, projectId: null }),
     };
 
+    const deletedDate = new Date();
     if (expectedVersion !== undefined) {
       const result = await client.item.updateMany({
         where: {
@@ -245,7 +247,7 @@ export class CommandRepository {
           version: expectedVersion,
         },
         data: {
-          deletedAt: new Date(),
+          deletedAt: deletedDate,
           version: { increment: 1 },
         },
       });
@@ -265,16 +267,27 @@ export class CommandRepository {
         }
         return false;
       }
+      await client.note?.updateMany?.({
+        where: { itemId: id, deletedAt: null },
+        data: { deletedAt: deletedDate },
+      });
       return true;
     }
 
     const result = await client.item.updateMany({
       where: scopeWhere,
       data: {
-        deletedAt: new Date(),
+        deletedAt: deletedDate,
         version: { increment: 1 },
       },
     });
+
+    if (result.count > 0) {
+      await client.note?.updateMany?.({
+        where: { itemId: id, deletedAt: null },
+        data: { deletedAt: deletedDate },
+      });
+    }
 
     return result.count > 0;
   }
@@ -359,7 +372,37 @@ export class CommandRepository {
       }
     }
 
+    // Cascade un-delete notes
+    await client.note?.updateMany?.({
+      where: { itemId: id, deletedAt: { not: null } },
+      data: { deletedAt: null },
+    });
+
+    // Cascade un-delete attachments
+    await client.attachment.updateMany({
+      where: { itemId: id, deletedAt: { not: null } },
+      data: { deletedAt: null },
+    });
+
+    // Cascade un-delete annotations for those attachments
+    const itemAttachments = await client.attachment.findMany({
+      where: { itemId: id },
+      select: { id: true },
+    });
+    if (itemAttachments.length > 0) {
+      await client.annotation.updateMany({
+        where: {
+          attachmentId: { in: itemAttachments.map((a) => a.id) },
+          deletedAt: { not: null },
+        },
+        data: { deletedAt: null },
+      });
+    }
+
     const activeNoteCount = await client.note.count({
+      where: { itemId: id, deletedAt: null },
+    });
+    const activeAttCount = await client.attachment.count({
       where: { itemId: id, deletedAt: null },
     });
 
@@ -368,6 +411,8 @@ export class CommandRepository {
       data: {
         deletedAt: null,
         noteCount: activeNoteCount,
+        attachmentCount: activeAttCount,
+        hasFile: activeAttCount > 0,
         ...(expectedVersion !== undefined ? {} : { version: { increment: 1 } }),
       },
       include: {
@@ -384,53 +429,7 @@ export class CommandRepository {
     client: Prisma.TransactionClient | PrismaService,
     itemIds: string[],
   ): Promise<string[]> {
-    if (itemIds.length === 0) return [];
-    const paths = new Set<string>();
-
-    const attachments = await client.attachment.findMany({
-      where: { itemId: { in: itemIds } },
-      select: { id: true, fileId: true, url: true },
-    });
-    const attachmentIds: string[] = [];
-    for (const att of attachments) {
-      if (att.id) attachmentIds.push(att.id);
-      const fileId = att.fileId || extractFileIdFromUrl(att.url);
-      if (fileId) paths.add(fileId);
-    }
-
-    if (
-      attachmentIds.length > 0 &&
-      typeof client.attachmentRevision?.findMany === 'function'
-    ) {
-      const revisions = await client.attachmentRevision.findMany({
-        where: { attachmentId: { in: attachmentIds } },
-        select: { fileId: true, url: true },
-      });
-      for (const rev of revisions) {
-        const fileId = rev.fileId || extractFileIdFromUrl(rev.url);
-        if (fileId) paths.add(fileId);
-      }
-    }
-
-    if (typeof client.itemMetadata?.findMany === 'function') {
-      const metadataRecords = await client.itemMetadata.findMany({
-        where: { itemId: { in: itemIds } },
-        select: { rawPayload: true },
-      });
-      for (const rec of metadataRecords) {
-        const raw = rec.rawPayload as
-          | (Record<string, unknown> & {
-              isOffloaded?: boolean;
-              fileId?: string;
-            })
-          | null;
-        if (raw?.isOffloaded && typeof raw.fileId === 'string' && raw.fileId) {
-          paths.add(raw.fileId);
-        }
-      }
-    }
-
-    return Array.from(paths);
+    return CommandBulkOperations.collectStoragePathsForItems(client, itemIds);
   }
 
   async purge(
@@ -482,50 +481,12 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
     projectId?: string,
   ): Promise<{ succeededIds: string[]; failedIds: string[] }> {
-    const validUserId = isUuid(userId);
-    const validIds = Array.from(
-      new Set(itemIds.filter((id) => isUuid(id))),
+    return CommandBulkOperations.softDeleteMany(
+      this.getClient(tx),
+      userId,
+      itemIds,
+      projectId,
     );
-    if (!validUserId || validIds.length === 0) {
-      return { succeededIds: [], failedIds: [...itemIds] };
-    }
-
-    const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeFilter: Prisma.ItemWhereInput =
-      validProjectId && isUuid(validProjectId)
-        ? { projectId: validProjectId }
-        : { userId, projectId: null };
-
-    const existingItems = await client.item.findMany({
-      where: {
-        id: { in: validIds },
-        deletedAt: null,
-        ...scopeFilter,
-      },
-      select: { id: true },
-    });
-
-    const foundSet = new Set(existingItems.map((it) => it.id));
-    const succeededIds = itemIds.filter((id, idx) => foundSet.has(id) && itemIds.indexOf(id) === idx);
-    const failedIds = itemIds.filter((id, idx) => !foundSet.has(id) || itemIds.indexOf(id) !== idx);
-
-    if (succeededIds.length > 0) {
-      const deletedAt = new Date();
-      await client.item.updateMany({
-        where: {
-          id: { in: succeededIds },
-          deletedAt: null,
-          ...scopeFilter,
-        },
-        data: {
-          deletedAt,
-          version: { increment: 1 },
-        },
-      });
-    }
-
-    return { succeededIds, failedIds };
   }
 
   async restoreMany(
@@ -538,79 +499,12 @@ export class CommandRepository {
     succeededIds: string[];
     failedIds: string[];
   }> {
-    const validUserId = isUuid(userId);
-    const validIds = Array.from(
-      new Set(itemIds.filter((id) => isUuid(id))),
+    return CommandBulkOperations.restoreMany(
+      this.getClient(tx),
+      userId,
+      itemIds,
+      projectId,
     );
-    if (!validUserId || validIds.length === 0) {
-      return { restoredItems: [], succeededIds: [], failedIds: [...itemIds] };
-    }
-
-    const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeFilter: Prisma.ItemWhereInput = validProjectId
-      ? { projectId: validProjectId }
-      : { userId, projectId: null };
-
-    const existingItems = await client.item.findMany({
-      where: {
-        id: { in: validIds },
-        deletedAt: { not: null },
-        ...scopeFilter,
-      },
-      select: { id: true, version: true, projectId: true, metadata: true },
-    });
-
-    const restorableMap = new Map<
-      string,
-      { id: string; version: number; projectId: string | null }
-    >();
-    for (const item of existingItems) {
-      const metadataObj =
-        item.metadata &&
-        typeof item.metadata === 'object' &&
-        !Array.isArray(item.metadata)
-          ? (item.metadata as Record<string, unknown>)
-          : {};
-      if (
-        typeof metadataObj.mergedIntoId === 'string' &&
-        metadataObj.mergedIntoId
-      ) {
-        continue;
-      }
-      restorableMap.set(item.id, {
-        id: item.id,
-        version: item.version + 1,
-        projectId: item.projectId,
-      });
-    }
-
-    const succeededIds = itemIds.filter(
-      (id, idx) => restorableMap.has(id) && itemIds.indexOf(id) === idx,
-    );
-    const failedIds = itemIds.filter(
-      (id, idx) => !restorableMap.has(id) || itemIds.indexOf(id) !== idx,
-    );
-
-    if (succeededIds.length > 0) {
-      await client.item.updateMany({
-        where: {
-          id: { in: succeededIds },
-          deletedAt: { not: null },
-          ...scopeFilter,
-        },
-        data: {
-          deletedAt: null,
-          version: { increment: 1 },
-        },
-      });
-    }
-
-    const restoredItems = succeededIds
-      .map((id) => restorableMap.get(id)!)
-      .filter(Boolean);
-
-    return { restoredItems, succeededIds, failedIds };
   }
 
   async purgeMany(
@@ -624,63 +518,12 @@ export class CommandRepository {
     fileIdsToDelete: string[];
     storagePaths: string[];
   }> {
-    const validUserId = isUuid(userId);
-    const validIds = Array.from(
-      new Set(itemIds.filter((id) => isUuid(id))),
+    return CommandBulkOperations.purgeMany(
+      this.getClient(tx),
+      userId,
+      itemIds,
+      projectId,
     );
-    if (!validUserId || validIds.length === 0) {
-      return {
-        succeededIds: [],
-        failedIds: [...itemIds],
-        fileIdsToDelete: [],
-        storagePaths: [],
-      };
-    }
-
-    const client = this.getClient(tx);
-    const validProjectId = normalizeProjectScopeId(projectId);
-    const scopeFilter: Prisma.ItemWhereInput = validProjectId
-      ? { projectId: validProjectId }
-      : { userId, projectId: null };
-
-    const existingItems = await client.item.findMany({
-      where: {
-        id: { in: validIds },
-        deletedAt: { not: null },
-        ...scopeFilter,
-      },
-      select: { id: true },
-    });
-
-    const purgeableSet = new Set(existingItems.map((it) => it.id));
-    const succeededIds = itemIds.filter(
-      (id, idx) => purgeableSet.has(id) && itemIds.indexOf(id) === idx,
-    );
-    const failedIds = itemIds.filter(
-      (id, idx) => !purgeableSet.has(id) || itemIds.indexOf(id) !== idx,
-    );
-
-    let storagePaths: string[] = [];
-    if (succeededIds.length > 0) {
-      storagePaths = await this.collectStoragePathsForItems(
-        client,
-        succeededIds,
-      );
-
-      await client.item.deleteMany({
-        where: {
-          id: { in: succeededIds },
-          ...scopeFilter,
-        },
-      });
-    }
-
-    return {
-      succeededIds,
-      failedIds,
-      fileIdsToDelete: storagePaths,
-      storagePaths,
-    };
   }
 
   async purgeExpiredTrash(
@@ -693,68 +536,12 @@ export class CommandRepository {
     purgedCollections: number;
     storagePaths: string[];
   }> {
-    const client = this.getClient(tx);
-    const cutoff = new Date(Date.now() - retentionDays * 86400 * 1000);
-
-    const expiredItems = await client.item.findMany({
-      where: { deletedAt: { lt: cutoff } },
-      select: { id: true },
-      orderBy: { deletedAt: 'asc' },
-      take: limit,
-    });
-    const expiredItemIds = expiredItems.map((it) => it.id);
-
-    let storagePaths: string[] = [];
-    let purgedItems = 0;
-    if (expiredItemIds.length > 0) {
-      storagePaths = await this.collectStoragePathsForItems(
-        client,
-        expiredItemIds,
-      );
-      const delItems = await client.item.deleteMany({
-        where: { id: { in: expiredItemIds } },
-      });
-      purgedItems = delItems.count;
-    }
-
-    const expiredNotes = await client.note.findMany({
-      where: { deletedAt: { lt: cutoff } },
-      select: { id: true },
-      orderBy: { deletedAt: 'asc' },
-      take: limit,
-    });
-    let purgedNotes = 0;
-    if (expiredNotes.length > 0) {
-      const delNotes = await client.note.deleteMany({
-        where: { id: { in: expiredNotes.map((n) => n.id) } },
-      });
-      purgedNotes = delNotes.count;
-    }
-
-    const expiredCollections = await client.collection.findMany({
-      where: { deletedAt: { lt: cutoff } },
-      select: { id: true },
-      orderBy: { deletedAt: 'asc' },
-      take: limit,
-    });
-    let purgedCollections = 0;
-    if (expiredCollections.length > 0) {
-      const delCollections = await client.collection.deleteMany({
-        where: { id: { in: expiredCollections.map((c) => c.id) } },
-      });
-      purgedCollections = delCollections.count;
-    }
-
-    if (storagePaths.length > 0) {
-      await this.deleteStorageFilesBatch(storagePaths);
-    }
-
-    return {
-      purgedItems,
-      purgedNotes,
-      purgedCollections,
-      storagePaths,
-    };
+    return CommandBulkOperations.purgeExpiredTrash(
+      this.getClient(tx),
+      retentionDays,
+      limit,
+      this.deleteStorageFilesBatch.bind(this),
+    );
   }
 
   async deleteStorageFilesBatch(fileIds: string[]): Promise<void> {

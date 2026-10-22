@@ -49,8 +49,12 @@ export * from './ports/ingestion.port';
 export * from './ports/unit-of-work.port';
 export * from './ports/outbox.port';
 export * from './ports/idempotent-consumer.port';
+export { TransactionService } from '../sync/services/transaction.service';
 
 // Resilience
 export * from './resilience/circuit-breaker';
 export * from './resilience/rate-limiter';
 export * from './resilience/resilience-registry.service';
+
+// Streaming & OS Buffer Protection
+export * from './utils/stream-buffer.util';

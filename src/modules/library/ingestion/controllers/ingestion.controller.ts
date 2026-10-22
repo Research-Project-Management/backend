@@ -376,9 +376,9 @@ export class IngestionController {
   @Post('fetch-feed')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
-    summary: 'Fetch and parse an external RSS/Atom journal or arXiv feed',
+    summary: 'Fetch and parse an external RSS/Atom journal or arXiv feed with DB caching & ETag support',
   })
-  async fetchFeed(@Body() body: { url: string }) {
-    return this.urlCaptureService.fetchAcademicFeed(body?.url);
+  async fetchFeed(@Body() body: { url: string; forceRefresh?: boolean }) {
+    return this.urlCaptureService.fetchAcademicFeed(body?.url, body?.forceRefresh);
   }
 }

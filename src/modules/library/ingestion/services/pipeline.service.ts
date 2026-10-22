@@ -160,10 +160,7 @@ export class PipelineService {
 
     try {
       const now = new Date();
-      if (
-        typeof this.repo.findExpiredCapturePreviews === 'function' &&
-        typeof this.storagePort?.deleteFile === 'function'
-      ) {
+      if (this.storagePort?.deleteFile) {
         const expiredPreviews = await this.repo.findExpiredCapturePreviews(now);
         for (const p of expiredPreviews) {
           if (p.claimedAt) continue;
@@ -196,12 +193,8 @@ export class PipelineService {
           }
         }
       }
-      if (typeof this.repo.deleteExpiredCapturePreviews === 'function') {
-        await this.repo.deleteExpiredCapturePreviews(now).catch(() => undefined);
-      }
-      if (typeof this.repo.purgeOldRuns === 'function') {
-        await this.repo.purgeOldRuns(7).catch(() => undefined);
-      }
+      await this.repo.deleteExpiredCapturePreviews(now).catch(() => undefined);
+      await this.repo.purgeOldRuns(7).catch(() => undefined);
     } catch {
       // Non-critical background GC
     }

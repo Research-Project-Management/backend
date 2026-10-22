@@ -18,6 +18,7 @@ import {
   normalizeArxivId,
   isBotChallengePage,
   deriveDoiFromPublisherUrl,
+  readSafeResponseBuffer,
 } from '@/modules/library/core';
 import {
   PublisherDomExtractor,
@@ -250,8 +251,7 @@ export class UrlMetadataScraperService {
 
     if (isPdfContent) {
       try {
-        const arrayBuf = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuf);
+        const buffer = await readSafeResponseBuffer(response);
         const pdfProcessed = await this.processPdfBuffer(
           buffer,
           canonicalUrl,

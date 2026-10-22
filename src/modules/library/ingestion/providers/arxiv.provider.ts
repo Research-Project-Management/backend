@@ -65,10 +65,12 @@ export class ArxivProvider implements MetadataProvider {
       Accept: 'application/atom+xml, application/xml, text/xml',
     };
 
-    const { response } = await this.httpClient.request(url, {
-      headers,
-      signal,
-    });
+    let response: Response;
+    if (this.httpClient) {
+      ({ response } = await this.httpClient.request(url, { headers, signal }));
+    } else {
+      response = await fetch(url, { headers, signal });
+    }
 
     if (response.status === 404) return null;
 

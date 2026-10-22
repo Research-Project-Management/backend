@@ -1,5 +1,7 @@
+import { disambiguateCitationKey } from './citation-key.engine';
 import { Prisma, TagType } from '@prisma/client';
 import { PrismaService } from '@/core';
+import { generateCitationKey } from '@/modules/library/core/domain/identifier.domain';
 import {
   sanitizeItemTitle,
   cleanAbstractText,
@@ -180,6 +182,15 @@ export function resolveCanonicalCommandFields(
     extraKv['bibtex'] ??
     extraKv['tex.ids']?.split(/[,\s]+/)[0];
 
+  const resolvedCitationKey =
+    rawCitationKey?.trim() ||
+    generateCitationKey({
+      title: rawTitle,
+      year: extractedYear ?? (data.year !== undefined ? Number(data.year) : null),
+      creators: Array.isArray(data.creators) ? (data.creators as any) : null,
+      authors: Array.isArray(data.authors) ? (data.authors as any) : null,
+    });
+
   const candidateType = toNullableStr(firstDefined(['type']))?.trim() || '';
   const rawTypeField =
     candidateType && candidateType.toLowerCase() !== targetItemType.toLowerCase()
@@ -223,7 +234,7 @@ export function resolveCanonicalCommandFields(
     rawEdition,
     rawAccessDate,
     rawUrl,
-    rawCitationKey,
+    rawCitationKey: resolvedCitationKey,
     rawTypeField,
   };
 }
@@ -374,10 +385,18 @@ export async function buildCommandCreateInput(
     null;
   const resolvedFileId = rawFileId && isUuid(rawFileId) ? rawFileId : null;
 
+  const effectiveProjectId =
+    (projectId && projectId !== 'user' && isUuid(projectId)
+      ? projectId
+      : undefined) ||
+    (data.projectId && isUuid(data.projectId) ? data.projectId : null);
+
   const notes = prepareNotesToCreate(
     data.notes,
     userId,
     data.uploadedById || userId,
+    undefined,
+    effectiveProjectId,
   );
   const attachmentsToCreate = prepareAttachmentsToCreate(
     data.attachments,
@@ -391,12 +410,6 @@ export async function buildCommandCreateInput(
       Boolean(att.url && typeof att.url === 'string' && att.url.length > 0) ||
       att.attachmentType === 'primary_pdf',
   );
-
-  const effectiveProjectId =
-    (projectId && projectId !== 'user' && isUuid(projectId)
-      ? projectId
-      : undefined) ||
-    (data.projectId && isUuid(data.projectId) ? data.projectId : null);
 
   const ids = normalizeItemIdentifiers(data);
   const rawTagList = [
@@ -468,10 +481,16 @@ export async function buildCommandCreateInput(
     itemType: resolvedItemType,
     ...(resolvedPubTitle ? { publicationTitle: resolvedPubTitle } : {}),
     year: resolvedCreateYear,
-    doi: ids.doi ?? '',
-    abstract: canonical.rawAbstract ?? '',
-    url: (canonical.rawUrl ?? '').trim(),
-    citationKey: (canonical.rawCitationKey ?? '').trim(),
+    doi: ids.doi || null,
+    abstract: canonical.rawAbstract || null,
+    url: (canonical.rawUrl ?? '').trim() || null,
+    citationKey: (canonical.rawCitationKey ?? '').trim()
+      ? await disambiguateCitationKey(
+          client,
+          canonical.rawCitationKey!.trim(),
+          { userId, projectId: effectiveProjectId },
+        )
+      : null,
     metadata: metadataPayload as Prisma.InputJsonValue,
     hasFile,
     attachmentCount: attachmentsToCreate.length,
@@ -538,11 +557,17 @@ export function buildCommandUpdateInput(
       : existing.abstract;
 
   const existingNoteList = existing.notesList || existing.notes;
+  const existingProjectId =
+    (existing as Record<string, unknown>).projectId &&
+    typeof (existing as Record<string, unknown>).projectId === 'string'
+      ? ((existing as Record<string, unknown>).projectId as string)
+      : null;
   const newNotesToCreate = prepareNotesToCreate(
     data.notes,
     userId,
     data.userId || (existing.uploadedById as string | undefined) || userId,
     existingNoteList,
+    existingProjectId,
   );
   const newAttachmentsToCreate =
     Array.isArray(data.attachments) && data.attachments.length > 0
@@ -737,3 +762,5 @@ export function calculateIdentifierChanges(
   }
   return changes;
 }
+
+export { disambiguateCitationKey } from './citation-key.engine';

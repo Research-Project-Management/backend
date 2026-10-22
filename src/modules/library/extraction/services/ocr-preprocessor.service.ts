@@ -1,6 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import sharp from 'sharp';
+import os from 'os';
 import { OcrPreprocessOptions } from '@/modules/library/extraction/types/ocr.types';
+
+// Configure OS-level libvips resource limits and hardware acceleration
+try {
+  sharp.cache({ memory: 64, items: 250, files: 20 });
+  sharp.simd(true);
+  const safeConcurrency = Math.max(1, Math.min(4, (os.cpus()?.length || 2) - 1));
+  sharp.concurrency(safeConcurrency);
+} catch {
+  // Graceful fallback if native libvips binding restricts re-configuration
+}
 
 export interface PreprocessResult {
   buffer: Buffer;

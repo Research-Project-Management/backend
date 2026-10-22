@@ -282,13 +282,7 @@ export class AttachmentRenamerService {
     }
 
     if (updatesToPersist.length > 0) {
-      if (typeof this.repo.batchRename === 'function') {
-        await this.repo.batchRename(updatesToPersist);
-      } else {
-        for (const u of updatesToPersist) {
-          await this.repo.renameAttachment(u.id, u.filename, u.fileId);
-        }
-      }
+      await this.repo.batchRename(updatesToPersist);
 
       const uniqueRenamedItemIds = new Map<string, string | undefined>();
       for (const u of updatesToPersist) {

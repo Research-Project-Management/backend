@@ -468,6 +468,36 @@ export class ChangeLogRepository {
     });
   }
 
+  async getMinRetainedSequence(
+    scope: { userId?: string; projectId?: string | null },
+  ): Promise<bigint | null> {
+    const { userId, projectId } = this.resolveScope(scope);
+    const scopeWhere = projectId ? { projectId } : { userId, projectId: null };
+
+    const [firstChange, firstTombstone] = await Promise.all([
+      this.prisma.libraryChange.findFirst({
+        where: scopeWhere,
+        orderBy: { seq: 'asc' },
+        select: { seq: true },
+      }),
+      this.prisma.tombstone.findFirst({
+        where: scopeWhere,
+        orderBy: { seq: 'asc' },
+        select: { seq: true },
+      }),
+    ]);
+
+    if (!firstChange && !firstTombstone) return null;
+    if (!firstChange && firstTombstone) return firstTombstone.seq;
+    if (!firstTombstone && firstChange) return firstChange.seq;
+    if (firstChange && firstTombstone) {
+      return firstChange.seq < firstTombstone.seq
+        ? firstChange.seq
+        : firstTombstone.seq;
+    }
+    return null;
+  }
+
   async getLatestSequence(
     scope: { userId?: string; projectId?: string | null },
   ): Promise<bigint> {

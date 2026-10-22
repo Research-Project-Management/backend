@@ -5,6 +5,7 @@ import { isUUID } from 'class-validator';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import { CollectionDeleteStrategy } from '@/modules/library/catalog/types/collections.types';
+import { TreeEngine } from '@/modules/library/catalog/domain/tree.engine';
 
 export interface CreateCollectionInput {
   name: string;
@@ -27,6 +28,8 @@ export interface UpdateCollectionInput {
 
 @Injectable()
 export class CollectionsRepository {
+  private readonly treeEngine = new TreeEngine();
+
   constructor(private readonly prisma: PrismaService) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
@@ -186,18 +189,26 @@ export class CollectionsRepository {
     const now = new Date();
 
     if (strategy === 'cascade') {
-      const children = await client.collection.findMany({
-        where: { ...scopeWhere, parentId: id, deletedAt: null },
+      const allCollections = await client.collection.findMany({
+        where: { ...scopeWhere, deletedAt: null },
+        select: { id: true, parentId: true },
       });
-      for (const child of children) {
-        await this.delete(userId, child.id, 'cascade', tx, projectId);
-      }
+      const descendantIds = this.treeEngine.getDescendantIds(
+        allCollections || [],
+        id,
+      );
+      const targetCollectionIds = [id, ...descendantIds];
 
       const links = await client.collectionItem.findMany({
-        where: { collectionId: id },
+        where: {
+          collectionId:
+            targetCollectionIds.length === 1
+              ? targetCollectionIds[0]
+              : { in: targetCollectionIds },
+        },
         select: { itemId: true },
       });
-      const itemIds = links.map((l) => l.itemId);
+      const itemIds = Array.from(new Set(links.map((l) => l.itemId)));
       if (itemIds.length > 0) {
         const validProjectId = normalizeProjectScopeId(projectId);
         await client.item.updateMany({
@@ -213,7 +224,36 @@ export class CollectionsRepository {
             version: { increment: 1 },
           },
         });
+
+        await client.note?.updateMany?.({
+          where: {
+            itemId: { in: itemIds },
+            deletedAt: null,
+          },
+          data: { deletedAt: now },
+        });
+
+        await client.attachment?.updateMany?.({
+          where: {
+            itemId: { in: itemIds },
+            deletedAt: null,
+          },
+          data: { deletedAt: now },
+        });
       }
+
+      const result = await client.collection.updateMany({
+        where: {
+          id:
+            targetCollectionIds.length === 1
+              ? targetCollectionIds[0]
+              : { in: targetCollectionIds },
+          ...scopeWhere,
+          deletedAt: null,
+        },
+        data: { deletedAt: now },
+      });
+      return result.count > 0;
     } else {
       await client.collection.updateMany({
         where: { ...scopeWhere, parentId: id, deletedAt: null },
