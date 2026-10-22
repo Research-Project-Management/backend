@@ -6,6 +6,7 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { OverviewService } from './overview.service';
 
 @ApiTags('Project Overview')
@@ -16,6 +17,8 @@ export class OverviewController {
   constructor(private readonly overviewService: OverviewService) {}
 
   @Get(':projectId/overview')
+  @UseGuards(ProjectAccessGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get comprehensive overview dashboard for a project',
   })

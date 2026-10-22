@@ -5,22 +5,29 @@ import {
 } from '@nestjs/common';
 import { ProjectTemplate } from '@prisma/client';
 import { TemplateRepository } from './template.repository';
+import { CoreRepository } from '../core/core.repository';
 import { CreateProjectTemplateDto } from './dto/create-template.dto';
 import { InstantiateProjectTemplateDto } from './dto/instantiate-template.dto';
 import { deriveProjectPrefix } from '../core/utils/identifier.util';
 
 @Injectable()
 export class TemplateService {
-  constructor(private readonly templateRepo: TemplateRepository) {}
+  constructor(
+    private readonly templateRepo: TemplateRepository,
+    private readonly coreRepo: CoreRepository,
+  ) {}
 
   async listTemplates(userId: string): Promise<ProjectTemplate[]> {
     return this.templateRepo.findAccessibleTemplates(userId);
   }
 
-  async getTemplateById(id: string): Promise<ProjectTemplate> {
+  async getTemplateById(id: string, userId?: string): Promise<ProjectTemplate> {
     const template = await this.templateRepo.findTemplateById(id);
     if (!template) {
       throw new NotFoundException(`Project template with ID "${id}" not found`);
+    }
+    if (userId && !template.isPublic && template.createdById !== userId) {
+      throw new ForbiddenException('You do not have access to this private template');
     }
     return template;
   }
@@ -69,8 +76,9 @@ export class TemplateService {
     userId: string,
     dto: InstantiateProjectTemplateDto,
   ) {
-    const template = await this.getTemplateById(templateId);
-    const identifier = deriveProjectPrefix(dto.identifier, dto.name);
+    const template = await this.getTemplateById(templateId, userId);
+    const baseIdentifier = deriveProjectPrefix(dto.identifier, dto.name);
+    const identifier = await this.coreRepo.findAvailableIdentifier(baseIdentifier, userId);
     return this.templateRepo.instantiateProject(
       template,
       userId,

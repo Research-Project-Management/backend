@@ -169,4 +169,52 @@ describe('ProjectAccessGuard & SEC-01 Characterization', () => {
       );
     });
   });
+
+  describe('ProjectResourceResolver — Library Dual-Context Resource Resolution', () => {
+    it('should resolve authoritative projectId from Library Item, Attachment, Collection, Annotation, and Tag on /library routes', async () => {
+      const realResolver = new ProjectResourceResolver({
+        item: {
+          findUnique: jest.fn().mockResolvedValue({ projectId: projectAId }),
+        },
+        attachment: {
+          findUnique: jest.fn().mockResolvedValue({
+            item: { projectId: projectAId },
+          }),
+        },
+        collection: {
+          findUnique: jest.fn().mockResolvedValue({ projectId: projectAId }),
+        },
+        annotation: {
+          findUnique: jest.fn().mockResolvedValue({
+            attachment: { item: { projectId: projectAId } },
+          }),
+        },
+        tag: {
+          findUnique: jest.fn().mockResolvedValue({ projectId: projectAId }),
+        },
+      } as any);
+
+      const resolvedItem = await realResolver.resolveAuthoritativeProjectId({
+        url: `/api/v1/library/items/${pageAId}`,
+        params: { itemId: pageAId },
+        headers: {},
+        query: {},
+        body: {},
+      });
+      expect(resolvedItem).toEqual({
+        projectId: projectAId,
+        source: 'resource',
+      });
+
+      await expect(
+        realResolver.resolveAuthoritativeProjectId({
+          url: `/api/v1/projects/${projectBId}/library/items/${pageAId}`,
+          params: { projectId: projectBId, itemId: pageAId },
+          headers: { 'x-project-id': projectBId },
+          query: {},
+          body: {},
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
 });

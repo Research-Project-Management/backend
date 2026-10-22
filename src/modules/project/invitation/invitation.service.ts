@@ -55,6 +55,16 @@ export class InvitationService {
   }
 
   /**
+   * Resolves email for the authenticated user, fetching from database if omitted from token.
+   */
+  private async resolveUserEmail(user: AuthenticatedUser): Promise<string | null> {
+    if (user?.email) return user.email;
+    if (!user?.id) return null;
+    const dbUser = await this.repository.findUserById(user.id);
+    return dbUser?.email || null;
+  }
+
+  /**
    * Get all incoming project invitations for the current logged in user
    * (invitations sent to the user to join external projects).
    */
@@ -99,10 +109,11 @@ export class InvitationService {
       throw new BadRequestException('Invitation has expired');
     }
 
-    // Verify email match (case-insensitive)
+    // Verify email match (case-insensitive, mandatory lookup if user.email missing)
+    const userEmail = await this.resolveUserEmail(user);
     if (
-      user.email &&
-      invitation.email.toLowerCase() !== user.email.toLowerCase()
+      !userEmail ||
+      invitation.email.toLowerCase() !== userEmail.toLowerCase()
     ) {
       throw new ForbiddenException(
         'This invitation was sent to a different email address',
@@ -154,9 +165,10 @@ export class InvitationService {
       throw new NotFoundException('Invitation not found');
     }
 
+    const userEmail = await this.resolveUserEmail(user);
     if (
-      user.email &&
-      invitation.email.toLowerCase() !== user.email.toLowerCase()
+      !userEmail ||
+      invitation.email.toLowerCase() !== userEmail.toLowerCase()
     ) {
       throw new ForbiddenException('You cannot decline this invitation');
     }
@@ -342,9 +354,9 @@ export class InvitationService {
       throw new BadRequestException('User is already a member of this project');
     }
 
-    // Check if duplicate pending invite exists
+    // Check if duplicate pending invite exists (using canonical project.id)
     const existingInvite = await this.repository.findPendingByProjectAndEmail(
-      projectId,
+      project.id,
       email,
     );
 
@@ -360,7 +372,7 @@ export class InvitationService {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
     const invitation = await this.repository.create({
-      projectId,
+      projectId: project.id,
       email,
       role: dto.role || Role.contributor,
       tokenHash,

@@ -14,6 +14,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
 import { CurrentUser } from '@/modules/identity/auth';
+import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 import { FavoriteService } from './favorite.service';
 
 @ApiTags('Project Favorites')
@@ -32,6 +33,8 @@ export class FavoriteController {
   }
 
   @Post(':projectId/favorite')
+  @UseGuards(ProjectAccessGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Mark project as favorite for current user' })
   @ApiResponse({ status: 200, description: 'Project marked as favorite' })
   addFavorite(
@@ -42,6 +45,8 @@ export class FavoriteController {
   }
 
   @Delete(':projectId/favorite')
+  @UseGuards(ProjectAccessGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Remove project from favorites for current user' })
   @ApiResponse({ status: 200, description: 'Project removed from favorites' })
   removeFavorite(
@@ -52,6 +57,8 @@ export class FavoriteController {
   }
 
   @Post(':projectId/favorite/toggle')
+  @UseGuards(ProjectAccessGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Toggle favorite status for a project' })
   toggleFavorite(
     @Param('projectId') projectId: string,

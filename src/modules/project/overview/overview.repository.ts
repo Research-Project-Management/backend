@@ -6,8 +6,8 @@ export class OverviewRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async getProjectMetadata(projectId: string) {
-    return this.prisma.project.findUnique({
-      where: { id: projectId },
+    return this.prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -60,19 +60,27 @@ export class OverviewRepository {
   async getWorkItemStateGroupCounts(
     projectId: string,
   ): Promise<Record<string, number>> {
-    const workItems = await this.prisma.workItem.findMany({
-      where: {
-        projectId,
-        deletedAt: null,
-      },
-      select: {
-        state: {
-          select: {
-            group: true,
-          },
+    const [grouped, states] = await Promise.all([
+      this.prisma.workItem.groupBy({
+        by: ['columnId'],
+        where: {
+          projectId,
+          deletedAt: null,
         },
-      },
-    });
+        _count: {
+          id: true,
+        },
+      }),
+      this.prisma.workItemState.findMany({
+        where: { projectId },
+        select: { id: true, group: true },
+      }),
+    ]);
+
+    const stateGroupMap = new Map<string, string>();
+    for (const s of states) {
+      stateGroupMap.set(s.id, s.group);
+    }
 
     const counts: Record<string, number> = {
       backlog: 0,
@@ -82,9 +90,9 @@ export class OverviewRepository {
       cancelled: 0,
     };
 
-    for (const item of workItems) {
-      const group = item.state?.group || 'backlog';
-      counts[group] = (counts[group] || 0) + 1;
+    for (const item of grouped) {
+      const group = (item.columnId ? stateGroupMap.get(item.columnId) : null) || 'backlog';
+      counts[group] = (counts[group] || 0) + item._count.id;
     }
 
     return counts;

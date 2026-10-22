@@ -194,24 +194,26 @@ export class StateRepository {
     stateId: string,
     dto: UpdateProjectStateItemDto,
   ): Promise<ProjectState> {
-    if (dto.isDefault) {
-      await this.prisma.projectState.updateMany({
-        where: { projectId, isDefault: true, id: { not: stateId } },
-        data: { isDefault: false },
-      });
-    }
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isDefault) {
+        await tx.projectState.updateMany({
+          where: { projectId, isDefault: true, id: { not: stateId } },
+          data: { isDefault: false },
+        });
+      }
 
-    return this.prisma.projectState.update({
-      where: { id: stateId },
-      data: {
-        ...(dto.name !== undefined && { name: dto.name.trim() }),
-        ...(dto.description !== undefined && {
-          description: dto.description.trim(),
-        }),
-        ...(dto.color !== undefined && { color: dto.color }),
-        ...(dto.sequence !== undefined && { sequence: dto.sequence }),
-        ...(dto.isDefault !== undefined && { isDefault: dto.isDefault }),
-      },
+      return tx.projectState.update({
+        where: { id: stateId },
+        data: {
+          ...(dto.name !== undefined && { name: dto.name.trim() }),
+          ...(dto.description !== undefined && {
+            description: dto.description.trim(),
+          }),
+          ...(dto.color !== undefined && { color: dto.color }),
+          ...(dto.sequence !== undefined && { sequence: dto.sequence }),
+          ...(dto.isDefault !== undefined && { isDefault: dto.isDefault }),
+        },
+      });
     });
   }
 
@@ -246,31 +248,33 @@ export class StateRepository {
     stateId: string,
     fallbackStateId?: string,
   ): Promise<void> {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { stateId: true },
-    });
+    await this.prisma.$transaction(async (tx) => {
+      const project = await tx.project.findUnique({
+        where: { id: projectId },
+        select: { stateId: true },
+      });
 
-    if (project?.stateId === stateId) {
-      let targetId = fallbackStateId;
-      if (!targetId) {
-        const nextAvailable = await this.prisma.projectState.findFirst({
-          where: { projectId, id: { not: stateId } },
-          orderBy: { sequence: 'asc' },
+      if (project?.stateId === stateId) {
+        let targetId = fallbackStateId;
+        if (!targetId) {
+          const nextAvailable = await tx.projectState.findFirst({
+            where: { projectId, id: { not: stateId } },
+            orderBy: { sequence: 'asc' },
+          });
+          targetId = nextAvailable?.id;
+        }
+
+        await tx.project.update({
+          where: { id: projectId },
+          data: {
+            stateId: targetId ?? null,
+          },
         });
-        targetId = nextAvailable?.id;
       }
 
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: {
-          stateId: targetId ?? null,
-        },
+      await tx.projectState.delete({
+        where: { id: stateId },
       });
-    }
-
-    await this.prisma.projectState.delete({
-      where: { id: stateId },
     });
   }
 

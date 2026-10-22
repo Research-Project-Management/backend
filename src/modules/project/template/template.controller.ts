@@ -39,8 +39,8 @@ export class TemplateController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a project template by ID' })
-  getTemplate(@Param('id') id: string) {
-    return this.templateService.getTemplateById(id);
+  getTemplate(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.templateService.getTemplateById(id, userId);
   }
 
   @Post()

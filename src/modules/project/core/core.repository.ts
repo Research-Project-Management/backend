@@ -920,7 +920,7 @@ export class CoreRepository {
         data: { projectId: newProject.id, userId, role: 'owner' },
       });
 
-      // 3. Clone ProjectStates
+      // 3. Clone ProjectStates & set active stateId
       const stateIdMap = new Map<string, string>();
       for (const state of source.projectStates) {
         const newState = await tx.projectState.create({
@@ -934,6 +934,27 @@ export class CoreRepository {
           },
         });
         stateIdMap.set(state.id, newState.id);
+      }
+
+      if (source.stateId && stateIdMap.has(source.stateId)) {
+        await tx.project.update({
+          where: { id: newProject.id },
+          data: { stateId: stateIdMap.get(source.stateId) },
+        });
+      }
+
+      // 3b. Seed WorkItemStates for Kanban board parity
+      for (const s of DEFAULT_WORK_ITEM_STATES) {
+        await tx.workItemState.create({
+          data: {
+            projectId: newProject.id,
+            name: s.name,
+            color: s.color,
+            group: s.group,
+            sequence: s.sequence,
+            description: s.description,
+          },
+        });
       }
 
       // 4. Clone Manuscript Documents (map oldDocId -> newDocId)

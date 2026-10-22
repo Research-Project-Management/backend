@@ -82,9 +82,17 @@ export class LabelRepository {
     labelIds: string[],
     assignedById?: string,
   ): Promise<void> {
-    // Upsert or createMany skipDuplicates
+    if (!labelIds.length) return;
+    // Verify valid label IDs
+    const validLabels = await this.prisma.label.findMany({
+      where: { id: { in: labelIds } },
+      select: { id: true },
+    });
+    const validIds = validLabels.map((l) => l.id);
+    if (!validIds.length) return;
+
     await this.prisma.projectLabel.createMany({
-      data: labelIds.map((labelId) => ({
+      data: validIds.map((labelId) => ({
         projectId,
         labelId,
         ...(assignedById ? { assignedById } : {}),
@@ -115,14 +123,21 @@ export class LabelRepository {
         where: { projectId },
       });
       if (labelIds.length > 0) {
-        await tx.projectLabel.createMany({
-          data: labelIds.map((labelId) => ({
-            projectId,
-            labelId,
-            ...(assignedById ? { assignedById } : {}),
-          })),
-          skipDuplicates: true,
+        const validLabels = await tx.label.findMany({
+          where: { id: { in: labelIds } },
+          select: { id: true },
         });
+        const validIds = validLabels.map((l) => l.id);
+        if (validIds.length > 0) {
+          await tx.projectLabel.createMany({
+            data: validIds.map((labelId) => ({
+              projectId,
+              labelId,
+              ...(assignedById ? { assignedById } : {}),
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
     });
   }

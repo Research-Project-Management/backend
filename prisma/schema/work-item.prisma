@@ -21,7 +21,7 @@ enum ViewAccess {
 }
 
 model WorkItemState {
-  id          String   @id @default(uuid())
+  id          String   @id @default(uuid(7)) @db.Uuid
   projectId   String   @map("project_id") @db.Uuid
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name        String
@@ -43,10 +43,10 @@ model WorkItemState {
 }
 
 model WorkItem {
-  id               String           @id @default(uuid()) @db.Uuid
+  id               String           @id @default(uuid(7)) @db.Uuid
   title            String
   content          String?          @default("")
-  columnId         String           @map("column_id")
+  columnId         String           @map("column_id") @db.Uuid
   state            WorkItemState?   @relation(fields: [columnId], references: [id], onDelete: Restrict)
   startDate        DateTime?        @map("start_date") @db.Timestamptz(6)
   dueDate          DateTime?        @map("due_date") @db.Timestamptz(6)

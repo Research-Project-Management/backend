@@ -87,10 +87,10 @@ export class CoreService {
     userId?: string,
   ): Role {
     if (!userId || !project) return Role.reviewer;
-    if (project.createdById === userId) return Role.owner;
-
     const member = project.members?.find((m) => m.userId === userId);
-    return (member?.role as Role) || Role.reviewer;
+    if (member?.role) return member.role as Role;
+    if (project.createdById === userId) return Role.owner;
+    return Role.reviewer;
   }
 
   /**
@@ -519,13 +519,9 @@ export class CoreService {
     const source = await this.projectRepo.findProjectForDuplication(projectId);
     if (!source) throw new NotFoundException(`Project ${projectId} not found`);
 
-    // 1. Generate unique identifier
-    const baseIdentifier = deriveProjectPrefix(`${source.name} Copy`);
-    let identifier = baseIdentifier;
-    let suffix = 1;
-    while (await this.projectRepo.findByIdentifier(identifier)) {
-      identifier = `${baseIdentifier}${suffix++}`;
-    }
+    // 1. Generate unique identifier scoped to this user
+    const baseIdentifier = deriveProjectPrefix(null, `${source.name} Copy`);
+    const identifier = await this.projectRepo.findAvailableIdentifier(baseIdentifier, userId);
 
     // 2. Clone project atomically in repository
     const newProject = await this.projectRepo.duplicateProject(

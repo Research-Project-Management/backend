@@ -216,6 +216,108 @@ export class ProjectResourceResolver {
         }
       }
 
+      // 7. Resolve from Library Resource IDs (Item, Attachment, Collection, Annotation, Tag, Note)
+      const isLibraryContext =
+        typeof request.url === 'string' && request.url.includes('/library');
+      if (isLibraryContext) {
+        const itemId =
+          (typeof request.params?.itemId === 'string' &&
+            request.params.itemId) ||
+          (typeof request.body?.itemId === 'string' && request.body.itemId) ||
+          (typeof request.body?.primaryItemId === 'string' &&
+            request.body.primaryItemId);
+        if (itemId && isUUID(itemId) && (this.prisma as any).item?.findUnique) {
+          const item = await this.prisma.item.findUnique({
+            where: { id: itemId },
+            select: { projectId: true },
+          });
+          if (item?.projectId) {
+            resolvedResourceProjects.set(`item:${itemId}`, item.projectId);
+          }
+        }
+
+        const attachmentId =
+          (typeof request.params?.attachmentId === 'string' &&
+            request.params.attachmentId) ||
+          (typeof request.body?.attachmentId === 'string' &&
+            request.body.attachmentId);
+        if (
+          attachmentId &&
+          isUUID(attachmentId) &&
+          (this.prisma as any).attachment?.findUnique
+        ) {
+          const attachment = await this.prisma.attachment.findUnique({
+            where: { id: attachmentId },
+            select: { item: { select: { projectId: true } } },
+          });
+          if (attachment?.item?.projectId) {
+            resolvedResourceProjects.set(
+              `attachment:${attachmentId}`,
+              attachment.item.projectId,
+            );
+          }
+        }
+
+        const collectionId =
+          (typeof request.params?.collectionId === 'string' &&
+            request.params.collectionId) ||
+          (typeof request.body?.collectionId === 'string' &&
+            request.body.collectionId);
+        if (
+          collectionId &&
+          isUUID(collectionId) &&
+          (this.prisma as any).collection?.findUnique
+        ) {
+          const collection = await this.prisma.collection.findUnique({
+            where: { id: collectionId },
+            select: { projectId: true },
+          });
+          if (collection?.projectId) {
+            resolvedResourceProjects.set(
+              `collection:${collectionId}`,
+              collection.projectId,
+            );
+          }
+        }
+
+        const annotationId =
+          typeof request.params?.annotationId === 'string'
+            ? request.params.annotationId
+            : undefined;
+        if (
+          annotationId &&
+          isUUID(annotationId) &&
+          (this.prisma as any).annotation?.findUnique
+        ) {
+          const annotation = await this.prisma.annotation.findUnique({
+            where: { id: annotationId },
+            select: {
+              attachment: { select: { item: { select: { projectId: true } } } },
+            },
+          });
+          if (annotation?.attachment?.item?.projectId) {
+            resolvedResourceProjects.set(
+              `annotation:${annotationId}`,
+              annotation.attachment.item.projectId,
+            );
+          }
+        }
+
+        const tagId =
+          typeof request.params?.tagId === 'string'
+            ? request.params.tagId
+            : undefined;
+        if (tagId && isUUID(tagId) && (this.prisma as any).tag?.findUnique) {
+          const tag = await this.prisma.tag.findUnique({
+            where: { id: tagId },
+            select: { projectId: true },
+          });
+          if (tag?.projectId) {
+            resolvedResourceProjects.set(`tag:${tagId}`, tag.projectId);
+          }
+        }
+      }
+
       // Verify mutual agreement among all referenced resources
       const uniqueResourceProjectIds = Array.from(
         new Set(
