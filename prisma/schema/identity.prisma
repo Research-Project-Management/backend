@@ -88,7 +88,6 @@ model User {
   // Sticky Notes & Canvas Relations
   stickies Sticky[] @relation("UserStickies")
 
-  @@index([email])
   @@index([status, deletedAt])
   @@map("users")
 }
@@ -97,7 +96,10 @@ model UserProfile {
   userId      String   @id @map("user_id") @db.Uuid
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String   @default("User")
+  firstName   String?  @map("first_name")
+  lastName    String?  @map("last_name")
   avatar      String?  @map("avatar_url")
+  coverImage  String?  @map("cover_image_url")
   institution String?
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -108,13 +110,16 @@ model UserProfile {
 }
 
 model UserSettings {
-  userId       String          @id @map("user_id") @db.Uuid
-  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  theme        ThemePreference @default(system)
-  locale       String          @default("en")
-  editorConfig Json            @default("{}") @map("editor_config")
-  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  userId        String          @id @map("user_id") @db.Uuid
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme         ThemePreference @default(system)
+  locale        String          @default("en")
+  timezone      String?         @default("UTC")
+  editorConfig  Json            @default("{}") @map("editor_config")
+  preferences   Json            @default("{}")
+  notifications Json            @default("{}")
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("user_settings")
 }

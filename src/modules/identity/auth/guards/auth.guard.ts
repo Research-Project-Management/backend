@@ -155,17 +155,32 @@ export class AuthGuard implements CanActivate {
 
       // Real-time Token Revocation check via Redis
       const userId = payload.sub || payload.id;
-      if (userId && this.redis) {
+      const sessionId = payload.sid;
+
+      if (this.redis) {
         try {
-          const revokedAt = await this.redis.get<number>(
-            IDENTITY_REDIS_KEYS.revoked(userId),
-          );
-          if (revokedAt) {
-            const tokenIatMs = (payload.iat || 0) * 1000;
-            if (tokenIatMs <= revokedAt) {
+          if (sessionId) {
+            const isSessionRevoked = await this.redis.get<string | number>(
+              IDENTITY_REDIS_KEYS.revokedSession(sessionId),
+            );
+            if (isSessionRevoked) {
               throw new UnauthorizedException(
                 'Session has been revoked or expired. Please log in again.',
               );
+            }
+          }
+
+          if (userId) {
+            const revokedAt = await this.redis.get<number>(
+              IDENTITY_REDIS_KEYS.revoked(userId),
+            );
+            if (revokedAt) {
+              const tokenIatMs = (payload.iat || 0) * 1000;
+              if (tokenIatMs <= revokedAt) {
+                throw new UnauthorizedException(
+                  'Session has been revoked or expired. Please log in again.',
+                );
+              }
             }
           }
         } catch (err: unknown) {

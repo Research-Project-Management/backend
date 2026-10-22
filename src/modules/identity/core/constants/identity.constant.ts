@@ -6,6 +6,10 @@ export const IDENTITY_REDIS_KEYS = {
   /** Active session cache: identity:session:{sessionId} */
   session: (sessionId: string): string => `identity:session:${sessionId}`,
 
+  /** Specific revoked session: identity:revoked:session:{sessionId} */
+  revokedSession: (sessionId: string): string =>
+    `identity:revoked:session:${sessionId}`,
+
   /** User blacklist/revocation marker: identity:revoked:{userId} */
   revoked: (userId: string): string => `identity:revoked:${userId}`,
 

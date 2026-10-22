@@ -481,10 +481,12 @@ export class AuthService {
         const emails = (await emailsRes.json()) as Array<{
           email: string;
           primary: boolean;
+          verified?: boolean;
         }>;
         if (Array.isArray(emails)) {
-          const primary = emails.find((ei) => ei.primary);
-          email = primary?.email || emails[0]?.email;
+          const verifiedEmails = emails.filter((ei) => ei.verified !== false);
+          const primary = verifiedEmails.find((ei) => ei.primary);
+          email = primary?.email || verifiedEmails[0]?.email;
         }
       }
 
@@ -529,6 +531,14 @@ export class AuthService {
 
       if (existingUser) {
         user = existingUser;
+        // If account was awaiting email verification, OAuth from trusted provider confirms email ownership
+        if (user.status === 'pending_verification') {
+          user = await this.authnRepo.updateUser(user.id, {
+            status: 'active',
+            // If user was created by unverified local signup, clear password to prevent pre-hijacking
+            password: null,
+          });
+        }
       } else {
         if (!profile.email) {
           throw new BadRequestException(
@@ -1091,10 +1101,11 @@ export class AuthService {
       if (tokenRecord) {
         await this.authnRepo.revokeToken(tokenRecord.id);
         await this.redis.del(IDENTITY_REDIS_KEYS.session(tokenRecord.id));
+        // Revoke only this specific session to avoid terminating other user devices
         await this.redis.set(
-          IDENTITY_REDIS_KEYS.revoked(tokenRecord.userId),
+          IDENTITY_REDIS_KEYS.revokedSession(tokenRecord.id),
           Date.now(),
-          7 * 86400,
+          3600, // 1 hour (covers maximum access token lifetime)
         );
 
         await this.auditService.record({
@@ -1195,10 +1206,11 @@ export class AuthService {
     }
 
     await this.redis.del(IDENTITY_REDIS_KEYS.session(sessionId));
+    // Revoke only this specific session
     await this.redis.set(
-      IDENTITY_REDIS_KEYS.revoked(userId),
+      IDENTITY_REDIS_KEYS.revokedSession(sessionId),
       Date.now(),
-      7 * 86400,
+      3600, // 1 hour
     );
 
     await this.auditService.record({
