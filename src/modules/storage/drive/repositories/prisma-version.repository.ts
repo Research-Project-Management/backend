@@ -46,6 +46,8 @@ function toDomainVersion(
     fileId: string;
     blobId: string;
     versionNumber: number;
+    sizeBytes?: bigint | null;
+    mimeType?: string | null;
     changeComment: string | null;
     createdById: string;
     createdAt: Date;
@@ -61,7 +63,8 @@ function toDomainVersion(
     changeComment: record.changeComment,
     createdById: record.createdById,
     createdAt: record.createdAt,
-    sizeBytes: record.blob?.sizeBytes ?? 0n,
+    sizeBytes: record.sizeBytes ?? record.blob?.sizeBytes ?? 0n,
+    mimeType: record.mimeType ?? undefined,
     author,
   });
 }
@@ -77,6 +80,8 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
         fileId: version.fileId,
         blobId: version.blobId,
         versionNumber: version.versionNumber,
+        sizeBytes: version.sizeBytes,
+        mimeType: version.mimeType,
         changeComment: version.changeComment,
         createdById: version.createdById,
         createdAt: version.createdAt,

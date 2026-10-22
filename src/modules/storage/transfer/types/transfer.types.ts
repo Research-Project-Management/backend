@@ -173,11 +173,13 @@ export interface UploadDirectInput {
   buffer: Buffer;
   mimeType: string;
   projectId?: string | null;
+  pageId?: string | null;
   linkedToId?: string | null;
   linkedToType?: string;
   parentId?: string | null;
   scope?: FileScope;
   source?: string;
+  metaData?: Record<string, unknown> | null;
 }
 
 export interface UploadDirectOutput {
@@ -197,8 +199,10 @@ export interface PresignUploadInput {
   sizeBytes: number;
   contentHash?: string;
   projectId?: string | null;
+  pageId?: string | null;
   parentId?: string | null;
   scope?: FileScope;
+  metaData?: Record<string, unknown> | null;
 }
 
 export interface PresignUploadOutput {
@@ -221,9 +225,11 @@ export interface CompletePresignInput {
   sizeBytes?: number;
   mimeType?: string;
   projectId?: string | null;
+  pageId?: string | null;
   parentId?: string | null;
   scope?: FileScope;
   contentHash?: string;
+  metaData?: Record<string, unknown> | null;
 }
 
 export interface CompletePresignOutput {
@@ -257,6 +263,7 @@ export interface InitiateMultipartInput {
   mimeType: string;
   totalSize: number;
   projectId?: string | null;
+  pageId?: string | null;
   parentId?: string | null;
   scope?: FileScope;
   expectedHash?: string;

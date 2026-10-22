@@ -241,7 +241,7 @@ export class StorageNodeMapper {
     const scope = normalizeFileScope(record.linkedToType);
     const metadata = (record.metaData as Record<string, unknown>) || {};
     const projectId =
-      (record as { projectId?: string | null }).projectId ??
+      record.projectId ??
       (typeof metadata.projectId === 'string' ? metadata.projectId : null) ??
       (scope === FileScope.Project || scope === FileScope.Library
         ? record.linkedToId
@@ -288,6 +288,7 @@ export class StorageNodeMapper {
       starred: node.starred,
       metaData: metadata as Prisma.InputJsonValue,
       parentId: node.parentId,
+      projectId: node.projectId,
       linkedToType: node.scope,
       linkedToId: node.linkedToId ?? node.projectId,
       blobId: node.blobId,
@@ -331,6 +332,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
         size: data.size,
         mimeType: data.mimeType,
         parentId: data.parentId,
+        projectId: data.projectId,
         linkedToType: data.linkedToType,
         linkedToId: data.linkedToId,
         starred: data.starred,
@@ -362,17 +364,22 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
   ): Promise<{ nodes: StorageNode[]; total: number }> {
     const targetUserId = filter.userId ?? filter.authorId;
     const where: Prisma.FileWhereInput = {};
-    if (targetUserId) {
+    const andConditions: Prisma.FileWhereInput[] = [];
+
+    // Only restrict by authorId when querying Personal Drive (no projectId and no linkedToId)
+    // or when explicitly filtering by authorId
+    if (filter.authorId) {
+      where.authorId = filter.authorId;
+    } else if (targetUserId && !filter.projectId && !filter.linkedToId) {
       where.authorId = targetUserId;
     }
 
     if (filter.trashedOnly) {
       where.trashedAt = { not: null };
       if (filter.parentId === undefined && !filter.search?.trim()) {
-        where.OR = [
-          { parentId: null },
-          { parent: { trashedAt: null } },
-        ];
+        andConditions.push({
+          OR: [{ parentId: null }, { parent: { trashedAt: null } }],
+        });
       }
     } else {
       where.trashedAt = null;
@@ -400,13 +407,33 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
         where.linkedToId = targetLinkedId;
       }
     } else if (filter.projectId) {
-      where.linkedToType = { equals: FileScope.Project, mode: 'insensitive' };
-      where.linkedToId = filter.projectId;
+      andConditions.push({
+        OR: [
+          { projectId: filter.projectId },
+          {
+            linkedToType: { equals: FileScope.Project, mode: 'insensitive' },
+            linkedToId: filter.projectId,
+          },
+        ],
+      });
     } else {
-      // Default: Exclude Library and Paper files from Personal Drive (case-insensitive)
+      // Personal Drive: exclude project-scoped, library-scoped, and paper-scoped files
+      where.projectId = null;
       where.NOT = [
+        { linkedToType: { equals: FileScope.Project, mode: 'insensitive' } },
         { linkedToType: { equals: FileScope.Library, mode: 'insensitive' } },
         { linkedToType: { equals: FileScope.Paper, mode: 'insensitive' } },
+      ];
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+            ? [where.AND]
+            : []),
+        ...andConditions,
       ];
     }
 

@@ -163,9 +163,9 @@ export class DriveController {
     action: 'read' | 'write' | 'delete',
   ): Promise<void> {
     if (!userId) return;
-    for (const id of ids) {
-      await this.accessPolicy.assertCanAccess(userId, id, action);
-    }
+    await Promise.all(
+      ids.map((id) => this.accessPolicy.assertCanAccess(userId, id, action)),
+    );
   }
 
   @Get('my-files')
@@ -282,13 +282,26 @@ export class DriveController {
   @ApiOperation({ summary: 'List files associated with a page' })
   async getPageFiles(
     @Param('pageId') pageId: string,
+    @CurrentUser('id') userId?: string,
+    @Query('projectId') projectId?: string,
     @Query('parentId') parentId?: string,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
     @Query('page') page?: number,
   ) {
+    const normalizedProjectId =
+      projectId && projectId !== 'null' ? projectId : undefined;
+    if (normalizedProjectId && userId) {
+      await this.accessPolicy.assertCanAccessProject(
+        userId,
+        normalizedProjectId,
+        'read',
+      );
+    }
     const pagination = parsePagination(limit, offset, page);
     const result = await this.driveService.list({
+      userId: normalizedProjectId ? undefined : userId,
+      projectId: normalizedProjectId,
       scope: FileScope.Page,
       linkedToId: pageId,
       parentId: parentId || null,
@@ -302,6 +315,7 @@ export class DriveController {
   @ApiOperation({ summary: 'Get starred files' })
   async getStarredFiles(
     @CurrentUser('id') userId: string,
+    @Query('projectId') projectId?: string,
     @Query('search') search?: string,
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: 'asc' | 'desc',
@@ -313,8 +327,21 @@ export class DriveController {
   ) {
     const pagination = parsePagination(limit, offset, page);
     const parsedTypes = parseTypesQuery(types, type);
+    const normalizedProjectId =
+      projectId && projectId !== 'null' ? projectId : undefined;
+
+    if (normalizedProjectId && userId) {
+      await this.accessPolicy.assertCanAccessProject(
+        userId,
+        normalizedProjectId,
+        'read',
+      );
+    }
+
     const result = await this.driveService.list({
-      userId,
+      userId: normalizedProjectId ? undefined : userId,
+      projectId: normalizedProjectId,
+      scope: normalizedProjectId ? FileScope.Project : undefined,
       starredOnly: true,
       search: search?.trim() || undefined,
       sortBy: sortBy || undefined,
@@ -566,17 +593,20 @@ export class TrashController {
     ids: string[],
   ): Promise<void> {
     if (!userId) return;
-    for (const id of ids) {
-      await this.accessPolicy.assertCanAccess(userId, id, 'delete', {
-        allowTrashed: true,
-      });
-    }
+    await Promise.all(
+      ids.map((id) =>
+        this.accessPolicy.assertCanAccess(userId, id, 'delete', {
+          allowTrashed: true,
+        }),
+      ),
+    );
   }
 
   @Get('trash')
   @ApiOperation({ summary: 'List files and folders currently in trash' })
   async getTrash(
     @CurrentUser('id') userId: string,
+    @Query('projectId') projectId?: string,
     @Query('search') search?: string,
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: 'asc' | 'desc',
@@ -588,8 +618,21 @@ export class TrashController {
   ) {
     const pagination = parsePagination(limit, offset, page);
     const parsedTypes = parseTypesQuery(types, type);
+    const normalizedProjectId =
+      projectId && projectId !== 'null' ? projectId : undefined;
+
+    if (normalizedProjectId && userId) {
+      await this.accessPolicy.assertCanAccessProject(
+        userId,
+        normalizedProjectId,
+        'read',
+      );
+    }
+
     const result = await this.driveService.list({
-      userId,
+      userId: normalizedProjectId ? undefined : userId,
+      projectId: normalizedProjectId,
+      scope: normalizedProjectId ? FileScope.Project : undefined,
       trashedOnly: true,
       search: search?.trim() || undefined,
       sortBy: sortBy || undefined,

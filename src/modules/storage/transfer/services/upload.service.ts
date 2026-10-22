@@ -65,6 +65,33 @@ export class UploadService {
     private readonly eventEmitter?: EventEmitter2,
   ) {}
 
+  private resolveScopeAndMetadata(input: {
+    scope?: FileScope;
+    linkedToType?: string;
+    linkedToId?: string | null;
+    projectId?: string | null;
+    pageId?: string | null;
+    source?: string;
+    metaData?: Record<string, unknown> | null;
+  }) {
+    const resolvedScope =
+      input.scope ??
+      (input.linkedToType as FileScope | undefined) ??
+      (input.pageId
+        ? FileScope.Page
+        : input.projectId
+          ? FileScope.Project
+          : FileScope.Personal);
+    const resolvedLinkedId =
+      input.linkedToId ?? input.pageId ?? input.projectId ?? null;
+    const metadata: Record<string, unknown> = {
+      ...(input.metaData || {}),
+      ...(input.source ? { source: input.source } : {}),
+      ...(input.pageId ? { pageId: input.pageId } : {}),
+    };
+    return { resolvedScope, resolvedLinkedId, metadata };
+  }
+
   async upload(input: UploadDirectInput): Promise<UploadDirectOutput> {
     const scopeKey = input.projectId ?? input.userId;
     const sizeBytes = BigInt(input.buffer.length);
@@ -92,14 +119,12 @@ export class UploadService {
 
     // 6. Create logical StorageNode
     const fileId = crypto.randomUUID();
-    const resolvedScope =
-      input.scope ??
-      (input.linkedToType as FileScope | undefined) ??
-      (input.projectId ? FileScope.Project : FileScope.Personal);
+    const { resolvedScope, resolvedLinkedId, metadata } =
+      this.resolveScopeAndMetadata(input);
     const node = new StorageNode({
       id: fileId,
       projectId: input.projectId ?? null,
-      linkedToId: input.linkedToId ?? input.projectId ?? null,
+      linkedToId: resolvedLinkedId,
       parentId: input.parentId ?? null,
       name: cleanFilename,
       isFolder: false,
@@ -107,7 +132,7 @@ export class UploadService {
       mimeType: input.mimeType,
       blobId,
       scope: resolvedScope,
-      metadata: input.source ? { source: input.source } : {},
+      metadata,
       authorId: input.userId,
     });
     await this.nodeRepo.create(node);
@@ -172,33 +197,41 @@ export class UploadService {
         const existingBlob = await this.blobService.findBlobByHash(hashVo);
 
         if (existingBlob && existingBlob.isReady()) {
-          await this.blobService.incrementBlobRef(existingBlob.id);
+          // Charge quota BEFORE incrementing refCount so quota failure never leaks a refCount
+          await this.quotaRepo.incrementUsage(
+            input.userId,
+            input.projectId ?? null,
+            existingBlob.sizeBytes,
+          );
 
-          await this.quotaRepo
-            .incrementUsage(
-              input.userId,
-              input.projectId ?? null,
-              existingBlob.sizeBytes,
-            )
-            .catch((err: unknown) => {
-              this.logger.warn(
-                `Failed to increment quota for CAS deduplicated file: ${err instanceof Error ? err.message : String(err)}`,
-              );
-            });
+          try {
+            await this.blobService.incrementBlobRef(existingBlob.id);
+          } catch (refErr) {
+            await this.quotaRepo
+              .decrementUsage(
+                input.userId,
+                input.projectId ?? null,
+                existingBlob.sizeBytes,
+              )
+              .catch(() => {});
+            throw refErr;
+          }
 
           const fileId = crypto.randomUUID();
+          const { resolvedScope, resolvedLinkedId, metadata } =
+            this.resolveScopeAndMetadata(input);
           const node = new StorageNode({
             id: fileId,
             projectId: input.projectId ?? null,
+            linkedToId: resolvedLinkedId,
             parentId: input.parentId ?? null,
             name: cleanFilename,
             isFolder: false,
             size: existingBlob.sizeBytes,
             mimeType: input.mimeType,
             blobId: existingBlob.id,
-            scope:
-              input.scope ??
-              (input.projectId ? FileScope.Project : FileScope.Personal),
+            scope: resolvedScope,
+            metadata,
             authorId: input.userId,
           });
           await this.nodeRepo.create(node);
@@ -237,6 +270,9 @@ export class UploadService {
           };
         }
       } catch (err: unknown) {
+        if (err instanceof BadRequestException) {
+          throw err;
+        }
         this.logger.debug(
           `CAS pre-lookup skipped or failed for hash ${input.contentHash}: ${(err as Error)?.message}`,
         );
@@ -367,18 +403,20 @@ export class UploadService {
 
     // 4. Create logical StorageNode
     const fileId = crypto.randomUUID();
+    const { resolvedScope, resolvedLinkedId, metadata } =
+      this.resolveScopeAndMetadata(input);
     const node = new StorageNode({
       id: fileId,
       projectId: input.projectId ?? null,
+      linkedToId: resolvedLinkedId,
       parentId: input.parentId ?? null,
       name: cleanFilename,
       isFolder: false,
       size: actualSize,
       mimeType: actualMime,
       blobId,
-      scope:
-        input.scope ??
-        (input.projectId ? FileScope.Project : FileScope.Personal),
+      scope: resolvedScope,
+      metadata,
       authorId: input.userId,
     });
     await this.nodeRepo.create(node);

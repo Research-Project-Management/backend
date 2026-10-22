@@ -22,7 +22,7 @@ export class StorageAccessPolicy {
   /**
    * Evaluates 5-tier ReBAC access permissions:
    * 1. Author bypass (Full access)
-   * 2. Direct & Ancestor Folder FileShare ACL
+   * 2. Direct & Ancestor Folder FileShare ACL (Single batched query)
    * 3. Project Workbench RBAC (across Project, Page, and Library scopes)
    * 4. Contextual metadata (Embargo date / isPublic)
    */
@@ -44,36 +44,31 @@ export class StorageAccessPolicy {
       return node;
     }
 
-    // 2. Direct FileShare ACL
-    const directShare = await this.prisma.fileShare.findUnique({
-      where: {
-        fileId_userId: { fileId: nodeId, userId },
-      },
-    });
-
-    if (directShare) {
-      if (action === 'read') return node;
-      if (action === 'write' && directShare.permission === 'edit') return node;
-      throw new ForbiddenException('Insufficient permission for this file');
-    }
-
-    // 2b. Ancestor Folder FileShare ACL inheritance
+    // 2. Direct & Ancestor Folder FileShare ACL (Batched to avoid N+1 queries)
+    const candidateFileIds = [nodeId];
     if (node.parentId && typeof this.nodeRepo.getFolderPath === 'function') {
       const ancestors = await this.nodeRepo.getFolderPath(node.parentId);
       for (const ancestor of ancestors) {
-        const ancestorShare = await this.prisma.fileShare.findUnique({
-          where: {
-            fileId_userId: { fileId: ancestor.id, userId },
-          },
-        });
-        if (ancestorShare) {
-          if (action === 'read') return node;
-          if (action === 'write' && ancestorShare.permission === 'edit') {
-            return node;
-          }
-          throw new ForbiddenException('Insufficient permission for this file');
+        if (ancestor.id && !candidateFileIds.includes(ancestor.id)) {
+          candidateFileIds.push(ancestor.id);
         }
       }
+    }
+
+    const shares = await this.prisma.fileShare.findMany({
+      where: {
+        fileId: { in: candidateFileIds },
+        userId,
+      },
+    });
+
+    if (shares.length > 0) {
+      if (action === 'read') return node;
+      const hasEditPermission = shares.some((s) => s.permission === 'edit');
+      if (action === 'write' && hasEditPermission) {
+        return node;
+      }
+      throw new ForbiddenException('Insufficient permission for this file');
     }
 
     // 3. Project Workbench RBAC check (across Project, Page, and Library scopes)
@@ -178,4 +173,3 @@ export class StorageAccessPolicy {
     }
   }
 }
-

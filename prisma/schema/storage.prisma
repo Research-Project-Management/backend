@@ -32,10 +32,11 @@ model File {
   starred  Boolean @default(false)
   metaData Json?   @default("{}") @map("meta_data")
   parentId String? @map("parent_id") @db.Uuid
-  parent   File?   @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  parent   File?   @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children File[]  @relation("FolderHierarchy")
 
   // Storage Isolation (Two-Tier Scope: Personal Drive vs Project / Page Scope)
+  projectId    String? @map("project_id") @db.Uuid
   linkedToType String? @map("linked_to_type")
   linkedToId   String? @map("linked_to_id")
 
@@ -55,6 +56,7 @@ model File {
 
   @@index([authorId])
   @@index([parentId, trashedAt])
+  @@index([projectId, parentId, trashedAt, isFolder(sort: Desc), filename])
   @@index([authorId, parentId, trashedAt, isFolder(sort: Desc), filename])
   @@index([linkedToType, linkedToId, parentId, trashedAt, isFolder(sort: Desc), filename])
   @@index([authorId, starred, trashedAt])
@@ -113,6 +115,8 @@ model FileVersion {
   fileId        String   @map("file_id") @db.Uuid
   blobId        String   @map("blob_id") @db.Uuid
   versionNumber Int      @map("version_number")
+  sizeBytes     BigInt?  @map("size_bytes")
+  mimeType      String?  @map("mime_type") @db.VarChar(150)
   changeComment String?  @map("change_comment") @db.VarChar(500)
   createdById   String   @map("created_by_id") @db.Uuid
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -171,4 +175,3 @@ model StorageQuota {
   @@index([projectId], map: "idx_quota_project")
   @@map("storage_quotas")
 }
-

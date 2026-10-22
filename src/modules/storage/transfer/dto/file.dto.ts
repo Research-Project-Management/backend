@@ -2,6 +2,7 @@ import {
   IsArray,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   ValidateNested,
@@ -27,6 +28,10 @@ export class PresignDto {
 
   @IsString()
   @IsOptional()
+  pageId?: string;
+
+  @IsString()
+  @IsOptional()
   parentId?: string;
 
   @IsString()
@@ -36,6 +41,10 @@ export class PresignDto {
   @IsString()
   @IsOptional()
   contentHash?: string;
+
+  @IsObject()
+  @IsOptional()
+  metaData?: Record<string, unknown>;
 
   @IsNumber()
   @IsOptional()
@@ -73,6 +82,10 @@ export class CompletePresignedDto {
 
   @IsString()
   @IsOptional()
+  pageId?: string;
+
+  @IsString()
+  @IsOptional()
   parentId?: string;
 
   @IsString()
@@ -82,6 +95,10 @@ export class CompletePresignedDto {
   @IsString()
   @IsOptional()
   contentHash?: string;
+
+  @IsObject()
+  @IsOptional()
+  metaData?: Record<string, unknown>;
 }
 
 export class InitiateMultipartDto {
@@ -108,6 +125,10 @@ export class InitiateMultipartDto {
   @IsString()
   @IsOptional()
   projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 
   @IsString()
   @IsOptional()
