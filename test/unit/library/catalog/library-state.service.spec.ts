@@ -14,7 +14,8 @@ import {
   shouldAutoAdvanceToReading,
   toStateResponse,
 } from '@/modules/library/catalog/domain/state.domain';
-import { TransactionService, TransactionHelpers } from '@/modules/library/core';
+import { TransactionHelpers } from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { PrismaService } from '@/core';
 

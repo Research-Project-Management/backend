@@ -1,8 +1,8 @@
-﻿import { Test, TestingModule } from '@nestjs/testing';
+import { TransactionService } from '@/modules/library/sync';
+import { Test, TestingModule } from '@nestjs/testing';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { PrismaService } from '@/core';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
-import { TransactionService } from '@/modules/library/core';
 import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
 import { fromPartial } from '@total-typescript/shoehorn';
 

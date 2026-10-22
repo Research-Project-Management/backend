@@ -60,6 +60,22 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     } else if (
       exception &&
       typeof exception === 'object' &&
+      'statusCode' in exception &&
+      typeof exception.statusCode === 'number'
+    ) {
+      const domainEx = exception as {
+        statusCode: number;
+        code?: string;
+        message?: string;
+        details?: unknown;
+      };
+      statusCode = domainEx.statusCode;
+      errorCode = domainEx.code || this.mapStatusToErrorCode(statusCode);
+      message = domainEx.message || message;
+      details = domainEx.details;
+    } else if (
+      exception &&
+      typeof exception === 'object' &&
       'code' in exception
     ) {
       const errorWithCode = exception as {
@@ -101,6 +117,14 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         errorCode = 'VALUE_TOO_LONG';
         message = 'Provided value exceeds maximum allowed length';
         details = errorWithCode.meta;
+      } else if (codeStr === 'VERSION_MISMATCH') {
+        statusCode = HttpStatus.PRECONDITION_FAILED;
+        errorCode = 'VERSION_MISMATCH';
+        message =
+          errorWithCode.message ||
+          'The item has been modified by another process. Please reload and try again.';
+        details =
+          errorWithCode.meta || (exception as { details?: unknown }).details;
       } else {
         this.logger.error(
           `[Unhandled Error with Code]: ${codeStr} - ${errorWithCode.message}`,

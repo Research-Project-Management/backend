@@ -1,3 +1,4 @@
+import { TransactionService } from '@/modules/library/sync';
 import { OpenAlexProvider } from '@/modules/library/ingestion/providers/openalex.provider';
 import { SemanticScholarProvider } from '@/modules/library/ingestion/providers/semantic-scholar.provider';
 import { OpenLibraryProvider } from '@/modules/library/ingestion/providers/openlibrary.provider';
@@ -17,7 +18,7 @@ import {
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { Prisma } from '@prisma/client';
-import { ICatalogFacade, TransactionService } from '@/modules/library/core';
+import { ICatalogFacade } from '@/modules/library/core';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 
@@ -630,7 +631,11 @@ describe('Wave 10: Multi-Dataset & Cross-Provider Metadata Fidelity Audit & Reme
       } as unknown as ICatalogFacade;
 
       const duplicateService = new DuplicateService(
-        new DuplicateDetectorService(mockCatalogGateway, undefined, mockTxService),
+        new DuplicateDetectorService(
+          mockCatalogGateway,
+          undefined,
+          mockTxService,
+        ),
         new DuplicateMergerService(mockTxService, mockCatalogGateway),
       );
 

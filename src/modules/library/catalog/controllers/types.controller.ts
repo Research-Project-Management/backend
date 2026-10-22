@@ -13,7 +13,7 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ZoteroSchemaValidatorService } from '@/modules/library/catalog/services/zotero-schema-validator.service';
 
-@ApiTags('Library Item Types & Zotero Schema')
+@ApiTags('Library Item Types & Academic Schema')
 @ApiBearerAuth()
 @Controller(['api/v1/library/types', 'api/v1/library/item-types'])
 @UseGuards(JwtAuthGuard)
@@ -65,7 +65,7 @@ export class TypeController {
     const def = this.typesService.getItemType(itemType);
     if (!def) {
       throw new NotFoundException(
-        `Item type '${itemType}' is not a valid Zotero v42 bibliographic type`,
+        `Item type '${itemType}' is not a valid academic bibliographic type`,
       );
     }
     return {

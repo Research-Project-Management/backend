@@ -9,7 +9,8 @@ import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TagsRepository } from '@/modules/library/catalog/repositories/tags.repository';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotation.normalizer';
-import { TransactionService, TransactionHelpers } from '@/modules/library/core';
+import { TransactionHelpers } from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 import { PrismaService } from '@/core';
 import { CATALOG_FACADE } from '@/modules/library/catalog/catalog.facade';
 

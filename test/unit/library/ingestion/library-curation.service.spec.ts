@@ -1,11 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma } from '@prisma/client';
-import {
-  DuplicateService,
-
-
-} from '@/modules/library/ingestion/services/duplicate.service';
+import { DuplicateService } from '@/modules/library/ingestion/services/duplicate.service';
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';
 import { PrismaService } from '@/core';
@@ -15,9 +11,9 @@ import {
   EXTRACTION_FACADE,
   IExtractionFacade,
   ItemDetail,
-  TransactionService,
   TransactionHelpers,
 } from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   normalizeTitleForDedupe,
@@ -142,8 +138,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           DuplicateService,
-        
-        
+
           { provide: PrismaService, useValue: mockPrisma },
           { provide: TransactionService, useValue: mockLibraryTx },
           { provide: CATALOG_FACADE, useValue: mockBibliographyFacade },

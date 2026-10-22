@@ -1,9 +1,9 @@
+import { TransactionService } from '@/modules/library/sync';
 import { UnprocessableEntityException } from '@nestjs/common';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { TransactionService } from '@/modules/library/core';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { sanitizeItemTitle } from '@/modules/library/core';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
