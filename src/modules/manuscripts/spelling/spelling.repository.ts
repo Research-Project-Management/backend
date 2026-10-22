@@ -35,7 +35,12 @@ export class SpellingRepository {
 
     await this.prisma.manuscriptCustomWord.upsert({
       where: {
-        projectId_word: { projectId, word: clean },
+        scope_projectId_userId_word: {
+          scope: ManuscriptDictionaryScope.project,
+          projectId,
+          userId: null as unknown as string,
+          word: clean,
+        },
       },
       create: {
         scope: ManuscriptDictionaryScope.project,
@@ -52,7 +57,12 @@ export class SpellingRepository {
 
     await this.prisma.manuscriptCustomWord.upsert({
       where: {
-        userId_word: { userId, word: clean },
+        scope_projectId_userId_word: {
+          scope: ManuscriptDictionaryScope.user,
+          projectId: null as unknown as string,
+          userId,
+          word: clean,
+        },
       },
       create: {
         scope: ManuscriptDictionaryScope.user,

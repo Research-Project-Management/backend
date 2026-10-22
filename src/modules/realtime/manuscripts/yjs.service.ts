@@ -55,6 +55,7 @@ export class YjsService implements OnModuleDestroy {
   private readonly REDIS_SNAPSHOT_TTL_SECONDS = 7 * 24 * 3600;
 
   private readonly IDLE_THRESHOLD_MS = 15 * 60 * 1000;
+  private readonly MAX_ACTIVE_DOCS = 2000;
   private readonly SWEEP_INTERVAL_MS = 5 * 60 * 1000;
   private sweepTimer: NodeJS.Timeout | null = null;
   private readonly validator: YjsUpdateValidator;
@@ -96,6 +97,20 @@ export class YjsService implements OnModuleDestroy {
         `Garbage collected ${evictedCount} idle Y.Doc in-memory session(s)`,
       );
     }
+
+    // Capacity overflow protection: evict least recently active docs if exceeding MAX_ACTIVE_DOCS
+    if (this.activeDocs.size > this.MAX_ACTIVE_DOCS) {
+      const sorted = [...this.activeDocs.values()]
+        .sort((a, b) => a.lastActiveAt - b.lastActiveAt);
+
+      const targetEvictions = this.activeDocs.size - this.MAX_ACTIVE_DOCS;
+      for (let i = 0; i < Math.min(targetEvictions, sorted.length); i++) {
+        const s = sorted[i];
+        await this.evictDoc(s.projectId, s.docId);
+        evictedCount++;
+      }
+    }
+
     return evictedCount;
   }
 

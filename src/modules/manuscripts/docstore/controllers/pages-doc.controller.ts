@@ -337,7 +337,7 @@ export class PagesDocController {
 
     const result = await this.docstoreService.updateDoc(
       record.projectId,
-      pageId,
+      record.id,
       {
         lines,
         version: (body.version ?? record.version) + 1,
@@ -901,12 +901,16 @@ export class PagesDocController {
             });
         if (doc) {
           await Promise.all([
-            this.docstoreService.patchDoc(doc.projectId, pageId, {
+            this.docstoreService.patchDoc(doc.projectId, doc.id, {
               deleted: true,
+              deletedAt: new Date().toISOString(),
             }),
             this.prisma.manuscriptNode
               .deleteMany({
-                where: { projectId: doc.projectId, docId: pageId },
+                where: {
+                  projectId: doc.projectId,
+                  OR: [{ docId: doc.id }, { id: pageId }],
+                },
               })
               .catch(() => null),
           ]);

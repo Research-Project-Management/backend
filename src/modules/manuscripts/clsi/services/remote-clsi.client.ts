@@ -5,7 +5,7 @@
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { RedisCacheService } from '@/core';
+import { RedisCacheService, CircuitBreaker } from '@/core';
 import { CompileManuscriptDto } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import { SyncPoint, ReverseSyncPoint } from '../domain/clsi-ports';
@@ -17,6 +17,11 @@ export class RemoteClsiClientAdapter {
   private readonly logger = new Logger(RemoteClsiClientAdapter.name);
   private readonly remoteClsiUrl: string;
   private readonly logParser = new CompileLogAnalyzer();
+  private readonly circuitBreaker = new CircuitBreaker({
+    name: 'RemoteCLSI',
+    failureThreshold: 3,
+    cooldownMs: 25000,
+  });
 
   constructor(
     @Optional() private readonly configService?: ConfigService,
@@ -81,6 +86,12 @@ export class RemoteClsiClientAdapter {
     cacheKey: string,
   ): Promise<CompilePipelineResult | null> {
     if (!this.remoteClsiUrl) return null;
+    if (this.circuitBreaker.isOpen()) {
+      this.logger.warn(
+        `Remote CLSI Circuit Breaker is OPEN. Fast-failing compile request to local pipeline.`,
+      );
+      return null;
+    }
 
     try {
       const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
@@ -124,6 +135,7 @@ export class RemoteClsiClientAdapter {
             break;
           }
         } catch (err: unknown) {
+      this.circuitBreaker.recordFailure(err);
           lastError = err instanceof Error ? err : new Error(String(err));
         }
       }
@@ -207,18 +219,22 @@ export class RemoteClsiClientAdapter {
         ) {
           await this.cache.set(cacheKey, result, 300);
         }
+        this.circuitBreaker.recordSuccess();
         return result;
       }
       if (response) {
+        this.circuitBreaker.recordFailure(new Error(`HTTP ${response.status}`));
         this.logger.warn(
           `Remote CLSI responded with HTTP ${response.status}. Falling back to local pipeline.`,
         );
       } else if (lastError) {
+        this.circuitBreaker.recordFailure(lastError);
         this.logger.warn(
           `Remote CLSI compile failed: ${lastError.message}. Falling back to local pipeline.`,
         );
       }
     } catch (err: unknown) {
+      this.circuitBreaker.recordFailure(err);
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
         `Remote CLSI compile failed: ${msg}. Falling back to local pipeline.`,
@@ -233,6 +249,12 @@ export class RemoteClsiClientAdapter {
     error?: string;
   } | null> {
     if (!this.remoteClsiUrl) return null;
+    if (this.circuitBreaker.isOpen()) {
+      this.logger.warn(
+        `Remote CLSI Circuit Breaker is OPEN. Fast-failing compile request to local pipeline.`,
+      );
+      return null;
+    }
     try {
       const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
       const response = await fetch(`${baseUrl}/api/clsi/synctex/forward`, {
@@ -245,6 +267,7 @@ export class RemoteClsiClientAdapter {
         return await response.json();
       }
     } catch (err: unknown) {
+      this.circuitBreaker.recordFailure(err);
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
         `Remote CLSI forwardSync failed: ${msg}. Falling back to local.`,
@@ -259,6 +282,12 @@ export class RemoteClsiClientAdapter {
     error?: string;
   } | null> {
     if (!this.remoteClsiUrl) return null;
+    if (this.circuitBreaker.isOpen()) {
+      this.logger.warn(
+        `Remote CLSI Circuit Breaker is OPEN. Fast-failing compile request to local pipeline.`,
+      );
+      return null;
+    }
     try {
       const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
       const response = await fetch(`${baseUrl}/api/clsi/synctex/reverse`, {
@@ -271,6 +300,7 @@ export class RemoteClsiClientAdapter {
         return await response.json();
       }
     } catch (err: unknown) {
+      this.circuitBreaker.recordFailure(err);
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
         `Remote CLSI reverseSync failed: ${msg}. Falling back to local.`,

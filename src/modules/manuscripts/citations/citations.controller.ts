@@ -177,6 +177,20 @@ export class CitationsController {
       this.handleError(err);
     }
   }
+
+  @Get('references.bib')
+  @RequireRole(Role.REVIEWER)
+  @ApiOperation({
+    summary: 'Virtual .bib stream projection for live editor compilation',
+  })
+  async getVirtualProjectBibtex(
+    @Param('projectId') routeProjectId: string,
+    @ResolvedProject() project?: string | { id?: string },
+  ): Promise<string> {
+    const targetProjectId =
+      (typeof project === 'string' ? project : project?.id) || routeProjectId;
+    return this.citationsService.getVirtualProjectBibtex(targetProjectId);
+  }
 }
 
 @ApiTags('Manuscripts - Citations & Bibliography')

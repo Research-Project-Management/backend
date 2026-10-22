@@ -19,6 +19,7 @@ model ManuscriptSnapshot {
   labels ManuscriptLabel[]
 
   @@unique([projectId, version], map: "uq_manuscript_snapshots_project_version")
+  @@index([projectId, createdAt(sort: Desc)], map: "idx_manuscript_snapshots_project_created_desc")
   @@index([projectId, createdAt], map: "idx_manuscript_snapshots_project_created")
   @@index([projectId, inStorage], map: "idx_manuscript_snapshots_storage")
   @@map("manuscript_snapshots")

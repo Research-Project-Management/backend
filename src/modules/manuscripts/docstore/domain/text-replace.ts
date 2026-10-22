@@ -14,6 +14,16 @@ export function buildSearchRegex(
   opts: ReplaceOptions = {},
 ): RegExp {
   if (!query) throw new Error('Search query must not be empty');
+  if (query.length > 500) throw new Error('Search pattern exceeds maximum allowed length of 500 characters');
+
+  if (opts.useRegex) {
+    // Basic ReDoS protection: detect potentially catastrophic nested quantifiers like (a+)+ or (.*)*
+    const dangerousNestedQuantifiers = /([*+]\??)\s*\)?\s*[*+]/;
+    if (dangerousNestedQuantifiers.test(query)) {
+      throw new Error('Unsafe regular expression pattern with nested quantifiers');
+    }
+  }
+
   let source = opts.useRegex
     ? query
     : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

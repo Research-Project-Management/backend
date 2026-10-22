@@ -42,7 +42,10 @@ export interface HeartbeatBody {
 export class ManuscriptPresenceService {
   private readonly logger = new Logger(ManuscriptPresenceService.name);
   private static readonly HTTP_PRESENCE_TTL_MS = 60_000;
+  private static readonly MAX_HTTP_PRESENCE_ENTRIES = 5000;
   private static readonly httpPresence = new Map<string, ActivePresenceUser>();
+  private static readonly projectIdCache = new Map<string, { projectId: string | null; expiresAt: number }>();
+  private static readonly PROJECT_ID_CACHE_TTL_MS = 300_000; // 5 minutes
   private liveCollab: LiveCollaborationPort | null | undefined;
 
   constructor(
@@ -64,16 +67,34 @@ export class ManuscriptPresenceService {
 
   private async resolveProjectId(id: string): Promise<string | null> {
     if (!isUuid(id)) return null;
+
+    const cached = ManuscriptPresenceService.projectIdCache.get(id);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.projectId;
+    }
+
     const doc = await this.prisma.manuscriptDoc.findUnique({
       where: { id },
       select: { projectId: true },
     });
-    if (doc?.projectId) return doc.projectId;
-    const node = await this.prisma.manuscriptNode.findFirst({
-      where: { projectId: id },
-      select: { projectId: true },
+    let resolved = doc?.projectId ?? null;
+    if (!resolved) {
+      const node = await this.prisma.manuscriptNode.findFirst({
+        where: { projectId: id },
+        select: { projectId: true },
+      });
+      resolved = node?.projectId ?? null;
+    }
+
+    if (ManuscriptPresenceService.projectIdCache.size > 2000) {
+      ManuscriptPresenceService.projectIdCache.clear();
+    }
+    ManuscriptPresenceService.projectIdCache.set(id, {
+      projectId: resolved,
+      expiresAt: Date.now() + ManuscriptPresenceService.PROJECT_ID_CACHE_TTL_MS,
     });
-    return node?.projectId ?? null;
+
+    return resolved;
   }
 
   /**
@@ -132,6 +153,18 @@ export class ManuscriptPresenceService {
   ): { success: true } {
     if (!userId) {
       throw new BadRequestException('Authenticated user required');
+    }
+    if (ManuscriptPresenceService.httpPresence.size >= ManuscriptPresenceService.MAX_HTTP_PRESENCE_ENTRIES) {
+      // Evict expired entries or clear half
+      const now = Date.now();
+      for (const [k, v] of ManuscriptPresenceService.httpPresence) {
+        if (now - v.lastSeen > ManuscriptPresenceService.HTTP_PRESENCE_TTL_MS) {
+          ManuscriptPresenceService.httpPresence.delete(k);
+        }
+      }
+      if (ManuscriptPresenceService.httpPresence.size >= ManuscriptPresenceService.MAX_HTTP_PRESENCE_ENTRIES) {
+        ManuscriptPresenceService.httpPresence.clear();
+      }
     }
     ManuscriptPresenceService.httpPresence.set(`${pageId}:${userId}`, {
       id: userId,

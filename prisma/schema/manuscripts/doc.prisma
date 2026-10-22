@@ -21,6 +21,7 @@ model ManuscriptDoc {
   updatedAt  DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
   node       ManuscriptNode?
 
+  @@index([projectId, deleted, updatedAt], map: "idx_manuscript_docs_proj_del_updated")
   @@index([projectId, deleted], map: "idx_manuscript_docs_project_deleted")
   @@index([projectId, inStorage], map: "idx_manuscript_docs_project_storage")
   @@index([projectId, path], map: "idx_manuscript_docs_project_path")

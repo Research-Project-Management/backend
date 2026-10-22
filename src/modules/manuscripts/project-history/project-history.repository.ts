@@ -59,6 +59,22 @@ export class ManuscriptHistoryMapper {
     return SnapshotNormalizer.parseSnapshotFiles(rawFiles);
   }
 
+  public static toDomainHeader(record: { id: string; projectId: string; version: number; summary: string | null; createdById: string | null; isAutomatic: boolean; createdAt: Date; sizeBytes?: number; labels?: PrismaLabel[]; }): Snapshot {
+    const labels = record.labels ? record.labels.map((l) => this.toDomainLabel(l)) : [];
+    return Snapshot.create({
+      id: record.id,
+      projectId: record.projectId,
+      version: record.version,
+      summary: record.summary,
+      createdById: record.createdById,
+      isAutomatic: record.isAutomatic,
+      files: new Map(),
+      fileCount: record.sizeBytes !== undefined && record.sizeBytes > 0 ? 1 : 1,
+      labels,
+      createdAt: record.createdAt,
+    });
+  }
+
   public static toDomain(prisma: PrismaSnapshotWithLabels): Snapshot {
     const filesMap = SnapshotNormalizer.parseSnapshotFiles(prisma.files);
     const labels = prisma.labels
@@ -474,13 +490,21 @@ export class ProjectHistoryRepository extends IHistoryRepositoryPort {
     const records = await this.prisma.manuscriptSnapshot.findMany({
       where: { projectId },
       orderBy: { version: 'asc' },
-      include: {
+      select: {
+        id: true,
+        projectId: true,
+        version: true,
+        summary: true,
+        createdById: true,
+        isAutomatic: true,
+        sizeBytes: true,
+        createdAt: true,
         labels: true,
       },
     });
 
     return records.map((r) =>
-      ManuscriptHistoryMapper.toDomain(r as PrismaSnapshotWithLabels),
+      ManuscriptHistoryMapper.toDomainHeader(r),
     );
   }
 

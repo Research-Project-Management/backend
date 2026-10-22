@@ -224,6 +224,8 @@ class MockDocstoreService {
     return doc;
   }
 
+  async updateDoc(projectId: string, docId: string, dto: any) { const existing = this.docs.get(docId); if (!existing) return null; const updated = { ...existing, ...dto }; this.docs.set(docId, updated); return updated; }
+
   async createDoc(projectId: string, dto: { path: string; lines: string[] }) {
     const id = `doc-${Math.random().toString(36).substring(7)}`;
     const doc = { _id: id, path: dto.path, lines: dto.lines };
@@ -947,3 +949,4 @@ describe('Manuscripts Export-Import Subsystem (ZIP Archive & Templates)', () => 
     });
   });
 });
+

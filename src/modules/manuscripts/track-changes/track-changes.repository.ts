@@ -530,6 +530,24 @@ export class TrackChangesRepository extends ITrackChangesRepositoryPort {
     return TrackChangesMapper.toDomainChange(record);
   }
 
+  public async batchUpdateChangesStatus(
+    ids: string[],
+    status: ChangeStatus,
+    resolvedById?: string | null,
+    resolvedAt?: Date | null,
+  ): Promise<void> {
+    if (ids.length === 0) return;
+    await this.prisma.manuscriptTrackChange.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        status,
+        resolvedById: resolvedById ?? null,
+        resolvedAt: resolvedAt ?? new Date(),
+        updatedAt: new Date(),
+      },
+    });
+  }
+
   public async findChangeById(changeId: string): Promise<TrackChange | null> {
     const record = await this.prisma.manuscriptTrackChange.findUnique({
       where: { id: changeId },

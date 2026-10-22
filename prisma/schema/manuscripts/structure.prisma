@@ -23,9 +23,9 @@ model ManuscriptNode {
   depth Int                @default(0)
 
   docId  String?         @unique(map: "uq_manuscript_nodes_doc_id") @map("doc_id") @db.Uuid
-  doc    ManuscriptDoc?  @relation(fields: [docId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_manuscript_nodes_doc_id")
+  doc    ManuscriptDoc?  @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_nodes_doc_id")
   fileId String?         @unique(map: "uq_manuscript_nodes_file_id") @map("file_id") @db.Uuid
-  file   ManuscriptFile? @relation(fields: [fileId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_manuscript_nodes_file_id")
+  file   ManuscriptFile? @relation(fields: [fileId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_nodes_file_id")
 
   isRootDoc Boolean @default(false) @map("is_root_doc")
   sizeBytes Int     @default(0) @map("size_bytes")

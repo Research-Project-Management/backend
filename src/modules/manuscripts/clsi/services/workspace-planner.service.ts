@@ -7,6 +7,8 @@
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import * as crypto from 'crypto';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
@@ -20,17 +22,21 @@ import {
   PlannedFileSet,
 } from '../domain/compile-fileset.planner';
 import { FileSnapshotVo } from '@/modules/manuscripts/project-history/domain/file-snapshot.vo';
+import { OverleafIncrementalWorkspace } from '../repositories/incremental-workspace.repository';
 
 @Injectable()
 export class ClsiWorkspacePlannerService {
   private readonly logger = new Logger(ClsiWorkspacePlannerService.name);
   private readonly lastAutoSnapshotTimes = new Map<string, number>();
+  private readonly lastSnapshotHashes = new Map<string, string>();
+  private static readonly MAX_TRACKED_PROJECTS = 1000;
 
   constructor(
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly filestoreService?: FilestoreService,
     @Optional() private readonly realtimeService?: RealtimeFacade,
+    @Optional() private readonly workspace?: OverleafIncrementalWorkspace,
   ) {}
 
   /**
@@ -177,7 +183,7 @@ export class ClsiWorkspacePlannerService {
         const [binaryFiles, fileNodes] = await Promise.all([
           this.prisma.manuscriptFile.findMany({
             where: { projectId, deleted: false, deletedAt: null },
-            select: { id: true, name: true },
+            select: { id: true, name: true, sizeBytes: true, hash: true },
           }),
           this.prisma.manuscriptNode.findMany({
             where: { projectId, type: 'FILE' },
@@ -197,6 +203,8 @@ export class ClsiWorkspacePlannerService {
           }
         }
 
+        const scratchDir = this.workspace?.getScratchDir(projectId);
+
         for (const bf of binaryFiles) {
           const relPath =
             pathByFileId.get(bf.id) ||
@@ -206,6 +214,21 @@ export class ClsiWorkspacePlannerService {
               .replace(/^(\.\/)+/, '')
               .replace(/^\/+/, '');
           if (!relPath || out[relPath] !== undefined) continue;
+
+          // Disk-cache hit optimization: if workspace already has the exact asset on disk, reuse it
+          if (scratchDir) {
+            const localAssetPath = path.join(scratchDir, relPath);
+            try {
+              const stat = await fs.stat(localAssetPath);
+              if (bf.sizeBytes && stat.size === bf.sizeBytes) {
+                // Asset is already on local disk with identical byte length; skip re-downloading to RAM
+                continue;
+              }
+            } catch {
+              // Asset not present on disk, proceed with stream fetch
+            }
+          }
+
           try {
             const { stream } = await this.filestoreService.openReadStream(
               projectId,
@@ -295,10 +318,13 @@ export class ClsiWorkspacePlannerService {
 
       const nextVersion = (latest?.version ?? 0) + 1;
       const filesJson: Record<string, unknown> = {};
+      const hashAccumulator = crypto.createHash('sha256');
+
       for (const [p, content] of Object.entries(mergedFiles)) {
         if (typeof content !== 'string') continue;
         const normalizedPath = p.startsWith('/') ? p : `/${p}`;
         const hash = crypto.createHash('sha256').update(content).digest('hex');
+        hashAccumulator.update(`${normalizedPath}:${hash};`);
         const lines = content.split('\n');
         const resolvedDocId = docIdByNormalizedPath.get(normalizedPath) || '';
         const isRootDoc =
@@ -314,6 +340,14 @@ export class ClsiWorkspacePlannerService {
         ).toJSON();
       }
       if (Object.keys(filesJson).length === 0) return;
+
+      const projectContentHash = hashAccumulator.digest('hex');
+      if (this.lastSnapshotHashes.get(projectId) === projectContentHash) {
+        // Content did not change since last snapshot; update timestamp to prevent thrashing
+        this.lastAutoSnapshotTimes.set(projectId, Date.now());
+        return;
+      }
+
       await this.prisma.manuscriptSnapshot.create({
         data: {
           projectId,
@@ -322,9 +356,20 @@ export class ClsiWorkspacePlannerService {
           createdById: userId || null,
           isAutomatic: true,
           files: filesJson as unknown as Prisma.InputJsonValue,
+          sizeBytes: Object.keys(filesJson).length,
         },
       });
+
+      // Bounded cache maintenance to prevent memory leaks across thousands of projects
+      if (this.lastAutoSnapshotTimes.size >= ClsiWorkspacePlannerService.MAX_TRACKED_PROJECTS) {
+        const oldestKey = this.lastAutoSnapshotTimes.keys().next().value;
+        if (oldestKey) {
+          this.lastAutoSnapshotTimes.delete(oldestKey);
+          this.lastSnapshotHashes.delete(oldestKey);
+        }
+      }
       this.lastAutoSnapshotTimes.set(projectId, Date.now());
+      this.lastSnapshotHashes.set(projectId, projectContentHash);
       this.realtimeService?.broadcastSnapshotCreated(projectId, {
         version: nextVersion,
         summary: `Compilation milestone (${metricEngine})`,

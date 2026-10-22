@@ -18,6 +18,7 @@ export interface CreateSnapshotProps {
   files:
     | Map<string, FileSnapshotVo>
     | Record<string, FileSnapshotVo | FileSnapshotProps>;
+  fileCount?: number;
   labels?: VersionLabel[];
   createdAt?: Date;
 }
@@ -30,6 +31,7 @@ export class Snapshot {
   private readonly _createdById: string | null;
   private readonly _isAutomatic: boolean;
   private readonly _files: Map<string, FileSnapshotVo>;
+  private readonly _fileCountOverride?: number;
   private readonly _labels: VersionLabel[];
   private readonly _createdAt: Date;
 
@@ -40,6 +42,7 @@ export class Snapshot {
     this._summary = props.summary ?? null;
     this._createdById = props.createdById ?? null;
     this._isAutomatic = props.isAutomatic ?? false;
+    this._fileCountOverride = props.fileCount;
     this._labels = props.labels ? [...props.labels] : [];
     this._createdAt = props.createdAt ?? new Date();
 
@@ -58,7 +61,7 @@ export class Snapshot {
       }
     }
 
-    if (this._files.size === 0) {
+    if (this._files.size === 0 && (this._fileCountOverride === undefined || this._fileCountOverride === 0)) {
       throw new EmptyProjectException(this._projectId);
     }
   }
@@ -89,7 +92,7 @@ export class Snapshot {
     return new Map(this._files);
   }
   public get fileCount(): number {
-    return this._files.size;
+    return this._fileCountOverride !== undefined ? this._fileCountOverride : this._files.size;
   }
   public get labels(): VersionLabel[] {
     return [...this._labels];

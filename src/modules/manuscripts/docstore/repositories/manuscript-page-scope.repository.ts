@@ -27,8 +27,13 @@ export class ManuscriptPageScopeRepository {
     if (!projectId || !identifier) return null;
 
     if (isUUID(identifier)) {
+      // 1. Direct docId lookup OR node lookup (if identifier is a nodeId)
       const doc = await this.prisma.manuscriptDoc.findFirst({
-        where: { id: identifier, projectId, deleted: false },
+        where: {
+          projectId,
+          deleted: false,
+          OR: [{ id: identifier }, { node: { id: identifier } }],
+        },
       });
       if (doc) return doc;
     }

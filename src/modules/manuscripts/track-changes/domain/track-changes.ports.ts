@@ -24,6 +24,13 @@ export abstract class ITrackChangesRepositoryPort {
     status?: ChangeStatus,
   ): Promise<TrackChange[]>;
 
+  abstract batchUpdateChangesStatus(
+    ids: string[],
+    status: ChangeStatus,
+    resolvedById?: string | null,
+    resolvedAt?: Date | null,
+  ): Promise<void>;
+
   abstract saveCommentThread(thread: CommentThread): Promise<CommentThread>;
   abstract findThreadById(threadId: string): Promise<CommentThread | null>;
   abstract listThreadsByDoc(

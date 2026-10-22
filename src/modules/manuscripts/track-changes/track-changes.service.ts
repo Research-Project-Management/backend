@@ -162,14 +162,25 @@ export class TrackChangesService {
       );
     }
 
+    const resolvedStatus = isAccept ? 'accepted' : 'rejected';
+    const now = new Date();
+    const idsToUpdate = sorted.map((c) => c.id);
+
+    // Atomic O(1) DB batch update instead of sequential N+1 updates
+    await this.repository.batchUpdateChangesStatus(
+      idsToUpdate,
+      resolvedStatus as any,
+      userId,
+      now,
+    );
+
     for (const change of sorted) {
       if (isAccept) {
         change.accept(userId);
       } else {
         change.reject(userId);
       }
-      const saved = await this.repository.saveChange(change);
-      this.realtimeNotifier?.notifyChangeResolved(resolvedProjId, docId, saved);
+      this.realtimeNotifier?.notifyChangeResolved(resolvedProjId, docId, change);
     }
 
     return {

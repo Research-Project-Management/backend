@@ -214,4 +214,18 @@ export class CitationsService {
     const entries = this.bibParser.parse(rawText);
     return entries.map((e) => e.toJSON() as BibEntryDto);
   }
+
+  /**
+   * Virtual .bib Projection (Editor ↔ Library Bridge):
+   * Streams aggregated project references directly without intermediate disk mutations.
+   */
+  public async getVirtualProjectBibtex(projectId: string): Promise<string> {
+    const bibFiles = await this.repository.collectBibFiles(projectId);
+    if (!bibFiles.length) {
+      return '';
+    }
+    return bibFiles
+      .flatMap((b) => b.entries.map((e) => e.toBibtexString()))
+      .join('\n\n');
+  }
 }

@@ -16,7 +16,8 @@ model ManuscriptCustomWord {
   word      String                    @db.VarChar(128)
   createdAt DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@unique([projectId, word], map: "uq_custom_word_project")
-  @@unique([userId, word], map: "uq_custom_word_user")
+  @@index([projectId, word], map: "idx_custom_word_project")
+  @@index([userId, word], map: "idx_custom_word_user")
+  @@unique([scope, projectId, userId, word], map: "uq_custom_word_scoped")
   @@map("manuscript_custom_words")
 }
