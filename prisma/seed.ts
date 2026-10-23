@@ -5,7 +5,6 @@ import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
 import { SCHEMA_V42_DATA } from '../src/modules/library/core/types/schema.constants';
-import { seedLibrary } from './seed-library';
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -1765,6 +1764,50 @@ async function main() {
     folderNodesMap.set(fName, node.id);
   }
 
+  function getDemoBackendFiles(template = 'main') {
+    const files = [
+      {
+        name: 'main.tex',
+        path: '/main.tex',
+        content: `\\documentclass{article}
+\\usepackage{amsmath}
+\\usepackage{graphicx}
+\\title{Physics-Informed Neural Operators for Turbulence and Fluid Dynamics}
+\\author{Prof. Tan Thanh Ngo, Dr. Evelyn Vance, Alex Chen}
+\\date{\\today}
+\\begin{document}
+\\maketitle
+\\begin{abstract}
+We present physics-informed neural operator frameworks for turbulent flows.
+\\end{abstract}
+\\section{Introduction}
+Deep learning operators solve PDEs orders of magnitude faster than classical solvers.
+\\bibliographystyle{plain}
+\\bibliography{references}
+\\end{document}`,
+      },
+      {
+        name: 'preamble.tex',
+        path: '/preamble.tex',
+        content: `\\usepackage{amssymb}\n\\usepackage{bm}\n\\usepackage{hyperref}`,
+      },
+      {
+        name: 'references.bib',
+        path: '/references.bib',
+        content: `@article{li2020fourier,
+  title={Fourier neural operator for parametric partial differential equations},
+  author={Li, Zongyi and Kovachki, Nikola and Azizzadenesheli, Kamyar and Liu, Burigede and Bhattacharya, Kaushik and Stuart, Andrew and Anandkumar, Anima},
+  journal={arXiv preprint arXiv:2010.08895},
+  year={2020}
+}`,
+      },
+    ];
+    return files.map((f) => ({
+      ...f,
+      size: Buffer.byteLength(f.content, 'utf8'),
+    }));
+  }
+
   const demoFiles = getDemoBackendFiles('main');
   for (let idx = 0; idx < demoFiles.length; idx++) {
     const f = demoFiles[idx];
@@ -1881,8 +1924,8 @@ async function main() {
 
   console.log(`📌 Created 6 personal stickies for ${userThanh.email}.`);
 
-  // 11. Seed Rich Academic Library Dataset & Contexts
-  await seedLibrary();
+  // 11. Academic Library items can be imported via Zotero or UI
+  console.log('📚 Library ready for dynamic items.');
 
   // 12. Invalidate Redis Caches
   try {
