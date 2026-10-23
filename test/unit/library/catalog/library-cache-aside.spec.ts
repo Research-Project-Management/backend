@@ -1,9 +1,9 @@
+import { TransactionService } from '@/modules/library/sync';
 import { ItemService as ItemsService } from '@/modules/library/catalog/services/items.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { ItemFulltextService } from '@/modules/library/catalog/services/item-fulltext.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { TransactionService } from '@/modules/library/core';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
 import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';

@@ -174,11 +174,7 @@ function applyFileTypeFilter(
     Object.assign(where, typeConditions[0]);
   } else if (typeConditions.length > 1) {
     where.AND = [
-      ...(Array.isArray(where.AND)
-        ? where.AND
-        : where.AND
-          ? [where.AND]
-          : []),
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
       { OR: typeConditions },
     ];
   }
@@ -241,7 +237,6 @@ export class StorageNodeMapper {
     const scope = normalizeFileScope(record.linkedToType);
     const metadata = (record.metaData as Record<string, unknown>) || {};
     const projectId =
-      record.projectId ??
       (typeof metadata.projectId === 'string' ? metadata.projectId : null) ??
       (scope === FileScope.Project || scope === FileScope.Library
         ? record.linkedToId
@@ -288,7 +283,6 @@ export class StorageNodeMapper {
       starred: node.starred,
       metaData: metadata as Prisma.InputJsonValue,
       parentId: node.parentId,
-      projectId: node.projectId,
       linkedToType: node.scope,
       linkedToId: node.linkedToId ?? node.projectId,
       blobId: node.blobId,
@@ -332,7 +326,6 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
         size: data.size,
         mimeType: data.mimeType,
         parentId: data.parentId,
-        projectId: data.projectId,
         linkedToType: data.linkedToType,
         linkedToId: data.linkedToId,
         starred: data.starred,
@@ -407,18 +400,10 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
         where.linkedToId = targetLinkedId;
       }
     } else if (filter.projectId) {
-      andConditions.push({
-        OR: [
-          { projectId: filter.projectId },
-          {
-            linkedToType: { equals: FileScope.Project, mode: 'insensitive' },
-            linkedToId: filter.projectId,
-          },
-        ],
-      });
+      where.linkedToType = { equals: FileScope.Project, mode: 'insensitive' };
+      where.linkedToId = filter.projectId;
     } else {
       // Personal Drive: exclude project-scoped, library-scoped, and paper-scoped files
-      where.projectId = null;
       where.NOT = [
         { linkedToType: { equals: FileScope.Project, mode: 'insensitive' } },
         { linkedToType: { equals: FileScope.Library, mode: 'insensitive' } },

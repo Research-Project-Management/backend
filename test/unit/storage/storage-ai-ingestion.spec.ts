@@ -32,7 +32,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
     } as any;
 
     mockContentFacade = {
-      extractDocumentFromBuffer: jest.fn(),
+      extractPdfBuffer: jest.fn(),
     };
 
     mockEngineService = {
@@ -99,7 +99,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
       buffer: Buffer.from('%PDF-1.7 sample quantum paper data'),
     });
 
-    mockContentFacade.extractDocumentFromBuffer.mockResolvedValue({
+    mockContentFacade.extractPdfBuffer.mockResolvedValue({
       metadata: {
         title: 'Quantum Advantage in Scientific Simulation',
         authors: ['Alice Researcher', 'Bob Physicist'],
@@ -134,7 +134,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
     });
 
     // Verify PDF extraction
-    expect(mockContentFacade.extractDocumentFromBuffer).toHaveBeenCalled();
+    expect(mockContentFacade.extractPdfBuffer).toHaveBeenCalled();
 
     // Verify AI Engine vector upload
     expect(mockEngineService.uploadDocument).toHaveBeenCalledWith(
@@ -219,7 +219,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
       buffer: Buffer.from('%PDF-1.7 sample data'),
     });
 
-    mockContentFacade.extractDocumentFromBuffer.mockResolvedValue({
+    mockContentFacade.extractPdfBuffer.mockResolvedValue({
       metadata: {
         title: 'Offline Scientific Paper',
         authors: ['Carol Scientist'],

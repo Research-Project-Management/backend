@@ -191,6 +191,7 @@ describe('Storage & File Security Suite', () => {
       mockPrisma = {
         fileShare: {
           findUnique: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([]),
         },
         projectMember: {
           findUnique: jest.fn(),
@@ -263,6 +264,13 @@ describe('Storage & File Security Suite', () => {
         }),
       );
 
+      mockPrisma.fileShare.findMany.mockResolvedValue([
+        {
+          fileId,
+          userId: collaboratorId,
+          permission: 'view',
+        },
+      ]);
       mockPrisma.fileShare.findUnique.mockResolvedValue({
         fileId,
         userId: collaboratorId,
@@ -603,7 +611,10 @@ describe('Storage & File Security Suite', () => {
 
     beforeEach(() => {
       mockPrisma = {
-        fileShare: { findUnique: jest.fn() },
+        fileShare: {
+          findUnique: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([]),
+        },
         projectMember: { findUnique: jest.fn() },
       };
       mockNodeRepo = { findById: jest.fn() };

@@ -1,3 +1,4 @@
+import { TransactionService } from '@/modules/library/sync';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslEngineService } from '@/modules/library/citation/services/csl-engine.service';
 import { CitationService } from '@/modules/library/citation/services/citation.service';
@@ -20,7 +21,6 @@ import {
 } from '@/modules/library/extraction/domain/renamer.domain';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
-import { TransactionService } from '@/modules/library/core';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
@@ -442,8 +442,9 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
           ),
         batchRename: jest
           .fn()
-          .mockImplementation((updates: Array<{ id: string; filename: string }>) =>
-            Promise.resolve(updates.length),
+          .mockImplementation(
+            (updates: Array<{ id: string; filename: string }>) =>
+              Promise.resolve(updates.length),
           ),
       };
       const mockCatalogGateway = {
@@ -537,9 +538,11 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
     it('ItemService executes bulkTrash -> bulkRestore -> bulkPurge lifecycle cleanly', async () => {
       const mockQueryRepo = {
         findById: jest.fn().mockResolvedValue({ id: 'item-1', title: 'Test' }),
-        findByIds: jest.fn().mockImplementation(async (_u, ids) =>
-          ids.map((id: string) => ({ id, title: `Test ${id}`, version: 3 })),
-        ),
+        findByIds: jest
+          .fn()
+          .mockImplementation(async (_u, ids) =>
+            ids.map((id: string) => ({ id, title: `Test ${id}`, version: 3 })),
+          ),
       };
       const mockCommandRepo = {
         softDelete: jest.fn().mockResolvedValue({
@@ -924,10 +927,7 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
         >[0],
       );
 
-      const relationsService = new ItemRelationsService(
-        queryRepo,
-        commandRepo,
-      );
+      const relationsService = new ItemRelationsService(queryRepo, commandRepo);
 
       // 1. Self-relation must be rejected
       await expect(
@@ -968,9 +968,16 @@ describe('Wave 2: Zotero 7 Official Documentation & Power-User User Stories Stre
       });
 
       // 4. Unlinking from item-b removes the bidirectional relation
-      const unlinkRes = await relationsService.unlinkItems(userId, itemBId, itemAId);
+      const unlinkRes = await relationsService.unlinkItems(
+        userId,
+        itemBId,
+        itemAId,
+      );
       expect(unlinkRes.unlinked).toBe(true);
-      const afterUnlink = await relationsService.getRelatedItems(userId, itemBId);
+      const afterUnlink = await relationsService.getRelatedItems(
+        userId,
+        itemBId,
+      );
       expect(afterUnlink.relatedItems).toHaveLength(0);
     });
   });
