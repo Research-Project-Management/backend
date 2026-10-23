@@ -454,7 +454,7 @@ export class DuplicateMergerService {
         const combinedUpdates = { ...backfillFields, ...scalarSelections };
         const topLevelData: Record<string, unknown> = {
           itemType: effectiveMergedItemType,
-          ...(mergedIsRetracted ? { isRetracted: true } : {}),
+          // isRetracted stored in metadata
         };
         for (const [key, val] of Object.entries(combinedUpdates)) {
           if (TOP_LEVEL_ITEM_COLUMNS.has(key)) {

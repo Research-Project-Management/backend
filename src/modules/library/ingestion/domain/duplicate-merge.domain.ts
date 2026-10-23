@@ -37,7 +37,6 @@ export const TOP_LEVEL_ITEM_COLUMNS = new Set([
   'publicationTitle',
   'abstract',
   'url',
-  'isRetracted',
 ]);
 
 export const IDENTIFIER_META_KEYS = [

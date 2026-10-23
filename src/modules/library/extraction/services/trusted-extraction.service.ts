@@ -473,11 +473,16 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
   ): void {
     const refinements: string[] = [];
 
-    // The arXiv ID encodes the submission year; it beats "last year in the
-    // header text" (which picked up e.g. "WMT 2014" for a 2017 paper).
-    // A year embedded in the PDF's own XMP is authoritative and kept.
+    // The arXiv ID encodes the submission year; it beats heuristic header years
+    // ONLY when the document is not an established journal publication with a formal venue.
+    // Formal journal publication years (JMLR, IEEE, ACM, Nature, Elsevier) take precedence over preprints.
     const arxivYear = yearFromArxivId(merged.arxivId);
-    if (arxivYear && !xmpYear && merged.year !== arxivYear) {
+    if (
+      arxivYear &&
+      !xmpYear &&
+      !merged.journal &&
+      merged.year !== arxivYear
+    ) {
       rawMatches.yearBeforeRefinement = merged.year;
       merged.year = arxivYear;
       refinements.push('year-from-arxiv-id');

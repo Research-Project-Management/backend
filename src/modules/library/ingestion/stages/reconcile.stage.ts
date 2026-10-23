@@ -57,13 +57,23 @@ export class ReconcileStage implements IWorkflowStage<
     // If we have an authentic local PDF extraction with a credible title,
     // verify that external enriched candidates do not belong to a cited paper.
     let citationTrapRejectedDoi: string | undefined;
-    if (fileCandidate && fileCandidate.normalizedMetadata?.title) {
+    const isFilenameFallback = Boolean(
+      fileCandidate?.fields?.extraFields?.normalizedValue &&
+        typeof fileCandidate.fields.extraFields.normalizedValue === 'object' &&
+        (fileCandidate.fields.extraFields.normalizedValue as Record<string, unknown>).isFilenameTitle,
+    ) || Boolean(
+      fileCandidate?.normalizedMetadata?.extraFields?.isFilenameTitle,
+    );
+
+    if (fileCandidate && fileCandidate.normalizedMetadata?.title && !isFilenameFallback) {
       const fileTitle = fileCandidate.normalizedMetadata.title;
       const isCrediblePdfTitle =
         fileTitle.trim().length >= 10 &&
         !/^(untitled|document|uploaded document|manuscript)$/i.test(
           fileTitle.trim(),
-        );
+        ) &&
+        !/^\d{4}\s*\d{4,5}(v\d+)?$/i.test(fileTitle.trim()) &&
+        !/^arxiv/i.test(fileTitle.trim());
 
       if (isCrediblePdfTitle) {
         const remaining: MetadataCandidate[] = [];

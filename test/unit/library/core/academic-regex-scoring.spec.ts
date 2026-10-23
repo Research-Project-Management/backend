@@ -1,4 +1,4 @@
-﻿import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
+import { AcademicRegexCatalog } from '@/modules/library/core/domain/academic-regex.catalog';
 
 describe('AcademicRegexCatalog - Page-1 Citation Disambiguation & DOI Scoring', () => {
   describe('scoreDoiCandidate', () => {
@@ -77,6 +77,49 @@ describe('AcademicRegexCatalog - Page-1 Citation Disambiguation & DOI Scoring', 
       );
       expect(citedCandidate).toBeDefined();
       expect(topCandidate.score).toBeGreaterThan(citedCandidate!.score);
+    });
+  });
+
+  describe('arXiv reference pollution vs genuine preprint identification', () => {
+    it('rejects an arXiv ID that is cited in an introduction citation bracket or footnote', () => {
+      const page1Text = `
+        Journal of Machine Learning Research 15 (2014) 1929-1958
+
+        Dropout: A Simple Way to Prevent Neural Networks from Overfitting
+        Nitish Srivastava, Geoffrey Hinton, Alex Krizhevsky, Ilya Sutskever, Ruslan Salakhutdinov
+
+        Abstract
+        Deep neural networks with a large number of parameters are very powerful machine learning systems.
+
+        1. Introduction
+        Regularization techniques have been explored in recent years. In particular, stochastic pooling
+        was proposed by Zeiler & Fergus [1] (arXiv:1301.3557) to prevent overfitting in convnets.
+      `;
+
+      const result = AcademicRegexCatalog.scan(page1Text);
+
+      // Must detect JMLR journal metadata correctly!
+      expect(result.journal).toBe('Journal of Machine Learning Research');
+      expect(result.year).toBe(2014);
+      expect(result.volume).toBe('15');
+      expect(result.pages).toBe('1929-1958');
+
+      // Must NOT attribute the paper to the cited arXiv ID or fabricate an arXiv DOI!
+      expect(result.arxivId).toBeUndefined();
+      expect(result.doi).toBeUndefined();
+    });
+
+    it('correctly keeps genuine arXiv preprint ID when located in the document header', () => {
+      const preprintText = `
+        arXiv:2303.08774v2 [cs.CV] 15 Mar 2023
+        Scaling Vision Transformers to 22 Billion Parameters
+        Mostafa Dehghani, Josip Djolonga, Alexey Dosovitskiy
+      `;
+
+      const result = AcademicRegexCatalog.scan(preprintText);
+      expect(result.arxivId).toBe('2303.08774v2');
+      expect(result.primaryCategory).toBe('cs.CV');
+      expect(result.doi).toBe('10.48550/arXiv.2303.08774v2');
     });
   });
 });

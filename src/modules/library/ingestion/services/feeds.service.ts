@@ -4,7 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
 
 export interface FeedSubscriptionDto {
@@ -228,15 +228,44 @@ export class FeedsService {
     }));
   }
 
+  private async resolveFeedItemUuid(rawItemId: string): Promise<string | null> {
+    if (!rawItemId || typeof rawItemId !== 'string') return null;
+    const trimmed = rawItemId.trim();
+    if (isUuid(trimmed)) return trimmed;
+
+    // If identifier is a guid (like "oai:arXiv.org:2610.28686v1" or arXiv ID / URL)
+    const found = await this.prisma.feedItem.findFirst({
+      where: {
+        OR: [
+          { guid: trimmed },
+          { url: trimmed },
+          { doi: trimmed },
+          { arxivId: trimmed },
+        ],
+      },
+      select: { id: true },
+    });
+
+    return found?.id || null;
+  }
+
   async markItemRead(userId: string, itemId: string, isRead = true): Promise<void> {
+    const canonicalId = await this.resolveFeedItemUuid(itemId);
+    if (!canonicalId) {
+      this.logger.debug(
+        `[FeedsService] Cannot record read state: FeedItem not found for identifier "${itemId}"`,
+      );
+      return;
+    }
+
     if (isRead) {
       await this.prisma.feedItemReadState.upsert({
         where: {
-          userId_itemId: { userId, itemId },
+          userId_itemId: { userId, itemId: canonicalId },
         },
         create: {
           userId,
-          itemId,
+          itemId: canonicalId,
         },
         update: {
           readAt: new Date(),
@@ -244,16 +273,23 @@ export class FeedsService {
       });
     } else {
       await this.prisma.feedItemReadState.deleteMany({
-        where: { userId, itemId },
+        where: { userId, itemId: canonicalId },
       });
     }
   }
 
   async markAllRead(userId: string, itemIds: string[]): Promise<void> {
-    if (itemIds.length === 0) return;
-    const records = itemIds.map((itemId) => ({
+    if (!itemIds || itemIds.length === 0) return;
+
+    const resolvedIds = (
+      await Promise.all(itemIds.map((id) => this.resolveFeedItemUuid(id)))
+    ).filter((id): id is string => Boolean(id));
+
+    if (resolvedIds.length === 0) return;
+
+    const records = resolvedIds.map((canonicalId) => ({
       userId,
-      itemId,
+      itemId: canonicalId,
     }));
     await this.prisma.feedItemReadState.createMany({
       data: records,

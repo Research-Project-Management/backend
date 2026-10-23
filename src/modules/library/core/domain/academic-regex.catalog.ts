@@ -69,6 +69,10 @@ export class AcademicRegexCatalog {
     /(?:Received|Accepted|Available online)\s+[^\n\r\d]*\d{1,2}\s+[A-Za-z]+\s+(20\d{2}|19\d{2})/i;
 
   /** Springer / Nature citation header strip */
+  /** JMLR (Journal of Machine Learning Research) banner strip */
+  public static readonly JMLR_HEADER_PATTERN =
+    /(?:Journal\s+of\s+Machine\s+Learning\s+Research|JMLR)\s+(\d+)\s*\((20\d{2}|19\d{2})\)\s*(\d+[-–]\d+)/i;
+
   public static readonly NATURE_HEADER_PATTERN =
     /\bNature\s+(?:Communications\s+)?\((\d{4})\)\s*(\d+):(\d+[-–]\d+)/i;
 
@@ -104,6 +108,56 @@ export class AcademicRegexCatalog {
    * Scores a candidate DOI based on surrounding structural signals to disambiguate
    * between the paper's own publication DOI and cited reference DOIs appearing on page 1.
    */
+  /**
+   * Scores a candidate arXiv ID to determine whether it is the document's own
+   * persistent preprint identifier or merely an inline citation to an external paper.
+   */
+  public static scoreArxivCandidate(
+    arxivId: string,
+    matchIndex: number,
+    text: string,
+  ): number {
+    let score = 50;
+
+    const prefix = text
+      .slice(Math.max(0, matchIndex - 150), matchIndex)
+      .toLowerCase();
+
+    // Positive: Explicit arXiv header indicators (e.g. arXiv:2303.08774v2 [cs.CV] or 'arxiv.org')
+    if (/(?:arxiv(?::|\.org\/abs\/|\.org\/pdf\/)|posted\s+on\s+arxiv)/i.test(prefix)) {
+      score += 35;
+    }
+
+    // Positive: Appears in first 1500 chars (Page 1 top header/title strip)
+    if (matchIndex < 1500) {
+      score += 30;
+    }
+
+    // Negative: Reference numbers e.g. [1], (12), [24]
+    if (/(?:\[\s*\d+\s*\]|\(\s*\d+\s*\)|ref(?:erence)?s?[:\s])/i.test(prefix)) {
+      score -= 50;
+    }
+
+    // Negative: Inline citation wording ('et al.', 'proposed by', 'in [')
+    if (/(?:et\s+al\.?|see\s+also|cited\s+(?:in|by)|according\s+to|proposed\s+by|in\s+\[)/i.test(prefix)) {
+      score -= 45;
+    }
+
+    // Negative: Deep in text after Introduction
+    const introPos = text.search(/(?:\n\s*(?:1\.?\s+)?introduction|\n\s*i\.?\s+introduction)/i);
+    if (introPos !== -1 && matchIndex > introPos) {
+      score -= 35;
+    }
+
+    // Negative: Near References / Bibliography
+    const refPos = text.search(/(?:\n\s*references|\n\s*bibliography|\n\s*literature\s+cited)/i);
+    if (refPos !== -1 && matchIndex > refPos) {
+      score -= 60;
+    }
+
+    return score;
+  }
+
   public static scoreDoiCandidate(
     doi: string,
     matchIndex: number,
@@ -243,19 +297,45 @@ export class AcademicRegexCatalog {
       }
     }
 
-    // Match arXiv ID
+    // Match arXiv ID with structural disambiguation (filter out cited reference arXiv IDs)
     const arxivMatches = [...boundedText.matchAll(this.ARXIV_PATTERN)];
     if (arxivMatches.length > 0) {
-      const m = arxivMatches[0];
-      const arxivId = m[1] || m[2];
-      if (arxivId) {
-        result.arxivId = arxivId;
-        if (m[3]) {
-          result.primaryCategory = m[3];
+      const scoredArxiv: Array<{
+        arxivId: string;
+        category?: string;
+        score: number;
+        index: number;
+      }> = [];
+      const seenArxiv = new Set<string>();
+
+      for (const m of arxivMatches) {
+        const id = m[1] || m[2];
+        if (id && !seenArxiv.has(id.toLowerCase())) {
+          seenArxiv.add(id.toLowerCase());
+          const matchIndex = m.index ?? 0;
+          const score = this.scoreArxivCandidate(id, matchIndex, boundedText);
+          scoredArxiv.push({
+            arxivId: id,
+            category: m[3],
+            score,
+            index: matchIndex,
+          });
         }
-        result.matchedSignatures.push('ARXIV_SCHEME');
-        if (!result.doi) {
-          result.doi = `10.48550/arXiv.${arxivId}`;
+      }
+
+      if (scoredArxiv.length > 0) {
+        scoredArxiv.sort((a, b) => b.score - a.score || a.index - b.index);
+        const bestArxiv = scoredArxiv[0];
+        // Only accept if score >= 30 (not penalised as inline citation or reference list item)
+        if (bestArxiv.score >= 30) {
+          result.arxivId = bestArxiv.arxivId;
+          if (bestArxiv.category) {
+            result.primaryCategory = bestArxiv.category;
+          }
+          result.matchedSignatures.push('ARXIV_SCHEME');
+          if (!result.doi) {
+            result.doi = `10.48550/arXiv.${bestArxiv.arxivId}`;
+          }
         }
       }
     }
@@ -341,6 +421,27 @@ export class AcademicRegexCatalog {
       if (natureMatch[3]) result.pages = natureMatch[3];
       result.publisher = 'Nature Publishing Group';
       result.matchedSignatures.push('NATURE_HEADER');
+    }
+
+    // JMLR (Journal of Machine Learning Research)
+    const jmlrMatch = boundedText.match(this.JMLR_HEADER_PATTERN);
+    if (jmlrMatch) {
+      if (jmlrMatch[1]) result.volume = jmlrMatch[1];
+      if (jmlrMatch[2] && !result.year) {
+        result.year = parseInt(jmlrMatch[2], 10);
+      }
+      if (jmlrMatch[3]) result.pages = jmlrMatch[3];
+      result.journal = 'Journal of Machine Learning Research';
+      result.publisher = 'Microtome Publishing / JMLR.org';
+      result.matchedSignatures.push('JMLR_BANNER');
+
+      // If document was mistakenly given a synthetic arXiv DOI, drop it because it is a formal JMLR publication
+      if (result.doi && result.doi.startsWith('10.48550/arXiv.')) {
+        delete result.doi;
+      }
+      if (result.arxivId && !boundedText.slice(0, 500).includes('arXiv:')) {
+        delete result.arxivId;
+      }
     }
 
     // 3. Match Abstract & Keywords

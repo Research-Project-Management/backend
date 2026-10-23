@@ -226,9 +226,24 @@ export class ExtractionMetadataSynchronizer {
         }
 
         const fallbackPubTitle =
+          doc.metadata?.publicationTitle ||
           doc.metadata?.journal ||
+          doc.metadata?.proceedingsTitle ||
+          doc.metadata?.conferenceName ||
           doc.metadata?.bookTitle ||
-          doc.metadata?.conferenceName;
+          (doc.metadata?.arxivId ? 'arXiv' : undefined);
+
+        const shouldInferItemType =
+          !attachment.item?.itemType ||
+          attachment.item?.itemType === 'journalArticle' ||
+          attachment.item?.itemType === 'document';
+
+        const inferredItemType =
+          doc.metadata?.proceedingsTitle || doc.metadata?.conferenceName
+            ? 'conferencePaper'
+            : doc.metadata?.arxivId && !doc.metadata?.journal && !doc.metadata?.proceedingsTitle
+              ? 'preprint'
+              : undefined;
 
         const existingItemRecord = (attachment.item ?? {}) as Record<
           string,
@@ -236,6 +251,7 @@ export class ExtractionMetadataSynchronizer {
         >;
 
         const itemPatch: Prisma.ItemUpdateInput = {
+          ...(shouldInferItemType && inferredItemType ? { itemType: inferredItemType } : {}),
           ...(shouldUpdateTitle ? { title: doc.metadata.title } : {}),
           ...(!attachment.item?.doi && doc.metadata?.doi
             ? { doi: doc.metadata.doi }
