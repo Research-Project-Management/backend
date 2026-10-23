@@ -1,0 +1,137 @@
+// -- 6. Chat & Social Context (Flux Unified Messenger & Channels) -------------
+
+enum ConversationType {
+  direct           // Tin nhắn 1-1 giữa 2 người dùng
+  group            // Nhóm chat tự do độc lập
+  project_channel  // Kênh chat thuộc một Project (Discord-style)
+}
+
+enum ConversationMemberRole {
+  owner
+  admin
+  member
+}
+
+enum FriendshipStatus {
+  pending
+  accepted
+  declined
+  blocked
+}
+
+enum MessageType {
+  text
+  image
+  file
+  system
+}
+
+// 1. Quản lý Bạn bè & Lời mời kết bạn
+model Friendship {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  requesterId String           @map("requester_id") @db.Uuid
+  addresseeId String           @map("addressee_id") @db.Uuid
+  status      FriendshipStatus @default(pending)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  requester   User             @relation("SentFriendRequests", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee   User             @relation("ReceivedFriendRequests", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId], map: "uq_friendship_pair")
+  @@index([requesterId, status])
+  @@index([addresseeId, status])
+  @@map("friendships")
+}
+
+// 2. Hội thoại & Kênh Chat (Unified Conversation & Channel)
+model Conversation {
+  id                 String             @id @default(uuid(7)) @db.Uuid
+  type               ConversationType
+  name               String?            @db.VarChar(100) // Tên nhóm hoặc tên kênh (vd: "general", "papers")
+  topic              String?            @db.VarChar(255) // Mô tả chủ đề kênh/nhóm
+  avatar             String?
+  
+  // Liên kết Project (dành cho type = project_channel)
+  projectId          String?            @map("project_id") @db.Uuid
+  project            Project?           @relation("ProjectChannels", fields: [projectId], references: [id], onDelete: Cascade)
+  isDefault          Boolean            @default(false)  @map("is_default") // Kênh mặc định của Project (vd: #general)
+
+  createdById        String             @map("created_by_id") @db.Uuid
+  createdBy          User               @relation("ConversationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  // Tối ưu tải danh sách: Cache đoạn tin nhắn cuối để không phải join bảng Message
+  lastMessageAt      DateTime?          @map("last_message_at") @db.Timestamptz(6)
+  lastMessageSnippet String?            @map("last_message_snippet") @db.VarChar(255)
+  lastSenderName     String?            @map("last_sender_name") @db.VarChar(100)
+
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  members            ConversationMember[]
+  messages           Message[]
+
+  @@index([type])
+  @@index([projectId])
+  @@index([lastMessageAt(sort: Desc)])
+  @@map("conversations")
+}
+
+// 3. Thành viên hội thoại
+model ConversationMember {
+  id             String                 @id @default(uuid(7)) @db.Uuid
+  conversationId String                 @map("conversation_id") @db.Uuid
+  userId         String                 @map("user_id") @db.Uuid
+  role           ConversationMemberRole @default(member)
+  joinedAt       DateTime               @default(now()) @map("joined_at") @db.Timestamptz(6)
+  lastReadAt     DateTime               @default(now()) @map("last_read_at") @db.Timestamptz(6)
+  isMuted        Boolean                @default(false) @map("is_muted")
+  isPinned       Boolean                @default(false) @map("is_pinned")
+
+  conversation   Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User                   @relation("UserConversationMembers", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId], map: "uq_conversation_member")
+  @@index([userId, lastReadAt])
+  @@map("conversation_members")
+}
+
+// 4. Tin nhắn
+model Message {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  conversationId String        @map("conversation_id") @db.Uuid
+  senderId       String        @map("sender_id") @db.Uuid
+  type           MessageType   @default(text)
+  content        String        @db.Text
+  attachments    Json?         @default("[]") // Danh sách file/ảnh trỏ tới S3
+  replyToId      String?       @map("reply_to_id") @db.Uuid
+  replyTo        Message?      @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        Message[]     @relation("MessageReplies")
+  
+  isEdited       Boolean       @default(false) @map("is_edited")
+  isDeleted      Boolean       @default(false) @map("is_deleted")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User          @relation("UserChatMessages", fields: [senderId], references: [id], onDelete: Restrict)
+  reactions      MessageReaction[]
+
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@map("messages")
+}
+
+// 5. Cảm xúc tin nhắn (Emoji Reactions)
+model MessageReaction {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  messageId String   @map("message_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  emoji     String   @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation("UserMessageReactions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji], map: "uq_message_user_reaction")
+  @@map("message_reactions")
+}

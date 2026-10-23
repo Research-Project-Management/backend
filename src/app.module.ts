@@ -16,6 +16,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -47,6 +48,7 @@ import { AppController } from './app.controller';
     RealtimeModule,
     NotificationsModule,
     IntegrationsModule,
+    ChatModule,
   ],
   controllers: [AppController],
 })

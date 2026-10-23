@@ -88,6 +88,14 @@ model User {
   // Sticky Notes & Canvas Relations
   stickies Sticky[] @relation("UserStickies")
 
+  // Chat & Social Relations
+  sentFriendRequests     Friendship[]         @relation("SentFriendRequests")
+  receivedFriendRequests Friendship[]         @relation("ReceivedFriendRequests")
+  createdConversations   Conversation[]       @relation("ConversationCreator")
+  conversationMembers    ConversationMember[] @relation("UserConversationMembers")
+  chatMessages           Message[]            @relation("UserChatMessages")
+  messageReactions       MessageReaction[]    @relation("UserMessageReactions")
+
   @@index([status, deletedAt])
   @@map("users")
 }

@@ -57,6 +57,10 @@ export function setupSwagger(app: NestFastifyApplication): void {
     .addTag('Activity', 'Activity Feed, Collaboration Stream, Recent Items')
     .addTag('Search', 'Global Search & Discovery')
     .addTag('Analytics', 'Workload Metrics, Velocity, Overview')
+    .addTag(
+      'Chat',
+      'Unified Messenger, Project Channels, Direct Messages, and Friendships',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

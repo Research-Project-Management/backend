@@ -80,6 +80,7 @@ model Project {
   aiChats          AiChat[]                 @relation("ProjectAiChats")
   updates          ProjectUpdate[]
   integrationLinks ProjectIntegrationLink[]
+  channels         Conversation[]           @relation("ProjectChannels")
 
   @@index([createdById], map: "idx_projects_created_by_id")
   @@index([identifier], map: "idx_projects_identifier")
