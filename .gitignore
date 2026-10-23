@@ -47,3 +47,10 @@ skills-lock.json
 # Local storage fallback & runtime uploads
 uploads/
 .tmp/
+
+# Local test scripts with credentials
+check-*.js
+seed-*.js
+test-runner.ts
+test_*.pdf
+
