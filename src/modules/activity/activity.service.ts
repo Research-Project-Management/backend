@@ -720,16 +720,22 @@ export class ActivityService {
         pageIds,
       );
 
-      items = uniqueTargets.map((target) => ({
-        id: `${target.entityType}-${target.entityId}`,
-        entityType: target.entityType,
-        entityId: target.entityId,
-        title:
-          titleMap.get(`${target.entityType}:${target.entityId}`) ||
-          `Untitled ${target.entityType}`,
-        projectId: target.projectId,
-        lastInteractedAt: target.lastInteractedAt,
-      }));
+      items = uniqueTargets.map((target) => {
+        const rawType = target.entityType as string;
+        const normalizedType = rawType === 'work_item' ? 'work-item' : rawType;
+        return {
+          id: `${target.entityType}-${target.entityId}`,
+          type: normalizedType,
+          entityType: target.entityType,
+          entityId: target.entityId,
+          title:
+            titleMap.get(`${target.entityType}:${target.entityId}`) ||
+            `Untitled ${target.entityType}`,
+          projectId: target.projectId,
+          lastInteractedAt: target.lastInteractedAt,
+          updatedAt: target.lastInteractedAt,
+        };
+      });
     }
 
     if (this.cache && limit === 10 && !projectId) {
@@ -739,4 +745,3 @@ export class ActivityService {
     return items;
   }
 }
-
