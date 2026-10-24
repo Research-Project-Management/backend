@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
+import { ItemCacheCoordinator } from './item-cache.coordinator';
 import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import {
   CreateNoteData,
@@ -33,51 +33,44 @@ import { ItemQueryService } from './item-query.service';
 export class NotesService {
   private readonly logger = new Logger(NotesService.name);
 
+  private readonly cacheCoordinator: ItemCacheCoordinator;
+
   constructor(
     private readonly repo: NotesRepository,
     private readonly libraryTx: TransactionService,
     @Optional()
     private readonly itemQuery?: ItemQueryService,
     @Optional()
-    private readonly cache?: RedisCacheService,
-  ) {}
+    cacheOrCoordinator?: RedisCacheService | ItemCacheCoordinator,
+    @Optional()
+    injectedCoordinator?: ItemCacheCoordinator,
+  ) {
+    if (injectedCoordinator) {
+      this.cacheCoordinator = injectedCoordinator;
+    } else if (cacheOrCoordinator instanceof ItemCacheCoordinator) {
+      this.cacheCoordinator = cacheOrCoordinator;
+    } else {
+      this.cacheCoordinator = new ItemCacheCoordinator(cacheOrCoordinator);
+    }
+  }
 
   private async invalidateNoteItemCaches(
     userId?: string,
     projectId?: string | null,
     itemId?: string | null,
   ): Promise<void> {
-    if (!this.cache) return;
-    try {
-      const tasks: Promise<unknown>[] = [];
-      if (itemId) {
-        tasks.push(
-          this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
-          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
-        );
-      }
-      if (userId) {
-        tasks.push(
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-          this.cache.del(`library:counts:user:${userId}`),
-        );
-      }
-      const validProjectId = normalizeProjectScopeId(projectId);
-      if (validProjectId) {
-        tasks.push(
-          this.cache.delPattern(
-            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
-          ),
-          this.cache.del(`library:counts:proj:${validProjectId}`),
-        );
-      }
-      if (tasks.length > 0) {
-        await Promise.all(tasks);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to invalidate note item cache: ${message}`);
+    const validProjectId = normalizeProjectScopeId(projectId);
+    if (itemId) {
+      await this.cacheCoordinator.invalidateItemCache(
+        itemId,
+        userId,
+        validProjectId,
+      );
+    } else if (userId) {
+      await this.cacheCoordinator.invalidateScopeListCache(
+        userId,
+        validProjectId,
+      );
     }
   }
 

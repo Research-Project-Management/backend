@@ -24,6 +24,11 @@ import {
 export { CATALOG_FACADE };
 export type { ICatalogFacade };
 export type CatalogItemSummary = ItemDetail;
+export { ItemsMapper } from './domain/items.mapper';
+export {
+  resolveOrCreateTags,
+  deriveFirstAuthor,
+} from './domain/creator-tag-payload.builder';
 
 /**
  * Public Facade for Catalog Bounded Context.

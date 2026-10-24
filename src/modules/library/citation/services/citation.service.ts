@@ -76,11 +76,11 @@ export class CitationService {
   /**
    * Registers an uploaded custom CSL XML stylesheet.
    */
-  async registerCustomStyle(cslXml: string, title?: string) {
+  async registerCustomStyle(cslXml: string, title?: string, scopeId?: string) {
     if (!this.cslRepo) {
       throw new BadRequestException('CSL repository service unavailable');
     }
-    const meta = await this.cslRepo.registerCustomStyle(cslXml, title);
+    const meta = await this.cslRepo.registerCustomStyle(cslXml, title, scopeId);
     await this.cslEngine.ensureTemplate(meta.id);
     const validCategory = (
       meta.category &&

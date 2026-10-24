@@ -53,6 +53,7 @@ import { WEB_FETCH_PORT } from './types/web-fetch.types';
 import { IngestionRepository } from './repositories/ingestion.repository';
 import { MetadataCache } from './repositories/metadata.cache';
 import { RetractionRepository } from './repositories/retraction.repository';
+import { FeedsRepository } from './repositories/feeds.repository';
 
 // Types & Ports
 import {
@@ -119,6 +120,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     IngestionRepository,
     MetadataCache,
     RetractionRepository,
+    FeedsRepository,
 
     // Services
     IngestionService,

@@ -18,7 +18,7 @@ import {
   extractYearToken,
   sanitizeFilenameStem,
   DEFAULT_RENAME_PATTERN,
-} from '@/modules/library/extraction/domain/renamer.domain';
+} from '@/modules/library/core';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';

@@ -13,14 +13,12 @@ import {
   ICatalogFacade,
   LIBRARY_REDIS_KEYS,
   normalizeProjectScopeId,
-} from '@/modules/library/core';
-import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
-import {
   formatAttachmentFilename,
   resolveFileExtension,
   sanitizeFilenameStem,
   DEFAULT_RENAME_PATTERN,
-} from '@/modules/library/extraction/domain/renamer.domain';
+} from '@/modules/library/core';
+import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
@@ -166,14 +164,6 @@ export class AttachmentRenamerService {
     return { attachment: updated, oldFilename, newFilename };
   }
 
-  async batchRenameByPattern(
-    userId: string,
-    dto: BatchRenameAttachmentsDto,
-    projectId?: string,
-  ) {
-    return this.batchRenameAttachments(userId, dto, projectId);
-  }
-
   async batchRenameAttachments(
     userId: string,
     dto: BatchRenameAttachmentsDto,
@@ -288,13 +278,16 @@ export class AttachmentRenamerService {
       for (const u of updatesToPersist) {
         uniqueRenamedItemIds.set(u.itemId, u.projectId);
       }
-      for (const [renamedItemId, itemProjectId] of uniqueRenamedItemIds) {
-        await this.invalidateAttachmentCache(
-          renamedItemId,
-          userId,
-          itemProjectId,
-        );
-      }
+      await Promise.all(
+        Array.from(uniqueRenamedItemIds.entries()).map(
+          ([renamedItemId, itemProjectId]) =>
+            this.invalidateAttachmentCache(
+              renamedItemId,
+              userId,
+              itemProjectId,
+            ),
+        ),
+      );
     }
 
     return {

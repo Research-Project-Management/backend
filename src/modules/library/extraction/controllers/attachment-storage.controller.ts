@@ -451,6 +451,14 @@ export class AttachmentStorageController {
     );
   }
 
+  private static readonly DANGEROUS_MIME_TYPES = new Set<string>([
+    'text/html',
+    'application/xhtml+xml',
+    'image/svg+xml',
+    'application/javascript',
+    'text/javascript',
+  ]);
+
   private sendAttachmentPayload(
     res: FastifyReply,
     payload: {
@@ -461,10 +469,21 @@ export class AttachmentStorageController {
       contentRange?: string;
     },
   ) {
-    res.header('Content-Type', payload.mimeType || 'application/pdf');
+    const rawMimeType = (payload.mimeType || 'application/pdf').trim();
+    const baseMimeType = rawMimeType.split(';')[0].trim().toLowerCase();
+    const isDangerousMime =
+      AttachmentStorageController.DANGEROUS_MIME_TYPES.has(baseMimeType);
+    const dispositionType = isDangerousMime ? 'attachment' : 'inline';
+
+    res.header('Content-Type', rawMimeType);
+    res.header('X-Content-Type-Options', 'nosniff');
+    res.header(
+      'Content-Security-Policy',
+      "default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; sandbox",
+    );
     res.header(
       'Content-Disposition',
-      `inline; filename="${encodeURIComponent(payload.filename)}"`,
+      `${dispositionType}; filename="${encodeURIComponent(payload.filename)}"`,
     );
     res.header('Accept-Ranges', 'bytes');
     res.header('Cache-Control', 'private, no-cache, no-store, must-revalidate');

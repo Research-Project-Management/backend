@@ -71,7 +71,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
   ) {
     this.metadataSync =
       metadataSync ??
-      new ExtractionMetadataSynchronizer(this.extractionRepo, this.storagePort);
+      new ExtractionMetadataSynchronizer(this.extractionRepo, this.libraryTx, this.storagePort);
   }
 
   async handle(event: OutboxEvent, signal?: AbortSignal): Promise<void> {
@@ -236,7 +236,19 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           : Buffer.from(rawBuffer as ArrayBuffer);
 
       // 3. Extract text and per-page structures
+      if (signal?.aborted) {
+        throw new ExtractionProcessException(
+          `Extraction aborted due to lost lease before PDF parsing for attachment ${attachmentId}`,
+          { eventId: event.id, attachmentId },
+        );
+      }
       const doc = await this.pdf.extractDocumentFromBuffer(buffer);
+      if (signal?.aborted) {
+        throw new ExtractionProcessException(
+          `Extraction aborted due to lost lease after PDF parsing for attachment ${attachmentId}`,
+          { eventId: event.id, attachmentId },
+        );
+      }
       const extractionResult = doc as Omit<typeof doc, 'pages'> & {
         markdown?: string;
         text?: string;
@@ -281,16 +293,12 @@ export class ExtractionHandler implements OutboxDispatchHandler {
                 charOffset: p.charOffset,
               })),
             });
-          } else if (
-            typeof this.searchFacade?.indexAttachmentPages === 'function'
-          ) {
+          } else if (this.searchFacade?.indexAttachmentPages) {
             await this.searchFacade.indexAttachmentPages(
               attachment.id,
               normalizedPages,
             );
-          } else if (
-            typeof this.extractionRepo.indexAttachmentPages === 'function'
-          ) {
+          } else if (this.extractionRepo.indexAttachmentPages) {
             await this.extractionRepo.indexAttachmentPages(
               attachment.id,
               normalizedPages,
@@ -338,7 +346,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         doc.searchablePdfBuffer &&
         doc.ocrProvenance &&
         doc.ocrProvenance.totalOcrPages > 0 &&
-        typeof this.storagePort?.uploadFile === 'function'
+        this.storagePort?.uploadFile
       ) {
         try {
           const ownerUserId = attachment.item?.userId || 'system';
@@ -386,6 +394,12 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       }
 
       // 5. Store authoritative PDF extraction provenance & full-text tree
+      if (signal?.aborted) {
+        throw new ExtractionProcessException(
+          `Extraction aborted due to lost lease before metadata sync for attachment ${attachmentId}`,
+          { eventId: event.id, attachmentId },
+        );
+      }
       await this.metadataSync.offloadFullTextAndSyncMetadata(
         attachment,
         doc,
@@ -576,7 +590,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       rawText?: string;
     }>,
   ): Promise<void> {
-    if (typeof this.extractionRepo?.findScopePapers !== 'function') {
+    if (!this.extractionRepo?.findScopePapers) {
       return;
     }
     const matcher =

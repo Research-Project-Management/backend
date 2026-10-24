@@ -60,6 +60,7 @@ model IngestionRun {
   // 4. Background Worker Polling & Orphan Recovery
   @@index([status, nextRetryAt])
   @@index([status, updatedAt])
+  @@index([status, completedAt])
 
   // 5. Content-based Deduplication Index
   @@index([userId, inputHash])

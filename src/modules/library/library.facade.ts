@@ -275,6 +275,7 @@ export class LibraryFacade implements ILibraryFacade {
         this.cache.del(LIBRARY_REDIS_KEYS.item(existing.itemId)),
         this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(existing.itemId)),
         this.cache.del(`library:item:${existing.itemId}:attachments`),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(existing.itemId)),
       ]);
     }
   }
@@ -319,6 +320,7 @@ export class LibraryFacade implements ILibraryFacade {
       if (scopeId) {
         tasks.push(
           this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeId)),
         );
       }
       await Promise.all(tasks);

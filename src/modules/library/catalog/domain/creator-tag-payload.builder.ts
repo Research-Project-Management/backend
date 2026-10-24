@@ -1,4 +1,4 @@
-import { Prisma, LinkMode, AttachmentType, TagType } from '@prisma/client';
+import { Prisma, LinkMode, AttachmentType, AnnotationType, TagType } from '@prisma/client';
 import { PrismaService } from '@/core';
 import {
   normalizeAcademicTags,
@@ -25,111 +25,14 @@ import { TagInput } from '@/modules/library/catalog/types/tags.types';
 import { CreatorCreditInput } from '@/modules/library/core/types/bibliographic.types';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { isUUID } from 'class-validator';
-
 export { buildTipTapDocFromText };
-
 export const isUuid = (val: unknown): val is string =>
   typeof val === 'string' && Boolean(val) && isUUID(val);
-
-export function cleanSingleIdentifier(
-  raw: string | null | undefined,
-  normalizer: (val?: string | null) => string | undefined,
-): string | undefined {
-  if (raw === undefined) return undefined;
-  if (!raw) return '';
-  const cleaned = cleanBannedString(raw);
-  return normalizer(cleaned) || cleaned || '';
-}
-
-export function extractExtraKeyValues(
-  extraStr?: string | null,
-): Record<string, string> {
-  const result: Record<string, string> = {};
-  if (!extraStr || typeof extraStr !== 'string') return result;
-
-  for (const match of extraStr.matchAll(
-    /\{:\s*([a-zA-Z_][a-zA-Z0-9_.\s-]*?)\s*:\s*([^}]+?)\s*\}/g,
-  )) {
-    const key = match[1].trim().toLowerCase().replace(/[\s_]+/g, '-');
-    result[key] = match[2].trim();
-  }
-  for (const line of extraStr.split(/\r?\n/)) {
-    const m = line.trim().match(/^([a-zA-Z_][a-zA-Z0-9_.\s-]{0,40}):\s*(.+)$/);
-    if (m) {
-      const key = m[1].trim().toLowerCase().replace(/[\s_]+/g, '-');
-      if (!result[key]) {
-        result[key] = m[2].trim();
-      }
-    }
-  }
-  return result;
-}
-
-export function normalizeItemIdentifiers(data: {
-  doi?: string | null;
-  DOI?: string | null;
-  arxivId?: string | null;
-  archiveID?: string | null;
-  archiveId?: string | null;
-  pmid?: string | null;
-  PMID?: string | null;
-  pmcid?: string | null;
-  PMCID?: string | null;
-  isbn?: string | null;
-  ISBN?: string | null;
-  issn?: string | null;
-  ISSN?: string | null;
-  extra?: string | null;
-  extraFields?: Record<string, unknown> | null;
-}) {
-  const rec = data as Record<string, unknown>;
-  const ef =
-    data.extraFields && typeof data.extraFields === 'object'
-      ? data.extraFields
-      : {};
-  const extraKv = extractExtraKeyValues(data.extra);
-
-  const pickFirst = (
-    keys: string[],
-    extraKvKeys: string[],
-  ): string | null | undefined => {
-    for (const k of keys) {
-      const v = rec[k] !== undefined ? rec[k] : ef[k];
-      if (v === null) return null;
-      if (typeof v === 'string') return v;
-      if (typeof v === 'number') return String(v);
-    }
-    for (const ek of extraKvKeys) {
-      if (extraKv[ek] !== undefined) return extraKv[ek];
-    }
-    return undefined;
-  };
-
-  return {
-    doi: cleanSingleIdentifier(pickFirst(['doi', 'DOI'], ['doi']), normalizeDoi),
-    arxivId: cleanSingleIdentifier(
-      pickFirst(['arxivId', 'archiveID', 'archiveId'], ['arxiv', 'arxivid']),
-      normalizeArxivId,
-    ),
-    pmid: cleanSingleIdentifier(
-      pickFirst(['pmid', 'PMID'], ['pmid']),
-      normalizePmid,
-    ),
-    pmcid: cleanSingleIdentifier(
-      pickFirst(['pmcid', 'PMCID'], ['pmcid', 'pmc']),
-      normalizePmcid,
-    ),
-    isbn: cleanSingleIdentifier(
-      pickFirst(['isbn', 'ISBN'], ['isbn']),
-      normalizeIsbn,
-    ),
-    issn: cleanSingleIdentifier(
-      pickFirst(['issn', 'ISSN'], ['issn']),
-      normalizeIssn,
-    ),
-  };
-}
-
+export {
+  cleanSingleIdentifier,
+  extractExtraKeyValues,
+  normalizeItemIdentifiers,
+} from './identifier-change.helper';
 export function resolveExtraPlainText(
   extraInput?: string | null,
   existingExtra?: string | null,
@@ -140,18 +43,15 @@ export function resolveExtraPlainText(
       ? extraInput
       : existingExtra) ?? '';
   const cleanRaw = typeof rawCandidate === 'string' ? rawCandidate.trim() : '';
-
   if (!patches || Object.keys(patches).length === 0) {
     return cleanRaw || undefined;
   }
-
   const patchLookup = new Map<string, unknown>();
   for (const [pKey, pVal] of Object.entries(patches)) {
     if (!pKey.startsWith('__')) {
       patchLookup.set(pKey.toLowerCase(), pVal);
     }
   }
-
   const updatedLines: string[] = [];
   for (const line of cleanRaw.split('\n')) {
     const colonIndex = line.indexOf(':');
@@ -174,10 +74,8 @@ export function resolveExtraPlainText(
       updatedLines.push(line);
     }
   }
-
   return updatedLines.join('\n').trim() || undefined;
 }
-
 const IGNORED_SYSTEM_KEYS = new Set([
   'id', 'userId', 'projectId', 'workspaceId', 'createdById', 'uploadedById',
   'createdAt', 'updatedAt', 'deletedAt', 'version', '_version',
@@ -202,14 +100,12 @@ const IGNORED_SYSTEM_KEYS = new Set([
   'disambiguationWarning', 'rejectedCitedDoi', 'wafKind', 'promptUploadPdf',
   'dismissedDuplicateIds', 'mergedCitationKeys', 'mergedFromIds',
 ]);
-
 export function extractNonColumnExtraFields(
   data?: Record<string, unknown> | null,
   existingExtraFields?: Record<string, unknown> | null,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = { ...(existingExtraFields || {}) };
   if (!data || typeof data !== 'object') return result;
-
   const copyNonColumn = (source: Record<string, unknown>) => {
     for (const [key, value] of Object.entries(source)) {
       if (
@@ -222,18 +118,15 @@ export function extractNonColumnExtraFields(
       }
     }
   };
-
   copyNonColumn(data);
   if (data.extraFields && typeof data.extraFields === 'object') {
     copyNonColumn(data.extraFields as Record<string, unknown>);
   }
   return result;
 }
-
 export function convertHtmlToMarkdown(html: string): string {
   return convertAcademicHtmlToMarkdown(html);
 }
-
 export function prepareNotesToCreate(
   notes: unknown,
   userId: string,
@@ -242,7 +135,6 @@ export function prepareNotesToCreate(
   projectId?: string | null,
 ) {
   if (!Array.isArray(notes)) return [];
-
   const existingNotesArr = (
     Array.isArray(existingNotesList) ? existingNotesList : []
   ) as Array<{ contentMd?: string }>;
@@ -251,7 +143,6 @@ export function prepareNotesToCreate(
       .map((n) => (typeof n.contentMd === 'string' ? n.contentMd.trim() : ''))
       .filter(Boolean),
   );
-
   return notes
     .map((note) => {
       const noteObj =
@@ -268,11 +159,9 @@ export function prepareNotesToCreate(
         : rawStr.trim();
       if (!contentMd || seen.has(contentMd)) return null;
       seen.add(contentMd);
-
       const sourceName =
         typeof noteObj?.source === 'string' ? noteObj.source.trim() : '';
       const isComment = contentMd.toLowerCase().startsWith('comment:');
-
       let noteTitle =
         typeof noteObj?.title === 'string' ? noteObj.title.trim() : '';
       if (!noteTitle) {
@@ -291,20 +180,17 @@ export function prepareNotesToCreate(
           noteTitle = sourceName ? `${baseLabel} (${sourceName})` : baseLabel;
         }
       }
-
       const contentJson =
         noteObj?.contentJson &&
         typeof noteObj.contentJson === 'object' &&
         'type' in (noteObj.contentJson as Record<string, unknown>)
           ? (noteObj.contentJson as Record<string, unknown>)
           : buildTipTapDocFromText(contentMd);
-
       const customTags = Array.isArray(noteObj?.tags)
         ? (noteObj.tags as unknown[]).filter(
             (t): t is string => typeof t === 'string' && t.trim().length > 0,
           )
         : [];
-
       const baseTags = normalizeAcademicTags([
         'imported',
         ...(sourceName ? [sourceName] : []),
@@ -313,7 +199,6 @@ export function prepareNotesToCreate(
       const mergedTags = Array.from(
         new Set([...baseTags, ...customTags.map((t) => t.trim())]),
       );
-
       return {
         userId,
         createdById: createdById || userId,
@@ -327,7 +212,6 @@ export function prepareNotesToCreate(
     })
     .filter((n): n is NonNullable<typeof n> => n !== null);
 }
-
 export function prepareAttachmentsToCreate(
   attachments: unknown,
   fallbackFileId?: string | null,
@@ -337,18 +221,16 @@ export function prepareAttachmentsToCreate(
     size?: number;
     mimeType?: string;
   },
+  userId?: string,
 ): Prisma.AttachmentCreateWithoutItemInput[] {
   const result: Prisma.AttachmentCreateWithoutItemInput[] = [];
-
   if (Array.isArray(attachments) && attachments.length > 0) {
     let hasPrimaryPdf = false;
-
     for (const rawAtt of attachments) {
       if (!rawAtt || typeof rawAtt !== 'object') continue;
       const att = rawAtt as Record<string, unknown>;
       const rawFileId = att.fileId || null;
       const resolvedFileId = rawFileId && isUuid(rawFileId) ? rawFileId : null;
-
       const title =
         (typeof att.title === 'string' && att.title.trim()) ||
         (typeof att.name === 'string' && att.name.trim()) ||
@@ -364,7 +246,6 @@ export function prepareAttachmentsToCreate(
             ? title
             : `${title}.pdf`
           : 'document.pdf');
-
       const mimeType =
         (typeof att.mimeType === 'string' && att.mimeType.trim()) ||
         (typeof att.contentType === 'string' && att.contentType.trim()) ||
@@ -376,7 +257,6 @@ export function prepareAttachmentsToCreate(
           : resolvedFileId
             ? getFileContentPath(resolvedFileId)
             : '';
-
       const isPdf =
         mimeType === 'application/pdf' ||
         filename.toLowerCase().endsWith('.pdf');
@@ -398,7 +278,6 @@ export function prepareAttachmentsToCreate(
       } else if (attachmentType === AttachmentType.primary_pdf) {
         hasPrimaryPdf = true;
       }
-
       const linkMode: LinkMode =
         (att.linkMode as LinkMode | undefined) ||
         (resolvedFileId
@@ -408,7 +287,6 @@ export function prepareAttachmentsToCreate(
               ? LinkMode.imported_url
               : LinkMode.linked_url
             : LinkMode.imported_file);
-
       const metadata: Record<string, unknown> = {
         ...(typeof att.metadata === 'object' && att.metadata !== null
           ? (att.metadata as Record<string, unknown>)
@@ -416,7 +294,46 @@ export function prepareAttachmentsToCreate(
         ...(title ? { title } : {}),
         ...(att.accessDate ? { accessDate: att.accessDate } : {}),
       };
-
+      const annotationsToCreate =
+        Array.isArray(att.annotations) && att.annotations.length > 0
+          ? att.annotations
+              .filter(
+                (ann: unknown) =>
+                  ann &&
+                  typeof ann === 'object' &&
+                  !(ann as Record<string, unknown>).deletedAt,
+              )
+              .map((rawAnn: unknown) => {
+                const ann = rawAnn as Record<string, unknown>;
+                return {
+                  type: (ann.type as AnnotationType) || AnnotationType.highlight,
+                  color: (ann.color as string) || '#ffeb3b',
+                  pageIndex: typeof ann.pageIndex === 'number' ? ann.pageIndex : 0,
+                  pageLabel: typeof ann.pageLabel === 'string' ? ann.pageLabel : '',
+                  annotationSortIndex:
+                    typeof ann.annotationSortIndex === 'string'
+                      ? ann.annotationSortIndex
+                      : '',
+                  rectCoords:
+                    ann.rectCoords !== undefined
+                      ? (ann.rectCoords as Prisma.InputJsonValue)
+                      : Prisma.JsonNull,
+                  quoteText:
+                    typeof ann.quoteText === 'string' ? ann.quoteText : null,
+                  comment: typeof ann.comment === 'string' ? ann.comment : '',
+                  tags: Array.isArray(ann.tags)
+                    ? (ann.tags as string[]).filter((t): t is string => typeof t === 'string')
+                    : [],
+                  authorId:
+                    typeof ann.authorId === 'string' && isUuid(ann.authorId)
+                      ? ann.authorId
+                      : userId && isUuid(userId)
+                        ? userId
+                        : '00000000-0000-0000-0000-000000000000',
+                  version: 1,
+                };
+              })
+          : [];
       result.push({
         filename,
         url: fileUrl,
@@ -429,6 +346,13 @@ export function prepareAttachmentsToCreate(
           Object.keys(metadata).length > 0
             ? (metadata as Prisma.InputJsonValue)
             : undefined,
+        ...(annotationsToCreate.length > 0
+          ? {
+              annotations: {
+                create: annotationsToCreate,
+              },
+            }
+          : {}),
         ...(fileUrl || resolvedFileId
           ? {
               revisions: {
@@ -446,7 +370,6 @@ export function prepareAttachmentsToCreate(
       });
     }
   }
-
   if (result.length === 0 && (fallbackData?.fileUrl || fallbackFileId)) {
     const fileUrl =
       fallbackData?.fileUrl ||
@@ -454,7 +377,6 @@ export function prepareAttachmentsToCreate(
     const filename = fallbackData?.filename || 'document.pdf';
     const mimeType = fallbackData?.mimeType || 'application/pdf';
     const size = fallbackData?.size || 0;
-
     result.push({
       filename,
       url: fileUrl,
@@ -475,15 +397,12 @@ export function prepareAttachmentsToCreate(
       },
     });
   }
-
   return result;
 }
-
 export interface ResolvedTag {
   id: string;
   type: TagType;
 }
-
 export function buildTagTypeMap(
   rawTagList: (TagInput | null | undefined)[],
 ): Map<string, TagType> {
@@ -520,7 +439,6 @@ export function buildTagTypeMap(
   }
   return tagTypeMap;
 }
-
 export async function resolveOrCreateTags(
   client: Prisma.TransactionClient | PrismaService,
   userId: string,
@@ -530,7 +448,6 @@ export async function resolveOrCreateTags(
 ): Promise<ResolvedTag[]> {
   const normalizedTagNames = normalizeAcademicTags(rawTagList).slice(0, 30);
   if (normalizedTagNames.length === 0) return [];
-
   const effectiveProjectId =
     projectId &&
     projectId !== 'user' &&
@@ -539,24 +456,21 @@ export async function resolveOrCreateTags(
     isUuid(projectId)
       ? projectId
       : null;
-
   const scopeWhere: Prisma.TagWhereInput = effectiveProjectId
     ? { projectId: effectiveProjectId }
     : { userId, projectId: null };
-
   const tagTypeMap = buildTagTypeMap(rawTagList);
-
+  const tagOrFilter = normalizedTagNames.map((name) => ({
+    name: { equals: name, mode: 'insensitive' as const },
+  }));
   const preExistingTags =
     (await client.tag.findMany({
       where: {
         ...scopeWhere,
-        OR: normalizedTagNames.map((name) => ({
-          name: { equals: name, mode: 'insensitive' as const },
-        })),
+        OR: tagOrFilter,
       },
       select: { id: true, name: true, type: true },
     })) || [];
-
   const existingLowerNames = new Set(
     preExistingTags
       .map((t: { id: string; name?: string }) =>
@@ -567,7 +481,6 @@ export async function resolveOrCreateTags(
   const missingTagNames = normalizedTagNames.filter(
     (name) => !existingLowerNames.has(name.toLowerCase()),
   );
-
   if (missingTagNames.length > 0) {
     await client.tag.createMany({
       data: missingTagNames.map((name) => ({
@@ -580,20 +493,16 @@ export async function resolveOrCreateTags(
       skipDuplicates: true,
     });
   }
-
   const allMatchingTags =
     missingTagNames.length > 0
       ? (await client.tag.findMany({
           where: {
             ...scopeWhere,
-            OR: normalizedTagNames.map((name) => ({
-              name: { equals: name, mode: 'insensitive' as const },
-            })),
+            OR: tagOrFilter,
           },
           select: { id: true, name: true, type: true },
         })) || preExistingTags
       : preExistingTags;
-
   const dedupedByLower = new Map<string, ResolvedTag>();
   for (const t of allMatchingTags as Array<{
     id: string;
@@ -608,10 +517,8 @@ export async function resolveOrCreateTags(
       });
     }
   }
-
   return Array.from(dedupedByLower.values());
 }
-
 export async function syncTagsForCatalogItem(
   client: Prisma.TransactionClient | PrismaService,
   userId: string,
@@ -625,7 +532,6 @@ export async function syncTagsForCatalogItem(
     await client.itemTag.deleteMany({ where: { itemId } });
     return;
   }
-
   const resolvedTags = await resolveOrCreateTags(
     client,
     userId,
@@ -637,14 +543,12 @@ export async function syncTagsForCatalogItem(
     await client.itemTag.deleteMany({ where: { itemId } });
     return;
   }
-
   await client.itemTag.deleteMany({
     where: {
       itemId,
       tagId: { notIn: resolvedTags.map((t) => t.id) },
     },
   });
-
   await client.itemTag.createMany({
     data: resolvedTags.map((t) => ({
       tagId: t.id,
@@ -654,7 +558,6 @@ export async function syncTagsForCatalogItem(
     skipDuplicates: true,
   });
 }
-
 export function deriveFirstAuthor(data: {
   contributors?: Array<Record<string, unknown> | CreatorCreditInput>;
   creators?: Array<Record<string, unknown> | CreatorCreditInput>;
@@ -695,7 +598,6 @@ export function deriveFirstAuthor(data: {
   }
   return null;
 }
-
 export function prepareContributorsToCreate(
   data: {
     contributors?: CreatorCreditInput[];
@@ -718,7 +620,6 @@ export function prepareContributorsToCreate(
       : data.creators !== undefined
         ? data.creators
         : undefined;
-
   if (structuredList !== undefined) {
     return (structuredList || [])
       .filter((c: CreatorCreditInput) => {
@@ -753,7 +654,6 @@ export function prepareContributorsToCreate(
         };
       });
   }
-
   if (data.authors !== undefined) {
     return (data.authors || [])
       .flatMap((authorName: string) => splitAuthorString(authorName))
@@ -768,6 +668,5 @@ export function prepareContributorsToCreate(
         };
       });
   }
-
   return null;
 }

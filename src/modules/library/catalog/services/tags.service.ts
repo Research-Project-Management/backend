@@ -236,20 +236,26 @@ export class TagsService {
           tx,
           effectiveProjectId,
         );
-        for (const tagId of deletedTagIds) {
-          await helpers.recordTombstone(eventScope, {
-            entityType: 'Tag',
-            entityId: tagId,
-          });
-          await helpers.publishOutbox(
+        if (deletedTagIds.length > 0) {
+          await helpers.recordTombstonesBatch(
             eventScope,
-            tagId,
-            'library.tag.deleted',
-            {
-              id: tagId,
-              deletedAt: new Date(),
-              projectId: effectiveProjectId,
-            },
+            deletedTagIds.map((tagId) => ({
+              entityType: 'Tag',
+              entityId: tagId,
+            })),
+          );
+          const deletedAt = new Date();
+          await helpers.publishOutboxBatch(
+            eventScope,
+            deletedTagIds.map((tagId) => ({
+              aggregateId: tagId,
+              eventType: 'library.tag.deleted',
+              payload: {
+                id: tagId,
+                deletedAt,
+                projectId: effectiveProjectId,
+              },
+            })),
           );
         }
         return { count: deletedTagIds.length };
@@ -369,27 +375,47 @@ export class TagsService {
     itemId: ItemId | string,
     tagNames: string[],
     defaultTagType: TagType = TagType.automatic,
+    projectId?: ProjectId | string,
   ): Promise<void> {
     if (tagNames.length === 0) return;
 
-    const resolvedTags = await resolveOrCreateTags(
-      tx,
-      userId,
-      tagNames,
-      defaultTagType,
-    );
-    if (resolvedTags.length === 0) return;
+    const executeSync = async (client: Prisma.TransactionClient) => {
+      const resolvedTags = await resolveOrCreateTags(
+        client,
+        userId,
+        tagNames,
+        defaultTagType,
+        normalizeProjectScopeId(projectId),
+      );
+      if (resolvedTags.length === 0) return false;
 
-    await tx.itemTag.createMany({
-      data: resolvedTags.map((tag) => ({
-        tagId: tag.id,
-        itemId,
-        type: tag.type,
-      })),
-      skipDuplicates: true,
-    });
+      await client.itemTag.createMany({
+        data: resolvedTags.map((tag) => ({
+          tagId: tag.id,
+          itemId,
+          type: tag.type,
+        })),
+        skipDuplicates: true,
+      });
+      return true;
+    };
 
-    await this.invalidateTagsCache(userId);
+    if (this.libraryTx && !tx) {
+      const synced = await this.libraryTx.executeInTransaction((innerTx) =>
+        executeSync(innerTx),
+      );
+      if (synced) {
+        await this.invalidateTagsCache(userId, projectId, itemId);
+      }
+      return;
+    }
+
+    const synced = await executeSync(tx);
+    if (synced) {
+      void Promise.resolve().then(() =>
+        this.invalidateTagsCache(userId, projectId, itemId),
+      );
+    }
   }
 
   async mergeTagsToItem(

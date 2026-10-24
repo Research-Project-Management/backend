@@ -64,7 +64,7 @@ export class DuplicateService {
   ) {
     if (
       libraryTx &&
-      (typeof (libraryTx as any).detectDuplicates === 'function' ||
+      ((libraryTx as unknown as DuplicateDetectorService).detectDuplicates ||
         libraryTx instanceof DuplicateDetectorService)
     ) {
       this.detector = libraryTx as unknown as DuplicateDetectorService;

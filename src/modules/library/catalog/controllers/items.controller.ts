@@ -181,10 +181,13 @@ export class ItemsController {
         'Project ID is required in URL parameter to import items',
       );
     }
+    if (!Array.isArray(body?.itemIds) || body.itemIds.length === 0 || body.itemIds.length > 100) {
+      throw new BadRequestException('itemIds must be a non-empty array of at most 100 IDs');
+    }
     return this.curationService.importItemsToProject(
       userId,
       projectId,
-      body?.itemIds || [],
+      body.itemIds,
     );
   }
 
@@ -356,6 +359,9 @@ export class ItemsController {
     const expectedVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
       : undefined;
+    if (expectedVersion !== undefined && (Number.isNaN(expectedVersion) || expectedVersion < 0)) {
+      throw new BadRequestException('Invalid expectedVersion');
+    }
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
 
     const deleted = await this.itemService.deleteItem(
@@ -388,6 +394,9 @@ export class ItemsController {
         : ifMatch
           ? parseInt(ifMatch.replace(/["']/g, ''), 10)
           : undefined;
+    if (expectedVersion !== undefined && (Number.isNaN(expectedVersion) || expectedVersion < 0)) {
+      throw new BadRequestException('Invalid expectedVersion');
+    }
     const projectId = normalizeProjectScopeId(paramProjectId || queryProjectId);
 
     const restored = await this.itemService.restoreItem(

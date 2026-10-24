@@ -10,10 +10,16 @@ import { promisify } from 'util';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
+import { normalizeProjectScopeId, libraryConfig } from '@/modules/library/core';
 import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 
 const gunzipAsync = promisify(zlib.gunzip);
+
+const applyJitter = (ttl: number): number =>
+  libraryConfig().app.isTest
+    ? ttl
+    : Math.max(1, Math.floor(ttl * (0.9 + Math.random() * 0.2)));
 
 /**
  * ItemFulltextService — Dedicated Domain Service for Academic Document Intelligence.
@@ -41,6 +47,7 @@ export class ItemFulltextService {
     projectId?: string,
   ): Promise<DocumentFulltextResponse> {
     const cacheKey = LIBRARY_REDIS_KEYS.itemFulltext(id);
+    const normalizedProj = normalizeProjectScopeId(projectId);
     if (this.cache) {
       try {
         const cached = await this.cache.get<
@@ -49,19 +56,12 @@ export class ItemFulltextService {
             projectId?: string | null;
           }
         >(cacheKey);
-        if (cached) {
-          if (cached.userId) {
-            const isOwner = cached.userId === userId;
-            const isProjectMatch = Boolean(
-              projectId && cached.projectId === projectId,
-            );
-            if (isOwner || isProjectMatch) {
-              return cached;
-            }
-            this.logger.warn(
-              `Unauthorized fulltext cache access attempt for item ${id} by user ${userId}`,
-            );
-          }
+        const isAuthorizedCached =
+          cached &&
+          ((normalizedProj && cached.projectId === normalizedProj) ||
+            (!normalizedProj && cached.userId === userId));
+        if (isAuthorizedCached) {
+          return cached;
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -210,9 +210,10 @@ export class ItemFulltextService {
         const cachedPayload = {
           ...result,
           userId: item.userId,
-          projectId: item.projectId ?? null,
+          projectId: normalizedProj ?? item.projectId ?? null,
         };
-        await this.cache.set(cacheKey, cachedPayload, 600); // 10 min TTL
+        const jitteredTtl = applyJitter(600);
+        await this.cache.set(cacheKey, cachedPayload, jitteredTtl); // 10 min TTL with jitter
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.debug(`Cache set error for ${cacheKey}: ${message}`);

@@ -192,11 +192,6 @@ export function resolveFileExtension(
 
 /**
  * Formats an attachment filename according to the official Zotero 7 template engine.
- * Supports:
- * - Double-brace Zotero 7 templates: `{{ firstCreator suffix=" - " }}{{ year suffix=" - " }}{{ title truncate="100" }}`
- * - Single-brace shorthand templates: `{author}_{year}_{title}`, `{firstCreator}`, `{citationKey}`, `{journal}`, etc.
- * - Variables: firstCreator, author, authors, creators, allAuthors, year, title, shortTitle, publicationTitle, journal, citationKey, itemType, doi
- * - Attributes: suffix="...", prefix="...", truncate="N", join="..."
  */
 export function formatAttachmentFilename(
   pattern: string,

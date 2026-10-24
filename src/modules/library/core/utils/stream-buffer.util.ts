@@ -26,8 +26,9 @@ export async function readSafeResponseBuffer(
   }
 
   // Streaming reader with backpressure if ReadableStream body exists
-  if (response.body && typeof (response.body as any).getReader === 'function') {
-    const reader = (response.body as any).getReader();
+  const streamBody = response.body as ReadableStream<Uint8Array> | null;
+  if (streamBody && typeof streamBody.getReader === 'function') {
+    const reader = streamBody.getReader();
     const chunks: Uint8Array[] = [];
     let totalBytes = 0;
 

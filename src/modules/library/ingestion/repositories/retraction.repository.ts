@@ -130,15 +130,20 @@ export class RetractionRepository {
       where: {
         ...scopeWhere,
         ...RETRACTION_IDENTIFIER_FILTER,
+        OR: [
+          { retractionCheckedAt: null },
+          { retractionCheckedAt: { lt: staleBefore } },
+        ],
       },
-      orderBy: { updatedAt: 'asc' },
+      orderBy: { retractionCheckedAt: { sort: 'asc', nulls: 'first' } },
       select: {
         id: true,
         title: true,
         doi: true,
         metadata: true,
+        retractionCheckedAt: true,
       },
-      take: limit * 2,
+      take: limit,
     });
 
     return items
@@ -148,6 +153,9 @@ export class RetractionRepository {
           pmid?: string | null;
           isbn?: string | null;
         };
+        const checkedAt =
+          item.retractionCheckedAt ??
+          (meta.retractionCheckedAt ? new Date(meta.retractionCheckedAt) : null);
         return {
           id: item.id,
           title: item.title,
@@ -156,15 +164,10 @@ export class RetractionRepository {
           isbn: topItem.isbn ?? meta.isbn ?? null,
           isRetracted: Boolean(meta.isRetracted),
           retractionNature: meta.retractionNature ?? null,
-          retractionCheckedAt: meta.retractionCheckedAt
-            ? new Date(meta.retractionCheckedAt)
-            : null,
+          retractionCheckedAt: checkedAt,
         };
       })
       .filter((item) => Boolean(item.doi?.trim() || item.pmid?.trim()))
-      .filter(
-        (i) => !i.retractionCheckedAt || i.retractionCheckedAt < staleBefore,
-      )
       .slice(0, limit);
   }
 
@@ -192,6 +195,7 @@ export class RetractionRepository {
       where: { id: itemId },
       data: {
         metadata: metadataObj as unknown as Prisma.InputJsonValue,
+        retractionCheckedAt: checkedAt,
         version: { increment: 1 },
       },
     });

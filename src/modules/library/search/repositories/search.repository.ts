@@ -421,8 +421,8 @@ export class SearchRepository implements OnModuleInit {
   async invalidateFacets(scopeId: string): Promise<void> {
     if (this.cache) {
       await Promise.all([
-        this.cache.delPattern(`library:search:facets:*${scopeId}*`),
-        this.cache.delPattern(`library:search:items:*${scopeId}*`),
+        this.cache.delPattern('library:search:facets:*' + scopeId + '*'),
+        this.cache.delPattern('library:search:items:*' + scopeId + '*'),
       ]);
     }
   }

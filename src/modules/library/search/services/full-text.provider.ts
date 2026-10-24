@@ -49,7 +49,10 @@ export class FullTextProvider {
     pageIndex?: number,
   ): Promise<PageAnchorMatch[]> {
     const normalizedTerm = (term ?? '').trim().toLowerCase();
-    if (!normalizedTerm) return [];
+    if (normalizedTerm.length < 2) return [];
+
+    const MAX_MATCHES_PER_ATTACHMENT = 200;
+    const MAX_MATCHES_PER_PAGE = 50;
 
     const pages = await this.repo.findAttachmentPages(
       attachmentId,
@@ -62,8 +65,14 @@ export class FullTextProvider {
       const textContent = page.textContent || '';
       const lower = textContent.toLowerCase();
       let pos = 0;
+      let pageMatches = 0;
 
-      while ((pos = lower.indexOf(normalizedTerm, pos)) !== -1) {
+      while (
+        (pos = lower.indexOf(normalizedTerm, pos)) !== -1 &&
+        matches.length < MAX_MATCHES_PER_ATTACHMENT &&
+        pageMatches < MAX_MATCHES_PER_PAGE
+      ) {
+        pageMatches++;
         const charOffsetStart = (page.charOffset ?? 0) + pos;
         const charOffsetEnd = charOffsetStart + normalizedTerm.length;
 
@@ -88,6 +97,8 @@ export class FullTextProvider {
 
         pos += normalizedTerm.length;
       }
+
+      if (matches.length >= MAX_MATCHES_PER_ATTACHMENT) break;
     }
 
     return matches;

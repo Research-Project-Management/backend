@@ -100,12 +100,18 @@ export class AttachmentsService {
     let resolvedFileId = input.fileId || extractFileIdFromUrl(input.url);
 
     // Content-Addressable Storage (CAS) Deduplication:
-    // If incoming upload has a valid fileHash, reuse existing storage blob if available
+    // If incoming upload has a valid fileHash, reuse existing storage blob if available within the same tenant scope
     let storageKey = input.storageKey;
     if (input.fileHash && input.fileHash.trim().length >= 32) {
+      const effectiveProjectId = normalizeProjectScopeId(
+        projectId || input.projectId,
+      );
       const existingWithHash = await this.repo.findFirst({
         fileHash: input.fileHash.trim(),
         storageKey: { not: null },
+        item: effectiveProjectId
+          ? { projectId: effectiveProjectId, deletedAt: null }
+          : { userId, projectId: null, deletedAt: null },
       });
       if (existingWithHash?.storageKey) {
         storageKey = existingWithHash.storageKey;
@@ -399,6 +405,13 @@ export class AttachmentsService {
     if (fileIdsToDelete.size > 0 && this.storagePort?.deleteFile) {
       for (const fid of fileIdsToDelete) {
         try {
+          const remainingRefs = await this.repo.countFileIdReferences?.(
+            fid,
+            attachment.id,
+          );
+          if (typeof remainingRefs === 'number' && remainingRefs > 0) {
+            continue;
+          }
           await this.storagePort.deleteFile(fid);
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);

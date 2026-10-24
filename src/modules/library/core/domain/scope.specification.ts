@@ -41,16 +41,15 @@ export function normalizeProjectScopeId(
   return isProjectScopeId(projectId) ? projectId.trim() : undefined;
 }
 
-class CompositeScopeSpecification {
+export interface IScopeSpecificationOperand {
+  toPrismaWhere(): Record<string, unknown>;
+  isSatisfiedBy?: (item: unknown) => boolean;
+}
+
+class CompositeScopeSpecification implements IScopeSpecificationOperand {
   constructor(
-    private readonly left: {
-      toPrismaWhere(): Record<string, unknown>;
-      isSatisfiedBy?: (item: unknown) => boolean;
-    },
-    private readonly right: {
-      toPrismaWhere(): Record<string, unknown>;
-      isSatisfiedBy?: (item: unknown) => boolean;
-    },
+    private readonly left: IScopeSpecificationOperand,
+    private readonly right: IScopeSpecificationOperand,
   ) {}
 
   toPrismaWhere(): Record<string, unknown> {
@@ -71,7 +70,7 @@ class CompositeScopeSpecification {
     return leftValid && rightValid;
   }
 
-  and(other: any): any {
+  and(other: IScopeSpecificationOperand): CompositeScopeSpecification {
     return new CompositeScopeSpecification(this, other);
   }
 }
@@ -80,7 +79,7 @@ class CompositeScopeSpecification {
  * ScopeSpecification: Enforces multi-tenant isolation.
  * Resolves to projectId for collaborative workspaces, or userId for user library.
  */
-export class ScopeSpecification {
+export class ScopeSpecification implements IScopeSpecificationOperand {
   constructor(
     public readonly userId: string,
     public readonly projectId?: string | null,
@@ -102,7 +101,7 @@ export class ScopeSpecification {
     return rec.userId === this.userId && (!rec.projectId || rec.projectId === null);
   }
 
-  and(other: any): any {
+  and(other: IScopeSpecificationOperand): CompositeScopeSpecification {
     return new CompositeScopeSpecification(this, other);
   }
 }

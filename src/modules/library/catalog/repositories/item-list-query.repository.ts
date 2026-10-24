@@ -228,7 +228,15 @@ export class ItemListQueryRepository {
           },
         },
         ...(options.cursor
-          ? { skip: 1 }
+          ? {
+              cursor: {
+                userId_itemId: {
+                  userId: effectiveUserId,
+                  itemId: options.cursor,
+                },
+              },
+              skip: 1,
+            }
           : options.page && options.page > 1
             ? { skip: (options.page - 1) * limit }
             : {}),

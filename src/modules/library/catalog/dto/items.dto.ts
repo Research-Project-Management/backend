@@ -2,6 +2,7 @@ import {
   IsString,
   IsOptional,
   IsArray,
+  ArrayMaxSize,
   IsNumber,
   IsBoolean,
   IsObject,
@@ -537,6 +538,7 @@ export class BulkPurgeItemsDto {
     example: ['uuid-1', 'uuid-2'],
   })
   @IsArray()
+  @ArrayMaxSize(100)
   @IsString({ each: true })
   itemIds!: string[];
 }
@@ -547,6 +549,7 @@ export class BulkTrashItemsDto {
     example: ['uuid-1', 'uuid-2'],
   })
   @IsArray()
+  @ArrayMaxSize(100)
   @IsString({ each: true })
   itemIds!: string[];
 }
@@ -557,6 +560,7 @@ export class BulkRestoreItemsDto {
     example: ['uuid-1', 'uuid-2'],
   })
   @IsArray()
+  @ArrayMaxSize(100)
   @IsString({ each: true })
   itemIds!: string[];
 }

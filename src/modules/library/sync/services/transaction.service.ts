@@ -1,9 +1,15 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '@/core';
 import { Prisma, LibraryChange, Tombstone, OutboxStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { ChangeLogRepository } from '@/modules/library/sync/repositories/changelog.repository';
 import { OutboxRepository } from '@/modules/library/sync/repositories/outbox.repository';
+import {
+  LIBRARY_OUTBOX_JOB,
+  LIBRARY_OUTBOX_QUEUE,
+} from '@/modules/library/sync/types/outbox.constants';
 import {
   IUnitOfWork,
   TransactionHelpers,
@@ -26,11 +32,16 @@ export type {
 
 @Injectable()
 export class TransactionService implements IUnitOfWork {
+  private readonly logger = new Logger(TransactionService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly changeLogRepo: ChangeLogRepository,
     @Optional() private readonly outboxWorker?: OutboxWorker,
     @Optional() private readonly outboxRepo?: OutboxRepository,
+    @Optional()
+    @InjectQueue(LIBRARY_OUTBOX_QUEUE)
+    private readonly outboxQueue?: Queue,
   ) {}
 
   async executeInTransaction<T>(
@@ -40,7 +51,7 @@ export class TransactionService implements IUnitOfWork {
     ) => Promise<T>,
     options?: { maxWait?: number; timeout?: number },
   ): Promise<T> {
-    const pendingOutboxEventIds: string[] = [];
+    const pendingOutboxEvents: Array<{ id: string; eventType: string }> = [];
 
     const result = await this.prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {
@@ -125,7 +136,7 @@ export class TransactionService implements IUnitOfWork {
                 retryCount: 0,
               },
             });
-            pendingOutboxEventIds.push(event.id);
+            pendingOutboxEvents.push({ id: event.id, eventType: event.eventType });
             return event;
           },
           publishOutboxBatch: async (
@@ -159,7 +170,11 @@ export class TransactionService implements IUnitOfWork {
                 normalizedEvents,
                 tx,
               );
-              pendingOutboxEventIds.push(...ids);
+              normalizedEvents.forEach((ev, idx) => {
+                if (ids[idx]) {
+                  pendingOutboxEvents.push({ id: ids[idx], eventType: ev.eventType });
+                }
+              });
               return ids;
             }
             const data: Prisma.OutboxEventCreateManyInput[] =
@@ -173,18 +188,20 @@ export class TransactionService implements IUnitOfWork {
                 status: OutboxStatus.PENDING,
                 retryCount: 0,
               }));
-            if (typeof tx.outboxEvent?.createMany === 'function') {
+            if (tx.outboxEvent?.createMany) {
               await tx.outboxEvent.createMany({ data });
               const ids = data.map((d) => d.id!);
-              pendingOutboxEventIds.push(...ids);
+              data.forEach((d) => {
+                pendingOutboxEvents.push({ id: d.id!, eventType: d.eventType });
+              });
               return ids;
             }
             const createdIds: string[] = [];
             for (const row of data) {
               const created = await tx.outboxEvent.create({ data: row });
               createdIds.push(created.id);
+              pendingOutboxEvents.push({ id: created.id, eventType: created.eventType });
             }
-            pendingOutboxEventIds.push(...createdIds);
             return createdIds;
           },
         };
@@ -197,13 +214,46 @@ export class TransactionService implements IUnitOfWork {
       },
     );
 
-    if (pendingOutboxEventIds.length > 0 && this.outboxWorker) {
-      void this.outboxWorker.notifyEvents(pendingOutboxEventIds);
+    if (pendingOutboxEvents.length > 0) {
+      void this.dispatchPostCommitOutboxNotifications(pendingOutboxEvents);
     }
 
     return result;
   }
 
+
+  async dispatchPostCommitOutboxNotifications(
+    events: Array<{ id: string; eventType: string }>,
+  ): Promise<void> {
+    if (!events || events.length === 0) return;
+
+    if (this.outboxQueue) {
+      try {
+        await this.outboxQueue.addBulk(
+          events.map((ev) => ({
+            name: LIBRARY_OUTBOX_JOB,
+            data: { eventId: ev.id, eventType: ev.eventType },
+            opts: {
+              jobId: ev.id,
+              attempts: 5,
+              backoff: { type: 'exponential', delay: 2000 },
+              removeOnComplete: true,
+            },
+          })),
+        );
+        return;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Failed to bulk-enqueue outbox event(s) to BullMQ: ${msg}. Falling back to direct worker notification.`,
+        );
+      }
+    }
+
+    if (this.outboxWorker) {
+      void this.outboxWorker.notifyEvents(events.map((e) => e.id));
+    }
+  }
   async getChangesSince(
     scope: { userId?: string; projectId?: string | null },
     sinceSeq: bigint = BigInt(0),

@@ -75,7 +75,9 @@ export class IngestionController {
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
     const effectiveProjectId =
-      this.validateProjectId(paramProjectId) || queryProjectId || dto.projectId;
+      this.validateProjectId(paramProjectId) ||
+      this.validateProjectId(queryProjectId) ||
+      this.validateProjectId(dto.projectId);
 
     let payload: SubmissionPayload;
     switch (dto.kind) {
@@ -188,6 +190,9 @@ export class IngestionController {
     @Param('runId') runId: string,
     @Param('projectId') projectId?: string,
   ) {
+    if (!isUUID(runId)) {
+      throw new BadRequestException('Invalid run ID');
+    }
     return this.ingestionService.retryRun(
       userId,
       runId,
@@ -210,7 +215,9 @@ export class IngestionController {
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
     const effectiveProjectId =
-      this.validateProjectId(paramProjectId) || queryProjectId || dto.projectId;
+      this.validateProjectId(paramProjectId) ||
+      this.validateProjectId(queryProjectId) ||
+      this.validateProjectId(dto.projectId);
     let command: IngestionCommand;
 
     switch (dto.source) {
@@ -346,7 +353,9 @@ export class IngestionController {
     @Query('projectId') queryProjectId?: string,
   ) {
     return this.urlCaptureService.captureUrl(dto.url, {
-      projectId: this.validateProjectId(paramProjectId) || queryProjectId,
+      projectId:
+        this.validateProjectId(paramProjectId) ||
+        this.validateProjectId(queryProjectId),
       userId,
     });
   }
@@ -362,9 +371,9 @@ export class IngestionController {
   ) {
     const effectiveScopeId =
       this.validateProjectId(paramProjectId) ||
-      queryProjectId ||
-      dto.projectId ||
-      userId;
+      this.validateProjectId(queryProjectId) ||
+      this.validateProjectId(dto.projectId) ||
+      undefined;
 
     return this.urlCaptureService.confirmCapturedUrl(
       effectiveScopeId,

@@ -54,6 +54,7 @@ model LibraryChange {
   @@index([userId, seq])
   @@index([projectId, seq])
   @@index([entityType, entityId])
+  @@index([createdAt])
   @@map("library_changes")
 }
 
@@ -71,6 +72,7 @@ model Tombstone {
   @@index([projectId, seq])
   @@index([userId, entityType, entityId])
   @@index([projectId, entityType, entityId])
+  @@index([deletedAt])
   @@map("tombstones")
 }
 
@@ -94,6 +96,7 @@ model OutboxEvent {
   updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([status, createdAt])
+  @@index([status, updatedAt])
   @@index([status, scheduledAt, leaseExpiresAt])
   @@index([userId, createdAt])
   @@index([projectId, createdAt])

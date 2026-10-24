@@ -4,7 +4,13 @@ import * as zlib from 'zlib';
 import { promisify } from 'util';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
-import { parseCreatorString, isNoiseAuthorName } from '@/modules/library/core';
+import {
+  parseCreatorString,
+  isNoiseAuthorName,
+  LIBRARY_EVENT_TYPES,
+  normalizeProjectScopeId,
+} from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 
 const gzipAsync = promisify(zlib.gzip);
 
@@ -15,6 +21,8 @@ export class ExtractionMetadataSynchronizer {
   constructor(
     private readonly extractionRepo: ExtractionRepository,
     @Optional()
+    private readonly libraryTx?: TransactionService,
+    @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
   ) {}
@@ -24,9 +32,9 @@ export class ExtractionMetadataSynchronizer {
    * and synchronizes extracted metadata (DOI, arXiv, title, year, contributors, keywords, notes) onto Item model.
    */
   async offloadFullTextAndSyncMetadata(
-    attachment: any,
-    doc: any,
-    extractionResult: any,
+    attachment: Record<string, unknown> & { id: string; itemId: string; fileId?: string | null; metadata?: unknown; item?: Record<string, unknown> & { id?: string; userId?: string; projectId?: string | null; title?: string; doi?: string | null; arxivId?: string | null; abstract?: string | null; year?: number | null; metadata?: unknown; contributors?: unknown[]; itemTags?: unknown[]; notesList?: unknown[] } | null },
+    doc: { references?: unknown[]; sections?: unknown[]; figures?: unknown[]; tables?: unknown[]; formulas?: unknown[]; fullText?: string; pages?: Array<{ textContent?: string }>; metadata?: { rawText?: string; keywords?: string[]; notes?: Array<{ content: string; type?: string }>; title?: string; doi?: string; arxivId?: string; abstract?: string; year?: number; numberOfPages?: number; publicationTitle?: string; journal?: string; proceedingsTitle?: string; conferenceName?: string; bookTitle?: string; isbn?: string; issn?: string; pmid?: string; volume?: string; issue?: string; pages?: string; publisher?: string; place?: string; publicationDate?: string; primaryCategory?: string; authors?: string[]; creators?: Array<{ creatorType?: string; fullName?: string; name?: string; firstName?: string; lastName?: string; fieldMode?: number }> } },
+    extractionResult: { text?: string; sections?: unknown[]; figures?: unknown[]; tables?: unknown[]; formulas?: unknown[]; references?: unknown[]; markdown?: string; pageCount?: number; qualityScore?: number; engineUsed?: string },
   ): Promise<void> {
     if (
       (doc.references && doc.references.length > 0) ||
@@ -54,7 +62,7 @@ export class ExtractionMetadataSynchronizer {
           extractionResult.text ??
           doc.fullText ??
           (Array.isArray(doc.pages) && doc.pages.length > 0
-            ? doc.pages.map((p: any) => p.textContent || '').join('\n')
+            ? doc.pages.map((p) => p.textContent || '').join('\n')
             : doc.metadata?.rawText ?? '');
         const fulltextTree = {
           title: doc.metadata?.title,
@@ -84,7 +92,7 @@ export class ExtractionMetadataSynchronizer {
         };
 
         // Claim Check Pattern: Offload heavy full-text tree to Object Storage
-        if (typeof this.storagePort?.uploadFile === 'function') {
+        if (this.storagePort?.uploadFile) {
           try {
             const jsonBuffer = Buffer.from(
               JSON.stringify(fulltextTree),
@@ -140,7 +148,7 @@ export class ExtractionMetadataSynchronizer {
           savedFulltextRecord &&
           'supersededFileIds' in savedFulltextRecord &&
           Array.isArray(savedFulltextRecord.supersededFileIds) &&
-          typeof this.storagePort?.deleteFile === 'function'
+          this.storagePort?.deleteFile
         ) {
           for (const oldFileId of savedFulltextRecord.supersededFileIds) {
             try {
@@ -160,14 +168,14 @@ export class ExtractionMetadataSynchronizer {
           attachment.itemId,
           'mextract',
           {
-            title: doc.metadata.title,
-            abstract: doc.metadata.abstract,
-            creators: doc.metadata.creators,
-            doi: doc.metadata.doi,
-            arxivId: doc.metadata.arxivId,
-            year: doc.metadata.year,
-            keywords: doc.metadata.keywords,
-            notes: doc.metadata.notes,
+            title: doc.metadata?.title,
+            abstract: doc.metadata?.abstract,
+            creators: doc.metadata?.creators,
+            doi: doc.metadata?.doi,
+            arxivId: doc.metadata?.arxivId,
+            year: doc.metadata?.year,
+            keywords: doc.metadata?.keywords,
+            notes: doc.metadata?.notes,
             referenceCount: doc.references?.length ?? 0,
             references: doc.references ?? [],
           } as unknown as Prisma.InputJsonValue,
@@ -249,24 +257,31 @@ export class ExtractionMetadataSynchronizer {
           string,
           unknown
         >;
+        const existingItemMeta =
+          typeof existingItemRecord.metadata === 'object' &&
+          existingItemRecord.metadata !== null &&
+          !Array.isArray(existingItemRecord.metadata)
+            ? (existingItemRecord.metadata as Record<string, unknown>)
+            : existingMeta;
+
+        let hasBackfilledFields = Object.keys(metaPatch).length > 0;
+        for (const idKey of ['arxivId', 'pmid', 'isbn', 'issn'] as const) {
+          const extractedVal = doc.metadata?.[idKey];
+          if (
+            extractedVal &&
+            !existingItemMeta[idKey] &&
+            !existingItemRecord[idKey]
+          ) {
+            metaPatch[idKey] = extractedVal;
+            hasBackfilledFields = true;
+          }
+        }
 
         const itemPatch: Prisma.ItemUpdateInput = {
           ...(shouldInferItemType && inferredItemType ? { itemType: inferredItemType } : {}),
-          ...(shouldUpdateTitle ? { title: doc.metadata.title } : {}),
+          ...(shouldUpdateTitle ? { title: doc.metadata?.title } : {}),
           ...(!attachment.item?.doi && doc.metadata?.doi
             ? { doi: doc.metadata.doi }
-            : {}),
-          ...(!existingItemRecord.arxivId && doc.metadata?.arxivId
-            ? { arxivId: doc.metadata.arxivId }
-            : {}),
-          ...(!existingItemRecord.pmid && doc.metadata?.pmid
-            ? { pmid: doc.metadata.pmid }
-            : {}),
-          ...(!existingItemRecord.isbn && doc.metadata?.isbn
-            ? { isbn: doc.metadata.isbn }
-            : {}),
-          ...(!existingItemRecord.issn && doc.metadata?.issn
-            ? { issn: doc.metadata.issn }
             : {}),
           ...(!attachment.item?.abstract && doc.metadata?.abstract
             ? { abstract: doc.metadata.abstract }
@@ -279,10 +294,10 @@ export class ExtractionMetadataSynchronizer {
                 publicationTitle: fallbackPubTitle,
               }
             : {}),
-          ...(Object.keys(metaPatch).length > 0
+          ...(hasBackfilledFields
             ? {
                 metadata: {
-                  ...existingMeta,
+                  ...existingItemMeta,
                   ...metaPatch,
                 } as unknown as Prisma.InputJsonValue,
               }
@@ -290,7 +305,45 @@ export class ExtractionMetadataSynchronizer {
         };
 
         if (Object.keys(itemPatch).length > 0) {
-          await this.extractionRepo.updateItem(attachment.itemId, itemPatch);
+          const ownerUserId = attachment.item?.userId || 'system';
+          const ownerProjectId = normalizeProjectScopeId(
+            attachment.item?.projectId,
+          );
+          const eventScope = {
+            userId: ownerUserId,
+            projectId: ownerProjectId,
+          };
+
+          if (this.libraryTx) {
+            await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+              const updatedItem = await this.extractionRepo.updateItem(
+                attachment.itemId,
+                itemPatch,
+                tx,
+              );
+              await helpers.appendChange(eventScope, {
+                entityType: 'Item',
+                entityId: updatedItem.id,
+                action: 'update',
+                version: updatedItem.version,
+                data: updatedItem,
+              });
+              await helpers.publishOutbox(
+                eventScope,
+                updatedItem.id,
+                LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+                {
+                  itemId: updatedItem.id,
+                  userId: ownerUserId,
+                  projectId: ownerProjectId,
+                  updatedAt: new Date().toISOString(),
+                  source: 'extraction.metadata_sync',
+                },
+              );
+            });
+          } else {
+            await this.extractionRepo.updateItem(attachment.itemId, itemPatch);
+          }
         }
 
         const creatorType = 'author';
@@ -387,7 +440,7 @@ export class ExtractionMetadataSynchronizer {
             await this.extractionRepo.createItemNotes({
               userId: effectiveUserId,
               itemId: attachment.itemId,
-              notes: doc.metadata.notes,
+              notes: doc.metadata?.notes,
               projectId: attachment.item?.projectId,
             });
           }

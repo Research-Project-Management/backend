@@ -14,40 +14,16 @@ import {
 import { randomUUID } from 'crypto';
 import { isUUID } from 'class-validator';
 
-export interface CreateIngestionRunData {
-  id?: string;
-  userId?: string;
-  projectId?: string | null;
-  traceId?: string | null;
-  inputParams: Prisma.InputJsonValue;
-  inputHash: string;
-  idempotencyKey?: string | null;
-  contractVersion?: string;
-  pipelineVersion?: string;
-  status?: IngestionStatus;
-  nextRetryAt?: Date | null;
-}
-
-export interface CreateIngestionStageData {
-  stageName: string;
-  durationMs?: number;
-  success?: boolean;
-  errorMessage?: string;
-  outputSnapshot?: Prisma.InputJsonValue;
-  leaseToken?: string;
-  leaseExpiresAt?: Date;
-}
-
-export interface CreateIngestionReviewCaseData {
-  targetItemId?: string;
-  reason: string;
-  evidence?: Prisma.InputJsonValue;
-  options?: Prisma.InputJsonValue;
-  status?: string; // PENDING, RESOLVED, DISMISSED
-  resolution?: string;
-  assignedToUserId?: string;
-  assignedToId?: string;
-}
+import {
+  CreateIngestionRunData,
+  CreateIngestionStageData,
+  CreateIngestionReviewCaseData,
+} from '@/modules/library/ingestion/domain/duplicate-merge.helper';
+export type {
+  CreateIngestionRunData,
+  CreateIngestionStageData,
+  CreateIngestionReviewCaseData,
+};
 
 function parseReviewCase(val: unknown): IngestionReviewCase | null {
   if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
@@ -58,44 +34,12 @@ function toJsonValue<T>(val: T): Prisma.InputJsonValue {
   return val as unknown as Prisma.InputJsonValue;
 }
 
-export type IngestionScope =
-  { userId?: string; projectId?: string | null } | string;
-
-export function parseRunScope(
-  scope?: IngestionScope,
-  fallbackUserId?: string,
-): { userId: string; projectId: string | null } {
-  if (typeof scope === 'object' && scope !== null) {
-    const rawProject = scope.projectId;
-    const resolvedUserId = scope.userId || fallbackUserId;
-    if (!resolvedUserId) {
-      throw new BadRequestException(
-        'User context (userId) is required for ingestion run operations',
-      );
-    }
-    return {
-      userId: resolvedUserId,
-      projectId: rawProject && isUUID(rawProject) ? rawProject : null,
-    };
-  }
-  const str = typeof scope === 'string' ? scope : '';
-  const isProject =
-    str &&
-    str !== 'user' &&
-    str !== 'me' &&
-    str !== fallbackUserId &&
-    isUUID(str);
-  const resolvedUserId = fallbackUserId || (!isProject && str ? str : '');
-  if (!resolvedUserId) {
-    throw new BadRequestException(
-      'User context (userId) is required for ingestion run operations',
-    );
-  }
-  return {
-    userId: resolvedUserId,
-    projectId: isProject ? str : null,
-  };
-}
+import {
+  IngestionScope,
+  parseRunScope,
+} from '@/modules/library/ingestion/domain/duplicate-merge.helper';
+export type { IngestionScope };
+export { parseRunScope };
 
 @Injectable()
 export class IngestionRepository {
@@ -710,7 +654,7 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    if (typeof client.capturePreview?.findMany !== 'function') {
+    if (!client.capturePreview?.findMany) {
       return [];
     }
     return client.capturePreview.findMany({

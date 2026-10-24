@@ -1,4 +1,10 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import {
   IWebFetchPort,
   WebFetchOptions,
@@ -11,7 +17,10 @@ import {
   DEFAULT_BROWSER_FETCH_HEADERS,
   DEFAULT_SAFE_REDIRECT_MAX_HOPS,
 } from '@/modules/library/core/services/ssrf-guard.service';
-import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
+import {
+  MetadataRoutingPolicy,
+  SsrfBlockedDomainException,
+} from '@/modules/library/ingestion/policies/metadata.policy';
 import { DomainRateLimiterService } from './domain-rate-limiter.service';
 import {
   deriveDoiFromPublisherUrl,
@@ -36,12 +45,15 @@ const DEFAULT_FETCH_TIMEOUT_MS = 14000;
 interface FlareSolverrResponse {
   status?: string;
   solution?: {
+    url?: string;
     response?: string;
     status?: number;
   };
 }
 
 interface StealthProxyJsonResponse {
+  url?: string;
+  finalUrl?: string;
   html?: string;
   body?: string;
   text?: string;
@@ -77,11 +89,23 @@ export class WebFetchLadderService implements IWebFetchPort {
       new WebMirrorResolverService(this.httpClient, this.configService);
   }
 
+  private isSsrfError(err: unknown): boolean {
+    if (
+      err instanceof BadRequestException ||
+      err instanceof ForbiddenException ||
+      err instanceof SsrfBlockedDomainException
+    ) {
+      return true;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return msg.includes('SSRF Protection') || msg.includes('SSRF');
+  }
+
   private async assertSafeUrl(url: string): Promise<void> {
     if (this.ssrfGuard) {
       await this.ssrfGuard.assertSafeUrl(url);
     } else {
-      MetadataRoutingPolicy.validateUrl(url);
+      await MetadataRoutingPolicy.assertSafeUrl(url);
     }
   }
 
@@ -210,6 +234,8 @@ export class WebFetchLadderService implements IWebFetchPort {
   private async executeStealthFetch(
     url: string,
   ): Promise<{ text?: string; status: number } | null> {
+    await this.assertSafeUrl(url);
+
     const stealthEndpoint =
       this.configService?.webFetch.stealthScraperUrl ||
       this.configService?.webFetch.headlessScraperUrl ||
@@ -242,6 +268,9 @@ export class WebFetchLadderService implements IWebFetchPort {
 
         if (!res.ok) return null;
         const json = (await res.json()) as FlareSolverrResponse;
+        if (json?.solution?.url) {
+          await this.assertSafeUrl(json.solution.url);
+        }
         if (json?.status === 'ok' && json?.solution?.response) {
           return {
             text: json.solution.response,
@@ -265,6 +294,10 @@ export class WebFetchLadderService implements IWebFetchPort {
         ).toLowerCase();
         if (contentType.includes('application/json')) {
           const json = (await res.json()) as StealthProxyJsonResponse;
+          const resolvedUrl = json.finalUrl || json.url;
+          if (resolvedUrl) {
+            await this.assertSafeUrl(resolvedUrl);
+          }
           const text = json.html || json.body || json.text || json.content;
           if (text) {
             return { text, status: json.status || res.status };
@@ -275,6 +308,9 @@ export class WebFetchLadderService implements IWebFetchPort {
         }
       }
     } catch (err: unknown) {
+      if (this.isSsrfError(err)) {
+        throw err;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Stealth fetch attempt failed for "${url}": ${msg}`);
     }
@@ -338,6 +374,20 @@ export class WebFetchLadderService implements IWebFetchPort {
           break;
         }
       } catch (err: unknown) {
+        if (this.isSsrfError(err)) {
+          const ssrfMsg = err instanceof Error ? err.message : String(err);
+          return {
+            url: canonicalUrl,
+            finalUrl: targetUrl,
+            status: 403,
+            isBlocked: true,
+            wafKind: 'SSRF_BLOCKED',
+            isPdf: false,
+            ladderStepReached: 1,
+            derivedIdentifier,
+            warnings: ["SSRF blocked redirect: " + ssrfMsg],
+          };
+        }
         fetchError = err instanceof Error ? err : new Error(String(err));
         this.logger.debug(
           `Plain HTTP fetch error for "${targetUrl}": ${fetchError.message}`,

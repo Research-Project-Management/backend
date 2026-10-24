@@ -83,10 +83,16 @@ export class CitationController {
     ProjectRole.CONTRIBUTOR,
   )
   async uploadCustomStyle(
+    @CurrentUser('id') userId: string,
     @Body('xml') xml: string,
     @Body('title') title?: string,
+    @Param('projectId') projectId?: string,
   ) {
-    return this.citationService.registerCustomStyle(xml, title);
+    return this.citationService.registerCustomStyle(
+      xml,
+      title,
+      projectId || userId,
+    );
   }
 
   /**
@@ -164,7 +170,7 @@ export class CitationController {
   )
   @Header(
     'Cache-Control',
-    'public, max-age=86400, stale-while-revalidate=604800',
+    'private, max-age=3600, stale-while-revalidate=86400',
   )
   async getDoiReference(
     @CurrentUser('id') userId: string,

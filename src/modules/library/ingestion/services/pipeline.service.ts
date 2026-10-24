@@ -32,6 +32,7 @@ import {
 } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import { PipelineBatchExecutor } from './pipeline-batch.executor';
+import { UrlCaptureService } from './url-capture.service';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 function resolveScope(
@@ -74,6 +75,8 @@ export class PipelineService {
   private readonly sideEffects: PipelineSideEffectsService;
   private readonly batchExecutor: PipelineBatchExecutor;
   private readonly normalizer = new NormalizationPolicy();
+  private lastGcRunAt = 0;
+  private static readonly GC_THROTTLE_INTERVAL_MS = 15 * 60_000;
 
   constructor(
     private readonly repo: IngestionRepository,
@@ -99,6 +102,8 @@ export class PipelineService {
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
+    @Optional()
+    private readonly urlCapture?: UrlCaptureService,
   ) {
     this.orchestrator = sagaOrchestrator ?? new IngestionSagaOrchestrator(repo);
     this.sideEffects =
@@ -130,13 +135,19 @@ export class PipelineService {
   ): Promise<void> {
     try {
       await this.executePipelineStages(runId, scopeId, envelope);
-      await this.runTerminalMaintenanceGc(envelope);
-    } catch (err) {
-      throw err;
+    } finally {
+      await this.cleanupOffloadedPayload(envelope);
+      if (
+        Date.now() - this.lastGcRunAt >
+        PipelineService.GC_THROTTLE_INTERVAL_MS
+      ) {
+        this.lastGcRunAt = Date.now();
+        await this.runTerminalMaintenanceGc(envelope);
+      }
     }
   }
 
-  private async runTerminalMaintenanceGc(
+  private async cleanupOffloadedPayload(
     envelope: IngestionSubmissionEnvelope,
   ): Promise<void> {
     const payload = envelope?.payload;
@@ -147,7 +158,7 @@ export class PipelineService {
         ? payload.fileId
         : undefined;
 
-    if (claimCheckFileId && typeof this.storagePort?.deleteFile === 'function') {
+    if (claimCheckFileId && this.storagePort?.deleteFile) {
       try {
         await this.storagePort.deleteFile(claimCheckFileId);
       } catch (err: unknown) {
@@ -157,43 +168,15 @@ export class PipelineService {
         );
       }
     }
+  }
 
+  private async runTerminalMaintenanceGc(
+    _envelope?: IngestionSubmissionEnvelope,
+  ): Promise<void> {
     try {
-      const now = new Date();
-      if (this.storagePort?.deleteFile) {
-        const expiredPreviews = await this.repo.findExpiredCapturePreviews(now);
-        for (const p of expiredPreviews) {
-          if (p.claimedAt) continue;
-          const meta =
-            p.canonicalMetadata &&
-            typeof p.canonicalMetadata === 'object' &&
-            !Array.isArray(p.canonicalMetadata)
-              ? (p.canonicalMetadata as Record<string, unknown>)
-              : {};
-          const extra =
-            meta.extraFields &&
-            typeof meta.extraFields === 'object' &&
-            !Array.isArray(meta.extraFields)
-              ? (meta.extraFields as Record<string, unknown>)
-              : {};
-          const scraped =
-            meta.scrapedData &&
-            typeof meta.scrapedData === 'object' &&
-            !Array.isArray(meta.scrapedData)
-              ? (meta.scrapedData as Record<string, unknown>)
-              : {};
-          const pdfFileId =
-            (typeof scraped.pdfFileId === 'string' && scraped.pdfFileId) ||
-            (typeof meta.pdfFileId === 'string' && meta.pdfFileId) ||
-            (typeof extra.pdfFileId === 'string' && extra.pdfFileId) ||
-            (typeof extra.fileId === 'string' && extra.fileId) ||
-            (typeof meta.fileId === 'string' && meta.fileId);
-          if (pdfFileId) {
-            await this.storagePort.deleteFile(pdfFileId).catch(() => undefined);
-          }
-        }
+      if (this.urlCapture?.cleanupExpiredPreviews) {
+        await this.urlCapture.cleanupExpiredPreviews(0).catch(() => undefined);
       }
-      await this.repo.deleteExpiredCapturePreviews(now).catch(() => undefined);
       await this.repo.purgeOldRuns(7).catch(() => undefined);
     } catch {
       // Non-critical background GC
@@ -533,30 +516,30 @@ export class PipelineService {
       },
     );
 
-    if (createdItem?.id) {
-      await this.sideEffects.attachFile(
-        resolvedScope.userId,
-        resolvedScope.projectId,
-        createdItem.id,
-        uploadedFileIdentifier,
-        uploadedFilename,
-        payloadSize,
-        {
-          ...(decision.proposedItem || {}),
-          ...(createdItem as unknown as Record<string, unknown>),
-        },
-      );
-
-      await this.sideEffects.materializeNotes(
-        resolvedScope.userId,
-        resolvedScope.projectId,
-        createdItem.id,
-        decision.proposedItem?.notes,
-        createdItem,
-      );
-    }
-
     try {
+      if (createdItem?.id) {
+        await this.sideEffects.attachFile(
+          resolvedScope.userId,
+          resolvedScope.projectId,
+          createdItem.id,
+          uploadedFileIdentifier,
+          uploadedFilename,
+          payloadSize,
+          {
+            ...(decision.proposedItem || {}),
+            ...(createdItem as unknown as Record<string, unknown>),
+          },
+        );
+
+        await this.sideEffects.materializeNotes(
+          resolvedScope.userId,
+          resolvedScope.projectId,
+          createdItem.id,
+          decision.proposedItem?.notes,
+          createdItem,
+        );
+      }
+
       const commitSourceLabel =
         getSubmissionPayloadLabel(envelope.payload) ||
         decision.proposedItem?.filename ||

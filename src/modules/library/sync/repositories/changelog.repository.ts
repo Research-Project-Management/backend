@@ -22,7 +22,18 @@ export class ChangeLogRepository {
     return tx || this.prisma;
   }
 
-  private resolveScope(scope: { userId?: string; projectId?: string | null }) {
+  private resolveScope(
+    scope: { userId?: string; projectId?: string | null } | string,
+  ) {
+    if (typeof scope === 'string') {
+      if (scope.startsWith('proj:')) {
+        return { userId: undefined, projectId: scope.slice(5) };
+      }
+      if (scope.startsWith('user:')) {
+        return { userId: scope.slice(5), projectId: undefined };
+      }
+      return { userId: scope, projectId: undefined };
+    }
     return {
       userId: scope.userId,
       projectId: normalizeProjectScopeId(scope.projectId),
@@ -30,26 +41,26 @@ export class ChangeLogRepository {
   }
 
   async allocateNextSequence(
-    scope: { userId?: string; projectId?: string | null },
-    _tx?: Prisma.TransactionClient,
+    scope: { userId?: string; projectId?: string | null } | string,
+    countOrTx: number | Prisma.TransactionClient = 1,
+    tx?: Prisma.TransactionClient,
   ): Promise<bigint> {
-    // Note: Always use root client (this.prisma) instead of the interactive transaction.
-    // SyncSequence acts as a monotonic sequence generator (analogous to Postgres nextval).
-    // Holding the lock on SyncSequence inside an interactive transaction causes severe row-lock
-    // contention and P2028 timeouts when multiple items are modified or deleted concurrently.
-    const client = this.prisma;
+    const count = typeof countOrTx === 'number' ? countOrTx : 1;
+    const client =
+      (typeof countOrTx !== 'number' ? countOrTx : tx) || this.prisma;
     const { userId, projectId } = this.resolveScope(scope);
+    const incrementBy = BigInt(count);
 
     if (projectId) {
       const record = await client.syncSequence.upsert({
         where: { projectId },
         create: {
           projectId,
-          currentSequence: BigInt(1),
+          currentSequence: incrementBy,
         },
         update: {
           currentSequence: {
-            increment: BigInt(1),
+            increment: incrementBy,
           },
         },
         select: { currentSequence: true },
@@ -62,11 +73,11 @@ export class ChangeLogRepository {
         where: { userId },
         create: {
           userId,
-          currentSequence: BigInt(1),
+          currentSequence: incrementBy,
         },
         update: {
           currentSequence: {
-            increment: BigInt(1),
+            increment: incrementBy,
           },
         },
         select: { currentSequence: true },
@@ -74,51 +85,17 @@ export class ChangeLogRepository {
       return record.currentSequence;
     }
 
-    return BigInt(1);
+    return incrementBy;
   }
 
   async allocateSequenceBatch(
-    scope: { userId?: string; projectId?: string | null },
+    scope: { userId?: string; projectId?: string | null } | string,
     count: number,
+    tx?: Prisma.TransactionClient,
   ): Promise<bigint[]> {
     if (count <= 0) return [];
-    const client = this.prisma;
-    const { userId, projectId } = this.resolveScope(scope);
+    const endSeq = await this.allocateNextSequence(scope, count, tx);
     const incrementBy = BigInt(count);
-
-    let endSeq = incrementBy;
-    if (projectId) {
-      const record = await client.syncSequence.upsert({
-        where: { projectId },
-        create: {
-          projectId,
-          currentSequence: incrementBy,
-        },
-        update: {
-          currentSequence: {
-            increment: incrementBy,
-          },
-        },
-        select: { currentSequence: true },
-      });
-      endSeq = record.currentSequence;
-    } else if (userId) {
-      const record = await client.syncSequence.upsert({
-        where: { userId },
-        create: {
-          userId,
-          currentSequence: incrementBy,
-        },
-        update: {
-          currentSequence: {
-            increment: incrementBy,
-          },
-        },
-        select: { currentSequence: true },
-      });
-      endSeq = record.currentSequence;
-    }
-
     const startSeq = endSeq - incrementBy + 1n;
     const sequences: bigint[] = [];
     for (let i = 0n; i < incrementBy; i++) {
@@ -134,7 +111,7 @@ export class ChangeLogRepository {
   ): Promise<LibraryChange> {
     const client = this.getClient(tx);
     const { userId, projectId } = this.resolveScope(scope);
-    const seq = await this.allocateNextSequence(scope, tx);
+    const seq = await this.allocateNextSequence(scope, 1, tx);
 
     return client.libraryChange.create({
       data: {
@@ -187,6 +164,7 @@ export class ChangeLogRepository {
       const seqs = await this.allocateSequenceBatch(
         group.scope,
         group.items.length,
+        tx,
       );
       group.items.forEach((entry, idx) => {
         createRows.push({
@@ -202,7 +180,7 @@ export class ChangeLogRepository {
       });
     }
 
-    if (typeof client.libraryChange?.createMany === 'function') {
+    if (client.libraryChange?.createMany) {
       const res = await client.libraryChange.createMany({
         data: createRows,
       });
@@ -222,7 +200,7 @@ export class ChangeLogRepository {
   ): Promise<Tombstone> {
     const client = this.getClient(tx);
     const { userId, projectId } = this.resolveScope(scope);
-    const seq = await this.allocateNextSequence(scope, tx);
+    const seq = await this.allocateNextSequence(scope, 1, tx);
 
     const existing = await client.tombstone.findFirst({
       where: {
@@ -297,7 +275,7 @@ export class ChangeLogRepository {
       );
 
       // Remove any stale tombstones for the same entities in this scope, then bulk-insert fresh tombstones
-      if (typeof client.tombstone?.deleteMany === 'function') {
+      if (client.tombstone?.deleteMany) {
         await client.tombstone.deleteMany({
           where: {
             userId: userId || null,
@@ -310,6 +288,7 @@ export class ChangeLogRepository {
       const seqs = await this.allocateSequenceBatch(
         group.scope,
         group.items.length,
+        tx,
       );
       const deletedAt = new Date();
       const createRows: Prisma.TombstoneCreateManyInput[] = group.items.map(
@@ -324,7 +303,7 @@ export class ChangeLogRepository {
         }),
       );
 
-      if (typeof client.tombstone?.createMany === 'function') {
+      if (client.tombstone?.createMany) {
         const res = await client.tombstone.createMany({
           data: createRows,
         });

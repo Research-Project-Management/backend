@@ -187,8 +187,8 @@ export function resolveCanonicalCommandFields(
     generateCitationKey({
       title: rawTitle,
       year: extractedYear ?? (data.year !== undefined ? Number(data.year) : null),
-      creators: Array.isArray(data.creators) ? (data.creators as any) : null,
-      authors: Array.isArray(data.authors) ? (data.authors as any) : null,
+      creators: Array.isArray(data.creators) ? (data.creators as Array<{ lastName?: string | null; fullName?: string | null; name?: string | null; fieldMode?: number | null }>) : null,
+      authors: Array.isArray(data.authors) ? (data.authors as string[]) : null,
     });
 
   const candidateType = toNullableStr(firstDefined(['type']))?.trim() || '';
@@ -402,6 +402,7 @@ export async function buildCommandCreateInput(
     data.attachments,
     resolvedFileId,
     data,
+    userId,
   );
   const firstAuthor = deriveFirstAuthor(data);
   const hasFile = attachmentsToCreate.some(
@@ -464,7 +465,7 @@ export async function buildCommandCreateInput(
     data,
     resolvedItemType,
   );
-  const uniqueCollectionIds = Array.from(
+  const rawUniqueCollectionIds = Array.from(
     new Set(
       [
         ...(Array.isArray(data.collectionIds) ? data.collectionIds : []),
@@ -474,6 +475,30 @@ export async function buildCommandCreateInput(
       ),
     ),
   );
+  let uniqueCollectionIds = rawUniqueCollectionIds;
+  if (rawUniqueCollectionIds.length > 0 && client.collection) {
+    const validCollections = await client.collection.findMany({
+      where: effectiveProjectId
+        ? {
+            id: { in: rawUniqueCollectionIds },
+            projectId: effectiveProjectId,
+            deletedAt: null,
+          }
+        : {
+            id: { in: rawUniqueCollectionIds },
+            userId,
+            projectId: null,
+            deletedAt: null,
+          },
+      select: { id: true },
+    });
+    if (Array.isArray(validCollections)) {
+      const validSet = new Set(validCollections.map((c) => c.id));
+      uniqueCollectionIds = rawUniqueCollectionIds.filter((cid) =>
+        validSet.has(cid),
+      );
+    }
+  }
 
   const createData: Prisma.ItemUncheckedCreateInput = {
     userId,
@@ -576,6 +601,8 @@ export function buildCommandUpdateInput(
             (a: Record<string, unknown> | null | undefined) => !a?.id,
           ),
           null,
+          undefined,
+          userId,
         )
       : [];
 
@@ -615,42 +642,7 @@ export function buildCommandUpdateInput(
     targetItemType,
   );
 
-  let collectionItemsPatch:
-    | Prisma.CollectionItemUpdateManyWithoutItemNestedInput
-    | undefined;
-  if (data.collectionIds !== undefined) {
-    const unique = Array.from(
-      new Set(
-        (Array.isArray(data.collectionIds) ? data.collectionIds : []).filter(
-          (cid: string): cid is string =>
-            typeof cid === 'string' && cid.trim().length > 0,
-        ),
-      ),
-    );
-    collectionItemsPatch =
-      unique.length > 0
-        ? {
-            deleteMany: {},
-            create: unique.map((cid, idx) => ({
-              collection: { connect: { id: cid } },
-              sortOrder: idx,
-            })),
-          }
-        : { deleteMany: {} };
-  } else if (data.collectionId !== undefined) {
-    collectionItemsPatch =
-      data.collectionId &&
-      typeof data.collectionId === 'string' &&
-      data.collectionId.trim().length > 0
-        ? {
-            deleteMany: {},
-            create: {
-              collection: { connect: { id: data.collectionId.trim() } },
-              sortOrder: 0,
-            },
-          }
-        : { deleteMany: {} };
-  }
+  const collectionItemsPatch = buildCollectionItemsUpdatePatch(data);
 
   const updateData: Prisma.ItemUpdateInput = {
     title:
@@ -713,54 +705,12 @@ export function buildCommandUpdateInput(
   return { updateData, cleanIds: ids, rawTags };
 }
 
-export const IDENTIFIER_URI_BUILDERS: ReadonlyArray<{
-  type: 'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'issn';
-  key: keyof ReturnType<typeof normalizeItemIdentifiers>;
-  buildUri: (val: string) => string;
-}> = [
-  { type: 'doi', key: 'doi', buildUri: (v) => `https://doi.org/${v}` },
-  {
-    type: 'arxiv',
-    key: 'arxivId',
-    buildUri: (v) => `https://arxiv.org/abs/${v}`,
-  },
-  {
-    type: 'pmid',
-    key: 'pmid',
-    buildUri: (v) => `https://pubmed.ncbi.nlm.nih.gov/${v}/`,
-  },
-  {
-    type: 'pmcid',
-    key: 'pmcid',
-    buildUri: (v) => `https://www.ncbi.nlm.nih.gov/pmc/articles/${v}/`,
-  },
-  { type: 'isbn', key: 'isbn', buildUri: (v) => `urn:isbn:${v}` },
-  { type: 'issn', key: 'issn', buildUri: (v) => `urn:issn:${v}` },
-];
-
-export function calculateIdentifierChanges(
-  cleanIds: ReturnType<typeof normalizeItemIdentifiers>,
-  existing: ItemDetail | Record<string, unknown>,
-): Array<{ type: string; value: string; canonicalUri: string }> {
-  const existingArxivIdentifier = (
-    existing.identifiers as Array<{ type: string; value?: string }> | undefined
-  )?.find((identifierItem) => identifierItem.type === 'arxiv')?.value;
-
-  const changes: Array<{ type: string; value: string; canonicalUri: string }> =
-    [];
-  for (const { type, key, buildUri } of IDENTIFIER_URI_BUILDERS) {
-    const newVal = cleanIds[key];
-    const currentVal =
-      type === 'arxiv' ? existingArxivIdentifier : existing[key];
-    if (newVal !== undefined && newVal !== currentVal) {
-      changes.push({
-        type,
-        value: newVal,
-        canonicalUri: newVal ? buildUri(newVal) : '',
-      });
-    }
-  }
-  return changes;
-}
+import { buildCollectionItemsUpdatePatch } from './identifier-change.helper';
+export {
+  IDENTIFIER_URI_BUILDERS,
+  calculateIdentifierChanges,
+  buildMyPublicationMetadata,
+  buildCollectionItemsUpdatePatch,
+} from './identifier-change.helper';
 
 export { disambiguateCitationKey } from './citation-key.engine';

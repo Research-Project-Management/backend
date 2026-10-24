@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectScopeId, libraryConfig } from '@/modules/library/core';
 import { TagsService } from './tags.service';
 
 /**
@@ -12,10 +12,31 @@ import { TagsService } from './tags.service';
 export class ItemCacheCoordinator {
   private readonly logger = new Logger(ItemCacheCoordinator.name);
 
+  /**
+   * Adds ±10% jitter to cache TTL to prevent cache stampedes / thundering herds.
+   */
+  withJitter(ttlSeconds: number): number {
+    if (libraryConfig().app.isTest) {
+      return ttlSeconds;
+    }
+    return Math.max(1, Math.floor(ttlSeconds * (0.9 + Math.random() * 0.2)));
+  }
+
   constructor(
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly tagsService?: TagsService,
   ) {}
+
+  /**
+   * Invalidates detail cache for a specific item without triggering SCAN pattern storms.
+   */
+  async invalidateDetailCache(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<void> {
+    return this.invalidateItemCache(itemId, userId, projectId);
+  }
 
   /**
    * Invalidates Redis cache entries for an item and affected library lists.
@@ -28,18 +49,38 @@ export class ItemCacheCoordinator {
   ): Promise<void> {
     if (!this.cache) return;
     try {
-      await Promise.all([
-        this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
-        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
-        this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(id)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
-      ]);
+      const keysToDelete: string[] = [
+        LIBRARY_REDIS_KEYS.item(id),
+        LIBRARY_REDIS_KEYS.itemDetails(id),
+        LIBRARY_REDIS_KEYS.itemFulltext(id),
+        `${LIBRARY_REDIS_KEYS.item(id)}:attachments`,
+        `${LIBRARY_REDIS_KEYS.item(id)}:notes`,
+      ];
+      if (userId) {
+        keysToDelete.push(`${LIBRARY_REDIS_KEYS.item(id)}:u:${userId}`);
+      }
+      await Promise.all(keysToDelete.map((k) => this.cache!.del(k)));
       if (!options?.skipScopeInvalidation && userId) {
         await this.invalidateScopeListCache(userId, projectId);
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Failed to invalidate cache for item ${id}: ${message}`);
+    }
+  }
+
+  /**
+   * Invalidates aggregated counts cache for a specific scope (userId or projectId).
+   */
+  async invalidateCounts(scopeId: string): Promise<void> {
+    if (!this.cache) return;
+    try {
+      await this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeId));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to invalidate counts for scope ${scopeId}: ${message}`,
+      );
     }
   }
 
@@ -55,7 +96,7 @@ export class ItemCacheCoordinator {
       const validProjectId = normalizeProjectScopeId(projectId);
       const tasks: Promise<unknown>[] = [
         this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-        this.cache.del(`library:counts:user:${userId}`),
+        this.invalidateCounts(userId),
       ];
       if (this.tagsService) {
         tasks.push(this.tagsService.invalidateTagsCache(userId, validProjectId));
@@ -65,7 +106,7 @@ export class ItemCacheCoordinator {
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
           ),
-          this.cache.del(`library:counts:proj:${validProjectId}`),
+          this.invalidateCounts(validProjectId),
         );
       }
       await Promise.all(tasks);
@@ -89,14 +130,18 @@ export class ItemCacheCoordinator {
 
     try {
       const uniqueIds = Array.from(new Set(itemIds));
-      const directKeyDeletions: Promise<unknown>[] = [];
+      const keysToDelete: string[] = [];
       for (const id of uniqueIds) {
-        directKeyDeletions.push(
-          this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
-          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
-          this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(id)),
+        keysToDelete.push(
+          LIBRARY_REDIS_KEYS.item(id),
+          `${LIBRARY_REDIS_KEYS.item(id)}:u:${userId}`,
+          LIBRARY_REDIS_KEYS.itemDetails(id),
+          LIBRARY_REDIS_KEYS.itemFulltext(id),
+          `${LIBRARY_REDIS_KEYS.item(id)}:attachments`,
+          `${LIBRARY_REDIS_KEYS.item(id)}:notes`,
         );
       }
+      const directKeyDeletions = keysToDelete.map((k) => this.cache!.del(k));
 
       const uniqueScopes = new Set<string>();
       const validBaseProject = normalizeProjectScopeId(projectId);

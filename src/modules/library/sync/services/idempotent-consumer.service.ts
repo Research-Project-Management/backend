@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { RedisCacheService } from '@/core';
 import {
   IIdempotentConsumer,
@@ -10,6 +11,7 @@ export type { IdempotentConsumerOptions, IdempotentResult };
 
 interface MemoryInboxEntry {
   status: 'processing' | 'completed';
+  ownerToken?: string;
   expiresAt: number;
 }
 
@@ -56,9 +58,14 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
     } = options;
 
     const key = this.buildKey(consumer, eventId);
+    const ownerToken = randomUUID();
 
     // 1. Check if already processed or in-flight in Redis / Memory
-    const claim = await this.tryAcquireProcessingLease(key, leaseTtlSeconds);
+    const claim = await this.tryAcquireProcessingLease(
+      key,
+      leaseTtlSeconds,
+      ownerToken,
+    );
 
     if (!claim.acquired) {
       this.logger.debug(
@@ -85,7 +92,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       };
     } catch (err) {
       // 4. On failure, clear lease so BullMQ retry can execute
-      await this.releaseLease(key);
+      await this.releaseLease(key, ownerToken);
       this.logger.warn(
         `[IdempotentConsumer] Event ${eventId} failed during execution. Processing lease released for retry.`,
       );
@@ -112,6 +119,12 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
         if (client) {
           const raw = await client.get(key);
           if (raw) {
+            if (raw.startsWith('COMPLETED:')) {
+              return true;
+            }
+            if (raw.startsWith('PROCESSING:')) {
+              return false;
+            }
             const parsed = JSON.parse(raw) as { status?: string };
             return parsed.status === 'completed';
           }
@@ -157,11 +170,13 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
   private async tryAcquireProcessingLease(
     key: string,
     leaseTtlSeconds: number,
+    ownerToken: string,
   ): Promise<{
     acquired: boolean;
     reason?: 'ALREADY_COMPLETED' | 'IN_FLIGHT';
   }> {
     const now = Date.now();
+    const leaseTokenPrefix = `PROCESSING:${ownerToken}:`;
 
     // 1. Remote Redis path (Distributed atomic lock)
     if (this.redis && this.redis.isReady()) {
@@ -170,6 +185,8 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
         try {
           const leasePayload = JSON.stringify({
             status: 'processing',
+            ownerToken,
+            token: `${leaseTokenPrefix}${now}`,
             startedAt: now,
           });
 
@@ -184,13 +201,21 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
 
           if (setRes === 'OK') {
             // Successfully acquired distributed lease
-            this.setMemoryEntry(key, 'processing', leaseTtlSeconds);
+            this.setMemoryEntry(key, 'processing', leaseTtlSeconds, ownerToken);
             return { acquired: true };
           }
 
           // Key already exists — inspect current status
           const existingRaw = await client.get(key);
           if (existingRaw) {
+            if (existingRaw.startsWith('COMPLETED:')) {
+              this.setMemoryEntry(key, 'completed', 86400);
+              return { acquired: false, reason: 'ALREADY_COMPLETED' };
+            }
+            if (existingRaw.startsWith('PROCESSING:')) {
+              this.setMemoryEntry(key, 'processing', leaseTtlSeconds);
+              return { acquired: false, reason: 'IN_FLIGHT' };
+            }
             try {
               const existing = JSON.parse(existingRaw) as { status?: string };
               if (existing.status === 'completed') {
@@ -227,7 +252,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
     }
 
     // Acquire in memory
-    this.setMemoryEntry(key, 'processing', leaseTtlSeconds);
+    this.setMemoryEntry(key, 'processing', leaseTtlSeconds, ownerToken);
     return { acquired: true };
   }
 
@@ -257,14 +282,41 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
     }
   }
 
-  private async releaseLease(key: string): Promise<void> {
-    this.memoryStore.delete(key);
+  private async releaseLease(key: string, ownerToken?: string): Promise<void> {
+    const memEntry = this.memoryStore.get(key);
+    if (
+      !memEntry ||
+      (memEntry.status === 'processing' &&
+        (!ownerToken || !memEntry.ownerToken || memEntry.ownerToken === ownerToken))
+    ) {
+      this.memoryStore.delete(key);
+    }
 
     if (this.redis && this.redis.isReady()) {
       const client = this.redis.getClient();
       if (client) {
         try {
-          await client.del(key);
+          if (ownerToken && client.eval) {
+            const luaScript = `
+              local val = redis.call('GET', KEYS[1])
+              if not val then return 0 end
+              if string.find(val, 'PROCESSING:' .. ARGV[1] .. ':', 1, true) then
+                return redis.call('DEL', KEYS[1])
+              end
+              return 0
+            `;
+            await client.eval(luaScript, 1, key, ownerToken);
+          } else if (ownerToken) {
+            const currentRaw = await client.get(key);
+            if (
+              currentRaw &&
+              currentRaw.includes(`PROCESSING:${ownerToken}:`)
+            ) {
+              await client.del(key);
+            }
+          } else {
+            await client.del(key);
+          }
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
           this.logger.warn(`Failed to release lease in Redis: ${errMsg}`);
@@ -289,6 +341,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
     key: string,
     status: 'processing' | 'completed',
     ttlSeconds: number,
+    ownerToken?: string,
   ): void {
     if (
       this.memoryStore.size >= IdempotentConsumerService.MAX_MEMORY_STORE_SIZE
@@ -310,6 +363,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
 
     this.memoryStore.set(key, {
       status,
+      ownerToken,
       expiresAt: Date.now() + ttlSeconds * 1000,
     });
   }

@@ -18,7 +18,7 @@ import {
 } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
 import { TransactionService } from '@/modules/library/sync';
-import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import { ItemsMapper } from '@/modules/library/catalog/catalog.facade';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import {
   DuplicateClusterResult,
@@ -27,6 +27,7 @@ import {
 import { UserId, ProjectId } from '@/modules/library/core/types/branded.types';
 import {
   normalizeTitleForDedupe,
+  tokenizeTitleWords,
   extractContributorAuthors,
   generateDedupeBucketKey,
   calculateTitleSimilarity,
@@ -384,7 +385,7 @@ export class DuplicateDetectorService {
         const tasks: Promise<unknown>[] = [
           this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeKey)),
           this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(String(userId))),
-          this.cache.del(LIBRARY_REDIS_KEYS.counts(scopeKey)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(effectiveProjectId || String(userId))),
         ];
         for (const id of uniqueIds) {
           tasks.push(
@@ -584,39 +585,19 @@ export class DuplicateDetectorService {
       });
     };
 
-    clusterByIdentifier(
-      'doi',
-      (it) => normalizeDoi(it.doi) || it.doi,
-      'EXACT_DOI',
-    );
-    clusterByIdentifier(
-      'arxiv',
-      (it) =>
-        normalizeArxivId(
-          (getEffectiveItemField(it, 'arxivId') as string | undefined) ||
-            undefined,
-          { stripVersion: true },
-        ),
-      'EXACT_ARXIV',
-    );
-    clusterByIdentifier(
-      'pmid',
-      (it) =>
-        normalizePmid(
-          (getEffectiveItemField(it, 'pmid') as string | undefined) ||
-            undefined,
-        ),
-      'EXACT_PMID',
-    );
-    clusterByIdentifier(
-      'isbn',
-      (it) =>
-        normalizeIsbn(
-          (getEffectiveItemField(it, 'isbn') as string | undefined) ||
-            undefined,
-        ),
-      'EXACT_ISBN',
-    );
+    const idSpecs: Array<['doi' | 'arxivId' | 'pmid' | 'isbn', (val?: string | null) => string | undefined, 'EXACT_DOI' | 'EXACT_ARXIV' | 'EXACT_PMID' | 'EXACT_ISBN']> = [
+      ['doi', normalizeDoi, 'EXACT_DOI'],
+      ['arxivId', normalizeArxivId, 'EXACT_ARXIV'],
+      ['pmid', normalizePmid, 'EXACT_PMID'],
+      ['isbn', normalizeIsbn, 'EXACT_ISBN'],
+    ];
+    for (const [field, normFn, reason] of idSpecs) {
+      clusterByIdentifier(
+        field,
+        (it) => normFn((getEffectiveItemField(it, field) as string | undefined) || undefined),
+        reason,
+      );
+    }
 
     // Tier 2: Fuzzy Title + Year (+/-1) + First Author
     const fuzzyBuckets = new Map<string, DuplicateCandidateItem[]>();
@@ -679,8 +660,7 @@ export class DuplicateDetectorService {
     if (
       rawClusters.length > 0 &&
       groupedItemIds.size > 0 &&
-      this.catalogGateway &&
-      typeof this.catalogGateway.findByIds === 'function'
+      this.catalogGateway?.findByIds
     ) {
       try {
         const fullRawItems = await this.catalogGateway.findByIds(
@@ -713,6 +693,49 @@ export class DuplicateDetectorService {
         recommendedMasterId: rc.recommendedMasterId,
         items: mappedItems,
       };
+    });
+  }
+
+  async checkDuplicates(
+    scope: { userId: string; projectId?: string | null },
+    candidate: {
+      doi?: string | null;
+      arxivId?: string | null;
+      pmid?: string | null;
+      isbn?: string | null;
+      title?: string | null;
+    },
+  ) {
+    if (!this.catalogGateway?.findMatchCandidates) {
+      return { matchType: 'NO_MATCH', exactMatch: null, candidateItems: [] };
+    }
+    const cleanDoi = candidate.doi
+      ? normalizeDoi(candidate.doi) || candidate.doi.trim()
+      : undefined;
+    const cleanArxiv = candidate.arxivId
+      ? normalizeArxivId(candidate.arxivId) || candidate.arxivId.trim()
+      : undefined;
+    const cleanPmid = candidate.pmid
+      ? normalizePmid(candidate.pmid) || candidate.pmid.trim()
+      : undefined;
+    const cleanIsbn = candidate.isbn
+      ? normalizeIsbn(candidate.isbn) || candidate.isbn.trim()
+      : undefined;
+    const proposedTitle = candidate.title?.trim();
+    const significantWords =
+      proposedTitle && proposedTitle.length > 5
+        ? tokenizeTitleWords(proposedTitle)
+            .filter((w) => w.length >= 3)
+            .slice(0, 3)
+        : [];
+
+    return this.catalogGateway.findMatchCandidates(scope, {
+      doi: cleanDoi,
+      arxivId: cleanArxiv,
+      pmid: cleanPmid,
+      isbn: cleanIsbn,
+      titleWords: significantWords,
+      titlePrefix: proposedTitle,
     });
   }
 }

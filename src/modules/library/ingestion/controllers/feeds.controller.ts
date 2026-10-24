@@ -12,25 +12,54 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  IsArray,
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsString,
+  ArrayMaxSize,
+  MaxLength,
+} from 'class-validator';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { FeedsService } from '../services/feeds.service';
 
 class SubscribeFeedDto {
+  @IsString()
+  @MaxLength(2048)
   url!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
   customTitle?: string;
+
+  @IsOptional()
+  @IsNumber()
   cleanupDays?: number;
 }
 
 class UpdateFeedSubDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
   customTitle?: string;
+
+  @IsOptional()
+  @IsNumber()
   cleanupDays?: number;
 }
 
 class MarkItemReadDto {
+  @IsOptional()
+  @IsBoolean()
   isRead?: boolean;
 }
 
 class MarkAllReadDto {
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
   itemIds!: string[];
 }
 

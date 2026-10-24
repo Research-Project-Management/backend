@@ -26,8 +26,12 @@ export const LIBRARY_REDIS_KEYS = {
     `library:${scopeKey}:items:list:${optionsHash}`,
   itemsPattern: (scopeKey: string) => `library:${scopeKey}:items*`,
   itemPattern: (itemId: string) => `library:item:${itemId}*`,
-  counts: (scopeId: string) =>
-    scopeId.startsWith('proj:') || scopeId.startsWith('user:')
-      ? `library:counts:${scopeId}`
-      : `library:counts:user:${scopeId}`,
+  counts: (userId: string, projectId?: string | null) =>
+    projectId
+      ? `library:counts:proj:${projectId}:u:${userId}`
+      : userId.startsWith('proj:') || userId.startsWith('user:')
+        ? `library:counts:${userId}`
+        : `library:counts:user:${userId}`,
+  countsPattern: (scopeId: string) => `library:counts:*${scopeId}*`,
+  countsByScope: (scopeId: string) => `library:counts:*${scopeId}*`,
 };

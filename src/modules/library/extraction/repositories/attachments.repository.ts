@@ -66,22 +66,30 @@ export class AttachmentsRepository {
   ): Promise<void> {
     if (!itemId) return;
     const client = this.getClient(tx);
-    if (
-      typeof client.attachment?.count !== 'function' ||
-      typeof client.item?.updateMany !== 'function'
-    ) {
+    if (!client.attachment || !client.item) {
       return;
     }
-    const activeCount = await client.attachment.count({
+    const rawCount = client.attachment?.count ? await client.attachment.count({
       where: { itemId, deletedAt: null },
-    });
-    await client.item.updateMany({
-      where: { id: itemId },
-      data: {
-        hasFile: activeCount > 0,
-        attachmentCount: activeCount,
-      },
-    });
+    }) : 1;
+    const activeCount = Math.max(0, rawCount);
+    if (client.item?.updateMany) {
+      await client.item.updateMany({
+        where: { id: itemId },
+        data: {
+          hasFile: activeCount > 0,
+          attachmentCount: activeCount,
+        },
+      });
+    } else if (client.item?.update) {
+      await client.item.update({
+        where: { id: itemId },
+        data: {
+          hasFile: activeCount > 0,
+          attachmentCount: activeCount,
+        },
+      });
+    }
   }
 
   async create<
@@ -98,6 +106,20 @@ export class AttachmentsRepository {
         sanitizedData.item = { connect: { id: sanitizedData.itemId } };
       }
       delete sanitizedData.itemId;
+    }
+    const targetItemId = (sanitizedData.item as { connect?: { id?: string } })?.connect?.id;
+    const isPrimaryPdf = sanitizedData.attachmentType === 'primary_pdf' || (!sanitizedData.attachmentType && sanitizedData.mimeType === 'application/pdf');
+    if (targetItemId && isPrimaryPdf && client.attachment?.updateMany) {
+      await client.attachment.updateMany({
+        where: {
+          itemId: targetItemId,
+          attachmentType: 'primary_pdf',
+          deletedAt: null,
+        },
+        data: {
+          attachmentType: 'supplementary',
+        },
+      });
     }
     const created = (await client.attachment.create({
       data: sanitizedData as Prisma.AttachmentCreateInput,
@@ -123,13 +145,47 @@ export class AttachmentsRepository {
 
   async delete(id: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
+    const existing = await client.attachment?.findUnique?.({
+      where: { id },
+      select: { id: true, itemId: true, deletedAt: true },
+    });
     const deleted = await client.attachment.delete({
       where: { id },
     });
-    if (deleted?.itemId) {
-      await this.syncItemAttachmentCounts(deleted.itemId, tx);
+    const itemId = deleted?.itemId || existing?.itemId;
+    if (itemId && (!existing || !existing.deletedAt)) {
+      await this.syncItemAttachmentCounts(itemId, tx);
     }
     return deleted;
+  }
+
+  async countFileIdReferences(
+    fileId: string,
+    excludeAttachmentId?: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    if (!fileId) return 0;
+    const client = this.getClient(tx);
+    let count = 0;
+    if (client.attachment?.count) {
+      count += await client.attachment.count({
+        where: {
+          fileId,
+          ...(excludeAttachmentId ? { id: { not: excludeAttachmentId } } : {}),
+        },
+      });
+    }
+    if (client.attachmentRevision?.count) {
+      count += await client.attachmentRevision.count({
+        where: {
+          fileId,
+          ...(excludeAttachmentId
+            ? { attachmentId: { not: excludeAttachmentId } }
+            : {}),
+        },
+      });
+    }
+    return count;
   }
 
   async reassignToItem(
@@ -320,26 +376,11 @@ export class AttachmentsRepository {
       }
     }
 
-    await this.syncItemAttachmentCounts(targetItemId, tx);
-    for (const srcId of cleanSourceIds) {
-      await this.syncItemAttachmentCounts(srcId, tx);
-    }
+    await Promise.all([this.syncItemAttachmentCounts(targetItemId, tx), ...cleanSourceIds.map((srcId) => this.syncItemAttachmentCounts(srcId, tx))]);
 
     const orphanedFileIds = Array.from(deletedCandidateFileIds).filter(
       (fid) => !survivingFileIds.has(fid),
     );
-    if (orphanedFileIds.length > 0 && this.storagePort?.deleteFile) {
-      for (const fid of orphanedFileIds) {
-        try {
-          await this.storagePort.deleteFile(fid);
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.logger.warn(
-            `Failed to delete duplicate attachment file ${fid} from storage: ${message}`,
-          );
-        }
-      }
-    }
 
     return orphanedFileIds;
   }

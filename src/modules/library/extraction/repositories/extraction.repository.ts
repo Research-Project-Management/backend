@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { resolveOrCreateTags } from '@/modules/library/catalog/domain/creator-tag-payload.builder';
+import { resolveOrCreateTags } from '@/modules/library/catalog/catalog.facade';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 import {
   EntityNotFoundException,
@@ -216,7 +216,7 @@ export class ExtractionRepository {
   ): Promise<void> {
     if (!pages || pages.length === 0) return;
     const execute = async (client: Prisma.TransactionClient) => {
-      if (typeof client.fullTextIndex?.deleteMany !== 'function') return;
+      if (!client.fullTextIndex?.deleteMany) return;
       await client.fullTextIndex.deleteMany({
         where: { attachmentId },
       });
@@ -237,7 +237,7 @@ export class ExtractionRepository {
 
     if (tx) {
       await execute(tx);
-    } else if (typeof this.prisma.$transaction === 'function') {
+    } else if (this.prisma.$transaction) {
       await this.prisma.$transaction(async (innerTx) => {
         await execute(innerTx);
       });
@@ -501,7 +501,7 @@ export class ExtractionRepository {
     );
 
     if (resolvedTags.length > 0) {
-      if (typeof client.itemTag?.createMany === 'function') {
+      if (client.itemTag?.createMany) {
         await client.itemTag.createMany({
           data: resolvedTags.map((t) => ({
             tagId: t.id,
@@ -510,22 +510,15 @@ export class ExtractionRepository {
           })),
           skipDuplicates: true,
         });
-      } else if (typeof (client as any).itemTag?.upsert === 'function') {
+      } else if (client.itemTag?.upsert) {
         for (const t of resolvedTags) {
-          await (client as any).itemTag.upsert({
-            where: { itemId_tagId: { itemId: params.itemId, tagId: t.id } },
+          await client.itemTag.upsert({
+            where: { tagId_itemId: { itemId: params.itemId, tagId: t.id } },
             create: { itemId: params.itemId, tagId: t.id, type: 'automatic' },
             update: {},
           });
         }
-      } else if (false) await client.itemTag.createMany({
-        data: resolvedTags.map((t) => ({
-          tagId: t.id,
-          itemId: params.itemId,
-          type: 'automatic',
-        })),
-        skipDuplicates: true,
-      });
+      }
     }
 
     const item = await client.item.findUnique({

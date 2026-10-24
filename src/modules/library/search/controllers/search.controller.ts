@@ -38,8 +38,12 @@ export class SearchController {
     @Param('projectId') routeProjectId?: string,
     @Query('projectId') queryProjectId?: string,
   ) {
-    const parsedPage =
+    const rawPage =
       pageIndex !== undefined ? parseInt(pageIndex, 10) : undefined;
+    const parsedPage =
+      rawPage !== undefined && Number.isInteger(rawPage) && rawPage >= 0
+        ? rawPage
+        : undefined;
     return this.searchService.searchPageAnchors(
       userId,
       attachmentId,

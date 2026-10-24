@@ -25,10 +25,7 @@ export class CommandBulkOperations {
       if (fileId) paths.add(fileId);
     }
 
-    if (
-      attachmentIds.length > 0 &&
-      typeof client.attachmentRevision?.findMany === 'function'
-    ) {
+    if (attachmentIds.length > 0 && client.attachmentRevision) {
       const revisions = await client.attachmentRevision.findMany({
         where: { attachmentId: { in: attachmentIds } },
         select: { fileId: true, url: true },
@@ -39,7 +36,7 @@ export class CommandBulkOperations {
       }
     }
 
-    if (typeof client.itemMetadata?.findMany === 'function') {
+    if (client.itemMetadata) {
       const metadataRecords = await client.itemMetadata.findMany({
         where: { itemId: { in: itemIds } },
         select: { rawPayload: true },
@@ -248,18 +245,28 @@ export class CommandBulkOperations {
         if (ag.itemId) attachmentCountMap.set(ag.itemId, ag._count.id);
       }
 
+      const countBuckets = new Map<string, { nc: number; ac: number; ids: string[] }>();
       for (const id of succeededIds) {
         const nc = noteCountMap.get(id) ?? 0;
         const ac = attachmentCountMap.get(id) ?? 0;
-        await client.item.update({
-          where: { id },
-          data: {
-            noteCount: nc,
-            attachmentCount: ac,
-            hasFile: ac > 0,
-          },
-        });
+        const key = `${nc}:${ac}`;
+        const bucket = countBuckets.get(key) ?? { nc, ac, ids: [] };
+        bucket.ids.push(id);
+        countBuckets.set(key, bucket);
       }
+
+      await Promise.all(
+        Array.from(countBuckets.values()).map(({ nc, ac, ids }) =>
+          client.item.updateMany({
+            where: { id: { in: ids } },
+            data: {
+              noteCount: nc,
+              attachmentCount: ac,
+              hasFile: ac > 0,
+            },
+          }),
+        ),
+      );
     }
 
     const restoredItems = succeededIds
@@ -342,7 +349,6 @@ export class CommandBulkOperations {
     client: Prisma.TransactionClient | PrismaService,
     retentionDays: number = 30,
     limit: number = 200,
-    deleteStorageFilesBatchFn?: (fileIds: string[]) => Promise<void>,
   ): Promise<{
     purgedItems: number;
     purgedNotes: number;
@@ -398,10 +404,6 @@ export class CommandBulkOperations {
         where: { id: { in: expiredCollections.map((c) => c.id) } },
       });
       purgedCollections = delCollections.count;
-    }
-
-    if (storagePaths.length > 0 && typeof deleteStorageFilesBatchFn === 'function') {
-      await deleteStorageFilesBatchFn(storagePaths);
     }
 
     return {

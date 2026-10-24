@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { TypesService } from './types.service';
+import { ItemCacheCoordinator } from './item-cache.coordinator';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import {
@@ -14,6 +15,12 @@ import {
   ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
 } from '@/modules/library/catalog/types/items.constants';
+import {
+  normalizeProjectScopeId,
+  LIBRARY_EVENT_TYPES,
+  TransactionHelpers,
+} from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 
 import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';
 
@@ -29,6 +36,8 @@ export class ItemTypeConversionService {
     private readonly command: CommandRepository,
     private readonly typesService: TypesService,
     private readonly transformer: ItemTransformer,
+    @Optional() private readonly libraryTx?: TransactionService,
+    @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
   ) {}
 
   /**
@@ -77,14 +86,60 @@ export class ItemTypeConversionService {
       this.transformer,
     );
 
-    const updated = await this.command.update(
-      userId,
-      itemId,
-      options.expectedVersion,
-      updatePayload,
-      tx,
-      projectId,
-    );
+    const effectiveProjectId =
+      normalizeProjectScopeId(projectId ?? existing.projectId) ?? undefined;
+
+    const updated =
+      !tx && this.libraryTx
+        ? await this.libraryTx.executeInTransaction(
+            async (
+              innerTx: Prisma.TransactionClient,
+              helpers: TransactionHelpers,
+            ) => {
+              const res = await this.command.update(
+                userId,
+                itemId,
+                options.expectedVersion,
+                updatePayload,
+                innerTx,
+                projectId,
+              );
+              const eventScope = {
+                userId,
+                projectId: effectiveProjectId,
+              };
+              await helpers.appendChange(eventScope, {
+                entityType: 'Item',
+                entityId: itemId,
+                action: 'update',
+                version: res.version,
+                data: res,
+              });
+              await helpers.publishOutbox(
+                eventScope,
+                itemId,
+                LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+                res,
+              );
+              return res;
+            },
+          )
+        : await this.command.update(
+            userId,
+            itemId,
+            options.expectedVersion,
+            updatePayload,
+            tx,
+            projectId,
+          );
+
+    if (!tx) {
+      await this.cacheCoordinator?.invalidateItemCache(
+        itemId,
+        userId,
+        effectiveProjectId,
+      );
+    }
 
     return {
       success: true,

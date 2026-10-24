@@ -28,6 +28,7 @@ import {
 import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
 
 import { OutboxDispatchHandler } from '@/modules/library/core';
+import { shouldRunWorkerConsumers } from '@/core';
 export type { OutboxDispatchHandler };
 
 @Injectable()
@@ -114,8 +115,8 @@ export class OutboxWorker
     if (!eventIds || eventIds.length === 0) return;
 
     const jobOpts = {
-      attempts: this.maxRetries,
-      backoff: { type: 'exponential' as const, delay: 1000 },
+      attempts: 5,
+      backoff: { type: 'exponential' as const, delay: 2000 },
       removeOnComplete: true,
     };
 
@@ -125,21 +126,27 @@ export class OutboxWorker
           eventIds.map((eventId) => ({
             name: LIBRARY_OUTBOX_JOB,
             data: { eventId },
-            opts: jobOpts,
+            opts: { jobId: eventId, ...jobOpts },
           })),
         )
         .catch((err: unknown) => {
           this.logger.warn(
-            `Failed to bulk-enqueue ${eventIds.length} outbox event(s) to BullMQ: ${err instanceof Error ? err.message : String(err)}. Falling back to direct dispatch.`,
+            `Failed to bulk-enqueue ${eventIds.length} outbox event(s) to BullMQ: ${err instanceof Error ? err.message : String(err)}. Falling back to bounded poll dispatch.`,
           );
-          for (const eventId of eventIds) {
-            void this.processEventById(eventId);
+          if (eventIds.length <= OutboxWorker.CONCURRENCY) {
+            for (const eventId of eventIds) {
+              void this.processEventById(eventId);
+            }
+          } else {
+            void this.pollAndProcess();
           }
         });
-    } else {
+    } else if (eventIds.length <= OutboxWorker.CONCURRENCY) {
       for (const eventId of eventIds) {
         void this.processEventById(eventId);
       }
+    } else {
+      void this.pollAndProcess();
     }
   }
 
@@ -174,10 +181,51 @@ export class OutboxWorker
       return false;
     }
 
+    const abortController = new AbortController();
+    let isLeaseLost = false;
+    const heartbeatIntervalMs = Math.max(1000, Math.floor(leaseMs / 3));
+    const heartbeatTimer = setInterval(() => {
+      void (async () => {
+        try {
+          if (!this.repo.renewLease) return;
+          const renewed = await this.repo.renewLease(
+            eventId,
+            this.workerId,
+            leaseMs,
+          );
+          if (!renewed) {
+            isLeaseLost = true;
+            abortController.abort();
+            this.logger.error(
+              `Worker [${this.workerId}] LOST LEASE on OutboxEvent ${eventId}. Aborting handler execution.`,
+            );
+            this.metricsService?.incrementCounter('outbox_lease_lost_total');
+            clearInterval(heartbeatTimer);
+          }
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Heartbeat renewal failed for event ${eventId}: ${errMsg}`,
+          );
+        }
+      })();
+    }, heartbeatIntervalMs);
+    heartbeatTimer.unref();
+
     const start = performance.now();
     try {
-      await Promise.all(effectiveHandlers.map((h) => h.handle(event)));
+      await Promise.all(
+        effectiveHandlers.map((h) => h.handle(event, abortController.signal)),
+      );
+      clearInterval(heartbeatTimer);
       const durationMs = Math.round(performance.now() - start);
+
+      if (isLeaseLost) {
+        this.logger.error(
+          `Worker [${this.workerId}] refused to publish event ${eventId} due to lost lease.`,
+        );
+        return false;
+      }
 
       const published = await this.repo.markPublished(eventId, this.workerId);
       if (!published) {
@@ -189,10 +237,20 @@ export class OutboxWorker
       this.metricsService?.recordOutboxDispatch(durationMs, true);
       return true;
     } catch (err: unknown) {
+      clearInterval(heartbeatTimer);
       const durationMs = Math.round(performance.now() - start);
       this.metricsService?.recordOutboxDispatch(durationMs, false);
-      await this.handleDispatchFailure(event, err);
-      throw err;
+      if (isLeaseLost) {
+        this.logger.error(
+          `Worker [${this.workerId}] aborted error handling for event ${eventId} due to lost lease.`,
+        );
+        return false;
+      }
+      const outcome = await this.handleDispatchFailure(event, err);
+      if (outcome !== 'deadLettered' && !this.bullQueue) {
+        throw err;
+      }
+      return false;
     }
   }
 
@@ -286,9 +344,9 @@ export class OutboxWorker
         ? configEnabled === 'true'
         : envEnabled !== undefined
           ? envEnabled === 'true'
-          : !isTestEnv;
+          : !isTestEnv && shouldRunWorkerConsumers();
 
-    if (isEnabled) {
+    if (isEnabled && shouldRunWorkerConsumers()) {
       const intervalMs =
         this.libraryConfigService?.outbox.pollIntervalMs ??
         (Number(this.configService?.get('OUTBOX_POLL_INTERVAL_MS')) ||
@@ -420,7 +478,7 @@ export class OutboxWorker
     for (const group of groupedPending) {
       pendingCountsByType[group.eventType] = group.count;
       totalPending += group.count;
-      if (!this.handlers.has(group.eventType)) {
+      if (!this.hasHandler(group.eventType) && !this.defaultHandler) {
         unhandledSet.add(group.eventType);
       }
     }
@@ -631,10 +689,11 @@ export class OutboxWorker
 
     const workerCount = Math.min(OutboxWorker.CONCURRENCY, groups.length);
     const workers = Array.from({ length: workerCount }, async () => {
-      while (groupCursor < groups.length) {
+      while (groupCursor < groups.length && !this.isShuttingDown) {
         const currentGroup = groups[groupCursor++];
         if (!currentGroup) break;
         for (const item of currentGroup) {
+          if (this.isShuttingDown) break;
           const res = await this.processClaimedItem(item, leaseMs);
           processed += res.processed;
           failed += res.failed;

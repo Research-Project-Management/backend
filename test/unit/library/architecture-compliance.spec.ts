@@ -163,7 +163,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     expect(violations).toEqual([]);
   });
 
-  it('SC-004: Decompose oversized files (> 800 lines, excluding static data catalogs/lexicons)', () => {
+  it('SC-004: Decompose oversized files (> 750 lines, excluding static data catalogs/lexicons)', () => {
     const oversizedFiles: Array<{ file: string; lines: number }> = [];
 
     for (const file of allFiles) {
@@ -179,7 +179,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
 
       const content = fs.readFileSync(file, 'utf-8');
       const lineCount = content.split(/\r?\n/).length;
-      if (lineCount > 800) {
+      if (lineCount > 750) {
         oversizedFiles.push({
           file: path.relative(libraryRoot, file),
           lines: lineCount,
@@ -222,5 +222,220 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
     }
 
     expect(violations).toEqual([]);
+  });
+
+  it('SC-006: Strict Bounded Context Encapsulation (zero deep imports into another context internal folders)', () => {
+    const boundedContexts = [
+      'catalog',
+      'citation',
+      'extraction',
+      'ingestion',
+      'search',
+      'sync',
+    ];
+    const violations: Array<{ file: string; line: number; match: string }> = [];
+
+    for (const file of allFiles) {
+      const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
+      const sourceContext = boundedContexts.find((ctx) =>
+        relPath.startsWith(`${ctx}/`),
+      );
+      if (!sourceContext) continue;
+
+      const content = fs.readFileSync(file, 'utf-8');
+      const lines = content.split(/\r?\n/);
+
+      lines.forEach((line, index) => {
+        if (line.trim().startsWith('//')) return;
+        for (const targetContext of boundedContexts) {
+          if (targetContext === sourceContext) continue;
+          const deepImportPattern = new RegExp(
+            `(?:@/modules/library/${targetContext}|\\.\\./${targetContext})/(?:services|repositories|controllers|domain|providers|stages|policies|parsers|subscribers|types|dto)/`,
+          );
+          if (deepImportPattern.test(line)) {
+            violations.push({
+              file: relPath,
+              line: index + 1,
+              match: line.trim(),
+            });
+          }
+        }
+      });
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('SC-007: Zero explicit "any" type annotations or casts across all Library Backend files', () => {
+    const violations: Array<{ file: string; line: number; match: string }> = [];
+
+    for (const file of allFiles) {
+      const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
+      const content = fs.readFileSync(file, 'utf-8');
+      const lines = content.split(/\r?\n/);
+
+      lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+        if (/\bas\s+any\b|:\s*any\b|<any>|:\s*any\[\]/.test(line)) {
+          violations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        }
+      });
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('SC-008: Frontend Library file size (<= 800 lines, excluding static *.types.ts) & zero explicit "any"', () => {
+    const feRoot = path.resolve(
+      __dirname,
+      '../../../../frontend/src/features/library',
+    );
+    if (!fs.existsSync(feRoot)) return;
+
+    function walkFrontend(dir: string, list: string[] = []): string[] {
+      for (const entry of fs.readdirSync(dir)) {
+        const full = path.join(dir, entry);
+        const st = fs.statSync(full);
+        if (st.isDirectory()) {
+          walkFrontend(full, list);
+        } else if (
+          (full.endsWith('.ts') || full.endsWith('.tsx')) &&
+          !full.endsWith('.spec.ts') &&
+          !full.endsWith('.test.ts')
+        ) {
+          list.push(full);
+        }
+      }
+      return list;
+    }
+
+    const feFiles = walkFrontend(feRoot);
+    const sizeViolations: Array<{ file: string; lines: number }> = [];
+    const anyViolations: Array<{ file: string; line: number; match: string }> = [];
+
+    for (const file of feFiles) {
+      const relPath = path.relative(feRoot, file).replace(/\\/g, '/');
+      const content = fs.readFileSync(file, 'utf-8');
+      const lines = content.split(/\r?\n/);
+
+      if (!relPath.endsWith('.types.ts') && lines.length > 800) {
+        sizeViolations.push({ file: relPath, lines: lines.length });
+      }
+
+      lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+        if (/\bas\s+any\b|:\s*any\b|<any>|:\s*any\[\]/.test(line)) {
+          anyViolations.push({
+            file: relPath,
+            line: index + 1,
+            match: trimmed,
+          });
+        }
+      });
+    }
+
+    expect(sizeViolations).toEqual([]);
+    expect(anyViolations).toEqual([]);
+  });
+
+  it('SC-009: Centralization of Data, State, Cache & Business Logic (Backend Repositories & Frontend Coordinators/SDK)', () => {
+    // 1. Backend: Zero direct this.prisma calls in domain services (excluding infrastructure transaction.service.ts)
+    const beDirectPrismaInServices: Array<{ file: string; line: number; match: string }> = [];
+    for (const file of allFiles) {
+      const relPath = path.relative(libraryRoot, file).replace(/\\/g, '/');
+      if (!relPath.includes('/services/') || relPath.endsWith('sync/services/transaction.service.ts')) {
+        continue;
+      }
+      const content = fs.readFileSync(file, 'utf-8');
+      content.split(/\r?\n/).forEach((line, index) => {
+        if (!line.trim().startsWith('//') && /this\.prisma\./.test(line)) {
+          beDirectPrismaInServices.push({
+            file: relPath,
+            line: index + 1,
+            match: line.trim(),
+          });
+        }
+      });
+    }
+    expect(beDirectPrismaInServices).toEqual([]);
+
+    // 2. Frontend: Zero scattered useQueryClient, useQuery, useMutation, localStorage, or direct *Service.* in UI components
+    const feRoot = path.resolve(
+      __dirname,
+      '../../../../frontend/src/features/library',
+    );
+    if (!fs.existsSync(feRoot)) return;
+
+    function walkFrontend(dir: string, list: string[] = []): string[] {
+      for (const entry of fs.readdirSync(dir)) {
+        const full = path.join(dir, entry);
+        const st = fs.statSync(full);
+        if (st.isDirectory()) {
+          walkFrontend(full, list);
+        } else if (
+          (full.endsWith('.ts') || full.endsWith('.tsx')) &&
+          !full.endsWith('.spec.ts') &&
+          !full.endsWith('.test.ts')
+        ) {
+          list.push(full);
+        }
+      }
+      return list;
+    }
+
+    const feFiles = walkFrontend(feRoot);
+    const feUiViolations: Array<{ file: string; line: number; match: string }> = [];
+    const feDomainStorageViolations: Array<{ file: string; line: number; match: string }> = [];
+
+    for (const file of feFiles) {
+      const relPath = path.relative(feRoot, file).replace(/\\/g, '/');
+      const content = fs.readFileSync(file, 'utf-8');
+      const lines = content.split(/\r?\n/);
+
+      if (relPath.startsWith('ui/')) {
+        lines.forEach((line, index) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+          if (
+            /\buseQueryClient\s*\(/.test(line) ||
+            /\buseQuery\s*\(/.test(line) ||
+            /\buseMutation\s*\(/.test(line) ||
+            /\blocalStorage\b/.test(line) ||
+            /\b(catalogService|collectionsService|attachmentsService|annotationsService|feedsService|savedSearchesService|relationsService|itemLinksService|libraryIngestionService)\./.test(
+              line,
+            )
+          ) {
+            feUiViolations.push({
+              file: relPath,
+              line: index + 1,
+              match: trimmed,
+            });
+          }
+        });
+      }
+
+      if (relPath.startsWith('domain/')) {
+        lines.forEach((line, index) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+          if (/\blocalStorage\b/.test(line)) {
+            feDomainStorageViolations.push({
+              file: relPath,
+              line: index + 1,
+              match: trimmed,
+            });
+          }
+        });
+      }
+    }
+
+    expect(feUiViolations).toEqual([]);
+    expect(feDomainStorageViolations).toEqual([]);
   });
 });

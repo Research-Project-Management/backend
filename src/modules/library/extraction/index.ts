@@ -10,7 +10,6 @@ export * from './controllers/extraction-telemetry.controller';
 // Domain
 export * from './domain/attachments.domain';
 export * from './domain/annotation.normalizer';
-export * from './domain/renamer.domain';
 
 // DTOs
 export * from './dto/attachments.dto';

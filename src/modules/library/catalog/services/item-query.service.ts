@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { RedisCacheService } from '@/core';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import { normalizeProjectScopeId, libraryConfig } from '@/modules/library/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
 import { CursorPaginatedResult } from '@/modules/library/catalog/dto/items.dto';
@@ -41,6 +41,11 @@ const PERSONAL_LIBRARY_PERMISSIONS: LibraryPermissionsContract = {
   canExport: true,
   canAnnotate: true,
 };
+
+const applyJitter = (ttl: number): number =>
+  libraryConfig().app.isTest
+    ? ttl
+    : Math.max(1, Math.floor(ttl * (0.9 + Math.random() * 0.2)));
 
 /**
  * ItemQueryService — Dedicated Domain Service for Item Information Retrieval.
@@ -191,9 +196,7 @@ export class ItemQueryService {
     role: 'owner' | 'coordinator' | 'contributor' | 'reviewer';
     permissions: LibraryPermissionsContract;
   }> {
-    const cacheKey = projectId
-      ? `library:counts:proj:${projectId}`
-      : `library:counts:user:${userId}`;
+    const cacheKey = LIBRARY_REDIS_KEYS.counts(userId, projectId);
 
     const fetchCountsData = async () => {
       const [total, unfiled, starred, trash, itemTypes] = await Promise.all([
@@ -229,7 +232,9 @@ export class ItemQueryService {
 
   async getItem(userId: string, id: string, projectId?: string) {
     const validProjectId = normalizeProjectScopeId(projectId);
-    const cacheKey = LIBRARY_REDIS_KEYS.item(id);
+    const cacheKey = validProjectId
+      ? `${LIBRARY_REDIS_KEYS.item(id)}:u:${userId}`
+      : LIBRARY_REDIS_KEYS.item(id);
     const fetchRaw = () => this.query.findById(userId, id, validProjectId);
 
     let item: ItemDetail | Record<string, unknown> | null = null;
@@ -255,7 +260,7 @@ export class ItemQueryService {
               !cachedStates ||
               cachedStates.length === 0 ||
               cachedStates.some((s) => !s.userId || s.userId === userId);
-            if (hasMatchingUserState && (!isProjectMatch || cached.userId === userId)) {
+            if (hasMatchingUserState) {
               if (
                 cachedStates !== null ||
                 (cached as Record<string, unknown>).readStatus !== undefined
@@ -273,7 +278,8 @@ export class ItemQueryService {
 
       item = await fetchRaw();
       if (item) {
-        await this.cache.set(cacheKey, item, 300).catch(() => undefined);
+        const itemTtl = applyJitter(300);
+        await this.cache.set(cacheKey, item, itemTtl).catch(() => undefined);
       }
     } else {
       item = await fetchRaw();
@@ -356,6 +362,10 @@ export class ItemQueryService {
         : '',
       options.recursive !== undefined ? `rec=${options.recursive}` : '',
       options.fields ? `f=${options.fields}` : '',
+      options.onlyFlagged !== undefined ? `of=${options.onlyFlagged}` : '',
+      options.isRetracted !== undefined ? `ir=${options.isRetracted}` : '',
+      options.includeNotes !== undefined ? `in=${options.includeNotes}` : '',
+      options.include ? `inc=${options.include}` : '',
     ]
       .filter(Boolean)
       .join(':');
@@ -397,7 +407,7 @@ export class ItemQueryService {
         ? { targetCollectionIds: preResolvedCollectionIds }
         : {}),
     };
-    const isInitialPage = !options.cursor;
+    const isInitialPage = !options.cursor && (!options.page || options.page === 1);
     const shouldCount = isInitialPage;
     const [totalCount, rawItems] = await Promise.all([
       shouldCount
@@ -435,7 +445,8 @@ export class ItemQueryService {
 
     if (canCache && cacheKey && this.cache) {
       try {
-        await this.cache.set(cacheKey, result, 60);
+        const listTtl = applyJitter(60);
+        await this.cache.set(cacheKey, result, listTtl);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.debug(`Cache set error for ${cacheKey}: ${message}`);

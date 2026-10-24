@@ -96,6 +96,9 @@ export class OcrWorkerPoolService
       );
     }
 
+    if (this.recyclePromise) {
+      await this.recyclePromise;
+    }
     if (this.scheduler && this.workers.length > 0) {
       return;
     }
@@ -169,7 +172,8 @@ export class OcrWorkerPoolService
       );
     }
 
-    const jobPromise = this.scheduler.addJob(
+    const activeScheduler = this.scheduler;
+    const jobPromise = activeScheduler.addJob(
       'recognize',
       imageBuffer,
       {},
@@ -229,7 +233,7 @@ export class OcrWorkerPoolService
         this.logger.warn(
           `OCR recognition timed out after ${timeoutMs}ms. Recycling worker pool to prevent scheduler starvation.`,
         );
-        this.recyclePool().catch((recycleErr: unknown) => {
+        this.recyclePool(activeScheduler).catch((recycleErr: unknown) => {
           this.logger.warn(
             `Failed to recycle worker pool after timeout: ${recycleErr instanceof Error ? recycleErr.message : String(recycleErr)}`,
           );
@@ -312,7 +316,26 @@ export class OcrWorkerPoolService
     };
   }
 
-  async recyclePool(): Promise<void> {
+  private recyclePromise?: Promise<void>;
+
+  async recyclePool(expectedScheduler?: Scheduler): Promise<void> {
+    if (
+      expectedScheduler &&
+      this.scheduler &&
+      this.scheduler !== expectedScheduler
+    ) {
+      return;
+    }
+    if (this.recyclePromise) {
+      return this.recyclePromise;
+    }
+    this.recyclePromise = this.executePoolRecycle().finally(() => {
+      this.recyclePromise = undefined;
+    });
+    return this.recyclePromise;
+  }
+
+  private async executePoolRecycle(): Promise<void> {
     this.logger.warn(
       'Recycling Tesseract Worker Pool due to worker timeout or unrecoverable error...',
     );

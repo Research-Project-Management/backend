@@ -18,7 +18,6 @@ import {
   CreateItemData,
   UpdateItemData,
 } from '@/modules/library/core/types/bibliographic.types';
-
 import {
   isUuid,
   cleanSingleIdentifier,
@@ -30,9 +29,9 @@ import {
   syncTagsForCatalogItem,
   buildCommandCreateInput,
   buildCommandUpdateInput,
+  buildMyPublicationMetadata,
 } from '@/modules/library/catalog/domain/command-payload.builder';
 import { CommandBulkOperations } from './command-bulk.operations';
-
 export {
   isUuid,
   cleanSingleIdentifier,
@@ -45,22 +44,18 @@ export {
   buildCommandCreateInput,
   buildCommandUpdateInput,
 };
-
 @Injectable()
 export class CommandRepository {
   private readonly logger = new Logger(CommandRepository.name);
-
   constructor(
     private readonly prisma: PrismaService,
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
   ) {}
-
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
   }
-
   async create(
     userId: string,
     data: CreateItemData,
@@ -74,7 +69,6 @@ export class CommandRepository {
       client,
       normalizeProjectScopeId(projectId),
     );
-
     const item = await client.item.create({
       data: createData,
       include: {
@@ -93,10 +87,8 @@ export class CommandRepository {
         },
       },
     });
-
     return item;
   }
-
   async update(
     userId: string,
     id: string,
@@ -114,7 +106,6 @@ export class CommandRepository {
       validProjectId && isUuid(validProjectId)
         ? { projectId: validProjectId }
         : { userId, projectId: null };
-
     const existing = await client.item.findFirst({
       where: {
         id,
@@ -125,11 +116,9 @@ export class CommandRepository {
         notesList: { where: { deletedAt: null } },
       },
     });
-
     if (!existing) {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
-
     if (expectedVersion !== undefined) {
       if (existing.version !== expectedVersion) {
         throw new VersionMismatchException({
@@ -139,7 +128,6 @@ export class CommandRepository {
           providedVersion: expectedVersion,
         });
       }
-
       const affected = await client.item.updateMany({
         where: {
           id,
@@ -151,7 +139,6 @@ export class CommandRepository {
           version: { increment: 1 },
         },
       });
-
       if (affected.count === 0) {
         const fresh = await client.item.findUnique({
           where: { id },
@@ -165,14 +152,68 @@ export class CommandRepository {
         });
       }
     }
-
+    let sanitizedData = data;
+    if (data.collectionIds !== undefined || data.collectionId !== undefined) {
+      const candidateColIds = Array.from(
+        new Set(
+          [
+            ...(Array.isArray(data.collectionIds) ? data.collectionIds : []),
+            ...(data.collectionId && typeof data.collectionId === 'string'
+              ? [data.collectionId.trim()]
+              : []),
+          ].filter(
+            (cid): cid is string =>
+              typeof cid === 'string' && cid.trim().length > 0,
+          ),
+        ),
+      );
+      if (candidateColIds.length > 0 && client.collection) {
+        const targetProjectId = validProjectId ?? existing.projectId;
+        const validCols = await client.collection.findMany({
+          where: targetProjectId
+            ? {
+                id: { in: candidateColIds },
+                projectId: targetProjectId,
+                deletedAt: null,
+              }
+            : {
+                id: { in: candidateColIds },
+                userId,
+                projectId: null,
+                deletedAt: null,
+              },
+          select: { id: true },
+        });
+        if (Array.isArray(validCols)) {
+          const validColSet = new Set(validCols.map((c) => c.id));
+          sanitizedData = {
+            ...data,
+            ...(data.collectionIds !== undefined
+              ? {
+                  collectionIds: candidateColIds.filter((cid) =>
+                    validColSet.has(cid),
+                  ),
+                }
+              : {}),
+            ...(data.collectionId !== undefined
+              ? {
+                  collectionId:
+                    data.collectionId &&
+                    validColSet.has(data.collectionId.trim())
+                      ? data.collectionId.trim()
+                      : null,
+                }
+              : {}),
+          };
+        }
+      }
+    }
     const { updateData, rawTags } = buildCommandUpdateInput(
       userId,
       existing,
-      data,
+      sanitizedData,
       { skipVersionIncrement: expectedVersion !== undefined },
     );
-
     const itemRelationsInclude = {
       collectionItems: {
         include: { collection: true },
@@ -190,15 +231,12 @@ export class CommandRepository {
         where: { deletedAt: null },
       },
     };
-
     const hasTagSync = Boolean(rawTags && Array.isArray(rawTags));
-
     const updated = await client.item.update({
       where: { id },
       data: updateData,
       ...(hasTagSync ? {} : { include: itemRelationsInclude }),
     });
-
     if (hasTagSync && rawTags) {
       await syncTagsForCatalogItem(
         client,
@@ -208,17 +246,14 @@ export class CommandRepository {
         undefined,
         validProjectId ?? existing.projectId,
       );
-
       const reloaded = await client.item.findUnique({
         where: { id: updated.id },
         include: itemRelationsInclude,
       });
       return reloaded || updated;
     }
-
     return updated;
   }
-
   async softDelete(
     userId: string,
     id: string,
@@ -238,7 +273,6 @@ export class CommandRepository {
         ? { projectId: validProjectId }
         : { userId, projectId: null }),
     };
-
     const deletedDate = new Date();
     if (expectedVersion !== undefined) {
       const result = await client.item.updateMany({
@@ -251,7 +285,6 @@ export class CommandRepository {
           version: { increment: 1 },
         },
       });
-
       if (result.count === 0) {
         const existing = await client.item.findFirst({
           where: scopeWhere,
@@ -273,7 +306,6 @@ export class CommandRepository {
       });
       return true;
     }
-
     const result = await client.item.updateMany({
       where: scopeWhere,
       data: {
@@ -281,17 +313,14 @@ export class CommandRepository {
         version: { increment: 1 },
       },
     });
-
     if (result.count > 0) {
       await client.note?.updateMany?.({
         where: { itemId: id, deletedAt: null },
         data: { deletedAt: deletedDate },
       });
     }
-
     return result.count > 0;
   }
-
   async restore(
     userId: string,
     id: string,
@@ -307,7 +336,6 @@ export class CommandRepository {
     const scopeFilter: Prisma.ItemWhereInput = validProjectId
       ? { projectId: validProjectId }
       : { userId, projectId: null };
-
     const existing = await client.item.findFirst({
       where: {
         id,
@@ -315,18 +343,15 @@ export class CommandRepository {
         ...scopeFilter,
       },
     });
-
     if (!existing) {
       throw new NotFoundException(`Trashed item ${id} not found`);
     }
-
     const metadataObj =
       existing.metadata &&
       typeof existing.metadata === 'object' &&
       !Array.isArray(existing.metadata)
         ? (existing.metadata as Record<string, unknown>)
         : {};
-
     if (
       typeof metadataObj.mergedIntoId === 'string' &&
       metadataObj.mergedIntoId
@@ -335,7 +360,6 @@ export class CommandRepository {
         `Cannot restore item ${id}: it was merged into primary item ${metadataObj.mergedIntoId}`,
       );
     }
-
     if (expectedVersion !== undefined) {
       if (existing.version !== expectedVersion) {
         throw new VersionMismatchException({
@@ -345,7 +369,6 @@ export class CommandRepository {
           providedVersion: expectedVersion,
         });
       }
-
       const affected = await client.item.updateMany({
         where: {
           id,
@@ -357,7 +380,6 @@ export class CommandRepository {
           version: { increment: 1 },
         },
       });
-
       if (affected.count === 0) {
         const fresh = await client.item.findUnique({
           where: { id },
@@ -371,20 +393,14 @@ export class CommandRepository {
         });
       }
     }
-
-    // Cascade un-delete notes
     await client.note?.updateMany?.({
       where: { itemId: id, deletedAt: { not: null } },
       data: { deletedAt: null },
     });
-
-    // Cascade un-delete attachments
     await client.attachment.updateMany({
       where: { itemId: id, deletedAt: { not: null } },
       data: { deletedAt: null },
     });
-
-    // Cascade un-delete annotations for those attachments
     const itemAttachments = await client.attachment.findMany({
       where: { itemId: id },
       select: { id: true },
@@ -398,14 +414,12 @@ export class CommandRepository {
         data: { deletedAt: null },
       });
     }
-
     const activeNoteCount = await client.note.count({
       where: { itemId: id, deletedAt: null },
     });
     const activeAttCount = await client.attachment.count({
       where: { itemId: id, deletedAt: null },
     });
-
     return client.item.update({
       where: { id },
       data: {
@@ -424,20 +438,31 @@ export class CommandRepository {
       },
     });
   }
-
   private async collectStoragePathsForItems(
     client: Prisma.TransactionClient | PrismaService,
     itemIds: string[],
   ): Promise<string[]> {
     return CommandBulkOperations.collectStoragePathsForItems(client, itemIds);
   }
-
   async purge(
     userId: string,
     id: string,
     tx?: Prisma.TransactionClient,
     projectId?: string,
+    options?: { skipStorageDelete?: boolean },
   ): Promise<boolean> {
+    const res = await this.purgeWithStoragePaths(userId, id, tx, projectId, {
+      skipStorageDelete: options?.skipStorageDelete ?? Boolean(tx),
+    });
+    return res.purged;
+  }
+  async purgeWithStoragePaths(
+    userId: string,
+    id: string,
+    tx?: Prisma.TransactionClient,
+    projectId?: string,
+    options?: { skipStorageDelete?: boolean },
+  ): Promise<{ purged: boolean; storagePaths: string[] }> {
     if (!isUuid(id) || !isUuid(userId)) {
       throw new NotFoundException(`Item ${id} not found`);
     }
@@ -451,30 +476,23 @@ export class CommandRepository {
           : { userId, projectId: null }),
       },
     });
-
     if (!existing) {
       throw new NotFoundException(`Item ${id} not found`);
     }
-
     if (!existing.deletedAt) {
       throw new BadRequestException(
         `Item ${id} must be in trash before it can be permanently purged`,
       );
     }
-
     const storagePaths = await this.collectStoragePathsForItems(client, [id]);
-
     await client.item.delete({
       where: { id },
     });
-
-    if (storagePaths.length > 0) {
+    if (storagePaths.length > 0 && !options?.skipStorageDelete) {
       await this.deleteStorageFilesBatch(storagePaths);
     }
-
-    return true;
+    return { purged: true, storagePaths };
   }
-
   async softDeleteMany(
     userId: string,
     itemIds: string[],
@@ -488,7 +506,6 @@ export class CommandRepository {
       projectId,
     );
   }
-
   async restoreMany(
     userId: string,
     itemIds: string[],
@@ -506,7 +523,6 @@ export class CommandRepository {
       projectId,
     );
   }
-
   async purgeMany(
     userId: string,
     itemIds: string[],
@@ -525,7 +541,6 @@ export class CommandRepository {
       projectId,
     );
   }
-
   async purgeExpiredTrash(
     retentionDays: number = 30,
     limit: number = 200,
@@ -536,14 +551,16 @@ export class CommandRepository {
     purgedCollections: number;
     storagePaths: string[];
   }> {
-    return CommandBulkOperations.purgeExpiredTrash(
+    const res = await CommandBulkOperations.purgeExpiredTrash(
       this.getClient(tx),
       retentionDays,
       limit,
-      this.deleteStorageFilesBatch.bind(this),
     );
+    if (!tx && res.storagePaths.length > 0) {
+      await this.deleteStorageFilesBatch(res.storagePaths);
+    }
+    return res;
   }
-
   async deleteStorageFilesBatch(fileIds: string[]): Promise<void> {
     if (!this.storagePort?.deleteFile || fileIds.length === 0) return;
     const uniqueFileIds = Array.from(new Set(fileIds.filter(Boolean)));
@@ -560,7 +577,6 @@ export class CommandRepository {
       }
     });
   }
-
   async putRelation(
     itemId: string,
     relation: {
@@ -580,13 +596,11 @@ export class CommandRepository {
       return;
     }
     const client = this.getClient(tx);
-
     const source = await client.item.findUnique({
       where: { id: itemId },
       select: { userId: true },
     });
     if (!source) return;
-
     const rawType = String(relation.relationType || '')
       .trim()
       .toLowerCase();
@@ -607,9 +621,7 @@ export class CommandRepository {
     const relationType: RelationType = validRelationTypes.has(rawType)
       ? (rawType as RelationType)
       : RelationType.related;
-
     const description = relation.description || '';
-
     await client.itemRelation.upsert({
       where: {
         sourceItemId_targetItemId_relationType: {
@@ -629,7 +641,6 @@ export class CommandRepository {
       },
     });
   }
-
   async removeRelation(
     itemId: string,
     targetItemId: string,
@@ -646,7 +657,6 @@ export class CommandRepository {
       },
     });
   }
-
   async setMyPublication(
     userId: string,
     id: string,
@@ -665,85 +675,26 @@ export class CommandRepository {
     if (!isUuid(id) || !isUuid(userId)) {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
-
     const validProjectId = normalizeProjectScopeId(options?.projectId);
     const scopeWhere = validProjectId
       ? { projectId: validProjectId }
       : { userId, projectId: null };
-
     const client = this.getClient(tx);
     const existing = await client.item.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
-
     if (!existing) {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
-
-    const metadataObj: Record<string, unknown> =
-      typeof existing.metadata === 'object' &&
-      existing.metadata !== null &&
-      !Array.isArray(existing.metadata)
-        ? { ...(existing.metadata as Record<string, unknown>) }
-        : {};
-    metadataObj.isMyPublication = isMyPublication;
     if (isMyPublication) {
-      metadataObj.publicationConfirmedAt = new Date().toISOString();
-      if (options?.openAccessLicense !== undefined) {
-        metadataObj.openAccessLicense = options.openAccessLicense;
-      }
-      if (options?.isPublic !== undefined) {
-        metadataObj.isPublicPublication = options.isPublic;
-      }
-      if (options?.contributorId !== undefined) {
-        metadataObj.publicationContributorId = options.contributorId;
-      }
-      if (options?.includeAttachments !== undefined) {
-        metadataObj.includeAttachmentsInMyPublications =
-          options.includeAttachments;
-      }
-      if (options?.includeNotes !== undefined) {
-        metadataObj.includeNotesInMyPublications = options.includeNotes;
-      }
-      if (options?.authorshipConfirmed !== undefined) {
-        metadataObj.authorshipConfirmed = options.authorshipConfirmed;
-      }
-
-      const createPayload: {
-        userId: string;
-        itemId: string;
-        contributorId?: string | null;
-        isPublic?: boolean;
-        openAccessLicense?: string | null;
-      } = {
-        userId,
-        itemId: id,
-        ...(options?.contributorId !== undefined && {
-          contributorId: options.contributorId,
-        }),
+      const updatePayload = {
+        ...(options?.contributorId !== undefined && { contributorId: options.contributorId }),
         ...(options?.isPublic !== undefined && { isPublic: options.isPublic }),
-        ...(options?.openAccessLicense !== undefined && {
-          openAccessLicense: options.openAccessLicense,
-        }),
+        ...(options?.openAccessLicense !== undefined && { openAccessLicense: options.openAccessLicense }),
       };
-
-      const updatePayload: {
-        contributorId?: string | null;
-        isPublic?: boolean;
-        openAccessLicense?: string | null;
-      } = {
-        ...(options?.contributorId !== undefined && {
-          contributorId: options.contributorId,
-        }),
-        ...(options?.isPublic !== undefined && { isPublic: options.isPublic }),
-        ...(options?.openAccessLicense !== undefined && {
-          openAccessLicense: options.openAccessLicense,
-        }),
-      };
-
       await client.userPublication.upsert({
         where: { userId_itemId: { userId, itemId: id } },
-        create: createPayload,
+        create: { userId, itemId: id, ...updatePayload },
         update: updatePayload,
       });
     } else {
@@ -751,7 +702,18 @@ export class CommandRepository {
         where: { userId, itemId: id },
       });
     }
-
+    if (validProjectId) {
+      return client.item.findUniqueOrThrow({
+        where: { id },
+        include: {
+          collectionItems: { include: { collection: true } },
+          itemTags: { include: { tag: true } },
+          contributors: { orderBy: { orderIndex: 'asc' } },
+          attachments: true,
+        },
+      });
+    }
+    const metadataObj = buildMyPublicationMetadata(existing.metadata, isMyPublication, options);
     return client.item.update({
       where: { id },
       data: {
@@ -759,15 +721,9 @@ export class CommandRepository {
         version: { increment: 1 },
       },
       include: {
-        collectionItems: {
-          include: { collection: true },
-        },
-        itemTags: {
-          include: { tag: true },
-        },
-        contributors: {
-          orderBy: { orderIndex: 'asc' },
-        },
+        collectionItems: { include: { collection: true } },
+        itemTags: { include: { tag: true } },
+        contributors: { orderBy: { orderIndex: 'asc' } },
         attachments: true,
       },
     });

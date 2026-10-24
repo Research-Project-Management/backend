@@ -7,6 +7,7 @@ describe('Library Workflow & Distributed Consistency Invariants', () => {
   const USER_ID = '01a15274-ada1-710d-8b87-107bc6085af0';
   const PROJECT_ID = '01a15318-d98e-75cf-bcc1-18872bbb1272';
   const ITEM_ID = '01a15400-0000-7000-8000-000000000001';
+  const COLLECTION_ID = '01a15500-0000-7000-8000-000000000001';
 
   describe('1. Citation Key Scope-Aware Disambiguation (BibTeX / BetterBibTeX convention)', () => {
     it('returns the base citation key unchanged when no collision exists in project scope', async () => {
@@ -240,6 +241,78 @@ describe('Library Workflow & Distributed Consistency Invariants', () => {
           },
         }),
       );
+    });
+  });
+
+  describe('5. Aggregate Invariant INV-ATT-1: Single Primary PDF per Item', () => {
+    it('INV-ATT-1: demotes existing primary_pdf to supplementary when a new primary_pdf is created for the same item', async () => {
+      const { AttachmentsRepository } = await import('@/modules/library/extraction/repositories/attachments.repository');
+      const mockPrisma = {
+        attachment: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          create: jest.fn().mockImplementation(async ({ data }) => ({ id: 'att-new', ...data, itemId: ITEM_ID })),
+        },
+        item: {
+          update: jest.fn().mockResolvedValue({ id: ITEM_ID }),
+        },
+      };
+      const repo = new AttachmentsRepository(mockPrisma as any);
+      await repo.create(
+        {
+          itemId: ITEM_ID,
+          filename: 'new-version.pdf',
+          attachmentType: 'primary_pdf' as any,
+          mimeType: 'application/pdf',
+        },
+        mockPrisma as any,
+      );
+      expect(mockPrisma.attachment.updateMany).toHaveBeenCalledWith({
+        where: {
+          itemId: ITEM_ID,
+          attachmentType: 'primary_pdf',
+          deletedAt: null,
+        },
+        data: {
+          attachmentType: 'supplementary',
+        },
+      });
+    });
+  });
+
+  describe('6. Aggregate Invariant INV-COL-2: Scope Homogeneity for Collections', () => {
+    it('INV-COL-2: filters out items belonging to a different scope before linking into CollectionItem', async () => {
+      const mockPrisma = {
+        collection: {
+          findFirst: jest.fn().mockResolvedValue({ id: COLLECTION_ID, userId: USER_ID, projectId: PROJECT_ID, deletedAt: null }),
+        },
+        item: {
+          findMany: jest.fn().mockResolvedValue([{ id: ITEM_ID }]),
+        },
+        collectionItem: {
+          createMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      const repo = new CollectionsRepository(mockPrisma as any);
+      await repo.addItemsToCollection(
+        USER_ID,
+        COLLECTION_ID,
+        [ITEM_ID, '01a15400-0000-7000-8000-999999999999'],
+        undefined,
+        PROJECT_ID,
+      );
+      expect(mockPrisma.item.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { in: [ITEM_ID, '01a15400-0000-7000-8000-999999999999'] },
+            projectId: PROJECT_ID,
+            deletedAt: null,
+          }),
+        }),
+      );
+      expect(mockPrisma.collectionItem.createMany).toHaveBeenCalledWith({
+        data: [{ collectionId: COLLECTION_ID, itemId: ITEM_ID, sortOrder: 0 }],
+        skipDuplicates: true,
+      });
     });
   });
 });

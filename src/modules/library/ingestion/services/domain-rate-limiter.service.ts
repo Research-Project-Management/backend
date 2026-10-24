@@ -144,7 +144,7 @@ export class DomainRateLimiterService {
     let waitTime = Math.max(0, config.minIntervalMs - elapsed);
 
     // Multi-Pod Distributed Check: Synchronize with cluster via Redis
-    if (this.redis && typeof this.redis.isReady === 'function' && this.redis.isReady()) {
+    if (this.redis?.isReady && this.redis.isReady()) {
       try {
         const client = this.redis.getClient?.();
         if (client) {

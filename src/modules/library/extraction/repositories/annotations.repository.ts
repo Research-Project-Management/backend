@@ -298,14 +298,26 @@ export class AnnotationsRepository {
     }
 
     if (deletes.length > 0) {
-      await tx.annotation.deleteMany({
+      const candidates = await tx.annotation.findMany({
         where: {
           id: { in: deletes },
           attachmentId,
           authorId,
+          deletedAt: null,
         },
+        select: { id: true },
       });
-      deleted = [...deletes];
+      const foundIds = candidates.map((c) => c.id);
+      if (foundIds.length > 0) {
+        await tx.annotation.updateMany({
+          where: { id: { in: foundIds } },
+          data: {
+            deletedAt: new Date(),
+            version: { increment: 1 },
+          },
+        });
+      }
+      deleted = foundIds;
     }
 
     return { created, updated, deleted };

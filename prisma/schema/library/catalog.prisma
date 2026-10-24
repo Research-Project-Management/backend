@@ -41,6 +41,7 @@ model Item {
   attachmentCount     Int         @default(0) @map("attachment_count")
   noteCount           Int         @default(0) @map("note_count")
   firstAuthor         String?     @map("first_author") @db.VarChar(255)
+  retractionCheckedAt DateTime?   @map("retraction_checked_at") @db.Timestamptz(6)
 
   // Canonical Relations across Library Sub-Domains
   attachments         Attachment[]
@@ -61,13 +62,18 @@ model Item {
   @@index([projectId, deletedAt, year(sort: Desc), id(sort: Desc)])
   @@index([projectId, deletedAt, firstAuthor, id])
   @@index([projectId, deletedAt, itemType])
+  @@index([projectId, deletedAt, doi])
+  @@index([projectId, deletedAt, citationKey])
   @@index([projectId, hasFile, deletedAt])
+  @@index([retractionCheckedAt])
   @@index([userId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@index([userId, deletedAt, updatedAt(sort: Desc)])
   @@index([userId, deletedAt, year(sort: Desc), id(sort: Desc)])
   @@index([userId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
   @@index([userId, deletedAt, firstAuthor, id])
   @@index([userId, deletedAt, itemType])
+  @@index([userId, deletedAt, doi])
+  @@index([userId, deletedAt, citationKey])
   @@index([userId, itemType])
   @@index([userId, hasFile, deletedAt])
   @@index([doi])
@@ -178,4 +184,3 @@ model ItemFieldMapping {
   @@index([baseField])
   @@map("item_field_mappings")
 }
-

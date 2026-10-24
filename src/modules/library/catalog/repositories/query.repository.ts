@@ -5,8 +5,11 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { promisify } from 'util';
 import zlib from 'zlib';
 import { PrismaService } from '@/core';
+
+const gunzipAsync = promisify(zlib.gunzip);
 import { isUUID } from 'class-validator';
 import { normalizeProjectScopeId } from '@/modules/library/core';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
@@ -95,7 +98,13 @@ export class QueryRepository {
                 where: { deletedAt: null },
               },
               attachments: {
-                include: { revisions: true },
+                where: { deletedAt: null },
+                include: {
+                  revisions: true,
+                  annotations: {
+                    where: { deletedAt: null },
+                  },
+                },
               },
             }
           : {}),
@@ -178,11 +187,28 @@ export class QueryRepository {
               notesList: {
                 where: { deletedAt: null },
               },
-              attachments: true,
+              attachments: {
+                where: { deletedAt: null },
+                include: {
+                  revisions: true,
+                  annotations: {
+                    where: { deletedAt: null },
+                  },
+                },
+              },
             }
           : {}),
       },
     });
+  }
+
+  async findManyByIdsWithFullDetails(
+    userId: string,
+    ids: string[],
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    return this.findByIds(userId, ids, projectId, tx, true);
   }
 
   async getItemSnapshot(
@@ -304,7 +330,7 @@ export class QueryRepository {
           fileId: raw.fileId,
         });
         if (storageFile?.buffer) {
-          const decompressed = zlib.gunzipSync(storageFile.buffer);
+          const decompressed = await gunzipAsync(storageFile.buffer);
           const fullData = JSON.parse(decompressed.toString('utf-8')) as Record<
             string,
             unknown

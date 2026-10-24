@@ -27,6 +27,9 @@ import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class RetractionController {
+  private lastForceSeedAt = 0;
+  private static readonly FORCE_SEED_COOLDOWN_MS = 15 * 60 * 1000;
+
   constructor(private readonly service: RetractionService) {}
 
   @Get('database/stats')
@@ -47,7 +50,15 @@ export class RetractionController {
         'System administrator privilege is required to seed the global retraction database',
       );
     }
-    return this.service.seedDatabase(Boolean(force));
+    const allowForce =
+      Boolean(force) &&
+      (role === 'superadmin' || role === 'system') &&
+      Date.now() - this.lastForceSeedAt >
+        RetractionController.FORCE_SEED_COOLDOWN_MS;
+    if (allowForce) {
+      this.lastForceSeedAt = Date.now();
+    }
+    return this.service.seedDatabase(allowForce);
   }
 
   @Get('items')

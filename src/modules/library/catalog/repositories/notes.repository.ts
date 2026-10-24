@@ -90,7 +90,9 @@ export class NotesRepository {
 
     if (data.itemId) {
       const parentItem = await client.item.findFirst({
-        where: { id: data.itemId, deletedAt: null },
+        where: effectiveProjectId
+          ? { id: data.itemId, projectId: effectiveProjectId, deletedAt: null }
+          : { id: data.itemId, userId, projectId: null, deletedAt: null },
         select: { id: true, projectId: true },
       });
       if (!parentItem) {
@@ -267,10 +269,10 @@ export class NotesRepository {
       where: { itemId: { in: sourceItemIds } },
       data: { itemId: targetItemId },
     });
-    for (const sourceId of sourceItemIds) {
-      await this.syncItemNoteCount(sourceId, tx);
-    }
-    await this.syncItemNoteCount(targetItemId, tx);
+    await Promise.all([
+      ...sourceItemIds.map((sourceId) => this.syncItemNoteCount(sourceId, tx)),
+      this.syncItemNoteCount(targetItemId, tx),
+    ]);
   }
 
   async createLiteratureNote(

@@ -39,7 +39,7 @@ export class OutboxRepository {
       retryCount: 0,
     }));
 
-    if (typeof client.outboxEvent?.createMany === 'function') {
+    if (client.outboxEvent?.createMany) {
       await client.outboxEvent.createMany({ data });
       return data.map((d) => d.id!);
     }
@@ -124,7 +124,10 @@ export class OutboxRepository {
       where: {
         id,
         OR: [
-          { status: { in: [OutboxStatus.PENDING, OutboxStatus.FAILED] } },
+          {
+            status: OutboxStatus.PENDING,
+            OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
+          },
           { status: OutboxStatus.PROCESSING, leaseExpiresAt: { lte: now } },
         ],
       },

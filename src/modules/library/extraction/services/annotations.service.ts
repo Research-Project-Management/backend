@@ -237,50 +237,105 @@ export class AnnotationsService {
           tx,
         );
 
-        for (const annotation of result.created) {
-          await helpers.appendChange(eventScope, {
+        const changes: Array<{
+          entityType: string;
+          entityId: string;
+          action: 'create' | 'update';
+          version: number;
+          data: unknown;
+        }> = [
+          ...result.created.map((annotation) => ({
             entityType: 'Annotation',
             entityId: annotation.id,
-            action: 'create',
+            action: 'create' as const,
             version: annotation.version,
-          });
-          await helpers.publishOutbox(
-            eventScope,
-            annotation.id,
-            'library.annotation.created',
-            annotation,
-          );
-        }
-
-        for (const annotation of result.updated) {
-          await helpers.appendChange(eventScope, {
+            data: annotation,
+          })),
+          ...result.updated.map((annotation) => ({
             entityType: 'Annotation',
             entityId: annotation.id,
-            action: 'update',
+            action: 'update' as const,
             version: annotation.version,
-          });
-          await helpers.publishOutbox(
-            eventScope,
-            annotation.id,
-            'library.annotation.updated',
-            annotation,
-          );
+            data: annotation,
+          })),
+        ];
+
+        if (changes.length > 0) {
+          if (helpers.appendChangesBatch) {
+            await helpers.appendChangesBatch(eventScope, changes);
+          } else {
+            for (const change of changes) {
+              await helpers.appendChange(eventScope, change);
+            }
+          }
         }
 
-        for (const id of result.deleted) {
-          await helpers.recordTombstone(eventScope, {
-            entityType: 'Annotation',
-            entityId: id,
-          });
-          await helpers.publishOutbox(
-            eventScope,
-            id,
-            'library.annotation.deleted',
-            {
+        if (result.deleted.length > 0) {
+          if (helpers.recordTombstonesBatch) {
+            await helpers.recordTombstonesBatch(
+              eventScope,
+              result.deleted.map((id) => ({
+                entityType: 'Annotation',
+                entityId: id,
+              })),
+            );
+          } else {
+            for (const id of result.deleted) {
+              await helpers.recordTombstone(eventScope, {
+                entityType: 'Annotation',
+                entityId: id,
+              });
+            }
+          }
+        }
+
+        const deletedAt = new Date();
+        const outboxEvents: Array<{
+          userId: string;
+          projectId?: string;
+          aggregateId: string;
+          eventType: string;
+          payload: unknown;
+        }> = [
+          ...result.created.map((annotation) => ({
+            userId,
+            projectId: effectiveProjectId,
+            aggregateId: annotation.id,
+            eventType: 'library.annotation.created',
+            payload: annotation,
+          })),
+          ...result.updated.map((annotation) => ({
+            userId,
+            projectId: effectiveProjectId,
+            aggregateId: annotation.id,
+            eventType: 'library.annotation.updated',
+            payload: annotation,
+          })),
+          ...result.deleted.map((id) => ({
+            userId,
+            projectId: effectiveProjectId,
+            aggregateId: id,
+            eventType: 'library.annotation.deleted',
+            payload: {
               id,
-              deletedAt: new Date(),
+              deletedAt,
             },
-          );
+          })),
+        ];
+
+        if (outboxEvents.length > 0) {
+          if (helpers.publishOutboxBatch) {
+            await helpers.publishOutboxBatch(outboxEvents);
+          } else {
+            for (const ev of outboxEvents) {
+              await helpers.publishOutbox(
+                eventScope,
+                ev.aggregateId,
+                ev.eventType,
+                ev.payload,
+              );
+            }
+          }
         }
 
         return result;

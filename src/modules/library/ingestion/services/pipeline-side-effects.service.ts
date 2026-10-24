@@ -6,17 +6,15 @@ import {
   ICatalogFacade,
   EXTRACTION_FACADE,
   IExtractionFacade,
+  formatAttachmentFilename,
+  DEFAULT_RENAME_PATTERN,
+  RenamerItemMetadata,
 } from '@/modules/library/core';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 import { ReconciliationDecision } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
-import {
-  formatAttachmentFilename,
-  DEFAULT_RENAME_PATTERN,
-  RenamerItemMetadata,
-} from '@/modules/library/extraction/domain/renamer.domain';
 
 @Injectable()
 export class PipelineSideEffectsService {

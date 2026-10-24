@@ -23,41 +23,37 @@ import {
   isValidScrollPosition,
 } from '@/modules/library/catalog/domain/state.domain';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
+import { ItemCacheCoordinator } from './item-cache.coordinator';
 
 @Injectable()
 export class StateService {
+  private readonly cacheCoordinator: ItemCacheCoordinator;
+
   constructor(
     private readonly stateRepository: StateRepository,
     private readonly libraryTx: TransactionService,
     @Optional()
     private readonly itemExistencePort?: ItemQueryService,
     @Optional()
-    private readonly cache?: RedisCacheService,
-  ) {}
+    cacheOrCoordinator?: RedisCacheService | ItemCacheCoordinator,
+    @Optional()
+    injectedCoordinator?: ItemCacheCoordinator,
+  ) {
+    if (injectedCoordinator) {
+      this.cacheCoordinator = injectedCoordinator;
+    } else if (cacheOrCoordinator instanceof ItemCacheCoordinator) {
+      this.cacheCoordinator = cacheOrCoordinator;
+    } else {
+      this.cacheCoordinator = new ItemCacheCoordinator(cacheOrCoordinator);
+    }
+  }
 
   private async invalidateStateCache(
     itemId: string,
     userId: string,
     projectId?: string,
   ): Promise<void> {
-    if (!this.cache) return;
-    const tasks: Promise<unknown>[] = [
-      this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
-      this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
-      this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-      this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(`user:${userId}`)),
-      this.cache.del(LIBRARY_REDIS_KEYS.counts(userId)),
-      this.cache.del(LIBRARY_REDIS_KEYS.counts(`user:${userId}`)),
-    ];
-    if (projectId) {
-      tasks.push(
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(projectId)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`)),
-        this.cache.del(LIBRARY_REDIS_KEYS.counts(`proj:${projectId}`)),
-      );
-    }
-    await Promise.allSettled(tasks);
+    await this.cacheCoordinator.invalidateItemCache(itemId, userId, projectId);
   }
 
   private toResponse(state?: StateEntity | null): StateData {

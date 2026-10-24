@@ -112,6 +112,8 @@ export class SyncController {
 
     const hasMore = changes.length > limit;
     const rawPaged = hasMore ? changes.slice(0, limit) : changes;
+    const highWaterMarkSeq =
+      rawPaged.length > 0 ? rawPaged[rawPaged.length - 1].seq : sinceSeq;
     const pagedChanges =
       query.compact !== false ? compactLibraryChanges(rawPaged) : rawPaged;
 
@@ -120,6 +122,7 @@ export class SyncController {
       count: pagedChanges.length,
       compacted: query.compact !== false,
       hasMore,
+      nextCursor: hasMore ? highWaterMarkSeq.toString() : null,
       changes: pagedChanges.map((c) => ({
         id: c.id,
         seq: c.seq.toString(),

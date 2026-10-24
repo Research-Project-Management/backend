@@ -18,6 +18,7 @@ export * from './domain/academic-regex.catalog';
 export * from './domain/sort-index.domain';
 export * from './domain/tiptap.domain';
 export * from './domain/zotero-field-harmonizer.domain';
+export * from './domain/renamer.domain';
 
 // Constants
 export * from './constants/academic-client.constants';

@@ -7,7 +7,12 @@ import { isUuid } from './creator-tag-payload.builder';
  * Follows BibTeX / BetterBibTeX convention: vaswani2017attention -> vaswani2017attentiona -> vaswani2017attentionb.
  */
 export async function disambiguateCitationKey(
-  client: Prisma.TransactionClient | PrismaService | any,
+  client:
+    | Prisma.TransactionClient
+    | PrismaService
+    | { item?: { findMany?: Prisma.TransactionClient['item']['findMany'] } }
+    | null
+    | undefined,
   baseKey: string | null | undefined,
   scope: { userId: string; projectId?: string | null },
   excludeItemId?: string,
@@ -16,7 +21,7 @@ export async function disambiguateCitationKey(
   const cleanKey = baseKey.trim();
 
   // Defensive fallback if client is a minimal mock in unit tests
-  if (!client || !client.item || typeof client.item.findMany !== 'function') {
+  if (!client?.item?.findMany) {
     return cleanKey;
   }
 

@@ -5,7 +5,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
-import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
+import { ItemCacheCoordinator } from './item-cache.coordinator';
 import { ItemQueryService } from './item-query.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
@@ -19,6 +19,7 @@ import {
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
+import { disambiguateCitationKey } from '@/modules/library/catalog/domain/citation-key.engine';
 
 interface CslItemData {
   id?: string;
@@ -65,13 +66,24 @@ function getCite(): CitationJsConstructor | undefined {
  */
 @Injectable()
 export class ItemCurationService {
+  private readonly cacheCoordinator: ItemCacheCoordinator;
+
   constructor(
     private readonly query: QueryRepository,
     private readonly command: CommandRepository,
     private readonly libraryTx: TransactionService,
-    @Optional() private readonly cache?: RedisCacheService,
+    @Optional() cacheOrCoordinator?: RedisCacheService | ItemCacheCoordinator,
     @Optional() private readonly itemQueryService?: ItemQueryService,
-  ) {}
+    @Optional() injectedCoordinator?: ItemCacheCoordinator,
+  ) {
+    if (injectedCoordinator) {
+      this.cacheCoordinator = injectedCoordinator;
+    } else if (cacheOrCoordinator instanceof ItemCacheCoordinator) {
+      this.cacheCoordinator = cacheOrCoordinator;
+    } else {
+      this.cacheCoordinator = new ItemCacheCoordinator(cacheOrCoordinator);
+    }
+  }
 
   /**
    * Parses raw unformatted citation strings or multi-line bibliographies into structured references.
@@ -136,7 +148,8 @@ export class ItemCurationService {
     projectId: string,
     itemIds: string[],
   ): Promise<{ success: boolean; importedCount: number }> {
-    if (!itemIds || itemIds.length === 0) {
+    const uniqueItemIds = Array.from(new Set(itemIds)).slice(0, 100);
+    if (uniqueItemIds.length === 0) {
       return { success: true, importedCount: 0 };
     }
 
@@ -167,7 +180,7 @@ export class ItemCurationService {
       }
     }
 
-    const sourceItems = await this.query.findByIds(userId, itemIds);
+    const sourceItems = await this.query.findManyByIdsWithFullDetails(userId, uniqueItemIds);
     let importedCount = 0;
 
     // Batch query to detect duplicates in one go, avoiding N+1 queries.
@@ -207,10 +220,6 @@ export class ItemCurationService {
           source.doi && existingDois.has(source.doi.trim().toLowerCase()),
         ) ||
         Boolean(
-          source.citationKey &&
-          existingCitationKeys.has(source.citationKey.trim().toLowerCase()),
-        ) ||
-        Boolean(
           source.title && existingTitles.has(source.title.trim().toLowerCase()),
         );
 
@@ -221,6 +230,17 @@ export class ItemCurationService {
       const createData = buildImportItemPayload(source, userId);
 
       await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        if (source.citationKey) {
+          const disambiguated = await disambiguateCitationKey(
+            tx,
+            source.citationKey,
+            { userId, projectId },
+          );
+          if (disambiguated) {
+            createData.citationKey = disambiguated;
+          }
+        }
+
         const item = await this.command.create(
           userId,
           createData,
@@ -261,8 +281,8 @@ export class ItemCurationService {
       if (source.doi?.trim()) {
         existingDois.add(source.doi.trim().toLowerCase());
       }
-      if (source.citationKey?.trim()) {
-        existingCitationKeys.add(source.citationKey.trim().toLowerCase());
+      if (createData.citationKey?.trim()) {
+        existingCitationKeys.add(createData.citationKey.trim().toLowerCase());
       }
       if (source.title?.trim()) {
         existingTitles.add(source.title.trim().toLowerCase());
@@ -271,14 +291,8 @@ export class ItemCurationService {
       importedCount++;
     }
 
-    if (this.cache && importedCount > 0) {
-      await Promise.allSettled([
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(projectId)),
-        this.cache.del(LIBRARY_REDIS_KEYS.counts(`proj:${projectId}`)),
-        this.cache.del(LIBRARY_REDIS_KEYS.tags(`proj:${projectId}`)),
-        this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(`proj:${projectId}`)),
-      ]);
+    if (importedCount > 0) {
+      await this.cacheCoordinator.invalidateScopeListCache(userId, projectId);
     }
 
     return { success: true, importedCount };
@@ -400,8 +414,42 @@ export function buildImportItemPayload(
   const resolvedFileHash =
     primaryAttachment?.fileHash || source.fileHash || undefined;
 
+  const clonedAttachments = (source.attachments || []).map((att) => ({
+    title: att.name || att.filename || 'document.pdf',
+    filename: att.filename || att.name || 'document.pdf',
+    url: att.url || (att.fileId ? `/api/files/${att.fileId}/content` : ''),
+    fileId: att.fileId ? String(att.fileId) : null,
+    fileHash: att.fileHash || '',
+    mimeType: att.mimeType || 'application/pdf',
+    size: att.size !== undefined && att.size !== null ? Number(att.size) : 0,
+    linkMode: (att as Record<string, unknown>).linkMode as string | undefined,
+    attachmentType: (att as Record<string, unknown>).attachmentType as string | undefined,
+    metadata: (att as Record<string, unknown>).metadata as Record<string, unknown> | undefined,
+    annotations: Array.isArray((att as Record<string, unknown>).annotations)
+      ? ((att as Record<string, unknown>).annotations as Array<Record<string, unknown>>)
+          .filter((ann) => ann && !ann.deletedAt)
+          .map((ann) => ({
+            type: ann.type || 'highlight',
+            color: ann.color || '#ffeb3b',
+            pageIndex: typeof ann.pageIndex === 'number' ? ann.pageIndex : 0,
+            pageLabel: typeof ann.pageLabel === 'string' ? ann.pageLabel : '',
+            annotationSortIndex:
+              typeof ann.annotationSortIndex === 'string'
+                ? ann.annotationSortIndex
+                : '',
+            rectCoords: ann.rectCoords ?? null,
+            quoteText: typeof ann.quoteText === 'string' ? ann.quoteText : null,
+            comment: typeof ann.comment === 'string' ? ann.comment : '',
+            tags: Array.isArray(ann.tags) ? (ann.tags as string[]) : [],
+            authorId: userId,
+          }))
+      : [],
+  }));
+
   return {
     title: source.title,
+    attachmentCount: clonedAttachments.length,
+    attachments: clonedAttachments,
     uploadedById: userId,
     year: source.year ?? undefined,
     doi: source.doi ?? undefined,

@@ -53,7 +53,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     @InjectQueue(LIBRARY_INGESTION_QUEUE)
     private readonly bullQueue?: Queue,
   ) {
-    if (typeof this.bullQueue?.on === 'function') {
+    if (this.bullQueue?.on) {
       this.bullQueue.on('error', (err: Error) => {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Ingestion BullMQ queue error notice: ${message}`);
@@ -136,11 +136,11 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     if (this.bullQueue) {
       try {
         const jobId = `ingest-${runId}`;
-        if (typeof this.bullQueue.getJob === 'function') {
+        if (this.bullQueue.getJob) {
           const existingJob = await this.bullQueue
             .getJob(jobId)
             .catch(() => null);
-          if (existingJob && typeof existingJob.getState === 'function') {
+          if (existingJob?.getState) {
             const state = await existingJob.getState().catch(() => '');
             if (
               state === 'active' ||
@@ -153,7 +153,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
               );
               return false;
             }
-            if (typeof existingJob.remove === 'function') {
+            if (existingJob.remove) {
               await existingJob.remove().catch(() => undefined);
             }
           }

@@ -187,6 +187,8 @@ export class CollectionsRepository {
     const client = this.getClient(tx);
     const scopeWhere = this.buildScopeWhere(userId, projectId);
     const now = new Date();
+    let deletedCollectionIds: string[] = [id];
+    let deletedItemIds: string[] = [];
 
     if (strategy === 'cascade') {
       const allCollections = await client.collection.findMany({
@@ -198,6 +200,7 @@ export class CollectionsRepository {
         id,
       );
       const targetCollectionIds = [id, ...descendantIds];
+      deletedCollectionIds = targetCollectionIds;
 
       const links = await client.collectionItem.findMany({
         where: {
@@ -210,6 +213,7 @@ export class CollectionsRepository {
       });
       const itemIds = Array.from(new Set(links.map((l) => l.itemId)));
       if (itemIds.length > 0) {
+        deletedItemIds = itemIds;
         const validProjectId = normalizeProjectScopeId(projectId);
         await client.item.updateMany({
           where: {
@@ -272,16 +276,36 @@ export class CollectionsRepository {
    * Adds items to a collection.
    */
   async addItemsToCollection(
-    _userId: string,
+    userId: string,
     collectionId: string,
     itemIds: string[],
     tx?: Prisma.TransactionClient,
+    projectId?: string | null,
   ): Promise<void> {
     if (itemIds.length === 0) return;
     const client = this.getClient(tx);
 
+    let validItemIds = itemIds;
+    if (client.item?.findMany) {
+      const validProjectId = normalizeProjectScopeId(projectId);
+      const scopeWhere: Prisma.ItemWhereInput = validProjectId
+        ? { projectId: validProjectId }
+        : { userId, projectId: null };
+      const matched = await client.item.findMany({
+        where: {
+          ...scopeWhere,
+          id: { in: itemIds },
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      validItemIds = matched.map((m: { id: string }) => m.id);
+    }
+
+    if (validItemIds.length === 0) return;
+
     await client.collectionItem.createMany({
-      data: itemIds.map((itemId) => ({
+      data: validItemIds.map((itemId) => ({
         collectionId,
         itemId,
         sortOrder: 0,
@@ -332,13 +356,20 @@ export class CollectionsRepository {
     targetCollectionId: string | null,
     itemIds: string[],
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<void> {
     const client = this.getClient(tx);
 
     if (targetCollectionId === null) {
+      const validProjectId = normalizeProjectScopeId(projectId);
+      const collectionScope: Prisma.CollectionWhereInput = validProjectId
+        ? { projectId: validProjectId }
+        : { userId, projectId: null };
+
       await client.collectionItem.deleteMany({
         where: {
           itemId: { in: itemIds },
+          collection: collectionScope,
         },
       });
     } else {
@@ -378,7 +409,7 @@ export class CollectionsRepository {
       );
     };
 
-    if (!tx && typeof this.prisma.$transaction === 'function') {
+    if (!tx && this.prisma.$transaction) {
       await this.prisma.$transaction(async (innerTx) => {
         await runUpdates(innerTx);
       });
@@ -395,14 +426,18 @@ export class CollectionsRepository {
     collectionId: string,
     tx?: Prisma.TransactionClient,
     limit?: number,
+    projectId?: string,
   ): Promise<string[]> {
     const client = this.getClient(tx);
+    const validProjectId = this.resolveProjectScopeId(projectId);
 
     const items = await client.collectionItem.findMany({
       where: {
         collectionId,
         item: {
-          userId,
+          ...(validProjectId
+            ? { projectId: validProjectId }
+            : { userId, projectId: null }),
           deletedAt: null,
         },
       },

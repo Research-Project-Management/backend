@@ -94,8 +94,10 @@ export class CollectionSpecification extends CompositeSpecification {
   isSatisfiedBy(item: unknown): boolean {
     if (!item || typeof item !== 'object') return false;
     const rec = item as Record<string, unknown>;
-    const list = Array.isArray(rec.collectionItems) ? rec.collectionItems : [];
-    return list.some((c: any) => c?.collectionId === this.collectionId);
+    const list = Array.isArray(rec.collectionItems)
+      ? (rec.collectionItems as Array<{ collectionId?: string } | null>)
+      : [];
+    return list.some((c) => c?.collectionId === this.collectionId);
   }
 }
 
@@ -118,8 +120,10 @@ export class TagSpecification extends CompositeSpecification {
   isSatisfiedBy(item: unknown): boolean {
     if (!item || typeof item !== 'object') return false;
     const rec = item as Record<string, unknown>;
-    const list = Array.isArray(rec.itemTags) ? rec.itemTags : [];
-    return list.some((t: any) => t?.tagId === this.tagId);
+    const list = Array.isArray(rec.itemTags)
+      ? (rec.itemTags as Array<{ tagId?: string } | null>)
+      : [];
+    return list.some((t) => t?.tagId === this.tagId);
   }
 }
 
@@ -197,9 +201,13 @@ export class TextSearchSpecification extends CompositeSpecification {
     if (typeof rec.doi === 'string' && rec.doi.toLowerCase().includes(q)) return true;
     if (typeof rec.citationKey === 'string' && rec.citationKey.toLowerCase().includes(q)) return true;
     if (Array.isArray(rec.contributors)) {
+      const contributors = rec.contributors as Array<{
+        fullName?: unknown;
+        lastName?: unknown;
+      } | null>;
       if (
-        rec.contributors.some(
-          (c: any) =>
+        contributors.some(
+          (c) =>
             (c?.fullName && String(c.fullName).toLowerCase().includes(q)) ||
             (c?.lastName && String(c.lastName).toLowerCase().includes(q)),
         )
@@ -208,9 +216,14 @@ export class TextSearchSpecification extends CompositeSpecification {
       }
     }
     if (Array.isArray(rec.notesList)) {
+      const notesList = rec.notesList as Array<{
+        deletedAt?: unknown;
+        title?: unknown;
+        contentMd?: unknown;
+      } | null>;
       if (
-        rec.notesList.some(
-          (n: any) =>
+        notesList.some(
+          (n) =>
             !n?.deletedAt &&
             ((n?.title && String(n.title).toLowerCase().includes(q)) ||
               (n?.contentMd && String(n.contentMd).toLowerCase().includes(q))),
@@ -220,13 +233,21 @@ export class TextSearchSpecification extends CompositeSpecification {
       }
     }
     if (Array.isArray(rec.attachments)) {
+      const attachments = rec.attachments as Array<{
+        deletedAt?: unknown;
+        annotations?: Array<{
+          deletedAt?: unknown;
+          quoteText?: unknown;
+          comment?: unknown;
+        } | null>;
+      } | null>;
       if (
-        rec.attachments.some(
-          (a: any) =>
+        attachments.some(
+          (a) =>
             !a?.deletedAt &&
             Array.isArray(a?.annotations) &&
             a.annotations.some(
-              (ann: any) =>
+              (ann) =>
                 !ann?.deletedAt &&
                 ((ann?.quoteText &&
                   String(ann.quoteText).toLowerCase().includes(q)) ||

@@ -217,4 +217,18 @@ describe('SyncController (Library Distributed Sync API)', () => {
       }
     });
   });
+
+    it('signals fullSyncRequired/SYNC_RESET_REQUIRED when client since cursor is older than earliest retained sequence', async () => {
+      (transactionServiceMock as any).getMinRetainedSequence = jest.fn().mockResolvedValue(50n);
+      (transactionServiceMock as any).getLatestSequence = jest.fn().mockResolvedValue(100n);
+
+      await expect(
+        controller.getChanges('user-1', { since: '10', limit: 100 } as any)
+      ).rejects.toMatchObject({
+        status: 410,
+        response: expect.objectContaining({
+          code: 'SYNC_RESET_REQUIRED',
+        }),
+      });
+    });
 });

@@ -26,12 +26,17 @@ import {
   PrismaMergeAuditTrail,
   ALLOWED_MERGE_METADATA_FIELDS,
 } from '@/modules/library/ingestion/types/curation.types';
+import {
+  buildMergeAuditTrail,
+  invalidateMergedItemsCache,
+} from '@/modules/library/ingestion/domain/duplicate-merge.helper';
 import { UserId, ProjectId } from '@/modules/library/core/types/branded.types';
 import {
   asMetaObject,
   getEffectiveItemField,
 } from './duplicate-detector.service';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { deriveFirstAuthor } from '@/modules/library/catalog/catalog.facade';
 
 import {
   ContributorShape,
@@ -196,6 +201,17 @@ export class DuplicateMergerService {
           );
         }
 
+        const eventScope = { userId, projectId: effectiveProjectId };
+
+        const initialNotes = (await tx.note?.findMany?.({
+          where: { itemId: { in: uniqueDupIds } },
+          select: { id: true, itemId: true },
+        })) || [];
+        const initialAttachments = (await tx.attachment?.findMany?.({
+          where: { itemId: { in: uniqueDupIds } },
+          select: { id: true, itemId: true },
+        })) || [];
+
         if (this.extractionGateway?.reassignContentToItem) {
           await this.extractionGateway.reassignContentToItem(
             uniqueDupIds,
@@ -208,19 +224,78 @@ export class DuplicateMergerService {
           await this.catalogGateway.mergeItems(tx, uniqueDupIds, primary.id);
         }
 
+        const survivingNotes = initialNotes.length > 0 ? ((await tx.note?.findMany?.({
+          where: { id: { in: initialNotes.map((n) => n.id) } },
+        })) || []) : [];
+        const survivingNoteMap = new Map(survivingNotes.map((n) => [n.id, n]));
+
+        for (const initNote of initialNotes) {
+          const survivor = survivingNoteMap.get(initNote.id);
+          if (survivor && !survivor.deletedAt) {
+            await helpers.appendChange(eventScope, {
+              entityType: 'Note',
+              entityId: survivor.id,
+              action: 'update',
+              version: 1,
+              data: survivor,
+            });
+          } else {
+            await helpers.recordTombstone(eventScope, {
+              entityType: 'Note',
+              entityId: initNote.id,
+            });
+            await helpers.appendChange(eventScope, {
+              entityType: 'Note',
+              entityId: initNote.id,
+              action: 'delete',
+              version: 0,
+            });
+          }
+        }
+
+        const survivingAttachments = initialAttachments.length > 0 ? ((await tx.attachment?.findMany?.({
+          where: { id: { in: initialAttachments.map((a) => a.id) } },
+        })) || []) : [];
+        const survivingAttachmentMap = new Map(
+          survivingAttachments.map((a) => [a.id, a]),
+        );
+
+        for (const initAtt of initialAttachments) {
+          const survivor = survivingAttachmentMap.get(initAtt.id);
+          if (survivor && !survivor.deletedAt) {
+            await helpers.appendChange(eventScope, {
+              entityType: 'Attachment',
+              entityId: survivor.id,
+              action: 'update',
+              version: 1,
+              data: survivor,
+            });
+          } else {
+            await helpers.recordTombstone(eventScope, {
+              entityType: 'Attachment',
+              entityId: initAtt.id,
+            });
+            await helpers.appendChange(eventScope, {
+              entityType: 'Attachment',
+              entityId: initAtt.id,
+              action: 'delete',
+              version: 0,
+            });
+          }
+        }
+
         await this.rewireMergedItemRelations(tx, primary.id, uniqueDupIds);
         await this.consolidateUserPublications(tx, primary.id, uniqueDupIds);
 
         const existingPrimaryMeta = await tx.itemMetadata.findFirst({
           where: { itemId: primary.id },
         });
-        const dupMetas =
-          typeof tx.itemMetadata.findMany === 'function'
-            ? await tx.itemMetadata.findMany({
-                where: { itemId: { in: uniqueDupIds } },
-                select: { id: true, rawPayload: true },
-              })
-            : [];
+        const dupMetas = tx.itemMetadata?.findMany
+          ? await tx.itemMetadata.findMany({
+              where: { itemId: { in: uniqueDupIds } },
+              select: { id: true, rawPayload: true },
+            })
+          : [];
         const extractOffloadedFileId = (rawPayload: unknown): string | null => {
           if (
             rawPayload &&
@@ -451,10 +526,36 @@ export class DuplicateMergerService {
           },
         ];
 
+        const primaryContributors = (await tx.contributor?.findMany?.({
+          where: { itemId: primary.id },
+          orderBy: { orderIndex: 'asc' },
+        })) || (primary as { contributors?: Array<Record<string, unknown>> }).contributors || [];
+        const derivedFirstAuthor = deriveFirstAuthor({
+          contributors: primaryContributors,
+          creators: Array.isArray(primaryMeta.creators)
+            ? (primaryMeta.creators as Array<Record<string, unknown>>)
+            : undefined,
+          authors: Array.isArray(primaryMeta.authors)
+            ? (primaryMeta.authors as Array<string | Record<string, unknown>>)
+            : undefined,
+        });
+
+        const [noteCount, attachmentCount] = await Promise.all([
+          tx.note?.count ? tx.note.count({
+            where: { itemId: primary.id, deletedAt: null },
+          }) : Promise.resolve(undefined),
+          tx.attachment?.count ? tx.attachment.count({
+            where: { itemId: primary.id, deletedAt: null },
+          }) : Promise.resolve(undefined),
+        ]);
+
         const combinedUpdates = { ...backfillFields, ...scalarSelections };
         const topLevelData: Record<string, unknown> = {
           itemType: effectiveMergedItemType,
-          // isRetracted stored in metadata
+          ...(derivedFirstAuthor ? { firstAuthor: derivedFirstAuthor } : {}),
+          ...(noteCount !== undefined ? { noteCount } : {}),
+          ...(attachmentCount !== undefined ? { attachmentCount, hasFile: attachmentCount > 0 } : {}),
+          ...(mergedIsRetracted ? { isRetracted: true } : {}),
         };
         for (const [key, val] of Object.entries(combinedUpdates)) {
           if (TOP_LEVEL_ITEM_COLUMNS.has(key)) {
@@ -473,7 +574,6 @@ export class DuplicateMergerService {
           },
         });
 
-        const eventScope = { userId, projectId: effectiveProjectId };
         await helpers.appendChange(eventScope, {
           entityType: 'Item',
           entityId: updatedPrimary.id,
@@ -556,63 +656,15 @@ export class DuplicateMergerService {
         });
 
         const finalPrimary = reloadedPrimary ?? updatedPrimary;
-        const normPrimaryDoi = normalizeDoi(primary.doi);
-        const matchReasons = Array.from(
-          new Set(
-            duplicates.map((dup) => {
-              const normDupDoi = normalizeDoi(dup.doi);
-              return normPrimaryDoi &&
-                normDupDoi &&
-                normPrimaryDoi === normDupDoi
-                ? 'EXACT_DOI'
-                : 'FUZZY_TITLE_YEAR_AUTHOR';
-            }),
-          ),
-        );
-
-        const preservedCitationKeys = Array.from(
-          new Set(
-            [
-              (finalPrimary as { citationKey?: string | null }).citationKey ??
-                primary.citationKey,
-              ...(Array.isArray(primaryMeta.mergedCitationKeys)
-                ? (primaryMeta.mergedCitationKeys as string[])
-                : []),
-            ].filter((k): k is string => typeof k === 'string' && k.length > 0),
-          ),
-        );
-
-        const reloadedWithRelations = finalPrimary as {
-          attachments?: unknown[];
-          notesList?: unknown[];
-          itemTags?: unknown[];
-          collectionItems?: unknown[];
-        };
-
-        const audit: PrismaMergeAuditTrail = {
-          masterItemId: primary.id,
-          mergedDuplicateIds: uniqueDupIds,
-          matchReasons,
-          preservedCitationKeys,
-          consolidatedAttachments: Array.isArray(
-            reloadedWithRelations.attachments,
-          )
-            ? reloadedWithRelations.attachments.length
-            : 0,
-          consolidatedNotes: Array.isArray(reloadedWithRelations.notesList)
-            ? reloadedWithRelations.notesList.length
-            : 0,
-          consolidatedTags: Array.isArray(reloadedWithRelations.itemTags)
-            ? reloadedWithRelations.itemTags.length
-            : 0,
-          consolidatedCollections: Array.isArray(
-            reloadedWithRelations.collectionItems,
-          )
-            ? reloadedWithRelations.collectionItems.length
-            : 0,
-          backfilledFields: Object.keys(backfillFields),
-          timestamp: now.toISOString(),
-        };
+        const audit: PrismaMergeAuditTrail = buildMergeAuditTrail({
+          primary,
+          duplicates,
+          uniqueDupIds,
+          finalPrimary,
+          primaryMeta,
+          backfillFields,
+          now,
+        });
 
         return {
           primaryItem: finalPrimary,
@@ -625,7 +677,7 @@ export class DuplicateMergerService {
 
     if (
       offloadedFileIdsToDelete.length > 0 &&
-      typeof this.storagePort?.deleteFile === 'function'
+      this.storagePort?.deleteFile
     ) {
       for (const fid of offloadedFileIdsToDelete) {
         try {
@@ -640,61 +692,14 @@ export class DuplicateMergerService {
       }
     }
 
-    if (this.cache) {
-      try {
-        const scopeId = effectiveProjectId || userId;
-        const invalidationTasks: Promise<unknown>[] = [
-          this.cache.del(LIBRARY_REDIS_KEYS.item(primary.id)),
-          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(primary.id)),
-          this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(primary.id)),
-          this.cache.del(`library:item:${primary.id}:attachments`),
-          this.cache.del(`library:item:${primary.id}:notes`),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(primary.id)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-          this.cache.del(LIBRARY_REDIS_KEYS.counts(scopeId)),
-          this.cache.del(`library:counts:user:${userId}`),
-          this.cache.del(LIBRARY_REDIS_KEYS.collections(scopeId)),
-          this.cache.del(LIBRARY_REDIS_KEYS.collectionTree(scopeId)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(scopeId)),
-          this.cache.del(LIBRARY_REDIS_KEYS.tags(scopeId)),
-          this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(scopeId)),
-        ];
-        for (const dupId of uniqueDupIds) {
-          invalidationTasks.push(
-            this.cache.del(LIBRARY_REDIS_KEYS.item(dupId)),
-            this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(dupId)),
-            this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(dupId)),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(dupId)),
-          );
-        }
-        if (effectiveProjectId) {
-          invalidationTasks.push(
-            this.cache.delPattern(
-              LIBRARY_REDIS_KEYS.itemsPattern(`proj:${effectiveProjectId}`),
-            ),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
-            this.cache.del(`library:counts:proj:${effectiveProjectId}`),
-            this.cache.delPattern(
-              LIBRARY_REDIS_KEYS.collectionsPattern(userId),
-            ),
-            this.cache.del(
-              LIBRARY_REDIS_KEYS.tags(`proj:${effectiveProjectId}`),
-            ),
-            this.cache.delPattern(
-              LIBRARY_REDIS_KEYS.tagsPattern(`proj:${effectiveProjectId}`),
-            ),
-            this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(userId)),
-          );
-        }
-        await Promise.all(invalidationTasks);
-      } catch (cacheErr: unknown) {
-        const msg =
-          cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
-        this.logger.warn(
-          `Failed to invalidate Redis caches after merging items into ${primary.id}: ${msg}`,
-        );
-      }
-    }
+    await invalidateMergedItemsCache({
+      cache: this.cache,
+      logger: this.logger,
+      primaryId: primary.id,
+      uniqueDupIds,
+      userId: String(userId),
+      effectiveProjectId,
+    });
 
     return txResult;
   }

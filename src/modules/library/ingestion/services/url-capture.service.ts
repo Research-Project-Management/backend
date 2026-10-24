@@ -1,3 +1,5 @@
+import { DuplicateDetectorService } from './duplicate-detector.service';
+import { RetractionScannerProvider } from '../providers/retraction-scanner.provider';
 import {
   Injectable,
   Logger,
@@ -5,6 +7,7 @@ import {
   Inject,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { Prisma } from '@prisma/client';
@@ -34,6 +37,7 @@ import { createHash } from 'crypto';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { PrismaService } from '@/core';
 import { FeedRetrievalService } from './feed-retrieval.service';
+import { FeedsRepository } from '@/modules/library/ingestion/repositories/feeds.repository';
 
 @Injectable()
 export class UrlCaptureService {
@@ -54,9 +58,11 @@ export class UrlCaptureService {
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
     @Optional() private readonly prisma?: PrismaService,
-    @Optional() feedRetrieval?: FeedRetrievalService,
+    @Optional() feedRetrieval?: FeedRetrievalService, @Optional() private readonly duplicateDetector?: DuplicateDetectorService, @Optional() private readonly retractionScanner?: RetractionScannerProvider,
   ) {
-    this.feedRetrieval = feedRetrieval ?? new FeedRetrievalService(prisma, ssrfGuard);
+    const resolvedFeedsRepo =
+      prisma ? new FeedsRepository(prisma) : undefined;
+    this.feedRetrieval = feedRetrieval ?? new FeedRetrievalService(resolvedFeedsRepo, ssrfGuard);
   }
 
   private readonly feedRetrieval: FeedRetrievalService;
@@ -132,11 +138,11 @@ export class UrlCaptureService {
    * and committing an Item to the library.
    */
   async confirmCapturedUrl(
-    scopeId: string,
+    scopeId: string | undefined,
     userId: string,
     dto: ConfirmCapturedUrlDto,
   ): Promise<ItemDetail> {
-    const targetUserId = userId || scopeId;
+    const targetUserId = userId || scopeId || '';
     const projectId = scopeId && scopeId !== targetUserId ? scopeId : undefined;
     if (!dto?.previewToken) {
       throw new BadRequestException('previewToken is required');
@@ -150,6 +156,10 @@ export class UrlCaptureService {
 
     if (!preview) {
       throw new BadRequestException('Invalid or expired capture preview token');
+    }
+
+    if (preview.userId && preview.userId !== targetUserId) {
+      throw new ForbiddenException('Access denied to capture preview');
     }
 
     if (preview.claimedAt) {
@@ -355,6 +365,53 @@ export class UrlCaptureService {
       uploadedById: targetUserId,
     };
 
+    if (this.duplicateDetector?.checkDuplicates) {
+      try {
+        const match = await this.duplicateDetector.checkDuplicates(
+          { userId: targetUserId, projectId },
+          {
+            doi: itemData.doi,
+            title: itemData.title,
+            arxivId: (itemData as Record<string, unknown>).arxivId as string,
+            pmid: (itemData as Record<string, unknown>).pmid as string,
+            isbn: (itemData as Record<string, unknown>).isbn as string,
+          },
+        );
+        if (match?.exactMatch) {
+          this.logger.warn(
+            `URL capture matched existing item ${match.exactMatch.id} (${match.exactMatch.matchReason})`,
+          );
+        }
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Duplicate check skipped during confirmCapturedUrl: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    if (this.retractionScanner?.checkRetraction) {
+      try {
+        const retraction = await this.retractionScanner.checkRetraction(
+          itemData.doi,
+          (itemData as Record<string, unknown>).pmid as string,
+        );
+        if (retraction?.status === 'retracted') {
+          itemData.isRetracted = true;
+          itemData.retractionNature =
+            retraction.details?.nature || 'retraction';
+          itemData.retractionDetails = retraction.details;
+          itemData.retractionCheckedAt = new Date();
+        } else if (retraction?.status === 'clean') {
+          itemData.isRetracted = false;
+          itemData.retractionCheckedAt = new Date();
+        }
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Retraction check skipped during confirmCapturedUrl: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     const claimedCount = await this.repo.claimCapturePreview(tokenHash);
 
     if (!claimedCount || claimedCount === 0) {
@@ -399,10 +456,10 @@ export class UrlCaptureService {
    * Cleans up expired and consumed preview records.
    */
   async cleanupExpiredPreviews(retentionDays = 7): Promise<number> {
-    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    const cutoff = retentionDays <= 0 ? new Date() : new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
     if (
-      typeof this.repo.findExpiredCapturePreviews === 'function' &&
-      typeof this.storagePort?.deleteFile === 'function'
+      this.repo.findExpiredCapturePreviews &&
+      this.storagePort?.deleteFile
     ) {
       try {
         const expiredList = await this.repo.findExpiredCapturePreviews(cutoff);

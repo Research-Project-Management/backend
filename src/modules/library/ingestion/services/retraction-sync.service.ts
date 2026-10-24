@@ -5,7 +5,7 @@ import {
   OnModuleDestroy,
   Optional,
 } from '@nestjs/common';
-import { RedisCacheService } from '@/core';
+import { RedisCacheService, shouldRunWorkerConsumers } from '@/core';
 import {
   LIBRARY_REDIS_KEYS,
   normalizeProjectScopeId,
@@ -55,7 +55,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    if (libraryConfig().app.isTest) return;
+    if (libraryConfig().app.isTest || !shouldRunWorkerConsumers()) return;
     const intervalHours = libraryConfig().retraction.syncIntervalHours;
     const intervalMs = Math.max(1, intervalHours) * 60 * 60 * 1000;
     this.logger.log(
@@ -213,6 +213,16 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
               updatedItems.push(item);
             } else {
               skippedUnverified++;
+              await this.repo.updateItemRetraction(
+                item.id,
+                Boolean(item.isRetracted),
+                (typeof item.retractionNature === 'string'
+                  ? item.retractionNature
+                  : null) as Parameters<typeof this.repo.updateItemRetraction>[2],
+                null,
+                now,
+              );
+              scanned++;
             }
           } catch (err: unknown) {
             failed++;
@@ -247,7 +257,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
         for (const scopeKey of scopesToInvalidate) {
           tasks.push(
             this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeKey)),
-            this.cache.del(LIBRARY_REDIS_KEYS.counts(scopeKey)),
+            this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeKey)),
           );
         }
         await Promise.all(tasks);

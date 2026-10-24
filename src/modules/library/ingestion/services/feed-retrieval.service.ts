@@ -3,13 +3,17 @@ import {
   Logger,
   Optional,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
-import { PrismaService } from '@/core';
 import { SsrfGuardService, ExternalProviderException } from '@/modules/library/core';
 import {
   parseAcademicFeedXml,
   ParsedAcademicFeed,
 } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
+import {
+  FeedsRepository,
+  type CachedFeedWithItems,
+} from '@/modules/library/ingestion/repositories/feeds.repository';
 
 @Injectable()
 export class FeedRetrievalService {
@@ -20,7 +24,7 @@ export class FeedRetrievalService {
   >();
 
   constructor(
-    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly feedsRepo?: FeedsRepository,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
   ) {}
 
@@ -40,18 +44,12 @@ export class FeedRetrievalService {
     }
     const trimmed = feedUrl.trim();
 
-    // 1. Check PostgreSQL Database first (Data Pooling & Cooldown Guard)
-    if (this.prisma) {
+    if (this.feedsRepo?.isAvailable) {
       try {
-        const cachedFeed = await this.prisma.feed.findUnique({
-          where: { url: trimmed },
-          include: {
-            items: {
-              orderBy: { publishedAt: 'desc' },
-              take: 50,
-            },
-          },
-        });
+        const cachedFeed = await this.feedsRepo.findFeedWithRecentItemsByUrl(
+          trimmed,
+          50,
+        );
 
         const cooldownMinutes = forceRefresh ? 3 : 15;
         const cooldownThreshold = new Date(
@@ -69,47 +67,7 @@ export class FeedRetrievalService {
               `User requested refresh for "${trimmed}", but feed was refreshed recently (< 3 min). Serving from DB to prevent publisher rate limit.`,
             );
           }
-          return {
-            format: 'atom',
-            feedTitle: cachedFeed.title,
-            feedUrl: cachedFeed.url,
-            entries: cachedFeed.items.map((it: any) => ({
-              id: it.id,
-              title: it.title,
-              url: it.url,
-              pdfUrl: it.pdfUrl || undefined,
-              doi: it.doi || undefined,
-              arxivId: it.arxivId || undefined,
-              primaryCategory: it.primaryCategory || undefined,
-              authors: Array.isArray(it.authors)
-                ? (it.authors as any[]).map((a) =>
-                    typeof a === 'string' ? a : a.name || '',
-                  )
-                : [],
-              creators: Array.isArray(it.authors)
-                ? (it.authors as any[]).map((a) => {
-                    const name = typeof a === 'string' ? a : a.name || '';
-                    return {
-                      firstName: '',
-                      lastName: name,
-                      fullName: name,
-                      creatorType: 'author' as const,
-                    };
-                  })
-                : [],
-              abstract: it.abstract || undefined,
-              publicationTitle: cachedFeed.title,
-              publicationDate: it.publishedAt
-                ? it.publishedAt.toISOString()
-                : undefined,
-              year: it.publishedAt
-                ? new Date(it.publishedAt).getFullYear()
-                : null,
-              keywords: it.primaryCategory ? [it.primaryCategory] : [],
-              rights: it.license || undefined,
-              itemType: it.arxivId ? 'preprint' : 'journalArticle',
-            })),
-          };
+          return this.feedsRepo.mapCachedFeedToParsedFeed(cachedFeed);
         }
       } catch (err: unknown) {
         this.logger.warn(
@@ -118,7 +76,6 @@ export class FeedRetrievalService {
       }
     }
 
-    // 2. Singleflight: If a request for this URL is already in-flight, await it rather than duplicating
     const existingPromise = this.inflightFeedRequests.get(trimmed);
     if (existingPromise) {
       return existingPromise;
@@ -137,18 +94,13 @@ export class FeedRetrievalService {
   private async executeFetchAndPersistFeed(
     trimmed: string,
   ): Promise<ParsedAcademicFeed> {
-    let existingFeedRecord: any = null;
-    if (this.prisma) {
+    let existingFeedRecord: CachedFeedWithItems | null = null;
+    if (this.feedsRepo?.isAvailable) {
       try {
-        existingFeedRecord = await this.prisma.feed.findUnique({
-          where: { url: trimmed },
-          include: {
-            items: {
-              orderBy: { publishedAt: 'desc' },
-              take: 50,
-            },
-          },
-        });
+        existingFeedRecord = await this.feedsRepo.findFeedWithRecentItemsByUrl(
+          trimmed,
+          50,
+        );
       } catch {
         // ignore db lookup failure
       }
@@ -170,15 +122,21 @@ export class FeedRetrievalService {
 
     let response: Response;
     try {
-      if (this.ssrfGuard) {
-        response = await this.ssrfGuard.safeFetch(trimmed, {
-          method: 'GET',
-          headers,
-        });
-      } else {
-        response = await fetch(trimmed, { method: 'GET', headers });
-      }
+      const guard = this.ssrfGuard ?? new SsrfGuardService();
+      response = await guard.safeFetch(trimmed, {
+        method: 'GET',
+        headers,
+      });
     } catch (err: unknown) {
+      if (
+        err instanceof BadRequestException ||
+        err instanceof ForbiddenException ||
+        (err instanceof Error &&
+          (err.message.includes('SSRF Protection') ||
+            err.message.includes('SSRF')))
+      ) {
+        throw err;
+      }
       this.logger.warn(
         `Direct fetch failed for feed "${trimmed}": ${err instanceof Error ? err.message : String(err)}. Attempting search fallback...`,
       );
@@ -188,58 +146,14 @@ export class FeedRetrievalService {
     if (
       response.status === 304 &&
       existingFeedRecord &&
-      existingFeedRecord.items?.length > 0
+      existingFeedRecord.items?.length > 0 &&
+      this.feedsRepo
     ) {
       this.logger.log(
         `Feed "${trimmed}" returned 304 Not Modified. Reusing existing articles.`,
       );
-      if (this.prisma) {
-        await this.prisma.feed
-          .update({
-            where: { id: existingFeedRecord.id },
-            data: { lastFetchedAt: new Date(), lastStatus: 304, errorCount: 0 },
-          })
-          .catch(() => {});
-      }
-      return {
-        format: 'atom',
-        feedTitle: existingFeedRecord.title,
-        feedUrl: existingFeedRecord.url,
-        entries: existingFeedRecord.items.map((it: any) => ({
-          id: it.id,
-          title: it.title,
-          url: it.url,
-          pdfUrl: it.pdfUrl || undefined,
-          doi: it.doi || undefined,
-          arxivId: it.arxivId || undefined,
-          primaryCategory: it.primaryCategory || undefined,
-          authors: Array.isArray(it.authors)
-            ? (it.authors as any[]).map((a) =>
-                typeof a === 'string' ? a : a.name || '',
-              )
-            : [],
-          creators: Array.isArray(it.authors)
-            ? (it.authors as any[]).map((a) => {
-                const name = typeof a === 'string' ? a : a.name || '';
-                return {
-                  firstName: '',
-                  lastName: name,
-                  fullName: name,
-                  creatorType: 'author' as const,
-                };
-              })
-            : [],
-          abstract: it.abstract || undefined,
-          publicationTitle: existingFeedRecord.title,
-          publicationDate: it.publishedAt
-            ? it.publishedAt.toISOString()
-            : undefined,
-          year: it.publishedAt ? new Date(it.publishedAt).getFullYear() : null,
-          keywords: it.primaryCategory ? [it.primaryCategory] : [],
-          rights: it.license || undefined,
-          itemType: it.arxivId ? 'preprint' : 'journalArticle',
-        })),
-      };
+      await this.feedsRepo.markFeedPollSuccess(existingFeedRecord.id, 304);
+      return this.feedsRepo.mapCachedFeedToParsedFeed(existingFeedRecord);
     }
 
     if (!response.ok || response.status === 403 || response.status === 503) {
@@ -270,112 +184,22 @@ export class FeedRetrievalService {
     const etagHeader = response.headers.get('etag') || undefined;
     const lastModifiedHeader =
       response.headers.get('last-modified') || undefined;
-    this.persistFeedToDatabase(
-      trimmed,
-      parsedFeed,
-      etagHeader,
-      lastModifiedHeader,
-    ).catch((err) => {
-      this.logger.warn(
-        `Failed to persist feed to database: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    });
+    if (this.feedsRepo) {
+      try {
+        await this.feedsRepo.persistFetchedFeedAndItems({
+          feedUrl: trimmed,
+          parsed: parsedFeed,
+          etag: etagHeader,
+          lastModified: lastModifiedHeader,
+        });
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Failed to persist feed to database: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     return parsedFeed;
-  }
-
-  private async persistFeedToDatabase(
-    feedUrl: string,
-    parsed: ParsedAcademicFeed,
-    etag?: string,
-    lastModified?: string,
-  ) {
-    if (!this.prisma) return;
-
-    const feed = await this.prisma.feed.upsert({
-      where: { url: feedUrl },
-      create: {
-        url: feedUrl,
-        title: parsed.feedTitle || 'Academic Feed',
-        siteUrl: undefined,
-        description: undefined,
-        etag,
-        lastModified,
-        lastFetchedAt: new Date(),
-        lastStatus: 200,
-        errorCount: 0,
-      },
-      update: {
-        title: parsed.feedTitle || undefined,
-        etag: etag || undefined,
-        lastModified: lastModified || undefined,
-        lastFetchedAt: new Date(),
-        lastStatus: 200,
-        errorCount: 0,
-      },
-    });
-
-    if (!Array.isArray(parsed.entries) || parsed.entries.length === 0) return;
-
-    for (const entry of parsed.entries) {
-      const guid = (
-        entry.doi ||
-        entry.arxivId ||
-        entry.url ||
-        entry.id ||
-        entry.title ||
-        ''
-      ).trim();
-      if (!guid || !entry.title) continue;
-
-      const publishedDate = entry.publicationDate
-        ? new Date(entry.publicationDate)
-        : new Date();
-      const validPublishedAt = isNaN(publishedDate.getTime())
-        ? new Date()
-        : publishedDate;
-
-      const authorsJson = Array.isArray(entry.authors)
-        ? entry.authors.map((a: string) => ({ name: a }))
-        : [];
-
-      await this.prisma.feedItem
-        .upsert({
-          where: {
-            feedId_guid: {
-              feedId: feed.id,
-              guid,
-            },
-          },
-          create: {
-            feedId: feed.id,
-            guid,
-            title: entry.title,
-            url: entry.url || feedUrl,
-            pdfUrl: entry.pdfUrl,
-            doi: entry.doi,
-            arxivId: entry.arxivId,
-            primaryCategory: entry.primaryCategory,
-            authors: authorsJson,
-            abstract: entry.abstract,
-            license: entry.rights,
-            comments: undefined,
-            publishedAt: validPublishedAt,
-          },
-          update: {
-            title: entry.title,
-            url: entry.url || undefined,
-            pdfUrl: entry.pdfUrl || undefined,
-            doi: entry.doi || undefined,
-            arxivId: entry.arxivId || undefined,
-            primaryCategory: entry.primaryCategory || undefined,
-            authors: authorsJson,
-            abstract: entry.abstract || undefined,
-            license: entry.rights || undefined,
-          },
-        })
-        .catch(() => {});
-    }
   }
 
   private async fallbackSearchFeed(
@@ -429,54 +253,76 @@ export class FeedRetrievalService {
         );
       }
 
-      const entries = items.map((item: any, idx: number) => {
-        const rawTitle = Array.isArray(item.title)
-          ? item.title[0]
-          : item.title || 'Untitled Article';
-        const doi = item.DOI || undefined;
-        const journal = Array.isArray(item['container-title'])
-          ? item['container-title'][0]
-          : item['container-title'] || searchFeedTitle;
-        const authors = Array.isArray(item.author)
-          ? item.author.map(
-              (a: any) =>
-                [a.given, a.family].filter(Boolean).join(' ') ||
-                a.name ||
-                'Author',
-            )
-          : [];
-        const pubDateParts =
-          item.published?.['date-parts']?.[0] ||
-          item.created?.['date-parts']?.[0];
-        const publishedDate = pubDateParts
-          ? `${pubDateParts[0]}-${String(pubDateParts[1] || 1).padStart(2, '0')}-${String(pubDateParts[2] || 1).padStart(2, '0')}`
-          : undefined;
+      const entries = (items as Array<Record<string, unknown>>).map(
+        (
+          item: {
+            title?: string | string[];
+            DOI?: string;
+            'container-title'?: string | string[];
+            author?: Array<{ given?: string; family?: string; name?: string }>;
+            published?: { 'date-parts'?: number[][] };
+            created?: { 'date-parts'?: number[][] };
+            URL?: string;
+            link?: Array<{ 'content-type'?: string; URL?: string }>;
+            abstract?: string;
+            volume?: string;
+            issue?: string;
+            page?: string;
+            subject?: string[];
+            license?: Array<{ URL?: string }>;
+          },
+          idx: number,
+        ) => {
+          const rawTitle = Array.isArray(item.title)
+            ? item.title[0]
+            : item.title || 'Untitled Article';
+          const doi = item.DOI || undefined;
+          const journal = Array.isArray(item['container-title'])
+            ? item['container-title'][0]
+            : item['container-title'] || searchFeedTitle;
+          const authors = Array.isArray(item.author)
+            ? item.author.map(
+                (a) =>
+                  [a.given, a.family].filter(Boolean).join(' ') ||
+                  a.name ||
+                  'Author',
+              )
+            : [];
+          const pubDateParts =
+            item.published?.['date-parts']?.[0] ||
+            item.created?.['date-parts']?.[0];
+          const publishedDate = pubDateParts
+            ? `${pubDateParts[0]}-${String(pubDateParts[1] || 1).padStart(2, '0')}-${String(pubDateParts[2] || 1).padStart(2, '0')}`
+            : undefined;
 
-        return {
-          id: doi ? `doi:${doi}` : `search-item-${idx}`,
-          title: rawTitle,
-          url: item.URL || (doi ? `https://doi.org/${doi}` : undefined),
-          pdfUrl:
-            item.link?.find((l: any) => l['content-type'] === 'application/pdf')
-              ?.URL || (doi ? `https://doi.org/${doi}` : undefined),
-          doi,
-          authors,
-          creators: authors.map((name: string) => ({
-            name,
-            creatorType: 'author',
-          })),
-          abstract: item.abstract?.replace(/<[^>]+>/g, '').trim() || undefined,
-          publicationTitle: journal,
-          volume: item.volume || undefined,
-          issue: item.issue || undefined,
-          pages: item.page || undefined,
-          publicationDate: publishedDate,
-          year: pubDateParts ? pubDateParts[0] : undefined,
-          keywords: Array.isArray(item.subject) ? item.subject : [],
-          rights: item.license?.[0]?.URL || 'Open Access',
-          itemType: 'journalArticle' as const,
-        };
-      });
+          return {
+            id: doi ? `doi:${doi}` : `search-item-${idx}`,
+            title: rawTitle,
+            url: item.URL || (doi ? `https://doi.org/${doi}` : undefined),
+            pdfUrl:
+              item.link?.find((l) => l['content-type'] === 'application/pdf')
+                ?.URL || (doi ? `https://doi.org/${doi}` : undefined),
+            doi,
+            authors,
+            creators: authors.map((name: string) => ({
+              firstName: '',
+              lastName: name,
+              fullName: name,
+              creatorType: 'author' as const,
+            })),
+            abstract: item.abstract?.replace(/<[^>]+>/g, '').trim() || undefined,
+            publicationTitle: journal,
+            volume: item.volume || undefined,
+            issue: item.issue || undefined,
+            pages: item.page || undefined,
+            publicationDate: publishedDate,
+            year: pubDateParts ? pubDateParts[0] : undefined,
+            keywords: Array.isArray(item.subject) ? item.subject : [],
+            rights: item.license?.[0]?.URL || 'Open Access',
+            itemType: 'journalArticle' as const,
+          };
+        },
+      );
 
       return {
         format: 'rss2',

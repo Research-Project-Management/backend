@@ -153,15 +153,27 @@ export class ItemLifecycleSubscriber {
       (rawPayload as { itemId?: string; id?: string } | undefined)?.id;
     if (!itemId) return;
 
+    const deletedAtRaw = (
+      rawPayload as { deletedAt?: string | Date } | undefined
+    )?.deletedAt;
+    const itemDeletedAt = deletedAtRaw ? new Date(deletedAtRaw) : undefined;
+
     this.logger.log(
-      `[ExtractionSubscriber] Cascading restore to attachments and annotations for restored item ${itemId}`,
+      `[ExtractionSubscriber] Verifying attachment counts for restored item ${itemId}`,
     );
 
     try {
-      if (this.attachmentsRepository?.findMany) {
+      // Note: CommandRepository.restore already cascades restore inside the DB transaction.
+      // Only restore attachments/annotations if itemDeletedAt is explicitly provided so we never
+      // blindly resurrect attachments that were deleted long before the item was deleted.
+      if (
+        itemDeletedAt &&
+        !isNaN(itemDeletedAt.getTime()) &&
+        this.attachmentsRepository?.findMany
+      ) {
         const trashedAttachments = await this.attachmentsRepository.findMany({
           itemId,
-          deletedAt: { not: null },
+          deletedAt: { gte: itemDeletedAt },
         });
         const attachmentIds = (trashedAttachments || []).map(
           (attachment: { id: string }) => attachment.id,
@@ -172,8 +184,8 @@ export class ItemLifecycleSubscriber {
             attachmentIds,
           );
         }
-        await this.attachmentsRepository.restoreByItemId?.(itemId);
       }
+      await this.attachmentsRepository?.syncItemAttachmentCounts?.(itemId);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.warn(

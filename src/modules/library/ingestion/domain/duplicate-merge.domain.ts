@@ -37,6 +37,7 @@ export const TOP_LEVEL_ITEM_COLUMNS = new Set([
   'publicationTitle',
   'abstract',
   'url',
+  'firstAuthor',
 ]);
 
 export const IDENTIFIER_META_KEYS = [

@@ -191,17 +191,17 @@ export class RetractionDatabaseService implements OnModuleInit {
     // 3. PostgreSQL RetractionRecord Lookup (indexed lookup by DOI / PMID on cache miss)
     if (cleanDoi || cleanPmid) {
       let record =
-        cleanDoi && typeof this.repo.findRetractionRecordByDoi === 'function'
+        cleanDoi && this.repo.findRetractionRecordByDoi
           ? await this.repo.findRetractionRecordByDoi(cleanDoi)
           : null;
       if (
         !record &&
         cleanPmid &&
-        typeof this.repo.findRetractionRecordByPmid === 'function'
+        this.repo.findRetractionRecordByPmid
       ) {
         record = await this.repo.findRetractionRecordByPmid(cleanPmid);
       }
-      if (!record && typeof this.repo.findRetractionRecord === 'function') {
+      if (!record && this.repo.findRetractionRecord) {
         record = await this.repo.findRetractionRecord({
           OR: [
             ...(cleanDoi ? [{ doi: cleanDoi }] : []),

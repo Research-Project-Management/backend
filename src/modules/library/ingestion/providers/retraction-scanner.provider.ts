@@ -17,6 +17,13 @@ import {
 @Injectable()
 export class RetractionScannerProvider {
   private readonly logger = new Logger(RetractionScannerProvider.name);
+
+  async checkRetraction(
+    doi?: string | null,
+    pmid?: string | null,
+  ): Promise<RetractionLookupResult> {
+    return this.lookup(doi, pmid);
+  }
   constructor(
     private readonly retractionDb: RetractionDatabaseService,
     @Optional() private readonly httpClient?: AcademicHttpClient,
@@ -276,3 +283,5 @@ export class RetractionScannerProvider {
     return { retraction: null, isVerifiedClean: false };
   }
 }
+
+export { RetractionScannerProvider as RetractionScannerService };

@@ -51,7 +51,10 @@ export class OpenLibraryProvider implements MetadataProvider {
     options?: RequestInit,
   ): Promise<{ response: Response; attempts: number }> {
     if (this.httpClient) {
-      const res = await this.httpClient.request(url, options as any);
+      const res = await this.httpClient.request(url, {
+        signal: options?.signal ?? undefined,
+        headers: options?.headers as Record<string, string> | undefined,
+      });
       return { response: res.response, attempts: 1 };
     }
     const response = await fetch(url, options);

@@ -5,6 +5,7 @@ import {
   Inject,
   ConflictException,
   BadRequestException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   IngestionSubmissionEnvelope,
@@ -80,6 +81,27 @@ export class IngestionService {
   /**
    * Primary Fast-Path Submission Entry Point (Async 202 Contract)
    */
+  /**
+   * Computes deterministic SHA-256 request payload hash including overrides, collections, and tags.
+   */
+  public computeRequestHash(envelope: IngestionSubmissionEnvelope): string {
+    const projectId = envelope.projectId ?? '';
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          projectId,
+          payload: envelope.payload,
+          overrides: envelope.overrides,
+          collectionIds: envelope.collectionIds,
+          tagIds: envelope.tagIds,
+        }),
+      )
+      .digest('hex');
+  }
+
+  /**
+   * Primary Fast-Path Submission Entry Point (Async 202 Contract)
+   */
   async submit(
     envelope: IngestionSubmissionEnvelope,
     options?: { enqueue?: boolean },
@@ -93,9 +115,7 @@ export class IngestionService {
     const projectId = envelope.projectId ?? '';
     const idempotencyKey = envelope.idempotencyKey?.trim();
 
-    const requestHash = createHash('sha256')
-      .update(JSON.stringify({ projectId, payload: envelope.payload }))
-      .digest('hex');
+    const requestHash = this.computeRequestHash(envelope);
 
     // 1. Idempotency Check & Atomic Claim
     if (idempotencyKey) {
@@ -106,8 +126,8 @@ export class IngestionService {
 
       if (existingRun) {
         if (existingRun.inputHash !== requestHash) {
-          throw new ConflictException(
-            `Idempotency key "${idempotencyKey}" was already used with a different request payload`,
+          throw new UnprocessableEntityException(
+            'Idempotency key reused with different request payload',
           );
         }
 
@@ -131,7 +151,7 @@ export class IngestionService {
       envelope.payload.kind === 'RECORD' &&
       envelope.payload.content &&
       envelope.payload.content.length > 32 * 1024 &&
-      typeof this.storagePort?.uploadFile === 'function'
+      this.storagePort?.uploadFile
     ) {
       try {
         const rawBuffer = Buffer.from(envelope.payload.content, 'utf-8');
@@ -204,9 +224,9 @@ export class IngestionService {
         );
         if (raceRun) {
           if (raceRun.inputHash !== requestHash) {
-            throw new ConflictException(
-              `Idempotency key "${idempotencyKey}" was already used with a different request payload`,
-            );
+            throw new UnprocessableEntityException(
+            'Idempotency key reused with different request payload',
+          );
           }
           return {
             runId: raceRun.id,
@@ -513,7 +533,7 @@ export class IngestionService {
         ? payload.fileId
         : undefined;
 
-    if (claimCheckFileId && typeof this.storagePort?.deleteFile === 'function') {
+    if (claimCheckFileId && this.storagePort?.deleteFile) {
       try {
         await this.storagePort.deleteFile(claimCheckFileId);
         deletedClaimCheckBlob = true;
@@ -527,45 +547,9 @@ export class IngestionService {
 
     let expiredPreviewsDeleted = 0;
     try {
-      const now = new Date();
-      if (this.storagePort?.deleteFile) {
-        const expiredList = await this.repo.findExpiredCapturePreviews(now);
-        for (const p of expiredList) {
-          if (p.claimedAt) continue;
-          const meta =
-            p.canonicalMetadata &&
-            typeof p.canonicalMetadata === 'object' &&
-            !Array.isArray(p.canonicalMetadata)
-              ? (p.canonicalMetadata as Record<string, unknown>)
-              : {};
-          const extra =
-            meta.extraFields &&
-            typeof meta.extraFields === 'object' &&
-            !Array.isArray(meta.extraFields)
-              ? (meta.extraFields as Record<string, unknown>)
-              : {};
-          const scraped =
-            meta.scrapedData &&
-            typeof meta.scrapedData === 'object' &&
-            !Array.isArray(meta.scrapedData)
-              ? (meta.scrapedData as Record<string, unknown>)
-              : {};
-          const pdfFileId =
-            (typeof scraped.pdfFileId === 'string' && scraped.pdfFileId) ||
-            (typeof meta.pdfFileId === 'string' && meta.pdfFileId) ||
-            (typeof extra.pdfFileId === 'string' && extra.pdfFileId) ||
-            (typeof extra.fileId === 'string' && extra.fileId) ||
-            (typeof meta.fileId === 'string' && meta.fileId);
-          if (pdfFileId) {
-            try {
-              await this.storagePort.deleteFile(pdfFileId);
-            } catch {
-              // Ignore individual blob deletion errors
-            }
-          }
-        }
-      }
-      expiredPreviewsDeleted = await this.repo.deleteExpiredCapturePreviews(now);
+      expiredPreviewsDeleted = await this.urlCapture.cleanupExpiredPreviews(
+        options?.retentionDays ?? 0,
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
