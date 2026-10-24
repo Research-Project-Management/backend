@@ -1,5 +1,5 @@
 /**
- * Scope normalization and multi-tenant resolution helpers.
+ * Scope normalization and user/project resolution helpers.
  *
  * Pure Shared Kernel primitive used across Library bounded contexts
  * (Catalog, Search, Sync, Ingestion, Extraction, Citation) to distinguish
@@ -76,8 +76,8 @@ class CompositeScopeSpecification implements IScopeSpecificationOperand {
 }
 
 /**
- * ScopeSpecification: Enforces multi-tenant isolation.
- * Resolves to projectId for collaborative workspaces, or userId for user library.
+ * ScopeSpecification: Enforces user & project scope isolation.
+ * Resolves to projectId for user projects, or userId for personal user library.
  */
 export class ScopeSpecification implements IScopeSpecificationOperand {
   constructor(

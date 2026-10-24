@@ -1,6 +1,6 @@
 /**
  * Redis Key Namespaces for Library Module (redis-core convention)
- * Colon-separated hierarchical structure with workspace tenancy isolation.
+ * Colon-separated hierarchical structure with user/project scope isolation.
  */
 export const LIBRARY_REDIS_KEYS = {
   // Collections

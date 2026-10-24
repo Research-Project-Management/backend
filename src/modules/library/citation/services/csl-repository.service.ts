@@ -507,7 +507,7 @@ export class CslRepositoryService implements OnModuleInit {
       updated: new Date().toISOString(),
     };
 
-    // Cache XML and metadata with tenant/scope isolation
+    // Cache XML and metadata with user/project scope isolation
     if (this.redisCache) {
       await this.redisCache.set(`csl:xml:${slug}`, cslXml, 86400 * 365);
       const listKey = scopeId

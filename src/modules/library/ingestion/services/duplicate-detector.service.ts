@@ -587,7 +587,7 @@ export class DuplicateDetectorService {
 
     const idSpecs: Array<['doi' | 'arxivId' | 'pmid' | 'isbn', (val?: string | null) => string | undefined, 'EXACT_DOI' | 'EXACT_ARXIV' | 'EXACT_PMID' | 'EXACT_ISBN']> = [
       ['doi', normalizeDoi, 'EXACT_DOI'],
-      ['arxivId', normalizeArxivId, 'EXACT_ARXIV'],
+      ['arxivId', (val) => normalizeArxivId(val, { stripVersion: true }), 'EXACT_ARXIV'],
       ['pmid', normalizePmid, 'EXACT_PMID'],
       ['isbn', normalizeIsbn, 'EXACT_ISBN'],
     ];

@@ -685,9 +685,9 @@ export class IngestionRepository {
 
   // Local Metadata Identifier Lookup
   /**
-   * Tenant-scoped lookup of an Item by external identifier.
+   * Scope-isolated lookup of an Item by external identifier.
    * A scope is REQUIRED: items are user-owned and must never be resolved
-   * across tenants. Returns null (fail closed) when no userId is supplied.
+   * across user/project scopes. Returns null (fail closed) when no userId is supplied.
    */
   async findItemByIdentifier(
     type: string,

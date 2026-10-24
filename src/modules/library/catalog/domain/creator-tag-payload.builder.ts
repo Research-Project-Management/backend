@@ -77,7 +77,7 @@ export function resolveExtraPlainText(
   return updatedLines.join('\n').trim() || undefined;
 }
 const IGNORED_SYSTEM_KEYS = new Set([
-  'id', 'userId', 'projectId', 'workspaceId', 'createdById', 'uploadedById',
+  'id', 'userId', 'projectId', 'createdById', 'uploadedById',
   'createdAt', 'updatedAt', 'deletedAt', 'version', '_version',
   'expectedVersion', 'isDeleted', 'silent', 'creators', 'authors',
   'contributors', 'editors', 'tags', 'labels', 'itemTags', 'zoteroTags',
@@ -87,9 +87,7 @@ const IGNORED_SYSTEM_KEYS = new Set([
   'lastReadAt', 'extraFields', 'fileId', 'fileUrl', 'size', 'mimeType',
   'hasFile', 'attachmentCount', 'noteCount', 'firstAuthor', 'outgoingRel',
   'incomingRel', 'relations', 'seeAlso', 'identifiers', 'ingestionRuns',
-  'itemMetadata', 'publications', 'crossrefEnriched', 'ragDocId',
-  'ragIndexedAt', 'ragLastAttemptAt', 'ragAttempts', 'ragError', 'ragStatus',
-  'isRetracted', 'retraction', 'retractionStatus', 'retractionDate',
+  'itemMetadata', 'publications', 'crossrefEnriched',  'isRetracted', 'retraction', 'retractionStatus', 'retractionDate',
   'retractionNature', 'retractionReasons', 'retractionNoticeDoi',
   'retractionDetails', 'retractionCheckedAt', 'isMyPublication',
   'publicationConfirmedAt', 'ingestionStatus', 'extractionStatus',

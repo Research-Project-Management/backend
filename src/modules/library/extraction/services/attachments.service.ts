@@ -100,7 +100,7 @@ export class AttachmentsService {
     let resolvedFileId = input.fileId || extractFileIdFromUrl(input.url);
 
     // Content-Addressable Storage (CAS) Deduplication:
-    // If incoming upload has a valid fileHash, reuse existing storage blob if available within the same tenant scope
+    // If incoming upload has a valid fileHash, reuse existing storage blob if available within the same user/project scope
     let storageKey = input.storageKey;
     if (input.fileHash && input.fileHash.trim().length >= 32) {
       const effectiveProjectId = normalizeProjectScopeId(

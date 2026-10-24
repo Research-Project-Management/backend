@@ -140,7 +140,7 @@ export class ItemCurationService {
   }
 
   /**
-   * Imports existing library items into a specific collaborative project workspace.
+   * Imports existing library items into a specific user project library.
    * Performs batch duplicate detection and transactional item duplication.
    */
   async importItemsToProject(

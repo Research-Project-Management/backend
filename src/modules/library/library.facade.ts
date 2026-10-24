@@ -264,7 +264,7 @@ export class LibraryFacade implements ILibraryFacade {
           : {}),
         metadata: {
           ...currentMeta,
-          ragStatus: status,
+          extractionStatus: status,
           ...(metadataPatch ?? {}),
         } as Prisma.InputJsonValue,
       },

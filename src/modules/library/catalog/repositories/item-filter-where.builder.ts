@@ -232,8 +232,13 @@ export function buildItemWhereClause(
       .map((s) => s.trim())
       .filter((s): s is ReadStatus => validStatuses.includes(s as ReadStatus));
     if (statuses.length > 0) {
+      const existingSome =
+        where.states && typeof where.states === 'object' && 'some' in where.states && where.states.some
+          ? (where.states.some as Prisma.StateWhereInput)
+          : {};
       where.states = {
         some: {
+          ...existingSome,
           userId,
           readStatus: statuses.length > 1 ? { in: statuses } : statuses[0],
         },

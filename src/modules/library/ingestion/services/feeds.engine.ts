@@ -266,7 +266,7 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
 
       if (totalPurged > 0) {
         this.logger.log(
-          `Multi-Tenant Retention Pruner: Safely purged ${totalPurged} feed items based on subscriber preferences.`,
+          `Feed Retention Pruner: Safely purged ${totalPurged} feed items based on subscriber preferences.`,
         );
       }
       return totalPurged;
