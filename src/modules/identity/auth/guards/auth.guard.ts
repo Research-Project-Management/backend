@@ -159,28 +159,29 @@ export class AuthGuard implements CanActivate {
 
       if (this.redis) {
         try {
-          if (sessionId) {
-            const isSessionRevoked = await this.redis.get<string | number>(
-              IDENTITY_REDIS_KEYS.revokedSession(sessionId),
+          const [isSessionRevoked, revokedAt] = await Promise.all([
+            sessionId
+              ? this.redis.get<string | number>(
+                  IDENTITY_REDIS_KEYS.revokedSession(sessionId),
+                )
+              : Promise.resolve(null),
+            userId
+              ? this.redis.get<number>(IDENTITY_REDIS_KEYS.revoked(userId))
+              : Promise.resolve(null),
+          ]);
+
+          if (isSessionRevoked) {
+            throw new UnauthorizedException(
+              'Session has been revoked or expired. Please log in again.',
             );
-            if (isSessionRevoked) {
+          }
+
+          if (revokedAt) {
+            const tokenIatMs = (payload.iat || 0) * 1000;
+            if (tokenIatMs <= revokedAt) {
               throw new UnauthorizedException(
                 'Session has been revoked or expired. Please log in again.',
               );
-            }
-          }
-
-          if (userId) {
-            const revokedAt = await this.redis.get<number>(
-              IDENTITY_REDIS_KEYS.revoked(userId),
-            );
-            if (revokedAt) {
-              const tokenIatMs = (payload.iat || 0) * 1000;
-              if (tokenIatMs <= revokedAt) {
-                throw new UnauthorizedException(
-                  'Session has been revoked or expired. Please log in again.',
-                );
-              }
             }
           }
         } catch (err: unknown) {

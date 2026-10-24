@@ -178,11 +178,14 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     if (this.isReady() && this.redisClient) {
       try {
         const data = await this.redisClient.get(key);
-        if (data) {
+        if (data !== null) {
           // Cache in memory for subsequent sub-millisecond reads with bounded TTL (60s)
           this.setMemoryCache(key, data, 60);
           return JSON.parse(data) as T;
         }
+        // Cache negative lookup (key does not exist) briefly (15s) to prevent repeated Redis round-trips on hot paths (e.g., AuthGuard revocation checks)
+        this.setMemoryCache(key, 'null', 15);
+        return null;
       } catch (err: unknown) {
         this.logger.warn(
           `Cache get failed for key "${key}": ${getErrorMessage(err)}`,

@@ -27,27 +27,29 @@ export class ChatService {
    * Get all conversations accessible to the user (Direct, Group, and Project Channels).
    */
   async getUserConversations(userId: string) {
-    // 1. Direct and Group conversations where user is an explicit ConversationMember
-    const standardMemberships = await this.prisma.conversationMember.findMany({
-      where: {
-        userId,
-        conversation: {
-          type: { in: [ConversationType.direct, ConversationType.group] },
+    // 1. Fetch Direct/Group memberships and User Projects in parallel
+    const [standardMemberships, userProjects] = await Promise.all([
+      this.prisma.conversationMember.findMany({
+        where: {
+          userId,
+          conversation: {
+            type: { in: [ConversationType.direct, ConversationType.group] },
+          },
         },
-      },
-      include: {
-        conversation: {
-          include: {
-            members: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    email: true,
-                    profile: {
-                      select: {
-                        name: true,
-                        avatar: true,
+        include: {
+          conversation: {
+            include: {
+              members: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      email: true,
+                      profile: {
+                        select: {
+                          name: true,
+                          avatar: true,
+                        },
                       },
                     },
                   },
@@ -56,124 +58,158 @@ export class ChatService {
             },
           },
         },
-      },
-      orderBy: { conversation: { lastMessageAt: 'desc' } },
-    });
-
-    // 2. Project Channels where user is a ProjectMember or ConversationMember
-    // First find projects user is part of
-    const userProjects = await this.prisma.project.findMany({
-      where: {
-        OR: [{ createdById: userId }, { members: { some: { userId } } }],
-      },
-      select: { id: true, name: true, identifier: true },
-    });
+        orderBy: { conversation: { lastMessageAt: 'desc' } },
+      }),
+      this.prisma.project.findMany({
+        where: {
+          OR: [{ createdById: userId }, { members: { some: { userId } } }],
+        },
+        select: { id: true, name: true, identifier: true },
+      }),
+    ]);
 
     const projectIds = userProjects.map((p) => p.id);
     const projectMap = new Map(userProjects.map((p) => [p.id, p]));
 
-    const projectChannels = await this.prisma.conversation.findMany({
-      where: {
-        projectId: { in: projectIds },
-        type: ConversationType.project_channel,
-      },
-      include: {
-        members: {
-          where: { userId },
+    const projectChannels =
+      projectIds.length > 0
+        ? await this.prisma.conversation.findMany({
+            where: {
+              projectId: { in: projectIds },
+              type: ConversationType.project_channel,
+            },
+            include: {
+              members: {
+                where: { userId },
+              },
+            },
+            orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+          })
+        : [];
+
+    // 2. Fast-path unread count resolution:
+    // Only query conversations where lastMessageAt > lastReadAt (eliminates N+1 queries for read/empty chats)
+    const unreadThresholds = new Map<string, Date>();
+
+    for (const m of standardMemberships) {
+      const conv = m.conversation;
+      const lastReadAt = m.lastReadAt || new Date(0);
+      if (conv.lastMessageAt && conv.lastMessageAt > lastReadAt) {
+        unreadThresholds.set(conv.id, lastReadAt);
+      }
+    }
+
+    for (const ch of projectChannels) {
+      const membership = ch.members[0];
+      const lastReadAt = membership?.lastReadAt || new Date(0);
+      if (ch.lastMessageAt && ch.lastMessageAt > lastReadAt) {
+        unreadThresholds.set(ch.id, lastReadAt);
+      }
+    }
+
+    const unreadCountMap = new Map<string, number>();
+
+    if (unreadThresholds.size > 0) {
+      const candidateIds = Array.from(unreadThresholds.keys());
+      let minLastReadAt = new Date();
+      for (const dt of unreadThresholds.values()) {
+        if (dt < minLastReadAt) minLastReadAt = dt;
+      }
+
+      const candidateMessages = await this.prisma.message.findMany({
+        where: {
+          conversationId: { in: candidateIds },
+          senderId: { not: userId },
+          isDeleted: false,
+          createdAt: { gt: minLastReadAt },
         },
-      },
-      orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+        select: {
+          conversationId: true,
+          createdAt: true,
+        },
+      });
+
+      for (const msg of candidateMessages) {
+        const threshold = unreadThresholds.get(msg.conversationId);
+        if (threshold && msg.createdAt > threshold) {
+          unreadCountMap.set(
+            msg.conversationId,
+            (unreadCountMap.get(msg.conversationId) || 0) + 1,
+          );
+        }
+      }
+    }
+
+    // 3. Format results synchronously in memory (0 additional DB queries)
+    const formattedStandard = standardMemberships.map((m) => {
+      const conv = m.conversation;
+      const unreadCount = unreadCountMap.get(conv.id) || 0;
+
+      let title = conv.name;
+      let avatar = conv.avatar;
+      let otherUser = null;
+
+      if (conv.type === ConversationType.direct) {
+        const otherMember = conv.members.find((mem) => mem.userId !== userId);
+        if (otherMember) {
+          const profile = otherMember.user.profile;
+          title = profile?.name || otherMember.user.email.split('@')[0];
+          avatar = profile?.avatar || null;
+          otherUser = {
+            id: otherMember.user.id,
+            email: otherMember.user.email,
+            name: title,
+            avatar,
+          };
+        }
+      }
+
+      return {
+        id: conv.id,
+        type: conv.type,
+        name: title || 'Conversation',
+        topic: conv.topic,
+        avatar,
+        projectId: conv.projectId,
+        isDefault: conv.isDefault,
+        otherUser,
+        memberCount: conv.members.length,
+        lastMessageAt: conv.lastMessageAt,
+        lastMessageSnippet: conv.lastMessageSnippet,
+        lastSenderName: conv.lastSenderName,
+        unreadCount,
+        isMuted: m.isMuted,
+        isPinned: m.isPinned,
+        updatedAt: conv.updatedAt,
+      };
     });
 
-    // Calculate unread counts and format
-    const formattedStandard = await Promise.all(
-      standardMemberships.map(async (m) => {
-        const conv = m.conversation;
-        const unreadCount = await this.prisma.message.count({
-          where: {
-            conversationId: conv.id,
-            createdAt: { gt: m.lastReadAt },
-            senderId: { not: userId },
-          },
-        });
+    const formattedChannels = projectChannels.map((ch) => {
+      const membership = ch.members[0];
+      const unreadCount = unreadCountMap.get(ch.id) || 0;
+      const proj = ch.projectId ? projectMap.get(ch.projectId) : null;
 
-        // Determine title and avatar
-        let title = conv.name;
-        let avatar = conv.avatar;
-        let otherUser = null;
-
-        if (conv.type === ConversationType.direct) {
-          const otherMember = conv.members.find((mem) => mem.userId !== userId);
-          if (otherMember) {
-            const profile = otherMember.user.profile;
-            title = profile?.name || otherMember.user.email.split('@')[0];
-            avatar = profile?.avatar || null;
-            otherUser = {
-              id: otherMember.user.id,
-              email: otherMember.user.email,
-              name: title,
-              avatar,
-            };
-          }
-        }
-
-        return {
-          id: conv.id,
-          type: conv.type,
-          name: title || 'Conversation',
-          topic: conv.topic,
-          avatar,
-          projectId: conv.projectId,
-          isDefault: conv.isDefault,
-          otherUser,
-          memberCount: conv.members.length,
-          lastMessageAt: conv.lastMessageAt,
-          lastMessageSnippet: conv.lastMessageSnippet,
-          lastSenderName: conv.lastSenderName,
-          unreadCount,
-          isMuted: m.isMuted,
-          isPinned: m.isPinned,
-          updatedAt: conv.updatedAt,
-        };
-      }),
-    );
-
-    const formattedChannels = await Promise.all(
-      projectChannels.map(async (ch) => {
-        const membership = ch.members[0];
-        const lastReadAt = membership?.lastReadAt || new Date(0);
-        const unreadCount = await this.prisma.message.count({
-          where: {
-            conversationId: ch.id,
-            createdAt: { gt: lastReadAt },
-            senderId: { not: userId },
-          },
-        });
-
-        const proj = ch.projectId ? projectMap.get(ch.projectId) : null;
-
-        return {
-          id: ch.id,
-          type: ch.type,
-          name: ch.name || 'general',
-          topic: ch.topic,
-          avatar: ch.avatar,
-          projectId: ch.projectId,
-          projectName: proj?.name || 'Project',
-          projectIdentifier: proj?.identifier || '',
-          isDefault: ch.isDefault,
-          otherUser: null,
-          memberCount: 0,
-          lastMessageAt: ch.lastMessageAt,
-          lastMessageSnippet: ch.lastMessageSnippet,
-          lastSenderName: ch.lastSenderName,
-          unreadCount,
-          isMuted: membership?.isMuted || false,
-          isPinned: membership?.isPinned || false,
-          updatedAt: ch.updatedAt,
-        };
-      }),
-    );
+      return {
+        id: ch.id,
+        type: ch.type,
+        name: ch.name || 'general',
+        topic: ch.topic,
+        avatar: ch.avatar,
+        projectId: ch.projectId,
+        projectName: proj?.name || 'Project',
+        projectIdentifier: proj?.identifier || '',
+        isDefault: ch.isDefault,
+        otherUser: null,
+        memberCount: 0,
+        lastMessageAt: ch.lastMessageAt,
+        lastMessageSnippet: ch.lastMessageSnippet,
+        lastSenderName: ch.lastSenderName,
+        unreadCount,
+        isMuted: membership?.isMuted || false,
+        isPinned: membership?.isPinned || false,
+        updatedAt: ch.updatedAt,
+      };
+    });
 
     return {
       directs: formattedStandard.filter(

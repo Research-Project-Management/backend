@@ -591,19 +591,20 @@ export class CoreRepository {
       projectId = proj.id;
     }
 
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: {
-        startDate: true,
-        targetDate: true,
-        state: true,
-      },
-    });
-
-    const states = await this.prisma.workItemState.findMany({
-      where: { projectId },
-      select: { id: true, group: true },
-    });
+    const [project, states] = await Promise.all([
+      this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: {
+          startDate: true,
+          targetDate: true,
+          state: true,
+        },
+      }),
+      this.prisma.workItemState.findMany({
+        where: { projectId },
+        select: { id: true, group: true },
+      }),
+    ]);
 
     const stateList: { id: string; group: string }[] = states;
 

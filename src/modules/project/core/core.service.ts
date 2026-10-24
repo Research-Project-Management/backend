@@ -117,11 +117,16 @@ export class CoreService {
       );
     }
 
-    // Batch check favorites for this user
-    const favoriteSet = await this.favoriteService.batchCheckFavorites(
-      projects.map((p) => p.id),
-      userId,
-    );
+    const [favoriteSet, membershipMap] = await Promise.all([
+      this.favoriteService.batchCheckFavorites(
+        projects.map((p) => p.id),
+        userId,
+      ),
+      this.projectRepo.findMembershipsForUser(
+        projects.filter((p) => p.createdById !== userId).map((p) => p.id),
+        userId,
+      ),
+    ]);
 
     // Apply favorite filter if requested
     if (query?.isFavorite !== undefined) {
@@ -129,16 +134,6 @@ export class CoreService {
         query.isFavorite ? favoriteSet.has(p.id) : !favoriteSet.has(p.id),
       );
     }
-
-    // Resolve user roles for shared projects in a single batch query
-    const sharedProjectIds = projects
-      .filter((p) => p.createdById !== userId)
-      .map((p) => p.id);
-
-    const membershipMap = await this.projectRepo.findMembershipsForUser(
-      sharedProjectIds,
-      userId,
-    );
 
     const enrichProject = (p: ProjectWithMembers): EnrichedProject => {
       const yourRole =
@@ -193,14 +188,12 @@ export class CoreService {
       return proj;
     };
 
-    const project = this.cache
-      ? await this.cache.wrap(cacheKey, projectFetch, CACHE_TTL_SECONDS.DETAIL)
-      : await projectFetch();
-
-    const isFavorite = await this.favoriteService.isProjectFavorite(
-      projectId,
-      userId,
-    );
+    const [project, isFavorite] = await Promise.all([
+      this.cache
+        ? this.cache.wrap(cacheKey, projectFetch, CACHE_TTL_SECONDS.DETAIL)
+        : projectFetch(),
+      this.favoriteService.isProjectFavorite(projectId, userId),
+    ]);
     const yourRole = this.resolveUserRoleInProject(project, userId);
     const permissions = calculateProjectPermissions(yourRole, project.isActive);
 
@@ -237,15 +230,23 @@ export class CoreService {
       return overview;
     };
 
-    const overview = this.cache
-      ? await this.cache.wrap(
-          cacheKey,
-          overviewFetch,
-          CACHE_TTL_SECONDS.OVERVIEW,
-        )
-      : await overviewFetch();
-
-    const project = await this.projectRepo.findProjectById(projectId);
+    const projectDetailCacheKey = CACHE_KEYS.detail(projectId);
+    const [overview, project] = await Promise.all([
+      this.cache
+        ? this.cache.wrap(
+            cacheKey,
+            overviewFetch,
+            CACHE_TTL_SECONDS.OVERVIEW,
+          )
+        : overviewFetch(),
+      this.cache
+        ? this.cache.wrap(
+            projectDetailCacheKey,
+            () => this.projectRepo.findProjectById(projectId),
+            CACHE_TTL_SECONDS.DETAIL,
+          )
+        : this.projectRepo.findProjectById(projectId),
+    ]);
     const yourRole = this.resolveUserRoleInProject(project, userId);
 
     return {

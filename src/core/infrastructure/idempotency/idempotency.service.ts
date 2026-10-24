@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   Optional,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { RedisCacheService } from '../redis/redis.service';
@@ -56,7 +57,7 @@ export class IdempotencyService {
             cached.requestHash &&
             cached.requestHash !== requestHash
           ) {
-            throw new ConflictException(
+            throw new UnprocessableEntityException(
               'Idempotency key reused with different request payload',
             );
           }
@@ -71,7 +72,7 @@ export class IdempotencyService {
           };
         }
       } catch (err: unknown) {
-        if (err instanceof ConflictException) {
+        if (err instanceof ConflictException || err instanceof UnprocessableEntityException) {
           throw err;
         }
         const msg = err instanceof Error ? err.message : String(err);
@@ -102,9 +103,9 @@ export class IdempotencyService {
         record.requestHash &&
         record.requestHash !== requestHash
       ) {
-        throw new ConflictException(
-          'Idempotency key reused with different request payload',
-        );
+        throw new UnprocessableEntityException(
+              'Idempotency key reused with different request payload',
+            );
       }
 
       if (record.status === 'in_progress') {

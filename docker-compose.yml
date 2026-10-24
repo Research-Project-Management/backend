@@ -13,7 +13,7 @@ services:
   db:
     image: postgres:16-alpine
     container_name: flux_postgres
-    restart: unless-stopped
+    restart: "no"
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -52,7 +52,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: flux_redis
-    restart: unless-stopped
+    restart: "no"
     command: redis-server --appendonly yes
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -94,7 +94,7 @@ services:
       target: runner
     image: ghcr.io/research-project-management/backend:latest
     container_name: flux_backend
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "${PORT:-3000}:3000"
     env_file:
@@ -145,7 +145,7 @@ services:
       target: runner
     image: ghcr.io/research-project-management/backend:latest
     container_name: flux_backend_worker
-    restart: unless-stopped
+    restart: "no"
     command: ["node", "dist/worker.js"]
     volumes:
       - ./dist:/app/dist
@@ -197,7 +197,7 @@ services:
   clsi:
     image: ghcr.io/research-project-management/clsi:latest
     container_name: flux_clsi
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "127.0.0.1:${CLSI_PORT:-3013}:3013"
     environment:
@@ -227,7 +227,7 @@ services:
   searxng:
     image: searxng/searxng:latest
     container_name: flux_searxng
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "127.0.0.1:${SEARXNG_PORT:-8080}:8080"
     volumes:
