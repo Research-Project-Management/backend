@@ -10,7 +10,12 @@ import { Readable } from 'stream';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { IDocPersistor, Md5MismatchError, computeContentMd5 } from '../domain';
+import {
+  IDocPersistor,
+  Md5MismatchError,
+  ArchiveObjectNotFoundError,
+  computeContentMd5,
+} from '../domain';
 
 /**
  * Pure in-memory archive repository adapter for fast, deterministic unit tests.
@@ -45,7 +50,7 @@ export class InMemoryDocArchiveRepository implements IDocPersistor {
   public async getObjectStream(key: string): Promise<Readable> {
     const item = this.store.get(key);
     if (!item) {
-      throw new Error(`Archive object not found: ${key}`);
+      throw new ArchiveObjectNotFoundError(key);
     }
     return Readable.from(item.buffer);
   }
@@ -53,7 +58,7 @@ export class InMemoryDocArchiveRepository implements IDocPersistor {
   public async getObjectMd5Hash(key: string): Promise<string> {
     const item = this.store.get(key);
     if (!item) {
-      throw new Error(`Archive object not found: ${key}`);
+      throw new ArchiveObjectNotFoundError(key);
     }
     return item.md5;
   }
@@ -188,7 +193,7 @@ export class DocArchiveRepository implements IDocPersistor {
       this.setInMemoryItem(key, item);
       return item;
     } catch {
-      throw new Error(`Archive object not found: ${key}`);
+      throw new ArchiveObjectNotFoundError(key);
     }
   }
 

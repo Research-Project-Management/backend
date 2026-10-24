@@ -30,6 +30,7 @@ import {
   NoProjectContext,
   ResolvedProject,
 } from '@/modules/project/access';
+import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { DiagnosticsService } from './diagnostics.service';
 import {
   ParseLogDto,
@@ -54,6 +55,8 @@ export class DiagnosticsController {
   constructor(private readonly diagnosticsService: DiagnosticsService) {}
 
   @Post('parse-log')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
   @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -81,6 +84,8 @@ export class DiagnosticsController {
   }
 
   @Post('lint')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
   @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -92,8 +97,9 @@ export class DiagnosticsController {
   }
 
   @Post('projects/:projectId/lint')
-  @UseGuards(ProjectAccessGuard)
+  @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.REVIEWER)
+  @UserRateLimit('search-replace')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -110,6 +116,8 @@ export class DiagnosticsController {
   }
 
   @Post('autofix')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
   @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

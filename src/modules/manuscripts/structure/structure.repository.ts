@@ -382,7 +382,7 @@ export class StructureRepository extends IStructureRepository {
     const normalizedText = lines.join('\n');
     const sizeBytes = Buffer.byteLength(normalizedText, 'utf8');
     const { createHash } = await import('node:crypto');
-    const hash = createHash('sha1')
+    const hash = createHash('sha256')
       .update(`blob ${sizeBytes}\0${normalizedText}`, 'utf8')
       .digest('hex');
 

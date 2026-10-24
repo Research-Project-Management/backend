@@ -11,6 +11,7 @@ import {
   ManuscriptNodeEntity,
   NodePathVo,
   FileTreeBuilder,
+  StructureError,
   DuplicateNodePathError,
   NodeNotFoundError,
   CannotDeleteRootFolderError,
@@ -100,7 +101,7 @@ export class StructureService {
         throw new NodeNotFoundError(dto.parentId);
       }
       if (!parentNode.isFolder()) {
-        throw new Error('Parent node must be a FOLDER');
+        throw new StructureError('Parent node must be a FOLDER');
       }
       computedPath = NodePathVo.join(parentNode.path, dto.name);
     } else if (dto.path) {
@@ -196,8 +197,19 @@ export class StructureService {
         node,
       });
       return node;
-    } catch (err: any) {
-      if (err?.code === 'P2002' || err?.message?.includes('P2002')) {
+    } catch (err: unknown) {
+      if (resolvedDocId && !dto.docId) {
+        try {
+          if (this.docstoreService) {
+            await this.docstoreService.patchDoc(projectId, resolvedDocId, {
+              deleted: true,
+              deletedAt: new Date().toISOString(),
+            });
+          }
+        } catch {}
+      }
+      const errObj = err as { code?: string; message?: string } | null;
+      if (errObj?.code === 'P2002' || errObj?.message?.includes('P2002')) {
         throw new DuplicateNodePathError(computedPath);
       }
       throw err;
@@ -210,7 +222,7 @@ export class StructureService {
   ): Promise<ManuscriptNodeEntity> {
     const normalized = NodePathVo.normalize(dirPath);
     if (normalized === '/') {
-      throw new Error('Cannot mkdirp root directory');
+      throw new StructureError('Cannot mkdirp root directory');
     }
 
     const segments = normalized.split('/').filter(Boolean);
@@ -278,7 +290,7 @@ export class StructureService {
         throw new NodeNotFoundError(targetParentId);
       }
       if (!destParent.isFolder()) {
-        throw new Error('Destination parent must be a FOLDER');
+        throw new StructureError('Destination parent must be a FOLDER');
       }
       destPath = NodePathVo.join(destParent.path, targetNode.name);
       newParentId = destParent.id;
@@ -289,7 +301,7 @@ export class StructureService {
       if (parentPath !== '/') {
         const parentNode = await this.repo.findByPath(projectId, parentPath);
         if (parentNode && !parentNode.isFolder()) {
-          throw new Error('Destination parent must be a FOLDER');
+          throw new StructureError('Destination parent must be a FOLDER');
         }
         newParentId = parentNode ? parentNode.id : null;
       }
@@ -392,42 +404,14 @@ export class StructureService {
           .filter((id): id is string => typeof id === 'string' && id.length > 0),
       ),
     );
-    const fileIds = Array.from(
-      new Set(
-        deletedNodes
-          .map((n) => n.fileId)
-          .filter((id): id is string => typeof id === 'string' && id.length > 0),
-      ),
-    );
-
     const liveCollab = this.getLiveCollab();
 
-    for (const docId of docIds) {
-      if (this.docstoreService) {
+    if (liveCollab) {
+      for (const docId of docIds) {
         try {
-          await this.docstoreService.patchDoc(projectId, docId, {
-            deleted: true,
-            deletedAt: new Date().toISOString(),
-          });
-        } catch {
-          // Already marked deleted by deleteSubtree or not found
-        }
-      }
-      if (liveCollab) {
-        try {
-          await liveCollab.applyExternalText(projectId, docId, '');
+          await liveCollab.evictDoc(projectId, docId);
         } catch {
           // Ignore liveCollab cleanup errors
-        }
-      }
-    }
-
-    for (const fileId of fileIds) {
-      if (this.filestoreService) {
-        try {
-          await this.filestoreService.deleteFile(projectId, fileId, true);
-        } catch {
-          // Already marked deleted by deleteSubtree or not found
         }
       }
     }
@@ -435,6 +419,7 @@ export class StructureService {
     const hadRootDoc = deletedNodes.some((n) => n.isRootDoc);
     if (hadRootDoc) {
       await this.repo.unsetRootDoc(projectId);
+      await this.autoDetectRootDoc(projectId, new Map()).catch(() => null);
     }
 
     this.realtimeService?.broadcastFileTreeChange(projectId, {
@@ -459,7 +444,7 @@ export class StructureService {
       throw new NodeNotFoundError(nodeId);
     }
     if (!found.isDoc() && !found.name.toLowerCase().endsWith('.tex')) {
-      throw new Error(
+      throw new StructureError(
         `Cannot set node of type ${found.type} as root document. Must be a LaTeX document (.tex).`,
       );
     }
@@ -590,7 +575,9 @@ export class StructureService {
     hash?: string | null,
   ): Promise<ManuscriptNodeEntity> {
     if (!this.repo.updateNodeFileId) {
-      throw new Error('updateNodeFileId is not supported by this repository');
+      throw new StructureError(
+        'updateNodeFileId is not supported by this repository',
+      );
     }
     const node = await this.repo.updateNodeFileId(
       projectId,

@@ -4,8 +4,7 @@
  * Zero I/O, zero NestJS imports.
  */
 
-import { InvalidWordException } from './invalid-word.exception';
-import { UnsupportedLanguageException } from './unsupported-language.exception';
+import { InvalidWordException, UnsupportedLanguageException } from './spelling.exceptions';
 import {
   ACADEMIC_SHARED_WORDS,
   ENGLISH_COMMON_WORDS,

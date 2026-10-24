@@ -69,9 +69,7 @@ export class TemplatesService {
 
   async getTemplate(idOrVersionId: string) {
     const entity = await this.getTemplateEntity(idOrVersionId);
-    return typeof entity.toPlainObject === 'function'
-      ? entity.toPlainObject()
-      : entity;
+    return entity.toPlainObject();
   }
 
   async searchTemplates(dto: SearchTemplatesDto) {

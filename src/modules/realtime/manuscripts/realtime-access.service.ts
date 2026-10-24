@@ -22,6 +22,7 @@ interface CachedAccessEntry {
 @Injectable()
 export class RealtimeAccessService {
   private readonly logger = new Logger(RealtimeAccessService.name);
+  private static readonly MAX_CACHE_ENTRIES = 2000;
   private readonly cache = new Map<string, CachedAccessEntry>();
 
   constructor(
@@ -29,6 +30,30 @@ export class RealtimeAccessService {
     private readonly prisma: PrismaService,
     private readonly config: RealtimeConfigService,
   ) {}
+
+  private setCacheEntry(
+    key: string,
+    access: RealtimeProjectAccess,
+    now: number,
+  ): void {
+    if (!this.cache.has(key) && this.cache.size >= RealtimeAccessService.MAX_CACHE_ENTRIES) {
+      for (const [k, entry] of this.cache) {
+        if (entry.expiresAt <= now) {
+          this.cache.delete(k);
+        }
+      }
+      if (this.cache.size >= RealtimeAccessService.MAX_CACHE_ENTRIES) {
+        const oldestKey = this.cache.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.cache.delete(oldestKey);
+        }
+      }
+    }
+    this.cache.set(key, {
+      access,
+      expiresAt: now + this.config.getAuthCacheTtlSeconds() * 1000,
+    });
+  }
 
   private getCacheKey(projectId: string, userId: string): string {
     return `${projectId}:${userId}`;
@@ -89,10 +114,7 @@ export class RealtimeAccessService {
           role: 'none',
           decision: 'denied',
         };
-        this.cache.set(cacheKey, {
-          access: deniedResult,
-          expiresAt: now + this.config.getAuthCacheTtlSeconds() * 1000,
-        });
+        this.setCacheEntry(cacheKey, deniedResult, now);
         return deniedResult;
       }
 
@@ -111,10 +133,7 @@ export class RealtimeAccessService {
         decision: 'allowed',
       };
 
-      this.cache.set(cacheKey, {
-        access: accessResult,
-        expiresAt: now + this.config.getAuthCacheTtlSeconds() * 1000,
-      });
+      this.setCacheEntry(cacheKey, accessResult, now);
 
       return accessResult;
     } catch (err: unknown) {

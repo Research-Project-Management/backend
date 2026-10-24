@@ -79,8 +79,10 @@ export class ClsiController {
     return { success: true, cancelled };
   }
 
-  @Post(['word-count', 'clsi/word-count'])
-  @NoProjectContext()
+  @Post(['word-count', 'clsi/word-count', 'projects/:projectId/word-count'])
+  @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
+  @RequireRole(Role.REVIEWER)
+  @UserRateLimit('compile')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Calculate academic word count and metrics (texcount parity)',

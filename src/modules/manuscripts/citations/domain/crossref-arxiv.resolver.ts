@@ -5,8 +5,8 @@
  */
 
 import { IIdentifierResolverPort } from './citations.ports';
-import { AcademicIdentifierVo } from './value-objects/academic-identifier.vo';
-import { BibEntry } from './entities/bib-entry.entity';
+import { AcademicIdentifierVo } from './academic-identifier.vo';
+import { BibEntry } from './bib-entry.entity';
 import { RegexAstBibtexParser } from './regex-ast-bibtex.parser';
 import { sanitizeCitationKey } from './bibtex.formatter';
 

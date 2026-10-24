@@ -34,6 +34,7 @@ import {
   NoProjectContext,
   ResolvedProject,
 } from '@/modules/project/access';
+import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { CitationsService } from './citations.service';
 import {
   CitationQueryDto,
@@ -97,7 +98,9 @@ export class CitationsController {
   }
 
   @Post('resolve')
+  @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
+  @UserRateLimit('import')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -149,7 +152,9 @@ export class CitationsController {
   }
 
   @Post('sync-library')
+  @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
+  @UserRateLimit('import')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Sync bibliography collection from external library (Zotero/Flux)',
@@ -215,6 +220,8 @@ export class CitationsUtilityController {
   }
 
   @Post('parse-raw')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
   @NoProjectContext()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Parse raw BibTeX text content in memory' })

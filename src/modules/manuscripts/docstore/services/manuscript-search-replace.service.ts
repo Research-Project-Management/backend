@@ -116,6 +116,7 @@ export class ManuscriptSearchReplaceService {
       };
     }
 
+    
     try {
       const re = buildSearchRegex(query, {
         caseSensitive: body?.caseSensitive,

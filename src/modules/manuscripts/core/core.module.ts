@@ -8,13 +8,22 @@
 
 import { Global, Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
+import { ManuscriptsConfigService } from './config/manuscripts.config';
 import { ProjectWorkspaceCollectorService } from './services/project-workspace-collector.service';
 import { ManuscriptUserResolverService } from '@/modules/manuscripts/docstore/services/manuscript-user-resolver.service';
 
 @Global()
 @Module({
   imports: [PrismaModule],
-  providers: [ProjectWorkspaceCollectorService, ManuscriptUserResolverService],
-  exports: [ProjectWorkspaceCollectorService, ManuscriptUserResolverService],
+  providers: [
+    ManuscriptsConfigService,
+    ProjectWorkspaceCollectorService,
+    ManuscriptUserResolverService,
+  ],
+  exports: [
+    ManuscriptsConfigService,
+    ProjectWorkspaceCollectorService,
+    ManuscriptUserResolverService,
+  ],
 })
 export class ManuscriptsCoreModule {}

@@ -46,6 +46,12 @@ export abstract class LiveCollaborationPort {
   flushDoc(projectId: string, docId: string): Promise<string[]> {
     return this.flushDocs(projectId, [docId]);
   }
+
+  /**
+   * Immediately terminates any active in-memory Yjs session for a deleted document,
+   * cancelling pending debounce timers so deleted documents are never re-flushed to Postgres.
+   */
+  abstract evictDoc(projectId: string, docId: string): Promise<void>;
 }
 
 export const LIVE_COLLABORATION_PORT = LiveCollaborationPort;

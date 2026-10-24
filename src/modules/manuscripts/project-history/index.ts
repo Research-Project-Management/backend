@@ -7,5 +7,7 @@ export * from './project-history.module';
 export * from './project-history.service';
 export * from './project-history.controller';
 export * from './project-history.repository';
+export * from './adapters/project-history.adapters';
+export * from './adapters/project-history.adapters';
 export * from './dto/history.dto';
 export * from './domain';

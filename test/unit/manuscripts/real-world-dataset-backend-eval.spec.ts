@@ -467,6 +467,7 @@ describe('Backend Manuscripts / CLSI / Yjs Gateway - Real-World Dataset Evaluati
           async (id: string) => changes.find((c) => c.id === id) || null,
         ),
         saveChange: jest.fn(async (c: TrackChange) => c),
+        batchUpdateChangesStatus: jest.fn(async () => undefined),
       };
 
       const mockNotifier = {

@@ -7,6 +7,10 @@
 import * as os from 'os';
 import * as path from 'path';
 import { SandboxConfigurationException } from '../../domain/sandbox-errors';
+import {
+  getRawManuscriptsEnv,
+  readManuscriptsConfig,
+} from '../../../core/config/manuscripts.config';
 
 export type SandboxMode = 'container' | 'local-unsafe';
 
@@ -37,10 +41,11 @@ const DIGEST_REGEX = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 export function parseSandboxConfig(
   options: ParseSandboxConfigOptions = {},
 ): ClsiSandboxConfig {
-  const env = options.env ?? process.env;
+  const defaultConfig = readManuscriptsConfig();
+  const env = options.env ?? getRawManuscriptsEnv();
   const isProduction =
     options.isProduction ??
-    (env.NODE_ENV === 'production' || process.env.NODE_ENV === 'production');
+    (env.NODE_ENV === 'production' || defaultConfig.isProduction);
 
   // Mode resolution
   let mode: SandboxMode;

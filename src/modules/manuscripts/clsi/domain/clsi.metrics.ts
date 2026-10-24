@@ -15,6 +15,15 @@ export interface CompileMetricSample {
 
 export class ClsiMetrics {
   private static instance: ClsiMetrics;
+  private static readonly KNOWN_ENGINES = new Set([
+    'pdflatex',
+    'xelatex',
+    'lualatex',
+    'latexmk',
+    'latex',
+    'tectonic',
+    'other',
+  ]);
 
   private totalCompiles = 0;
   private successfulCompiles = 0;
@@ -58,7 +67,10 @@ export class ClsiMetrics {
       this.failedCompiles++;
     }
 
-    const engineKey = sample.engine.toLowerCase();
+    const rawKey = (sample.engine || 'other').toLowerCase().trim();
+    const engineKey = ClsiMetrics.KNOWN_ENGINES.has(rawKey)
+      ? rawKey
+      : 'other';
     const existing = this.durationsByEngine.get(engineKey) || {
       count: 0,
       totalMs: 0,

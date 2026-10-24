@@ -9,6 +9,7 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  PayloadTooLargeException,
   Logger,
   Optional,
   Inject,
@@ -410,13 +411,13 @@ export class LinkedFilesService {
         response.status === 308
       ) {
         if (redirectCount >= MAX_REDIRECTS) {
-          throw new Error(
+          throw new BadRequestException(
             `Maximum redirect limit (${MAX_REDIRECTS}) exceeded`,
           );
         }
         const location = response.headers.get('location');
         if (!location) {
-          throw new Error(
+          throw new BadRequestException(
             `Redirect response HTTP ${response.status} missing Location header`,
           );
         }
@@ -433,14 +434,14 @@ export class LinkedFilesService {
     }
 
     if (!response || !response.ok) {
-      throw new Error(
+      throw new BadRequestException(
         `Remote server returned HTTP ${response?.status ?? 0} ${response?.statusText ?? 'Unknown'}`,
       );
     }
 
     const contentLength = Number(response.headers.get('content-length') || '0');
     if (contentLength > this.MAX_DOWNLOAD_SIZE_BYTES) {
-      throw new Error(
+      throw new PayloadTooLargeException(
         `File exceeds maximum permitted size of 50MB (${contentLength} bytes)`,
       );
     }
@@ -461,7 +462,9 @@ export class LinkedFilesService {
             totalBytes += value.byteLength;
             if (totalBytes > this.MAX_DOWNLOAD_SIZE_BYTES) {
               await reader.cancel().catch(() => {});
-              throw new Error(`File exceeds maximum permitted size of 50MB`);
+              throw new PayloadTooLargeException(
+                `File exceeds maximum permitted size of 50MB`,
+              );
             }
             chunks.push(Buffer.from(value));
           }
@@ -474,7 +477,9 @@ export class LinkedFilesService {
       const arrayBuf = await response.arrayBuffer();
       buffer = Buffer.from(arrayBuf);
       if (buffer.length > this.MAX_DOWNLOAD_SIZE_BYTES) {
-        throw new Error(`File exceeds maximum permitted size of 50MB`);
+        throw new PayloadTooLargeException(
+          `File exceeds maximum permitted size of 50MB`,
+        );
       }
     }
 

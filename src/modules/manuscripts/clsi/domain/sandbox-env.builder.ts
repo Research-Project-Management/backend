@@ -28,7 +28,7 @@ export function buildSandboxEnv(
   options: SandboxEnvOptions = {},
 ): Record<string, string> {
   const {
-    parentEnv = process.env,
+    parentEnv = {},
     extraEnv = {},
     clientAllowList = [],
     platform = process.platform,

@@ -61,6 +61,13 @@ export class StorageQuotaExceededException extends Error {
   }
 }
 
+export class FilestoreValidationException extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FilestoreValidationException';
+  }
+}
+
 // ============================================================================
 // VALUE OBJECTS & MODELS
 // ============================================================================
@@ -74,12 +81,14 @@ export class ContentHash {
 
   public static create(hash: string): ContentHash {
     if (!hash || typeof hash !== 'string') {
-      throw new Error('Content hash must be a non-empty string.');
+      throw new FilestoreValidationException(
+        'Content hash must be a non-empty string.',
+      );
     }
 
     const trimmed = hash.trim().toLowerCase();
     if (!/^[0-9a-f]{40}$/.test(trimmed) && !/^[0-9a-f]{64}$/.test(trimmed)) {
-      throw new Error(
+      throw new FilestoreValidationException(
         `Invalid content hash format: '${hash}'. Expected 40-char or 64-char hex string.`,
       );
     }
@@ -117,10 +126,10 @@ export class StorageKey {
 
   public static fromRawKey(rawKey: string): StorageKey {
     if (!rawKey || typeof rawKey !== 'string' || rawKey.trim().length === 0) {
-      throw new Error('Storage key cannot be empty.');
+      throw new FilestoreValidationException('Storage key cannot be empty.');
     }
     if (rawKey.includes('..') || rawKey.startsWith('/')) {
-      throw new Error(
+      throw new FilestoreValidationException(
         `Insecure storage key: '${rawKey}'. Traversal sequences are prohibited.`,
       );
     }
@@ -332,12 +341,14 @@ export class ManuscriptFile {
 
   private static sanitizeFilename(raw: string): string {
     if (!raw || typeof raw !== 'string') {
-      throw new Error('Filename must be a valid non-empty string.');
+      throw new FilestoreValidationException(
+        'Filename must be a valid non-empty string.',
+      );
     }
     const trimmed = raw.trim();
     const sanitized = trimmed.replace(/[/\\]/g, '_');
     if (sanitized.length === 0 || sanitized === '.' || sanitized === '..') {
-      throw new Error(`Invalid filename: '${raw}'`);
+      throw new FilestoreValidationException(`Invalid filename: '${raw}'`);
     }
     return sanitized;
   }

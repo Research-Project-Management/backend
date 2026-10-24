@@ -11,21 +11,35 @@ import {
   CyclicMoveError,
   MaxProjectFilesExceededError,
 } from './structure-errors';
-import { TreeNodeDto } from '../dto/node.dto';
+
+export interface TreeNode {
+  id: string;
+  name: string;
+  path: string;
+  type: 'FOLDER' | 'DOC' | 'FILE';
+  depth: number;
+  isRootDoc: boolean;
+  docId?: string | null;
+  fileId?: string | null;
+  sizeBytes: number;
+  hash?: string | null;
+  sortOrder: number;
+  children: TreeNode[];
+}
 
 const VALID_ROOT_EXTENSIONS = ['.tex', '.rtex', '.rnw'];
 export const DEFAULT_MAX_PROJECT_FILES = 2000;
 
 export class FileTreeBuilder {
   /**
-   * Transforms flat ManuscriptNodeEntity[] into a sorted recursive TreeNodeDto[] hierarchy.
+   * Transforms flat ManuscriptNodeEntity[] into a sorted recursive TreeNode[] hierarchy.
    * Folders are sorted before files; root docs prioritized; then sortOrder, then alphabetical.
    */
   public static buildTreeHierarchy(
     nodes: readonly ManuscriptNodeEntity[],
-  ): TreeNodeDto[] {
-    const nodeMap = new Map<string, TreeNodeDto>();
-    const rootNodes: TreeNodeDto[] = [];
+  ): TreeNode[] {
+    const nodeMap = new Map<string, TreeNode>();
+    const rootNodes: TreeNode[] = [];
 
     for (const node of nodes) {
       nodeMap.set(node.id, {
@@ -53,7 +67,7 @@ export class FileTreeBuilder {
       }
     }
 
-    const sortFn = (a: TreeNodeDto, b: TreeNodeDto): number => {
+    const sortFn = (a: TreeNode, b: TreeNode): number => {
       if (a.type === 'FOLDER' && b.type !== 'FOLDER') return -1;
       if (a.type !== 'FOLDER' && b.type === 'FOLDER') return 1;
       if (a.isRootDoc && !b.isRootDoc) return -1;
@@ -62,7 +76,7 @@ export class FileTreeBuilder {
       return a.name.localeCompare(b.name);
     };
 
-    const sortRecursively = (list: TreeNodeDto[]) => {
+    const sortRecursively = (list: TreeNode[]) => {
       list.sort(sortFn);
       for (const item of list) {
         if (item.children.length > 0) {

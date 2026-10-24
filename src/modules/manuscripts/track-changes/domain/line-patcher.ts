@@ -278,11 +278,9 @@ export function applySuggestionToLines(
     record.endCol !== null && record.endCol !== undefined ? record.endCol : 0,
   );
   const changeType = String(record.type);
-  const isZeroBased = rawStartLine === 0;
-  const sIdx = isZeroBased ? 0 : Math.max(0, rawStartLine - 1);
-  const eIdx = isZeroBased
-    ? Math.max(0, rawEndLine)
-    : Math.max(sIdx, rawEndLine - 1);
+  const isExplicitZero = rawStartLine === 0 && rawEndLine === 0;
+  const sIdx = isExplicitZero ? 0 : Math.max(0, rawStartLine > 0 ? rawStartLine - 1 : 0);
+  const eIdx = isExplicitZero ? 0 : Math.max(sIdx, rawEndLine > 0 ? rawEndLine - 1 : sIdx);
 
   if (changeType === 'insert') {
     if (sIdx < lines.length) {

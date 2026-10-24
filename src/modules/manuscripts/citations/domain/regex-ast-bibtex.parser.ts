@@ -5,8 +5,8 @@
  */
 
 import { IBibtexParserPort } from './citations.ports';
-import { BibEntry } from './entities/bib-entry.entity';
-import { CitationKeyVo } from './value-objects/citation-key.vo';
+import { BibEntry } from './bib-entry.entity';
+import { CitationKeyVo } from './citation-key.vo';
 
 export class RegexAstBibtexParser implements IBibtexParserPort {
   private static readonly STANDARD_MONTH_MACROS: Record<string, string> = {

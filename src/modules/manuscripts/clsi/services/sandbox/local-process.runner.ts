@@ -7,6 +7,7 @@ import {
 } from '../../domain/clsi-ports';
 import { Watchdog, killProcessGroup } from './process-watchdog';
 import { buildSandboxEnv } from '../../domain/sandbox-env.builder';
+import { getSafeHostEnv } from '../../../core/config/manuscripts.config';
 
 export class LocalProcessRunner implements ISandboxRunner {
   readonly name = 'local-process';
@@ -48,7 +49,7 @@ export class LocalProcessRunner implements ISandboxRunner {
     }
 
     const filteredEnv = buildSandboxEnv({
-      parentEnv: process.env,
+      parentEnv: getSafeHostEnv(),
       extraEnv: options.env,
       clientAllowList: ['DOCKER_HOST', 'DOCKER_CONTEXT'],
       isTexProcess: isTexCommand,

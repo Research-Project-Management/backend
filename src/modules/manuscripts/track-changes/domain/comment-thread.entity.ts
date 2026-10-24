@@ -22,6 +22,13 @@ export interface CreateCommentThreadProps {
   updatedAt?: Date;
 }
 
+export class CommentThreadDomainException extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CommentThreadDomainException';
+  }
+}
+
 export class CommentThread {
   private readonly _id: string;
   private readonly _projectId: string;
@@ -38,10 +45,10 @@ export class CommentThread {
 
   private constructor(props: CreateCommentThreadProps) {
     if (!props.projectId || !props.projectId.trim()) {
-      throw new Error('Project ID cannot be empty.');
+      throw new CommentThreadDomainException('Project ID cannot be empty.');
     }
     if (!props.docId || !props.docId.trim()) {
-      throw new Error('Document ID cannot be empty.');
+      throw new CommentThreadDomainException('Document ID cannot be empty.');
     }
 
     this._id = props.id ?? crypto.randomUUID();
@@ -101,7 +108,9 @@ export class CommentThread {
 
   public addReply(reply: CommentReply): void {
     if (this._isResolved) {
-      throw new Error('Cannot add reply to a resolved comment thread.');
+      throw new CommentThreadDomainException(
+        'Cannot add reply to a resolved comment thread.',
+      );
     }
     this._replies.push(reply);
     this._updatedAt = new Date();
@@ -109,7 +118,9 @@ export class CommentThread {
 
   public resolve(resolvedBy?: string | null): void {
     if (this._isResolved) {
-      throw new Error('Comment thread is already resolved.');
+      throw new CommentThreadDomainException(
+        'Comment thread is already resolved.',
+      );
     }
     this._isResolved = true;
     this._resolvedById = resolvedBy ?? null;

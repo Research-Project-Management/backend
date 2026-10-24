@@ -11,11 +11,11 @@ import { FilestoreModule } from '@/modules/manuscripts/filestore/filestore.modul
 
 import { ProjectHistoryController } from './project-history.controller';
 import { ProjectHistoryService } from './project-history.service';
+import { ProjectHistoryRepository } from './project-history.repository';
 import {
-  ProjectHistoryRepository,
   ManuscriptCollectorAdapter,
   ManuscriptRestorerAdapter,
-} from './project-history.repository';
+} from './adapters/project-history.adapters';
 import {
   IHistoryRepositoryPort,
   IDiffEnginePort,

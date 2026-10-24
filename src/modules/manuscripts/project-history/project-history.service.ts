@@ -4,12 +4,17 @@
  * and pure MyersDiffEngine.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
-  ProjectHistoryRepository,
+  Injectable,
+  Logger,
+  Optional,
+  ConflictException,
+} from '@nestjs/common';
+import { ProjectHistoryRepository } from './project-history.repository';
+import {
   ManuscriptCollectorAdapter,
   ManuscriptRestorerAdapter,
-} from './project-history.repository';
+} from './adapters/project-history.adapters';
 import {
   Snapshot,
   VersionLabel,
@@ -276,7 +281,7 @@ export class ProjectHistoryService {
       }
     }
 
-    throw new Error(
+    throw new ConflictException(
       `Failed to create snapshot for project ${projectId} after ${maxAttempts} attempts`,
     );
   }

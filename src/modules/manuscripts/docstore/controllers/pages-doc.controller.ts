@@ -31,24 +31,33 @@ import {
   Role,
   ResolvedProject,
 } from '@/modules/project/access';
-import { ManuscriptDoc } from '@prisma/client';
 import { PrismaService, AuthenticatedRequest, isUuid } from '@/core';
-import * as path from 'path';
 import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
 import { ManuscriptProjectBootstrapService } from '../services/manuscript-project-bootstrap.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LiveCollaborationPort } from '@/modules/manuscripts/core';
 import { ManuscriptPageScopeRepository } from '../repositories/manuscript-page-scope.repository';
+import {
+  PageDocRanges,
+  resolveActiveProjectId,
+  resolveProjectIdByEntityId,
+  hydratePageDocLines,
+  findPageRecordWithNode,
+  formatPageByIdResponse,
+  assertExpectedVersionAndRev,
+  executeDocstoreUpdateWithOcc,
+  applyPageMetadataAndTitleUpdates,
+  updateProjectThumbnailSettings,
+  resolvePageFilesList,
+  formatRootNodesAsProjectPages,
+  restoreDeletedDocOrFile,
+  duplicateSourcePageAndNode,
+  resolveAndAssignLabelsForDoc,
+  isPrismaUniqueConstraintError,
+} from './pages-doc.helpers';
 
-export interface PageDocRanges {
-  labels?: Array<{ id: string; name?: string; color?: string }>;
-  labelIds?: string[];
-  status?: string;
-  description?: string;
-  pdfThumbnail?: string;
-  [key: string]: unknown;
-}
+export type { PageDocRanges };
 
 @ApiTags('Manuscripts - Pages Compatibility Bridge')
 @ApiBearerAuth('JWT-auth')
@@ -58,7 +67,6 @@ export interface PageDocRanges {
 export class PagesDocController {
   private readonly logger = new Logger(PagesDocController.name);
   private liveCollab: LiveCollaborationPort | null | undefined;
-
   private readonly pageScopeRepo: ManuscriptPageScopeRepository;
 
   constructor(
@@ -103,24 +111,13 @@ export class PagesDocController {
   }
 
   private async resolveProjectId(id: string): Promise<string | null> {
-    if (!isUuid(id)) return null;
-    const doc = await this.prisma.manuscriptDoc.findUnique({
-      where: { id },
-      select: { projectId: true },
-    });
-    if (doc?.projectId) return doc.projectId;
-    const node = await this.prisma.manuscriptNode.findFirst({
-      where: { projectId: id },
-      select: { projectId: true },
-    });
-    return node?.projectId ?? null;
+    return resolveProjectIdByEntityId(this.prisma, id);
   }
 
   private resolveActiveProjectId(
     project?: string | { id: string } | null,
   ): string | undefined {
-    if (!project) return undefined;
-    return typeof project === 'string' ? project : project.id;
+    return resolveActiveProjectId(project);
   }
 
   private async getHydratedDocLines(doc: {
@@ -129,26 +126,7 @@ export class PagesDocController {
     lines: unknown;
     inStorage?: boolean;
   }): Promise<string[]> {
-    if (doc.inStorage) {
-      try {
-        const hydrated = await this.docstoreService.getDoc(
-          doc.projectId,
-          doc.id,
-        );
-        if (Array.isArray(hydrated.lines)) {
-          return hydrated.lines;
-        }
-      } catch {
-        // Fallback to raw lines if hydration fails
-      }
-    }
-    if (Array.isArray(doc.lines)) {
-      return doc.lines as string[];
-    }
-    if (typeof doc.lines === 'string') {
-      return doc.lines.split('\n');
-    }
-    return [];
+    return hydratePageDocLines(this.docstoreService, doc);
   }
 
   // ─── 1. CORE DOCUMENT CONTENT & METADATA ──────────────────────────────────────
@@ -163,56 +141,12 @@ export class PagesDocController {
     @ResolvedProject() authorizedProjectId?: string | { id: string } | null,
   ) {
     try {
-      let record = null;
       const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
-
-      if (targetProjectId) {
-        if (isUuid(pageId)) {
-          record = await this.prisma.manuscriptDoc.findFirst({
-            where: {
-              projectId: targetProjectId,
-              deleted: false,
-              OR: [{ id: pageId }, { node: { id: pageId } }],
-            },
-            include: { node: true },
-          });
-
-          // If pageId was actually a projectId, fetch its root document
-          if (!record) {
-            const rootNode = await this.prisma.manuscriptNode.findFirst({
-              where: { projectId: targetProjectId, isRootDoc: true },
-            });
-            if (rootNode?.docId) {
-              record = await this.prisma.manuscriptDoc.findFirst({
-                where: {
-                  id: rootNode.docId,
-                  projectId: targetProjectId,
-                  deleted: false,
-                },
-                include: { node: true },
-              });
-            }
-          }
-        } else {
-          // Query by path or filename strictly within the authorized project
-          const cleanPath = pageId.startsWith('/') ? pageId.slice(1) : pageId;
-          record = await this.prisma.manuscriptDoc.findFirst({
-            where: {
-              projectId: targetProjectId,
-              deleted: false,
-              OR: [{ path: `/${cleanPath}` }, { path: cleanPath }],
-            },
-            include: { node: true },
-          });
-        }
-      } else {
-        if (isUuid(pageId)) {
-          record = await this.prisma.manuscriptDoc.findUnique({
-            where: { id: pageId },
-            include: { node: true },
-          });
-        }
-      }
+      const record = await findPageRecordWithNode(
+        this.prisma,
+        pageId,
+        targetProjectId,
+      );
 
       if (!record || record.deleted) {
         throw new NotFoundException({
@@ -222,68 +156,7 @@ export class PagesDocController {
         });
       }
 
-      let doc: {
-        _id: string;
-        id?: string;
-        projectId?: string;
-        path: string;
-        lines: string[];
-        version: number;
-        rev: number;
-        ranges?: unknown;
-        hash?: string | null;
-        sizeBytes?: number;
-        createdAt?: Date;
-        updatedAt?: Date;
-      };
-      if (record.inStorage) {
-        doc = await this.docstoreService.getDoc(record.projectId, record.id);
-      } else {
-        const rawLines = record.lines;
-        const lines = Array.isArray(rawLines)
-          ? (rawLines as string[])
-          : typeof rawLines === 'string'
-            ? rawLines.split('\n')
-            : [];
-        doc = {
-          _id: record.id,
-          id: record.id,
-          projectId: record.projectId,
-          path: record.path,
-          lines,
-          version: record.version,
-          rev: record.rev,
-          ranges: record.ranges || {},
-          hash: record.hash,
-          sizeBytes: record.sizeBytes,
-          createdAt: record.createdAt,
-          updatedAt: record.updatedAt,
-        };
-      }
-
-      const lines = doc.lines || [];
-      const content = Array.isArray(lines) ? lines.join('\n') : String(lines);
-
-      const title =
-        record.node?.name || doc.path?.replace(/^\//, '') || 'document.tex';
-
-      return {
-        ...doc,
-        page: {
-          id: doc._id,
-          title,
-          content,
-          status: 'published',
-          projectId: record.projectId,
-          mainFile: { id: doc._id, title },
-          mainFileId: doc._id,
-          rootPageId: doc._id,
-          version: doc.version,
-          rev: doc.rev,
-          createdAt: record.createdAt,
-          updatedAt: record.updatedAt,
-        },
-      };
+      return await formatPageByIdResponse(this.docstoreService, record);
     } catch (err) {
       if (err instanceof NotFoundException) throw err;
       throw new NotFoundException(`Document ${pageId} not found`);
@@ -304,6 +177,8 @@ export class PagesDocController {
       lines?: string[];
       title?: string;
       version?: number;
+      expectedRev?: number;
+      expectedVersion?: number;
       status?: 'draft' | 'published' | 'archived';
       description?: string;
     },
@@ -328,6 +203,12 @@ export class PagesDocController {
       });
     }
 
+    assertExpectedVersionAndRev(
+      record,
+      body.expectedRev,
+      body.expectedVersion,
+    );
+
     const hasNewContent =
       body.lines !== undefined || typeof body.content === 'string';
     const lines = hasNewContent
@@ -335,75 +216,31 @@ export class PagesDocController {
         (typeof body.content === 'string' ? body.content.split('\n') : [])
       : await this.getHydratedDocLines(record);
 
-    const result = await this.docstoreService.updateDoc(
-      record.projectId,
-      record.id,
-      {
-        lines,
-        version: (body.version ?? record.version) + 1,
-      },
+    const result = await executeDocstoreUpdateWithOcc(
+      this.docstoreService,
+      record,
+      lines,
+      body.version,
+      body.expectedRev,
     );
 
     const liveSynced = hasNewContent
       ? await this.syncLiveDoc(record.projectId, pageId, lines)
       : false;
 
-    const cleanTitle = body.title
-      ? body.title.trim().replace(/^\//, '')
-      : undefined;
-
-    if (cleanTitle) {
-      const dir = path.posix.dirname(record.path);
-      const newPath =
-        dir && dir !== '.' && dir !== '/'
-          ? `${dir}/${cleanTitle}`
-          : `/${cleanTitle}`;
-      await Promise.all([
-        this.prisma.manuscriptDoc
-          .update({
-            where: { id: pageId },
-            data: { path: newPath },
-          })
-          .catch(() => null),
-        this.prisma.manuscriptNode
-          .updateMany({
-            where: {
-              projectId: record.projectId,
-              OR: [{ docId: pageId }, { id: pageId }],
-            },
-            data: {
-              name: cleanTitle,
-              path: newPath,
-            },
-          })
-          .catch(() => null),
-      ]);
-    }
-
-    const existingRanges = (record.ranges as PageDocRanges) || {};
-    const updatedRanges = {
-      ...existingRanges,
-      ...(body.status ? { status: body.status } : {}),
-      ...(body.description !== undefined
-        ? { description: body.description }
-        : {}),
-    };
-
-    if (body.status || body.description !== undefined) {
-      await this.prisma.manuscriptDoc
-        .update({
-          where: { id: pageId },
-          data: { ranges: updatedRanges },
-        })
-        .catch(() => null);
-    }
+    const { cleanTitle, existingRanges } =
+      await applyPageMetadataAndTitleUpdates(
+        this.prisma,
+        pageId,
+        record,
+        body,
+      );
 
     const updatedLines = result.doc.lines || [];
     const content = Array.isArray(updatedLines)
       ? updatedLines.join('\n')
       : String(updatedLines);
 
-    // Broadcast real-time content notification to collaborating peers
     if (this.eventEmitter && record.projectId) {
       try {
         this.eventEmitter.emit('manuscripts.project.event', {
@@ -424,6 +261,7 @@ export class PagesDocController {
 
     return {
       ...result,
+      rev: result.rev,
       liveSessionSynced: liveSynced,
       page: {
         id: result.doc.id,
@@ -483,31 +321,11 @@ export class PagesDocController {
         }
 
         if (projectId) {
-          const proj = await this.prisma.project
-            .findUnique({
-              where: { id: projectId },
-              select: { settings: true },
-            })
-            .catch(() => null);
-          if (proj) {
-            const settings = (proj.settings as Record<string, unknown>) || {};
-            const manuscriptSettings =
-              (settings.manuscript as Record<string, unknown>) || {};
-            await this.prisma.project
-              .update({
-                where: { id: projectId },
-                data: {
-                  settings: {
-                    ...settings,
-                    manuscript: {
-                      ...manuscriptSettings,
-                      pdfThumbnail,
-                    },
-                  },
-                },
-              })
-              .catch(() => null);
-          }
+          await updateProjectThumbnailSettings(
+            this.prisma,
+            projectId,
+            pdfThumbnail,
+          );
         }
       } catch {
         // Non-blocking fallback
@@ -531,127 +349,11 @@ export class PagesDocController {
       if (!isUuid(pageId)) {
         return { files: [] };
       }
-
-      let projectId: string | null = null;
-      let rootDoc: ManuscriptDoc | null = null;
-
-      let record = await this.prisma.manuscriptDoc.findUnique({
-        where: { id: pageId },
-      });
-
-      if (!record) {
-        const node = await this.prisma.manuscriptNode.findUnique({
-          where: { id: pageId },
-          include: { doc: true },
-        });
-        if (node?.doc) {
-          record = node.doc;
-          projectId = node.projectId;
-          rootDoc = node.doc;
-        } else if (node) {
-          projectId = node.projectId;
-        }
-      }
-
-      if (record) {
-        projectId = record.projectId;
-        rootDoc = record;
-      } else if (!projectId) {
-        const project = await this.prisma.project.findUnique({
-          where: { id: pageId },
-        });
-        if (project) {
-          projectId = project.id;
-        }
-      }
-
-      if (!projectId) {
-        return { files: [] };
-      }
-
-      const [nodes, allDocs] = await Promise.all([
-        this.prisma.manuscriptNode.findMany({
-          where: { projectId },
-          orderBy: { sortOrder: 'asc' },
-        }),
-        this.prisma.manuscriptDoc.findMany({
-          where: { projectId, deleted: false },
-          select: {
-            id: true,
-            projectId: true,
-            path: true,
-            lines: true,
-            inStorage: true,
-            sizeBytes: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-          orderBy: { createdAt: 'asc' },
-        }),
-      ]);
-
-      const docMap = new Map(allDocs.map((d) => [d.id, d]));
-
-      const filteredNodes = nodes.filter((node) => {
-        if (node.type === 'FOLDER') return false;
-        if (node.docId && !docMap.has(node.docId)) return false;
-        return true;
-      });
-
-      const files = await Promise.all(
-        filteredNodes.map(async (node) => {
-          const cleanName =
-            node.path.replace(/^\//, '') || node.name || 'main.tex';
-          const targetDoc = node.docId ? docMap.get(node.docId) : null;
-          const docLines = targetDoc
-            ? await this.getHydratedDocLines({
-                id: targetDoc.id,
-                projectId: targetDoc.projectId || projectId!,
-                lines: targetDoc.lines,
-                inStorage: targetDoc.inStorage,
-              })
-            : [];
-          const content = docLines.join('\n');
-          return {
-            id: node.docId || node.id,
-            nodeId: node.id,
-            name: cleanName,
-            title: cleanName,
-            path: node.path,
-            content,
-            type: 'file',
-            size: node.sizeBytes || (targetDoc?.sizeBytes ?? 0),
-            pageId,
-            createdAt: node.createdAt.toISOString(),
-            updatedAt: node.updatedAt.toISOString(),
-          };
-        }),
+      return await resolvePageFilesList(
+        this.prisma,
+        this.docstoreService,
+        pageId,
       );
-
-      if (files.length === 0 && rootDoc && !rootDoc.deleted) {
-        const cleanName = rootDoc.path.replace(/^\//, '') || 'main.tex';
-        const rootLines = await this.getHydratedDocLines(rootDoc);
-        const content = rootLines.join('\n');
-        files.push({
-          id: rootDoc.id,
-          nodeId: rootDoc.id,
-          name: cleanName,
-          title: cleanName,
-          path: rootDoc.path,
-          content,
-          type: 'file',
-          size: rootDoc.sizeBytes || 0,
-          pageId,
-          createdAt: rootDoc.createdAt.toISOString(),
-          updatedAt: rootDoc.updatedAt.toISOString(),
-        });
-      }
-
-      if (files.length === 0) {
-        return { files: [] };
-      }
-
-      return { files };
     } catch {
       return { files: [] };
     }
@@ -698,8 +400,11 @@ export class PagesDocController {
       );
     }
 
+    const cleanDocPath = cleanName.replace(/\\/g, '/').replace(/^\/+/g, '');
+    const cleanNodePath = `/${cleanDocPath}`;
+
     const createdDoc = await this.docstoreService.createDoc(projectId, {
-      path: `/${cleanName}`,
+      path: cleanDocPath,
       text: content,
       version: 1,
     });
@@ -710,15 +415,28 @@ export class PagesDocController {
         data: {
           projectId,
           name: cleanName,
-          path: `/${cleanName}`,
+          path: cleanNodePath,
           type: 'DOC',
           docId: createdDoc._id,
           sizeBytes: Buffer.byteLength(content, 'utf8'),
         },
       });
       nodeId = node.id;
-    } catch {
-      // ignore path conflicts
+    } catch (createErr: unknown) {
+      try {
+        await this.docstoreService.patchDoc(projectId, createdDoc._id, {
+          deleted: true,
+          deletedAt: new Date().toISOString(),
+        });
+      } catch {
+        // Ignore rollback failure
+      }
+      if (isPrismaUniqueConstraintError(createErr)) {
+        throw new BadRequestException(
+          `File path already exists: ${cleanNodePath}`,
+        );
+      }
+      throw createErr;
     }
 
     return {
@@ -809,56 +527,13 @@ export class PagesDocController {
         project?.createdBy?.email?.split('@')[0] ||
         'Author';
 
-      let pages = await Promise.all(
-        rootNodes.map(async (node) => {
-          const d = node.doc;
-          const ranges = (
-            d?.ranges && typeof d.ranges === 'object' ? d.ranges : {}
-          ) as PageDocRanges;
-          const title =
-            (ranges as Record<string, unknown>)?.title &&
-            typeof (ranges as Record<string, unknown>).title === 'string'
-              ? ((ranges as Record<string, unknown>).title as string)
-              : node.name || d?.path?.replace(/^\//, '') || 'Untitled';
-          const docLines = d
-            ? await this.getHydratedDocLines({
-                id: d.id,
-                projectId: d.projectId || projectId,
-                lines: d.lines,
-                inStorage: d.inStorage,
-              })
-            : [];
-          const content = docLines.join('\n');
-          const pageLabels = Array.isArray(ranges.labels) ? ranges.labels : [];
-          const pageStatus = ranges.status || 'published';
-          const pageDescription = ranges.description || '';
-
-          return {
-            id: d?.id || node.docId || node.id,
-            title,
-            description: pageDescription,
-            content,
-            status: pageStatus,
-            projectId,
-            author: { name: authorName },
-            labels: pageLabels,
-            mainFile: { id: d?.id || node.docId || node.id, title },
-            mainFileId: d?.id || node.docId || node.id,
-            rootPageId: d?.id || node.docId || node.id,
-            version: d?.version ?? 1,
-            rev: d?.rev ?? 1,
-            createdAt:
-              d?.createdAt?.toISOString() ?? node.createdAt.toISOString(),
-            updatedAt:
-              d?.updatedAt?.toISOString() ?? node.updatedAt.toISOString(),
-          };
-        }),
+      const pages = await formatRootNodesAsProjectPages(
+        this.docstoreService,
+        projectId,
+        authorName,
+        rootNodes,
+        _search,
       );
-
-      if (_search && _search.trim()) {
-        const query = _search.trim().toLowerCase();
-        pages = pages.filter((p) => p.title.toLowerCase().includes(query));
-      }
 
       return {
         pages,
@@ -900,6 +575,10 @@ export class PagesDocController {
               where: { id: pageId },
             });
         if (doc) {
+          const live = this.getLiveCollaboration();
+          if (live) {
+            await live.evictDoc(doc.projectId, doc.id).catch(() => null);
+          }
           await Promise.all([
             this.docstoreService.patchDoc(doc.projectId, doc.id, {
               deleted: true,
@@ -954,11 +633,13 @@ export class PagesDocController {
     const deletedDocs = await this.prisma.manuscriptDoc.findMany({
       where: { projectId, deleted: true },
       orderBy: { updatedAt: 'desc' },
+      take: 200,
     });
 
     const deletedFiles = await this.prisma.manuscriptFile.findMany({
       where: { projectId, deleted: true },
       orderBy: { updatedAt: 'desc' },
+      take: 200,
     });
 
     const files = [
@@ -1002,114 +683,13 @@ export class PagesDocController {
     }
 
     const targetProjectId = this.resolveActiveProjectId(authorizedProjectId);
-    const doc = targetProjectId
-      ? await this.prisma.manuscriptDoc.findFirst({
-          where: { id: pageId, projectId: targetProjectId },
-        })
-      : await this.prisma.manuscriptDoc.findUnique({
-          where: { id: pageId },
-        });
-
-    if (doc) {
-      await this.docstoreService.patchDoc(doc.projectId, pageId, {
-        deleted: false,
-      });
-
-      const cleanPath = doc.path.startsWith('/') ? doc.path : `/${doc.path}`;
-      const cleanName = doc.path.replace(/^\//, '') || 'restored.tex';
-      let existingNode = await this.prisma.manuscriptNode.findFirst({
-        where: { projectId: doc.projectId, docId: doc.id },
-      });
-
-      if (!existingNode) {
-        existingNode = await this.prisma.manuscriptNode.create({
-          data: {
-            projectId: doc.projectId,
-            name: cleanName,
-            path: cleanPath,
-            type: 'DOC',
-            docId: doc.id,
-            sizeBytes: doc.sizeBytes || 0,
-          },
-        });
-      }
-
-      this.eventEmitter?.emit('manuscripts.file-tree.change', {
-        projectId: doc.projectId,
-        change: {
-          action: 'create',
-          node: existingNode,
-        },
-      });
-
-      const lines = await this.getHydratedDocLines(doc);
-      const content = lines.join('\n');
-
-      return {
-        success: true,
-        page: {
-          id: doc.id,
-          title: cleanName,
-          content,
-          projectId: doc.projectId,
-        },
-      };
-    }
-
-    const file = targetProjectId
-      ? await this.prisma.manuscriptFile.findFirst({
-          where: { id: pageId, projectId: targetProjectId },
-        })
-      : await this.prisma.manuscriptFile.findUnique({
-          where: { id: pageId },
-        });
-
-    if (file) {
-      await this.prisma.manuscriptFile.update({
-        where: { id: pageId },
-        data: { deleted: false },
-      });
-
-      let existingNode = await this.prisma.manuscriptNode.findFirst({
-        where: { projectId: file.projectId, fileId: file.id },
-      });
-
-      if (!existingNode) {
-        existingNode = await this.prisma.manuscriptNode.create({
-          data: {
-            projectId: file.projectId,
-            name: file.name,
-            path: `/${file.name}`,
-            type: 'FILE',
-            fileId: file.id,
-            sizeBytes: Number(file.sizeBytes || 0),
-          },
-        });
-      }
-
-      this.eventEmitter?.emit('manuscripts.file-tree.change', {
-        projectId: file.projectId,
-        change: {
-          action: 'create',
-          node: existingNode,
-        },
-      });
-
-      return {
-        success: true,
-        page: {
-          id: file.id,
-          title: file.name,
-          projectId: file.projectId,
-        },
-      };
-    }
-
-    throw new NotFoundException({
-      statusCode: 404,
-      code: 'RESOURCE_NOT_FOUND',
-      message: `Document ${pageId} not found`,
-    });
+    return restoreDeletedDocOrFile(
+      this.prisma,
+      this.docstoreService,
+      this.eventEmitter,
+      pageId,
+      targetProjectId,
+    );
   }
 
   /**
@@ -1149,87 +729,13 @@ export class PagesDocController {
       });
     }
 
-    const sourceTitle = source.path || 'document.tex';
-    const newTitle = sourceTitle.endsWith(' (Copy)')
-      ? `${sourceTitle.replace(/ \(Copy\)$/, '')} (Copy 2)`
-      : `${sourceTitle} (Copy)`;
-    const normalizedNodePath = newTitle.startsWith('/')
-      ? newTitle
-      : `/${newTitle}`;
-
-    const hydratedSourceLines = await this.getHydratedDocLines(source);
-
-    const newDoc = await this.prisma.manuscriptDoc.create({
-      data: {
-        projectId: source.projectId,
-        path: newTitle,
-        lines: hydratedSourceLines,
-        rev: 0,
-        version: 1,
-        ranges: source.ranges ?? {},
-        hash: source.hash,
-        sizeBytes: source.sizeBytes,
-      },
-    });
-
-    const sourceNode = await this.prisma.manuscriptNode.findFirst({
-      where: { projectId: source.projectId, docId: pageId },
-    });
-
-    if (sourceNode) {
-      await this.prisma.manuscriptNode.create({
-        data: {
-          projectId: source.projectId,
-          parentId: sourceNode.parentId,
-          type: sourceNode.type,
-          name: newTitle.replace(/^\//, ''),
-          path: normalizedNodePath,
-          depth: sourceNode.depth,
-          docId: newDoc.id,
-          fileId: null,
-          isRootDoc: sourceNode.isRootDoc,
-          sizeBytes: source.sizeBytes,
-          hash: source.hash,
-          sortOrder: sourceNode.sortOrder + 1,
-        },
-      });
-
-      if (this.eventEmitter) {
-        this.eventEmitter.emit('manuscripts.file-tree.change', {
-          projectId: source.projectId,
-          change: {
-            action: 'create',
-            node: {
-              id: newDoc.id,
-              path: normalizedNodePath,
-              docId: newDoc.id,
-            },
-          },
-        });
-      }
-    }
-
-    const lines = Array.isArray(newDoc.lines)
-      ? (newDoc.lines as string[])
-      : hydratedSourceLines;
-    const content = lines.join('\n');
-
-    return {
-      page: {
-        id: newDoc.id,
-        title: newDoc.path,
-        content,
-        status: 'draft',
-        projectId: source.projectId,
-        version: newDoc.version,
-        rev: newDoc.rev,
-        createdAt: newDoc.createdAt.toISOString(),
-        updatedAt: newDoc.updatedAt.toISOString(),
-      },
-      mainFile: { id: newDoc.id, title: newDoc.path },
-      rootPageId: newDoc.id,
-      mainFileId: newDoc.id,
-    };
+    return duplicateSourcePageAndNode(
+      this.prisma,
+      this.docstoreService,
+      this.eventEmitter,
+      pageId,
+      source,
+    );
   }
 
   /**
@@ -1259,49 +765,13 @@ export class PagesDocController {
     @Body() body: { labelIds?: string[] },
   ) {
     if (isUuid(pageId) && Array.isArray(body?.labelIds)) {
-      const doc = await this.pageScopeRepo.findDocInProject(projectId, pageId);
-      if (!doc) {
-        throw new NotFoundException({
-          statusCode: 404,
-          code: 'RESOURCE_NOT_FOUND',
-          message: `Document ${pageId} not found`,
-        });
-      }
-
-      const targetProjectId = doc.projectId || projectId;
-      let labels: { id: string; name: string; color: string }[] = [];
-      try {
-        const found = await this.prisma.label.findMany({
-          where: {
-            id: { in: body.labelIds },
-            projects: { some: { projectId: targetProjectId } },
-          },
-        });
-        if (found.length > 0) {
-          labels = found.map((l) => ({
-            id: l.id,
-            name: l.name,
-            color: l.color,
-          }));
-        } else {
-          const foundWork = await this.prisma.workItemLabel.findMany({
-            where: { id: { in: body.labelIds }, projectId: targetProjectId },
-          });
-          labels = foundWork.map((l) => ({
-            id: l.id,
-            name: l.name,
-            color: l.color,
-          }));
-        }
-      } catch {
-        // Fallback
-      }
-
-      await this.pageScopeRepo.updateDocInProject(projectId, pageId, {
-        ranges: { labelIds: body.labelIds, labels },
-      });
-
-      return { labels };
+      return resolveAndAssignLabelsForDoc(
+        this.prisma,
+        this.pageScopeRepo,
+        projectId,
+        pageId,
+        body.labelIds,
+      );
     }
     return { labels: [] };
   }

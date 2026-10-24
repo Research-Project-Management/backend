@@ -41,6 +41,7 @@ import {
   Role,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
+import { readManuscriptsConfig } from '../core/config/manuscripts.config';
 import { GitBridgeService } from './git-bridge.service';
 import { CreateGitTokenDto } from './dto/git-bridge.dto';
 import {
@@ -187,7 +188,7 @@ export class GitBridgeController {
         this.requestBody(req),
       );
       if (result.code !== 0 && result.stdout.length === 0) {
-        throw new Error(result.stderr || `exit ${result.code}`);
+        throw new BadRequestException(result.stderr || `exit ${result.code}`);
       }
       reply.raw.writeHead(200, {
         'Content-Type': 'application/x-git-upload-pack-result',
@@ -242,9 +243,9 @@ export class GitBridgeController {
   // ─── Management API (JWT) ───────────────────────────────────────────────────
 
   private cloneUrl(req: FastifyRequest, projectId: string): string {
+    const { gitBridge } = readManuscriptsConfig();
     const base =
-      process.env.GIT_BRIDGE_PUBLIC_URL ||
-      process.env.PUBLIC_API_URL ||
+      gitBridge.publicUrl ||
       `${req.headers?.['x-forwarded-proto'] || req.protocol || 'http'}://${
         req.headers?.['x-forwarded-host'] || req.headers?.host
       }`;

@@ -130,6 +130,7 @@ function createMockTemplatesRepo(): {
     projectMember: {
       create: jest.fn().mockResolvedValue({ id: 'pm-parity-1' }),
     },
+    $transaction: jest.fn(async (cb: any) => cb(mockPrisma)),
   };
 
   return { repo: new TemplatesRepository(mockPrisma), mockPrisma };
@@ -434,6 +435,7 @@ describe('Manuscripts Templates Subsystem', () => {
           projectMember: {
             create: jest.fn().mockResolvedValue({ id: 'pm-1' }),
           },
+          $transaction: jest.fn(async (cb: any) => cb(mockPrisma)),
         };
 
         const adapter = new TemplatesRepository(mockPrisma);

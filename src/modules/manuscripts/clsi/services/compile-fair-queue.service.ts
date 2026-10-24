@@ -4,7 +4,13 @@
  */
 
 import * as os from 'os';
-import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  HttpException,
+  HttpStatus,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import {
   FairSemaphore,
@@ -33,7 +39,7 @@ export interface CompileQueueConfig {
 }
 
 @Injectable()
-export class CompileFairQueue {
+export class CompileFairQueue implements OnModuleDestroy {
   private readonly logger = new Logger(CompileFairQueue.name);
   private readonly inFlightCompiles = new Map<string, InFlightCompileSession>();
   private readonly compileTimestamps = new Map<string, number[]>();
@@ -67,6 +73,14 @@ export class CompileFairQueue {
     };
   }
 
+  public onModuleDestroy(): void {
+    for (const session of this.inFlightCompiles.values()) {
+      session.abortController.abort();
+    }
+    this.inFlightCompiles.clear();
+    this.compileTimestamps.clear();
+  }
+
   public async schedule<T>(
     projectId: string,
     userId: string | undefined,
@@ -75,7 +89,15 @@ export class CompileFairQueue {
       signal: AbortSignal,
       onLogChunk: (chunk: string) => void,
     ) => Promise<T>,
+    options?: { priority?: 'manual' | 'auto' },
   ): Promise<T> {
+    // Load shedding: when queue is over 75% full, drop auto-compiles gracefully to preserve slots for manual compiles
+    if (options?.priority === 'auto' && this.slots.stats().waiting > 40) {
+      throw new HttpException(
+        'Auto-compilation shed under high queue contention to prioritize manual builds',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
     this.checkRateLimit(projectId);
 
     const existing = this.inFlightCompiles.get(projectId);

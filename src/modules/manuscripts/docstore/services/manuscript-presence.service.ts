@@ -9,6 +9,7 @@ import {
   Logger,
   Optional,
   BadRequestException,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -39,13 +40,25 @@ export interface HeartbeatBody {
 }
 
 @Injectable()
-export class ManuscriptPresenceService {
+export class ManuscriptPresenceService implements OnModuleDestroy {
   private readonly logger = new Logger(ManuscriptPresenceService.name);
   private static readonly HTTP_PRESENCE_TTL_MS = 60_000;
   private static readonly MAX_HTTP_PRESENCE_ENTRIES = 5000;
   private static readonly httpPresence = new Map<string, ActivePresenceUser>();
   private static readonly projectIdCache = new Map<string, { projectId: string | null; expiresAt: number }>();
   private static readonly PROJECT_ID_CACHE_TTL_MS = 300_000; // 5 minutes
+  private static readonly PRESENCE_CACHE_TTL_MS = 1_000; // 1 second single-flight + short TTL cache
+  private readonly presenceCache = new Map<
+    string,
+    {
+      expiresAt: number;
+      promise: Promise<{
+        users: Array<LivePresenceUser | ActivePresenceUser>;
+        realtimeAvailable: boolean;
+      }>;
+    }
+  >();
+  private readonly activeSseCleanups = new Set<() => void>();
   private liveCollab: LiveCollaborationPort | null | undefined;
 
   constructor(
@@ -53,6 +66,14 @@ export class ManuscriptPresenceService {
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
+
+  public onModuleDestroy(): void {
+    for (const cleanup of this.activeSseCleanups) {
+      cleanup();
+    }
+    this.activeSseCleanups.clear();
+    this.presenceCache.clear();
+  }
 
   private getLiveCollaboration(): LiveCollaborationPort | null {
     if (this.liveCollab !== undefined) return this.liveCollab;
@@ -102,6 +123,39 @@ export class ManuscriptPresenceService {
    * HTTP-heartbeat clients (fallback transport), de-duplicated by userId.
    */
   public async collectPresence(pageId: string): Promise<{
+    users: Array<LivePresenceUser | ActivePresenceUser>;
+    realtimeAvailable: boolean;
+  }> {
+    const now = Date.now();
+    const cached = this.presenceCache.get(pageId);
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+
+    const promise = this.fetchPresence(pageId).catch((err) => {
+      this.presenceCache.delete(pageId);
+      throw err;
+    });
+
+    if (this.presenceCache.size >= 2000) {
+      for (const [k, v] of this.presenceCache) {
+        if (v.expiresAt <= now) {
+          this.presenceCache.delete(k);
+        }
+      }
+      if (this.presenceCache.size >= 2000) {
+        this.presenceCache.clear();
+      }
+    }
+
+    this.presenceCache.set(pageId, {
+      expiresAt: now + ManuscriptPresenceService.PRESENCE_CACHE_TTL_MS,
+      promise,
+    });
+    return promise;
+  }
+
+  private async fetchPresence(pageId: string): Promise<{
     users: Array<LivePresenceUser | ActivePresenceUser>;
     realtimeAvailable: boolean;
   }> {
@@ -174,6 +228,7 @@ export class ManuscriptPresenceService {
       cursor: body?.cursor,
       lastSeen: Date.now(),
     });
+    this.presenceCache.delete(pageId);
     return { success: true };
   }
 
@@ -181,6 +236,7 @@ export class ManuscriptPresenceService {
     if (userId) {
       ManuscriptPresenceService.httpPresence.delete(`${pageId}:${userId}`);
     }
+    this.presenceCache.delete(pageId);
     return { success: true };
   }
 
@@ -258,11 +314,16 @@ export class ManuscriptPresenceService {
       }
     }, 15000);
 
-    rawRequest.on('close', () => {
+    const cleanup = () => {
+      if (closed) return;
       closed = true;
       clearInterval(poll);
       clearInterval(keepalive);
       this.eventEmitter?.off('manuscripts.project.event', onProjectEvent);
-    });
+      this.activeSseCleanups.delete(cleanup);
+    };
+
+    this.activeSseCleanups.add(cleanup);
+    rawRequest.on('close', cleanup);
   }
 }

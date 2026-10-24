@@ -4,7 +4,11 @@
  * Levenshtein suggestion ranking, and custom project/user dictionary management.
  */
 
-import { Injectable, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { SpellingRepository } from './spelling.repository';
 import {
@@ -46,7 +50,9 @@ export class SpellingService {
 
   private get repo(): SpellingRepository {
     if (!this.repository) {
-      throw new Error('SpellingRepository is not configured');
+      throw new ServiceUnavailableException(
+        'SpellingRepository is not configured',
+      );
     }
     return this.repository;
   }

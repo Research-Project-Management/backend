@@ -20,6 +20,7 @@ import {
   DocstoreMetrics,
   DocstoreMetricsSummary,
   DocNotFoundError,
+  DocModifiedError,
   Md5MismatchError,
   NullByteDetectedError,
   computeDocSha256,
@@ -150,7 +151,8 @@ export class DocstoreService {
       COLD_HYDRATION_CONCURRENCY,
       async (doc: TextDoc) => {
         if (doc.inStorage) {
-          return await this.getDocEntity(projectId, doc.id);
+          const peeked = await this.peekDoc(projectId, doc.id);
+          return peeked.doc;
         }
         return doc;
       },
@@ -276,6 +278,18 @@ export class DocstoreService {
     if (!currentDoc) {
       throw new DocNotFoundError(
         `Document ${docId} not found in project ${projectId}`,
+      );
+    }
+
+    if (expectedRev !== undefined && currentDoc.rev !== expectedRev) {
+      DocstoreMetrics.recordOccConflict();
+      throw new DocModifiedError(
+        `Optimistic concurrency conflict on doc ${docId}: expected rev ${expectedRev} but current is ${currentDoc.rev}`,
+        {
+          docId,
+          rev: expectedRev,
+          currentRev: currentDoc.rev,
+        },
       );
     }
 

@@ -5,10 +5,26 @@
  */
 
 import * as path from 'path';
+import { escapeLatex } from '@/modules/manuscripts/core';
 import {
   buildPkZipBuffer,
   type PkZipEntry,
 } from '@/modules/manuscripts/core/utils/pkzip-builder.util';
+
+export { escapeLatex };
+
+export function sanitizeLatexUrl(url: string): string {
+  return (url || '').replace(/[{}\\%#\r\n\0]/g, '').trim();
+}
+
+export function unescapeXml(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
 
 export interface IncludedProjectDoc {
   id: string;

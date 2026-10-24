@@ -33,7 +33,9 @@ import {
 } from './dto/template.dto';
 
 @ApiTags('Manuscripts - Templates')
+@ApiBearerAuth('JWT-auth')
 @Controller('api/v1/manuscripts/templates')
+@UseGuards(JwtAuthGuard)
 @NoProjectContext()
 export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}

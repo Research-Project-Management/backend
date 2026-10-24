@@ -4,30 +4,26 @@
  * into compilable LaTeX projects without external CLI dependencies.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { escapeLatex } from '@/modules/manuscripts/core';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  BadRequestException,
+} from '@nestjs/common';
 import {
   ArchiveEntryVo,
   IDocumentTranspilerPort,
   IZipEnginePort,
   TranspiledProjectResult,
 } from '../domain/archive-validator';
+import {
+  escapeLatex,
+  sanitizeLatexUrl,
+  unescapeXml,
+} from '../domain/latex-export-transpiler';
 import { PkzipEngineAdapter } from './pkzip-engine.adapter';
 
-export { escapeLatex };
-
-export function sanitizeLatexUrl(url: string): string {
-  return (url || '').replace(/[{}\\%#\r\n\0]/g, '').trim();
-}
-
-export function unescapeXml(text: string): string {
-  return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
-}
+export { escapeLatex, sanitizeLatexUrl, unescapeXml };
 
 @Injectable()
 export class DocumentTranspilerAdapter extends IDocumentTranspilerPort {
@@ -312,7 +308,9 @@ ${
 
     const docXmlEntry = entries.find((e) => e.path === 'word/document.xml');
     if (!docXmlEntry) {
-      throw new Error('Invalid DOCX format: word/document.xml missing.');
+      throw new BadRequestException(
+        'Invalid DOCX format: word/document.xml missing.',
+      );
     }
 
     const relsEntry = entries.find(

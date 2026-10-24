@@ -12,8 +12,7 @@ import {
 } from './diagnostic-item.entity';
 import { DiagnosticReport } from './diagnostic-report.entity';
 import { LogLineVo } from './log-line.vo';
-import { InvalidLogFormatException } from './invalid-log-format.exception';
-import { ExplanationNotFoundException } from './explanation-not-found.exception';
+import { InvalidLogFormatException, ExplanationNotFoundException } from './diagnostics.exceptions';
 import {
   CompilerDiagnostic,
   ILogParser,

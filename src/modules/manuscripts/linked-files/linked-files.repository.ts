@@ -18,6 +18,8 @@ import {
 @Injectable()
 export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
   private readonly logger = new Logger(LinkedFilesRepository.name);
+  private static readonly MAX_MEMORY_PROJECTS = 1000;
+  private static readonly MAX_FILES_PER_PROJECT = 500;
   private readonly memoryStore = new Map<
     string,
     Map<string, LinkedFileEntity>
@@ -25,6 +27,30 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
 
   constructor(@Optional() private readonly redis?: RedisCacheService) {
     super();
+  }
+
+  private saveToMemoryStore(entity: LinkedFileEntity): void {
+    let projectMap = this.memoryStore.get(entity.projectId);
+    if (!projectMap) {
+      if (this.memoryStore.size >= LinkedFilesRepository.MAX_MEMORY_PROJECTS) {
+        const oldestProject = this.memoryStore.keys().next().value;
+        if (oldestProject !== undefined) {
+          this.memoryStore.delete(oldestProject);
+        }
+      }
+      projectMap = new Map();
+      this.memoryStore.set(entity.projectId, projectMap);
+    }
+    if (
+      !projectMap.has(entity.id) &&
+      projectMap.size >= LinkedFilesRepository.MAX_FILES_PER_PROJECT
+    ) {
+      const oldestFileId = projectMap.keys().next().value;
+      if (oldestFileId !== undefined) {
+        projectMap.delete(oldestFileId);
+      }
+    }
+    projectMap.set(entity.id, entity);
   }
 
   private getRedisClient(): Redis | null {
@@ -39,13 +65,6 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
   }
 
   public async save(entity: LinkedFileEntity): Promise<LinkedFileEntity> {
-    let projectMap = this.memoryStore.get(entity.projectId);
-    if (!projectMap) {
-      projectMap = new Map();
-      this.memoryStore.set(entity.projectId, projectMap);
-    }
-    projectMap.set(entity.id, entity);
-
     const client = this.getRedisClient();
     if (client) {
       try {
@@ -54,12 +73,14 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
           entity.id,
           JSON.stringify(entity.toJSON()),
         );
+        return entity;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Failed to persist linked file to Redis: ${msg}`);
       }
     }
 
+    this.saveToMemoryStore(entity);
     return entity;
   }
 
@@ -118,6 +139,7 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
     const client = this.getRedisClient();
     if (client) {
       try {
+        const redisResults = new Map<string, LinkedFileEntity>();
         let cursor = '0';
         do {
           const [nextCursor, keys] = await client.scan(
@@ -133,16 +155,24 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
             if (all && Object.keys(all).length > 0) {
               for (const raw of Object.values(all)) {
                 const entity = this.deserialize(raw);
-                let projectMap = this.memoryStore.get(entity.projectId);
-                if (!projectMap) {
-                  projectMap = new Map();
-                  this.memoryStore.set(entity.projectId, projectMap);
+                if (entity.autoRefresh) {
+                  redisResults.set(`${entity.projectId}:${entity.id}`, entity);
                 }
-                projectMap.set(entity.id, entity);
               }
             }
           }
         } while (cursor !== '0');
+        for (const projectMap of this.memoryStore.values()) {
+          for (const entity of projectMap.values()) {
+            if (entity.autoRefresh) {
+              const key = `${entity.projectId}:${entity.id}`;
+              if (!redisResults.has(key)) {
+                redisResults.set(key, entity);
+              }
+            }
+          }
+        }
+        return Array.from(redisResults.values());
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.debug(`Redis scan error in findAllAutoRefresh: ${msg}`);
@@ -162,7 +192,12 @@ export class LinkedFilesRepository extends ILinkedFilesRepositoryPort {
 
   public async delete(projectId: string, id: string): Promise<boolean> {
     const projectMap = this.memoryStore.get(projectId);
-    projectMap?.delete(id);
+    if (projectMap) {
+      projectMap.delete(id);
+      if (projectMap.size === 0) {
+        this.memoryStore.delete(projectId);
+      }
+    }
 
     const client = this.getRedisClient();
     if (client) {

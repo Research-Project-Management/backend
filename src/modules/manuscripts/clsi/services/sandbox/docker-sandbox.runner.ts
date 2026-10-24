@@ -6,6 +6,7 @@ import {
 } from '../../domain/clsi-ports';
 import { LocalProcessRunner } from './local-process.runner';
 import { buildSandboxEnv } from '../../domain/sandbox-env.builder';
+import { getSafeHostEnv } from '../../../core/config/manuscripts.config';
 import { SandboxUnavailableException } from '../../domain/sandbox-errors';
 import {
   DEFAULT_SANDBOX_PROFILE,
@@ -62,7 +63,7 @@ export class DockerSandboxRunner implements ISandboxRunner {
     const containerName = `flux-clsi-${runId}`;
 
     const filteredEnv = buildSandboxEnv({
-      parentEnv: process.env,
+      parentEnv: getSafeHostEnv(),
       extraEnv: options.env,
       isTexProcess: true,
     });

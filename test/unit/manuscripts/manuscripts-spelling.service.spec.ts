@@ -30,6 +30,21 @@ function createMockSpellingRepository(): SpellingRepository {
         const set = store.get(key);
         return set ? Array.from(set).sort().map((word) => ({ word })) : [];
       }),
+      findFirst: jest.fn(async ({ where }: any) => {
+        const key = where.projectId ? `p:${where.projectId}` : `u:${where.userId}`;
+        const set = store.get(key);
+        return set && set.has(where.word) ? { id: `${key}:${where.word}`, word: where.word } : null;
+      }),
+      create: jest.fn(async ({ data }: any) => {
+        const key = data.projectId ? `p:${data.projectId}` : `u:${data.userId}`;
+        let set = store.get(key);
+        if (!set) {
+          set = new Set<string>();
+          store.set(key, set);
+        }
+        set.add(data.word);
+        return { id: `${key}:${data.word}`, ...data };
+      }),
       upsert: jest.fn(async ({ create }: any) => {
         const key = create.projectId ? `p:${create.projectId}` : `u:${create.userId}`;
         let set = store.get(key);

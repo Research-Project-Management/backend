@@ -138,6 +138,24 @@ class InMemoryTrackChangesRepository implements ITrackChangesRepositoryPort {
     );
   }
 
+  async batchUpdateChangesStatus(
+    ids: string[],
+    status: ChangeStatus,
+    resolvedById?: string | null,
+    resolvedAt?: Date | null,
+  ): Promise<void> {
+    for (const id of ids) {
+      const change = this.changes.get(id);
+      if (change && change.isPending()) {
+        if (status === 'accepted') {
+          change.accept(resolvedById);
+        } else if (status === 'rejected') {
+          change.reject(resolvedById);
+        }
+      }
+    }
+  }
+
   async saveCommentThread(thread: CommentThread): Promise<CommentThread> {
     this.threads.set(thread.id, thread);
     return thread;

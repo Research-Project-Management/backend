@@ -58,3 +58,17 @@ export class Md5MismatchError extends Error {
     this.name = 'Md5MismatchError';
   }
 }
+
+export class InvalidSearchPatternError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidSearchPatternError';
+  }
+}
+
+export class ArchiveObjectNotFoundError extends Error {
+  constructor(key: string) {
+    super(`Archive object not found: ${key}`);
+    this.name = 'ArchiveObjectNotFoundError';
+  }
+}

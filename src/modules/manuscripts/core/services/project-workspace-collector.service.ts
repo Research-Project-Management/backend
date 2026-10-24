@@ -52,4 +52,31 @@ export class ProjectWorkspaceCollectorService {
       return [];
     }
   }
+
+  /**
+   * Convenience alias to flush explicit docIds.
+   */
+  public async flushDocs(
+    projectId: string,
+    docIds: string[],
+  ): Promise<string[]> {
+    return this.flushProjectWorkspace(projectId, docIds);
+  }
+
+  /**
+   * Evicts an in-memory Yjs session for a document that was deleted or archived.
+   */
+  public async evictDoc(projectId: string, docId: string): Promise<void> {
+    const live = this.getLiveCollaborationPort();
+    if (!live) return;
+
+    try {
+      await live.evictDoc(projectId, docId);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Non-blocking live workspace evict warning for doc ${projectId}:${docId}: ${msg}`,
+      );
+    }
+  }
 }

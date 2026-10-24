@@ -9,7 +9,15 @@
  * - BibTeX AST parsing & formatting
  */
 
-import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  Inject,
+  BadRequestException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { ManuscriptNodeEntity } from '@/modules/manuscripts/structure/domain';
@@ -296,12 +304,14 @@ export class CitationsRepository
       collectionId.startsWith('group:')
     ) {
       if (!this.integrationsRepo || !this.zoteroProvider) {
-        throw new Error('Zotero integration services are not configured');
+        throw new ServiceUnavailableException(
+          'Zotero integration services are not configured',
+        );
       }
 
       const conn = await this.integrationsRepo.findConnection(userId, 'zotero');
       if (!conn || conn.status !== 'connected' || conn.authFailedAt) {
-        throw new Error(
+        throw new BadRequestException(
           'Zotero account is not connected or authorization is invalid',
         );
       }
@@ -320,7 +330,9 @@ export class CitationsRepository
 
     if (collectionId.startsWith('mendeley:')) {
       if (!this.integrationsRepo || !this.mendeleyProvider) {
-        throw new Error('Mendeley integration services are not configured');
+        throw new ServiceUnavailableException(
+          'Mendeley integration services are not configured',
+        );
       }
 
       const conn = await this.integrationsRepo.findConnection(
@@ -328,7 +340,7 @@ export class CitationsRepository
         'mendeley',
       );
       if (!conn || conn.status !== 'connected' || conn.authFailedAt) {
-        throw new Error(
+        throw new BadRequestException(
           'Mendeley account is not connected or authorization is invalid',
         );
       }
@@ -359,7 +371,7 @@ export class CitationsRepository
       }
     }
 
-    throw new Error(`Collection ${collectionId} not found`);
+    throw new NotFoundException(`Collection ${collectionId} not found`);
   }
 
   private upsertEntryText(

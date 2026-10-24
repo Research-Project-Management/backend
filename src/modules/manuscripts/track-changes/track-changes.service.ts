@@ -15,6 +15,7 @@ import {
   ITrackChangesRepositoryPort,
   LinePatcher,
   TrackChange,
+  ChangeStatus,
   CommentThread,
   CommentReply,
   TextRangeVo,
@@ -26,7 +27,7 @@ import {
 import {
   DocstorePatcherAdapter,
   RealtimeNotifierAdapter,
-} from './track-changes.repository';
+} from './adapters/track-changes.adapters';
 
 import {
   RecordChangeDto,
@@ -162,17 +163,9 @@ export class TrackChangesService {
       );
     }
 
-    const resolvedStatus = isAccept ? 'accepted' : 'rejected';
+    const resolvedStatus: ChangeStatus = isAccept ? 'accepted' : 'rejected';
     const now = new Date();
     const idsToUpdate = sorted.map((c) => c.id);
-
-    // Atomic O(1) DB batch update instead of sequential N+1 updates
-    await this.repository.batchUpdateChangesStatus(
-      idsToUpdate,
-      resolvedStatus as any,
-      userId,
-      now,
-    );
 
     for (const change of sorted) {
       if (isAccept) {
@@ -180,6 +173,17 @@ export class TrackChangesService {
       } else {
         change.reject(userId);
       }
+    }
+
+    // Atomic O(1) DB batch update instead of sequential N+1 updates
+    await this.repository.batchUpdateChangesStatus(
+      idsToUpdate,
+      resolvedStatus,
+      userId,
+      now,
+    );
+
+    for (const change of sorted) {
       this.realtimeNotifier?.notifyChangeResolved(resolvedProjId, docId, change);
     }
 

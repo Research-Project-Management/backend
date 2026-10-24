@@ -85,5 +85,8 @@ export class LiveCollaborationProvider extends LiveCollaborationPort {
     }
     return Array.from(flushed);
   }
-}
 
+  async evictDoc(projectId: string, docId: string): Promise<void> {
+    await this.yjs.evictDoc(projectId, docId);
+  }
+}

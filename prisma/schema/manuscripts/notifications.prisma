@@ -30,6 +30,6 @@ model ManuscriptNotification {
   @@index([userId, isRead, createdAt(sort: Desc)], map: "idx_manuscript_notifications_user")
   @@index([key], map: "idx_manuscript_notifications_key")
   @@index([expiresAt], map: "idx_manuscript_notifications_expires")
-  @@index([projectId], map: "idx_manuscript_notifications_project")
+  @@index([projectId, docId], map: "idx_manuscript_notifications_project")
   @@map("manuscript_notifications")
 }

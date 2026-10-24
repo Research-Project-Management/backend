@@ -5,5 +5,4 @@
 
 export * from './academic-dictionaries';
 export * from './academic-spell.engine';
-export * from './unsupported-language.exception';
-export * from './invalid-word.exception';
+export * from './spelling.exceptions';

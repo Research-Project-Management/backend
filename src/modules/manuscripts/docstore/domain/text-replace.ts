@@ -3,6 +3,8 @@
  * Pure search/replace rules shared by project-wide replace endpoints.
  */
 
+import { InvalidSearchPatternError } from './doc-errors';
+
 export interface ReplaceOptions {
   caseSensitive?: boolean;
   wholeWord?: boolean;
@@ -13,14 +15,14 @@ export function buildSearchRegex(
   query: string,
   opts: ReplaceOptions = {},
 ): RegExp {
-  if (!query) throw new Error('Search query must not be empty');
-  if (query.length > 500) throw new Error('Search pattern exceeds maximum allowed length of 500 characters');
+  if (!query) throw new InvalidSearchPatternError('Search query must not be empty');
+  if (query.length > 500) throw new InvalidSearchPatternError('Search pattern exceeds maximum allowed length of 500 characters');
 
   if (opts.useRegex) {
     // Basic ReDoS protection: detect potentially catastrophic nested quantifiers like (a+)+ or (.*)*
     const dangerousNestedQuantifiers = /([*+]\??)\s*\)?\s*[*+]/;
     if (dangerousNestedQuantifiers.test(query)) {
-      throw new Error('Unsafe regular expression pattern with nested quantifiers');
+      throw new InvalidSearchPatternError('Unsafe regular expression pattern with nested quantifiers');
     }
   }
 
@@ -31,7 +33,7 @@ export function buildSearchRegex(
   const flags = opts.caseSensitive ? 'gm' : 'gim';
   const re = new RegExp(source, flags);
   if (re.test('')) {
-    throw new Error('Search pattern must not match the empty string');
+    throw new InvalidSearchPatternError('Search pattern must not match the empty string');
   }
   re.lastIndex = 0;
   return re;

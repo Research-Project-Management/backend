@@ -24,6 +24,13 @@ export interface CreateTrackChangeProps {
   updatedAt?: Date;
 }
 
+export class TrackChangeDomainException extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TrackChangeDomainException';
+  }
+}
+
 export class TrackChange {
   private readonly _id: string;
   private readonly _projectId: string;
@@ -40,10 +47,10 @@ export class TrackChange {
 
   public constructor(props: CreateTrackChangeProps) {
     if (!props.projectId || !props.projectId.trim()) {
-      throw new Error('Project ID cannot be empty.');
+      throw new TrackChangeDomainException('Project ID cannot be empty.');
     }
     if (!props.docId || !props.docId.trim()) {
-      throw new Error('Document ID cannot be empty.');
+      throw new TrackChangeDomainException('Document ID cannot be empty.');
     }
 
     this._id = props.id ?? crypto.randomUUID();
@@ -107,7 +114,9 @@ export class TrackChange {
 
   public accept(resolvedBy?: string | null): void {
     if (!this.isPending()) {
-      throw new Error(`Change '${this._id}' has already been ${this._status}.`);
+      throw new TrackChangeDomainException(
+        `Change '${this._id}' has already been ${this._status}.`,
+      );
     }
     this._status = 'accepted';
     this._resolvedById = resolvedBy ?? null;
@@ -117,7 +126,9 @@ export class TrackChange {
 
   public reject(resolvedBy?: string | null): void {
     if (!this.isPending()) {
-      throw new Error(`Change '${this._id}' has already been ${this._status}.`);
+      throw new TrackChangeDomainException(
+        `Change '${this._id}' has already been ${this._status}.`,
+      );
     }
     this._status = 'rejected';
     this._resolvedById = resolvedBy ?? null;

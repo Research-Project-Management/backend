@@ -29,6 +29,13 @@ import { TEXT_EXTENSIONS, isTextPath } from '@/modules/manuscripts/core';
 
 export { TEXT_EXTENSIONS, isTextPath };
 
+export class GitBridgeDomainError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GitBridgeDomainError';
+  }
+}
+
 /**
  * Normalizes a repo-relative path to the project's "/a/b.tex" form.
  * Rejects traversal, absolute, empty segments and git internals.
@@ -42,7 +49,7 @@ export function toProjectPath(repoPath: string): string {
       (s) => !s || s === '.' || s === '..' || s.toLowerCase() === '.git',
     )
   ) {
-    throw new Error(`Unsafe path in push: ${repoPath}`);
+    throw new GitBridgeDomainError(`Unsafe path in push: ${repoPath}`);
   }
   return `/${segments.join('/')}`;
 }

@@ -33,44 +33,64 @@ export class SpellingRepository {
     const clean = word.toLowerCase().trim();
     if (!clean) return;
 
-    await this.prisma.manuscriptCustomWord.upsert({
+    const existing = await this.prisma.manuscriptCustomWord.findFirst({
       where: {
-        scope_projectId_userId_word: {
-          scope: ManuscriptDictionaryScope.project,
-          projectId,
-          userId: null as unknown as string,
-          word: clean,
-        },
-      },
-      create: {
         scope: ManuscriptDictionaryScope.project,
         projectId,
+        userId: null,
         word: clean,
       },
-      update: {},
+      select: { id: true },
     });
+
+    if (!existing) {
+      try {
+        await this.prisma.manuscriptCustomWord.create({
+          data: {
+            scope: ManuscriptDictionaryScope.project,
+            projectId,
+            userId: null,
+            word: clean,
+          },
+        });
+      } catch (err: unknown) {
+        if ((err as { code?: string })?.code !== 'P2002') {
+          throw err;
+        }
+      }
+    }
   }
 
   public async addUserWord(userId: string, word: string): Promise<void> {
     const clean = word.toLowerCase().trim();
     if (!clean) return;
 
-    await this.prisma.manuscriptCustomWord.upsert({
+    const existing = await this.prisma.manuscriptCustomWord.findFirst({
       where: {
-        scope_projectId_userId_word: {
-          scope: ManuscriptDictionaryScope.user,
-          projectId: null as unknown as string,
-          userId,
-          word: clean,
-        },
-      },
-      create: {
         scope: ManuscriptDictionaryScope.user,
+        projectId: null,
         userId,
         word: clean,
       },
-      update: {},
+      select: { id: true },
     });
+
+    if (!existing) {
+      try {
+        await this.prisma.manuscriptCustomWord.create({
+          data: {
+            scope: ManuscriptDictionaryScope.user,
+            projectId: null,
+            userId,
+            word: clean,
+          },
+        });
+      } catch (err: unknown) {
+        if ((err as { code?: string })?.code !== 'P2002') {
+          throw err;
+        }
+      }
+    }
   }
 
   public async removeProjectWord(

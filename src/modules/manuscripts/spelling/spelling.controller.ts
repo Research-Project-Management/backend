@@ -32,6 +32,7 @@ import {
   NoProjectContext,
   ResolvedProject,
 } from '@/modules/project/access';
+import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { SpellingService } from './spelling.service';
 import {
   CheckSpellingDto,
@@ -66,6 +67,8 @@ export class SpellingController {
   }
 
   @Post('check')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Check LaTeX document spelling and return errors with suggestions',
@@ -165,6 +168,8 @@ export class SpellingUtilityController {
   }
 
   @Get('suggestions')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
   @NoProjectContext()
   @ApiOperation({
     summary: 'Get candidate spelling suggestions for a queried word',

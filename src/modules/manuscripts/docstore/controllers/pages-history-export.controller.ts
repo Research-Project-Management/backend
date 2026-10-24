@@ -29,7 +29,9 @@ import {
   Role,
   ResolvedProject,
 } from '@/modules/project/access';
+import { Prisma, ManuscriptSnapshot } from '@prisma/client';
 import { PrismaService, AuthenticatedRequest, isUuid } from '@/core';
+import { createHash } from 'crypto';
 import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '../docstore.service';
 import { ManuscriptUserResolverService } from '../services/manuscript-user-resolver.service';
@@ -184,6 +186,9 @@ export class PagesHistoryExportController {
     if (!isUuid(pageId)) return { versions: [] };
     try {
       const activeProjectId = this.resolveActiveProjectId(project);
+    if (activeProjectId) {
+        await this.getLiveCollaboration()?.flushDoc(activeProjectId, pageId).catch(() => []);
+      }
       const doc = activeProjectId
         ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
         : await this.prisma.manuscriptDoc.findUnique({
@@ -195,7 +200,14 @@ export class PagesHistoryExportController {
 
       const snapshots = await this.prisma.manuscriptSnapshot.findMany({
         where: { projectId },
-        include: { labels: true },
+        select: {
+          id: true,
+          version: true,
+          summary: true,
+          createdById: true,
+          createdAt: true,
+          labels: true,
+        },
         orderBy: { version: 'desc' },
         take: 500,
       });
@@ -376,7 +388,7 @@ export class PagesHistoryExportController {
           id: s.id,
           title: `v${s.version} Snapshot`,
           label:
-            (s as any).labels?.[0]?.label ||
+            s.labels?.[0]?.label ||
             s.summary ||
             `Version ${s.version}`,
           fileName,
@@ -439,14 +451,10 @@ export class PagesHistoryExportController {
 
     try {
       const [aggOrCount, allDocs, userMap] = await Promise.all([
-        typeof this.prisma.manuscriptSnapshot.aggregate === 'function'
-          ? this.prisma.manuscriptSnapshot.aggregate({
-              where: { projectId },
-              _max: { version: true },
-            })
-          : this.prisma.manuscriptSnapshot
-              .count({ where: { projectId } })
-              .then((c) => ({ _max: { version: c } })),
+        this.prisma.manuscriptSnapshot.aggregate({
+          where: { projectId },
+          _max: { version: true },
+        }),
         this.prisma.manuscriptDoc.findMany({
           where: { projectId, deleted: false },
           select: { id: true, projectId: true, path: true, lines: true, inStorage: true },
@@ -479,7 +487,7 @@ export class PagesHistoryExportController {
           normalizedPath,
           d.id,
           finalText.split('\n'),
-          '',
+          createHash('sha256').update(finalText).digest('hex'),
           normalizedPath === '/main.tex',
         );
         snapshotFiles[vo.path] = vo.toJSON();
@@ -490,7 +498,7 @@ export class PagesHistoryExportController {
           normalizedTarget,
           isUuid(pageId) ? pageId : '',
           content.split('\n'),
-          '',
+          createHash('sha256').update(content).digest('hex'),
           normalizedTarget === '/main.tex',
         );
         snapshotFiles[vo.path] = vo.toJSON();
@@ -503,15 +511,38 @@ export class PagesHistoryExportController {
         req?.user?.email?.split('@')[0] ||
         'Collaborator';
 
-      const snap = await this.prisma.manuscriptSnapshot.create({
-        data: {
-          projectId,
-          version: nextVersion,
-          summary: body.label || 'Manual Snapshot',
-          createdById: isUuid(userId) ? userId : null,
-          files: snapshotFiles as any,
-        },
-      });
+      let candidateVersion = nextVersion;
+      const maxAttempts = 3;
+      let snap: ManuscriptSnapshot | null = null;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          snap = await this.prisma.manuscriptSnapshot.create({
+            data: {
+              projectId,
+              version: candidateVersion,
+              summary: body.label || 'Manual Snapshot',
+              createdById: isUuid(userId) ? userId : null,
+              files: snapshotFiles as Prisma.InputJsonValue,
+            },
+          });
+          break;
+        } catch (err: unknown) {
+          const code = (err as { code?: string })?.code;
+          if (code === 'P2002' && attempt < maxAttempts - 1) {
+            const latest = await this.prisma.manuscriptSnapshot.aggregate({
+              where: { projectId },
+              _max: { version: true },
+            });
+            candidateVersion = Math.max(candidateVersion + 1, (latest?._max?.version ?? 0) + 1);
+            continue;
+          }
+          throw err;
+        }
+      }
+      if (!snap) {
+        throw new InternalServerErrorException('Failed to create snapshot version');
+      }
       return {
         version: {
           id: snap.id,
@@ -615,17 +646,26 @@ export class PagesHistoryExportController {
 
     const userId = req?.user?.id || req?.user?.sub || null;
 
-    await this.prisma.manuscriptLabel
-      .create({
-        data: {
+    await this.prisma.manuscriptLabel.upsert({
+      where: {
+        projectId_label: {
           projectId: snap.projectId,
-          snapshotId: versionId,
-          version: snap.version,
           label: labelName,
-          createdById: isUuid(userId) ? userId : null,
         },
-      })
-      .catch(() => {});
+      },
+      create: {
+        projectId: snap.projectId,
+        snapshotId: versionId,
+        version: snap.version,
+        label: labelName,
+        createdById: isUuid(userId) ? userId : null,
+      },
+      update: {
+        snapshotId: versionId,
+        version: snap.version,
+        createdById: isUuid(userId) ? userId : null,
+      },
+    });
 
     return {
       version: {
@@ -666,7 +706,14 @@ export class PagesHistoryExportController {
 
     const snapshots = await this.prisma.manuscriptSnapshot.findMany({
       where: { projectId },
-      include: { labels: true },
+      select: {
+        id: true,
+        version: true,
+        summary: true,
+        createdById: true,
+        createdAt: true,
+        labels: true,
+      },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
@@ -758,35 +805,6 @@ export class PagesHistoryExportController {
     };
   }
 
-  /**
-   * GET /api/v1/manuscripts/projects/:projectId/history
-   */
-  @Get('projects/:projectId/history')
-  async getProjectHistory(
-    @Param('projectId') routeProjectId: string,
-    @ResolvedProject() project?: string | { id: string } | null,
-  ) {
-    const projectId = this.resolveActiveProjectId(project) || routeProjectId;
-    if (!isUuid(projectId)) return { events: [], history: [] };
-
-    const snapshots = await this.prisma.manuscriptSnapshot.findMany({
-      where: { projectId },
-      include: { labels: true },
-      orderBy: { version: 'desc' },
-      take: 100,
-    });
-
-    const events = snapshots.map((s) => ({
-      id: s.id,
-      version: s.version,
-      label: s.labels?.[0]?.label || s.summary || `Version ${s.version}`,
-      createdAt: s.createdAt.toISOString(),
-      userId: s.createdById || 'anonymous',
-      summary: s.summary,
-    }));
-
-    return { events, history: events };
-  }
 
   // ─── 2. COMPILER INCREMENTAL SYNC ─────────────────────────────────────────────
 

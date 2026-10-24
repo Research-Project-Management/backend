@@ -16,6 +16,13 @@ export interface CreateVersionLabelProps {
   updatedAt?: Date;
 }
 
+export class InvalidVersionLabelException extends Error {
+  constructor(message: string = 'Version label cannot be empty.') {
+    super(message);
+    this.name = 'InvalidVersionLabelException';
+  }
+}
+
 export class VersionLabel {
   private readonly _id: string;
   private readonly _projectId: string;
@@ -28,7 +35,7 @@ export class VersionLabel {
 
   private constructor(props: CreateVersionLabelProps) {
     if (!props.label || !props.label.trim()) {
-      throw new Error('Version label cannot be empty.');
+      throw new InvalidVersionLabelException('Version label cannot be empty.');
     }
     this._id = props.id ?? crypto.randomUUID();
     this._projectId = props.projectId;
@@ -71,7 +78,7 @@ export class VersionLabel {
 
   public updateLabel(newLabel: string): void {
     if (!newLabel || !newLabel.trim()) {
-      throw new Error('Version label cannot be empty.');
+      throw new InvalidVersionLabelException('Version label cannot be empty.');
     }
     this._label = newLabel.trim();
     this._updatedAt = new Date();

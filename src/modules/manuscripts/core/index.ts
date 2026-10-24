@@ -4,6 +4,7 @@
  */
 
 export * from './core.module';
+export * from './config/manuscripts.config';
 export * from './domain/workspace-file.interface';
 export * from './domain/ssrf-guard';
 export * from './domain/latex-escape.util';

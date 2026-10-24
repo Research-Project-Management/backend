@@ -25,6 +25,7 @@ export interface ActiveDocSession {
   lastActiveAt: number;
   firstUnflushedAt?: number;
   currentVersion?: number;
+  lastFlushedRev?: number;
   lastFlushedText?: string;
 }
 
@@ -49,6 +50,7 @@ export class YjsService implements OnModuleDestroy {
     string,
     Promise<ActiveDocSession>
   >();
+  private readonly inFlightFlushes = new Map<string, Promise<void>>();
 
   private readonly FLUSH_DEBOUNCE_MS = 2000;
   private readonly MAX_FLUSH_DELAY_MS = 10000;
@@ -574,14 +576,46 @@ export class YjsService implements OnModuleDestroy {
 
   public async flushDoc(projectId: string, docId: string): Promise<void> {
     const key = this.docKey(projectId, docId);
+    const existingFlush = this.inFlightFlushes.get(key);
+    if (existingFlush) {
+      await existingFlush;
+      const postSession = this.activeDocs.get(key);
+      if (
+        postSession &&
+        (postSession.firstUnflushedAt !== undefined ||
+          postSession.yText.toString() !== postSession.lastFlushedText)
+      ) {
+        return this.flushDoc(projectId, docId);
+      }
+      return;
+    }
+
     const session = this.activeDocs.get(key);
     if (!session) return;
 
+    const flushPromise = this.executeFlushDoc(projectId, docId, key, session);
+    this.inFlightFlushes.set(key, flushPromise);
+    try {
+      await flushPromise;
+    } finally {
+      if (this.inFlightFlushes.get(key) === flushPromise) {
+        this.inFlightFlushes.delete(key);
+      }
+    }
+  }
+
+  private async executeFlushDoc(
+    projectId: string,
+    docId: string,
+    key: string,
+    session: ActiveDocSession,
+  ): Promise<void> {
     if (session.flushTimeout) {
       clearTimeout(session.flushTimeout);
       session.flushTimeout = undefined;
     }
-    const unflushedTimestamp = session.firstUnflushedAt;
+    const flushedTimestamp = session.firstUnflushedAt;
+    const flushedText = session.yText.toString();
 
     try {
       const tasks: Promise<unknown>[] = [];
@@ -591,33 +625,61 @@ export class YjsService implements OnModuleDestroy {
       }
 
       if (this.docstoreService) {
-        const text = session.yText.toString();
-        const lines = LineArrayEngine.textToLines(text);
-        if (session.currentVersion === undefined) {
+        const lines = LineArrayEngine.textToLines(flushedText);
+        if (session.currentVersion === undefined || session.lastFlushedRev === undefined) {
           const currentDoc = await this.docstoreService
             .getDoc(projectId, docId)
             .catch(() => null);
           session.currentVersion = currentDoc?.version ?? 0;
+          session.lastFlushedRev = currentDoc?.rev;
         }
         const nextVersion = (session.currentVersion ?? 0) + 1;
 
         tasks.push(
           this.docstoreService
-            .updateDoc(projectId, docId, { lines, version: nextVersion })
+            .updateDoc(projectId, docId, {
+              lines,
+              version: nextVersion,
+              expectedRev: session.lastFlushedRev,
+            })
             .then((res) => {
               session.currentVersion = res.doc?.version ?? nextVersion;
-              session.lastFlushedText = text;
+              session.lastFlushedRev = res.rev ?? res.doc?.rev;
+              session.lastFlushedText = flushedText;
               this.logger.debug(
-                `Flushed Y.Doc to Docstore (${lines.length} lines, v${session.currentVersion}): ${key}`,
+                `Flushed Y.Doc to Docstore (${lines.length} lines, v${session.currentVersion}, rev${session.lastFlushedRev}): ${key}`,
               );
+            })
+            .catch(async (err: unknown) => {
+              if (err && typeof err === 'object' && 'name' in err && err.name === 'DocModifiedError') {
+                this.logger.warn(
+                  `OCC conflict during Y.Doc flush for ${key}. Re-fetching base rev.`,
+                );
+                const fresh = await this.docstoreService?.getDoc(projectId, docId).catch(() => null);
+                if (fresh) {
+                  session.lastFlushedRev = fresh.rev;
+                  session.currentVersion = fresh.version;
+                }
+              }
+              throw err;
             }),
         );
       }
 
       await Promise.all(tasks);
-      session.firstUnflushedAt = undefined;
+      if (session.yText.toString() === flushedText) {
+        session.firstUnflushedAt = undefined;
+      } else {
+        session.firstUnflushedAt = session.firstUnflushedAt ?? Date.now();
+        if (!session.flushTimeout) {
+          session.flushTimeout = setTimeout(
+            () => void this.flushDoc(projectId, docId),
+            this.FLUSH_DEBOUNCE_MS,
+          );
+        }
+      }
     } catch (err: unknown) {
-      session.firstUnflushedAt = unflushedTimestamp ?? Date.now();
+      session.firstUnflushedAt = flushedTimestamp ?? Date.now();
       session.currentVersion = undefined;
       this.logger.error(
         `Error flushing Y.Doc ${key}: ${(err as Error)?.message}`,

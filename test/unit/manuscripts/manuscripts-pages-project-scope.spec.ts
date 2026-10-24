@@ -50,7 +50,11 @@ describe('ManuscriptPageScopeRepository & Tenant Isolation', () => {
       expect(result).toBeDefined();
       expect(result?.id).toBe(docAId);
       expect(mockPrisma.manuscriptDoc.findFirst).toHaveBeenCalledWith({
-        where: { id: docAId, projectId: projectAId, deleted: false },
+        where: {
+          projectId: projectAId,
+          deleted: false,
+          OR: [{ id: docAId }, { node: { id: docAId } }],
+        },
       });
     });
 
@@ -60,7 +64,11 @@ describe('ManuscriptPageScopeRepository & Tenant Isolation', () => {
       const result = await repository.findDocInProject(projectBId, docAId);
       expect(result).toBeNull();
       expect(mockPrisma.manuscriptDoc.findFirst).toHaveBeenCalledWith({
-        where: { id: docAId, projectId: projectBId, deleted: false },
+        where: {
+          projectId: projectBId,
+          deleted: false,
+          OR: [{ id: docAId }, { node: { id: docAId } }],
+        },
       });
     });
 

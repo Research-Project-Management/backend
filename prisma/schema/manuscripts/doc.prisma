@@ -22,7 +22,7 @@ model ManuscriptDoc {
   node       ManuscriptNode?
 
   @@index([projectId, deleted, updatedAt], map: "idx_manuscript_docs_proj_del_updated")
-  @@index([projectId, deleted], map: "idx_manuscript_docs_project_deleted")
+  @@index([projectId, deleted, deletedAt(sort: Desc)], map: "idx_manuscript_docs_proj_del_deleted_at")
   @@index([projectId, inStorage], map: "idx_manuscript_docs_project_storage")
   @@index([projectId, path], map: "idx_manuscript_docs_project_path")
   @@map("manuscript_docs")

@@ -201,16 +201,7 @@ export class FilestoreService {
     projectId: string,
     rawPath: string,
   ): Promise<ManuscriptFile | null> {
-    if (typeof this.repository.findFileByPathFlexible === 'function') {
-      return await this.repository.findFileByPathFlexible(projectId, rawPath);
-    }
-    const cleanPath = rawPath.replace(/^\//, '').trim();
-    const leafName = cleanPath.split('/').pop() || cleanPath;
-    let file = await this.repository.findByProjectAndName(projectId, cleanPath);
-    if (!file && leafName !== cleanPath) {
-      file = await this.repository.findByProjectAndName(projectId, leafName);
-    }
-    return file;
+    return await this.repository.findFileByPathFlexible(projectId, rawPath);
   }
 
   /**

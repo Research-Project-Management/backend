@@ -293,9 +293,9 @@ export class ClsiService {
       }
     }
 
-    if (cacheable) {
-      const inFlight = this.inFlightBuilds.get(cacheKey);
-      if (inFlight) return inFlight;
+    if (plan.hasMainContent) {
+      const existingBuild = this.inFlightBuilds.get(cacheKey);
+      if (existingBuild) return existingBuild;
     }
 
     const build = this.runCompile(
@@ -306,7 +306,7 @@ export class ClsiService {
       cacheKey,
       _userId,
     );
-    if (!cacheable) return build;
+    if (!plan.hasMainContent) return build;
 
     const tracked = build.finally(() => {
       if (this.inFlightBuilds.get(cacheKey) === tracked) {

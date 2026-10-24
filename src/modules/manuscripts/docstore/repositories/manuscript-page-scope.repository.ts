@@ -4,8 +4,10 @@ import { isUUID } from 'class-validator';
 import {
   ManuscriptDoc,
   ManuscriptCommentThread,
+  ManuscriptCommentReply,
   ManuscriptTrackChange,
   ManuscriptSnapshot,
+  ManuscriptLabel,
   ManuscriptFile,
   Prisma,
 } from '@prisma/client';
@@ -130,7 +132,7 @@ export class ManuscriptPageScopeRepository {
     projectId: string,
     threadId: string,
     docId?: string,
-  ): Promise<(ManuscriptCommentThread & { replies: any[] }) | null> {
+  ): Promise<(ManuscriptCommentThread & { replies: ManuscriptCommentReply[] }) | null> {
     if (!isUUID(threadId)) return null;
 
     return this.prisma.manuscriptCommentThread.findFirst({
@@ -215,7 +217,7 @@ export class ManuscriptPageScopeRepository {
   async findSnapshotInProject(
     projectId: string,
     versionOrId: string | number,
-  ): Promise<(ManuscriptSnapshot & { labels?: any[] }) | null> {
+  ): Promise<(ManuscriptSnapshot & { labels?: ManuscriptLabel[] }) | null> {
     if (typeof versionOrId === 'number' || !isNaN(Number(versionOrId))) {
       return this.prisma.manuscriptSnapshot.findFirst({
         where: { projectId, version: Number(versionOrId) },

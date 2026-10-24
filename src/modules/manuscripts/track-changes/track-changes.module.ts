@@ -9,11 +9,11 @@ import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 
 import { TrackChangesController } from './track-changes.controller';
 import { TrackChangesService } from './track-changes.service';
+import { TrackChangesRepository } from './track-changes.repository';
 import {
-  TrackChangesRepository,
   DocstorePatcherAdapter,
   RealtimeNotifierAdapter,
-} from './track-changes.repository';
+} from './adapters/track-changes.adapters';
 import {
   ITrackChangesRepositoryPort,
   IDocstorePatcherPort,

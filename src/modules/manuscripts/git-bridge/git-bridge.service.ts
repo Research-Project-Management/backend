@@ -5,7 +5,13 @@
  * role authorization, and bidirectional Structure/Docstore/Filestore <-> Git sync.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  BadRequestException,
+  PayloadTooLargeException,
+} from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { Readable } from 'stream';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
@@ -77,7 +83,9 @@ export class GitBridgeService {
   async createToken(userId: string, label?: string) {
     const { editorConfig, tokens } = await this.repository.readConfig(userId);
     if (tokens.length >= MAX_TOKENS) {
-      throw new Error(`At most ${MAX_TOKENS} git tokens are allowed`);
+      throw new BadRequestException(
+        `At most ${MAX_TOKENS} git tokens are allowed`,
+      );
     }
     const { token, id, hash } = generateToken(userId);
     const stored: StoredGitToken = {
@@ -336,13 +344,13 @@ export class GitBridgeService {
         change.path,
       );
       if (content.length > MAX_PUSH_FILE_SIZE_BYTES) {
-        throw new Error(
+        throw new PayloadTooLargeException(
           `File "${projectPath}" exceeds maximum permitted push size of 50MB (${content.length} bytes)`,
         );
       }
       totalBytes += content.length;
       if (totalBytes > MAX_PUSH_TOTAL_BYTES) {
-        throw new Error(
+        throw new PayloadTooLargeException(
           `Push payload exceeds maximum permitted total size of 200MB`,
         );
       }

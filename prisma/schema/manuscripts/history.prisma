@@ -20,7 +20,6 @@ model ManuscriptSnapshot {
 
   @@unique([projectId, version], map: "uq_manuscript_snapshots_project_version")
   @@index([projectId, createdAt(sort: Desc)], map: "idx_manuscript_snapshots_project_created_desc")
-  @@index([projectId, createdAt], map: "idx_manuscript_snapshots_project_created")
   @@index([projectId, inStorage], map: "idx_manuscript_snapshots_storage")
   @@map("manuscript_snapshots")
 }
@@ -38,5 +37,6 @@ model ManuscriptLabel {
 
   @@unique([projectId, label], map: "uq_manuscript_labels_project_label")
   @@index([projectId, version], map: "idx_manuscript_labels_project_version")
+  @@index([snapshotId], map: "idx_manuscript_labels_snapshot_id")
   @@map("manuscript_labels")
 }

@@ -67,6 +67,29 @@ export class ProjectHistoryController {
     throw error;
   }
 
+  @Get('')
+  @ApiOperation({
+    summary: 'Get project history events and versions overview',
+  })
+  async getProjectHistory(
+    @Param('projectId') projectId: string,
+  ) {
+    try {
+      const versions = await this.historyService.listVersions(projectId);
+      const events = versions.map((v) => ({
+        id: v.id,
+        version: v.version,
+        label: v.labels?.[0] || v.summary || `Version ${v.version}`,
+        createdAt: v.createdAt,
+        userId: v.createdById || 'anonymous',
+        summary: v.summary,
+      }));
+      return { events, history: events, versions };
+    } catch (err) {
+      this.handleError(err);
+    }
+  }
+
   @Get('versions')
   @ApiOperation({
     summary: 'List all historical snapshot versions and labels for project',

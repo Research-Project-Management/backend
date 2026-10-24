@@ -348,17 +348,42 @@ export class ClsiWorkspacePlannerService {
         return;
       }
 
-      await this.prisma.manuscriptSnapshot.create({
-        data: {
-          projectId,
-          version: nextVersion,
-          summary: `Compilation milestone (${metricEngine})`,
-          createdById: userId || null,
-          isAutomatic: true,
-          files: filesJson as unknown as Prisma.InputJsonValue,
-          sizeBytes: Object.keys(filesJson).length,
-        },
-      });
+      let candidateVersion = nextVersion;
+      const maxAttempts = 3;
+      let savedVersion = candidateVersion;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          await this.prisma.manuscriptSnapshot.create({
+            data: {
+              projectId,
+              version: candidateVersion,
+              summary: `Compilation milestone (${metricEngine})`,
+              createdById: userId || null,
+              isAutomatic: true,
+              files: filesJson as unknown as Prisma.InputJsonValue,
+              sizeBytes: Object.keys(filesJson).length,
+            },
+          });
+          savedVersion = candidateVersion;
+          break;
+        } catch (err: unknown) {
+          const code = (err as { code?: string })?.code;
+          if (code === 'P2002' && attempt < maxAttempts - 1) {
+            const currentLatest = await this.prisma.manuscriptSnapshot.findFirst({
+              where: { projectId },
+              orderBy: { version: 'desc' },
+              select: { version: true },
+            });
+            candidateVersion = Math.max(
+              candidateVersion + 1,
+              (currentLatest?.version ?? 0) + 1,
+            );
+            continue;
+          }
+          throw err;
+        }
+      }
 
       // Bounded cache maintenance to prevent memory leaks across thousands of projects
       if (this.lastAutoSnapshotTimes.size >= ClsiWorkspacePlannerService.MAX_TRACKED_PROJECTS) {
@@ -371,7 +396,7 @@ export class ClsiWorkspacePlannerService {
       this.lastAutoSnapshotTimes.set(projectId, Date.now());
       this.lastSnapshotHashes.set(projectId, projectContentHash);
       this.realtimeService?.broadcastSnapshotCreated(projectId, {
-        version: nextVersion,
+        version: savedVersion,
         summary: `Compilation milestone (${metricEngine})`,
         label: null,
       });

@@ -6,7 +6,7 @@
 import * as crypto from 'node:crypto';
 import { FileSnapshotVo, FileSnapshotProps } from './file-snapshot.vo';
 import { VersionLabel } from './version-label.entity';
-import { EmptyProjectException } from './empty-project.exception';
+import { EmptyProjectException } from './project-history.exceptions';
 
 export interface CreateSnapshotProps {
   id?: string;

@@ -14,6 +14,13 @@ export interface CreateCommentReplyProps {
   updatedAt?: Date;
 }
 
+export class InvalidCommentReplyException extends Error {
+  constructor(message: string = 'Reply content cannot be empty.') {
+    super(message);
+    this.name = 'InvalidCommentReplyException';
+  }
+}
+
 export class CommentReply {
   private readonly _id: string;
   private readonly _threadId: string;
@@ -24,7 +31,7 @@ export class CommentReply {
 
   private constructor(props: CreateCommentReplyProps) {
     if (!props.content || !props.content.trim()) {
-      throw new Error('Reply content cannot be empty.');
+      throw new InvalidCommentReplyException('Reply content cannot be empty.');
     }
     this._id = props.id ?? crypto.randomUUID();
     this._threadId = props.threadId;
@@ -59,7 +66,7 @@ export class CommentReply {
 
   public updateContent(content: string): void {
     if (!content || !content.trim()) {
-      throw new Error('Reply content cannot be empty.');
+      throw new InvalidCommentReplyException('Reply content cannot be empty.');
     }
     this._content = content.trim();
     this._updatedAt = new Date();

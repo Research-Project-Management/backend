@@ -3,9 +3,9 @@
  * Aggregate Entity representing an individual BibTeX bibliography entry.
  */
 
-import { CitationKeyVo } from '../value-objects/citation-key.vo';
-import { AuthorListVo } from '../value-objects/author-list.vo';
-import { toBibtexValue } from '../bibtex.formatter';
+import { CitationKeyVo } from './citation-key.vo';
+import { AuthorListVo } from './author-list.vo';
+import { toBibtexValue } from './bibtex.formatter';
 
 /**
  * How field values should be treated when serializing:

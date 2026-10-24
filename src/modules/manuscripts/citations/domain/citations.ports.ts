@@ -3,9 +3,9 @@
  * Domain port interfaces for Citations & Bibliography.
  */
 
-import { BibEntry } from './entities/bib-entry.entity';
-import { BibliographyFile } from './entities/bibliography-file.entity';
-import { AcademicIdentifierVo } from './value-objects/academic-identifier.vo';
+import { BibEntry } from './bib-entry.entity';
+import { BibliographyFile } from './bibliography-file.entity';
+import { AcademicIdentifierVo } from './academic-identifier.vo';
 
 export interface IBibtexParserPort {
   /**

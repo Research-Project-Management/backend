@@ -400,13 +400,9 @@ export class TemplatesRepository
         return projectId;
       };
 
-      if (typeof this.prisma.$transaction === 'function') {
-        finalProjectId = await this.prisma.$transaction(async (tx) =>
-          createProjectAndOwner(tx),
-        );
-      } else {
-        finalProjectId = await createProjectAndOwner(this.prisma);
-      }
+      finalProjectId = await this.prisma.$transaction(async (tx) =>
+        createProjectAndOwner(tx),
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`Prisma project creation failed: ${msg}`);

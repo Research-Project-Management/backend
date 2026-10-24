@@ -14,6 +14,7 @@ import {
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { TreeNode } from '../domain/file-tree.builder';
 
 export class CreateNodeDto {
   @ApiProperty({
@@ -102,7 +103,7 @@ export class ReorderNodeDto {
   sortOrder!: number;
 }
 
-export class TreeNodeDto {
+export class TreeNodeDto implements TreeNode {
   @ApiProperty()
   id!: string;
 
