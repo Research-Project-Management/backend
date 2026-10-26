@@ -6,12 +6,24 @@ import {
 } from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
+const AUTH_TAG_LENGTH = 16;
 
 function getEncryptionKey(): Buffer {
   const rawSecret =
+    process.env.INTEGRATIONS_ENCRYPTION_KEY ||
     process.env.ZOTERO_ENCRYPTION_KEY ||
-    process.env.ENCRYPTION_SECRET ||
-    'flux-default-vault-secure-token-encryption-key-32b';
+    process.env.ENCRYPTION_SECRET;
+
+  if (!rawSecret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'CRITICAL: Production environment requires INTEGRATIONS_ENCRYPTION_KEY or ENCRYPTION_SECRET to be configured.',
+      );
+    }
+    return createHash('sha256')
+      .update('flux-default-vault-secure-token-encryption-key-32b')
+      .digest();
+  }
   return createHash('sha256').update(rawSecret).digest();
 }
 
@@ -24,7 +36,9 @@ export function encryptToken(plaintext: string): string {
     throw new Error('Plaintext cannot be empty');
   }
   const iv = randomBytes(12);
-  const cipher = createCipheriv(ALGORITHM, getEncryptionKey(), iv);
+  const cipher = createCipheriv(ALGORITHM, getEncryptionKey(), iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
 
   let encrypted = cipher.update(plaintext, 'utf8', 'hex');
   encrypted += cipher.final('hex');
@@ -51,7 +65,13 @@ export function decryptToken(cipherPayload: string): string {
   const iv = Buffer.from(ivHex, 'hex');
   const authTag = Buffer.from(authTagHex, 'hex');
 
-  const decipher = createDecipheriv(ALGORITHM, getEncryptionKey(), iv);
+  if (authTag.length !== AUTH_TAG_LENGTH) {
+    throw new Error(`Invalid authentication tag length; expected ${AUTH_TAG_LENGTH} bytes`);
+  }
+
+  const decipher = createDecipheriv(ALGORITHM, getEncryptionKey(), iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
   decipher.setAuthTag(authTag);
 
   let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');

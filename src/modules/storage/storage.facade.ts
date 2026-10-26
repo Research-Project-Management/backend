@@ -87,6 +87,18 @@ export class StorageFacade implements IStoragePort {
     return { node, blob };
   }
 
+  async assertFileAccess(
+    fileId: string,
+    userId?: string,
+    projectId?: string | null,
+  ): Promise<void> {
+    const node = await this.nodeRepo.findById(fileId);
+    if (!node || node.isTrashed()) {
+      throw new NotFoundException(`Storage node not found: ${fileId}`);
+    }
+    await this.verifyNodeAccess(node, userId, projectId);
+  }
+
   async readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput> {
     const { node, blob } = await this.resolveActiveNodeAndBlob(
       input.fileId,

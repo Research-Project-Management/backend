@@ -118,6 +118,8 @@ model Message {
   reactions      MessageReaction[]
 
   @@index([conversationId, createdAt(sort: Desc)])
+  @@index([senderId])
+  @@index([replyToId])
   @@map("messages")
 }
 
@@ -133,5 +135,6 @@ model MessageReaction {
   user      User     @relation("UserMessageReactions", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId, emoji], map: "uq_message_user_reaction")
+  @@index([userId])
   @@map("message_reactions")
 }

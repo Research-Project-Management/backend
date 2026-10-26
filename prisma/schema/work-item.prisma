@@ -85,11 +85,15 @@ model WorkItem {
   @@index([projectId, columnId, rank])
   @@index([projectId, columnId, deletedAt, rank])
   @@index([projectId, deletedAt, archivedAt, rank])
+  @@index([projectId, deletedAt, updatedAt(sort: Desc)])
+  @@index([projectId, deletedAt, dueDate])
   @@index([projectId, parentWorkItemId, rank])
   @@index([projectId, completed, deletedAt])
   @@index([projectId, identifier])
   @@index([assigneeId, deletedAt])
+  @@index([assigneeId, deletedAt, archivedAt, updatedAt(sort: Desc)])
   @@index([authorId])
+  @@index([authorId, deletedAt, updatedAt(sort: Desc)])
   @@map("work_items")
 }
 

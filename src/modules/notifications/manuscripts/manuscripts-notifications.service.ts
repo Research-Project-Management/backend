@@ -163,11 +163,17 @@ export class ManuscriptsNotificationsService {
    * Dismisses mention and reply notifications when thread is resolved.
    */
   async dismissThreadNotifications(threadId: string): Promise<number> {
+    if (!threadId || !threadId.trim()) {
+      return 0;
+    }
+    const safeThreadId = threadId.trim();
     const [deletedMentions, deletedReplies] = await Promise.all([
       this.deleteNotificationUseCase.deleteByKey(
-        `comment-mention-${threadId}`,
+        `comment-mention-${safeThreadId}`,
       ),
-      this.deleteNotificationUseCase.deleteByKey(`comment-reply-${threadId}`),
+      this.deleteNotificationUseCase.deleteByKey(
+        `comment-reply-${safeThreadId}`,
+      ),
     ]);
     return deletedMentions + deletedReplies;
   }

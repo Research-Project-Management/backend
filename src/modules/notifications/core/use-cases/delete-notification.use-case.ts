@@ -33,10 +33,17 @@ export class DeleteNotificationUseCase {
   }
 
   async deleteByKey(key: string, userId?: string): Promise<number> {
+    const affectedUserIds = userId
+      ? [userId]
+      : ((await this.repository
+          .findAffectedUserIdsByKey?.(key)
+          .catch(() => [])) ?? []);
     const deleted = await this.repository.deleteByKey(key, userId);
-    if (deleted > 0 && userId) {
-      const count = await this.repository.countUnread(userId);
-      await this.notifier.broadcastUnreadCount(userId, count);
+    if (deleted > 0) {
+      for (const uid of affectedUserIds) {
+        const count = await this.repository.countUnread(uid);
+        await this.notifier.broadcastUnreadCount(uid, count);
+      }
     }
     return deleted;
   }

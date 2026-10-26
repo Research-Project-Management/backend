@@ -5,6 +5,8 @@ import {
   Optional,
   Logger,
 } from '@nestjs/common';
+import { RedisCacheService } from '@/core';
+import { UserIntegration } from '@prisma/client';
 import { IntegrationsRepository } from './integrations.repository';
 import {
   IIntegrationProvider,
@@ -53,6 +55,10 @@ export class IntegrationsService {
     IntegrationProviderType,
     IIntegrationProvider
   >();
+  private readonly inMemoryOAuthState = new Map<
+    string,
+    { userId: string; provider: string; expiresAt: number }
+  >();
   constructor(
     private readonly repo: IntegrationsRepository,
     private readonly zoteroProvider: ZoteroProvider,
@@ -62,6 +68,7 @@ export class IntegrationsService {
     private readonly exportImportService: ExportImportService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly structureService?: StructureService,
+    @Optional() private readonly redis?: RedisCacheService,
   ) {
     this.providers.set(this.zoteroProvider.provider, this.zoteroProvider);
     this.providers.set(this.mendeleyProvider.provider, this.mendeleyProvider);
@@ -155,7 +162,22 @@ export class IntegrationsService {
     provider: IntegrationProviderType,
     redirectUri: string,
   ): Promise<OAuthInitiationResult> {
-    return this.getProvider(provider).initiateOAuth(userId, redirectUri);
+    const result = await this.getProvider(provider).initiateOAuth(userId, redirectUri);
+    if (result.state) {
+      if (this.redis) {
+        await this.redis.set(
+          `oauth:state:${result.state}`,
+          JSON.stringify({ userId, provider }),
+          900,
+        );
+      }
+      this.inMemoryOAuthState.set(result.state, {
+        userId,
+        provider,
+        expiresAt: Date.now() + 15 * 60 * 1000,
+      });
+    }
+    return result;
   }
 
   async handleCallback(params: {
@@ -167,6 +189,36 @@ export class IntegrationsService {
     secret?: string;
     redirectUri: string;
   }): Promise<void> {
+    let stateUserId: string | undefined;
+
+    if (params.state) {
+      if (this.redis) {
+        const storedJson = await this.redis.get<string | { userId: string; provider: string }>(
+          `oauth:state:${params.state}`,
+        );
+        if (storedJson) {
+          const stored = typeof storedJson === 'string' ? JSON.parse(storedJson) : storedJson;
+          if (stored.provider === params.provider) {
+            stateUserId = stored.userId;
+            await this.redis.del(`oauth:state:${params.state}`);
+          } else {
+            throw new BadRequestException('OAuth state provider mismatch');
+          }
+        }
+      }
+      if (!stateUserId) {
+        const mem = this.inMemoryOAuthState.get(params.state);
+        if (mem && mem.expiresAt > Date.now()) {
+          if (mem.provider === params.provider) {
+            stateUserId = mem.userId;
+            this.inMemoryOAuthState.delete(params.state);
+          } else {
+            throw new BadRequestException('OAuth state provider mismatch');
+          }
+        }
+      }
+    }
+
     const providerInstance = this.getProvider(params.provider);
 
     const exchange = await providerInstance.handleCallback({
@@ -177,7 +229,7 @@ export class IntegrationsService {
       redirectUri: params.redirectUri,
     });
 
-    const targetUserId = exchange.userId || params.userId;
+    const targetUserId = stateUserId || exchange.userId || params.userId;
 
     if (!targetUserId || targetUserId === 'anonymous-user') {
       throw new BadRequestException(
@@ -213,6 +265,108 @@ export class IntegrationsService {
     await this.repo.deleteConnection(userId, provider);
   }
 
+  async getValidAccessToken(
+    userId: string,
+    conn: UserIntegration,
+  ): Promise<string> {
+    const provider = conn.provider as IntegrationProviderType;
+    const providerInstance = this.getProvider(provider);
+
+    const isExpired =
+      conn.tokenExpiresAt &&
+      conn.tokenExpiresAt.getTime() <= Date.now() + 5 * 60 * 1000;
+
+    if (isExpired && conn.refreshToken && providerInstance.refreshAccessToken) {
+      try {
+        const decryptedRefresh = decryptToken(conn.refreshToken);
+        const exchange = await providerInstance.refreshAccessToken(decryptedRefresh);
+        const newEncryptedAccess = encryptToken(exchange.accessToken);
+        const newEncryptedRefresh = exchange.refreshToken
+          ? encryptToken(exchange.refreshToken)
+          : conn.refreshToken;
+        const newTokenExpiresAt = exchange.expiresInSeconds
+          ? new Date(Date.now() + exchange.expiresInSeconds * 1000)
+          : null;
+
+        await this.repo.upsertConnection({
+          userId,
+          provider,
+          accessToken: newEncryptedAccess,
+          refreshToken: newEncryptedRefresh,
+          tokenExpiresAt: newTokenExpiresAt,
+          providerUserId: conn.providerUserId,
+          accountName: conn.accountName || undefined,
+          accountEmail: conn.accountEmail || undefined,
+          metadata: (conn.metadata as Record<string, unknown>) || undefined,
+        });
+
+        return exchange.accessToken;
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Failed to proactively refresh token for ${provider} (user: ${userId}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return decryptToken(conn.accessToken);
+  }
+
+  async executeWithTokenRefresh<T>(
+    userId: string,
+    conn: UserIntegration,
+    operation: (decryptedToken: string) => Promise<T>,
+  ): Promise<T> {
+    const provider = conn.provider as IntegrationProviderType;
+    const providerInstance = this.getProvider(provider);
+    const token = await this.getValidAccessToken(userId, conn);
+
+    try {
+      return await operation(token);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (
+        (errMsg.includes('401') || errMsg.includes('unauthorized') || errMsg.includes('Unauthorized')) &&
+        conn.refreshToken &&
+        providerInstance.refreshAccessToken
+      ) {
+        try {
+          this.logger.log(`Received 401 for ${provider}; attempting token refresh retry...`);
+          const decryptedRefresh = decryptToken(conn.refreshToken);
+          const exchange = await providerInstance.refreshAccessToken(decryptedRefresh);
+          const newEncryptedAccess = encryptToken(exchange.accessToken);
+          const newEncryptedRefresh = exchange.refreshToken
+            ? encryptToken(exchange.refreshToken)
+            : conn.refreshToken;
+          const newTokenExpiresAt = exchange.expiresInSeconds
+            ? new Date(Date.now() + exchange.expiresInSeconds * 1000)
+            : null;
+
+          await this.repo.upsertConnection({
+            userId,
+            provider,
+            accessToken: newEncryptedAccess,
+            refreshToken: newEncryptedRefresh,
+            tokenExpiresAt: newTokenExpiresAt,
+            providerUserId: conn.providerUserId,
+            accountName: conn.accountName || undefined,
+            accountEmail: conn.accountEmail || undefined,
+            metadata: (conn.metadata as Record<string, unknown>) || undefined,
+          });
+
+          return await operation(exchange.accessToken);
+        } catch (refreshErr) {
+          await this.repo.markAuthFailed(userId, provider);
+          throw refreshErr;
+        }
+      }
+
+      if (errMsg.includes('401') || errMsg.includes('403')) {
+        await this.repo.markAuthFailed(userId, provider);
+      }
+      throw err;
+    }
+  }
+
   async listCollections(
     userId: string,
     provider: IntegrationProviderType,
@@ -231,20 +385,9 @@ export class IntegrationsService {
     }
 
     const providerInstance = this.getProvider(provider);
-    const decryptedToken = decryptToken(conn.accessToken);
-
-    try {
-      return await providerInstance.fetchCollections(
-        decryptedToken,
-        conn.providerUserId,
-      );
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      if (errMsg.includes('401') || errMsg.includes('403')) {
-        await this.repo.markAuthFailed(userId, provider);
-      }
-      throw err;
-    }
+    return this.executeWithTokenRefresh(userId, conn, (token) =>
+      providerInstance.fetchCollections(token, conn.providerUserId),
+    );
   }
 
   async syncProjectCollection(
@@ -252,6 +395,7 @@ export class IntegrationsService {
     provider: IntegrationProviderType,
     dto: SyncCollectionDto,
   ) {
+    await this.repo.assertUserProjectAccess(userId, dto.projectId, true);
     const conn = await this.repo.findConnection(userId, provider);
     if (!conn) {
       throw new NotFoundException(
@@ -477,6 +621,7 @@ export class IntegrationsService {
   }
 
   async pushProjectToGithub(userId: string, dto: PushGithubDto) {
+    await this.repo.assertUserProjectAccess(userId, dto.projectId, false);
     const { token, connId } = await this.getDecryptedGithubToken(userId);
 
     const link = await this.repo.findProjectLink(dto.projectId, connId);
@@ -529,6 +674,7 @@ export class IntegrationsService {
   }
 
   async pullProjectFromGithub(userId: string, dto: PullGithubDto) {
+    await this.repo.assertUserProjectAccess(userId, dto.projectId, true);
     const { token, connId } = await this.getDecryptedGithubToken(userId);
 
     const link = await this.repo.findProjectLink(dto.projectId, connId);
@@ -580,6 +726,7 @@ export class IntegrationsService {
   }
 
   async importGithubRepo(userId: string, dto: ImportGithubRepoDto) {
+    await this.repo.assertUserProjectAccess(userId, dto.projectId, true);
     const { token, connId } = await this.getDecryptedGithubToken(userId);
     const branch = dto.branch || 'main';
 

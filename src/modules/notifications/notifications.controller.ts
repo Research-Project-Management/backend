@@ -169,10 +169,7 @@ export class NotificationsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark a notification as read' })
   @ApiResponse({ status: 200, description: 'Notification marked as read' })
-  async markAsRead(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-  ) {
+  async markAsRead(@Param('id') id: string, @CurrentUser('id') userId: string) {
     const resolvedId = this.extractUserId(userId);
     const success = await this.notificationsService.markAsRead(id, resolvedId);
     return { success };
@@ -223,8 +220,16 @@ export class NotificationsController {
  */
 @ApiTags('Notifications - Overleaf Parity')
 @Controller('user')
+@UseGuards(JwtAuthGuard)
 export class OverleafNotificationsParityController {
   constructor(private readonly notificationsService: NotificationsService) {}
+
+  private resolveTargetUserId(
+    paramUserId: string,
+    currentUserId?: string,
+  ): string {
+    return currentUserId || paramUserId;
+  }
 
   @Post(':user_id')
   async addNotification(
@@ -235,9 +240,11 @@ export class OverleafNotificationsParityController {
       templateKey: string;
       messageOpts?: Record<string, unknown>;
     },
+    @CurrentUser('id') currentUserId?: string,
   ) {
+    const targetId = this.resolveTargetUserId(userId, currentUserId);
     await this.notificationsService.createNotification({
-      userId,
+      userId: targetId,
       key: dto.key,
       templateKey: dto.templateKey,
       messageOpts: dto.messageOpts,
@@ -246,8 +253,12 @@ export class OverleafNotificationsParityController {
   }
 
   @Get(':user_id')
-  async getUserNotifications(@Param('user_id') userId: string) {
-    const list = await this.notificationsService.getUserNotifications(userId);
+  async getUserNotifications(
+    @Param('user_id') userId: string,
+    @CurrentUser('id') currentUserId?: string,
+  ) {
+    const targetId = this.resolveTargetUserId(userId, currentUserId);
+    const list = await this.notificationsService.getUserNotifications(targetId);
     return list.map((n) => n.toPlain());
   }
 
@@ -255,8 +266,10 @@ export class OverleafNotificationsParityController {
   async removeNotificationId(
     @Param('user_id') userId: string,
     @Param('notification_id') notificationId: string,
+    @CurrentUser('id') currentUserId?: string,
   ) {
-    await this.notificationsService.deleteById(notificationId, userId);
+    const targetId = this.resolveTargetUserId(userId, currentUserId);
+    await this.notificationsService.deleteById(notificationId, targetId);
     return { status: 'ok' };
   }
 
@@ -264,15 +277,22 @@ export class OverleafNotificationsParityController {
   async removeNotificationKey(
     @Param('user_id') userId: string,
     @Param('key') key: string,
+    @CurrentUser('id') currentUserId?: string,
   ) {
-    await this.notificationsService.deleteByKey(key, userId);
+    const targetId = this.resolveTargetUserId(userId, currentUserId);
+    await this.notificationsService.deleteByKey(key, targetId);
     return { status: 'ok' };
   }
 
   @Delete('notifications/key/:key')
-  async removeNotificationByKeyOnly(@Param('key') key: string) {
-    await this.notificationsService.deleteByKey(key);
+  async removeNotificationByKeyOnly(
+    @Param('key') key: string,
+    @CurrentUser('id') currentUserId?: string,
+  ) {
+    await this.notificationsService.deleteByKey(
+      key,
+      currentUserId || undefined,
+    );
     return { status: 'ok' };
   }
 }
-

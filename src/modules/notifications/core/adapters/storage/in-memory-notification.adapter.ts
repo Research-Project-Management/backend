@@ -31,6 +31,21 @@ export class InMemoryNotificationAdapter implements INotificationRepositoryPort 
     return null;
   }
 
+  async findAffectedUserIdsByKey(
+    key: string,
+    userId?: string,
+  ): Promise<string[]> {
+    const userIds = new Set<string>();
+    for (const item of this.notifications.values()) {
+      const matchesKey =
+        item.key && (item.key === key || item.key.startsWith(key));
+      if (matchesKey && (!userId || item.userId === userId) && item.userId) {
+        userIds.add(item.userId);
+      }
+    }
+    return Array.from(userIds);
+  }
+
   async findByUser(
     userId: string,
     options?: QueryNotificationsOptions,

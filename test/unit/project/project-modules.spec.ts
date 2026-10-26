@@ -331,7 +331,7 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
         createTemplate: jest.fn(),
         instantiateProject: jest.fn(),
       };
-      templateService = new TemplateService(mockRepo);
+      templateService = new TemplateService(mockRepo, {} as any);
     });
 
     it('should instantiate project atomically from template with initial items', async () => {

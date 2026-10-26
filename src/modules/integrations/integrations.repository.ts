@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import {
   UserIntegration,
@@ -156,5 +156,35 @@ export class IntegrationsRepository {
       },
       orderBy: { updatedAt: 'desc' },
     });
+  }
+
+  async assertUserProjectAccess(
+    userId: string,
+    projectId: string,
+    writeRequired = false,
+  ): Promise<void> {
+    if (!projectId || !userId) {
+      throw new BadRequestException('Project ID and User ID are required.');
+    }
+    const member = await this.prisma.projectMember.findUnique({
+      where: {
+        projectId_userId: {
+          projectId,
+          userId,
+        },
+      },
+    });
+
+    if (!member) {
+      throw new ForbiddenException(
+        'Access denied: You are not a member of this project.',
+      );
+    }
+
+    if (writeRequired && member.role === 'reviewer') {
+      throw new ForbiddenException(
+        'Access denied: You do not have write access to this project.',
+      );
+    }
   }
 }

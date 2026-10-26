@@ -60,4 +60,5 @@ export interface IIntegrationProvider {
     providerUserId: string,
     collectionId: string,
   ): Promise<string>;
+  refreshAccessToken?(refreshToken: string): Promise<OAuthExchangeResult>;
 }

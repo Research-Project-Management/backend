@@ -11,6 +11,7 @@ export interface INotificationRepositoryPort {
   save(notification: NotificationEntity): Promise<NotificationEntity>;
   findById(id: string): Promise<NotificationEntity | null>;
   findByKey(key: string, userId?: string): Promise<NotificationEntity | null>;
+  findAffectedUserIdsByKey?(key: string, userId?: string): Promise<string[]>;
   findByUser(
     userId: string,
     options?: QueryNotificationsOptions,

@@ -71,9 +71,14 @@ export class YourWorkRepository implements IYourWorkRepository {
             states: true,
           },
         },
-        comments: { select: { id: true } },
+        comments: {
+          where: { authorId: userId },
+          select: { id: true },
+          take: 1,
+        },
       },
       orderBy: { updatedAt: 'desc' },
+      take: 500,
     });
 
     return items.map((item) => ({

@@ -48,6 +48,11 @@ export interface UploadFileOutput {
 
 export interface IStoragePort {
   readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput>;
+  assertFileAccess?(
+    fileId: string,
+    userId?: string,
+    projectId?: string | null,
+  ): Promise<void>;
   getOwnedFileStream(
     input: ReadOwnedFileInput & {
       range?: { start: number; end: number };

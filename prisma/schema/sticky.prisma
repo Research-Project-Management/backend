@@ -15,5 +15,6 @@ model Sticky {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   @@index([userId, order])
+  @@index([userId, deletedAt, order])
   @@map("stickies")
 }

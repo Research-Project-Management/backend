@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import {
   IIntegrationProvider,
@@ -50,6 +50,52 @@ export class GithubProvider implements IIntegrationProvider {
         'GitHub client credentials not configured for repository sync. Operating in development mock/sandbox mode.',
       );
     }
+  }
+
+
+  private validateRepoFullName(repoFullName: string): string {
+    const trimmed = (repoFullName || '').trim();
+    if (
+      !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(trimmed) ||
+      trimmed.includes('..')
+    ) {
+      throw new BadRequestException(`Invalid GitHub repository name: ${repoFullName}`);
+    }
+    const [owner, repo] = trimmed.split('/');
+    return `${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  }
+
+  private encodeGitRef(ref: string): string {
+    const trimmed = (ref || 'main').trim();
+    if (
+      !trimmed ||
+      trimmed.includes('..') ||
+      /[\x00-\x20~^:?*[\\#]/.test(trimmed) ||
+      trimmed.startsWith('/') ||
+      trimmed.endsWith('/') ||
+      trimmed.endsWith('.lock')
+    ) {
+      throw new BadRequestException(`Invalid Git branch or reference: ${ref}`);
+    }
+    return trimmed
+      .split('/')
+      .filter(Boolean)
+      .map((seg) => encodeURIComponent(seg))
+      .join('/');
+  }
+
+  private isSafeGitTreePath(filePath: string): boolean {
+    if (!filePath || typeof filePath !== 'string') return false;
+    if (filePath.startsWith('/') || filePath.includes('\\') || filePath.includes('\0')) {
+      return false;
+    }
+    const segments = filePath.split('/');
+    for (const seg of segments) {
+      if (!seg || seg === '.' || seg === '..' || seg.toLowerCase() === '.git') {
+        return false;
+      }
+    }
+    return true;
   }
 
   async initiateOAuth(

@@ -98,33 +98,23 @@ export class AnalyticsRepository {
       };
     }
 
-    const userProjects = await this.prisma.projectMember.findMany({
-      where: { userId },
-      select: { projectId: true },
-    });
-    const projectIds = userProjects.map((p) => p.projectId);
-
     const [
+      userProjects,
       assignedWorkItemsCount,
       createdWorkItemsCount,
-      pagesCount,
       stickiesCount,
       papersCount,
     ] = await Promise.all([
+      this.prisma.projectMember.findMany({
+        where: { userId },
+        select: { projectId: true },
+      }),
       this.prisma.workItem.count({
         where: { assigneeId: userId, deletedAt: null },
       }),
       this.prisma.workItem.count({
         where: { authorId: userId, deletedAt: null },
       }),
-      projectIds.length
-        ? this.prisma.manuscriptDoc.count({
-            where: {
-              projectId: { in: projectIds },
-              deleted: false,
-            },
-          })
-        : 0,
       this.prisma.sticky.count({
         where: { userId, deletedAt: null },
       }),
@@ -132,6 +122,16 @@ export class AnalyticsRepository {
         where: { userId, deletedAt: null },
       }),
     ]);
+
+    const projectIds = userProjects.map((p) => p.projectId);
+    const pagesCount = projectIds.length
+      ? await this.prisma.manuscriptDoc.count({
+          where: {
+            projectId: { in: projectIds },
+            deleted: false,
+          },
+        })
+      : 0;
 
     return {
       projects: userProjects.length,

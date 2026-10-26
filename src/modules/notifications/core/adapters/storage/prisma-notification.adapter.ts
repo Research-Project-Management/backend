@@ -62,6 +62,37 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
     return record ? this.mapToEntity(record) : null;
   }
 
+  async findAffectedUserIdsByKey(
+    key: string,
+    userId?: string,
+  ): Promise<string[]> {
+    if (!this.prisma.manuscriptNotification?.findMany) {
+      return userId ? [userId] : [];
+    }
+    const where: Prisma.ManuscriptNotificationWhereInput = {
+      key: {
+        startsWith: key,
+      },
+    };
+    if (userId) where.userId = userId;
+
+    const records = await this.prisma.manuscriptNotification
+      .findMany({
+        where,
+        select: { userId: true },
+      })
+      .catch(() => []);
+    return Array.from(
+      new Set(
+        records
+          .map((r) => r.userId)
+          .filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          ),
+      ),
+    );
+  }
+
   async findByUser(
     userId: string,
     options?: QueryNotificationsOptions,
@@ -186,4 +217,3 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
     });
   }
 }
-

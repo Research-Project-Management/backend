@@ -196,6 +196,66 @@ export class MendeleyProvider implements IIntegrationProvider {
     }
   }
 
+  async refreshAccessToken(refreshToken: string): Promise<OAuthExchangeResult> {
+    if (this.isMockMode) {
+      return {
+        accessToken: `mendeley_mock_token_${randomBytes(16).toString('hex')}`,
+        refreshToken: `mendeley_mock_refresh_${randomBytes(16).toString('hex')}`,
+        expiresInSeconds: 3600,
+        providerUserId: 'mendeley_user_883921',
+        accountName: 'Mendeley Researcher (Sandbox)',
+        accountEmail: 'researcher@mendeley.sandbox',
+        metadata: { isMock: true, provider: 'mendeley' },
+      };
+    }
+
+    try {
+      const tokenUrl = 'https://api.mendeley.com/oauth/token';
+      const basicAuth = Buffer.from(
+        `${this.clientId}:${this.clientSecret}`,
+      ).toString('base64');
+
+      const bodyParams = new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      });
+
+      const tokenResponse = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: bodyParams.toString(),
+      });
+
+      if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text();
+        throw new Error(
+          `Failed to refresh Mendeley token: ${tokenResponse.status} ${errorText}`,
+        );
+      }
+
+      const tokenData = (await tokenResponse.json()) as {
+        access_token: string;
+        token_type: string;
+        expires_in: number;
+        refresh_token?: string;
+      };
+
+      return {
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token || refreshToken,
+        expiresInSeconds: tokenData.expires_in,
+        providerUserId: '',
+      };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Error refreshing Mendeley token: ${errMsg}`);
+      throw err;
+    }
+  }
+
   async fetchCollections(
     decryptedToken: string,
     providerUserId: string,

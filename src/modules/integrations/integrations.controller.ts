@@ -35,6 +35,20 @@ import {
   ImportGithubRepoDto,
 } from './dto/github-sync.dto';
 
+
+function escapeHtml(str: string): string {
+  return str.replace(/[&<>"']/g, (m) => {
+    switch (m) {
+      case '&': return '&amp;';
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '"': return '&quot;';
+      case "'": return '&#39;';
+      default: return m;
+    }
+  });
+}
+
 @ApiTags('Integrations')
 @Controller('api/v1/integrations')
 @UseGuards(JwtAuthGuard)
@@ -212,7 +226,7 @@ export class IntegrationsController {
   <script>
     try {
       if (window.opener) {
-        window.opener.postMessage({ type: 'OAUTH_SUCCESS', provider: '${provider}' }, '*');
+        window.opener.postMessage({ type: 'OAUTH_SUCCESS', provider: '${escapeHtml(provider)}' }, clientUrl || window.location.origin);
       }
       setTimeout(() => {
         window.close();
@@ -237,7 +251,7 @@ export class IntegrationsController {
 <body style="font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #09090b; color: #ef4444;">
   <div style="text-align: center;">
     <h2>Authorization Error</h2>
-    <p>${errMsg}</p>
+    <p>${escapeHtml(errMsg)}</p>
     <button onclick="window.close()" style="margin-top: 1rem; padding: 0.5rem 1rem; cursor: pointer;">Close Window</button>
   </div>
 </body>
