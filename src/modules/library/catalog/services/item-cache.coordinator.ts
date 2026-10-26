@@ -96,6 +96,9 @@ export class ItemCacheCoordinator {
       const validProjectId = normalizeProjectScopeId(projectId);
       const tasks: Promise<unknown>[] = [
         this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
+        this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(userId)),
         this.invalidateCounts(userId),
       ];
       if (this.tagsService) {
@@ -106,6 +109,17 @@ export class ItemCacheCoordinator {
           this.cache.delPattern(
             LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
           ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.itemsPattern(validProjectId),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.searchFacetsPattern(validProjectId),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.searchItemsPattern(validProjectId),
+          ),
+          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(validProjectId)),
+          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(`proj:${validProjectId}`)),
           this.invalidateCounts(validProjectId),
         );
       }
@@ -164,5 +178,27 @@ export class ItemCacheCoordinator {
         `Failed to invalidate bulk item caches (${itemIds.length} items): ${message}`,
       );
     }
+  }
+
+  /**
+   * Unified write-path invalidation helper for item mutations across services.
+   */
+  async invalidateForWrite(params: {
+    userId: string;
+    projectId?: string | null;
+    itemIds?: string[];
+    additionalProjectIds?: Array<string | null | undefined>;
+  }): Promise<void> {
+    const validProjectId = normalizeProjectScopeId(params.projectId ?? undefined);
+    if (params.itemIds && params.itemIds.length > 0) {
+      await this.invalidateBulkItemsCache(
+        params.itemIds,
+        params.userId,
+        validProjectId,
+        params.additionalProjectIds,
+      );
+      return;
+    }
+    await this.invalidateScopeListCache(params.userId, validProjectId);
   }
 }

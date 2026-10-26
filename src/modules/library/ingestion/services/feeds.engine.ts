@@ -242,7 +242,10 @@ export class FeedsEngine implements OnModuleInit, OnModuleDestroy {
         let effectiveRetentionDays = defaultRetentionDays;
 
         if (feed.subscriptions.length > 0) {
-          const preferences = feed.subscriptions.map((s) => s.cleanupUnreadAfter);
+          const preferences = feed.subscriptions.flatMap((s) => [
+            s.cleanupUnreadAfter,
+            s.cleanupReadAfter ?? s.cleanupUnreadAfter,
+          ]);
           const hasNeverOption = preferences.some((days) => days <= 0);
           if (hasNeverOption) {
             effectiveRetentionDays = systemHardCapDays;

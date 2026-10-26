@@ -96,10 +96,33 @@ export class ExportsRepository {
       where,
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        attachments: true,
+        attachments: { where: { deletedAt: null } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       ...(take ? { take } : {}),
+    });
+  }
+
+  async findItemsByIds(
+    scopeWhere: Prisma.ItemWhereInput,
+    itemIds: string[],
+    collectionId?: string,
+    take: number = EXPORT_MAX_ITEMS,
+  ) {
+    return this.prisma.item.findMany({
+      where: {
+        ...scopeWhere,
+        id: { in: itemIds },
+        ...(collectionId
+          ? { collectionItems: { some: { collectionId } } }
+          : {}),
+      },
+      include: {
+        contributors: { orderBy: { orderIndex: 'asc' } },
+        attachments: { where: { deletedAt: null } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take,
     });
   }
 

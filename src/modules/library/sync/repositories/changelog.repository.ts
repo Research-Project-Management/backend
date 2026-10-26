@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma, LibraryChange, Tombstone } from '@prisma/client';
 
@@ -85,7 +90,9 @@ export class ChangeLogRepository {
       return record.currentSequence;
     }
 
-    return incrementBy;
+    throw new BadRequestException(
+      'Sync scope must include either a valid userId or projectId',
+    );
   }
 
   async allocateSequenceBatch(
@@ -111,6 +118,32 @@ export class ChangeLogRepository {
   ): Promise<LibraryChange> {
     const client = this.getClient(tx);
     const { userId, projectId } = this.resolveScope(scope);
+
+    // If a tombstone already created a 'delete' LibraryChange for this entity in the same scope,
+    // update it in place instead of allocating a second sequence number.
+    if (entry.action === 'delete' && client.libraryChange?.findFirst) {
+      const existingDeleteChange = await client.libraryChange.findFirst({
+        where: {
+          userId: userId || null,
+          projectId: projectId || null,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          action: 'delete',
+        },
+        orderBy: { seq: 'desc' },
+        select: { id: true, seq: true },
+      });
+      if (existingDeleteChange && client.libraryChange?.update) {
+        return client.libraryChange.update({
+          where: { id: existingDeleteChange.id },
+          data: {
+            version: entry.version,
+            data: (entry.data as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+          },
+        });
+      }
+    }
+
     const seq = await this.allocateNextSequence(scope, 1, tx);
 
     return client.libraryChange.create({
@@ -160,37 +193,84 @@ export class ChangeLogRepository {
     }
 
     const createRows: Prisma.LibraryChangeCreateManyInput[] = [];
+    let updatedExistingCount = 0;
+
     for (const group of byScope.values()) {
-      const seqs = await this.allocateSequenceBatch(
-        group.scope,
-        group.items.length,
-        tx,
-      );
-      group.items.forEach((entry, idx) => {
-        createRows.push({
-          seq: seqs[idx],
-          userId: group.scope.userId || null,
-          projectId: group.scope.projectId || null,
-          entityType: entry.entityType,
-          entityId: entry.entityId,
-          action: entry.action,
-          version: entry.version,
-          data: (entry.data as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+      const { userId, projectId } = group.scope;
+      const deleteEntries = group.items.filter((it) => it.action === 'delete');
+      const existingDeleteByKey = new Map<string, string>();
+
+      if (deleteEntries.length > 0 && client.libraryChange?.findMany) {
+        const existingDeletes = await client.libraryChange.findMany({
+          where: {
+            userId: userId || null,
+            projectId: projectId || null,
+            action: 'delete',
+            entityId: { in: deleteEntries.map((d) => d.entityId) },
+          },
+          select: { id: true, entityType: true, entityId: true },
         });
-      });
+        for (const ed of existingDeletes) {
+          existingDeleteByKey.set(`${ed.entityType}:${ed.entityId}`, ed.id);
+        }
+      }
+
+      const itemsNeedingNewRow: AppendChangeInput[] = [];
+      for (const entry of group.items) {
+        const existingId =
+          entry.action === 'delete'
+            ? existingDeleteByKey.get(`${entry.entityType}:${entry.entityId}`)
+            : undefined;
+        if (existingId && client.libraryChange?.update) {
+          await client.libraryChange.update({
+            where: { id: existingId },
+            data: {
+              version: entry.version,
+              data: (entry.data as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+            },
+          });
+          updatedExistingCount++;
+        } else {
+          itemsNeedingNewRow.push(entry);
+        }
+      }
+
+      if (itemsNeedingNewRow.length > 0) {
+        const seqs = await this.allocateSequenceBatch(
+          group.scope,
+          itemsNeedingNewRow.length,
+          tx,
+        );
+        itemsNeedingNewRow.forEach((entry, idx) => {
+          createRows.push({
+            seq: seqs[idx],
+            userId: group.scope.userId || null,
+            projectId: group.scope.projectId || null,
+            entityType: entry.entityType,
+            entityId: entry.entityId,
+            action: entry.action,
+            version: entry.version,
+            data: (entry.data as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+          });
+        });
+      }
+    }
+
+    if (createRows.length === 0) {
+      return updatedExistingCount;
     }
 
     if (client.libraryChange?.createMany) {
       const res = await client.libraryChange.createMany({
         data: createRows,
       });
-      return res.count;
+      return res.count + updatedExistingCount;
     }
 
     for (const row of createRows) {
       await client.libraryChange.create({ data: row });
     }
-    return createRows.length;
+    return createRows.length + updatedExistingCount;
   }
 
   async recordTombstone(
@@ -200,7 +280,41 @@ export class ChangeLogRepository {
   ): Promise<Tombstone> {
     const client = this.getClient(tx);
     const { userId, projectId } = this.resolveScope(scope);
-    const seq = await this.allocateNextSequence(scope, 1, tx);
+
+    // Check if a 'delete' LibraryChange was already recorded for this entity in the same scope
+    const existingDeleteChange = client.libraryChange?.findFirst
+      ? await client.libraryChange.findFirst({
+          where: {
+            userId: userId || null,
+            projectId: projectId || null,
+            entityType: entry.entityType,
+            entityId: entry.entityId,
+            action: 'delete',
+          },
+          orderBy: { seq: 'desc' },
+          select: { id: true, seq: true },
+        })
+      : null;
+
+    const seq =
+      existingDeleteChange?.seq ??
+      (await this.allocateNextSequence(scope, 1, tx));
+
+    // Ensure a corresponding 'delete' entry exists in library_changes so GET /sync/changes observes all tombstones
+    if (!existingDeleteChange && client.libraryChange?.create) {
+      await client.libraryChange.create({
+        data: {
+          seq,
+          userId: userId || null,
+          projectId: projectId || null,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          action: 'delete',
+          version: 0,
+          data: Prisma.JsonNull,
+        },
+      });
+    }
 
     const existing = await client.tombstone.findFirst({
       where: {
@@ -223,16 +337,41 @@ export class ChangeLogRepository {
       });
     }
 
-    return client.tombstone.create({
-      data: {
-        userId: userId || null,
-        projectId: projectId || null,
-        entityType: entry.entityType,
-        entityId: entry.entityId,
-        seq,
-        deletedById: entry.deletedById ?? null,
-      },
-    });
+    try {
+      return await client.tombstone.create({
+        data: {
+          userId: userId || null,
+          projectId: projectId || null,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          seq,
+          deletedById: entry.deletedById ?? null,
+        },
+      });
+    } catch {
+      const retryExisting = await client.tombstone.findFirst({
+        where: {
+          userId: userId || null,
+          projectId: projectId || null,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+        },
+        select: { id: true },
+      });
+      if (retryExisting) {
+        return client.tombstone.update({
+          where: { id: retryExisting.id },
+          data: {
+            seq,
+            deletedAt: new Date(),
+            deletedById: entry.deletedById ?? null,
+          },
+        });
+      }
+      throw new InternalServerErrorException(
+        `Failed to record tombstone for ${entry.entityType}:${entry.entityId}`,
+      );
+    }
   }
 
   async recordTombstonesBatch(
@@ -285,23 +424,84 @@ export class ChangeLogRepository {
         });
       }
 
-      const seqs = await this.allocateSequenceBatch(
-        group.scope,
-        group.items.length,
-        tx,
+      const existingDeleteSeqByKey = new Map<string, bigint>();
+      if (client.libraryChange?.findMany) {
+        const existingDeletes = await client.libraryChange.findMany({
+          where: {
+            userId: userId || null,
+            projectId: projectId || null,
+            action: 'delete',
+            entityId: { in: entityIds },
+          },
+          orderBy: { seq: 'desc' },
+          select: { entityType: true, entityId: true, seq: true },
+        });
+        for (const ed of existingDeletes) {
+          const k = `${ed.entityType}:${ed.entityId}`;
+          if (!existingDeleteSeqByKey.has(k)) {
+            existingDeleteSeqByKey.set(k, ed.seq);
+          }
+        }
+      }
+
+      const itemsNeedingSeq = group.items.filter(
+        (entry) =>
+          !existingDeleteSeqByKey.has(`${entry.entityType}:${entry.entityId}`),
       );
+      const allocatedSeqs =
+        itemsNeedingSeq.length > 0
+          ? await this.allocateSequenceBatch(
+              group.scope,
+              itemsNeedingSeq.length,
+              tx,
+            )
+          : [];
+
+      let allocIdx = 0;
       const deletedAt = new Date();
-      const createRows: Prisma.TombstoneCreateManyInput[] = group.items.map(
-        (entry, idx) => ({
+      const createRows: Prisma.TombstoneCreateManyInput[] = [];
+      const missingChangeRows: Prisma.LibraryChangeCreateManyInput[] = [];
+
+      for (const entry of group.items) {
+        const k = `${entry.entityType}:${entry.entityId}`;
+        const existingSeq = existingDeleteSeqByKey.get(k);
+        const seq = existingSeq ?? allocatedSeqs[allocIdx++];
+
+        createRows.push({
           userId: userId || null,
           projectId: projectId || null,
           entityType: entry.entityType,
           entityId: entry.entityId,
-          seq: seqs[idx],
+          seq,
           deletedAt,
           deletedById: entry.deletedById ?? null,
-        }),
-      );
+        });
+
+        if (existingSeq === undefined) {
+          missingChangeRows.push({
+            seq,
+            userId: userId || null,
+            projectId: projectId || null,
+            entityType: entry.entityType,
+            entityId: entry.entityId,
+            action: 'delete',
+            version: 0,
+            data: Prisma.JsonNull,
+          });
+        }
+      }
+
+      if (missingChangeRows.length > 0) {
+        if (client.libraryChange?.createMany) {
+          await client.libraryChange.createMany({
+            data: missingChangeRows,
+          });
+        } else if (client.libraryChange?.create) {
+          for (const row of missingChangeRows) {
+            await client.libraryChange.create({ data: row });
+          }
+        }
+      }
 
       if (client.tombstone?.createMany) {
         const res = await client.tombstone.createMany({
@@ -403,6 +603,11 @@ export class ChangeLogRepository {
     limit: number = 100,
   ): Promise<LibraryChange[]> {
     const { userId, projectId } = this.resolveScope(scope);
+    if (!projectId && !userId) {
+      throw new BadRequestException(
+        'Sync scope must include either a valid userId or projectId',
+      );
+    }
     const seqBigInt =
       typeof sinceSeq === 'bigint' ? sinceSeq : BigInt(sinceSeq);
 
@@ -424,6 +629,11 @@ export class ChangeLogRepository {
     limit: number = 100,
   ): Promise<Tombstone[]> {
     const { userId, projectId } = this.resolveScope(scope);
+    if (!projectId && !userId) {
+      throw new BadRequestException(
+        'Sync scope must include either a valid userId or projectId',
+      );
+    }
     const seqBigInt =
       sinceSeq !== undefined
         ? typeof sinceSeq === 'bigint'
@@ -466,7 +676,25 @@ export class ChangeLogRepository {
       }),
     ]);
 
-    if (!firstChange && !firstTombstone) return null;
+    if (!firstChange && !firstTombstone) {
+      if (this.prisma.syncSequence?.findUnique) {
+        const syncSeq = projectId
+          ? await this.prisma.syncSequence.findUnique({
+              where: { projectId },
+              select: { currentSequence: true },
+            })
+          : userId
+            ? await this.prisma.syncSequence.findUnique({
+                where: { userId },
+                select: { currentSequence: true },
+              })
+            : null;
+        if (syncSeq && syncSeq.currentSequence > 0n) {
+          return syncSeq.currentSequence + 1n;
+        }
+      }
+      return null;
+    }
     if (!firstChange && firstTombstone) return firstTombstone.seq;
     if (!firstTombstone && firstChange) return firstChange.seq;
     if (firstChange && firstTombstone) {

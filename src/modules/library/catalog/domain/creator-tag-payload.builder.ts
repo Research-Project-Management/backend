@@ -8,6 +8,7 @@ import {
   splitAuthorString,
   isNoiseAuthorName,
   resolveCanonicalCreatorRole,
+  mergeCanonicalCreators,
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
@@ -368,7 +369,11 @@ export function prepareAttachmentsToCreate(
       });
     }
   }
-  if (result.length === 0 && (fallbackData?.fileUrl || fallbackFileId)) {
+  if (
+    result.length === 0 &&
+    (fallbackFileId ||
+      (fallbackData?.fileUrl && !/^https?:\/\//i.test(fallbackData.fileUrl)))
+  ) {
     const fileUrl =
       fallbackData?.fileUrl ||
       (fallbackFileId ? getFileContentPath(fallbackFileId) : '');
@@ -601,6 +606,7 @@ export function prepareContributorsToCreate(
     contributors?: CreatorCreditInput[];
     creators?: CreatorCreditInput[];
     authors?: string[];
+    editors?: string[];
   },
   itemType?: string,
 ): Array<{
@@ -612,59 +618,34 @@ export function prepareContributorsToCreate(
   shortName?: string;
   orderIndex: number;
 }> | null {
-  const structuredList =
-    data.contributors !== undefined
-      ? data.contributors
-      : data.creators !== undefined
-        ? data.creators
-        : undefined;
-  if (structuredList !== undefined) {
-    return (structuredList || [])
-      .filter((c: CreatorCreditInput) => {
-        const fullName =
-          c.fullName ||
-          [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-          c.name ||
-          '';
-        return Boolean(fullName && !isNoiseAuthorName(fullName));
-      })
-      .map((c: CreatorCreditInput, index: number) => {
-        const fullName =
-          c.fullName ||
-          [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-          c.name ||
-          '';
-        let first = c.firstName || '';
-        let last = c.lastName || '';
-        if (!first && !last && fullName) {
-          const parsed = parseCreatorString(fullName, index);
-          first = parsed.firstName;
-          last = parsed.lastName;
-        }
-        return {
-          creatorType: resolveCanonicalCreatorRole(c.creatorType, { itemType }),
-          fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
-          firstName: first,
-          lastName: last,
-          fullName,
-          shortName: c.shortName || '',
-          orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
-        };
-      });
+  if (
+    data.contributors === undefined &&
+    data.creators === undefined &&
+    data.authors === undefined &&
+    data.editors === undefined
+  ) {
+    return null;
   }
-  if (data.authors !== undefined) {
-    return (data.authors || [])
-      .flatMap((authorName: string) => splitAuthorString(authorName))
-      .map((authorName: string, index: number) => {
-        const parsed = parseCreatorString(authorName, index);
-        return {
-          creatorType: parsed.creatorType,
-          firstName: parsed.firstName,
-          lastName: parsed.lastName,
-          fullName: parsed.fullName,
-          orderIndex: parsed.orderIndex,
-        };
-      });
+  const merged = mergeCanonicalCreators({
+    contributors: data.contributors,
+    creators: data.creators,
+    authors: data.authors,
+    editors: data.editors,
+    itemType,
+  });
+  if (!merged || merged.length === 0) {
+    return [];
   }
-  return null;
+  return merged.map((c, index) => ({
+    creatorType: c.creatorType || 'author',
+    fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
+    firstName: c.firstName || '',
+    lastName: c.lastName || '',
+    fullName:
+      c.fullName ||
+      c.name ||
+      `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+    shortName: c.shortName || '',
+    orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
+  }));
 }

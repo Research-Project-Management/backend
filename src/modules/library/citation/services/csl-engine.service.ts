@@ -319,7 +319,7 @@ export class CslEngineService implements OnModuleInit {
           styleId: normalizedStyle,
           inText: `[${index}]`,
           bibliography: `[${index}] ${authorListStr}. ${title}.${journal ? ` ${journal}.` : ''} ${year}${volume}${issue}${page}.`,
-          bibliographyHtml: `[${index}] ${authorListStr}. ${title}.${journal ? ` <i>${journal}</i>.` : ''} ${year}${volume}${issue}${page}.`,
+          bibliographyHtml: `[${index}] ${this.formatter.escapeHtml(String(authorListStr))}. ${this.formatter.escapeHtml(String(title))}.${journal ? ` <i>${this.formatter.escapeHtml(String(journal))}</i>.` : ''} ${this.formatter.escapeHtml(String(year))}${this.formatter.escapeHtml(String(volume))}${this.formatter.escapeHtml(String(issue))}${this.formatter.escapeHtml(String(page))}.`,
           source: 'csl-engine',
         });
       }
@@ -329,7 +329,7 @@ export class CslEngineService implements OnModuleInit {
           styleId: normalizedStyle,
           inText: `(${firstAuthorFamily}, ${year})`,
           bibliography: `${authorListStr} (${year}) '${title}', ${journal}${volume}${issue}${cslItem.page ? `, pp. ${cslItem.page}` : ''}.`,
-          bibliographyHtml: `${authorListStr} (${year}) &lsquo;${title}&rsquo;, <i>${journal}</i>${volume}${issue}${cslItem.page ? `, pp. ${cslItem.page}` : ''}.`,
+          bibliographyHtml: `${this.formatter.escapeHtml(String(authorListStr))} (${this.formatter.escapeHtml(String(year))}) &lsquo;${this.formatter.escapeHtml(String(title))}&rsquo;, <i>${this.formatter.escapeHtml(String(journal))}</i>${this.formatter.escapeHtml(String(volume))}${this.formatter.escapeHtml(String(issue))}${cslItem.page ? `, pp. ${this.formatter.escapeHtml(String(cslItem.page))}` : ''}.`,
           source: 'csl-engine',
         });
       }

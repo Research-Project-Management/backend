@@ -30,16 +30,34 @@ export class ItemRelationsService {
     @Optional() private readonly libraryTx?: TransactionService,
   ) {}
 
-  private async invalidateRelationCaches(itemIds: string[]): Promise<void> {
+  private async invalidateRelationCaches(
+    itemIds: string[],
+    userId?: string,
+    projectId?: string,
+  ): Promise<void> {
     if (!this.cache || itemIds.length === 0) return;
     const uniqueIds = Array.from(new Set(itemIds.filter(Boolean)));
     try {
-      await Promise.all(
-        uniqueIds.flatMap((id) => [
-          this.cache!.del(LIBRARY_REDIS_KEYS.item(id)),
-          this.cache!.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
-        ]),
-      );
+      const validProjectId = normalizeProjectScopeId(projectId);
+      const tasks: Promise<unknown>[] = uniqueIds.flatMap((id) => [
+        this.cache!.del(LIBRARY_REDIS_KEYS.item(id)),
+        this.cache!.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
+        this.cache!.delPattern(LIBRARY_REDIS_KEYS.itemPattern(id)),
+      ]);
+      if (userId) {
+        tasks.push(
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+        );
+      }
+      if (validProjectId) {
+        tasks.push(
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(validProjectId)),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
+          ),
+        );
+      }
+      await Promise.all(tasks);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Failed to invalidate relation caches: ${msg}`);
@@ -191,10 +209,11 @@ export class ItemRelationsService {
       }
     }
 
-    await this.invalidateRelationCaches([
-      sourceItemId,
-      ...linkedRelations.map((r) => r.targetItemId),
-    ]);
+    await this.invalidateRelationCaches(
+      [sourceItemId, ...linkedRelations.map((r) => r.targetItemId)],
+      userId,
+      effectiveProjectId,
+    );
 
     return {
       success: true,
@@ -271,7 +290,11 @@ export class ItemRelationsService {
       await this.command.removeRelation(sourceItemId, targetItemId);
     }
 
-    await this.invalidateRelationCaches([sourceItemId, targetItemId]);
+    await this.invalidateRelationCaches(
+      [sourceItemId, targetItemId],
+      userId,
+      effectiveProjectId,
+    );
 
     return {
       success: true,

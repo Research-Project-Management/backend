@@ -35,7 +35,7 @@ export class ArxivProvider implements MetadataProvider {
   };
 
   constructor(
-    private readonly httpClient: AcademicHttpClient,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -160,16 +160,14 @@ export class ArxivProvider implements MetadataProvider {
 
     const keywords = normalizeAcademicTags(rawCategories);
 
-    let doi: string | undefined;
+    const canonicalArxivIdentifier = cleanId.replace(/v\d+$/i, '');
+    const doi = cleanId ? `10.48550/arXiv.${canonicalArxivIdentifier}` : undefined;
+    let publishedDoi: string | undefined;
     const doiMatchResult = entry.match(
       /<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/i,
     );
     if (doiMatchResult) {
-      doi = normalizeDoi(doiMatchResult[1]);
-    }
-    if (!doi && cleanId) {
-      const canonicalArxivIdentifier = cleanId.replace(/v\d+$/i, '');
-      doi = `10.48550/arXiv.${canonicalArxivIdentifier}`;
+      publishedDoi = normalizeDoi(doiMatchResult[1]);
     }
 
     let journal: string | undefined;
@@ -228,6 +226,7 @@ export class ArxivProvider implements MetadataProvider {
       extraLines.push(`version: ${versionMatch[1]}`);
     }
     if (journal) extraLines.push(`Journal reference: ${journal}`);
+    if (publishedDoi) extraLines.push(`Related DOI: ${publishedDoi}`);
     const extra = extraLines.join('\n');
 
     const pdfUrl = `https://arxiv.org/pdf/${cleanId}.pdf`;
@@ -251,6 +250,7 @@ export class ArxivProvider implements MetadataProvider {
         publicationDate,
         date: publicationDate,
         publisher: 'arXiv',
+        publicationTitle: journal,
         genre: 'Preprint',
         versionNumber,
         abstract,
@@ -270,7 +270,6 @@ export class ArxivProvider implements MetadataProvider {
         itemType: 'preprint',
         url: canonicalUrl,
         openAccessPdfUrl: pdfUrl,
-        ...(journal ? { publicationTitle: journal, journal } : {}),
         extraFields: {
           repository: 'arXiv',
           archiveId: cleanId,
@@ -278,6 +277,7 @@ export class ArxivProvider implements MetadataProvider {
           ...(primaryCategory ? { primaryCategory } : {}),
           ...(rights ? { rights } : {}),
           ...(journal ? { journalRef: journal } : {}),
+          ...(publishedDoi ? { publishedDoi } : {}),
         },
         provenance: {
           originProvider: this.id,

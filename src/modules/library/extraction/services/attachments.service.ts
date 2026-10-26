@@ -102,6 +102,7 @@ export class AttachmentsService {
     // Content-Addressable Storage (CAS) Deduplication:
     // If incoming upload has a valid fileHash, reuse existing storage blob if available within the same user/project scope
     let storageKey = input.storageKey;
+    let deduplicated = false;
     if (input.fileHash && input.fileHash.trim().length >= 32) {
       const effectiveProjectId = normalizeProjectScopeId(
         projectId || input.projectId,
@@ -115,6 +116,7 @@ export class AttachmentsService {
       });
       if (existingWithHash?.storageKey) {
         storageKey = existingWithHash.storageKey;
+        deduplicated = true;
         if (!resolvedFileId && existingWithHash.fileId) {
           resolvedFileId = existingWithHash.fileId;
         }
@@ -202,7 +204,7 @@ export class AttachmentsService {
           tx,
         );
 
-        if (resolvedFileId) {
+        if (resolvedFileId && !deduplicated) {
           await this.repo.updateLinkedFile(resolvedFileId, targetItemId, tx);
         }
 
@@ -264,10 +266,29 @@ export class AttachmentsService {
       await Promise.all([
         this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
         this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
         ...(scopeId
           ? [
               this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
-              this.cache.del(LIBRARY_REDIS_KEYS.counts(countsScopeKey)),
+              this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeId)),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.countsPattern(countsScopeKey),
+              ),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeId),
+              ),
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.searchItemsPattern(scopeId),
+              ),
+            ]
+          : []),
+        ...(validProjectId
+          ? [
+              this.cache.delPattern(
+                LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
+              ),
+              this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+              this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(userId)),
             ]
           : []),
       ]);
@@ -429,26 +450,42 @@ export class AttachmentsService {
     sourceItemIds: (ItemId | string)[],
     targetItemId: ItemId | string,
     tx?: Prisma.TransactionClient,
-  ): Promise<void> {
+  ): Promise<string[]> {
     const orphanedFileIds = await this.repo.reassignToItem(
       sourceItemIds,
       targetItemId,
       tx,
     );
+    if (tx) {
+      // Defer physical S3 deletion until after the transaction commits
+      return Array.isArray(orphanedFileIds) ? orphanedFileIds : [];
+    }
+    await this.cleanupOrphanedFiles(orphanedFileIds);
+    return Array.isArray(orphanedFileIds) ? orphanedFileIds : [];
+  }
+
+  async cleanupOrphanedFiles(orphanedFileIds?: string[]): Promise<void> {
     if (
-      Array.isArray(orphanedFileIds) &&
-      orphanedFileIds.length > 0 &&
-      this.storagePort?.deleteFile
+      !Array.isArray(orphanedFileIds) ||
+      orphanedFileIds.length === 0 ||
+      !this.storagePort?.deleteFile
     ) {
-      for (const fid of orphanedFileIds) {
-        try {
-          await this.storagePort.deleteFile(fid);
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.logger.warn(
-            `Failed to delete duplicate attachment file ${fid} on item merge: ${message}`,
-          );
+      return;
+    }
+    for (const fid of orphanedFileIds) {
+      try {
+        if (this.repo.countFileIdReferences) {
+          const remainingRefs = await this.repo.countFileIdReferences(fid);
+          if (typeof remainingRefs === 'number' && remainingRefs > 0) {
+            continue;
+          }
         }
+        await this.storagePort.deleteFile(fid);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Failed to delete duplicate attachment file ${fid} on item merge: ${message}`,
+        );
       }
     }
   }
@@ -583,7 +620,12 @@ export class AttachmentsService {
   ) {
     const renamerService =
       this.renamerService ??
-      new AttachmentRenamerService(this.repo, this.catalogGateway, this.cache);
+      new AttachmentRenamerService(
+        this.repo,
+        this.catalogGateway,
+        this.cache,
+        this.libraryTx,
+      );
     return renamerService.renameAttachment(
       userId,
       attachmentId,
@@ -607,7 +649,12 @@ export class AttachmentsService {
   }> {
     const renamerService =
       this.renamerService ??
-      new AttachmentRenamerService(this.repo, this.catalogGateway, this.cache);
+      new AttachmentRenamerService(
+        this.repo,
+        this.catalogGateway,
+        this.cache,
+        this.libraryTx,
+      );
     return renamerService.batchRenameAttachments(userId, dto, projectId);
   }
 

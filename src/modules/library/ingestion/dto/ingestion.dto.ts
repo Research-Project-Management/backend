@@ -3,6 +3,7 @@ import {
   IsOptional,
   IsIn,
   IsObject,
+  IsBoolean,
 } from 'class-validator';
 
 export class UnifiedIngestionDto {
@@ -15,6 +16,12 @@ export class UnifiedIngestionDto {
     'url',
     'bibtex',
     'ris',
+    'csl_json',
+    'endnote_xml',
+    'mods',
+    'zotero_rdf',
+    'medline',
+    'csv',
     'pdf',
     'zotero',
   ])
@@ -26,6 +33,12 @@ export class UnifiedIngestionDto {
     | 'url'
     | 'bibtex'
     | 'ris'
+    | 'csl_json'
+    | 'endnote_xml'
+    | 'mods'
+    | 'zotero_rdf'
+    | 'medline'
+    | 'csv'
     | 'pdf'
     | 'zotero';
 
@@ -86,6 +99,13 @@ export class UnifiedIngestionDto {
   externalItemKey?: string;
 
   @IsOptional()
+  payload?: unknown;
+
+  @IsOptional()
+  @IsBoolean()
+  silent?: boolean;
+
+  @IsOptional()
   @IsString()
   collectionId?: string;
 
@@ -97,4 +117,3 @@ export class UnifiedIngestionDto {
   @IsString()
   projectId?: string;
 }
-

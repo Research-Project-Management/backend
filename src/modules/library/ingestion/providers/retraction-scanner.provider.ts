@@ -21,8 +21,9 @@ export class RetractionScannerProvider {
   async checkRetraction(
     doi?: string | null,
     pmid?: string | null,
+    options?: { localOnly?: boolean },
   ): Promise<RetractionLookupResult> {
-    return this.lookup(doi, pmid);
+    return this.lookup(doi, pmid, options);
   }
   constructor(
     private readonly retractionDb: RetractionDatabaseService,
@@ -36,6 +37,7 @@ export class RetractionScannerProvider {
   async lookup(
     doi?: string | null,
     pmid?: string | null,
+    options?: { localOnly?: boolean },
   ): Promise<RetractionLookupResult> {
     const cleanDoiVal = doi
       ? normalizeDoi(doi) || doi.trim().toLowerCase()
@@ -52,6 +54,10 @@ export class RetractionScannerProvider {
     );
     if (localResult === false) return { status: 'clean' };
     if (localResult) return { status: 'retracted', details: localResult };
+
+    if (options?.localOnly) {
+      return { status: 'unknown' };
+    }
 
     if (cleanDoiVal || cleanPmidVal) {
       try {
@@ -89,12 +95,16 @@ export class RetractionScannerProvider {
    * 1. OpenAlex API: Ingests the entire Retraction Watch database (~55,000+ papers). Catches historical and preprint retractions.
    * 2. CrossRef CrossMark API: Real-time publisher update-to notices and retraction assertions.
    */
-    private async executeFetch(
+  private async executeFetch(
     url: string,
     options?: RequestInit,
   ): Promise<{ response: Response; attempts: number }> {
     if (this.httpClient) {
-      return this.executeFetch(url, options);
+      const res = await this.httpClient.request(url, {
+        signal: options?.signal ?? undefined,
+        headers: options?.headers as Record<string, string> | undefined,
+      });
+      return { response: res.response, attempts: 1 };
     }
     const response = await fetch(url, options);
     return { response, attempts: 1 };
@@ -184,6 +194,12 @@ export class RetractionScannerProvider {
                 label?: string;
                 updated?: { 'date-time'?: string };
               }>;
+              'updated-by'?: Array<{
+                type?: string;
+                doi?: string;
+                label?: string;
+                updated?: { 'date-time'?: string };
+              }>;
               assertion?: Array<{
                 name?: string;
                 value?: string;
@@ -192,7 +208,10 @@ export class RetractionScannerProvider {
           } | null;
           const message = crData?.message;
 
-          const updateTo = message?.['update-to'];
+          const updateTo = [
+            ...(Array.isArray(message?.['updated-by']) ? message['updated-by'] : []),
+            ...(Array.isArray(message?.['update-to']) ? message['update-to'] : []),
+          ];
           if (Array.isArray(updateTo) && updateTo.length > 0) {
             for (const update of updateTo) {
               const updateType = (update.type || '').toLowerCase();

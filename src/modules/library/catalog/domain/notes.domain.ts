@@ -103,18 +103,58 @@ export function sanitizeNoteTitle(title?: string | null): string {
   return cleaned || 'Untitled Note';
 }
 
+interface HtmlPurifier {
+  sanitize(raw: string, config?: Record<string, unknown>): string;
+}
+
+let domPurifyInstance: HtmlPurifier | null = null;
+
+function getPurifyInstance(): HtmlPurifier {
+  if (domPurifyInstance) return domPurifyInstance;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { JSDOM } = require('jsdom');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const createDOMPurify = require('dompurify');
+    const window = new JSDOM('').window;
+    domPurifyInstance = createDOMPurify(window) as HtmlPurifier;
+  } catch {
+    // Fail closed: if DOMPurify cannot be initialised, strip ALL markup instead of
+    // falling back to a bypassable regex sanitizer.
+    domPurifyInstance = { sanitize: (raw: string) => stripNoteHtml(raw) };
+  }
+  return domPurifyInstance;
+}
+
 export function sanitizeNoteContent(content?: string | null): string {
   if (!content || typeof content !== 'string') return '';
-  const cleaned = content
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
-    .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
-    .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '')
-    .replace(/<applet\b[^<]*(?:(?!<\/applet>)<[^<]*)*<\/applet>/gi, '')
-    .replace(/(?:javascript|vbscript):[^\s"')]+/gi, '')
-    .replace(/\son\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
-  return cleaned.trim();
+  const purify = getPurifyInstance();
+  return purify
+    .sanitize(content, {
+      ALLOWED_TAGS: [
+        'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'blockquote', 'pre', 'code', 'ul', 'ol', 'li',
+        'a', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+        'span', 'div', 'hr', 'mark', 'sub', 'sup', 'img'
+      ],
+      ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'style', 'src', 'alt', 'width', 'height'],
+      ALLOW_DATA_ATTR: false,
+    })
+    .trim();
+}
+
+export function validateTipTapDoc(doc: unknown): boolean {
+  if (!doc || typeof doc !== 'object') return false;
+  const d = doc as Record<string, unknown>;
+  if (d.type !== 'doc') return false;
+  if (!Array.isArray(d.content)) return false;
+  for (const node of d.content) {
+    if (!node || typeof node !== 'object' || typeof (node as Record<string, unknown>).type !== 'string') {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function formatLiteratureNoteMarkdown(

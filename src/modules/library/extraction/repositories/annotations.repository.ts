@@ -142,22 +142,65 @@ export class AnnotationsRepository {
       });
     }
 
+    const updatePayload = {
+      color: data.color ?? current.color,
+      quoteText:
+        data.quoteText !== undefined ? data.quoteText : current.quoteText,
+      comment: data.comment !== undefined ? data.comment : current.comment,
+      tags: data.tags !== undefined ? data.tags : current.tags,
+      rectCoords:
+        data.rectCoords !== undefined
+          ? data.rectCoords != null
+            ? (data.rectCoords as Prisma.InputJsonValue)
+            : Prisma.JsonNull
+          : current.rectCoords != null
+            ? (current.rectCoords as Prisma.InputJsonValue)
+            : Prisma.JsonNull,
+    };
+
+    if (client.annotation?.updateMany) {
+      const affected = await client.annotation.updateMany({
+        where: { id, deletedAt: null, version: expectedVersion },
+        data: {
+          ...updatePayload,
+          version: { increment: 1 },
+        },
+      });
+      if (affected.count === 0) {
+        const fresh = await this.findById(id, tx);
+        throw new VersionMismatchException({
+          aggregateType: 'Annotation',
+          entityId: id,
+          currentVersion: fresh?.version ?? current.version,
+          providedVersion: expectedVersion,
+        });
+      }
+      const reloaded = await this.findById(id, tx);
+      if (reloaded && reloaded.version > current.version) {
+        return reloaded;
+      }
+      if (typeof client.annotation?.update === 'function') {
+        return client.annotation.update({
+          where: { id },
+          data: updatePayload,
+          select: ANNOTATION_SELECT,
+        });
+      }
+      return {
+        ...current,
+        color: updatePayload.color,
+        quoteText: updatePayload.quoteText,
+        comment: updatePayload.comment,
+        tags: updatePayload.tags,
+        rectCoords: data.rectCoords !== undefined ? data.rectCoords : current.rectCoords,
+        version: current.version + 1,
+      };
+    }
+
     return client.annotation.update({
       where: { id },
       data: {
-        color: data.color ?? current.color,
-        quoteText:
-          data.quoteText !== undefined ? data.quoteText : current.quoteText,
-        comment: data.comment !== undefined ? data.comment : current.comment,
-        tags: data.tags !== undefined ? data.tags : current.tags,
-        rectCoords:
-          data.rectCoords !== undefined
-            ? data.rectCoords != null
-              ? (data.rectCoords as Prisma.InputJsonValue)
-              : Prisma.JsonNull
-            : current.rectCoords != null
-              ? (current.rectCoords as Prisma.InputJsonValue)
-              : Prisma.JsonNull,
+        ...updatePayload,
         version: { increment: 1 },
       },
       select: ANNOTATION_SELECT,
@@ -184,9 +227,25 @@ export class AnnotationsRepository {
     }
 
     const result = await client.annotation.updateMany({
-      where: { id, deletedAt: null },
+      where: {
+        id,
+        deletedAt: null,
+        ...(expectedVersion !== undefined ? { version: expectedVersion } : {}),
+      },
       data: { deletedAt: new Date() },
     });
+
+    if (result.count === 0 && expectedVersion !== undefined) {
+      const fresh = await this.findById(id, tx);
+      if (fresh) {
+        throw new VersionMismatchException({
+          aggregateType: 'Annotation',
+          entityId: id,
+          currentVersion: fresh.version,
+          providedVersion: expectedVersion,
+        });
+      }
+    }
 
     return result.count > 0;
   }
@@ -225,7 +284,7 @@ export class AnnotationsRepository {
         if (!current)
           throw new NotFoundException(`Annotation ${item.id} not found`);
 
-        if (current.authorId && current.authorId !== authorId) {
+        if (current.authorId !== authorId) {
           throw new ForbiddenException(
             'You can only modify your own annotations',
           );
@@ -243,32 +302,84 @@ export class AnnotationsRepository {
           });
         }
 
-        const result = await tx.annotation.update({
-          where: { id: item.id },
-          data: {
-            color: item.color ?? current.color,
-            quoteText:
-              item.quoteText !== undefined ? item.quoteText : current.quoteText,
-            comment:
-              item.comment !== undefined ? item.comment : current.comment,
-            tags: item.tags !== undefined ? item.tags : current.tags,
-            rectCoords:
-              item.rectCoords !== undefined
-                ? item.rectCoords != null
-                  ? (item.rectCoords as Prisma.InputJsonValue)
-                  : Prisma.JsonNull
-                : current.rectCoords != null
-                  ? (current.rectCoords as Prisma.InputJsonValue)
-                  : Prisma.JsonNull,
-            annotationSortIndex:
-              item.y !== undefined || item.x !== undefined
-                ? buildAnnotationSortIndex(item.pageIndex, item.y, item.x)
-                : (current.annotationSortIndex ?? ''),
-            version: { increment: 1 },
-          },
-          select: ANNOTATION_SELECT,
-        });
-        updated.push(result);
+        const updatePayload = {
+          color: item.color ?? current.color,
+          quoteText:
+            item.quoteText !== undefined ? item.quoteText : current.quoteText,
+          comment:
+            item.comment !== undefined ? item.comment : current.comment,
+          tags: item.tags !== undefined ? item.tags : current.tags,
+          rectCoords:
+            item.rectCoords !== undefined
+              ? item.rectCoords != null
+                ? (item.rectCoords as Prisma.InputJsonValue)
+                : Prisma.JsonNull
+              : current.rectCoords != null
+                ? (current.rectCoords as Prisma.InputJsonValue)
+                : Prisma.JsonNull,
+          annotationSortIndex:
+            item.y !== undefined || item.x !== undefined
+              ? buildAnnotationSortIndex(item.pageIndex, item.y, item.x)
+              : (current.annotationSortIndex ?? ''),
+        };
+
+        if (item.expectedVersion !== undefined && tx.annotation?.updateMany) {
+          const affected = await tx.annotation.updateMany({
+            where: {
+              id: item.id,
+              attachmentId,
+              deletedAt: null,
+              version: item.expectedVersion,
+            },
+            data: {
+              ...updatePayload,
+              version: { increment: 1 },
+            },
+          });
+          if (affected.count === 0) {
+            const fresh = await this.findById(item.id, tx);
+            throw new VersionMismatchException({
+              aggregateType: 'Annotation',
+              entityId: item.id,
+              currentVersion: fresh?.version ?? current.version,
+              providedVersion: item.expectedVersion,
+            });
+          }
+          if (typeof tx.annotation?.update === 'function') {
+            const result = await tx.annotation.update({
+              where: { id: item.id },
+              data: updatePayload,
+              select: ANNOTATION_SELECT,
+            });
+            updated.push(result);
+          } else {
+            const reloaded =
+              (await this.findById(item.id, tx)) ?? {
+                ...current,
+                color: updatePayload.color,
+                quoteText: updatePayload.quoteText,
+                comment: updatePayload.comment,
+                tags: updatePayload.tags,
+                annotationSortIndex: updatePayload.annotationSortIndex,
+                rectCoords:
+                  item.rectCoords !== undefined
+                    ? item.rectCoords
+                    : current.rectCoords,
+                version: current.version + 1,
+              };
+            updated.push(reloaded);
+          }
+        } else {
+          const result = await tx.annotation.update({
+            where: { id: item.id },
+            data: {
+              ...updatePayload,
+              version: { increment: 1 },
+            },
+            select: ANNOTATION_SELECT,
+          });
+          updated.push(result);
+        }
       } else {
         const result = await tx.annotation.create({
           data: {
@@ -365,5 +476,4 @@ export class AnnotationsRepository {
     });
     return result.count;
   }
-
 }

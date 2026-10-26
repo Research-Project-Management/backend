@@ -16,9 +16,12 @@ import {
 } from '@/modules/library/ingestion/types/metadata.types';
 import { QueryClassifier } from '@/modules/library/ingestion/parsers/query.classifier';
 import {
+  deriveDoiFromPublisherUrl,
   formatCanonicalId,
   normalizeArxivId,
   normalizeDoi,
+  normalizePmcid,
+  normalizePmid,
 } from '@/modules/library/core';
 import {
   MetadataRoutingPolicy,
@@ -73,7 +76,9 @@ export class MetadataService implements MetadataPort {
         this.ssrfGuard,
       );
 
-      const embeddedDoi = normalizeDoi(classified.clean);
+      const embeddedDoi =
+        normalizeDoi(classified.clean) ||
+        deriveDoiFromPublisherUrl(classified.clean);
       if (embeddedDoi) {
         classified = {
           raw: cleanQuery,
@@ -88,6 +93,16 @@ export class MetadataService implements MetadataPort {
             clean: embeddedArxiv,
             type: 'ARXIV',
           };
+        } else {
+          const embeddedPmid =
+            normalizePmid(classified.clean) || normalizePmcid(classified.clean);
+          if (embeddedPmid) {
+            classified = {
+              raw: cleanQuery,
+              clean: embeddedPmid,
+              type: 'PMID',
+            };
+          }
         }
       }
     }
@@ -139,7 +154,7 @@ export class MetadataService implements MetadataPort {
 
       const execResult = await this.executor.execute(
         provider,
-        { ...request, query: classified.clean },
+        { ...request, query: classified.clean, queryType: classified.type },
         request.signal,
       );
       allExecutions.push(execResult);
@@ -151,6 +166,7 @@ export class MetadataService implements MetadataPort {
 
     // 7. Enrichment (if authoritative found results)
     if (candidateResults.length > 0 && tiers.enrichment.length > 0) {
+      const primaryAuthoritativeTitle = candidateResults[0]?.metadata?.title;
       const enrichmentProviders = tiers.enrichment
         .map((id) => this.providerMap.get(id))
         .filter(
@@ -163,7 +179,7 @@ export class MetadataService implements MetadataPort {
         enrichmentProviders.map((provider) =>
           this.executor.execute(
             provider,
-            { ...request, query: classified.clean },
+            { ...request, query: classified.clean, queryType: classified.type },
             request.signal,
           ),
         ),
@@ -172,6 +188,16 @@ export class MetadataService implements MetadataPort {
       for (const execResult of enrichmentExecs) {
         allExecutions.push(execResult);
         if (execResult.status === 'found' && execResult.result) {
+          // Guard against enrichment provider returning a different work (e.g. a paper citing the arXiv preprint)
+          const enrichedTitle = execResult.result.metadata?.title;
+          if (
+            primaryAuthoritativeTitle &&
+            enrichedTitle &&
+            !this.isTitleSimilar(primaryAuthoritativeTitle, enrichedTitle) &&
+            !this.isTitleSimilar(enrichedTitle, primaryAuthoritativeTitle)
+          ) {
+            continue;
+          }
           candidateResults.push(execResult.result);
         }
       }
@@ -185,7 +211,7 @@ export class MetadataService implements MetadataPort {
 
         const execResult = await this.executor.execute(
           provider,
-          { ...request, query: classified.clean },
+          { ...request, query: classified.clean, queryType: classified.type },
           request.signal,
         );
         allExecutions.push(execResult);
@@ -364,6 +390,30 @@ export class MetadataService implements MetadataPort {
     }
 
     const similarity = matches / qTokens.length;
-    return similarity >= 0.5;
+    if (similarity < 0.5) return false;
+
+    // Bag-of-words alone accepts re-ordered titles ("Is Attention All You Need?" vs
+    // "Attention Is All You Need"), which are different works. Require the ordered
+    // word-pair overlap to agree as well.
+    const bigrams = (title: string): Set<string> => {
+      const words = title
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .split(/\s+/)
+        .filter(Boolean);
+      const pairs = new Set<string>();
+      for (let i = 0; i < words.length - 1; i++) {
+        pairs.add(`${words[i]} ${words[i + 1]}`);
+      }
+      return pairs;
+    };
+    const qPairs = bigrams(query);
+    const cPairs = bigrams(candidateTitle);
+    if (qPairs.size < 2 || cPairs.size < 2) return true;
+    let shared = 0;
+    for (const pair of qPairs) {
+      if (cPairs.has(pair)) shared++;
+    }
+    return shared / (qPairs.size + cPairs.size - shared) >= 0.5;
   }
 }

@@ -5,6 +5,7 @@ import {
   IsInt,
   MaxLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CreateNoteDto {
   @IsString()
@@ -51,7 +52,16 @@ export class UpdateNoteDto {
   @IsOptional()
   tags?: string[];
 
+  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+    if (typeof value === 'number') return value;
+    if (typeof obj?.version === 'number') return obj.version;
+    return value;
+  })
   @IsInt()
   @IsOptional()
   expectedVersion?: number;
+
+  @IsInt()
+  @IsOptional()
+  version?: number;
 }

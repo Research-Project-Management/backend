@@ -30,6 +30,7 @@ export class IngestionSagaSession {
     public readonly aggregate: IngestionRunAggregate,
     private readonly repo: IngestionRepository,
     private readonly logger: Logger,
+    public readonly isFinalAttempt: boolean = true,
   ) {}
 
   /**
@@ -156,10 +157,12 @@ export class IngestionSagaSession {
       await this.repo.updateRunStatus(
         this.scopeId,
         this.runId,
-        IngestionStatus.FAILED_FINAL,
+        this.isFinalAttempt
+          ? IngestionStatus.FAILED_FINAL
+          : IngestionStatus.FAILED_RETRYABLE,
         {
           lastError: `Saga rolled back after stage ${failedStage}: ${reason}`,
-          completedAt: new Date(),
+          ...(this.isFinalAttempt ? { completedAt: new Date() } : {}),
         },
       );
     } catch (statusErr: unknown) {
@@ -197,6 +200,7 @@ export class IngestionSagaOrchestrator {
     runId: string,
     scopeId: string,
     aggregate: IngestionRunAggregate,
+    options?: { isFinalAttempt?: boolean },
   ): IngestionSagaSession {
     return new IngestionSagaSession(
       runId,
@@ -204,6 +208,7 @@ export class IngestionSagaOrchestrator {
       aggregate,
       this.repo,
       this.logger,
+      options?.isFinalAttempt ?? true,
     );
   }
 }

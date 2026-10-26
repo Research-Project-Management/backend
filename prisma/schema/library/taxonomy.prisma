@@ -79,6 +79,7 @@ model ItemTag {
 
   @@id([tagId, itemId])
   @@index([itemId])
+  @@index([type, tagId])
   @@map("item_tags")
 }
 
@@ -104,6 +105,8 @@ model SavedSearch {
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([userId, deletedAt])
+  @@index([userId, projectId, deletedAt, isPinned(sort: Desc), name])
+  @@index([projectId, deletedAt, isPinned(sort: Desc), name])
   @@index([projectId, deletedAt])
   @@map("saved_searches")
 }

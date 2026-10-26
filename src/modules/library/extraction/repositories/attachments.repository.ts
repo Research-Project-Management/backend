@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
@@ -108,7 +109,61 @@ export class AttachmentsRepository {
       delete sanitizedData.itemId;
     }
     const targetItemId = (sanitizedData.item as { connect?: { id?: string } })?.connect?.id;
+    const targetFileId = typeof sanitizedData.fileId === 'string' ? sanitizedData.fileId : undefined;
     const isPrimaryPdf = sanitizedData.attachmentType === 'primary_pdf' || (!sanitizedData.attachmentType && sanitizedData.mimeType === 'application/pdf');
+
+    // Prevent duplicate attachment rows when the same physical fileId is already attached to this item
+    if (targetItemId && targetFileId && client.attachment?.findFirst && client.attachment?.update) {
+      const existingSameFile = await client.attachment.findFirst({
+        where: {
+          itemId: targetItemId,
+          fileId: targetFileId,
+          deletedAt: null,
+        },
+      });
+      if (existingSameFile) {
+        if (isPrimaryPdf && client.attachment?.updateMany) {
+          await client.attachment.updateMany({
+            where: {
+              itemId: targetItemId,
+              id: { not: existingSameFile.id },
+              attachmentType: 'primary_pdf',
+              deletedAt: null,
+            },
+            data: {
+              attachmentType: 'supplementary',
+            },
+          });
+        }
+        const updatePayload: Record<string, unknown> = {};
+        if (typeof sanitizedData.filename === 'string' && sanitizedData.filename) {
+          updatePayload.filename = sanitizedData.filename;
+        }
+        if (typeof sanitizedData.title === 'string' && sanitizedData.title) {
+          updatePayload.title = sanitizedData.title;
+        }
+        if (typeof sanitizedData.url === 'string' && sanitizedData.url) {
+          updatePayload.url = sanitizedData.url;
+        }
+        if (typeof sanitizedData.size === 'number') {
+          updatePayload.size = sanitizedData.size;
+        }
+        if (typeof sanitizedData.mimeType === 'string' && sanitizedData.mimeType) {
+          updatePayload.mimeType = sanitizedData.mimeType;
+        }
+        if (typeof sanitizedData.attachmentType === 'string' && sanitizedData.attachmentType) {
+          updatePayload.attachmentType = sanitizedData.attachmentType;
+        }
+        const updated = (await client.attachment.update({
+          where: { id: existingSameFile.id },
+          data: updatePayload as Prisma.AttachmentUpdateInput,
+          include,
+        })) as Prisma.AttachmentGetPayload<{ include: I }> & { itemId?: string };
+        await this.syncItemAttachmentCounts(targetItemId, tx);
+        return updated;
+      }
+    }
+
     if (targetItemId && isPrimaryPdf && client.attachment?.updateMany) {
       await client.attachment.updateMany({
         where: {
@@ -388,9 +443,19 @@ export class AttachmentsRepository {
   async updateLinkedFile(
     fileId: string,
     itemId: string,
-    _tx?: Prisma.TransactionClient,
+    tx?: Prisma.TransactionClient,
   ) {
     if (!fileId) return;
+    const client = this.getClient(tx);
+    if (client.file?.findUnique) {
+      const existingFile = await client.file.findUnique({
+        where: { id: fileId },
+        select: { linkedToId: true },
+      });
+      if (existingFile?.linkedToId && existingFile.linkedToId !== itemId) {
+        return;
+      }
+    }
     if (this.storagePort?.linkFile) {
       await this.storagePort.linkFile({
         fileId,
@@ -439,7 +504,7 @@ export class AttachmentsRepository {
     newFilename: string,
     fileId?: string,
   ) {
-    const updated = await this.prisma.attachment.update({
+    let updated = await this.prisma.attachment.update({
       where: { id: attachmentId },
       data: {
         filename: newFilename,
@@ -447,15 +512,85 @@ export class AttachmentsRepository {
     });
     if (fileId) {
       try {
-        await this.prisma.file.update({
-          where: { id: fileId },
-          data: { filename: newFilename },
-        });
+        const otherRefs = await this.countFileIdReferences(
+          fileId,
+          attachmentId,
+        );
+        if (
+          otherRefs > 0 &&
+          this.prisma.file?.findUnique &&
+          this.prisma.file?.create
+        ) {
+          const existingFile = await this.prisma.file.findUnique({
+            where: { id: fileId },
+          });
+          if (existingFile) {
+            const clonedFileId = randomUUID();
+            await this.prisma.file.create({
+              data: {
+                id: clonedFileId,
+                filename: newFilename,
+                size: existingFile.size,
+                mimeType: existingFile.mimeType,
+                isFolder: existingFile.isFolder,
+                starred: existingFile.starred,
+                metaData: existingFile.metaData ?? undefined,
+                parentId: existingFile.parentId,
+                linkedToType: 'Paper',
+                linkedToId: updated?.itemId ?? existingFile.linkedToId,
+                blobId: existingFile.blobId,
+                authorId: existingFile.authorId,
+              },
+            });
+            if (existingFile.blobId && this.prisma.storageBlob?.update) {
+              await this.prisma.storageBlob.update({
+                where: { id: existingFile.blobId },
+                data: { refCount: { increment: 1 } },
+              });
+            }
+            const nextUrl =
+              typeof updated?.url === 'string' && updated.url.includes(fileId)
+                ? updated.url.replace(fileId, clonedFileId)
+                : updated?.url;
+            updated = await this.prisma.attachment.update({
+              where: { id: attachmentId },
+              data: {
+                fileId: clonedFileId,
+                ...(nextUrl !== undefined ? { url: nextUrl } : {}),
+              },
+            });
+            if (this.prisma.attachmentRevision?.updateMany) {
+              await this.prisma.attachmentRevision.updateMany({
+                where: { attachmentId, fileId },
+                data: {
+                  fileId: clonedFileId,
+                  ...(nextUrl !== undefined ? { url: nextUrl } : {}),
+                },
+              });
+            }
+          } else {
+            await this.prisma.file.update({
+              where: { id: fileId },
+              data: { filename: newFilename },
+            });
+          }
+        } else {
+          await this.prisma.file.update({
+            where: { id: fileId },
+            data: { filename: newFilename },
+          });
+        }
       } catch (err: unknown) {
         this.logger.debug(
           `Could not sync filename on file record ${fileId}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+    }
+    if (updated?.itemId && this.prisma.item?.updateMany) {
+      await this.prisma.item.updateMany({
+        where: { id: updated.itemId },
+        data: { version: { increment: 1 } },
+      });
     }
     return updated;
   }
@@ -463,27 +598,102 @@ export class AttachmentsRepository {
   async batchRename(
     updates: Array<{ id: string; filename: string; fileId?: string }>,
   ): Promise<void> {
+    if (!updates || updates.length === 0) return;
     await this.prisma.$transaction(async (tx) => {
-      for (const item of updates) {
-        await tx.attachment.update({
-          where: { id: item.id },
-          data: {
-            filename: item.filename,
-          },
-        });
-        if (item.fileId) {
-          try {
-            await tx.file.update({
-              where: { id: item.fileId },
-              data: { filename: item.filename },
-            });
-          } catch (err: unknown) {
-            this.logger.debug(
-              `Could not sync filename on file record ${item.fileId}: ${err instanceof Error ? err.message : String(err)}`,
-            );
+      await Promise.all(
+        updates.map(async (item) => {
+          const updated = await tx.attachment.update({
+            where: { id: item.id },
+            data: {
+              filename: item.filename,
+            },
+          });
+          if (item.fileId) {
+            try {
+              const otherRefs = await this.countFileIdReferences(
+                item.fileId,
+                item.id,
+                tx,
+              );
+              if (
+                otherRefs > 0 &&
+                tx.file?.findUnique &&
+                tx.file?.create
+              ) {
+                const existingFile = await tx.file.findUnique({
+                  where: { id: item.fileId },
+                });
+                if (existingFile) {
+                  const clonedFileId = randomUUID();
+                  await tx.file.create({
+                    data: {
+                      id: clonedFileId,
+                      filename: item.filename,
+                      size: existingFile.size,
+                      mimeType: existingFile.mimeType,
+                      isFolder: existingFile.isFolder,
+                      starred: existingFile.starred,
+                      metaData: existingFile.metaData ?? undefined,
+                      parentId: existingFile.parentId,
+                      linkedToType: 'Paper',
+                      linkedToId: updated?.itemId ?? existingFile.linkedToId,
+                      blobId: existingFile.blobId,
+                      authorId: existingFile.authorId,
+                    },
+                  });
+                  if (existingFile.blobId && tx.storageBlob?.update) {
+                    await tx.storageBlob.update({
+                      where: { id: existingFile.blobId },
+                      data: { refCount: { increment: 1 } },
+                    });
+                  }
+                  const nextUrl =
+                    typeof updated?.url === 'string' &&
+                    updated.url.includes(item.fileId)
+                      ? updated.url.replace(item.fileId, clonedFileId)
+                      : updated?.url;
+                  await tx.attachment.update({
+                    where: { id: item.id },
+                    data: {
+                      fileId: clonedFileId,
+                      ...(nextUrl !== undefined ? { url: nextUrl } : {}),
+                    },
+                  });
+                  if (tx.attachmentRevision?.updateMany) {
+                    await tx.attachmentRevision.updateMany({
+                      where: { attachmentId: item.id, fileId: item.fileId },
+                      data: {
+                        fileId: clonedFileId,
+                        ...(nextUrl !== undefined ? { url: nextUrl } : {}),
+                      },
+                    });
+                  }
+                } else {
+                  await tx.file.update({
+                    where: { id: item.fileId },
+                    data: { filename: item.filename },
+                  });
+                }
+              } else {
+                await tx.file.update({
+                  where: { id: item.fileId },
+                  data: { filename: item.filename },
+                });
+              }
+            } catch (err: unknown) {
+              this.logger.debug(
+                `Could not sync filename on file record ${item.fileId}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
           }
-        }
-      }
+          if (updated?.itemId && tx.item?.updateMany) {
+            await tx.item.updateMany({
+              where: { id: updated.itemId },
+              data: { version: { increment: 1 } },
+            });
+          }
+        }),
+      );
     });
   }
 

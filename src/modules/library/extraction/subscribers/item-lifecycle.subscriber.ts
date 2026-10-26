@@ -37,7 +37,13 @@ export class ItemLifecycleSubscriber {
       | {
           id?: string;
           aggregateId?: string;
-          payload?: { id?: string; itemId?: string };
+          filePaths?: string[];
+          payload?: {
+            id?: string;
+            itemId?: string;
+            itemIds?: string[];
+            filePaths?: string[];
+          };
         }
       | null
       | undefined;
@@ -48,30 +54,40 @@ export class ItemLifecycleSubscriber {
       payload?.payload?.itemId;
     if (!itemId) return;
 
+    const rawFilePaths =
+      payload?.payload?.filePaths ?? payload?.filePaths ?? [];
+    const payloadFilePaths = Array.isArray(rawFilePaths)
+      ? rawFilePaths.filter(
+          (fp): fp is string => typeof fp === 'string' && fp.trim().length > 0,
+        )
+      : [];
+
     this.logger.log(
       `[ExtractionSubscriber] Purging attachments and annotations for purged item ${itemId}`,
     );
 
     try {
-      if (this.storagePort?.deleteFile && this.attachmentsRepository?.findMany) {
-        const attachments = await this.attachmentsRepository.findMany(
-          { itemId },
-          { revisions: true },
-        );
-        const fileIdsToDelete = new Set<string>();
-        for (const att of attachments || []) {
-          const attFileId = att.fileId || extractFileIdFromUrl(att.url);
-          if (attFileId) fileIdsToDelete.add(attFileId);
-          const revisions = (
-            att as {
-              revisions?: Array<{ fileId?: string | null; url?: string | null }>;
-            }
-          ).revisions;
-          if (Array.isArray(revisions)) {
-            for (const rev of revisions) {
-              const revFileId =
-                rev.fileId || extractFileIdFromUrl(rev.url ?? undefined);
-              if (revFileId) fileIdsToDelete.add(revFileId);
+      if (this.storagePort?.deleteFile) {
+        const fileIdsToDelete = new Set<string>(payloadFilePaths);
+        if (this.attachmentsRepository?.findMany) {
+          const attachments = await this.attachmentsRepository.findMany(
+            { itemId },
+            { revisions: true },
+          );
+          for (const att of attachments || []) {
+            const attFileId = att.fileId || extractFileIdFromUrl(att.url);
+            if (attFileId) fileIdsToDelete.add(attFileId);
+            const revisions = (
+              att as {
+                revisions?: Array<{ fileId?: string | null; url?: string | null }>;
+              }
+            ).revisions;
+            if (Array.isArray(revisions)) {
+              for (const rev of revisions) {
+                const revFileId =
+                  rev.fileId || extractFileIdFromUrl(rev.url ?? undefined);
+                if (revFileId) fileIdsToDelete.add(revFileId);
+              }
             }
           }
         }

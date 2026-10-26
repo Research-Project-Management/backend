@@ -289,7 +289,7 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
           { states: { none: { userId: mockUserId } } },
           {
             states: {
-              some: { userId: mockUserId, readStatus: { not: 'read' } },
+              some: { userId: mockUserId, readStatus: { not: 'completed' } },
             },
           },
         ],
@@ -418,6 +418,7 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
       expect(clauses[0]).toEqual({
         attachments: {
           some: {
+            deletedAt: null,
             fullTextIndexes: {
               some: {
                 textContent: { contains: 'transformer', mode: 'insensitive' },
@@ -430,6 +431,7 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
         NOT: {
           attachments: {
             some: {
+              deletedAt: null,
               fullTextIndexes: {
                 some: {
                   textContent: { contains: 'recurrent', mode: 'insensitive' },
@@ -440,10 +442,14 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
         },
       });
       expect(clauses[2]).toEqual({
-        attachments: { some: { fullTextIndexes: { some: {} } } },
+        attachments: {
+          some: { deletedAt: null, fullTextIndexes: { some: {} } },
+        },
       });
       expect(clauses[3]).toEqual({
-        attachments: { none: { fullTextIndexes: { some: {} } } },
+        attachments: {
+          none: { deletedAt: null, fullTextIndexes: { some: {} } },
+        },
       });
     });
 

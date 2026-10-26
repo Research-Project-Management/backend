@@ -1,4 +1,4 @@
-﻿import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
+import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import { DuplicateMatchResult } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import { normalizeDoi } from '@/modules/library/core';
 import {
@@ -53,10 +53,17 @@ export class DuplicatePolicy {
         const similarity = calculateTitleSimilarity(proposed.title, item.title);
         if (similarity >= 0.88) {
           // Same title! Check secondary signals (year within +/-1 or first author)
+          const hasBothYears =
+            proposed.year !== undefined &&
+            proposed.year !== null &&
+            item.year !== undefined &&
+            item.year !== null;
           const yearMatch =
-            proposed.year &&
-            item.year &&
+            hasBothYears &&
             Math.abs(Number(proposed.year) - Number(item.year)) <= 1;
+          const yearConflict =
+            hasBothYears &&
+            Math.abs(Number(proposed.year) - Number(item.year)) > 1;
           const authorMatch =
             proposed.authors &&
             proposed.authors.length > 0 &&
@@ -64,7 +71,7 @@ export class DuplicatePolicy {
             item.authors.length > 0 &&
             firstAuthorMatches(proposed.authors[0], item.authors[0]);
 
-          if (yearMatch || authorMatch) {
+          if (!yearConflict && (yearMatch || authorMatch)) {
             return {
               matchType: 'PROBABLE',
               confidence: 0.85,

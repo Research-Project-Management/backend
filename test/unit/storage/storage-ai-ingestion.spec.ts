@@ -3,7 +3,7 @@ import { DocumentAiIngestionService } from '@/modules/ai/ingestion/services/docu
 import { ScientificChunkingService } from '@/modules/ai/ingestion/services/scientific-chunking.service';
 import { FileUploadedEvent } from '@/modules/storage/core';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { IExtractionFacade } from '@/modules/library/extraction/extraction.facade';
+import { ILibraryFacade } from '@/modules/library/library.facade';
 import { EngineService } from '@/modules/ai/engine/engine.service';
 import { PrismaService } from '@/core';
 
@@ -44,7 +44,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
     ingestionService = new DocumentAiIngestionService(
       mockPrisma as PrismaService,
       mockStoragePort,
-      mockContentFacade as IExtractionFacade,
+      mockContentFacade as any as ILibraryFacade,
       chunkingService,
       mockEngineService as EngineService,
     );

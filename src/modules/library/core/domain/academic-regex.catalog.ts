@@ -313,7 +313,19 @@ export class AcademicRegexCatalog {
         if (id && !seenArxiv.has(id.toLowerCase())) {
           seenArxiv.add(id.toLowerCase());
           const matchIndex = m.index ?? 0;
-          const score = this.scoreArxivCandidate(id, matchIndex, boundedText);
+          let score = this.scoreArxivCandidate(id, matchIndex, boundedText);
+          // The arXiv watermark ("arXiv:1706.03762v7 [cs.CL] 2 Aug 2023") is a rotated margin
+          // stamp that PDF text layers emit AFTER the page body, so position-based signals
+          // wrongly penalise it. Its bracketed subject class is unique to the paper's own
+          // stamp (citations never carry one), hence a strong self-identification signal.
+          if (m[3] && /^arxiv:/i.test(m[0])) {
+            const refPos = boundedText.search(
+              /(?:\n\s*references|\n\s*bibliography|\n\s*literature\s+cited)/i,
+            );
+            if (refPos === -1 || matchIndex < refPos) {
+              score = Math.max(score, 90);
+            }
+          }
           scoredArxiv.push({
             arxivId: id,
             category: m[3],
@@ -326,8 +338,9 @@ export class AcademicRegexCatalog {
       if (scoredArxiv.length > 0) {
         scoredArxiv.sort((a, b) => b.score - a.score || a.index - b.index);
         const bestArxiv = scoredArxiv[0];
-        // Only accept if score >= 30 (not penalised as inline citation or reference list item)
-        if (bestArxiv.score >= 30) {
+        // Require explicit arXiv stamp or top-of-page header signal (score >= 80)
+        // so bare numbers or cited preprints in body/references are never promoted to the paper's own arXiv ID.
+        if (bestArxiv.score >= 80) {
           result.arxivId = bestArxiv.arxivId;
           if (bestArxiv.category) {
             result.primaryCategory = bestArxiv.category;

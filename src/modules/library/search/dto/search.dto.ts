@@ -1,5 +1,5 @@
-import { IsString, IsOptional, IsInt, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsString, IsOptional, IsInt, Min, Max, IsBoolean } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 
 export class SearchItemsQueryDto {
   @IsOptional()
@@ -50,4 +50,9 @@ export class SearchItemsQueryDto {
   @IsOptional()
   @IsString()
   sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  includeFacets?: boolean;
 }

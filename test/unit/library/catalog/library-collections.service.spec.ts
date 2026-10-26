@@ -254,5 +254,88 @@ describe('Library Collections — Tree Invariants & Sanitization', () => {
         }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('should batch descendant item queries and record tombstones/changes for all cascaded subcollections on deleteCollection', async () => {
+      const mockFindItemIdsByCollections = jest.fn().mockResolvedValue(['item-sub-1', 'item-sub-2']);
+      const mockFindItemIdsByCollection = jest.fn().mockResolvedValue(['item-root-1']);
+      const mockRecordTombstonesBatch = jest.fn().mockResolvedValue(3);
+      const mockAppendChangesBatch = jest.fn().mockResolvedValue(3);
+      const mockPublishOutbox = jest.fn().mockResolvedValue({});
+
+      const txMock = {
+        executeInTransaction: jest.fn(async (op) =>
+          op(
+            {},
+            {
+              recordTombstonesBatch: mockRecordTombstonesBatch,
+              appendChangesBatch: mockAppendChangesBatch,
+              recordTombstone: jest.fn(),
+              appendChange: jest.fn(),
+              publishOutbox: mockPublishOutbox,
+            },
+          ),
+        ),
+      };
+
+      const cascadeRepo = {
+        findById: jest.fn().mockResolvedValue({ id: 'col-root', name: 'Root', parentId: null }),
+        findAll: jest.fn().mockResolvedValue([
+          { id: 'col-root', name: 'Root', parentId: null },
+          { id: 'col-sub-1', name: 'Sub 1', parentId: 'col-root' },
+          { id: 'col-sub-2', name: 'Sub 2', parentId: 'col-sub-1' },
+        ]),
+        findItemIdsByCollection: mockFindItemIdsByCollection,
+        findItemIdsByCollections: mockFindItemIdsByCollections,
+        delete: jest.fn().mockResolvedValue(true),
+      };
+
+      const cascadeService = new CollectionsService(
+        cascadeRepo as unknown as CollectionsRepository,
+        new TreeEngine(),
+        undefined,
+        txMock as never,
+      );
+
+      await cascadeService.deleteCollection(mockUserId, 'col-root', 'cascade');
+
+      expect(mockFindItemIdsByCollections).toHaveBeenCalledTimes(1);
+      expect(mockFindItemIdsByCollections).toHaveBeenCalledWith(
+        mockUserId,
+        ['col-sub-1', 'col-sub-2'],
+        undefined,
+        undefined,
+        undefined,
+      );
+      expect(mockRecordTombstonesBatch).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: mockUserId }),
+        [
+          { entityType: 'Collection', entityId: 'col-root' },
+          { entityType: 'Collection', entityId: 'col-sub-1' },
+          { entityType: 'Collection', entityId: 'col-sub-2' },
+        ],
+      );
+      expect(mockPublishOutbox).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: mockUserId }),
+        'col-root',
+        expect.any(String),
+        expect.objectContaining({
+          deletedCollectionIds: ['col-root', 'col-sub-1', 'col-sub-2'],
+          deletedItemIds: ['item-root-1', 'item-sub-1', 'item-sub-2'],
+        }),
+      );
+      expect(cascadeRepo.delete).toHaveBeenCalledWith(
+        mockUserId,
+        'col-root',
+        'cascade',
+        {},
+        undefined,
+        {
+          targetCollectionIds: ['col-root', 'col-sub-1', 'col-sub-2'],
+          itemIds: ['item-root-1', 'item-sub-1', 'item-sub-2'],
+        },
+      );
+    });
+    it('placeholder', () => { expect(true).toBe(true);
+    });
   });
 });

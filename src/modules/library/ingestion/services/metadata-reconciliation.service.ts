@@ -14,351 +14,259 @@ import { parseCreatorString } from '@/modules/library/core/domain/author.domain'
 
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
 
-/**
- * Unified global fallback provider authority weights (0.0 - 1.0 scale).
- * Shared across MetadataReconciliationService and ReconciliationPolicy.
- */
-export const SOURCE_WEIGHTS: Record<string, number> = {
-  UserOverride: 1.0,
-  UserIdentifier: 1.0,
-  DirectIdentifier: 0.99,
-  TrustedPaper: 0.98,
-  trustedpaper: 0.98,
-  CrossRef: 0.94,
-  crossref: 0.94,
-  PubMed: 0.92,
-  pubmed: 0.92,
-  EnrichedProvider: 0.9,
-  enrichedprovider: 0.9,
-  ZoteroSync: 0.88,
-  zotero: 0.88,
-  SemanticScholar: 0.86,
-  semanticscholar: 0.86,
-  OpenAlex: 0.85,
-  openalex: 0.85,
-  arXiv: 0.84,
-  arxiv: 0.84,
-  DBLP: 0.83,
-  dblp: 0.83,
-  OpenLibrary: 0.82,
-  openlibrary: 0.82,
-  MetadataResolution: 0.8,
-  CSL_JSON: 0.78,
-  BibTeX: 0.65,
-  bibtex: 0.65,
-  RIS: 0.65,
-  ris: 0.65,
-  Unpaywall: 0.55,
-  unpaywall: 0.55,
-  UrlCapture: 0.5,
-  urlcapture: 0.5,
-  StagedPdf: 0.4,
-  stagedpdf: 0.4,
-  LocalPDFExtraction: 0.4,
-  localpdfextraction: 0.4,
-};
+export {
+  SOURCE_WEIGHTS,
+  FIELD_AUTHORITY_WEIGHTS,
+  FIELD_AUTHORITY,
+  resolveProviderFieldWeight,
+} from '../constants/source-weights.catalog';
+import {
+  FIELD_AUTHORITY_WEIGHTS,
+  resolveProviderFieldWeight,
+} from '../constants/source-weights.catalog';
 
-export const FIELD_AUTHORITY_WEIGHTS: Record<string, Record<string, number>> = {
-  // Identifiers
-  doi: {
-    UserOverride: 1.0,
-    UserIdentifier: 1.0,
-    DirectIdentifier: 1.0,
-    CrossRef: 0.999,
-    TrustedPaper: 0.98,
-    PubMed: 0.95,
-    ZoteroSync: 0.93,
-    OpenAlex: 0.92,
-    SemanticScholar: 0.92,
-    Unpaywall: 0.9,
-    BibTeX: 0.9,
-    RIS: 0.9,
-    LocalPDFExtraction: 0.82,
-    arXiv: 0.75,
-  },
-  arxivId: {
-    UserOverride: 1.0,
-    UserIdentifier: 1.0,
-    DirectIdentifier: 1.0,
-    arXiv: 1.0,
-    TrustedPaper: 0.98,
-    OpenAlex: 0.92,
-    SemanticScholar: 0.92,
-    ZoteroSync: 0.92,
-    BibTeX: 0.88,
-    LocalPDFExtraction: 0.8,
-  },
-  pmid: {
-    UserOverride: 1.0,
-    UserIdentifier: 1.0,
-    DirectIdentifier: 1.0,
-    PubMed: 1.0,
-    TrustedPaper: 0.98,
-    OpenAlex: 0.93,
-    SemanticScholar: 0.93,
-    ZoteroSync: 0.92,
-    BibTeX: 0.88,
-  },
-  pmcid: {
-    UserOverride: 1.0,
-    UserIdentifier: 1.0,
-    DirectIdentifier: 1.0,
-    PubMed: 1.0,
-    TrustedPaper: 0.98,
-    OpenAlex: 0.92,
-    SemanticScholar: 0.92,
-    ZoteroSync: 0.9,
-  },
-  isbn: {
-    UserOverride: 1.0,
-    UserIdentifier: 1.0,
-    DirectIdentifier: 1.0,
-    OpenLibrary: 0.97,
-    CrossRef: 0.93,
-    ZoteroSync: 0.9,
-    BibTeX: 0.88,
-    RIS: 0.87,
-  },
-  issn: {
-    UserOverride: 1.0,
-    CrossRef: 0.98,
-    PubMed: 0.97,
-    OpenAlex: 0.9,
-    ZoteroSync: 0.9,
-    BibTeX: 0.85,
-  },
-
-  // Core Bibliographic Fields
-  title: {
-    UserOverride: 1.0,
-    TrustedPaper: 0.99,
-    PubMed: 0.97,
-    CrossRef: 0.97,
-    arXiv: 0.94,
-    ZoteroSync: 0.93,
-    SemanticScholar: 0.92,
-    EnrichedProvider: 0.91,
-    BibTeX: 0.91,
-    RIS: 0.89,
-    OpenAlex: 0.87,
-    OpenLibrary: 0.87,
-    LocalPDFExtraction: 0.85,
-  },
-  authors: {
-    UserOverride: 1.0,
-    TrustedPaper: 0.98,
-    PubMed: 0.97,
-    CrossRef: 0.95,
-    arXiv: 0.93,
-    ZoteroSync: 0.92,
-    SemanticScholar: 0.91,
-    EnrichedProvider: 0.9,
-    BibTeX: 0.9,
-    RIS: 0.88,
-    OpenAlex: 0.85,
-    OpenLibrary: 0.83,
-    LocalPDFExtraction: 0.82,
-  },
-  creators: {
-    UserOverride: 1.0,
-    TrustedPaper: 0.98,
-    PubMed: 0.97,
-    CrossRef: 0.95,
-    arXiv: 0.93,
-    ZoteroSync: 0.92,
-    SemanticScholar: 0.91,
-    EnrichedProvider: 0.9,
-    BibTeX: 0.9,
-    RIS: 0.88,
-    OpenAlex: 0.85,
-    OpenLibrary: 0.83,
-    LocalPDFExtraction: 0.82,
-  },
-  abstract: {
-    UserOverride: 1.0,
-    PubMed: 0.97,
-    arXiv: 0.97,
-    TrustedPaper: 0.95,
-    SemanticScholar: 0.92,
-    EnrichedProvider: 0.9,
-    ZoteroSync: 0.88,
-    LocalPDFExtraction: 0.88,
-    BibTeX: 0.83,
-    OpenAlex: 0.83,
-    CrossRef: 0.7,
-  },
-  year: {
-    UserOverride: 1.0,
-    TrustedPaper: 0.99,
-    CrossRef: 0.98,
-    PubMed: 0.97,
-    SemanticScholar: 0.93,
-    BibTeX: 0.92,
-    ZoteroSync: 0.92,
-    RIS: 0.91,
-    EnrichedProvider: 0.9,
-    OpenAlex: 0.88,
-    OpenLibrary: 0.86,
-    LocalPDFExtraction: 0.75,
-    arXiv: 0.72,
-  },
-
-  // Publication Venue
-  journal: {
-    UserOverride: 1.0,
-    CrossRef: 0.97,
-    PubMed: 0.97,
-    ZoteroSync: 0.9,
-    EnrichedProvider: 0.9,
-    SemanticScholar: 0.89,
-    BibTeX: 0.88,
-    RIS: 0.87,
-    OpenAlex: 0.87,
-    LocalPDFExtraction: 0.68,
-    arXiv: 0.6,
-  },
-  publicationTitle: {
-    UserOverride: 1.0,
-    CrossRef: 0.97,
-    PubMed: 0.97,
-    ZoteroSync: 0.9,
-    EnrichedProvider: 0.9,
-    SemanticScholar: 0.89,
-    BibTeX: 0.88,
-    RIS: 0.87,
-    OpenAlex: 0.87,
-    LocalPDFExtraction: 0.68,
-    arXiv: 0.6,
-  },
-  publisher: {
-    UserOverride: 1.0,
-    CrossRef: 0.98,
-    OpenLibrary: 0.9,
-    ZoteroSync: 0.9,
-    EnrichedProvider: 0.89,
-    OpenAlex: 0.88,
-    BibTeX: 0.85,
-    RIS: 0.84,
-  },
-  volume: {
-    UserOverride: 1.0,
-    CrossRef: 0.95,
-    PubMed: 0.94,
-    BibTeX: 0.9,
-    ZoteroSync: 0.9,
-    RIS: 0.89,
-    SemanticScholar: 0.86,
-    OpenAlex: 0.85,
-    LocalPDFExtraction: 0.7,
-    arXiv: 0.5,
-  },
-  pages: {
-    UserOverride: 1.0,
-    CrossRef: 0.93,
-    PubMed: 0.92,
-    BibTeX: 0.9,
-    ZoteroSync: 0.9,
-    RIS: 0.89,
-    SemanticScholar: 0.84,
-    OpenAlex: 0.82,
-    LocalPDFExtraction: 0.6,
-    arXiv: 0.4,
-  },
-
-  // Enrichment Fields
-  language: {
-    UserOverride: 1.0,
-    PubMed: 0.95,
-    OpenAlex: 0.87,
-    arXiv: 0.83,
-    CrossRef: 0.82,
-    LocalPDFExtraction: 0.8,
-    BibTeX: 0.78,
-  },
-  itemType: {
-    UserOverride: 1.0,
-    arXiv: 0.96,
-    OpenLibrary: 0.94,
-    CrossRef: 0.92,
-    PubMed: 0.91,
-    BibTeX: 0.88,
-    RIS: 0.86,
-    ZoteroSync: 0.86,
-    SemanticScholar: 0.85,
-    OpenAlex: 0.78,
-    LocalPDFExtraction: 0.7,
-  },
-  openAccessPdfUrl: {
-    UserOverride: 1.0,
-    Unpaywall: 0.99,
-    arXiv: 0.98,
-    SemanticScholar: 0.95,
-    OpenAlex: 0.93,
-    ZoteroSync: 0.85,
-  },
-  citationCount: {
-    UserOverride: 1.0,
-    OpenAlex: 0.97,
-    SemanticScholar: 0.96,
-    CrossRef: 0.95,
-  },
-  referenceCount: {
-    UserOverride: 1.0,
-    OpenAlex: 0.97,
-    SemanticScholar: 0.96,
-    CrossRef: 0.95,
-    LocalPDFExtraction: 0.88,
-    PubMed: 0.85,
-    arXiv: 0.7,
-  },
-  extraFields: {
-    UserOverride: 1.0,
-    PubMed: 0.95,
-    arXiv: 0.92,
-    CrossRef: 0.92,
-    OpenLibrary: 0.9,
-    ZoteroSync: 0.9,
-    SemanticScholar: 0.88,
-    OpenAlex: 0.85,
-    BibTeX: 0.8,
-  },
-};
-
-export const FIELD_AUTHORITY = FIELD_AUTHORITY_WEIGHTS;
+const AUTHORITATIVE_CREATOR_PROVIDERS = new Set([
+  'crossref',
+  'pubmed',
+  'arxiv',
+  'enrichedprovider',
+]);
 
 /**
- * Resolves the canonical authority weight (0.0 - 1.0) for a given provider and optional field.
- * Checks field-specific authority first, then global SOURCE_WEIGHTS (case-insensitive).
+ * Selects the best creator/author list variant, preferring complete lists from
+ * authoritative publisher registries (CrossRef, PubMed, arXiv, EnrichedProvider)
+ * over shorter/truncated lists from local extraction.
  */
-export function resolveProviderFieldWeight(
-  provider: string | undefined,
-  field?: string,
-): number {
-  if (!provider) return 0.5;
-  const lower = provider.toLowerCase();
+export function selectAuthoritativeCreatorVariant<
+  T extends { sourceProvider?: string; val: unknown },
+>(sortedVariants: T[]): T {
+  const firstNonEmpty =
+    sortedVariants.find((v) => Array.isArray(v.val) && v.val.length > 0) ||
+    sortedVariants[0];
+  const authoritative = sortedVariants.find(
+    (v) =>
+      AUTHORITATIVE_CREATOR_PROVIDERS.has(
+        (v.sourceProvider || '').toLowerCase(),
+      ) &&
+      Array.isArray(v.val) &&
+      v.val.length > 0,
+  );
+  if (
+    authoritative &&
+    Array.isArray(authoritative.val) &&
+    Array.isArray(firstNonEmpty?.val) &&
+    authoritative.val.length > firstNonEmpty.val.length
+  ) {
+    return authoritative;
+  }
+  return firstNonEmpty;
+}
 
-  if (field && FIELD_AUTHORITY_WEIGHTS[field]) {
-    const fieldWeights = FIELD_AUTHORITY_WEIGHTS[field];
-    if (fieldWeights[provider] !== undefined) {
-      return fieldWeights[provider];
-    }
-    for (const [key, val] of Object.entries(fieldWeights)) {
-      if (key.toLowerCase() === lower) {
-        return val;
+/**
+ * Unions and normalizes academic tags/keywords/labels across multiple candidate arrays.
+ */
+export function mergeReconciledTagArrays(arrays: unknown[]): string[] {
+  const candidateTags: string[] = [];
+  for (const arr of arrays) {
+    if (Array.isArray(arr)) {
+      for (const t of arr) {
+        if (typeof t === 'string' && t.trim()) {
+          candidateTags.push(t.trim());
+        }
       }
     }
   }
+  return normalizeAcademicTags(candidateTags);
+}
 
-  if (SOURCE_WEIGHTS[provider] !== undefined) {
-    return SOURCE_WEIGHTS[provider];
+/**
+ * Deduplicates notes across multiple candidate arrays by case-insensitive content text.
+ */
+export function mergeReconciledNotesArrays(
+  arrays: unknown[],
+  normalizeToObject = false,
+): unknown[] {
+  const seen = new Set<string>();
+  const merged: unknown[] = [];
+  for (const arr of arrays) {
+    if (!Array.isArray(arr)) continue;
+    for (const item of arr) {
+      const noteObj =
+        item && typeof item === 'object'
+          ? (item as Record<string, unknown>)
+          : null;
+      const rawNoteContent =
+        noteObj?.content ?? noteObj?.contentMd ?? noteObj?.note;
+      const text =
+        typeof item === 'string'
+          ? item.trim()
+          : typeof rawNoteContent === 'string'
+            ? rawNoteContent.trim()
+            : '';
+      const dedupeKey = text
+        ? text.toLowerCase()
+        : normalizeToObject
+          ? ''
+          : JSON.stringify(item);
+      if (dedupeKey && !seen.has(dedupeKey)) {
+        seen.add(dedupeKey);
+        if (normalizeToObject) {
+          merged.push(
+            typeof item === 'string'
+              ? { content: text }
+              : {
+                  content: text,
+                  ...(typeof noteObj?.title === 'string' && noteObj.title.trim()
+                    ? { title: noteObj.title.trim() }
+                    : {}),
+                  ...(typeof noteObj?.source === 'string' &&
+                  noteObj.source.trim()
+                    ? { source: noteObj.source.trim() }
+                    : {}),
+                  ...(Array.isArray(noteObj?.tags) && noteObj.tags.length > 0
+                    ? { tags: noteObj.tags as string[] }
+                    : {}),
+                },
+          );
+        } else {
+          merged.push(item);
+        }
+      }
+    }
   }
-  for (const [key, val] of Object.entries(SOURCE_WEIGHTS)) {
-    if (key.toLowerCase() === lower) {
-      return val;
+  return merged;
+}
+
+/**
+ * Shared post-reconciliation cleanup for resolved bibliographic metadata:
+ * - Default `title` and `itemType`
+ * - Bidirectional Zotero base-field harmonization (`publicationTitle` <-> `journal`, etc.)
+ * - Canonical `preprint` vs. non-arXiv publisher DOI cleanup (`arXiv` repository/DOI vs. stripping stale journal fields)
+ * - Bidirectional `creators` <-> `authors` synchronization
+ */
+export function finalizeReconciledBibliographicMetadata(
+  resolved: Record<string, unknown>,
+  _candidates?: Array<{
+    sourceProvider?: string;
+    metadata?: Record<string, unknown>;
+  }>,
+): void {
+  if (!resolved.title) {
+    resolved.title = 'Untitled Document';
+  }
+  if (!resolved.itemType || typeof resolved.itemType !== 'string') {
+    resolved.itemType = 'journalArticle';
+  }
+
+  const itemType = String(resolved.itemType);
+  resolveBidirectionalBaseFields(resolved, itemType, undefined, false);
+
+  if (itemType === 'journalArticle') {
+    if (resolved.publicationTitle && !resolved.journal) {
+      resolved.journal = resolved.publicationTitle;
+    } else if (resolved.journal && !resolved.publicationTitle) {
+      resolved.publicationTitle = resolved.journal;
+    }
+  } else if (itemType === 'preprint') {
+    const rawArxivCandidate = String(
+      resolved.arxivId ||
+        (/^arxiv:/i.test(String(resolved.archiveId || ''))
+          ? resolved.archiveId
+          : '') ||
+        (typeof resolved.doi === 'string' &&
+        /^10\.48550\/arxiv\./i.test(resolved.doi)
+          ? resolved.doi.replace(/^10\.48550\/arxiv\./i, '')
+          : ''),
+    )
+      .replace(/^arxiv:\s*/i, '')
+      .replace(/v\d+$/i, '')
+      .trim();
+    const isValidArxivId =
+      /^\d{4}\.\d{4,5}$/.test(rawArxivCandidate) ||
+      /^[a-z-]+(?:\.[a-z]{2})?\/\d{7}$/i.test(rawArxivCandidate);
+    const isNonArxivDoi = Boolean(
+      typeof resolved.doi === 'string' &&
+        resolved.doi.trim() &&
+        !/^10\.48550\/arxiv\./i.test(resolved.doi.trim()),
+    );
+    if (isValidArxivId && !isNonArxivDoi) {
+      resolved.repository = resolved.repository || 'arXiv';
+      resolved.archive = resolved.archive || 'arXiv';
+      resolved.arxivId = rawArxivCandidate;
+      resolved.archiveId = `arXiv:${rawArxivCandidate}`;
+      resolved.doi = `10.48550/arXiv.${rawArxivCandidate}`;
+    } else {
+      resolved.repository =
+        resolved.repository ||
+        resolved.institution ||
+        resolved.publicationTitle ||
+        resolved.journal ||
+        resolved.publisher;
+    }
+    delete resolved.publicationTitle;
+    delete resolved.journal;
+    delete resolved.proceedingsTitle;
+    delete resolved.conferenceName;
+    delete resolved.bookTitle;
+    delete resolved.series;
+    delete resolved.volume;
+    delete resolved.issue;
+    delete resolved.pages;
+    delete resolved.journalAbbr;
+    delete resolved.journalAbbreviation;
+    delete resolved.issn;
+    delete resolved.isbn;
+    if (resolved.extraFields && typeof resolved.extraFields === 'object') {
+      const ef = resolved.extraFields as Record<string, unknown>;
+      delete ef.publicationTitle;
+      delete ef.journal;
+      delete ef.proceedingsTitle;
+      delete ef.conferenceName;
+      delete ef.bookTitle;
+      delete ef.series;
+      delete ef.volume;
+      delete ef.issue;
+      delete ef.pages;
+      delete ef.journalAbbr;
+      delete ef.journalAbbreviation;
+      delete ef.issn;
+      delete ef.isbn;
     }
   }
 
-  return 0.75;
+  if (Array.isArray(resolved.creators) && resolved.creators.length > 0) {
+    const creatorsList = resolved.creators as Array<{
+      creatorType?: string;
+      fullName?: string;
+      name?: string;
+      firstName?: string;
+      lastName?: string;
+    }>;
+    const authorsList = resolved.authors as unknown[] | undefined;
+    if (!authorsList || authorsList.length === 0) {
+      const authorCreators = creatorsList.filter(
+        (c) => c.creatorType === 'author' || !c.creatorType,
+      );
+      const effectiveList =
+        authorCreators.length > 0 ? authorCreators : creatorsList;
+      resolved.authors = effectiveList
+        .map(
+          (c) =>
+            c.fullName ||
+            c.name ||
+            `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+        )
+        .filter(Boolean);
+    }
+  } else if (Array.isArray(resolved.authors) && resolved.authors.length > 0) {
+    if (!Array.isArray(resolved.creators) || resolved.creators.length === 0) {
+      resolved.creators = (resolved.authors as string[])
+        .map((authorName: string, idx: number) =>
+          parseCreatorString(authorName, idx, 'author'),
+        )
+        .filter((c): c is NonNullable<typeof c> => c !== null);
+    }
+  }
 }
 
 @Injectable()
@@ -502,10 +410,9 @@ export class MetadataReconciliationService {
       }
 
       if (field === 'tags' || field === 'labels' || field === 'keywords') {
-        const rawTags = fieldVariants.flatMap((variant) =>
-          Array.isArray(variant.val) ? (variant.val as string[]) : [],
+        const values = mergeReconciledTagArrays(
+          fieldVariants.map((variant) => variant.val),
         );
-        const values = normalizeAcademicTags(rawTags);
         (resolved as Record<string, unknown>)[field] = values;
         assertions.push({
           field,
@@ -519,30 +426,10 @@ export class MetadataReconciliationService {
       }
 
       if (field === 'notes') {
-        const values = fieldVariants.flatMap((variant) =>
-          Array.isArray(variant.val) ? (variant.val as unknown[]) : [],
+        const unique = mergeReconciledNotesArrays(
+          fieldVariants.map((variant) => variant.val),
+          false,
         );
-        const seen = new Set<string>();
-        const unique: unknown[] = [];
-        for (const value of values) {
-          const noteRec =
-            value && typeof value === 'object'
-              ? (value as Record<string, unknown>)
-              : null;
-          const rawNoteText =
-            noteRec?.content ?? noteRec?.contentMd ?? noteRec?.note;
-          const text =
-            typeof value === 'string'
-              ? value.trim()
-              : typeof rawNoteText === 'string'
-                ? rawNoteText.trim()
-                : '';
-          const key = text ? text.toLowerCase() : JSON.stringify(value);
-          if (key && !seen.has(key)) {
-            seen.add(key);
-            unique.push(value);
-          }
-        }
         resolved.notes = unique as ItemMetadata['notes'];
         assertions.push({
           field,
@@ -557,22 +444,12 @@ export class MetadataReconciliationService {
 
       let winner = fieldVariants[0];
       if (field === 'creators' || field === 'authors') {
-        const authoritative = fieldVariants.find(
-          (v) =>
-            ['crossref', 'pubmed', 'arxiv', 'enrichedprovider'].includes(
-              (v.candidate.sourceProvider || '').toLowerCase(),
-            ) &&
-            Array.isArray(v.val) &&
-            v.val.length > 0,
+        winner = selectAuthoritativeCreatorVariant(
+          fieldVariants.map((v) => ({
+            ...v,
+            sourceProvider: v.candidate.sourceProvider,
+          })),
         );
-        if (
-          authoritative &&
-          Array.isArray(authoritative.val) &&
-          Array.isArray(winner.val) &&
-          authoritative.val.length > winner.val.length
-        ) {
-          winner = authoritative;
-        }
       }
 
       resolved[field] = this.cloneValue(winner.val);
@@ -604,45 +481,10 @@ export class MetadataReconciliationService {
       ...resolved,
     };
 
-    const finalRecord = finalMetadata as Record<string, unknown>;
-    resolveBidirectionalBaseFields(finalRecord, itemType, undefined, false);
-
-    if (itemType === 'journalArticle') {
-      if (finalMetadata.publicationTitle && !finalMetadata.journal) {
-        finalMetadata.journal = finalMetadata.publicationTitle;
-      } else if (finalMetadata.journal && !finalMetadata.publicationTitle) {
-        finalMetadata.publicationTitle = finalMetadata.journal;
-      }
-    }
-
-    if (
-      Array.isArray(finalMetadata.creators) &&
-      finalMetadata.creators.length > 0 &&
-      (!finalMetadata.authors || finalMetadata.authors.length === 0)
-    ) {
-      const authorCreators = finalMetadata.creators.filter(
-        (c) => c.creatorType === 'author' || !c.creatorType,
-      );
-      const effectiveList =
-        authorCreators.length > 0 ? authorCreators : finalMetadata.creators;
-      finalMetadata.authors = effectiveList
-        .map(
-          (c) =>
-            c.fullName ||
-            c.name ||
-            `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-        )
-        .filter(Boolean);
-    } else if (
-      Array.isArray(finalMetadata.authors) &&
-      finalMetadata.authors.length > 0 &&
-      (!Array.isArray(finalMetadata.creators) ||
-        finalMetadata.creators.length === 0)
-    ) {
-      finalMetadata.creators = finalMetadata.authors
-        .map((authorName, idx) => parseCreatorString(authorName, idx, 'author'))
-        .filter((c): c is NonNullable<typeof c> => c !== null);
-    }
+    finalizeReconciledBibliographicMetadata(
+      finalMetadata as Record<string, unknown>,
+      candidates,
+    );
 
     return {
       metadata: finalMetadata,

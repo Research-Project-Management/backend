@@ -259,7 +259,7 @@ describe('Library Workflow & Distributed Consistency Invariants', () => {
       const repo = new AttachmentsRepository(mockPrisma as any);
       await repo.create(
         {
-          itemId: ITEM_ID,
+          item: { connect: { id: ITEM_ID } },
           filename: 'new-version.pdf',
           attachmentType: 'primary_pdf' as any,
           mimeType: 'application/pdf',

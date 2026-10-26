@@ -49,9 +49,12 @@ export const IDENTIFIER_META_KEYS = [
 ] as const;
 
 export const RETRACTION_SURVIVAL_KEYS = [
+  'isRetracted',
   'retraction',
   'retractionDate',
   'retractionNature',
+  'retractionDetails',
+  'retractionCheckedAt',
   'retractionReasons',
   'retractionNoticeDoi',
   'retractionSource',
@@ -80,6 +83,8 @@ export async function rewireMergedItemRelations(
     }
   }
 
+  const relationIdsToDelete: string[] = [];
+
   for (const rel of existingRelations) {
     const isSourceDup = uniqueDupIds.includes(rel.sourceItemId);
     const isTargetDup = uniqueDupIds.includes(rel.targetItemId);
@@ -89,19 +94,31 @@ export async function rewireMergedItemRelations(
     const newTargetId = isTargetDup ? primaryId : rel.targetItemId;
 
     if (newSourceId === newTargetId) {
-      await tx.itemRelation.delete({ where: { id: rel.id } });
+      relationIdsToDelete.push(rel.id);
       continue;
     }
 
     const candidateKey = `${newSourceId}::${newTargetId}::${rel.relationType}`;
     if (primaryExistingPairs.has(candidateKey)) {
-      await tx.itemRelation.delete({ where: { id: rel.id } });
+      relationIdsToDelete.push(rel.id);
     } else {
       await tx.itemRelation.update({
         where: { id: rel.id },
         data: { sourceItemId: newSourceId, targetItemId: newTargetId },
       });
       primaryExistingPairs.add(candidateKey);
+    }
+  }
+
+  if (relationIdsToDelete.length > 0) {
+    if (tx.itemRelation.deleteMany) {
+      await tx.itemRelation.deleteMany({
+        where: { id: { in: relationIdsToDelete } },
+      });
+    } else {
+      for (const relId of relationIdsToDelete) {
+        await tx.itemRelation.delete({ where: { id: relId } });
+      }
     }
   }
 }
@@ -114,16 +131,22 @@ export async function consolidateUserPublications(
   const dupPublications = await tx.userPublication.findMany({
     where: { itemId: { in: uniqueDupIds } },
   });
+  if (dupPublications.length === 0) return;
+
+  const primaryPubByUser = new Map<string, (typeof dupPublications)[number]>();
 
   for (const pub of dupPublications) {
-    const existingPrimaryPub = await tx.userPublication.findUnique({
-      where: {
-        userId_itemId: { userId: pub.userId, itemId: primaryId },
-      },
-    });
+    let existingPrimaryPub = primaryPubByUser.get(pub.userId) ?? null;
+    if (!existingPrimaryPub && tx.userPublication.findUnique) {
+      existingPrimaryPub = await tx.userPublication.findUnique({
+        where: {
+          userId_itemId: { userId: pub.userId, itemId: primaryId },
+        },
+      });
+    }
 
     if (!existingPrimaryPub) {
-      await tx.userPublication.create({
+      const created = await tx.userPublication.create({
         data: {
           userId: pub.userId,
           itemId: primaryId,
@@ -133,26 +156,43 @@ export async function consolidateUserPublications(
           addedAt: pub.addedAt,
         },
       });
+      primaryPubByUser.set(
+        pub.userId,
+        created ?? ({ ...pub, itemId: primaryId } as never),
+      );
     } else {
+      const updatedData = {
+        isPublic: existingPrimaryPub.isPublic || pub.isPublic,
+        openAccessLicense:
+          existingPrimaryPub.openAccessLicense || pub.openAccessLicense,
+        contributorId:
+          existingPrimaryPub.contributorId || pub.contributorId,
+      };
       await tx.userPublication.update({
         where: {
           userId_itemId: { userId: pub.userId, itemId: primaryId },
         },
-        data: {
-          isPublic: existingPrimaryPub.isPublic || pub.isPublic,
-          openAccessLicense:
-            existingPrimaryPub.openAccessLicense || pub.openAccessLicense,
-          contributorId:
-            existingPrimaryPub.contributorId || pub.contributorId,
+        data: updatedData,
+      });
+      primaryPubByUser.set(pub.userId, {
+        ...existingPrimaryPub,
+        ...updatedData,
+      });
+    }
+  }
+
+  if (tx.userPublication.deleteMany) {
+    await tx.userPublication.deleteMany({
+      where: { itemId: { in: uniqueDupIds } },
+    });
+  } else {
+    for (const pub of dupPublications) {
+      await tx.userPublication.delete({
+        where: {
+          userId_itemId: { userId: pub.userId, itemId: pub.itemId },
         },
       });
     }
-
-    await tx.userPublication.delete({
-      where: {
-        userId_itemId: { userId: pub.userId, itemId: pub.itemId },
-      },
-    });
   }
 }
 

@@ -22,6 +22,7 @@ model Feed {
   createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  @@index([errorCount, lastFetchedAt])
   @@map("feeds")
 }
 
@@ -49,6 +50,10 @@ model FeedItem {
   @@unique([feedId, guid])
   @@index([feedId, publishedAt(sort: Desc)])
   @@index([publishedAt])
+  @@index([guid])
+  @@index([doi])
+  @@index([arxivId])
+  @@index([url])
   @@map("feed_items")
 }
 
@@ -66,7 +71,8 @@ model FeedSubscription {
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([userId, feedId])
-  @@index([userId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([feedId])
   @@map("feed_subscriptions")
 }
 
@@ -79,5 +85,6 @@ model FeedItemReadState {
 
   @@unique([userId, itemId])
   @@index([userId])
+  @@index([itemId])
   @@map("feed_item_read_states")
 }

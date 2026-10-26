@@ -38,11 +38,12 @@ describe('QueryRepository Filtering & Grounding Specification', () => {
       const where: any = queryRepo.buildWhereClause(userId, {
         readStatus: 'unread',
       });
-      expect(where.states).toEqual({
-        some: {
-          userId,
-          readStatus: 'unread',
-        },
+      // 'unread' must also match items that have no State row yet (cat:H6).
+      expect(where.AND).toContainEqual({
+        OR: [
+          { states: { none: { userId } } },
+          { states: { some: { userId, readStatus: 'unread' } } },
+        ],
       });
     });
 

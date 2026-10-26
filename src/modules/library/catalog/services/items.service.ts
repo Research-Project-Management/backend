@@ -1,27 +1,9 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  UnprocessableEntityException,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, UnprocessableEntityException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import {
-  CreateItemData,
-  UpdateItemData,
-  ItemDetail,
-  ItemTransactionContext,
-} from '@/modules/library/core/types/bibliographic.types';
-import {
-  sanitizeItemTitle,
-  normalizeProjectScopeId,
-  TransactionHelpers,
-  LIBRARY_EVENT_TYPES,
-  buildItemCreatedOutboxPayload,
-  LibraryItemSource,
-} from '@/modules/library/core';
+import { CreateItemData, UpdateItemData, ItemDetail, ItemTransactionContext } from '@/modules/library/core/types/bibliographic.types';
+import { sanitizeItemTitle, normalizeProjectScopeId, TransactionHelpers, LIBRARY_EVENT_TYPES, buildItemCreatedOutboxPayload, LibraryItemSource } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
@@ -53,12 +35,7 @@ export class ItemService {
     projectId?: string,
     options?: { skipScopeInvalidation?: boolean },
   ): Promise<void> {
-    return this.cacheCoordinator.invalidateItemCache(
-      id,
-      userId,
-      projectId,
-      options,
-    );
+    return this.cacheCoordinator.invalidateItemCache(id, userId, projectId, options);
   }
   async invalidateScopeListCache(
     userId: string,
@@ -425,11 +402,13 @@ export class ItemService {
           await helpers.publishOutbox(
             { userId, projectId: validProjectId },
             id,
-            'library.item.purged',
+            LIBRARY_EVENT_TYPES.ITEM_PURGED,
             {
               itemId: id,
+              itemIds: [id],
               userId,
               projectId: validProjectId,
+              filePaths: purgeRes.storagePaths,
               purgedAt: new Date().toISOString(),
             },
           );
@@ -614,13 +593,15 @@ export class ItemService {
           await helpers.appendChangesBatch(eventScope, res.succeededIds.map((id) => ({ entityType: 'Item', entityId: id, action: 'delete', version: 0 })));
           await helpers.publishOutboxBatch(
             eventScope,
-            res.succeededIds.map((id) => ({
+            res.succeededIds.map((id, idx) => ({
               aggregateId: id,
-              eventType: 'library.item.purged',
+              eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
               payload: {
                 itemId: id,
+                itemIds: res.succeededIds,
                 userId,
                 projectId: validProjectId,
+                filePaths: idx === 0 ? res.storagePaths : [],
                 purgedAt,
               },
             })),
@@ -647,33 +628,23 @@ export class ItemService {
   }
   async purgeExpiredTrash(retentionDays: number = 30, limit: number = 200) {
     let storagePathsToDelete: string[] = [];
+    let purgedItemsList: Array<{
+      id: string;
+      userId: string;
+      projectId: string | null;
+    }> = [];
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
-        const cutoff = new Date(Date.now() - retentionDays * 86400 * 1000);
-        const expiredItems = await tx.item.findMany({
-          where: { deletedAt: { lt: cutoff } },
-          select: { id: true, userId: true, projectId: true },
-          orderBy: { deletedAt: 'asc' },
-          take: limit,
-        });
-        const expiredNotes = await tx.note.findMany({
-          where: { deletedAt: { lt: cutoff } },
-          select: { id: true, userId: true, projectId: true },
-          orderBy: { deletedAt: 'asc' },
-          take: limit,
-        });
-        const expiredCollections = await tx.collection.findMany({
-          where: { deletedAt: { lt: cutoff } },
-          select: { id: true, userId: true, projectId: true },
-          orderBy: { deletedAt: 'asc' },
-          take: limit,
-        });
         const res = await this.command.purgeExpiredTrash(
           retentionDays,
           limit,
           tx,
         );
         storagePathsToDelete = res.storagePaths;
+        const expiredItems = res.expiredItems ?? [];
+        const expiredNotes = res.expiredNotes ?? [];
+        const expiredCollections = res.expiredCollections ?? [];
+        purgedItemsList = expiredItems;
         for (const it of expiredItems) {
           const scope = {
             userId: it.userId,
@@ -689,6 +660,26 @@ export class ItemService {
             action: 'delete',
             version: 0,
           });
+        }
+        if (expiredItems.length > 0) {
+          const purgedAt = new Date().toISOString();
+          const allExpiredItemIds = expiredItems.map((it) => it.id);
+          await helpers.publishOutboxBatch(
+            expiredItems.map((it, idx) => ({
+              userId: it.userId,
+              projectId: it.projectId ?? undefined,
+              aggregateId: it.id,
+              eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
+              payload: {
+                itemId: it.id,
+                itemIds: allExpiredItemIds,
+                userId: it.userId,
+                projectId: it.projectId ?? undefined,
+                filePaths: idx === 0 ? res.storagePaths : [],
+                purgedAt,
+              },
+            })),
+          );
         }
         for (const n of expiredNotes) {
           const scope = {
@@ -727,6 +718,27 @@ export class ItemService {
     );
     if (storagePathsToDelete.length > 0) {
       await this.command.deleteStorageFilesBatch(storagePathsToDelete);
+    }
+    if (purgedItemsList.length > 0) {
+      const itemsByUser = new Map<
+        string,
+        { itemIds: string[]; projectIds: Array<string | null> }
+      >();
+      for (const it of purgedItemsList) {
+        const entry = itemsByUser.get(it.userId) ?? {
+          itemIds: [],
+          projectIds: [],
+        };
+        entry.itemIds.push(it.id);
+        entry.projectIds.push(it.projectId);
+        itemsByUser.set(it.userId, entry);
+      }
+      await Promise.all(
+        Array.from(itemsByUser.entries()).map(
+          ([uid, { itemIds: ids, projectIds }]) =>
+            this.invalidateBulkItemsCache(ids, uid, undefined, projectIds),
+        ),
+      );
     }
     return result;
   }

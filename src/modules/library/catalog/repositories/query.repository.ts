@@ -150,6 +150,7 @@ export class QueryRepository {
     projectId?: string,
     tx?: Prisma.TransactionClient,
     includeContent: boolean = true,
+    collectionId?: string,
   ) {
     if (!isUuid(userId)) return [];
     const validIds = (ids || []).filter(isUuid);
@@ -167,6 +168,9 @@ export class QueryRepository {
         id: { in: validIds },
         deletedAt: null,
         ...scopeWhere,
+        ...(collectionId && isUuid(collectionId)
+          ? { collectionItems: { some: { collectionId } } }
+          : {}),
       },
       include: {
         contributors: {
@@ -690,6 +694,7 @@ export class QueryRepository {
       arxivId?: string | null;
       pmid?: string | null;
       isbn?: string | null;
+      year?: number | null;
       titleWords?: string[];
       titlePrefix?: string;
     },

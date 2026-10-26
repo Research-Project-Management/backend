@@ -65,3 +65,26 @@ export async function readSafeResponseBuffer(
   }
   return Buffer.from(arrayBuf);
 }
+
+export const MAX_SAFE_TEXT_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB default for HTML/XML/JSON
+
+export async function readSafeResponseText(
+  response: Response,
+  maxBytes = MAX_SAFE_TEXT_PAYLOAD_BYTES,
+): Promise<string> {
+  const streamBody = response.body as ReadableStream<Uint8Array> | null;
+  if (
+    (streamBody && typeof streamBody.getReader === 'function') ||
+    typeof response.arrayBuffer === 'function'
+  ) {
+    const buf = await readSafeResponseBuffer(response, maxBytes);
+    return buf.toString('utf-8');
+  }
+  const text = await response.text();
+  if (Buffer.byteLength(text, 'utf-8') > maxBytes) {
+    throw new PayloadTooLargeException(
+      `Text payload exceeds safe limit of ${(maxBytes / (1024 * 1024)).toFixed(0)} MB`,
+    );
+  }
+  return text;
+}

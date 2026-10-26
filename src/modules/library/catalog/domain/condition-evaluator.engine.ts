@@ -89,6 +89,7 @@ export function evalAnyFieldCondition(
     {
       attachments: {
         some: {
+          deletedAt: null,
           OR: [
             { filename: { contains: strVal, mode: 'insensitive' } },
             {
@@ -224,9 +225,10 @@ export function evalReadStatusCondition(
   userId?: string,
 ): Prisma.ItemWhereInput | null {
   if (!userId) return null;
+  const mappedStatus = strVal === 'read' ? 'completed' : strVal;
   const targetStatus: ReadStatus = (
-    strVal === 'reading' || strVal === 'completed' || strVal === 'read' ? strVal : 'unread'
-  ) as ReadStatus;
+    mappedStatus === 'reading' || mappedStatus === 'completed' ? mappedStatus : 'unread'
+  );
   if (operator === 'isNot') {
     return targetStatus === 'unread'
       ? { states: { some: { userId, readStatus: { not: 'unread' } } } }
@@ -299,17 +301,22 @@ export function evalAttachmentCondition(
       value === false ||
       strVal === 'false';
     return !isNegativeOp
-      ? { attachments: { some: {} } }
-      : { attachments: { none: {} } };
+      ? { attachments: { some: { deletedAt: null } } }
+      : { attachments: { none: { deletedAt: null } } };
   }
 
   if (field === 'attachmentFilename') {
-    if (operator === 'isPresent') return { attachments: { some: {} } };
-    if (operator === 'isAbsent') return { attachments: { none: {} } };
+    if (operator === 'isPresent')
+      return { attachments: { some: { deletedAt: null } } };
+    if (operator === 'isAbsent')
+      return { attachments: { none: { deletedAt: null } } };
     if (operator === 'contains' || operator === 'is') {
       return {
         attachments: {
-          some: { filename: { contains: strVal, mode: 'insensitive' } },
+          some: {
+            deletedAt: null,
+            filename: { contains: strVal, mode: 'insensitive' },
+          },
         },
       };
     }
@@ -317,7 +324,10 @@ export function evalAttachmentCondition(
       return {
         NOT: {
           attachments: {
-            some: { filename: { contains: strVal, mode: 'insensitive' } },
+            some: {
+              deletedAt: null,
+              filename: { contains: strVal, mode: 'insensitive' },
+            },
           },
         },
       };
@@ -329,6 +339,7 @@ export function evalAttachmentCondition(
     return {
       attachments: {
         some: {
+          deletedAt: null,
           fullTextIndexes: {
             some: { textContent: { contains: strVal, mode: 'insensitive' } },
           },
@@ -341,6 +352,7 @@ export function evalAttachmentCondition(
       NOT: {
         attachments: {
           some: {
+            deletedAt: null,
             fullTextIndexes: {
               some: { textContent: { contains: strVal, mode: 'insensitive' } },
             },
@@ -350,10 +362,18 @@ export function evalAttachmentCondition(
     };
   }
   if (operator === 'isPresent') {
-    return { attachments: { some: { fullTextIndexes: { some: {} } } } };
+    return {
+      attachments: {
+        some: { deletedAt: null, fullTextIndexes: { some: {} } },
+      },
+    };
   }
   if (operator === 'isAbsent') {
-    return { attachments: { none: { fullTextIndexes: { some: {} } } } };
+    return {
+      attachments: {
+        none: { deletedAt: null, fullTextIndexes: { some: {} } },
+      },
+    };
   }
   return null;
 }

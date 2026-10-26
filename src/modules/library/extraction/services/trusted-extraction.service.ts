@@ -148,46 +148,9 @@ export class TrustedExtractionService implements ITrustedExtractorPort {
             }
           }
 
-          // Official Zotero RecognizePDF behavior: also scan the last 1-2 pages
-          // for trailing DOIs, ISBNs, or publisher colophons if not on the front pages.
-          if (doc.numPages > 3) {
-            const tailPages =
-              doc.numPages > 4
-                ? [doc.numPages - 1, doc.numPages]
-                : [doc.numPages];
-            for (const tailPage of tailPages) {
-              try {
-                const tailText = await readPageText(tailPage);
-                if (tailText.length > 0) {
-                  const tailRegex = AcademicRegexCatalog.scan(tailText);
-                  if (!merged.doi && tailRegex.doi) {
-                    merged.doi = tailRegex.doi;
-                    rawMatches.detectedDoi = tailRegex.doi;
-                  }
-                  if (!merged.arxivId && tailRegex.arxivId) {
-                    merged.arxivId = tailRegex.arxivId;
-                    rawMatches.detectedArxivId = tailRegex.arxivId;
-                    if (!merged.doi) {
-                      merged.doi = `10.48550/arXiv.${tailRegex.arxivId}`;
-                    }
-                  }
-                  if (!merged.pmid && tailRegex.pmid) {
-                    merged.pmid = tailRegex.pmid;
-                    rawMatches.detectedPmid = tailRegex.pmid;
-                  }
-                  if (!merged.isbn && tailRegex.isbn) {
-                    merged.isbn = tailRegex.isbn;
-                  }
-                  if (!merged.issn && tailRegex.issn) {
-                    merged.issn = tailRegex.issn;
-                  }
-                }
-              } catch {
-                // Ignore tail page read errors
-              }
-            }
-          }
-
+          // Only scan the front matter (first 1-3 pages) for document identifiers.
+          // Do NOT scan tail pages (last 1-2 pages), because in academic papers the tail pages
+          // contain the References/Bibliography section and will falsely capture cited papers' DOIs/arXiv IDs.
           if (pageChunks.length > 0) {
             docText = pageChunks.join('\n\n');
           }

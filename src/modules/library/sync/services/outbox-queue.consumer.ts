@@ -59,6 +59,8 @@ export class OutboxQueueConsumer
     const { eventId } = job.data;
     if (!eventId) return;
 
-    await this.outboxWorker.processEventById(eventId);
+    await this.outboxWorker.processEventById(eventId, {
+      rethrowOnRetryableFailure: true,
+    });
   }
 }

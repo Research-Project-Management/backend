@@ -31,24 +31,53 @@ export interface ItemFilterOptions {
   fromYear?: number;
   toYear?: number;
   readStatus?: string;
+  searchMode?: 'title_creator_year' | 'fields_tags' | 'everything' | string;
   userId?: string;
 }
 
 /**
  * Constructs comprehensive search filters covering Zotero fields:
- * title, abstract, doi, publicationTitle, publisher, citationKey, arxivId,
- * isbn, issn, extra, and contributor names (fullName, lastName, firstName).
+ * - 'title_creator_year': title, year, and contributor names
+ * - 'fields_tags': all bibliographic fields + tags
+ * - 'everything' (default): all bibliographic fields + tags + notes + attachments + fulltext
  */
 export function buildItemSearchCondition(
   search: string,
+  searchMode?: string,
 ): Prisma.ItemWhereInput[] {
   const trimmed = search.trim();
-  return [
+  const numericYear = /^\d{4}$/.test(trimmed) ? Number(trimmed) : null;
+
+  const creatorClause: Prisma.ItemWhereInput = {
+    contributors: {
+      some: {
+        OR: [
+          { fullName: { contains: trimmed, mode: 'insensitive' } },
+          { lastName: { contains: trimmed, mode: 'insensitive' } },
+          { firstName: { contains: trimmed, mode: 'insensitive' } },
+        ],
+      },
+    },
+  };
+
+  if (searchMode === 'title_creator_year') {
+    const clauses: Prisma.ItemWhereInput[] = [
+      { title: { contains: trimmed, mode: 'insensitive' } },
+      creatorClause,
+    ];
+    if (numericYear !== null) {
+      clauses.push({ year: numericYear });
+    }
+    return clauses;
+  }
+
+  const baseClauses: Prisma.ItemWhereInput[] = [
     { title: { contains: trimmed, mode: 'insensitive' } },
     { publicationTitle: { contains: trimmed, mode: 'insensitive' } },
     { abstract: { contains: trimmed, mode: 'insensitive' } },
     { doi: { contains: trimmed, mode: 'insensitive' } },
     { citationKey: { contains: trimmed, mode: 'insensitive' } },
+    ...(numericYear !== null ? [{ year: numericYear }] : []),
     {
       metadata: {
         path: ['isbn'],
@@ -79,18 +108,58 @@ export function buildItemSearchCondition(
         string_contains: trimmed,
       },
     },
+    creatorClause,
     {
-      contributors: {
+      itemTags: {
         some: {
-          OR: [
-            { fullName: { contains: trimmed, mode: 'insensitive' } },
-            { lastName: { contains: trimmed, mode: 'insensitive' } },
-            { firstName: { contains: trimmed, mode: 'insensitive' } },
-          ],
+          tag: {
+            name: { contains: trimmed, mode: 'insensitive' },
+          },
         },
       },
     },
   ];
+
+  if (searchMode === 'fields_tags') {
+    return baseClauses;
+  }
+
+  if (searchMode === 'everything') {
+    return [
+      ...baseClauses,
+      {
+        notesList: {
+          some: {
+            deletedAt: null,
+            OR: [
+              { title: { contains: trimmed, mode: 'insensitive' } },
+              { contentMd: { contains: trimmed, mode: 'insensitive' } },
+            ],
+          },
+        },
+      },
+      {
+        attachments: {
+          some: {
+            deletedAt: null,
+            OR: [
+              { filename: { contains: trimmed, mode: 'insensitive' } },
+              {
+                fullTextIndexes: {
+                  some: {
+                    textContent: { contains: trimmed, mode: 'insensitive' },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    ];
+  }
+
+  // Default backward-compatible bibliographic + contributor search
+  return baseClauses.slice(0, -1);
 }
 
 /**
@@ -229,26 +298,35 @@ export function buildItemWhereClause(
     const validStatuses: ReadStatus[] = ['unread', 'reading', 'completed'];
     const statuses = options.readStatus
       .split(',')
-      .map((s) => s.trim())
+      .map((s) => s.trim() === 'read' ? 'completed' : s.trim())
       .filter((s): s is ReadStatus => validStatuses.includes(s as ReadStatus));
     if (statuses.length > 0) {
-      const existingSome =
-        where.states && typeof where.states === 'object' && 'some' in where.states && where.states.some
-          ? (where.states.some as Prisma.StateWhereInput)
-          : {};
-      where.states = {
-        some: {
-          ...existingSome,
-          userId,
-          readStatus: statuses.length > 1 ? { in: statuses } : statuses[0],
-        },
-      };
+      if (statuses.length === 1 && statuses[0] === 'unread') {
+        andConditions.push({
+          OR: [
+            { states: { none: { userId } } },
+            { states: { some: { userId, readStatus: 'unread' } } },
+          ],
+        });
+      } else {
+        const existingSome =
+          where.states && typeof where.states === 'object' && 'some' in where.states && where.states.some
+            ? (where.states.some as Prisma.StateWhereInput)
+            : {};
+        where.states = {
+          some: {
+            ...existingSome,
+            userId,
+            readStatus: statuses.length > 1 ? { in: statuses } : statuses[0],
+          },
+        };
+      }
     }
   }
 
   if (options.search) {
     andConditions.push({
-      OR: buildItemSearchCondition(options.search),
+      OR: buildItemSearchCondition(options.search, options.searchMode),
     });
   }
 

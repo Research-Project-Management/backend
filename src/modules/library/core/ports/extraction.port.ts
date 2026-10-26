@@ -49,7 +49,8 @@ export interface IExtractionFacade {
     duplicateItemIds: string[],
     primaryItemId: string,
     tx?: Prisma.TransactionClient,
-  ): Promise<void>;
+  ): Promise<string[]>;
+  cleanupOrphanedFiles?(fileIds: string[]): Promise<void>;
   getAnnotationsByAttachment(
     userId: string,
     attachmentId: string,

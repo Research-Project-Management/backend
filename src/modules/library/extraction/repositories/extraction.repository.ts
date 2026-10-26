@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
 import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { resolveOrCreateTags } from '@/modules/library/catalog/catalog.facade';
+import {
+  resolveOrCreateTags,
+  deriveFirstAuthor,
+} from '@/modules/library/catalog/catalog.facade';
 import { buildTipTapDocFromText } from '@/modules/library/core/domain/tiptap.domain';
 import {
   EntityNotFoundException,
@@ -258,9 +261,25 @@ export class ExtractionRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.contributor.createMany({
+    const result = await client.contributor.createMany({
       data,
     });
+    const itemId = data[0]?.itemId;
+    if (itemId && data.length > 0) {
+      const firstAuthor = deriveFirstAuthor({
+        contributors: data as unknown as Array<Record<string, unknown>>,
+      });
+      if (firstAuthor) {
+        await client.item.update({
+          where: { id: itemId },
+          data: {
+            firstAuthor,
+            version: { increment: 1 },
+          },
+        });
+      }
+    }
+    return result;
   }
 
   async markReady(attachmentId: string, tx?: Prisma.TransactionClient) {
@@ -519,33 +538,29 @@ export class ExtractionRepository {
           });
         }
       }
-    }
 
-    const item = await client.item.findUnique({
-      where: { id: params.itemId },
-      select: { metadata: true },
-    });
-    if (item) {
-      const currentMeta = (item.metadata as Record<string, unknown>) || {};
-      const existingTags = Array.isArray(currentMeta.tags)
-        ? (currentMeta.tags as unknown[]).filter(
-            (t): t is string => typeof t === 'string',
-          )
-        : [];
-      const mergedTags = normalizeAcademicTags([
-        ...existingTags,
-        ...normalized,
-      ]);
+      // Merge tags & keywords into item metadata
+      const existingItem = await client.item.findUnique({
+        where: { id: params.itemId },
+        select: { metadata: true },
+      });
+      const meta = ((existingItem?.metadata as Record<string, unknown>) || {});
+      const existingTags = Array.isArray(meta.tags) ? (meta.tags as string[]) : [];
+      const existingKeywords = Array.isArray(meta.keywords)
+        ? (meta.keywords as string[])
+        : existingTags;
+      const mergedTags = Array.from(new Set([...existingTags, ...normalized]));
+      const mergedKeywords = Array.from(new Set([...existingKeywords, ...normalized]));
+
       await client.item.update({
         where: { id: params.itemId },
         data: {
-          metadata: {
-            ...currentMeta,
-            tags: mergedTags,
-            keywords: mergedTags,
-            labels: mergedTags,
-          },
           version: { increment: 1 },
+          metadata: {
+            ...meta,
+            tags: mergedTags,
+            keywords: mergedKeywords,
+          },
         },
       });
     }
@@ -581,7 +596,7 @@ export class ExtractionRepository {
     });
     const existingContents = new Set(existing.map((n) => n.contentMd.trim()));
 
-    let createdCount = 0;
+    const toCreate: Prisma.NoteCreateManyInput[] = [];
     for (const n of params.notes) {
       const cleanContent = n.content.trim();
       if (!cleanContent || existingContents.has(cleanContent)) continue;
@@ -591,24 +606,29 @@ export class ExtractionRepository {
         : 'Extracted Document Note';
       const contentJson = buildTipTapDocFromText(cleanContent);
 
-      await client.note.create({
-        data: {
-          userId: params.userId,
-          createdById: params.userId,
-          projectId: params.projectId ?? null,
-          itemId: params.itemId,
-          title,
-          contentMd: cleanContent,
-          contentJson: contentJson as Prisma.InputJsonValue,
-          tags: ['extracted', 'automatic'],
-          version: 1,
-        },
+      toCreate.push({
+        userId: params.userId,
+        createdById: params.userId,
+        projectId: params.projectId ?? null,
+        itemId: params.itemId,
+        title,
+        contentMd: cleanContent,
+        contentJson: contentJson as Prisma.InputJsonValue,
+        tags: ['extracted', 'automatic'],
+        version: 1,
       });
       existingContents.add(cleanContent);
-      createdCount++;
     }
 
+    const createdCount = toCreate.length;
     if (createdCount > 0) {
+      if (client.note?.createMany) {
+        await client.note.createMany({ data: toCreate });
+      } else {
+        for (const row of toCreate) {
+          await client.note.create({ data: row });
+        }
+      }
       await client.item.update({
         where: { id: params.itemId },
         data: {

@@ -1,3 +1,4 @@
+import { parseMedlineDate, enrichFromEuropePmc } from './pubmed.helper';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
@@ -23,7 +24,10 @@ import {
   getAcademicContactEmail,
   getAcademicUserAgent,
 } from '@/modules/library/core/constants/academic-client.constants';
-import { normalizePageRange, parseCreatorString } from '@/modules/library/core';
+import { normalizePageRange,
+  parseCreatorString,
+  normalizeAcademicTags,
+} from '@/modules/library/core';
 
 @Injectable()
 export class PubMedProvider implements MetadataProvider {
@@ -38,7 +42,7 @@ export class PubMedProvider implements MetadataProvider {
   private readonly logger = new Logger(PubMedProvider.name);
 
   constructor(
-    private readonly httpClient: AcademicHttpClient,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -80,9 +84,9 @@ export class PubMedProvider implements MetadataProvider {
     const isPmc = Boolean(cleanPmcid && !cleanPmid);
     const targetId = isPmc ? cleanPmcid! : cleanPmid!;
 
+    let result: ProviderResult | null = null;
     try {
-      const cslResult = await this.resolveViaCtxp(targetId, isPmc, signal);
-      if (cslResult) return cslResult;
+      result = await this.resolveViaCtxp(targetId, isPmc, signal);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.debug(
@@ -90,10 +94,17 @@ export class PubMedProvider implements MetadataProvider {
       );
     }
 
-    if (!isPmc) {
-      return this.resolveViaEutils(targetId, signal);
+    if (!result && !isPmc) {
+      result = await this.resolveViaEutils(targetId, signal);
     }
-    return null;
+
+    if (result) {
+      const effectivePmid = result.metadata.pmid || (!isPmc ? targetId : undefined);
+      if (effectivePmid) {
+        await this.enrichFromPubmedXml(result, effectivePmid, signal);
+      }
+    }
+    return result;
   }
 
   private async resolveViaCtxp(
@@ -113,10 +124,12 @@ export class PubMedProvider implements MetadataProvider {
       Accept: '*/*',
     };
 
-    const { response } = await this.httpClient.request(url, {
-      headers,
-      signal,
-    });
+    let response: Response;
+    if (this.httpClient) {
+      ({ response } = await this.httpClient.request(url, { headers, signal }));
+    } else {
+      response = await fetch(url, { headers, signal });
+    }
 
     if (response.status === 404) return null;
     if (!response.ok) return null;
@@ -149,10 +162,12 @@ export class PubMedProvider implements MetadataProvider {
       Accept: 'application/json',
     };
 
-    const { response } = await this.httpClient.request(url, {
-      headers,
-      signal,
-    });
+    let response: Response;
+    if (this.httpClient) {
+      ({ response } = await this.httpClient.request(url, { headers, signal }));
+    } else {
+      response = await fetch(url, { headers, signal });
+    }
 
     if (response.status === 404) return null;
 
@@ -475,7 +490,7 @@ export class PubMedProvider implements MetadataProvider {
     if (rawPubDate) {
       const match = rawPubDate.match(/^(\d{4})/);
       if (match) year = Number(match[1]);
-      publicationDate = this.parseMedlineDate(rawPubDate);
+      publicationDate = parseMedlineDate(rawPubDate);
     }
 
     let doi: string | undefined;
@@ -569,39 +584,106 @@ export class PubMedProvider implements MetadataProvider {
     };
   }
 
-  private parseMedlineDate(raw: string): string | undefined {
-    const str = raw.trim();
-    if (!str) return undefined;
-    const MONTHS: Record<string, string> = {
-      jan: '01',
-      feb: '02',
-      mar: '03',
-      apr: '04',
-      may: '05',
-      jun: '06',
-      jul: '07',
-      aug: '08',
-      sep: '09',
-      oct: '10',
-      nov: '11',
-      dec: '12',
-    };
-    const iso = str.match(/^(\d{4})[/-](\d{1,2})(?:[/-](\d{1,2}))?/);
-    if (iso) {
-      const m = iso[2].padStart(2, '0');
-      return iso[3]
-        ? `${iso[1]}-${m}-${iso[3].padStart(2, '0')}`
-        : `${iso[1]}-${m}`;
+  private async enrichFromPubmedXml(
+    result: ProviderResult,
+    cleanPmid: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      const rawBase = this.eutilsBaseUrl.replace(/\/[^/]+\.fcgi$/i, '');
+      const base = rawBase.startsWith('https://')
+        ? rawBase
+        : 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
+      let url = `${base}/efetch.fcgi?db=pubmed&id=${encodeURIComponent(cleanPmid)}&retmode=xml&tool=FluxAcademic&email=${encodeURIComponent(this.email)}`;
+      if (this.apiKey) {
+        url += `&api_key=${encodeURIComponent(this.apiKey)}`;
+      }
+      const headers = {
+        'User-Agent': getAcademicUserAgent('PubMed'),
+        Accept: 'application/xml, text/xml, */*',
+      };
+      let response: Response;
+      if (this.httpClient) {
+        ({ response } = await this.httpClient.request(url, { headers, signal }));
+      } else {
+        response = await fetch(url, { headers, signal });
+      }
+      let xml = '';
+      if (response.ok) {
+        xml = await response.text();
+      }
+      const rawTags: string[] = [];
+
+      if (xml && xml.includes('<PubmedArticle')) {
+        // 1. Extract MeSH headings (<MeshHeading> -> <DescriptorName> + <QualifierName>)
+        const meshBlocks =
+          xml.match(/<MeshHeading>[\s\S]*?<\/MeshHeading>/gi) || [];
+        for (const block of meshBlocks) {
+          const descMatch = block.match(
+            /<DescriptorName[^>]*>([^<]+)<\/DescriptorName>/i,
+          );
+          if (!descMatch || !descMatch[1]) continue;
+          const descriptor = cleanBibliographicText(descMatch[1]);
+          if (!descriptor) continue;
+          const qualMatches = Array.from(
+            block.matchAll(/<QualifierName[^>]*>([^<]+)<\/QualifierName>/gi),
+          );
+          if (qualMatches.length > 0) {
+            for (const qm of qualMatches) {
+              const qual = cleanBibliographicText(qm[1]);
+              if (qual) rawTags.push(`${descriptor}/${qual}`);
+            }
+          } else {
+            rawTags.push(descriptor);
+          }
+        }
+
+        // 2. Extract Author Keywords (<Keyword>)
+        const kwMatches = Array.from(
+          xml.matchAll(/<Keyword(?:\s+[^>]*)?>([^<]+)<\/Keyword>/gi),
+        );
+        for (const km of kwMatches) {
+          const kw = cleanBibliographicText(km[1]);
+          if (kw) rawTags.push(kw);
+        }
+
+        // 3. Extract full Abstract if missing from ctxp/esummary
+        if (!result.metadata.abstract) {
+          const absParts: string[] = [];
+          const absMatches = Array.from(
+            xml.matchAll(/<AbstractText([^>]*)>([\s\S]*?)<\/AbstractText>/gi),
+          );
+          for (const am of absMatches) {
+            const attrs = am[1] || '';
+            const labelMatch = attrs.match(/Label="([^"]+)"/i);
+            const textPart = cleanAbstractText(am[2]);
+            if (textPart) {
+              absParts.push(
+                labelMatch?.[1] ? `${labelMatch[1]}: ${textPart}` : textPart,
+              );
+            }
+          }
+          if (absParts.length > 0) {
+            result.metadata.abstract = absParts.join('\n\n');
+          }
+        }
+      } else {
+        // Fallback to EuropePMC REST API when NCBI efetch.fcgi returns HTML error/rate-limit diagnostic
+        await enrichFromEuropePmc(result, cleanPmid, rawTags, this.httpClient, signal);
+      }
+
+      if (rawTags.length > 0) {
+        const normalizedTags = normalizeAcademicTags(rawTags);
+        if (normalizedTags.length > 0) {
+          result.metadata.keywords = normalizedTags;
+          result.metadata.tags = normalizedTags;
+        }
+      }
+    } catch (err: unknown) {
+      this.logger.debug(
+        `Optional PubMed XML enrichment skipped for ${cleanPmid}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
-    const med = str.match(
-      /^(\d{4})(?:\s+([A-Za-z]{3})[a-z]*(?:\s+(\d{1,2}))?)?/,
-    );
-    if (!med) return str;
-    const year = med[1];
-    const month = med[2] ? MONTHS[med[2].toLowerCase()] : undefined;
-    if (!month) return med[2] ? str : year;
-    return med[3]
-      ? `${year}-${month}-${med[3].padStart(2, '0')}`
-      : `${year}-${month}`;
   }
+
 }

@@ -17,29 +17,64 @@ import {
 import { Type, Transform } from 'class-transformer';
 import { AnnotationType } from '@/modules/library/extraction/types/annotations.types';
 
-// Shared color validator
+// Shared color validator & named-color canonicalizer
 
 const COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
 const COLOR_MSG = 'color must be a valid hex color (e.g. #ffd400 or #fff)';
+
+const NAMED_ANNOTATION_COLORS: Record<string, string> = {
+  yellow: '#ffd400',
+  red: '#ff6666',
+  green: '#5fb236',
+  blue: '#2ea8e5',
+  purple: '#a28ae5',
+  magenta: '#e56eee',
+  orange: '#f19837',
+  gray: '#aaaaaa',
+  grey: '#aaaaaa',
+};
+
+function transformAnnotationColor(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const mapped = NAMED_ANNOTATION_COLORS[trimmed.toLowerCase()];
+  return mapped || trimmed;
+}
+
+function transformAnnotationType(value: unknown): AnnotationType | undefined {
+  if (typeof value !== 'string') return value as AnnotationType | undefined;
+  const lower = value.trim().toLowerCase();
+  if (lower === 'box' || lower === 'area') return AnnotationType.rect;
+  if (lower === 'strikethrough') return AnnotationType.strike;
+  if (lower === 'freetext') return AnnotationType.text;
+  if (lower === 'drawing' || lower === 'pen') return AnnotationType.ink;
+  return lower as AnnotationType;
+}
 
 // Create
 
 export class CreateAnnotationDto {
   @IsEnum(AnnotationType)
   @IsOptional()
-  @Transform(({ value }: { value: unknown }) => {
-    if (typeof value !== 'string') return value as AnnotationType | undefined;
-    const lower = value.toLowerCase();
-    if (lower === 'box' || lower === 'area') return AnnotationType.rect;
-    if (lower === 'strikethrough') return AnnotationType.strike;
-    if (lower === 'freetext') return AnnotationType.text;
-    return lower as AnnotationType;
-  })
+  @Transform(({ value }: { value: unknown }) => transformAnnotationType(value))
   type?: AnnotationType;
 
+  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+    if (typeof value === 'number' && !Number.isNaN(value)) return value;
+    if (typeof obj?.pageNumber === 'number' && obj.pageNumber >= 1) {
+      return obj.pageNumber - 1;
+    }
+    return value;
+  })
   @IsInt()
   @Min(0)
   pageIndex!: number;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  pageNumber?: number;
 
   /**
    * Y position in page-relative coordinates [0, 1].
@@ -61,15 +96,26 @@ export class CreateAnnotationDto {
   @IsOptional()
   x?: number;
 
+  @Transform(({ value }: { value: unknown }) => transformAnnotationColor(value))
   @IsString()
   @Matches(COLOR_REGEX, { message: COLOR_MSG })
   @IsOptional()
   color?: string;
 
+  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+    if (typeof value === 'string') return value;
+    if (typeof obj?.text === 'string') return obj.text;
+    return value;
+  })
   @IsString()
   @MaxLength(10_000)
   @IsOptional()
   quoteText?: string;
+
+  @IsString()
+  @MaxLength(10_000)
+  @IsOptional()
+  text?: string;
 
   @IsString()
   @MaxLength(5_000)
@@ -81,22 +127,47 @@ export class CreateAnnotationDto {
   @IsOptional()
   tags?: string[];
 
+  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+    if (value !== undefined) return value;
+    if (Array.isArray(obj?.rects)) return obj.rects;
+    if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
+      return [obj.boundingRect];
+    }
+    return value;
+  })
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
+
+  @IsOptional()
+  rects?: Array<unknown>;
+
+  @IsOptional()
+  boundingRect?: Record<string, unknown>;
 }
 
 // Update
 
 export class UpdateAnnotationDto {
+  @Transform(({ value }: { value: unknown }) => transformAnnotationColor(value))
   @IsString()
   @Matches(COLOR_REGEX, { message: COLOR_MSG })
   @IsOptional()
   color?: string;
 
+  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+    if (typeof value === 'string') return value;
+    if (typeof obj?.text === 'string') return obj.text;
+    return value;
+  })
   @IsString()
   @MaxLength(10_000)
   @IsOptional()
   quoteText?: string;
+
+  @IsString()
+  @MaxLength(10_000)
+  @IsOptional()
+  text?: string;
 
   @IsString()
   @MaxLength(5_000)
@@ -108,8 +179,22 @@ export class UpdateAnnotationDto {
   @IsOptional()
   tags?: string[];
 
+  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+    if (value !== undefined) return value;
+    if (Array.isArray(obj?.rects)) return obj.rects;
+    if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
+      return [obj.boundingRect];
+    }
+    return value;
+  })
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
+
+  @IsOptional()
+  rects?: Array<unknown>;
+
+  @IsOptional()
+  boundingRect?: Record<string, unknown>;
 
   /** Optimistic lock version. Also accepted via If-Match header. */
   @IsInt()
@@ -128,19 +213,24 @@ export class UpsertAnnotationItemDto {
 
   @IsEnum(AnnotationType)
   @IsOptional()
-  @Transform(({ value }: { value: unknown }) => {
-    if (typeof value !== 'string') return value as AnnotationType | undefined;
-    const lower = value.toLowerCase();
-    if (lower === 'box' || lower === 'area') return AnnotationType.rect;
-    if (lower === 'strikethrough') return AnnotationType.strike;
-    if (lower === 'freetext') return AnnotationType.text;
-    return lower as AnnotationType;
-  })
+  @Transform(({ value }: { value: unknown }) => transformAnnotationType(value))
   type?: AnnotationType;
 
+  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+    if (typeof value === 'number' && !Number.isNaN(value)) return value;
+    if (typeof obj?.pageNumber === 'number' && obj.pageNumber >= 1) {
+      return obj.pageNumber - 1;
+    }
+    return value;
+  })
   @IsInt()
   @Min(0)
   pageIndex!: number;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  pageNumber?: number;
 
   @IsNumber()
   @Min(0)
@@ -154,15 +244,26 @@ export class UpsertAnnotationItemDto {
   @IsOptional()
   x?: number;
 
+  @Transform(({ value }: { value: unknown }) => transformAnnotationColor(value))
   @IsString()
   @Matches(COLOR_REGEX, { message: COLOR_MSG })
   @IsOptional()
   color?: string;
 
+  @Transform(({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
+    if (typeof value === 'string') return value;
+    if (typeof obj?.text === 'string') return obj.text;
+    return value;
+  })
   @IsString()
   @MaxLength(10_000)
   @IsOptional()
   quoteText?: string;
+
+  @IsString()
+  @MaxLength(10_000)
+  @IsOptional()
+  text?: string;
 
   @IsString()
   @MaxLength(5_000)

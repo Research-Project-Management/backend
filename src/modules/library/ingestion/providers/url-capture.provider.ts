@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Inject,
   Logger,
   BadRequestException,
   Optional,
@@ -7,6 +8,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { MetadataRoutingPolicy } from '@/modules/library/ingestion/policies/metadata.policy';
+import {
+  METADATA_PORT,
+  MetadataPort,
+} from '@/modules/library/ingestion/types/metadata.types';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 
 import {
@@ -18,6 +23,12 @@ import {
   SubsystemUnavailableException,
   LibraryConfigService,
   libraryConfig,
+  deriveDoiFromPublisherUrl,
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+  normalizePmcid,
+  normalizeAcademicTags,
 } from '@/modules/library/core';
 
 // Public Interfaces
@@ -119,6 +130,9 @@ export class UrlCaptureProvider {
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
     @Optional() private readonly urlScraper?: UrlMetadataScraperService,
     @Optional() private readonly libraryConfigService?: LibraryConfigService,
+    @Optional()
+    @Inject(METADATA_PORT)
+    private readonly metadataPort?: MetadataPort,
   ) {
     const configuredSecret =
       this.libraryConfigService?.capture.secret ??
@@ -220,6 +234,115 @@ export class UrlCaptureProvider {
         url: canonicalUrl,
         itemType: 'webpage',
       };
+    }
+
+    // Enrich from authoritative registry (CrossRef / arXiv / PubMed) when an identifier is present
+    const candidateArxiv =
+      captured.arxivId ||
+      scrapedResult?.arxivId ||
+      normalizeArxivId(canonicalUrl);
+    const candidateDoi =
+      captured.doi ||
+      scrapedResult?.doi ||
+      normalizeDoi(canonicalUrl) ||
+      deriveDoiFromPublisherUrl(canonicalUrl);
+    const candidatePmid =
+      captured.pmid ||
+      scrapedResult?.pmid ||
+      normalizePmid(canonicalUrl) ||
+      normalizePmcid(canonicalUrl);
+
+    const lookupQuery = candidateArxiv || candidateDoi || candidatePmid;
+    if (this.metadataPort && lookupQuery) {
+      try {
+        const resolved = await this.metadataPort.resolve({ query: lookupQuery });
+        if (resolved?.metadata && resolved.metadata.title) {
+          const rm = resolved.metadata;
+          const regTags = normalizeAcademicTags(
+            rm.tags || rm.keywords || captured.keywords || [],
+          );
+          const isArxivPreprint =
+            rm.itemType === 'preprint' ||
+            Boolean(
+              candidateArxiv &&
+                (!rm.doi || /^10\.48550\/arxiv\./i.test(String(rm.doi))),
+            );
+          const cleanArxiv = candidateArxiv
+            ? candidateArxiv.replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '')
+            : rm.arxivId;
+          captured = {
+            ...captured,
+            title: rm.title || captured.title,
+            shortTitle: rm.shortTitle || captured.shortTitle,
+            abstract: rm.abstract || captured.abstract,
+            itemType: isArxivPreprint
+              ? 'preprint'
+              : rm.itemType || captured.itemType,
+            authors:
+              rm.authors && rm.authors.length > 0
+                ? rm.authors
+                : captured.authors,
+            creators:
+              rm.creators && rm.creators.length > 0
+                ? rm.creators.map((c) => ({
+                    firstName: c.firstName || undefined,
+                    lastName: c.lastName || c.fullName || 'Unknown',
+                    fullName: c.fullName || undefined,
+                    creatorType: c.creatorType || 'author',
+                    fieldMode: c.fieldMode ?? (c.firstName ? 0 : 1),
+                  }))
+                : captured.creators,
+            year: rm.year ?? captured.year,
+            publicationDate: rm.publicationDate || rm.date || captured.publicationDate,
+            doi: isArxivPreprint && cleanArxiv
+              ? `10.48550/arXiv.${cleanArxiv}`
+              : rm.doi || candidateDoi || captured.doi,
+            arxivId: cleanArxiv || captured.arxivId,
+            pmid: rm.pmid || candidatePmid || captured.pmid,
+            pmcid: rm.pmcid || captured.pmcid,
+            isbn: isArxivPreprint ? undefined : rm.isbn || captured.isbn,
+            issn: isArxivPreprint ? undefined : rm.issn || captured.issn,
+            publicationTitle: isArxivPreprint
+              ? 'arXiv'
+              : rm.publicationTitle || rm.journal || captured.publicationTitle,
+            journal: isArxivPreprint ? undefined : rm.journal || captured.journal,
+            journalAbbr: isArxivPreprint ? undefined : rm.journalAbbr || captured.journalAbbr,
+            publisher: isArxivPreprint
+              ? 'arXiv'
+              : rm.publisher || captured.publisher,
+            volume: isArxivPreprint ? undefined : rm.volume != null ? String(rm.volume) : captured.volume,
+            issue: isArxivPreprint ? undefined : rm.issue != null ? String(rm.issue) : captured.issue,
+            pages: isArxivPreprint ? undefined : rm.pages || captured.pages,
+            conferenceName: isArxivPreprint ? undefined : rm.conferenceName || captured.conferenceName,
+            proceedingsTitle: isArxivPreprint ? undefined : rm.proceedingsTitle || captured.proceedingsTitle,
+            bookTitle: isArxivPreprint ? undefined : rm.bookTitle || captured.bookTitle,
+            series: isArxivPreprint ? undefined : rm.series || captured.series,
+            language: rm.language || captured.language,
+            rights: rm.rights || captured.rights,
+            license: rm.license || captured.license,
+            libraryCatalog: rm.libraryCatalog || captured.libraryCatalog,
+            archive: isArxivPreprint ? 'arXiv' : rm.archive || captured.archive,
+            extra: rm.extra || captured.extra,
+            keywords: regTags.length > 0 ? regTags : captured.keywords,
+            openAccessPdfUrl: rm.openAccessPdfUrl || captured.openAccessPdfUrl || captured.pdfUrl,
+            extraFields: {
+              ...(captured.extraFields || {}),
+              ...(rm.extraFields || {}),
+              ...(isArxivPreprint && cleanArxiv
+                ? {
+                    repository: 'arXiv',
+                    archive: 'arXiv',
+                    archiveId: `arXiv:${cleanArxiv}`,
+                  }
+                : {}),
+            },
+          };
+        }
+      } catch (enrichErr: unknown) {
+        this.logger.debug(
+          `[UrlCapture] Authoritative registry enrichment skipped for "${canonicalUrl}": ${enrichErr instanceof Error ? enrichErr.message : String(enrichErr)}`,
+        );
+      }
     }
 
     return this.attachPreviewToken(captured, context);

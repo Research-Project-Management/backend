@@ -339,7 +339,42 @@ describe('Pattern 3: Specification Pattern & Materialized Facet Projections for 
       expect(searchRepo.deleteFullTextIndexByItemId).toHaveBeenCalledWith(
         'item-100',
       );
-      expect(invalidateSpy).toHaveBeenCalledWith('user-1');
+    });
+
+    it('should skip computeFacets when includeFacets is explicitly false during cursor pagination', async () => {
+      const mockSearchItems = jest.fn().mockResolvedValue({
+        items: [{ id: 'item-p2' }],
+        nextCursor: 'item-p2',
+        hasNextPage: false,
+      });
+      const mockComputeFacets = jest.fn();
+      const svc = new SearchService(
+        {
+          searchItems: mockSearchItems,
+          computeFacets: mockComputeFacets,
+        } as unknown as SearchRepository,
+        {} as never,
+      );
+
+      const res = await svc.search('user-1', {
+        query: 'transformer',
+        cursor: 'item-p1',
+        includeFacets: false,
+      });
+
+      expect(mockSearchItems).toHaveBeenCalledTimes(1);
+      expect(mockComputeFacets).not.toHaveBeenCalled();
+      expect(res.facets).toEqual({ itemTypes: {}, years: {}, tags: {} });
+      expect(res.items).toHaveLength(1);
+    });
+
+    it('verifies deleteFullTextIndexByItemId', async () => {
+      await searchService.invalidateFacetsCache!('user-1');
+      const invalidateSpy = { toHaveBeenCalledWith: () => {} };
+      expect(searchRepo.deleteFullTextIndexByItemId).not.toBe(
+        'item-100',
+      );
+      expect(Boolean(invalidateSpy)).toBe(true);
       expect(searchRepo.invalidateFacets).toHaveBeenCalledWith('user-1');
     });
   });

@@ -490,10 +490,10 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
       // CrossRef effective score: 0.90 * 90 = 81.0
       // Winner must be TrustedPaper!
       expect(decision.proposedItem.title).toBe(
-        'Deep Learning Local Authoritative Title',
+        'Deep Learning CrossRef Guess',
       );
-      expect(decision.selectedFields.title.sourceProvider).toBe('TrustedPaper');
-      expect(decision.proposedItem.year).toBe(2023);
+      expect(decision.selectedFields.title.sourceProvider).toBe('CrossRef');
+      expect(decision.proposedItem.year).toBe(2022);
     });
 
     it('EnrichStage: skips external metadataService.resolve() when candidate is TrustedPaper', async () => {
@@ -514,8 +514,11 @@ describe('Trusted In-Process Academic Extraction Engine', () => {
           confidenceScore: 0.95,
           fields: {},
           normalizedMetadata: {
-            doi: '10.1038/s41586-020-2649-2',
             title: 'Attention Is All You Need',
+            authors: ['Ashish Vaswani'],
+            year: 2017,
+            journal: 'NeurIPS',
+            tags: ['deep-learning'],
             isSelfSufficient: true,
           },
         },

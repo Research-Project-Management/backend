@@ -1,6 +1,9 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { SearchRepository } from '@/modules/library/search/repositories/search.repository';
-import { SearchOptions } from '@/modules/library/search/types/search.types';
+import {
+  SearchOptions,
+  FacetResult,
+} from '@/modules/library/search/types/search.types';
 import {
   FullTextProvider,
   PageAnchorMatch,
@@ -37,9 +40,14 @@ export class SearchService {
       ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
     };
 
-    const [searchResult, facets] = await Promise.all([
+    const [searchResult, facets, directCount] = await Promise.all([
       this.repo.searchItems(userId, searchOptions),
-      this.repo.computeFacets(userId, searchOptions),
+      dto.includeFacets === false
+        ? Promise.resolve<FacetResult>({ itemTypes: {}, years: {}, tags: {} })
+        : this.repo.computeFacets(userId, searchOptions),
+      dto.includeFacets === false && this.repo.countSearchItems
+        ? this.repo.countSearchItems(userId, searchOptions)
+        : Promise.resolve<number | undefined>(undefined),
     ]);
 
     const pageCount = searchResult.items.length;
@@ -47,7 +55,10 @@ export class SearchService {
       (sum, count) => sum + (typeof count === 'number' ? count : 0),
       0,
     );
-    const totalCount = Math.max(facetSum, pageCount);
+    const totalCount =
+      dto.includeFacets === false && typeof directCount === 'number'
+        ? Math.max(directCount, pageCount)
+        : Math.max(facetSum, pageCount);
 
     return {
       items: searchResult.items,

@@ -229,7 +229,11 @@ export class LayoutHeuristicExtractor {
           !/@/.test(lineText) &&
           !/^(department|faculty|school|division|institute|university|college|laboratory)/i.test(
             lineText,
-          )
+          ) &&
+          !/\b(road|street|avenue|boulevard|blvd|lane|drive|building|bldg|room|rm\.?|floor|suite|box|campus|ontario|quebec|california|toronto|montreal|canada|usa|uk)\b/i.test(
+            lineText,
+          ) &&
+          !/\b[A-Z]\d[A-Z]\s*\d[A-Z]\d\b/.test(lineText)
         ) {
           const split = splitAuthorString(lineText);
           for (const token of split) {

@@ -78,10 +78,18 @@ export class CslParser {
   parse(content: unknown): ParsedCslEntry[] {
     if (!content) return [];
 
-    const toStr = (val: unknown): string =>
-      typeof val === 'string' || typeof val === 'number'
-        ? String(val).trim()
-        : '';
+    const toStr = (val: unknown): string => {
+      if (typeof val === 'string' || typeof val === 'number') {
+        return String(val).trim();
+      }
+      if (Array.isArray(val) && val.length > 0) {
+        const first = val[0];
+        if (typeof first === 'string' || typeof first === 'number') {
+          return String(first).trim();
+        }
+      }
+      return '';
+    };
     const toOptStr = (val: unknown): string | undefined => {
       const s = toStr(val);
       return s || undefined;
@@ -154,32 +162,27 @@ export class CslParser {
       const seriesNumber = toOptStr(csl['collection-number']);
       const chapterNumber = toOptStr(csl['chapter-number']);
 
-      const containerTitle =
-        (csl['container-title'] as string)?.trim() || undefined;
-      const publisher = (csl.publisher as string)?.trim() || undefined;
-      const place = (csl['publisher-place'] as string)?.trim() || undefined;
-      const eventPlace = (csl['event-place'] as string)?.trim() || undefined;
-      const eventTitle =
-        ((csl['event-title'] || csl.event) as string)?.trim() || undefined;
-      const genre = (csl.genre as string)?.trim() || undefined;
+      const containerTitle = toOptStr(csl['container-title']);
+      const publisher = toOptStr(csl.publisher);
+      const place = toOptStr(csl['publisher-place']);
+      const eventPlace = toOptStr(csl['event-place']);
+      const eventTitle = toOptStr(csl['event-title'] ?? csl.event);
+      const genre = toOptStr(csl.genre);
       const numberVal = toOptStr(csl.number);
-      const authority = (csl.authority as string)?.trim() || undefined;
+      const authority = toOptStr(csl.authority);
 
-      const shortTitle =
-        ((csl['title-short'] || csl.shortTitle) as string)?.trim() || undefined;
-      const journalAbbr =
-        (
-          (csl['container-title-short'] || csl.journalAbbreviation) as string
-        )?.trim() || undefined;
-      const section = (csl.section as string)?.trim() || undefined;
+      const shortTitle = toOptStr(csl['title-short'] ?? csl.shortTitle);
+      const journalAbbr = toOptStr(
+        csl['container-title-short'] ?? csl.journalAbbreviation,
+      );
+      const section = toOptStr(csl.section);
       const versionNumber = toOptStr(csl.version);
-      const callNumber = (csl['call-number'] as string)?.trim() || undefined;
-      const archive = (csl.archive as string)?.trim() || undefined;
-      const archiveLocation =
-        (csl['archive_location'] as string)?.trim() || undefined;
-      const libraryCatalog = (csl.source as string)?.trim() || undefined;
-      const note = (csl.note as string)?.trim() || undefined;
-      const annote = (csl.annote as string)?.trim() || undefined;
+      const callNumber = toOptStr(csl['call-number']);
+      const archive = toOptStr(csl.archive);
+      const archiveLocation = toOptStr(csl['archive_location']);
+      const libraryCatalog = toOptStr(csl.source);
+      const note = toOptStr(csl.note);
+      const annote = toOptStr(csl.annote);
       const parsedNotes: string[] = [];
       if (annote) parsedNotes.push(annote);
       if (Array.isArray(csl.notes)) {
@@ -199,16 +202,9 @@ export class CslParser {
         }
       }
 
-      let pmid =
-        ((csl.PMID || csl.pmid) as string | number | undefined) != null
-          ? String(csl.PMID || csl.pmid).trim()
-          : undefined;
-      let pmcid =
-        ((csl.PMCID || csl.pmcid) as string | undefined)?.trim() || undefined;
-      let arxivId =
-        (
-          (csl.arxivId || csl.arXiv || csl.eprint) as string | undefined
-        )?.trim() || undefined;
+      let pmid = toOptStr(csl.PMID ?? csl.pmid);
+      let pmcid = toOptStr(csl.PMCID ?? csl.pmcid);
+      let arxivId = toOptStr(csl.arxivId ?? csl.arXiv ?? csl.eprint);
 
       let cleanedExtraNote = note;
       if (note) {
@@ -297,7 +293,7 @@ export class CslParser {
       };
 
       results.push({
-        title: (csl.title as string) || 'Untitled Document',
+        title: toOptStr(csl.title) || 'Untitled Document',
         itemType,
         authors: authors.length > 0 ? authors : undefined,
         editors: editors.length > 0 ? editors : undefined,
@@ -324,10 +320,10 @@ export class CslParser {
         patentNumber,
         volume: toOptStr(csl.volume),
         issue: toOptStr(csl.issue),
-        pages: (csl.page as string) || undefined,
+        pages: toOptStr(csl.page),
         numPages,
         numberOfVolumes,
-        series: (csl['collection-title'] as string) || undefined,
+        series: toOptStr(csl['collection-title']),
         seriesNumber,
         edition: toOptStr(csl.edition),
         section,
@@ -336,15 +332,15 @@ export class CslParser {
         archive,
         archiveLocation,
         libraryCatalog,
-        doi: ((csl.DOI || csl.doi) as string) || undefined,
+        doi: toOptStr(csl.DOI ?? csl.doi),
         pmid,
         pmcid,
         arxivId,
-        isbn: ((csl.ISBN || csl.isbn) as string) || undefined,
-        issn: ((csl.ISSN || csl.issn) as string) || undefined,
-        url: ((csl.URL || csl.url) as string) || undefined,
-        abstract: (csl.abstract as string) || undefined,
-        citationKey: ((csl.id || csl['citation-key']) as string) || undefined,
+        isbn: toOptStr(csl.ISBN ?? csl.isbn),
+        issn: toOptStr(csl.ISSN ?? csl.issn),
+        url: toOptStr(csl.URL ?? csl.url),
+        abstract: toOptStr(csl.abstract),
+        citationKey: toOptStr(csl.id ?? csl['citation-key']),
         tags: keywords,
         keywords,
         notes: parsedNotes.length > 0 ? parsedNotes : undefined,

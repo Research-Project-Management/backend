@@ -63,6 +63,8 @@ export interface CanonicalCommandFields {
   rawAccessDate: string | null | undefined;
   rawUrl: string | null | undefined;
   rawCitationKey: string | null | undefined;
+  /** Citation key explicitly supplied by the client (never auto-generated). Used by update paths. */
+  suppliedCitationKey?: string | null;
   rawTypeField: string | undefined;
 }
 
@@ -113,12 +115,25 @@ export function resolveCanonicalCommandFields(
   );
 
   const rawPubTitle = toNullableStr(
-    firstDefined([
-      'publicationTitle',
-      'journal',
-      baseMap.publicationTitle,
-      ...ALL_MAPPED_PUB_TITLE_KEYS,
-    ]),
+    firstDefined(
+      targetItemType === 'preprint'
+        ? ['repository', 'archive', 'institution', 'publisher']
+        : [
+            'publicationTitle',
+            'journal',
+            baseMap.publicationTitle,
+            ...ALL_MAPPED_PUB_TITLE_KEYS,
+          ],
+    ) ??
+      (targetItemType === 'preprint' &&
+      Boolean(
+        getVal('arxivId') ||
+          getVal('archiveId') ||
+          (typeof getVal('doi') === 'string' &&
+            /^10\.48550\/arxiv\./i.test(String(getVal('doi')))),
+      )
+        ? 'arXiv'
+        : undefined),
   );
   const rawPublisher = toNullableStr(
     firstDefined([
@@ -235,6 +250,7 @@ export function resolveCanonicalCommandFields(
     rawAccessDate,
     rawUrl,
     rawCitationKey: resolvedCitationKey,
+    suppliedCitationKey: rawCitationKey?.trim() ? rawCitationKey.trim() : undefined,
     rawTypeField,
   };
 }
@@ -282,7 +298,11 @@ export function buildMetadataPartial(params: {
     if (val !== undefined) result[key] = val;
   };
 
-  setIfDefined('publicationTitle', isCreate ? (canonical.rawPubTitle ?? '').trim() : canonical.rawPubTitle);
+  if (canonical.itemType !== 'preprint') {
+    setIfDefined('publicationTitle', isCreate ? (canonical.rawPubTitle ?? '').trim() : canonical.rawPubTitle);
+  } else {
+    delete result.publicationTitle;
+  }
   const createDateStr = (canonical.rawPubDate ?? '').trim() || (data.year ? String(data.year) : '');
   if (isCreate) {
     result.publicationDate = createDateStr;
@@ -304,8 +324,8 @@ export function buildMetadataPartial(params: {
     const rawVal = getRawField(key);
     if (isCreate) {
       result[key] = typeof rawVal === 'string' ? rawVal.trim() : typeof rawVal === 'number' ? String(rawVal) : '';
-    } else if (dataRecord[key] !== undefined) {
-      result[key] = dataRecord[key];
+    } else if (rawVal !== undefined) {
+      result[key] = rawVal === null ? null : typeof rawVal === 'string' ? rawVal.trim() : typeof rawVal === 'number' ? String(rawVal) : rawVal;
     }
   }
 
@@ -313,8 +333,13 @@ export function buildMetadataPartial(params: {
   if (isCreate) {
     result.seriesNumber =
       typeof rawSeriesNumber === 'string' || typeof rawSeriesNumber === 'number' ? String(rawSeriesNumber).trim() : '';
-  } else if (data.seriesNumber !== undefined) {
-    result.seriesNumber = data.seriesNumber;
+  } else if (rawSeriesNumber !== undefined) {
+    result.seriesNumber =
+      rawSeriesNumber === null
+        ? null
+        : typeof rawSeriesNumber === 'string' || typeof rawSeriesNumber === 'number'
+          ? String(rawSeriesNumber).trim()
+          : rawSeriesNumber;
   }
 
   setIfDefined('abstractNote', isCreate ? (canonical.rawAbstract ?? '') : canonical.rawAbstract);
@@ -325,7 +350,7 @@ export function buildMetadataPartial(params: {
   setIfDefined('arxivId', isCreate ? (ids.arxivId ?? '') : ids.arxivId);
   setIfDefined('journalAbbr', isCreate ? (canonical.rawJournalAbbr ?? '').trim() : canonical.rawJournalAbbr);
   setIfDefined('rights', isCreate ? (canonical.rawRights ?? '').trim() : canonical.rawRights);
-  setIfDefined('license', isCreate ? (canonical.rawLicense ?? '').trim() : data.license);
+  setIfDefined('license', isCreate ? (canonical.rawLicense ?? '').trim() : canonical.rawLicense);
 
   if (isCreate) {
     result.accessedAt = data.accessedAt ?? (canonical.rawAccessDate ? parseAccessDate(canonical.rawAccessDate) : null);
@@ -420,7 +445,8 @@ export async function buildCommandCreateInput(
   ];
   const defaultTagType =
     (data.keywords && data.keywords.length > 0) ||
-    (data.labels && data.labels.length > 0)
+    (data.labels && data.labels.length > 0) ||
+    Boolean(data.fileId || data.doi || data.arxivId || data.pmid || data.isbn)
       ? TagType.automatic
       : TagType.manual;
   const resolvedTags = await resolveOrCreateTags(
@@ -667,8 +693,8 @@ export function buildCommandUpdateInput(
       | string
       | null
       | undefined,
-    citationKey: (canonical.rawCitationKey !== undefined
-      ? canonical.rawCitationKey
+    citationKey: (canonical.suppliedCitationKey !== undefined
+      ? canonical.suppliedCitationKey
       : existing.citationKey) as string | null | undefined,
     metadata: updatedMetadata as Prisma.InputJsonValue,
     ...(data.contributors !== undefined ||

@@ -74,7 +74,13 @@ export class CollectionsRepository {
           where: { deletedAt: null },
         },
         _count: {
-          select: { collectionItems: true },
+          select: {
+            collectionItems: {
+              where: {
+                item: { deletedAt: null },
+              },
+            },
+          },
         },
       },
     });
@@ -98,7 +104,13 @@ export class CollectionsRepository {
       where,
       include: {
         _count: {
-          select: { collectionItems: true },
+          select: {
+            collectionItems: {
+              where: {
+                item: { deletedAt: null },
+              },
+            },
+          },
         },
       },
       orderBy: { createdAt: 'asc' },
@@ -145,6 +157,7 @@ export class CollectionsRepository {
   ) {
     const versionToVerify = expectedVersion ?? input.version;
     const client = this.getClient(tx);
+    const scopeWhere = this.buildScopeWhere(userId, projectId);
     const existing = await this.findById(userId, id, tx, projectId);
     if (!existing) {
       throw new NotFoundException(`Collection ${id} not found`);
@@ -159,9 +172,42 @@ export class CollectionsRepository {
       });
     }
 
-    return client.collection.update({
-      where: { id },
-      data: {
+    const updateData = {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      ...(input.color !== undefined ? { color: input.color } : {}),
+      ...(input.icon !== undefined ? { icon: input.icon } : {}),
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+      version: { increment: 1 },
+    };
+
+    if (versionToVerify !== undefined && client.collection?.updateMany) {
+      const affected = await client.collection.updateMany({
+        where: {
+          id,
+          ...scopeWhere,
+          deletedAt: null,
+          version: versionToVerify,
+        },
+        data: updateData,
+      });
+      if (affected.count === 0) {
+        const current = await this.findById(userId, id, tx, projectId);
+        throw new VersionMismatchException({
+          aggregateType: 'Collection',
+          entityId: id,
+          currentVersion: current?.version ?? existing.version,
+          providedVersion: versionToVerify,
+        });
+      }
+      const reloaded = await this.findById(userId, id, tx, projectId);
+      if (reloaded && reloaded.version > existing.version) {
+        return reloaded;
+      }
+      return {
+        ...existing,
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.description !== undefined
           ? { description: input.description }
@@ -169,8 +215,16 @@ export class CollectionsRepository {
         ...(input.color !== undefined ? { color: input.color } : {}),
         ...(input.icon !== undefined ? { icon: input.icon } : {}),
         ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
-        version: { increment: 1 },
+        version: (existing.version ?? 1) + 1,
+      };
+    }
+
+    return client.collection.update({
+      where: {
+        id,
+        ...(versionToVerify !== undefined ? { version: versionToVerify } : {}),
       },
+      data: updateData,
     });
   }
 
@@ -183,6 +237,10 @@ export class CollectionsRepository {
     strategy: CollectionDeleteStrategy = 'orphan',
     tx?: Prisma.TransactionClient,
     projectId?: string,
+    preResolved?: {
+      targetCollectionIds?: string[];
+      itemIds?: string[];
+    },
   ): Promise<boolean> {
     const client = this.getClient(tx);
     const scopeWhere = this.buildScopeWhere(userId, projectId);
@@ -191,27 +249,33 @@ export class CollectionsRepository {
     let deletedItemIds: string[] = [];
 
     if (strategy === 'cascade') {
-      const allCollections = await client.collection.findMany({
-        where: { ...scopeWhere, deletedAt: null },
-        select: { id: true, parentId: true },
-      });
-      const descendantIds = this.treeEngine.getDescendantIds(
-        allCollections || [],
-        id,
-      );
-      const targetCollectionIds = [id, ...descendantIds];
+      let targetCollectionIds = preResolved?.targetCollectionIds;
+      if (!targetCollectionIds || targetCollectionIds.length === 0) {
+        const allCollections = await client.collection.findMany({
+          where: { ...scopeWhere, deletedAt: null },
+          select: { id: true, parentId: true },
+        });
+        const descendantIds = this.treeEngine.getDescendantIds(
+          allCollections || [],
+          id,
+        );
+        targetCollectionIds = [id, ...descendantIds];
+      }
       deletedCollectionIds = targetCollectionIds;
 
-      const links = await client.collectionItem.findMany({
-        where: {
-          collectionId:
-            targetCollectionIds.length === 1
-              ? targetCollectionIds[0]
-              : { in: targetCollectionIds },
-        },
-        select: { itemId: true },
-      });
-      const itemIds = Array.from(new Set(links.map((l) => l.itemId)));
+      let itemIds = preResolved?.itemIds;
+      if (itemIds === undefined) {
+        const links = await client.collectionItem.findMany({
+          where: {
+            collectionId:
+              targetCollectionIds.length === 1
+                ? targetCollectionIds[0]
+                : { in: targetCollectionIds },
+          },
+          select: { itemId: true },
+        });
+        itemIds = Array.from(new Set(links.map((l) => l.itemId)));
+      }
       if (itemIds.length > 0) {
         deletedItemIds = itemIds;
         const validProjectId = normalizeProjectScopeId(projectId);
@@ -240,6 +304,14 @@ export class CollectionsRepository {
         await client.attachment?.updateMany?.({
           where: {
             itemId: { in: itemIds },
+            deletedAt: null,
+          },
+          data: { deletedAt: now },
+        });
+
+        await client.annotation?.updateMany?.({
+          where: {
+            attachment: { itemId: { in: itemIds } },
             deletedAt: null,
           },
           data: { deletedAt: now },
@@ -360,8 +432,8 @@ export class CollectionsRepository {
   ): Promise<void> {
     const client = this.getClient(tx);
 
+    const validProjectId = normalizeProjectScopeId(projectId);
     if (targetCollectionId === null) {
-      const validProjectId = normalizeProjectScopeId(projectId);
       const collectionScope: Prisma.CollectionWhereInput = validProjectId
         ? { projectId: validProjectId }
         : { userId, projectId: null };
@@ -373,7 +445,7 @@ export class CollectionsRepository {
         },
       });
     } else {
-      await this.addItemsToCollection(userId, targetCollectionId, itemIds, tx);
+      await this.addItemsToCollection(userId, targetCollectionId, itemIds, tx, validProjectId);
     }
   }
 
@@ -397,12 +469,13 @@ export class CollectionsRepository {
       await Promise.all(
         collections.map((c) =>
           client.collection.updateMany({
-            where: { id: c.id, ...scopeWhere },
+            where: { id: c.id, ...scopeWhere, deletedAt: null },
             data: {
               ...(c.parentId !== undefined ? { parentId: c.parentId } : {}),
               ...(c.orderIndex !== undefined
-                ? { orderIndex: c.orderIndex }
+                ? { sortOrder: c.orderIndex }
                 : {}),
+              version: { increment: 1 },
             },
           }),
         ),
@@ -443,10 +516,49 @@ export class CollectionsRepository {
       },
       select: { itemId: true },
       orderBy: { sortOrder: 'asc' },
-      take: limit ?? 500,
+      ...(limit !== undefined ? { take: limit } : {}),
     });
 
     return items.map((i: { itemId: string }) => i.itemId);
+  }
+
+  /**
+   * Retrieves unique item IDs belonging to multiple collections in a single batched query.
+   */
+  async findItemIdsByCollections(
+    userId: string,
+    collectionIds: string[],
+    tx?: Prisma.TransactionClient,
+    limit?: number,
+    projectId?: string,
+  ): Promise<string[]> {
+    if (!collectionIds || collectionIds.length === 0) return [];
+    const client = this.getClient(tx);
+    const validProjectId = this.resolveProjectScopeId(projectId);
+
+    const items = await client.collectionItem.findMany({
+      where: {
+        collectionId:
+          collectionIds.length === 1
+            ? collectionIds[0]
+            : { in: collectionIds },
+        item: {
+          ...(validProjectId
+            ? { projectId: validProjectId }
+            : { userId, projectId: null }),
+          deletedAt: null,
+        },
+      },
+      select: { itemId: true },
+      orderBy: { sortOrder: 'asc' },
+      ...(limit !== undefined ? { take: limit } : {}),
+    });
+
+    return Array.from(new Set(items.map((i: { itemId: string }) => i.itemId)));
+  }
+
+  private get _collectionItemsMarker(): undefined {
+    return undefined;
   }
 
   async findOwnedItemIds(

@@ -183,18 +183,23 @@ export class DuplicateMergerService {
       'journalArticle';
 
     const offloadedFileIdsToDelete: string[] = [];
+    const reassignedOrphanFileIds: string[] = [];
 
     const txResult = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const now = new Date();
 
         try {
-          let hash = 0;
-          for (let i = 0; i < primary.id.length; i++) {
-            hash = (hash << 5) - hash + primary.id.charCodeAt(i);
-            hash |= 0;
+          const sortedLockIds = [primary.id, ...uniqueDupIds].slice().sort();
+          for (const lockTargetId of sortedLockIds) {
+            let hash = 0;
+            for (let i = 0; i < lockTargetId.length; i++) {
+              hash = (hash << 5) - hash + lockTargetId.charCodeAt(i);
+              hash |= 0;
+            }
+            const lockKey = hash & 0x7fffffff;
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
           }
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${Math.abs(hash)})`;
         } catch (err) {
           this.logger.warn(
             `Could not acquire pg_advisory_xact_lock: ${(err as Error).message}`,
@@ -203,21 +208,28 @@ export class DuplicateMergerService {
 
         const eventScope = { userId, projectId: effectiveProjectId };
 
-        const initialNotes = (await tx.note?.findMany?.({
-          where: { itemId: { in: uniqueDupIds } },
-          select: { id: true, itemId: true },
-        })) || [];
-        const initialAttachments = (await tx.attachment?.findMany?.({
-          where: { itemId: { in: uniqueDupIds } },
-          select: { id: true, itemId: true },
-        })) || [];
+        const [rawInitialNotes, rawInitialAttachments] = await Promise.all([
+          tx.note?.findMany?.({
+            where: { itemId: { in: uniqueDupIds } },
+            select: { id: true, itemId: true },
+          }),
+          tx.attachment?.findMany?.({
+            where: { itemId: { in: uniqueDupIds } },
+            select: { id: true, itemId: true },
+          }),
+        ]);
+        const initialNotes = rawInitialNotes || [];
+        const initialAttachments = rawInitialAttachments || [];
 
         if (this.extractionGateway?.reassignContentToItem) {
-          await this.extractionGateway.reassignContentToItem(
+          const orphaned = await this.extractionGateway.reassignContentToItem(
             uniqueDupIds,
             primary.id,
             tx,
           );
+          if (Array.isArray(orphaned) && orphaned.length > 0) {
+            reassignedOrphanFileIds.push(...orphaned);
+          }
         }
 
         if (this.catalogGateway) {
@@ -287,15 +299,17 @@ export class DuplicateMergerService {
         await this.rewireMergedItemRelations(tx, primary.id, uniqueDupIds);
         await this.consolidateUserPublications(tx, primary.id, uniqueDupIds);
 
-        const existingPrimaryMeta = await tx.itemMetadata.findFirst({
-          where: { itemId: primary.id },
-        });
-        const dupMetas = tx.itemMetadata?.findMany
-          ? await tx.itemMetadata.findMany({
-              where: { itemId: { in: uniqueDupIds } },
-              select: { id: true, rawPayload: true },
-            })
-          : [];
+        const [existingPrimaryMeta, dupMetas] = await Promise.all([
+          tx.itemMetadata.findFirst({
+            where: { itemId: primary.id },
+          }),
+          tx.itemMetadata?.findMany
+            ? tx.itemMetadata.findMany({
+                where: { itemId: { in: uniqueDupIds } },
+                select: { id: true, rawPayload: true },
+              })
+            : Promise.resolve([]),
+        ]);
         const extractOffloadedFileId = (rawPayload: unknown): string | null => {
           if (
             rawPayload &&
@@ -502,7 +516,9 @@ export class DuplicateMergerService {
           if (
             (dup as { isRetracted?: boolean }).isRetracted ||
             dupMeta.isRetracted ||
-            dupMeta.retraction
+            dupMeta.retraction ||
+            dupMeta.retractionNature ||
+            dupMeta.retractionDetails
           ) {
             mergedIsRetracted = true;
             primaryMeta.isRetracted = true;
@@ -511,6 +527,11 @@ export class DuplicateMergerService {
                 primaryMeta[rKey] = dupMeta[rKey];
               }
             }
+          } else if (
+            !primaryMeta.retractionCheckedAt &&
+            dupMeta.retractionCheckedAt
+          ) {
+            primaryMeta.retractionCheckedAt = dupMeta.retractionCheckedAt;
           }
         }
 
@@ -555,7 +576,7 @@ export class DuplicateMergerService {
           ...(derivedFirstAuthor ? { firstAuthor: derivedFirstAuthor } : {}),
           ...(noteCount !== undefined ? { noteCount } : {}),
           ...(attachmentCount !== undefined ? { attachmentCount, hasFile: attachmentCount > 0 } : {}),
-          ...(mergedIsRetracted ? { isRetracted: true } : {}),
+          // isRetracted is not an Item column; it is persisted via primaryMeta.isRetracted above.
         };
         for (const [key, val] of Object.entries(combinedUpdates)) {
           if (TOP_LEVEL_ITEM_COLUMNS.has(key)) {
@@ -674,6 +695,26 @@ export class DuplicateMergerService {
         };
       },
     );
+
+    if (reassignedOrphanFileIds.length > 0) {
+      if (this.extractionGateway?.cleanupOrphanedFiles) {
+        await this.extractionGateway.cleanupOrphanedFiles(
+          reassignedOrphanFileIds,
+        );
+      } else if (this.storagePort?.deleteFile) {
+        for (const fid of reassignedOrphanFileIds) {
+          try {
+            await this.storagePort.deleteFile(fid);
+          } catch (delErr: unknown) {
+            const msg =
+              delErr instanceof Error ? delErr.message : String(delErr);
+            this.logger.warn(
+              `Failed to delete duplicate attachment file ${fid} on item merge: ${msg}`,
+            );
+          }
+        }
+      }
+    }
 
     if (
       offloadedFileIdsToDelete.length > 0 &&

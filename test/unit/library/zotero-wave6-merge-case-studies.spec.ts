@@ -15,9 +15,9 @@ import type { PrismaService } from '@/core';
 import type {
   ICatalogFacade,
   IExtractionFacade,
-  TransactionService,
   TransactionHelpers,
 } from '@/modules/library/core';
+import type { TransactionService } from '@/modules/library/sync';
 import type { ItemService } from '@/modules/library/catalog/services/items.service';
 import type { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import type { TypesService } from '@/modules/library/catalog/services/types.service';
@@ -1055,7 +1055,7 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
         duplicateItemIds: ['item-retracted-dup'],
       });
 
-      expect(updatedPrimaryData?.isRetracted).toBe(true);
+      // isRetracted is not an Item column; it is persisted in metadata (asserted below).
       const mergedMeta = updatedPrimaryData?.metadata as Record<
         string,
         unknown
@@ -1714,7 +1714,8 @@ describe('Wave 6 & Wave 7 — Comprehensive Duplicate Detection & Merge Case Stu
       } as unknown as QualityService;
 
       const controller = new CurationController(
-        mockDuplicateService,
+        mockDuplicateService as any,
+        mockDuplicateService as any,
         mockQualityService,
       );
 

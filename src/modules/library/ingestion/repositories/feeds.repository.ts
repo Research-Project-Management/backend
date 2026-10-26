@@ -106,12 +106,26 @@ export class FeedsRepository {
     userId: string;
     feedId: string;
     customTitle?: string;
-    cleanupDays: number;
+    cleanupDays?: number;
+    cleanupReadAfter?: number;
+    cleanupUnreadAfter?: number;
   }): Promise<FeedSubscriptionRecord> {
     if (!this.prisma) {
       throw new ServiceUnavailableException('Database is unavailable');
     }
     const { userId, feedId, customTitle, cleanupDays } = params;
+    const readDays =
+      params.cleanupReadAfter !== undefined
+        ? params.cleanupReadAfter
+        : cleanupDays !== undefined
+          ? cleanupDays
+          : 7;
+    const unreadDays =
+      params.cleanupUnreadAfter !== undefined
+        ? params.cleanupUnreadAfter
+        : cleanupDays !== undefined
+          ? cleanupDays
+          : 30;
     return this.prisma.feedSubscription.upsert({
       where: {
         userId_feedId: { userId, feedId },
@@ -120,13 +134,13 @@ export class FeedsRepository {
         userId,
         feedId,
         customTitle: customTitle || null,
-        cleanupReadAfter: cleanupDays,
-        cleanupUnreadAfter: cleanupDays,
+        cleanupReadAfter: readDays,
+        cleanupUnreadAfter: unreadDays,
       },
       update: {
         customTitle: customTitle || undefined,
-        cleanupReadAfter: cleanupDays,
-        cleanupUnreadAfter: cleanupDays,
+        cleanupReadAfter: readDays,
+        cleanupUnreadAfter: unreadDays,
       },
       include: {
         feed: { select: FEED_SUMMARY_SELECT },
@@ -143,28 +157,47 @@ export class FeedsRepository {
 
   async findSubscription(userId: string, feedId: string) {
     if (!this.prisma) return null;
-    return this.prisma.feedSubscription.findUnique({
-      where: { userId_feedId: { userId, feedId } },
+    return this.prisma.feedSubscription.findFirst({
+      where: {
+        userId,
+        OR: [{ feedId }, { id: feedId }],
+      },
+      include: {
+        feed: { select: FEED_SUMMARY_SELECT },
+      },
     });
   }
 
   async updateSubscriptionById(
     id: string,
-    data: { customTitle?: string; cleanupDays?: number },
+    data: {
+      customTitle?: string;
+      cleanupDays?: number;
+      cleanupReadAfter?: number;
+      cleanupUnreadAfter?: number;
+      feedId?: string;
+    },
   ): Promise<FeedSubscriptionRecord> {
     if (!this.prisma) {
       throw new ServiceUnavailableException('Database is unavailable');
     }
+    const nextReadAfter =
+      data.cleanupReadAfter !== undefined
+        ? data.cleanupReadAfter
+        : data.cleanupDays;
+    const nextUnreadAfter =
+      data.cleanupUnreadAfter !== undefined
+        ? data.cleanupUnreadAfter
+        : data.cleanupDays;
     return this.prisma.feedSubscription.update({
       where: { id },
       data: {
         ...(data.customTitle !== undefined ? { customTitle: data.customTitle } : {}),
-        ...(data.cleanupDays !== undefined
-          ? {
-              cleanupReadAfter: data.cleanupDays,
-              cleanupUnreadAfter: data.cleanupDays,
-            }
+        ...(nextReadAfter !== undefined ? { cleanupReadAfter: nextReadAfter } : {}),
+        ...(nextUnreadAfter !== undefined
+          ? { cleanupUnreadAfter: nextUnreadAfter }
           : {}),
+        ...(data.feedId ? { feedId: data.feedId } : {}),
       },
       include: {
         feed: { select: FEED_SUMMARY_SELECT },
@@ -177,10 +210,30 @@ export class FeedsRepository {
     feedId: string;
     readStatus: 'read' | 'unread' | 'all';
     limit: number;
+    cleanupReadAfter?: number;
+    cleanupUnreadAfter?: number;
   }) {
     if (!this.prisma) return [];
-    const { userId, feedId, readStatus, limit } = params;
-    return this.prisma.feedItem.findMany({
+    const {
+      userId,
+      feedId,
+      readStatus,
+      limit,
+      cleanupReadAfter,
+      cleanupUnreadAfter,
+    } = params;
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const readCutoff =
+      cleanupReadAfter && cleanupReadAfter > 0
+        ? new Date(now - cleanupReadAfter * dayMs)
+        : null;
+    const unreadCutoff =
+      cleanupUnreadAfter && cleanupUnreadAfter > 0
+        ? new Date(now - cleanupUnreadAfter * dayMs)
+        : null;
+
+    const rawItems = await this.prisma.feedItem.findMany({
       where: {
         feedId,
         ...(readStatus === 'read'
@@ -197,6 +250,27 @@ export class FeedsRepository {
       },
       orderBy: { publishedAt: 'desc' },
       take: limit,
+    });
+
+    if (!readCutoff && !unreadCutoff) {
+      return rawItems;
+    }
+
+    // Per-user virtualized retention window:
+    // Shared physical `feed_items` stay intact for other subscribers,
+    // while each user only sees items within their own read/unread retention window.
+    return rawItems.filter((item) => {
+      const isRead = item.readStates.length > 0;
+      const pubTime = item.publishedAt ? new Date(item.publishedAt) : null;
+      if (isRead) {
+        if (!readCutoff) return true;
+        const referenceDate = item.readStates[0]?.readAt
+          ? new Date(item.readStates[0].readAt)
+          : pubTime;
+        return !referenceDate || referenceDate >= readCutoff;
+      }
+      if (!unreadCutoff) return true;
+      return !pubTime || pubTime >= unreadCutoff;
     });
   }
 
@@ -346,6 +420,7 @@ export class FeedsRepository {
         id: true,
         subscriptions: {
           select: {
+            cleanupReadAfter: true,
             cleanupUnreadAfter: true,
           },
         },
@@ -375,6 +450,7 @@ export class FeedsRepository {
     lastModified?: string;
   }): Promise<void> {
     if (!this.prisma) return;
+    const prismaClient = this.prisma;
     const { feedUrl, parsed, etag, lastModified } = params;
 
     const feed = await this.prisma.feed.upsert({
@@ -403,64 +479,70 @@ export class FeedsRepository {
     if (!Array.isArray(parsed.entries) || parsed.entries.length === 0) return;
 
     const boundedEntries = parsed.entries.slice(0, 100);
-    for (const entry of boundedEntries) {
-      const guid = (
-        entry.doi ||
-        entry.arxivId ||
-        entry.url ||
-        entry.id ||
-        entry.title ||
-        ''
-      ).trim();
-      if (!guid || !entry.title) continue;
+    const UPSERT_CHUNK_SIZE = 15;
+    for (let i = 0; i < boundedEntries.length; i += UPSERT_CHUNK_SIZE) {
+      const chunk = boundedEntries.slice(i, i + UPSERT_CHUNK_SIZE);
+      await Promise.all(
+        chunk.map((entry) => {
+          const guid = (
+            entry.doi ||
+            entry.arxivId ||
+            entry.url ||
+            entry.id ||
+            entry.title ||
+            ''
+          ).trim();
+          if (!guid || !entry.title) return Promise.resolve();
 
-      const publishedDate = entry.publicationDate
-        ? new Date(entry.publicationDate)
-        : new Date();
-      const validPublishedAt = isNaN(publishedDate.getTime())
-        ? new Date()
-        : publishedDate;
+          const publishedDate = entry.publicationDate
+            ? new Date(entry.publicationDate)
+            : new Date();
+          const validPublishedAt = isNaN(publishedDate.getTime())
+            ? new Date()
+            : publishedDate;
 
-      const authorsJson = Array.isArray(entry.authors)
-        ? entry.authors.map((a: string) => ({ name: a }))
-        : [];
+          const authorsJson = Array.isArray(entry.authors)
+            ? entry.authors.map((a: string) => ({ name: a }))
+            : [];
 
-      await this.prisma.feedItem
-        .upsert({
-          where: {
-            feedId_guid: {
-              feedId: feed.id,
-              guid,
-            },
-          },
-          create: {
-            feedId: feed.id,
-            guid,
-            title: entry.title,
-            url: entry.url || feedUrl,
-            pdfUrl: entry.pdfUrl,
-            doi: entry.doi,
-            arxivId: entry.arxivId,
-            primaryCategory: entry.primaryCategory,
-            authors: authorsJson,
-            abstract: entry.abstract,
-            license: entry.rights,
-            comments: undefined,
-            publishedAt: validPublishedAt,
-          },
-          update: {
-            title: entry.title,
-            url: entry.url || undefined,
-            pdfUrl: entry.pdfUrl || undefined,
-            doi: entry.doi || undefined,
-            arxivId: entry.arxivId || undefined,
-            primaryCategory: entry.primaryCategory || undefined,
-            authors: authorsJson,
-            abstract: entry.abstract || undefined,
-            license: entry.rights || undefined,
-          },
-        })
-        .catch(() => {});
+          return prismaClient.feedItem
+            .upsert({
+              where: {
+                feedId_guid: {
+                  feedId: feed.id,
+                  guid,
+                },
+              },
+              create: {
+                feedId: feed.id,
+                guid,
+                title: entry.title,
+                url: entry.url || feedUrl,
+                pdfUrl: entry.pdfUrl,
+                doi: entry.doi,
+                arxivId: entry.arxivId,
+                primaryCategory: entry.primaryCategory,
+                authors: authorsJson,
+                abstract: entry.abstract,
+                license: entry.rights,
+                comments: undefined,
+                publishedAt: validPublishedAt,
+              },
+              update: {
+                title: entry.title,
+                url: entry.url || undefined,
+                pdfUrl: entry.pdfUrl || undefined,
+                doi: entry.doi || undefined,
+                arxivId: entry.arxivId || undefined,
+                primaryCategory: entry.primaryCategory || undefined,
+                authors: authorsJson,
+                abstract: entry.abstract || undefined,
+                license: entry.rights || undefined,
+              },
+            })
+            .catch(() => {});
+        }),
+      );
     }
   }
 

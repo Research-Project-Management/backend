@@ -56,9 +56,11 @@ export class UpdateTagDto {
   @IsOptional()
   shortcut?: number | null;
 
+  @IsEnum(TagType)
+  @IsOptional()
+  type?: TagType;
+
   @IsString()
   @IsOptional()
-  @MaxLength(50)
-  type?: string;
+  projectId?: string;
 }
-

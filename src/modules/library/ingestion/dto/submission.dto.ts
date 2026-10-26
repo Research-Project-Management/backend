@@ -5,6 +5,7 @@ import {
   IsArray,
   IsUUID,
   IsObject,
+  IsBoolean,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import {
@@ -24,13 +25,56 @@ export class IngestionSubmissionDto {
     const src = String(obj?.source || '').toLowerCase();
     if (src === 'pdf' || obj?.fileId) return 'FILE';
     if (src === 'doi' || src === 'arxiv' || src === 'isbn' || src === 'pmid' || obj?.doi || obj?.arxivId || obj?.isbn || obj?.pmid) return 'IDENTIFIER';
-    if (src === 'bibtex' || src === 'ris' || obj?.format || obj?.recordFormat) return 'RECORD';
+    if (
+      src === 'bibtex' ||
+      src === 'ris' ||
+      src === 'csl_json' ||
+      src === 'endnote_xml' ||
+      src === 'mods' ||
+      src === 'zotero_rdf' ||
+      src === 'rdf' ||
+      src === 'medline' ||
+      src === 'nbib' ||
+      src === 'csv' ||
+      obj?.format ||
+      obj?.recordFormat
+    )
+      return 'RECORD';
     if (src === 'url' || obj?.url) return 'URL';
     if (src === 'zotero' || src === 'connector' || obj?.connectionId) return 'CONNECTOR';
     return value;
   })
   @IsIn(['IDENTIFIER', 'RECORD', 'URL', 'FILE', 'CONNECTOR'])
   kind!: SubmissionKind;
+
+  // Source alias & identifier convenience fields sent by Frontend SDK
+  @IsOptional()
+  @IsString()
+  source?: string;
+
+  @IsOptional()
+  @IsString()
+  doi?: string;
+
+  @IsOptional()
+  @IsString()
+  arxivId?: string;
+
+  @IsOptional()
+  @IsString()
+  pmid?: string;
+
+  @IsOptional()
+  @IsString()
+  isbn?: string;
+
+  @IsOptional()
+  @IsString()
+  bibtex?: string;
+
+  @IsOptional()
+  @IsString()
+  ris?: string;
 
   // Identifier fields
   @IsOptional()
@@ -53,10 +97,22 @@ export class IngestionSubmissionDto {
     'CSL_JSON',
     'ENDNOTE_XML',
     'MODS',
+    'ZOTERO_RDF',
+    'RDF',
+    'MEDLINE',
+    'NBIB',
+    'CSV',
     'REFER',
     'bibtex',
     'ris',
     'csl_json',
+    'endnote_xml',
+    'mods',
+    'zotero_rdf',
+    'rdf',
+    'medline',
+    'nbib',
+    'csv',
   ])
   format?: RecordFormat;
 
@@ -67,10 +123,22 @@ export class IngestionSubmissionDto {
     'CSL_JSON',
     'ENDNOTE_XML',
     'MODS',
+    'ZOTERO_RDF',
+    'RDF',
+    'MEDLINE',
+    'NBIB',
+    'CSV',
     'REFER',
     'bibtex',
     'ris',
     'csl_json',
+    'endnote_xml',
+    'mods',
+    'zotero_rdf',
+    'rdf',
+    'medline',
+    'nbib',
+    'csv',
   ])
   recordFormat?: RecordFormat;
 
@@ -111,9 +179,32 @@ export class IngestionSubmissionDto {
 
   @IsOptional()
   @IsString()
+  externalItemKey?: string;
+
+  @IsOptional()
+  @IsString()
   externalVersion?: string;
 
-  // Common Envelope Options
+  @IsOptional()
+  payload?: unknown;
+
+  // Common Envelope & Extraction Options
+  @IsOptional()
+  @IsBoolean()
+  allowDuplicates?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  autoExtract?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  enableOcr?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  silent?: boolean;
+
   @IsOptional()
   @IsString()
   idempotencyKey?: string;

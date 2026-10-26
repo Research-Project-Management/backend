@@ -265,7 +265,11 @@ export class ZoteroSchemaValidatorService {
       }
     }
 
-    cleanFields.extra = extraLines.join('\n');
+    // Only emit `extra` when the client sent it or fields were demoted into it; otherwise
+    // an empty string would wipe the stored extra on every PATCH.
+    if (data.extra !== undefined || extraLines.length > 0) {
+      cleanFields.extra = extraLines.join('\n');
+    }
 
     return { cleanFields, demotedToExtra, warnings };
   }

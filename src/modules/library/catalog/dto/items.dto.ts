@@ -407,6 +407,7 @@ export class CreateItemDto {
   @IsOptional() @IsString() priorityDate?: string;
   @IsOptional() @IsString() references?: string;
   @IsOptional() @IsString() audioFileType?: string;
+  @IsOptional() @IsString() medium?: string;
   @IsOptional() @IsString() sessionTitle?: string;
   @IsOptional() @IsString() status?: string;
   @IsOptional() @IsString() DOI?: string;
@@ -427,6 +428,8 @@ export class CreateItemDto {
   @IsOptional() @IsString() bibtex?: string;
   @IsOptional() @IsString() citeKey?: string;
   @IsOptional() @IsBoolean() isStarred?: boolean;
+  @IsOptional() @IsBoolean() isFavorite?: boolean;
+  @IsOptional() @IsBoolean() silent?: boolean;
   @IsOptional() @IsString() readStatus?: string;
   @IsOptional() @IsNumber() rating?: number;
   @IsOptional() @IsBoolean() isMyPublication?: boolean;

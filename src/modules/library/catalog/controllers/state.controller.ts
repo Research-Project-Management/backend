@@ -91,6 +91,8 @@ export class StateController {
 @Controller([
   'api/v1/library/state',
   'api/v1/projects/:projectId/library/state',
+  'api/v1/library/items/state',
+  'api/v1/projects/:projectId/library/items/state',
 ])
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 export class StateBatchController {

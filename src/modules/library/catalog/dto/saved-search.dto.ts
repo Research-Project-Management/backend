@@ -14,6 +14,18 @@ import {
   SavedSearchScopeOptions,
 } from '@/modules/library/catalog/types/saved-search.types';
 
+const SAVED_SEARCH_SORT_BY_VALUES = [
+  'dateAdded',
+  'createdAt',
+  'year',
+  'title',
+  'creator',
+  'authors',
+  'updatedAt',
+] as const;
+
+export type SavedSearchSortBy = (typeof SAVED_SEARCH_SORT_BY_VALUES)[number];
+
 export class CreateSavedSearchDto {
   @IsString()
   name!: string;
@@ -42,8 +54,8 @@ export class CreateSavedSearchDto {
   conjunction?: 'AND' | 'OR';
 
   @IsOptional()
-  @IsIn(['dateAdded', 'year', 'title', 'creator'])
-  sortBy?: 'dateAdded' | 'year' | 'title' | 'creator';
+  @IsIn(SAVED_SEARCH_SORT_BY_VALUES)
+  sortBy?: SavedSearchSortBy;
 
   @IsOptional()
   @IsIn(['asc', 'desc'])
@@ -56,6 +68,24 @@ export class CreateSavedSearchDto {
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @IsString()
+  targetScope?: string;
+
+  @IsOptional()
+  @IsString()
+  scope?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  expectedVersion?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  version?: number;
 }
 
 export class UpdateSavedSearchDto {
@@ -88,8 +118,8 @@ export class UpdateSavedSearchDto {
   conjunction?: 'AND' | 'OR';
 
   @IsOptional()
-  @IsIn(['dateAdded', 'year', 'title', 'creator'])
-  sortBy?: 'dateAdded' | 'year' | 'title' | 'creator';
+  @IsIn(SAVED_SEARCH_SORT_BY_VALUES)
+  sortBy?: SavedSearchSortBy;
 
   @IsOptional()
   @IsIn(['asc', 'desc'])
@@ -98,6 +128,24 @@ export class UpdateSavedSearchDto {
   @IsOptional()
   @IsBoolean()
   isPinned?: boolean;
+
+  @IsOptional()
+  @IsString()
+  targetScope?: string;
+
+  @IsOptional()
+  @IsString()
+  scope?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  expectedVersion?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  version?: number;
 }
 
 export class PreviewSavedSearchDto {
@@ -107,6 +155,14 @@ export class PreviewSavedSearchDto {
   @IsOptional()
   @IsObject()
   scopeOptions?: SavedSearchScopeOptions;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
+  @IsString()
+  sortOrder?: 'asc' | 'desc';
 
   @IsOptional()
   @IsString()
@@ -132,23 +188,8 @@ export class ExecuteSavedSearchQueryDto {
   cursor?: string;
 
   @IsOptional()
-  @IsIn([
-    'dateAdded',
-    'createdAt',
-    'year',
-    'title',
-    'creator',
-    'authors',
-    'updatedAt',
-  ])
-  sortBy?:
-    | 'dateAdded'
-    | 'createdAt'
-    | 'year'
-    | 'title'
-    | 'creator'
-    | 'authors'
-    | 'updatedAt';
+  @IsIn(SAVED_SEARCH_SORT_BY_VALUES)
+  sortBy?: SavedSearchSortBy;
 
   @IsOptional()
   @IsIn(['asc', 'desc'])

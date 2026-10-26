@@ -7,11 +7,29 @@ import {
   IsNumber,
   IsArray,
   IsBoolean,
-  IsEnum,
+  IsIn,
   ArrayMaxSize,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  SCHEMA_V42_DATA,
+  ALL_CREATOR_ROLES,
+} from '@/modules/library/core/types/schema.constants';
+
+const VALID_CREATOR_ROLES = Object.keys(ALL_CREATOR_ROLES);
+const VALID_ITEM_TYPES = [
+  ...Object.keys(SCHEMA_V42_DATA.itemTypes),
+  'article',
+  'paper',
+  'incollection',
+  'inproceedings',
+  'phdthesis',
+  'mastersthesis',
+  'techreport',
+  'misc',
+  'unpublished',
+];
 
 export class CreatorDto {
   @IsOptional()
@@ -19,15 +37,28 @@ export class CreatorDto {
   @MaxLength(100)
   firstName?: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  @MaxLength(100)
-  lastName!: string;
+  @MaxLength(200)
+  lastName?: string;
 
   @IsOptional()
-  @IsEnum(['author', 'editor', 'contributor', 'translator'], {
-    message:
-      'creatorType must be one of: author, editor, contributor, translator',
+  @IsString()
+  @MaxLength(200)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  fullName?: string;
+
+  @IsOptional()
+  @IsNumber()
+  fieldMode?: number;
+
+  @IsOptional()
+  @IsIn(VALID_CREATOR_ROLES, {
+    message: 'creatorType must be a valid Zotero creator role',
   })
   creatorType?: string;
 }
@@ -82,25 +113,9 @@ export class ConfirmCapturedUrlDto {
 
   @IsOptional()
   @IsString()
-  @IsEnum(
-    [
-      'journalArticle',
-      'book',
-      'bookSection',
-      'conferencePaper',
-      'preprint',
-      'report',
-      'thesis',
-      'webpage',
-      'manuscript',
-      'dataset',
-      'document',
-    ],
-    {
-      message:
-        'itemType must be one of: journalArticle, book, bookSection, conferencePaper, preprint, report, thesis, webpage, manuscript, dataset, document',
-    },
-  )
+  @IsIn(VALID_ITEM_TYPES, {
+    message: 'itemType must be a valid Zotero item type',
+  })
   itemType?: string;
 
   @IsOptional()

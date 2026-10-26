@@ -304,6 +304,22 @@ export class IngestionController {
         };
         break;
 
+      case 'csl_json':
+      case 'endnote_xml':
+      case 'mods':
+      case 'zotero_rdf':
+      case 'medline':
+      case 'csv':
+        command = {
+          source: dto.source,
+          projectId: effectiveProjectId,
+          userId,
+          content: dto.content || '',
+          collectionId: dto.collectionId,
+          idempotencyKey: effectiveIdempotencyKey,
+        };
+        break;
+
       case 'pdf':
         command = {
           source: 'pdf',

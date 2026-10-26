@@ -109,7 +109,9 @@ export function resolveCanonicalCreatorRole(
       const directMatch = validTypeMap.get(lower);
       if (directMatch) return directMatch;
 
-      const synonymTarget = CREATOR_ROLE_SYNONYMS[lower];
+      const synonymTarget = Object.prototype.hasOwnProperty.call(CREATOR_ROLE_SYNONYMS, lower)
+        ? CREATOR_ROLE_SYNONYMS[lower]
+        : undefined;
       if (synonymTarget && validTypeMap.has(synonymTarget.toLowerCase())) {
         return validTypeMap.get(synonymTarget.toLowerCase())!;
       }

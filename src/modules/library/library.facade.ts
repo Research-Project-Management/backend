@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Inject, Optional } from '@nestjs/common';
 import { Prisma, AttachmentExtractionStatus } from '@prisma/client';
 import { PrismaService, RedisCacheService } from '@/core';
 import { CatalogFacade } from './catalog/catalog.facade';
@@ -10,8 +10,11 @@ import { ExportLibraryDto } from './citation/dto/exports.dto';
 import { ExportResult } from './citation/types/exports.types';
 import {
   ExtractedPdfDocument,
+  LIBRARY_EVENT_TYPES,
   LIBRARY_REDIS_KEYS,
   normalizeProjectScopeId,
+  UNIT_OF_WORK,
+  IUnitOfWork,
 } from './core';
 
 export interface LibraryItemSummary {
@@ -104,6 +107,9 @@ export class LibraryFacade implements ILibraryFacade {
     private readonly prisma?: PrismaService,
     @Optional()
     private readonly cache?: RedisCacheService,
+    @Optional()
+    @Inject(UNIT_OF_WORK)
+    private readonly uow?: IUnitOfWork,
   ) {}
 
   async listCollections(
@@ -298,19 +304,51 @@ export class LibraryFacade implements ILibraryFacade {
         ? (existing.metadata as Record<string, unknown>)
         : {};
 
-    await this.prisma.item.update({
-      where: { id: itemId },
-      data: {
-        metadata: {
-          ...currentMeta,
-          ...aiMetadataPatch,
-        } as Prisma.InputJsonValue,
-        version: { increment: 1 },
-      },
-    });
+    const validProjectId = normalizeProjectScopeId(existing.projectId);
+    const mergedMetadata = {
+      ...currentMeta,
+      ...aiMetadataPatch,
+    } as Prisma.InputJsonValue;
+
+    if (this.uow && existing.userId) {
+      await this.uow.executeInTransaction(async (tx, helpers) => {
+        const client = tx?.item ? tx : this.prisma!;
+        const updated = await client.item.update({
+          where: { id: itemId },
+          data: {
+            metadata: mergedMetadata,
+            version: { increment: 1 },
+          },
+        });
+        const eventScope = {
+          userId: existing.userId,
+          projectId: validProjectId,
+        };
+        await helpers.appendChange(eventScope, {
+          entityType: 'Item',
+          entityId: itemId,
+          action: 'update',
+          version: updated.version ?? 1,
+          data: updated,
+        });
+        await helpers.publishOutbox(
+          eventScope,
+          itemId,
+          LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+          updated,
+        );
+      });
+    } else {
+      await this.prisma.item.update({
+        where: { id: itemId },
+        data: {
+          metadata: mergedMetadata,
+          version: { increment: 1 },
+        },
+      });
+    }
 
     if (this.cache) {
-      const validProjectId = normalizeProjectScopeId(existing.projectId);
       const scopeId = validProjectId || existing.userId;
       const tasks: Promise<unknown>[] = [
         this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
@@ -321,6 +359,42 @@ export class LibraryFacade implements ILibraryFacade {
         tasks.push(
           this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
           this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(scopeId)),
+          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(scopeId)),
+        );
+      }
+      if (validProjectId) {
+        const projScopeKey = `proj:${validProjectId}`;
+        tasks.push(
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(projScopeKey)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(projScopeKey)),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.searchFacetsPattern(projScopeKey),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.searchItemsPattern(projScopeKey),
+          ),
+          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(projScopeKey)),
+          ...(existing.userId
+            ? [
+                this.cache.delPattern(
+                  LIBRARY_REDIS_KEYS.itemsPattern(existing.userId),
+                ),
+                this.cache.delPattern(
+                  LIBRARY_REDIS_KEYS.countsPattern(existing.userId),
+                ),
+                this.cache.delPattern(
+                  LIBRARY_REDIS_KEYS.searchFacetsPattern(existing.userId),
+                ),
+                this.cache.delPattern(
+                  LIBRARY_REDIS_KEYS.searchItemsPattern(existing.userId),
+                ),
+                this.cache.del(
+                  LIBRARY_REDIS_KEYS.searchVersion(existing.userId),
+                ),
+              ]
+            : []),
         );
       }
       await Promise.all(tasks);

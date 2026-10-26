@@ -9,6 +9,8 @@ import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/constants/redis-keys.constants';
+import { LibraryFacade } from '@/modules/library/library.facade';
+import { LIBRARY_EVENT_TYPES } from '@/modules/library/core';
 
 describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
   let service: ItemsService;
@@ -390,6 +392,71 @@ describe('Library Cache-Aside & Multi-tier Invalidation Pattern', () => {
       const item = await queryService.getItem(mockUserId, mockItemId);
       expect(item).toBeDefined();
       expect(queryRepo.findById).toHaveBeenCalled();
+    });
+
+    it('should record CDC + Outbox events and invalidate proj:${projectId} list cache on LibraryFacade.updateItemAiMetadata', async () => {
+      const validProjUuid = '11111111-2222-4333-8444-555555555555';
+      const mockItemUpdate = jest.fn().mockResolvedValue({
+        id: mockItemId,
+        userId: mockUserId,
+        projectId: validProjUuid,
+        version: 2,
+        metadata: { aiSummary: 'Summary' },
+      });
+      const mockPrisma = {
+        item: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: mockItemId,
+            userId: mockUserId,
+            projectId: validProjUuid,
+            metadata: { existingKey: 'val' },
+          }),
+          update: mockItemUpdate,
+        },
+      };
+      const mockAppendChange = jest.fn().mockResolvedValue({});
+      const mockPublishOutbox = jest.fn().mockResolvedValue({});
+      const mockUow = {
+        executeInTransaction: jest.fn(async (op) =>
+          op(mockPrisma, {
+            appendChange: mockAppendChange,
+            publishOutbox: mockPublishOutbox,
+          }),
+        ),
+      };
+
+      const facade = new LibraryFacade(
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        mockPrisma as never,
+        cache,
+        mockUow as never,
+      );
+
+      await facade.updateItemAiMetadata(mockItemId, { aiSummary: 'Summary' });
+
+      expect(mockUow.executeInTransaction).toHaveBeenCalledTimes(1);
+      expect(mockAppendChange).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: validProjUuid },
+        expect.objectContaining({
+          entityType: 'Item',
+          entityId: mockItemId,
+          action: 'update',
+          version: 2,
+        }),
+      );
+      expect(mockPublishOutbox).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: validProjUuid },
+        mockItemId,
+        LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+        expect.objectContaining({ id: mockItemId, version: 2 }),
+      );
+      expect(cache.delPattern).toHaveBeenCalledWith(
+        LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjUuid}`),
+      );
+    expect(Boolean(validProjUuid)).toBe(true);
     });
   });
 });

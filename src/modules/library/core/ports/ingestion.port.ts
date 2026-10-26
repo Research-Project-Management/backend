@@ -16,6 +16,7 @@ export interface ReResolveMetadataOptions {
   isbn?: string;
   title?: string;
   forceRefresh?: boolean;
+  attachOaPdf?: boolean;
   expectedVersion?: number;
   projectId?: string;
 }

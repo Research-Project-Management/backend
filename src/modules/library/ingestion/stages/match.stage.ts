@@ -1,7 +1,10 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { DuplicateMatchResult } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import { DuplicatePolicy } from '@/modules/library/ingestion/policies/duplicate.policy';
-import { tokenizeTitleWords } from '@/modules/library/ingestion/domain/deduplication.domain';
+import {
+  calculateTitleSimilarity,
+  tokenizeTitleWords,
+} from '@/modules/library/ingestion/domain/deduplication.domain';
 import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
 import {
   IWorkflowStage,
@@ -77,6 +80,12 @@ export class MatchStage implements IWorkflowStage<
     if (this.catalogGateway?.findMatchCandidates) {
       const normalizedScope =
         typeof scope === 'string' ? { userId: scope } : scope;
+      const proposedYear =
+        actualProposed.year !== undefined &&
+        actualProposed.year !== null &&
+        Number.isFinite(Number(actualProposed.year))
+          ? Number(actualProposed.year)
+          : undefined;
       const matchResult = await this.catalogGateway.findMatchCandidates(
         normalizedScope,
         {
@@ -84,20 +93,37 @@ export class MatchStage implements IWorkflowStage<
           arxivId: cleanArxiv,
           pmid: cleanPmid,
           isbn: cleanIsbn,
+          year: proposedYear,
           titleWords: significantWords,
           titlePrefix: proposedTitle,
         },
       );
 
       if (matchResult.exactMatch) {
-        return {
-          matchType: 'EXACT',
-          confidence: 1.0,
-          targetItemId: matchResult.exactMatch.id,
-          targetItemTitle: matchResult.exactMatch.title,
-          matchReason: matchResult.exactMatch.matchReason,
-          evidence: matchResult.exactMatch.evidence,
-        };
+        const existingTitle = matchResult.exactMatch.title?.trim();
+        const isGenericTitle = (t?: string): boolean =>
+          !t || t.length <= 5 || /^untitled(\s+document)?$/i.test(t);
+
+        const titlesConflict =
+          Boolean(proposedTitle) &&
+          Boolean(existingTitle) &&
+          !isGenericTitle(proposedTitle) &&
+          !isGenericTitle(existingTitle) &&
+          calculateTitleSimilarity(proposedTitle ?? '', existingTitle ?? '') < 0.5;
+
+        if (!titlesConflict) {
+          return {
+            matchType: 'EXACT',
+            confidence: 1.0,
+            targetItemId: matchResult.exactMatch.id,
+            targetItemTitle: matchResult.exactMatch.title,
+            matchReason: matchResult.exactMatch.matchReason,
+            evidence: matchResult.exactMatch.evidence,
+          };
+        }
+        this.logger.warn(
+          `Ignored exact identifier match (${matchResult.exactMatch.matchReason}) due to conflicting titles: "${proposedTitle}" vs "${existingTitle}"`,
+        );
       }
 
       if (matchResult.candidateItems && matchResult.candidateItems.length > 0) {

@@ -7,6 +7,7 @@ const MIME_TYPES: Record<ExportFormatType, string> = {
   bibtex: 'application/x-bibtex',
   ris: 'application/x-research-info-systems',
   'csl-json': 'application/json',
+  csl_json: 'application/json',
   csv: 'text/csv; charset=utf-8',
   markdown: 'text/markdown; charset=utf-8',
 };
@@ -15,6 +16,7 @@ const FILE_EXTENSIONS: Record<ExportFormatType, string> = {
   bibtex: 'bib',
   ris: 'ris',
   'csl-json': 'json',
+  csl_json: 'json',
   csv: 'csv',
   markdown: 'md',
 };

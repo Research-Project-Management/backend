@@ -105,6 +105,7 @@ export interface SavedSearchScopeOptions {
   searchSubcollections?: boolean;
   showOnlyTopLevel?: boolean;
   includeParentsAndChildren?: boolean;
+  includeParentAndChild?: boolean;
 }
 
 export interface SavedSearchCondition {

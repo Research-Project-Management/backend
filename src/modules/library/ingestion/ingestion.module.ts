@@ -67,6 +67,7 @@ import { DoiParser } from './parsers/doi.parser';
 import { BibtexParser } from './parsers/bibtex.parser';
 import { RisParser } from './parsers/ris.parser';
 import { CslParser } from './parsers/csl.parser';
+import { XmlLegacyFormatsParser } from './parsers/xml-legacy-formats.parser';
 import { NormalizationPolicy } from './policies/normalization.policy';
 import { ReconciliationPolicy } from './policies/reconciliation.policy';
 import { DuplicatePolicy } from './policies/duplicate.policy';
@@ -151,6 +152,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     BibtexParser,
     RisParser,
     CslParser,
+    XmlLegacyFormatsParser,
     { provide: NormalizationPolicy, useClass: NormalizationPolicy },
     { provide: ReconciliationPolicy, useClass: ReconciliationPolicy },
     { provide: DuplicatePolicy, useClass: DuplicatePolicy },

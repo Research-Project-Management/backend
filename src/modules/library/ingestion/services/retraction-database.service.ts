@@ -211,12 +211,16 @@ export class RetractionDatabaseService implements OnModuleInit {
       }
 
       if (record) {
-        // Handle negative cache: verified clean
+        // Handle negative cache: verified clean (enforce 14-day TTL)
         if (!record.isRetracted) {
+          const checkedAtMs = record.checkedAt ? new Date(record.checkedAt).getTime() : 0;
+          if (checkedAtMs > 0 && Date.now() - checkedAtMs > this.CLEAN_CACHE_TTL_MS) {
+            return null;
+          }
           if (cleanDoi) {
             this.setCleanDoiCache(
               cleanDoi,
-              Date.now() + this.CLEAN_CACHE_TTL_MS,
+              (checkedAtMs > 0 ? checkedAtMs : Date.now()) + this.CLEAN_CACHE_TTL_MS,
             );
           }
           return false;

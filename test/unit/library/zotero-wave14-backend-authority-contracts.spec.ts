@@ -19,10 +19,10 @@ describe('Wave 14 — Backend Authority Contracts (Permissions, Duplicates Hydra
       const mockQueryRepo = {
         count: jest
           .fn()
-          .mockResolvedValueOnce(15) // all
-          .mockResolvedValueOnce(4) // unfiled
-          .mockResolvedValueOnce(3) // starred
-          .mockResolvedValueOnce(2), // trash
+          .mockImplementation(async (_u: string, opts: { view?: string }) => opts?.view === 'unfiled' ? 4 : opts?.view === 'starred' ? 3 : opts?.view === 'trash' ? 2 : 15) // all/unfiled/starred/trash
+          // unfiled=4, starred=3, trash=2 handled by mockImplementation
+          // starred=3 handled by mockImplementation
+          , // trash=2 handled by mockImplementation
         countByItemType: jest.fn().mockResolvedValue({
           journalArticle: 10,
           book: 3,

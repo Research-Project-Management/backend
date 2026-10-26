@@ -1,5 +1,5 @@
 export type ExportFormatType =
-  'bibtex' | 'ris' | 'csl-json' | 'csv' | 'markdown';
+  'bibtex' | 'ris' | 'csl-json' | 'csl_json' | 'csv' | 'markdown';
 
 export interface BurnableAnnotation {
   pageIndex: number;

@@ -40,7 +40,7 @@ export class OpenAlexProvider implements MetadataProvider {
   private readonly BASE_URL = 'https://api.openalex.org/works';
 
   constructor(
-    private readonly httpClient: AcademicHttpClient,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -84,15 +84,15 @@ export class OpenAlexProvider implements MetadataProvider {
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
     const { query } = request;
+    const cleanArxiv = normalizeArxivId(query, { stripVersion: true });
+    if (cleanArxiv) {
+      return this.fetchByArxiv(cleanArxiv, signal);
+    }
+
     const cleanDoi = normalizeDoi(query);
 
     if (cleanDoi) {
       return this.fetchByDoi(cleanDoi, signal);
-    }
-
-    const cleanArxiv = normalizeArxivId(query, { stripVersion: true });
-    if (cleanArxiv) {
-      return this.fetchByArxiv(cleanArxiv, signal);
     }
 
     const cleanPmid = normalizePmid(query);
@@ -222,7 +222,7 @@ export class OpenAlexProvider implements MetadataProvider {
     const rawId = cleanArxiv.replace(/^arxiv:\s*/i, '').trim();
     const idWithoutVersion = rawId.replace(/v\d+$/i, '');
 
-    let url = `${this.BASE_URL}?filter=locations.landing_page_url:http://arxiv.org/abs/${idWithoutVersion}|https://arxiv.org/abs/${idWithoutVersion}|https://doi.org/10.48550/arxiv.${idWithoutVersion}&per-page=5&mailto=${encodeURIComponent(this.mailto)}`;
+    let url = `${this.BASE_URL}/https://doi.org/10.48550/arXiv.${encodeURIComponent(idWithoutVersion)}?mailto=${encodeURIComponent(this.mailto)}`;
     if (this.apiKey) {
       url += `&api_key=${encodeURIComponent(this.apiKey)}`;
     }
@@ -243,11 +243,9 @@ export class OpenAlexProvider implements MetadataProvider {
       );
     }
 
-    let json: { results?: Array<Record<string, unknown>> } | null = null;
+    let item: Record<string, unknown> | null = null;
     try {
-      json = (await response.json()) as {
-        results?: Array<Record<string, unknown>>;
-      };
+      item = (await response.json()) as Record<string, unknown>;
     } catch {
       throw new ProviderFetchError(
         `Failed to parse OpenAlex arXiv JSON for ${cleanArxiv}`,
@@ -258,16 +256,10 @@ export class OpenAlexProvider implements MetadataProvider {
       );
     }
 
-    const results = json?.results;
-    if (!Array.isArray(results) || results.length === 0) {
+    if (!item || typeof item !== 'object' || (typeof item.title !== 'string' && typeof item.display_name !== 'string')) {
       return null;
     }
 
-    const sorted = [...results].sort(
-      (a, b) =>
-        (Number(b.cited_by_count) || 0) - (Number(a.cited_by_count) || 0),
-    );
-    const item = sorted[0];
     const itemDoi = typeof item.doi === 'string' ? item.doi : '';
     const doi = normalizeDoi(itemDoi) || `10.48550/arXiv.${idWithoutVersion}`;
 
@@ -567,34 +559,9 @@ export class OpenAlexProvider implements MetadataProvider {
 
     const itemIdStr = typeof item.id === 'string' ? item.id : title;
 
-    const rawKeywords: string[] = [];
-
-    if (Array.isArray(item.keywords) && item.keywords.length > 0) {
-      for (const rawK of item.keywords.slice(0, 4)) {
-        const k = rawK as
-          | string
-          | { keyword?: string; display_name?: string; score?: number }
-          | null
-          | undefined;
-        const text =
-          typeof k === 'string' ? k : k?.keyword || k?.display_name || '';
-        const score =
-          typeof k === 'object' && typeof k?.score === 'number' ? k.score : 1.0;
-        if (text && score >= 0.5) {
-          rawKeywords.push(text);
-        }
-      }
-    } else {
-      const primaryTopic =
-        item.primary_topic && typeof item.primary_topic === 'object'
-          ? (item.primary_topic as { display_name?: unknown })
-          : undefined;
-      if (primaryTopic && typeof primaryTopic.display_name === 'string') {
-        rawKeywords.push(primaryTopic.display_name);
-      }
-    }
-
-    const keywords = normalizeAcademicTags(rawKeywords).slice(0, 4);
+    // OpenAlex keywords/concepts/primary_topic are machine-generated topical guesses,
+    // NOT author-provided or publisher-curated taxonomy tags (unlike Zotero's Crossref/arXiv/PubMed tags).
+    const keywords: string[] = [];
 
     const creators = authors.map((name, idx) =>
       parseCreatorString(name, idx, 'author'),

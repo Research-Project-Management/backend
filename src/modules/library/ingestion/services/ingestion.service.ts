@@ -327,6 +327,20 @@ export class IngestionService {
     const submissionRes = await this.submit(envelope, { enqueue: false });
     const runId = submissionRes.runId;
 
+    if (
+      submissionRes.deduplicated &&
+      !submissionRes.existingItemId &&
+      (submissionRes.status === IngestionStatus.RUNNING ||
+        submissionRes.status === IngestionStatus.PENDING)
+    ) {
+      return {
+        runId,
+        status: 'processing',
+        attachmentIds: [],
+        deduplicated: true,
+      };
+    }
+
     if (submissionRes.deduplicated && submissionRes.existingItemId) {
       const item = this.catalogGateway
         ? await this.catalogGateway
@@ -451,6 +465,50 @@ export class IngestionService {
           kind: 'RECORD',
           format: 'RIS',
           content: command.content || '',
+        };
+        break;
+      case 'csl_json':
+        payload = {
+          kind: 'RECORD',
+          format: 'CSL_JSON',
+          content: ('content' in command ? command.content : '') || '',
+        };
+        break;
+      case 'endnote_xml':
+        payload = {
+          kind: 'RECORD',
+          format: 'ENDNOTE_XML',
+          content: ('content' in command ? command.content : '') || '',
+        };
+        break;
+      case 'mods':
+        payload = {
+          kind: 'RECORD',
+          format: 'MODS',
+          content: ('content' in command ? command.content : '') || '',
+        };
+        break;
+      case 'zotero_rdf':
+      case 'rdf':
+        payload = {
+          kind: 'RECORD',
+          format: 'ZOTERO_RDF',
+          content: ('content' in command ? command.content : '') || '',
+        };
+        break;
+      case 'medline':
+      case 'nbib':
+        payload = {
+          kind: 'RECORD',
+          format: 'MEDLINE',
+          content: ('content' in command ? command.content : '') || '',
+        };
+        break;
+      case 'csv':
+        payload = {
+          kind: 'RECORD',
+          format: 'CSV',
+          content: ('content' in command ? command.content : '') || '',
         };
         break;
       case 'pdf':

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
 import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
@@ -9,7 +9,11 @@ import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata-ca
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
 import { IngestionSagaSession } from './ingestion-saga.orchestrator';
 import { IngestionStatus, Prisma } from '@prisma/client';
-import { mapPayloadToSource } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import {
+  buildEnrichmentPatch,
+  mapPayloadToSource,
+} from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import { CATALOG_FACADE, ICatalogFacade } from '@/modules/library/core';
 
 @Injectable()
 export class PipelineBatchExecutor {
@@ -21,6 +25,9 @@ export class PipelineBatchExecutor {
     private readonly match: MatchStage,
     private readonly commit: CommitStage,
     private readonly sideEffects: PipelineSideEffectsService,
+    @Optional()
+    @Inject(CATALOG_FACADE)
+    private readonly catalogGateway?: ICatalogFacade,
   ) {}
 
   async processRecordBatch(params: {
@@ -55,29 +62,145 @@ export class PipelineBatchExecutor {
       status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
       itemId?: string;
       error?: string;
+      candidateKey?: string;
     }> = [];
+
+    // Retry idempotency: inspect prior progress on this runId and track in-batch committed keys
+    const committedRecordKeys = new Map<
+      string,
+      { itemId: string; status: 'SUCCEEDED' | 'DUPLICATE' }
+    >();
+    try {
+      const existingRun = await this.repo.findRunById(scopeId, runId);
+      const existingLog = existingRun?.executionLog as
+        | {
+            items?: Array<{
+              title?: string;
+              status?: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
+              itemId?: string;
+              candidateKey?: string;
+            }>;
+          }
+        | null
+        | undefined;
+      if (Array.isArray(existingLog?.items)) {
+        for (const prev of existingLog.items) {
+          if (
+            prev?.itemId &&
+            (prev.status === 'SUCCEEDED' || prev.status === 'DUPLICATE')
+          ) {
+            const key =
+              prev.candidateKey || prev.title?.trim().toLowerCase() || '';
+            if (key) {
+              committedRecordKeys.set(key, {
+                itemId: prev.itemId,
+                status: prev.status,
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-critical prior run progress check
+    }
+
+    // Pre-index provider candidates in O(N) to avoid O(N^2) filtering across large batches
+    const byEvidenceRef = new Map<string, MetadataCandidate[]>();
+    const byDoi = new Map<string, MetadataCandidate[]>();
+    const byTitle = new Map<string, MetadataCandidate[]>();
+
+    for (const ec of enrichedCandidates) {
+      if (ec.sourceKind !== 'PROVIDER') continue;
+      if (ec.rawEvidenceRef) {
+        const list = byEvidenceRef.get(ec.rawEvidenceRef) || [];
+        list.push(ec);
+        byEvidenceRef.set(ec.rawEvidenceRef, list);
+      }
+      const ecDoi = ec.normalizedMetadata?.doi?.trim().toLowerCase();
+      if (ecDoi) {
+        const list = byDoi.get(ecDoi) || [];
+        list.push(ec);
+        byDoi.set(ecDoi, list);
+      }
+      const ecTitle = ec.normalizedMetadata?.title?.trim().toLowerCase();
+      if (ecTitle) {
+        const list = byTitle.get(ecTitle) || [];
+        list.push(ec);
+        byTitle.set(ecTitle, list);
+      }
+    }
+
+    try {
+      await this.repo.updateRunProgress(scopeId, runId, {
+        total,
+        processed: 0,
+        succeeded: 0,
+        duplicates: 0,
+        failed: 0,
+        percentage: 0,
+        status: 'RUNNING',
+        currentTitle:
+          normalizedCandidates[0]?.normalizedMetadata?.title ||
+          'Processing batch...',
+        items: [],
+      });
+    } catch {
+      // Non-critical initial progress checkpoint
+    }
 
     for (const initialCand of normalizedCandidates) {
       const itemTitle =
         initialCand.normalizedMetadata?.title ||
         initialCand.normalizedMetadata?.shortTitle ||
         'Untitled Record';
+      const candDoiKey = initialCand.normalizedMetadata?.doi
+        ?.trim()
+        .toLowerCase();
+      const candYearKey = initialCand.normalizedMetadata?.year
+        ? String(initialCand.normalizedMetadata.year)
+        : '';
+      const candidateKey = candDoiKey
+        ? `doi:${candDoiKey}`
+        : `title:${itemTitle.trim().toLowerCase()}|year:${candYearKey}`;
+
+      const alreadyCommitted =
+        committedRecordKeys.get(candidateKey) ||
+        committedRecordKeys.get(itemTitle.trim().toLowerCase());
+      if (alreadyCommitted) {
+        createdItemIds.push(alreadyCommitted.itemId);
+        duplicates++;
+        processed++;
+        progressItems.push({
+          title: itemTitle,
+          status: 'DUPLICATE',
+          itemId: alreadyCommitted.itemId,
+          candidateKey,
+        });
+        continue;
+      }
 
       try {
-        const matchingEnriched = enrichedCandidates.filter(
-          (ec) =>
-            ec.sourceKind === 'PROVIDER' &&
-            (ec.rawEvidenceRef === initialCand.candidateId ||
-              (ec.normalizedMetadata?.doi &&
-                initialCand.normalizedMetadata?.doi &&
-                ec.normalizedMetadata.doi.toLowerCase() ===
-                  initialCand.normalizedMetadata.doi.toLowerCase()) ||
-              (ec.normalizedMetadata?.title &&
-                initialCand.normalizedMetadata?.title &&
-                ec.normalizedMetadata.title.toLowerCase() ===
-                  initialCand.normalizedMetadata.title.toLowerCase())),
-        );
-        const candidatesForRecord = [initialCand, ...matchingEnriched];
+        const matchedSet = new Set<MetadataCandidate>();
+        const refMatches = byEvidenceRef.get(initialCand.candidateId);
+        if (refMatches) refMatches.forEach((m) => matchedSet.add(m));
+
+        const candDoi = initialCand.normalizedMetadata?.doi
+          ?.trim()
+          .toLowerCase();
+        if (candDoi) {
+          const doiMatches = byDoi.get(candDoi);
+          if (doiMatches) doiMatches.forEach((m) => matchedSet.add(m));
+        }
+
+        const candTitle = initialCand.normalizedMetadata?.title
+          ?.trim()
+          .toLowerCase();
+        if (candTitle) {
+          const titleMatches = byTitle.get(candTitle);
+          if (titleMatches) titleMatches.forEach((m) => matchedSet.add(m));
+        }
+
+        const candidatesForRecord = [initialCand, ...Array.from(matchedSet)];
         const itemDecision = await this.reconcile.execute(candidatesForRecord);
         const matchRes = await this.match.execute({
           scope: resolvedScope,
@@ -87,11 +210,50 @@ export class PipelineBatchExecutor {
         if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
           createdItemIds.push(matchRes.targetItemId);
           duplicates++;
+          committedRecordKeys.set(candidateKey, {
+            itemId: matchRes.targetItemId,
+            status: 'DUPLICATE',
+          });
           progressItems.push({
             title: itemTitle,
             status: 'DUPLICATE',
             itemId: matchRes.targetItemId,
+            candidateKey,
           });
+
+          if (this.catalogGateway) {
+            try {
+              const existing = await this.catalogGateway.getItem(
+                resolvedScope.userId,
+                matchRes.targetItemId,
+                resolvedScope.projectId,
+              );
+              const existingRec = existing as
+                | Record<string, unknown>
+                | null
+                | undefined;
+              const enrichPatch = buildEnrichmentPatch(
+                existingRec,
+                itemDecision.proposedItem,
+              );
+              if (Object.keys(enrichPatch).length > 0) {
+                await this.catalogGateway.updateItem(
+                  resolvedScope.userId,
+                  matchRes.targetItemId,
+                  enrichPatch,
+                  { projectId: resolvedScope.projectId },
+                );
+              }
+              await this.sideEffects.materializeNotes(
+                resolvedScope.userId,
+                resolvedScope.projectId,
+                matchRes.targetItemId,
+                itemDecision.proposedItem?.notes,
+              );
+            } catch {
+              // Non-critical additive enrichment on duplicate
+            }
+          }
 
           // Ensure duplicate items are assigned to target envelope collections
           if (envelope.collectionIds && envelope.collectionIds.length > 0) {
@@ -123,7 +285,9 @@ export class PipelineBatchExecutor {
               .catch(() => undefined);
           }
 
-          await this.sideEffects.scanRetraction(itemDecision.proposedItem);
+          await this.sideEffects.scanRetraction(itemDecision.proposedItem, {
+            localOnly: true,
+          });
 
           const created = await this.commit.execute({
             scopeId: resolvedScope.projectId || resolvedScope.userId,
@@ -138,10 +302,15 @@ export class PipelineBatchExecutor {
           if (created?.id) {
             createdItemIds.push(created.id);
             succeeded++;
+            committedRecordKeys.set(candidateKey, {
+              itemId: created.id,
+              status: 'SUCCEEDED',
+            });
             progressItems.push({
               title: itemTitle,
               status: 'SUCCEEDED',
               itemId: created.id,
+              candidateKey,
             });
 
             await this.sideEffects.materializeNotes(

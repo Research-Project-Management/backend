@@ -10,17 +10,21 @@ import {
   ItemDetail,
   CATALOG_FACADE,
   ICatalogFacade,
+  EXTRACTION_FACADE,
+  IExtractionFacade,
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
   normalizeIsbn,
 } from '@/modules/library/core';
+import { getFileContentPath } from '@/modules/storage/storage.port';
 import {
   METADATA_PORT,
   MetadataPort,
   QueryType,
 } from '@/modules/library/ingestion/types/metadata.types';
 import { buildReResolvePatch } from '@/modules/library/ingestion/domain/enrichment-patch.builder';
+import { UrlMetadataScraperService } from './url-metadata-scraper.service';
 
 export interface ReResolveMetadataOptions {
   doi?: string;
@@ -30,6 +34,7 @@ export interface ReResolveMetadataOptions {
   title?: string;
   forceRefresh?: boolean;
   aggressive?: boolean;
+  attachOaPdf?: boolean;
   fields?: string[];
   expectedVersion?: number;
 }
@@ -45,6 +50,8 @@ export interface ReResolveMetadataResult {
     canonicalId?: string;
   };
   updatedFields: string[];
+  oaPdfAttached?: boolean;
+  oaPdfUrl?: string;
   warnings?: string[];
 }
 
@@ -59,6 +66,11 @@ export class MetadataResolverService {
     @Optional()
     @Inject(METADATA_PORT)
     private readonly metadataService?: MetadataPort,
+    @Optional()
+    @Inject(EXTRACTION_FACADE)
+    private readonly extractionGateway?: IExtractionFacade,
+    @Optional()
+    private readonly urlScraper?: UrlMetadataScraperService,
   ) {}
 
   /**
@@ -174,33 +186,107 @@ export class MetadataResolverService {
       { fields: options?.fields },
     );
 
-    if (updatedFields.length === 0) {
+    let updated: ItemDetail | null = existingItem;
+    if (updatedFields.length > 0) {
+      const expectedVersion = options?.expectedVersion ?? existingItem.version;
+      updated = await this.catalogGateway.updateItem(
+        userId,
+        itemId,
+        updateData,
+        { expectedVersion, projectId },
+      );
+    }
+
+    let oaPdfAttached = false;
+    const candidateOaPdfUrl =
+      (typeof resolved.metadata.openAccessPdfUrl === 'string' &&
+        resolved.metadata.openAccessPdfUrl.trim()) ||
+      (typeof resolved.metadata.pdfUrl === 'string' &&
+        resolved.metadata.pdfUrl.trim()) ||
+      (typeof existingItem.openAccessPdfUrl === 'string' &&
+        existingItem.openAccessPdfUrl.trim()) ||
+      '';
+
+    const existingHasStoredPdf =
+      Boolean(existingItem.fileId) ||
+      (Array.isArray(existingItem.attachments) &&
+        existingItem.attachments.some((rawAtt: unknown) => {
+          const att = rawAtt as {
+            fileId?: string | null;
+            mimeType?: string | null;
+            attachmentType?: string | null;
+          } | null;
+          return (
+            Boolean(att?.fileId) &&
+            (att?.mimeType === 'application/pdf' ||
+              att?.attachmentType === 'primary_pdf')
+          );
+        }));
+
+    if (
+      options?.attachOaPdf !== false &&
+      candidateOaPdfUrl &&
+      /^https?:\/\//i.test(candidateOaPdfUrl) &&
+      !existingHasStoredPdf &&
+      this.urlScraper &&
+      this.extractionGateway?.createAttachment
+    ) {
+      try {
+        const scraped = await this.urlScraper.scrape(candidateOaPdfUrl, {
+          scopeId: projectId || userId,
+          userId,
+        });
+        if (scraped?.isPdf && scraped.fileId) {
+          await this.extractionGateway.createAttachment(
+            {
+              itemId,
+              fileId: scraped.fileId,
+              filename:
+                scraped.filename ||
+                (existingItem.title
+                  ? `${existingItem.title.slice(0, 60).replace(/[<>:"/\\|?*]/g, '')}.pdf`
+                  : 'open-access.pdf'),
+              url: getFileContentPath(scraped.fileId),
+              mimeType: 'application/pdf',
+              size: scraped.fileBuffer?.length || 0,
+              userId,
+            },
+            projectId,
+          );
+          oaPdfAttached = true;
+          updated =
+            (await this.catalogGateway
+              .getItem(userId, itemId, projectId)
+              .catch(() => updated)) || updated;
+        }
+      } catch (oaErr: unknown) {
+        this.logger.debug(
+          `[RE_RESOLVE_OA_PDF] Could not download/attach OA PDF from ${candidateOaPdfUrl}: ${oaErr instanceof Error ? oaErr.message : String(oaErr)}`,
+        );
+      }
+    }
+
+    if (updatedFields.length === 0 && !oaPdfAttached) {
       return {
         success: true,
         message:
           'Item metadata is already up to date with authoritative registry.',
         itemId,
-        item: existingItem,
+        item: updated || existingItem,
         resolvedFrom: {
           query,
           queryType: resolved.queryType,
           canonicalId: resolved.canonicalId,
         },
         updatedFields: [],
+        oaPdfAttached: false,
+        oaPdfUrl: candidateOaPdfUrl || undefined,
       };
     }
 
-    const expectedVersion = options?.expectedVersion ?? existingItem.version;
-    const updated = await this.catalogGateway.updateItem(
-      userId,
-      itemId,
-      updateData,
-      { expectedVersion, projectId },
-    );
-
     return {
       success: true,
-      message: `Successfully re-resolved metadata from ${resolved.canonicalId || query}. Updated ${updatedFields.length} field(s): ${updatedFields.join(', ')}.`,
+      message: `Successfully re-resolved metadata from ${resolved.canonicalId || query}. Updated ${updatedFields.length} field(s)${oaPdfAttached ? ' and attached Open-Access PDF' : ''}.`,
       itemId,
       item: updated || existingItem,
       resolvedFrom: {
@@ -209,6 +295,8 @@ export class MetadataResolverService {
         canonicalId: resolved.canonicalId,
       },
       updatedFields,
+      oaPdfAttached,
+      oaPdfUrl: candidateOaPdfUrl || undefined,
     };
   }
 }

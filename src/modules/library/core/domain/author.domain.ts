@@ -1,8 +1,10 @@
 import {
   CreatorType,
   CreatorInput,
+  CreatorCreditInput,
   ParsedCreator,
 } from '@/modules/library/core/types/bibliographic.types';
+import { resolveCanonicalCreatorRole } from './zotero-field-harmonizer.domain';
 import {
   stripXmlAndHtmlTags,
   decodeHtmlEntities,
@@ -154,11 +156,19 @@ export function isNoiseAuthorName(raw?: string | null): boolean {
     return true;
   }
 
-  // Country and location tokens mistakenly parsed as author names
+  // Country, province, and address/street tokens mistakenly parsed as author names
   if (
-    /^(?:usa|uk|u\.s\.a\.?|japan|germany|france|china|russia|canada|australia|italy|spain|brazil|india)$/i.test(
-      lower,
+    /^(?:usa|uk|u\.s\.a\.?|japan|germany|france|china|russia|canada|australia|italy|spain|brazil|india|ontario|quebec|california|toronto|montreal|vancouver|london|paris|berlin|tokyo|beijing)$/i.test(
+      lower.replace(/[.,;]+$/, ''),
     )
+  ) {
+    return true;
+  }
+  if (
+    /\b(?:road|street|avenue|boulevard|blvd|lane|drive|building|bldg|room|rm\.?|floor|suite|box|p\.?o\.?\s*box|campus|parkway|highway)\b/i.test(
+      lower,
+    ) ||
+    /\b[A-Z]\d[A-Z]\s*\d[A-Z]\d\b/i.test(trimmed)
   ) {
     return true;
   }
@@ -242,17 +252,17 @@ export function cleanAuthorName(raw?: string | null): string {
   }
 
   // Strip trailing footnote markers, superscripts, and affiliation numbers:
-  // e.g. "1,2*", "*", "1", "†", "‡", "§", "1*", "*1", "∗", "⋆"
+  // e.g. "1,2*", "*", "+", "1", "†", "‡", "§", "1*", "*1", "∗", "⋆"
   cleaned = cleaned.replace(
-    /(?:[\s,]*[*∗⋆†‡§¶^#~]+[\s,]*\d*|[\s,]*\d+[*∗⋆†‡§¶^#~]*)+$/u,
+    /(?:[\s,]*[+*∗⋆†‡§¶^#~]+[\s,]*\d*|[\s,]*\d+[+*∗⋆†‡§¶^#~]*)+$/u,
     '',
   );
 
   // Strip leading footnote markers if present
-  cleaned = cleaned.replace(/^[*∗⋆†‡§¶^#~]+\s*/u, '');
+  cleaned = cleaned.replace(/^[+*∗⋆†‡§¶^#~]+\s*/u, '');
 
   // Strip leftover footnote characters if any remain attached to words
-  cleaned = cleaned.replace(/[*∗⋆†‡§¶^#~]+/gu, ' ');
+  cleaned = cleaned.replace(/[+*∗⋆†‡§¶^#~]+/gu, ' ');
 
   // Normalize excessive internal whitespace
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
@@ -693,3 +703,5 @@ export function splitConcatenatedAuthors(raw: string, minTokens = 6): string[] {
   }
   return names.length >= 2 ? names : [input];
 }
+
+export { extractCreatorString, mergeCanonicalCreators } from './creator-normalizer.domain';

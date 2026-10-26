@@ -64,6 +64,7 @@ export class IngestionQueueConsumer
 
     const { runId, projectId, envelope } = job.data;
     const startTime = Date.now();
+    const isFinalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
 
     this.logger.log(
       `[BULLMQ_START] Processing ingestion job ${job.id} (run: ${runId}) for project ${projectId} (attempt: ${job.attemptsMade + 1}/${job.opts.attempts || 1})`,
@@ -80,7 +81,12 @@ export class IngestionQueueConsumer
           );
         });
 
-      await this.pipeline.executePipeline(runId, projectId, envelope);
+      await this.pipeline.executePipeline(
+        runId,
+        projectId,
+        { ...envelope, isFinalAttempt },
+        { isFinalAttempt },
+      );
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.log(
@@ -89,27 +95,36 @@ export class IngestionQueueConsumer
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      const isLastAttempt = job.attemptsMade + 1 >= (job.opts.attempts || 1);
+      const isLastAttempt = isFinalAttempt;
 
       this.logger.error(
         `[BULLMQ_ERROR] Ingestion run ${runId} failed after ${elapsed}s (isLast: ${isLastAttempt}): ${msg}`,
       );
 
-      if (isLastAttempt) {
-        await this.repo
-          .updateRunStatus(projectId, runId, IngestionStatus.FAILED_FINAL, {
-            lastError: msg || 'Ingestion pipeline execution failed permanently',
-          })
-          .catch((updateErr: unknown) => {
-            const updateMsg =
-              updateErr instanceof Error
-                ? updateErr.message
-                : String(updateErr);
-            this.logger.error(
-              `Failed to update run status for failed run ${runId}: ${updateMsg}`,
-            );
-          });
-      }
+      await this.repo
+        .updateRunStatus(
+          projectId,
+          runId,
+          isLastAttempt
+            ? IngestionStatus.FAILED_FINAL
+            : IngestionStatus.FAILED_RETRYABLE,
+          {
+            lastError:
+              msg ||
+              (isLastAttempt
+                ? 'Ingestion pipeline execution failed permanently'
+                : 'Ingestion pipeline execution failed (retryable)'),
+          },
+        )
+        .catch((updateErr: unknown) => {
+          const updateMsg =
+            updateErr instanceof Error
+              ? updateErr.message
+              : String(updateErr);
+          this.logger.error(
+            `Failed to update run status for failed run ${runId}: ${updateMsg}`,
+          );
+        });
 
       throw err; // Allow BullMQ to handle retry backoff
     }

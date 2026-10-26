@@ -124,6 +124,15 @@ export type IngestionCommand =
       idempotencyKey?: string;
     }
   | {
+      source: 'csl_json';
+      projectId?: string;
+      scopeId?: string;
+      content: string;
+      userId?: string;
+      collectionId?: string;
+      idempotencyKey?: string;
+    }
+  | {
       source: 'pdf';
       projectId?: string;
       scopeId?: string;

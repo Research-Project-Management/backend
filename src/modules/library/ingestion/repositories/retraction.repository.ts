@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, Item } from '@prisma/client';
 import { PrismaService } from '@/core';
 import { isUUID } from 'class-validator';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  LIBRARY_EVENT_TYPES,
+} from '@/modules/library/core';
 import {
   RetractionDetails,
   RetractionNature,
@@ -183,8 +186,12 @@ export class RetractionRepository {
       where: { id: itemId },
       select: { metadata: true, userId: true, projectId: true },
     });
+    const prevMeta = parseItemMetadata(existing?.metadata);
+    const statusChanged =
+      Boolean(prevMeta.isRetracted) !== Boolean(isRetracted) ||
+      (prevMeta.retractionNature ?? null) !== (nature || null);
     const metadataObj: ItemRetractionMetadata = {
-      ...parseItemMetadata(existing?.metadata),
+      ...prevMeta,
       isRetracted,
       retractionNature: nature || null,
       retractionDetails: details || null,
@@ -238,6 +245,19 @@ export class RetractionRepository {
             data: updated as unknown as Prisma.InputJsonValue,
           },
         });
+        if (statusChanged) {
+          await this.prisma.outboxEvent?.create({
+            data: {
+              userId: effectiveUserId,
+              projectId: effectiveProjectId ?? null,
+              aggregateId: itemId,
+              eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+              payload: updated as unknown as Prisma.InputJsonValue,
+              status: 'PENDING',
+              retryCount: 0,
+            },
+          });
+        }
       } catch {
         // Non-critical changelog write in standalone repository context
       }
@@ -330,8 +350,12 @@ export class RetractionRepository {
       where: {
         deletedAt: null,
         ...RETRACTION_IDENTIFIER_FILTER,
+        OR: [
+          { retractionCheckedAt: null },
+          { retractionCheckedAt: { lt: staleBefore } },
+        ],
       },
-      orderBy: { updatedAt: 'asc' },
+      orderBy: { retractionCheckedAt: { sort: 'asc', nulls: 'first' } },
       select: {
         id: true,
         userId: true,
@@ -339,8 +363,9 @@ export class RetractionRepository {
         title: true,
         doi: true,
         metadata: true,
+        retractionCheckedAt: true,
       },
-      take: limit * 2,
+      take: limit,
     });
 
     return items
@@ -350,6 +375,9 @@ export class RetractionRepository {
           pmid?: string | null;
           isbn?: string | null;
         };
+        const checkedAt =
+          item.retractionCheckedAt ??
+          (meta.retractionCheckedAt ? new Date(meta.retractionCheckedAt) : null);
         return {
           id: item.id,
           userId: item.userId,
@@ -360,9 +388,7 @@ export class RetractionRepository {
           isbn: topItem.isbn ?? meta.isbn ?? null,
           isRetracted: Boolean(meta.isRetracted),
           retractionNature: meta.retractionNature ?? null,
-          retractionCheckedAt: meta.retractionCheckedAt
-            ? new Date(meta.retractionCheckedAt)
-            : null,
+          retractionCheckedAt: checkedAt,
         };
       })
       .filter((item) => Boolean(item.doi?.trim() || item.pmid?.trim()))

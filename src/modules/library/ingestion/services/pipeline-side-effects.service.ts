@@ -15,6 +15,7 @@ import { IngestionStatus, Prisma } from '@prisma/client';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/submission.types';
 import { ReconciliationDecision } from '@/modules/library/ingestion/types/metadata-candidate.types';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.aggregate';
+import { UrlMetadataScraperService } from './url-metadata-scraper.service';
 
 @Injectable()
 export class PipelineSideEffectsService {
@@ -30,6 +31,8 @@ export class PipelineSideEffectsService {
     private readonly extractionGateway?: IExtractionFacade,
     @Optional()
     private readonly retractionScanner?: RetractionScannerProvider,
+    @Optional()
+    private readonly urlScraper?: UrlMetadataScraperService,
   ) {}
 
   async assignItemToCollection(
@@ -53,7 +56,10 @@ export class PipelineSideEffectsService {
     }
   }
 
-  async scanRetraction(proposedItem?: Record<string, unknown>): Promise<void> {
+  async scanRetraction(
+    proposedItem?: Record<string, unknown>,
+    options?: { localOnly?: boolean },
+  ): Promise<void> {
     if (!this.retractionScanner || !proposedItem) return;
     try {
       const doi =
@@ -61,7 +67,7 @@ export class PipelineSideEffectsService {
       const pmid =
         typeof proposedItem.pmid === 'string' ? proposedItem.pmid : undefined;
 
-      const res = await this.retractionScanner.lookup(doi, pmid);
+      const res = await this.retractionScanner.lookup(doi, pmid, options);
 
       if (res.status === 'retracted' && res.details) {
         proposedItem.isRetracted = true;
@@ -203,6 +209,130 @@ export class PipelineSideEffectsService {
         `[ATTACHMENT] Failed to attach file ${fileId} to item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  /**
+   * Automatically downloads & attaches Open-Access PDFs and captures Web Snapshots
+   * during URL or Identifier ingestion (Zotero 7 Connector parity).
+   */
+  async autoCaptureWebAssets(params: {
+    userId: string;
+    projectId?: string;
+    itemId: string;
+    payloadKind: string;
+    sourceUrl?: string;
+    proposedItem?: Record<string, unknown>;
+    existingFileId?: string;
+    overrides?: Record<string, unknown>;
+  }): Promise<{ attachedPdfFileId?: string; capturedSnapshot: boolean }> {
+    const {
+      userId,
+      projectId,
+      itemId,
+      payloadKind,
+      sourceUrl,
+      proposedItem,
+      existingFileId,
+      overrides,
+    } = params;
+
+    let attachedPdfFileId = existingFileId;
+    let capturedSnapshot = false;
+
+    const shouldAttachOaPdf = overrides?.attachOaPdf !== false;
+    const shouldSaveSnapshot = overrides?.saveSnapshot !== false;
+
+    // 1. Auto Open-Access PDF Download & Stored Attachment
+    if (shouldAttachOaPdf && !attachedPdfFileId && this.urlScraper) {
+      const candidateOaUrl =
+        (typeof proposedItem?.openAccessPdfUrl === 'string' &&
+          proposedItem.openAccessPdfUrl.trim()) ||
+        (typeof proposedItem?.pdfUrl === 'string' &&
+          proposedItem.pdfUrl.trim()) ||
+        (typeof proposedItem?.fileUrl === 'string' &&
+          /^https?:\/\//i.test(proposedItem.fileUrl.trim()) &&
+          proposedItem.fileUrl.trim()) ||
+        '';
+
+      if (candidateOaUrl && /^https?:\/\//i.test(candidateOaUrl)) {
+        try {
+          const scraped = await this.urlScraper.scrape(candidateOaUrl, {
+            scopeId: projectId || userId,
+            userId,
+          });
+          if (scraped?.isPdf && scraped.fileId) {
+            attachedPdfFileId = scraped.fileId;
+            await this.attachFile(
+              userId,
+              projectId,
+              itemId,
+              scraped.fileId,
+              scraped.filename || 'document.pdf',
+              scraped.fileBuffer?.length || 0,
+              proposedItem,
+            );
+            this.logger.log(
+              `[AUTO_OA_PDF] Downloaded & attached Open Access PDF (${scraped.fileId}) from ${candidateOaUrl} to item ${itemId}`,
+            );
+          }
+        } catch (oaErr: unknown) {
+          this.logger.debug(
+            `[AUTO_OA_PDF] Non-fatal error downloading OA PDF from ${candidateOaUrl}: ${oaErr instanceof Error ? oaErr.message : String(oaErr)}`,
+          );
+        }
+      }
+    }
+
+    // 2. Auto Web Snapshot Capture (.html)
+    if (shouldSaveSnapshot && this.extractionGateway?.captureWebSnapshot) {
+      const itemType =
+        typeof proposedItem?.itemType === 'string'
+          ? proposedItem.itemType
+          : '';
+      const isWebOrientedType = [
+        'webpage',
+        'blogPost',
+        'forumPost',
+        'newspaperArticle',
+        'magazineArticle',
+        'encyclopediaArticle',
+      ].includes(itemType);
+
+      const snapshotTargetUrl =
+        (typeof sourceUrl === 'string' &&
+          /^https?:\/\//i.test(sourceUrl.trim()) &&
+          sourceUrl.trim()) ||
+        (typeof proposedItem?.url === 'string' &&
+          /^https?:\/\//i.test(proposedItem.url.trim()) &&
+          proposedItem.url.trim()) ||
+        '';
+
+      const isPdfDirectUrl = /\.pdf(?:$|\?|#)/i.test(snapshotTargetUrl);
+
+      if (
+        snapshotTargetUrl &&
+        !isPdfDirectUrl &&
+        (payloadKind === 'URL' || (isWebOrientedType && !attachedPdfFileId))
+      ) {
+        try {
+          await this.extractionGateway.captureWebSnapshot(
+            snapshotTargetUrl,
+            itemId,
+            userId,
+          );
+          capturedSnapshot = true;
+          this.logger.log(
+            `[AUTO_SNAPSHOT] Captured Web Snapshot from ${snapshotTargetUrl} for item ${itemId}`,
+          );
+        } catch (snapErr: unknown) {
+          this.logger.debug(
+            `[AUTO_SNAPSHOT] Non-fatal snapshot capture skipped for ${snapshotTargetUrl}: ${snapErr instanceof Error ? snapErr.message : String(snapErr)}`,
+          );
+        }
+      }
+    }
+
+    return { attachedPdfFileId, capturedSnapshot };
   }
 
   async materializeNotes(

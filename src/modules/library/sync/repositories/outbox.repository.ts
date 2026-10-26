@@ -64,43 +64,44 @@ export class OutboxRepository {
       Date.now() - failedRetentionDays * 86400 * 1000,
     );
 
-    const oldPublished = await this.prisma.outboxEvent.findMany({
-      where: {
-        status: OutboxStatus.PUBLISHED,
-        updatedAt: { lt: publishedCutoff },
-      },
-      select: { id: true },
-      orderBy: { updatedAt: 'asc' },
-      take: batchLimit,
-    });
+    const [oldPublished, oldFailed] = await Promise.all([
+      this.prisma.outboxEvent.findMany({
+        where: {
+          status: OutboxStatus.PUBLISHED,
+          updatedAt: { lt: publishedCutoff },
+        },
+        select: { id: true },
+        orderBy: { updatedAt: 'asc' },
+        take: batchLimit,
+      }),
+      this.prisma.outboxEvent.findMany({
+        where: {
+          status: OutboxStatus.FAILED,
+          updatedAt: { lt: failedCutoff },
+        },
+        select: { id: true },
+        orderBy: { updatedAt: 'asc' },
+        take: batchLimit,
+      }),
+    ]);
 
-    let purgedPublished = 0;
-    if (oldPublished.length > 0) {
-      const res = await this.prisma.outboxEvent.deleteMany({
-        where: { id: { in: oldPublished.map((e) => e.id) } },
-      });
-      purgedPublished = res.count;
-    }
+    const [publishedDeleteRes, failedDeleteRes] = await Promise.all([
+      oldPublished.length > 0
+        ? this.prisma.outboxEvent.deleteMany({
+            where: { id: { in: oldPublished.map((e) => e.id) } },
+          })
+        : Promise.resolve({ count: 0 }),
+      oldFailed.length > 0
+        ? this.prisma.outboxEvent.deleteMany({
+            where: { id: { in: oldFailed.map((e) => e.id) } },
+          })
+        : Promise.resolve({ count: 0 }),
+    ]);
 
-    const oldFailed = await this.prisma.outboxEvent.findMany({
-      where: {
-        status: OutboxStatus.FAILED,
-        updatedAt: { lt: failedCutoff },
-      },
-      select: { id: true },
-      orderBy: { updatedAt: 'asc' },
-      take: batchLimit,
-    });
-
-    let purgedFailed = 0;
-    if (oldFailed.length > 0) {
-      const res = await this.prisma.outboxEvent.deleteMany({
-        where: { id: { in: oldFailed.map((e) => e.id) } },
-      });
-      purgedFailed = res.count;
-    }
-
-    return { purgedPublished, purgedFailed };
+    return {
+      purgedPublished: publishedDeleteRes.count,
+      purgedFailed: failedDeleteRes.count,
+    };
   }
 
   async findById(id: string): Promise<OutboxEvent | null> {

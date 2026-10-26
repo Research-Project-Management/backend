@@ -131,8 +131,9 @@ export class AnnotationsController {
       y: body.y,
       x: body.x,
       color: body.color,
-      quoteText: body.quoteText,
+      quoteText: body.quoteText ?? body.text,
       comment: body.comment,
+      tags: body.tags,
       rectCoords: body.rectCoords,
       authorId: userId,
     };
@@ -179,7 +180,7 @@ export class AnnotationsController {
       );
     }
 
-    const { expectedVersion: _, ...updateData } = body;
+    const { expectedVersion: _, text: __, rects: ___, boundingRect: ____, ...updateData } = body;
 
     if (projectId !== undefined) {
       return this.annotationsService.updateAnnotation(

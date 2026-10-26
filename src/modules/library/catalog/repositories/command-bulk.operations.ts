@@ -108,13 +108,29 @@ export class CommandBulkOperations {
         },
       });
 
-      await client.note?.updateMany?.({
-        where: {
-          itemId: { in: succeededIds },
-          deletedAt: null,
-        },
-        data: { deletedAt },
-      });
+      await Promise.all([
+        client.note?.updateMany?.({
+          where: {
+            itemId: { in: succeededIds },
+            deletedAt: null,
+          },
+          data: { deletedAt },
+        }),
+        client.attachment?.updateMany?.({
+          where: {
+            itemId: { in: succeededIds },
+            deletedAt: null,
+          },
+          data: { deletedAt },
+        }),
+        client.annotation?.updateMany?.({
+          where: {
+            attachment: { itemId: { in: succeededIds } },
+            deletedAt: null,
+          },
+          data: { deletedAt },
+        }),
+      ]);
     }
 
     return { succeededIds, failedIds };
@@ -149,12 +165,12 @@ export class CommandBulkOperations {
         deletedAt: { not: null },
         ...scopeFilter,
       },
-      select: { id: true, version: true, projectId: true, metadata: true },
+      select: { id: true, version: true, projectId: true, metadata: true, deletedAt: true },
     });
 
     const restorableMap = new Map<
       string,
-      { id: string; version: number; projectId: string | null }
+      { id: string; version: number; projectId: string | null; deletedAt: Date | null }
     >();
     for (const item of existingItems) {
       const metadataObj =
@@ -173,6 +189,7 @@ export class CommandBulkOperations {
         id: item.id,
         version: item.version + 1,
         projectId: item.projectId,
+        deletedAt: item.deletedAt,
       });
     }
 
@@ -196,50 +213,59 @@ export class CommandBulkOperations {
         },
       });
 
-      // Cascade un-delete child notes, attachments, annotations
-      await client.note?.updateMany?.({
-        where: { itemId: { in: succeededIds }, deletedAt: { not: null } },
-        data: { deletedAt: null },
-      });
-      await client.attachment.updateMany({
-        where: { itemId: { in: succeededIds }, deletedAt: { not: null } },
-        data: { deletedAt: null },
-      });
-      const bulkAtts = await client.attachment.findMany({
-        where: { itemId: { in: succeededIds } },
-        select: { id: true },
-      });
-      if (bulkAtts.length > 0) {
-        await client.annotation.updateMany({
-          where: {
-            attachmentId: { in: bulkAtts.map((a) => a.id) },
-            deletedAt: { not: null },
-          },
-          data: { deletedAt: null },
-        });
-      }
+      // Cascade un-delete child notes, attachments, annotations per item cutoff
+      await Promise.all(
+        succeededIds.flatMap((id) => {
+          const itemDeletedAt = restorableMap.get(id)?.deletedAt;
+          const cascadeCutoff = itemDeletedAt
+            ? new Date(itemDeletedAt.getTime() - 2000)
+            : undefined;
+          const deletedFilter = cascadeCutoff
+            ? { gte: cascadeCutoff }
+            : { not: null };
+          return [
+            client.note?.updateMany?.({
+              where: { itemId: id, deletedAt: deletedFilter },
+              data: { deletedAt: null },
+            }),
+            client.attachment?.updateMany?.({
+              where: { itemId: id, deletedAt: deletedFilter },
+              data: { deletedAt: null },
+            }),
+            client.annotation?.updateMany?.({
+              where: {
+                attachment: { itemId: id },
+                deletedAt: deletedFilter,
+              },
+              data: { deletedAt: null },
+            }),
+          ];
+        }),
+      );
 
-      const noteGroups = await client.note.groupBy({
-        by: ['itemId'],
-        where: {
-          itemId: { in: succeededIds },
-          deletedAt: null,
-        },
-        _count: { id: true },
-      });
+      const [noteGroups, attachmentGroups] = await Promise.all([
+        client.note.groupBy({
+          by: ['itemId'],
+          where: {
+            itemId: { in: succeededIds },
+            deletedAt: null,
+          },
+          _count: { id: true },
+        }),
+        client.attachment.groupBy({
+          by: ['itemId'],
+          where: {
+            itemId: { in: succeededIds },
+            deletedAt: null,
+          },
+          _count: { id: true },
+        }),
+      ]);
       const noteCountMap = new Map<string, number>();
       for (const ng of noteGroups) {
         if (ng.itemId) noteCountMap.set(ng.itemId, ng._count.id);
       }
 
-      const attachmentGroups = await client.attachment.groupBy({
-        by: ['itemId'],
-        where: {
-          itemId: { in: succeededIds },
-          deletedAt: null,
-        },
-        _count: { id: true },
-      });
       const attachmentCountMap = new Map<string, number>();
       for (const ag of attachmentGroups) {
         if (ag.itemId) attachmentCountMap.set(ag.itemId, ag._count.id);
@@ -354,12 +380,15 @@ export class CommandBulkOperations {
     purgedNotes: number;
     purgedCollections: number;
     storagePaths: string[];
+    expiredItems: Array<{ id: string; userId: string; projectId: string | null }>;
+    expiredNotes: Array<{ id: string; userId: string; projectId: string | null }>;
+    expiredCollections: Array<{ id: string; userId: string; projectId: string | null }>;
   }> {
     const cutoff = new Date(Date.now() - retentionDays * 86400 * 1000);
 
     const expiredItems = await client.item.findMany({
       where: { deletedAt: { lt: cutoff } },
-      select: { id: true },
+      select: { id: true, userId: true, projectId: true },
       orderBy: { deletedAt: 'asc' },
       take: limit,
     });
@@ -380,7 +409,7 @@ export class CommandBulkOperations {
 
     const expiredNotes = await client.note.findMany({
       where: { deletedAt: { lt: cutoff } },
-      select: { id: true },
+      select: { id: true, userId: true, projectId: true },
       orderBy: { deletedAt: 'asc' },
       take: limit,
     });
@@ -394,7 +423,7 @@ export class CommandBulkOperations {
 
     const expiredCollections = await client.collection.findMany({
       where: { deletedAt: { lt: cutoff } },
-      select: { id: true },
+      select: { id: true, userId: true, projectId: true },
       orderBy: { deletedAt: 'asc' },
       take: limit,
     });
@@ -411,6 +440,9 @@ export class CommandBulkOperations {
       purgedNotes,
       purgedCollections,
       storagePaths,
+      expiredItems,
+      expiredNotes,
+      expiredCollections,
     };
   }
 

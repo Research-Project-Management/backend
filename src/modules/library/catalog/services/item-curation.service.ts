@@ -16,6 +16,7 @@ import {
 import {
   LIBRARY_EVENT_TYPES,
   buildItemCreatedOutboxPayload,
+  mergeCanonicalCreators,
 } from '@/modules/library/core';
 import { TransactionService } from '@/modules/library/sync';
 import { ItemsMapper } from '@/modules/library/catalog/domain/items.mapper';
@@ -508,24 +509,10 @@ export function buildImportItemPayload(
           tags: note.tags || [],
         }),
       ) || [],
-    creators: source.contributors?.map(
-      (contributor: {
-        creatorType?: string;
-        firstName?: string | null;
-        lastName?: string | null;
-        fullName?: string;
-        orderIndex?: number;
-      }) => ({
-        creatorType: contributor.creatorType || 'author',
-        firstName: contributor.firstName || '',
-        lastName: contributor.lastName || '',
-        fullName: contributor.fullName || '',
-        name:
-          contributor.fullName ||
-          `${contributor.firstName || ''} ${contributor.lastName || ''}`.trim(),
-        orderIndex: contributor.orderIndex ?? 0,
-      }),
-    ),
+    creators: mergeCanonicalCreators({
+      contributors: source.contributors,
+      itemType: source.itemType || 'journalArticle',
+    }),
     identifiers: source.identifiers?.map(
       (identifier: { type: string; value: string; canonicalUri?: string }) => ({
         type: identifier.type,

@@ -448,8 +448,8 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
         : '') ||
       (isArxiv ? 'arXiv' : '') ||
       '';
+    it.publicationTitle = it.repository || '';
     delete it.publisher;
-    delete it.publicationTitle;
     delete it.journal;
   } else if (it.itemType === 'thesis') {
     it.thesisType =
@@ -459,9 +459,9 @@ export function harmonizeDomainMetadataAndIdentifiersPartial(
       '';
   } else if (it.itemType === 'patent') {
     it.issuingAuthority =
-      it.issuingAuthority || it.country || it.authority || '';
+      it.issuingAuthority || it.authority || it.country || '';
     it.authority = it.authority || it.issuingAuthority || '';
-    it.country = it.country || it.issuingAuthority || '';
+    it.country = it.country || '';
     it.patentNumber = it.patentNumber || it.number || '';
     it.issueDate = it.issueDate || it.date || it.publicationDate || '';
     it.priorityDate = it.priorityDate || it.originalDate || '';

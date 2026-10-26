@@ -10,9 +10,12 @@ export type RecordFormat =
   | 'BIBTEX' // BibTeX (.bib)
   | 'RIS' // Research Information Systems (.ris)
   | 'CSL_JSON' // Citation Style Language JSON (.json)
-  | 'ENDNOTE_XML' // EndNote XML (.xml) — via Zotero Translation Server
-  | 'MODS' // Metadata Object Description Schema (.xml) — via Zotero Translation Server
-  | 'REFER'; // BibIX / Refer format (.refer) — via Zotero Translation Server
+  | 'ENDNOTE_XML' // EndNote XML (.xml)
+  | 'MODS' // Metadata Object Description Schema (.xml, .mods)
+  | 'ZOTERO_RDF' // Zotero / Bibliontology RDF (.rdf)
+  | 'MEDLINE' // PubMed / MEDLINE Tagged (.nbib, .txt)
+  | 'CSV' // Bibliographic CSV (.csv)
+  | 'REFER'; // BibIX / Refer format (.refer)
 
 export interface IdentifierSubmissionInput {
   kind: 'IDENTIFIER';
@@ -70,6 +73,7 @@ export interface IngestionSubmissionEnvelope {
   tagIds?: string[];
   overrides?: Record<string, unknown>;
   contractVersion?: string;
+  isFinalAttempt?: boolean;
 }
 
 export interface IngestionAcceptedResult {

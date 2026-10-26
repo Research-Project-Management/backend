@@ -80,6 +80,7 @@ model CapturePreview {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([tokenHash])
+  @@index([userId, expiresAt])
   @@index([expiresAt])
   @@map("capture_previews")
 }

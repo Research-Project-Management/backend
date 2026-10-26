@@ -33,21 +33,55 @@ export class TagsService {
     itemId?: ItemId | string,
   ): Promise<void> {
     if (this.cache) {
-      await this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(userId));
-      await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId));
+      await Promise.all([
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(userId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(userId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
+        this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(userId)),
+      ]);
       if (itemId) {
-        await this.cache.del(LIBRARY_REDIS_KEYS.item(itemId));
-        await this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId));
-        await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId));
+        await Promise.all([
+          this.cache.del(LIBRARY_REDIS_KEYS.item(itemId)),
+          this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(itemId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemPattern(itemId)),
+        ]);
       }
       const validProjectId = normalizeProjectScopeId(projectId);
       if (validProjectId) {
-        await this.cache.delPattern(
-          LIBRARY_REDIS_KEYS.tagsPattern(`proj:${validProjectId}`),
-        );
-        await this.cache.delPattern(
-          LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
-        );
+        await Promise.all([
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.tagsPattern(`proj:${validProjectId}`),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.tagsPattern(validProjectId),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.itemsPattern(validProjectId),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.countsPattern(validProjectId),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.countsPattern(`proj:${validProjectId}`),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.searchFacetsPattern(validProjectId),
+          ),
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.searchItemsPattern(validProjectId),
+          ),
+          this.cache.del(
+            LIBRARY_REDIS_KEYS.searchVersion(validProjectId),
+          ),
+          this.cache.del(
+            LIBRARY_REDIS_KEYS.searchVersion(`proj:${validProjectId}`),
+          ),
+        ]);
       }
     }
   }
@@ -278,21 +312,23 @@ export class TagsService {
       const tagWhere: Prisma.TagWhereInput = effectiveProjectId
         ? { id: tagId, projectId: effectiveProjectId }
         : { id: tagId, userId, projectId: null };
-      const tag = await tx.tag.findFirst({
-        where: tagWhere,
-        select: { id: true },
-      });
-      if (!tag) {
-        throw new NotFoundException(`Tag ${tagId} not found in library`);
-      }
-
       const itemWhere: Prisma.ItemWhereInput = effectiveProjectId
         ? { id: itemId, projectId: effectiveProjectId, deletedAt: null }
         : { id: itemId, userId, projectId: null, deletedAt: null };
-      const item = await tx.item.findFirst({
-        where: itemWhere,
-        select: { id: true },
-      });
+
+      const [tag, item] = await Promise.all([
+        tx.tag.findFirst({
+          where: tagWhere,
+          select: { id: true },
+        }),
+        tx.item.findFirst({
+          where: itemWhere,
+          select: { id: true },
+        }),
+      ]);
+      if (!tag) {
+        throw new NotFoundException(`Tag ${tagId} not found in library`);
+      }
       if (!item) {
         throw new NotFoundException(`Item ${itemId} not found in library`);
       }
@@ -331,21 +367,23 @@ export class TagsService {
       const tagWhere: Prisma.TagWhereInput = effectiveProjectId
         ? { id: tagId, projectId: effectiveProjectId }
         : { id: tagId, userId, projectId: null };
-      const tag = await tx.tag.findFirst({
-        where: tagWhere,
-        select: { id: true },
-      });
-      if (!tag) {
-        throw new NotFoundException(`Tag ${tagId} not found in library`);
-      }
-
       const itemWhere: Prisma.ItemWhereInput = effectiveProjectId
         ? { id: itemId, projectId: effectiveProjectId, deletedAt: null }
         : { id: itemId, userId, projectId: null, deletedAt: null };
-      const item = await tx.item.findFirst({
-        where: itemWhere,
-        select: { id: true },
-      });
+
+      const [tag, item] = await Promise.all([
+        tx.tag.findFirst({
+          where: tagWhere,
+          select: { id: true },
+        }),
+        tx.item.findFirst({
+          where: itemWhere,
+          select: { id: true },
+        }),
+      ]);
+      if (!tag) {
+        throw new NotFoundException(`Tag ${tagId} not found in library`);
+      }
       if (!item) {
         throw new NotFoundException(`Item ${itemId} not found in library`);
       }
@@ -425,16 +463,17 @@ export class TagsService {
   ): Promise<void> {
     if (sourceItemIds.length === 0) return;
 
-    const primaryTags = await tx.itemTag.findMany({
-      where: { itemId: targetItemId },
-      select: { tagId: true },
-    });
+    const [primaryTags, dupTags] = await Promise.all([
+      tx.itemTag.findMany({
+        where: { itemId: targetItemId },
+        select: { tagId: true },
+      }),
+      tx.itemTag.findMany({
+        where: { itemId: { in: sourceItemIds } },
+        select: { tagId: true },
+      }),
+    ]);
     const primaryTagIds = new Set(primaryTags.map((it) => it.tagId));
-
-    const dupTags = await tx.itemTag.findMany({
-      where: { itemId: { in: sourceItemIds } },
-      select: { tagId: true },
-    });
 
     const newTagIds = Array.from(
       new Set(

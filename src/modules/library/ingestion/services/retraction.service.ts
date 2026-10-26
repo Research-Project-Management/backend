@@ -57,6 +57,10 @@ export class RetractionService {
       }
       tasks.push(
         this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(scopeId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(scopeId)),
+        this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(scopeId)),
+        this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(scopeId)),
       );
       if (validProjectId) {
         tasks.push(
@@ -64,6 +68,11 @@ export class RetractionService {
             LIBRARY_REDIS_KEYS.itemsPattern(`proj:${validProjectId}`),
           ),
           this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.countsPattern(userId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.searchFacetsPattern(userId)),
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.searchItemsPattern(userId)),
+          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(`proj:${validProjectId}`)),
+          this.cache.del(LIBRARY_REDIS_KEYS.searchVersion(userId)),
         );
       }
       await Promise.all(tasks);

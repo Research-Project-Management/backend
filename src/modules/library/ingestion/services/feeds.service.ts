@@ -29,7 +29,9 @@ export class FeedsService {
     userId: string,
     url: string,
     customTitle?: string,
-    cleanupDays = 30,
+    cleanupDays?: number,
+    cleanupReadAfter?: number,
+    cleanupUnreadAfter?: number,
   ): Promise<FeedSubscriptionDto> {
     const cleanUrl = url.trim();
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
@@ -64,6 +66,8 @@ export class FeedsService {
       feedId: feed.id,
       customTitle,
       cleanupDays,
+      cleanupReadAfter,
+      cleanupUnreadAfter,
     });
   }
 
@@ -74,14 +78,39 @@ export class FeedsService {
   async updateSubscription(
     userId: string,
     feedId: string,
-    data: { customTitle?: string; cleanupDays?: number },
+    data: {
+      customTitle?: string;
+      cleanupDays?: number;
+      cleanupReadAfter?: number;
+      cleanupUnreadAfter?: number;
+      url?: string;
+    },
   ): Promise<FeedSubscriptionDto> {
     const existing = await this.feedsRepo.findSubscription(userId, feedId);
     if (!existing) {
       throw new NotFoundException('Subscription not found');
     }
 
-    return this.feedsRepo.updateSubscriptionById(existing.id, data);
+    let targetFeedId: string | undefined = undefined;
+    if (data.url && data.url.trim() && data.url.trim() !== existing.feed.url) {
+      const cleanUrl = data.url.trim();
+      let feed = await this.feedsRepo.findFeedByUrl(cleanUrl);
+      if (!feed) {
+        feed = await this.feedsRepo.createFeed({
+          url: cleanUrl,
+          title: data.customTitle || cleanUrl,
+        });
+      }
+      targetFeedId = feed.id;
+    }
+
+    return this.feedsRepo.updateSubscriptionById(existing.id, {
+      customTitle: data.customTitle,
+      cleanupDays: data.cleanupDays,
+      cleanupReadAfter: data.cleanupReadAfter,
+      cleanupUnreadAfter: data.cleanupUnreadAfter,
+      feedId: targetFeedId,
+    });
   }
 
   async getFeedItems(
@@ -91,12 +120,16 @@ export class FeedsService {
   ) {
     const limit = Math.min(Math.max(options?.limit ?? 50, 1), 200);
     const readStatus = options?.readStatus ?? 'all';
+    const sub = await this.feedsRepo.findSubscription(userId, feedId);
+    const resolvedFeedId = sub?.feedId || feedId;
 
     const items = await this.feedsRepo.findFeedItemsForUser({
       userId,
-      feedId,
+      feedId: resolvedFeedId,
       readStatus,
       limit,
+      cleanupReadAfter: sub?.cleanupReadAfter,
+      cleanupUnreadAfter: sub?.cleanupUnreadAfter,
     });
 
     return items.map((it) => ({

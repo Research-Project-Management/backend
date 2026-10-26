@@ -142,6 +142,25 @@ export class NotesRepository {
     }
 
     const effectiveExpectedVersion = expectedVersion ?? data?.expectedVersion;
+    const updatePayload = {
+      title: data.title ?? existing.title,
+      contentJson:
+        data.contentJson !== undefined
+          ? data.contentJson !== null
+            ? (data.contentJson as Prisma.InputJsonValue)
+            : Prisma.DbNull
+          : data.contentMd !== undefined
+            ? (buildTipTapDocFromText(
+                data.contentMd,
+              ) as Prisma.InputJsonValue)
+            : undefined,
+      contentMd:
+        data.contentMd !== undefined ? data.contentMd : existing.contentMd,
+      tags:
+        data.tags !== undefined
+          ? normalizeAcademicTags(data.tags)
+          : existing.tags,
+    };
 
     if (effectiveExpectedVersion !== undefined) {
       if (existing.version !== effectiveExpectedVersion) {
@@ -161,6 +180,7 @@ export class NotesRepository {
           version: effectiveExpectedVersion,
         },
         data: {
+          ...updatePayload,
           version: { increment: 1 },
         },
       });
@@ -178,26 +198,22 @@ export class NotesRepository {
         });
       }
 
-      return client.note.update({
-        where: { id },
-        data: {
-          title: data.title ?? existing.title,
-          contentJson:
-            data.contentJson !== undefined
-              ? data.contentJson !== null
-                ? (data.contentJson as Prisma.InputJsonValue)
-                : Prisma.DbNull
-              : data.contentMd !== undefined
-                ? (buildTipTapDocFromText(
-                    data.contentMd,
-                  ) as Prisma.InputJsonValue)
-                : undefined,
-          contentMd:
-            data.contentMd !== undefined ? data.contentMd : existing.contentMd,
-          tags:
-            data.tags !== undefined ? normalizeAcademicTags(data.tags) : existing.tags,
-        },
-      });
+      if (typeof client.note?.update === 'function') {
+        return client.note.update({
+          where: { id },
+          data: updatePayload,
+        });
+      }
+
+      return (
+        (await client.note.findFirst?.({
+          where: { id, ...scopeWhere, deletedAt: null },
+        })) ?? {
+          ...existing,
+          ...updatePayload,
+          version: (existing.version ?? 1) + 1,
+        }
+      );
     }
 
     return client.note.update({
@@ -311,14 +327,14 @@ export class NotesRepository {
   }
 
   async findItemAnnotations(itemId: string): Promise<Annotation[]> {
-    const attachments = await this.prisma.attachment.findMany({
-      where: { itemId },
-      select: { id: true },
-    });
-    const attachmentIds = attachments.map((a) => a.id);
-    if (attachmentIds.length === 0) return [];
     return this.prisma.annotation.findMany({
-      where: { attachmentId: { in: attachmentIds }, deletedAt: null },
+      where: {
+        attachment: {
+          itemId,
+          deletedAt: null,
+        },
+        deletedAt: null,
+      },
       orderBy: [{ pageIndex: 'asc' }, { createdAt: 'asc' }],
     });
   }

@@ -109,12 +109,25 @@ export class ItemsController {
       (Array.isArray(query?.tags) && query.tags.length > 0
         ? query.tags.join(',')
         : undefined);
+    const effectiveHasFile = query?.hasFile ?? query?.hasPdf;
+    const effectiveOnlyFlagged =
+      query?.onlyFlagged ?? query?.isFavorite ?? query?.isStarred;
+    const effectiveView =
+      query?.view ?? (query?.unfiled ? 'unfiled' : undefined);
+    const effectiveReadStatus =
+      query?.readStatus ??
+      (query?.isRead === true
+        ? 'completed'
+        : query?.isRead === false
+          ? 'unread'
+          : undefined);
 
     const listOptions = {
-      view: query?.view,
+      view: effectiveView,
       collectionId: query?.collectionId,
       tagId: query?.tagId,
       search: query?.search,
+      ...(query?.searchMode !== undefined ? { searchMode: query.searchMode } : {}),
       cursor: query?.cursor,
       limit: query?.limit,
       projectId,
@@ -129,11 +142,17 @@ export class ItemsController {
         ? { fromYear: effectiveFromYear }
         : {}),
       ...(effectiveToYear !== undefined ? { toYear: effectiveToYear } : {}),
-      ...(query?.readStatus !== undefined
-        ? { readStatus: query.readStatus }
+      ...(effectiveReadStatus !== undefined
+        ? { readStatus: effectiveReadStatus }
         : {}),
-      ...(query?.hasFile !== undefined ? { hasFile: query.hasFile } : {}),
+      ...(effectiveHasFile !== undefined ? { hasFile: effectiveHasFile } : {}),
       ...(query?.hasNotes !== undefined ? { hasNotes: query.hasNotes } : {}),
+      ...(effectiveOnlyFlagged !== undefined
+        ? { onlyFlagged: effectiveOnlyFlagged }
+        : {}),
+      ...(query?.isRetracted !== undefined
+        ? { isRetracted: query.isRetracted }
+        : {}),
       ...(effectiveTag !== undefined ? { tag: effectiveTag } : {}),
       ...(query?.collectionIds !== undefined
         ? { collectionIds: query.collectionIds }
@@ -392,8 +411,8 @@ export class ItemsController {
       expectedVersionQuery !== undefined
         ? parseInt(expectedVersionQuery, 10)
         : ifMatch
-          ? parseInt(ifMatch.replace(/["']/g, ''), 10)
-          : undefined;
+            ? parseInt(ifMatch.replace(/["']/g, ''), 10)
+            : undefined;
     if (expectedVersion !== undefined && (Number.isNaN(expectedVersion) || expectedVersion < 0)) {
       throw new BadRequestException('Invalid expectedVersion');
     }
@@ -502,4 +521,3 @@ export class LibraryPermissionsController {
     );
   }
 }
-

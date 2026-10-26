@@ -6,14 +6,12 @@ import {
   CreateItemData,
   CreatorCreditInput,
   ItemDetail,
-  splitAuthorString,
-  parseCreatorString,
+  mergeCanonicalCreators,
   cleanAbstractText,
   cleanCommentText,
   normalizeAcademicTags,
   getEffectiveBaseFieldMap,
   harmonizeZoteroFields,
-  resolveCanonicalCreatorRole,
   generateCitationKey,
 } from '@/modules/library/core';
 import {
@@ -48,177 +46,8 @@ function normalizeAccessedAt(
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
-function extractAuthorString(input: unknown): string {
-  if (!input) return '';
-  if (typeof input === 'string') return input;
-  if (typeof input === 'object' && input !== null) {
-    const obj = input as {
-      fullName?: unknown;
-      name?: unknown;
-      firstName?: unknown;
-      lastName?: unknown;
-    };
-    if (typeof obj.fullName === 'string' && obj.fullName.trim()) {
-      return obj.fullName.trim();
-    }
-    if (typeof obj.name === 'string' && obj.name.trim()) {
-      return obj.name.trim();
-    }
-    const parts = [obj.firstName, obj.lastName].filter(
-      (p): p is string => typeof p === 'string' && Boolean(p.trim()),
-    );
-    return parts.join(' ');
-  }
-  return typeof input === 'number' || typeof input === 'boolean'
-    ? String(input)
-    : '';
-}
-
 function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
-  const initialCreators = metadata.creators || [];
-  const creators: CreatorCreditInput[] = [];
-  const knownCreators = new Set<string>();
-
-  const append = (
-    name: string,
-    creatorType: string = primaryRole,
-    firstName?: string,
-    lastName?: string,
-    fieldMode?: number,
-    shortName?: string,
-  ) => {
-    const cleanName = (name || '').trim();
-    let finalFirst = firstName?.trim() || '';
-    let finalLast = lastName?.trim() || '';
-    let finalFull = cleanName;
-    let finalFieldMode = fieldMode;
-
-    if (finalFieldMode === 1) {
-      const single = finalLast || finalFull || finalFirst;
-      if (!single) return;
-      finalFirst = '';
-      finalLast = single;
-      finalFull = single;
-    } else if (cleanName.includes(',') || (!finalFirst && !finalLast)) {
-      const parsed = parseCreatorString(
-        cleanName || `${finalFirst} ${finalLast}`.trim(),
-        0,
-        creatorType,
-      );
-      if (parsed.fieldMode === 1) {
-        finalFieldMode = 1;
-        finalFirst = '';
-        finalLast = parsed.lastName || parsed.fullName;
-        finalFull = parsed.fullName;
-      } else {
-        finalFirst = parsed.firstName || finalFirst;
-        finalLast = parsed.lastName || finalLast;
-        finalFull = parsed.fullName;
-      }
-    } else if (!finalFull) {
-      finalFull = `${finalFirst} ${finalLast}`.trim();
-    }
-
-    if (!finalFull && !finalFirst && !finalLast) return;
-
-    const dedupKey =
-      finalLast || finalFirst
-        ? `${creatorType}:${finalLast.toLowerCase()}:${finalFirst.toLowerCase()}`
-        : `${creatorType}:${finalFull.toLowerCase()}`;
-    if (knownCreators.has(dedupKey)) return;
-    knownCreators.add(dedupKey);
-
-    const displayFull = finalFull || `${finalFirst} ${finalLast}`.trim();
-    creators.push({
-      name: displayFull,
-      fullName: displayFull,
-      creatorType,
-      firstName: finalFieldMode === 1 ? '' : finalFirst || '',
-      lastName: finalLast || '',
-      ...(finalFieldMode !== undefined ? { fieldMode: finalFieldMode } : {}),
-      ...(shortName ? { shortName } : {}),
-    });
-  };
-
-  for (const c of initialCreators) {
-    const creatorType = resolveCanonicalCreatorRole(
-      c.creatorType || primaryRole,
-      { itemType: metadata.itemType },
-    );
-    const cRec = c as unknown as Record<string, unknown>;
-    const cFieldMode =
-      typeof cRec.fieldMode === 'number' ? cRec.fieldMode : undefined;
-    const cShortName =
-      typeof cRec.shortName === 'string' && cRec.shortName.trim()
-        ? cRec.shortName.trim()
-        : undefined;
-
-    if (cFieldMode === 1) {
-      const singleName =
-        c.lastName || c.fullName || c.name || c.firstName || '';
-      append(singleName, creatorType, '', singleName, 1, cShortName);
-      continue;
-    }
-
-    const rawName = extractAuthorString(c);
-    if (rawName) {
-      const parts =
-        c.firstName || c.lastName ? [rawName] : splitAuthorString(rawName);
-      for (const p of parts) {
-        append(
-          p,
-          creatorType,
-          c.firstName || undefined,
-          c.lastName || undefined,
-          cFieldMode,
-          cShortName,
-        );
-      }
-    } else if (c.firstName || c.lastName) {
-      append(
-        '',
-        creatorType,
-        c.firstName || undefined,
-        c.lastName || undefined,
-        cFieldMode,
-        cShortName,
-      );
-    }
-  }
-
-  const appendStringRoleList = (
-    list: unknown[] | undefined,
-    role: string,
-    checkAnyInitialRole: boolean,
-  ) => {
-    for (const rawEntry of list || []) {
-      const rawStr = extractAuthorString(rawEntry).trim();
-      if (!rawStr) continue;
-      const lowerStr = rawStr.toLowerCase();
-      if (
-        checkAnyInitialRole &&
-        initialCreators.some(
-          (ic) => extractAuthorString(ic).trim().toLowerCase() === lowerStr,
-        )
-      ) {
-        continue;
-      }
-      if (
-        knownCreators.has(`${role}:${lowerStr}:`) ||
-        knownCreators.has(`${role}:${lowerStr}`)
-      ) {
-        continue;
-      }
-      for (const splitPart of splitAuthorString(rawStr)) {
-        append(splitPart, role);
-      }
-    }
-  };
-
-  appendStringRoleList(metadata.authors, primaryRole, true);
-  appendStringRoleList(metadata.editors, 'editor', false);
-
-  return creators.length > 0 ? creators : undefined;
+  return mergeCanonicalCreators(metadata, primaryRole);
 }
 
 const EXCLUDED_RAW_METADATA_KEYS = new Set([
@@ -243,6 +72,14 @@ const EXCLUDED_RAW_METADATA_KEYS = new Set([
   'collectionId',
   'collectionIds',
   'conferenceName',
+  'id',
+  'userId',
+  'version',
+  'deletedAt',
+  'createdAt',
+  'updatedAt',
+  'mergedIntoId',
+  'contentHash',
 ]);
 
 /**
@@ -373,13 +210,30 @@ export function toItemData(
     isbn: harmonized.isbn,
     year: resolvedYear,
     publicationDate: resolvedPubDate,
-    publicationTitle: harmonized.publicationTitle ?? harmonized.journal,
-    journal: metadata.journal,
-    journalAbbr: harmonized.journalAbbr,
-    publisher: harmonized.publisher,
+    publicationTitle:
+      effectiveType === 'preprint'
+        ? undefined
+        : (harmonized.publicationTitle ?? harmonized.journal),
+    journal: effectiveType === 'preprint' ? undefined : metadata.journal,
+    journalAbbr:
+      effectiveType === 'preprint' ? undefined : harmonized.journalAbbr,
+    publisher:
+      effectiveType === 'preprint'
+        ? (harmonized.repository ?? metadata.repository ?? harmonized.publisher)
+        : harmonized.publisher,
     place: harmonized.place,
-    volume: harmonized.volume != null ? String(harmonized.volume) : undefined,
-    issue: harmonized.issue != null ? String(harmonized.issue) : undefined,
+    volume:
+      effectiveType === 'preprint'
+        ? undefined
+        : harmonized.volume != null
+          ? String(harmonized.volume)
+          : undefined,
+    issue:
+      effectiveType === 'preprint'
+        ? undefined
+        : harmonized.issue != null
+          ? String(harmonized.issue)
+          : undefined,
     section: harmonized.section,
     partNumber: harmonized.partNumber,
     partTitle: harmonized.partTitle,
@@ -489,9 +343,53 @@ export class CommitStage implements IWorkflowStage<
       createData.projectId = effectiveProjectId;
     }
 
-    return await this.catalogGateway.createItem(effectiveUserId, createData, {
-      projectId: effectiveProjectId,
-      source: actualOptions?.source,
-    });
+    try {
+      return await this.catalogGateway.createItem(effectiveUserId, createData, {
+        projectId: effectiveProjectId,
+        source: actualOptions?.source,
+      });
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        code === 'P2002' ||
+        msg.includes('Unique constraint failed')
+      ) {
+        if (this.catalogGateway.findMatchCandidates) {
+          const match = await this.catalogGateway.findMatchCandidates(
+            { userId: effectiveUserId, projectId: effectiveProjectId },
+            {
+              doi: createData.doi,
+              arxivId: createData.arxivId,
+              pmid: createData.pmid,
+              isbn: createData.isbn,
+              year: createData.year ? Number(createData.year) : undefined,
+              titlePrefix: createData.title,
+            },
+          );
+          const matchedId =
+            match.exactMatch?.id ??
+            match.candidateItems?.find(
+              (c) =>
+                c.title?.trim().toLowerCase() ===
+                  createData.title?.trim().toLowerCase() &&
+                (!createData.year ||
+                  !c.year ||
+                  Number(c.year) === Number(createData.year)),
+            )?.id;
+          if (matchedId) {
+            const existing = await this.catalogGateway.getItem(
+              effectiveUserId,
+              matchedId,
+              effectiveProjectId,
+            );
+            if (existing) {
+              return existing;
+            }
+          }
+        }
+      }
+      throw err;
+    }
   }
 }

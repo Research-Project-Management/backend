@@ -349,7 +349,7 @@ export class AnnotationsService {
     userId: string,
     annotation: { authorId?: string | null },
   ) {
-    if (annotation.authorId && annotation.authorId !== userId) {
+    if (annotation.authorId !== userId) {
       throw new ForbiddenException(
         'Only the annotation author can modify or delete this annotation',
       );

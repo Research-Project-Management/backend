@@ -70,8 +70,23 @@ export class SearchRepository implements OnModuleInit {
       const scopeKey = this.isProjectScope(options.projectId)
         ? `proj:${options.projectId}`
         : `user:${userId}`;
+      const normalizedCacheInput = {
+        q: queryText || '',
+        cursor: options.cursor || '',
+        limit,
+        projectId: options.projectId || '',
+        collectionId: options.collectionId || '',
+        tagId: options.tagId || '',
+        itemType: Array.isArray(options.itemType)
+          ? [...options.itemType].sort()
+          : options.itemType || '',
+        yearFrom: options.yearFrom ?? null,
+        yearTo: options.yearTo ?? null,
+        sortBy: options.sortBy || '',
+        sortOrder: options.sortOrder || '',
+      };
       const filterHash = createHash('sha256')
-        .update(JSON.stringify({ ...options, limit, q: queryText }))
+        .update(JSON.stringify(normalizedCacheInput))
         .digest('hex');
       const cacheKey = `library:search:items:${scopeKey}:${filterHash}`;
 
@@ -236,6 +251,7 @@ export class SearchRepository implements OnModuleInit {
         attachments: { take: 5 },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
+        states: { where: { userId }, take: 1 },
       },
     });
 
@@ -279,6 +295,7 @@ export class SearchRepository implements OnModuleInit {
         attachments: { take: 5 },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
+        states: { where: { userId }, take: 1 },
       },
     });
 
@@ -292,6 +309,50 @@ export class SearchRepository implements OnModuleInit {
     }
 
     return { items, nextCursor, hasNextPage };
+  }
+
+  async countSearchItems(
+    userId: string,
+    options: SearchOptions,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const q = options.q?.trim();
+    const ftsSanitized = sanitizeSearchQuery(q);
+    let textWhere: Prisma.ItemWhereInput = {};
+
+    if (q) {
+      if (ftsSanitized && this.hasFtsColumn()) {
+        try {
+          const hasProject = this.isProjectScope(options.projectId);
+          const scopeSql = hasProject
+            ? `project_id = $1::uuid`
+            : `user_id = $1::uuid AND project_id IS NULL`;
+          const ftsRows = await this.prisma.$queryRawUnsafe<
+            Array<{ id: string }>
+          >(
+            `SELECT id FROM "items" WHERE ${scopeSql} AND deleted_at IS NULL AND search_vector @@ plainto_tsquery('english', $2) LIMIT 5000`,
+            hasProject ? options.projectId : userId,
+            ftsSanitized,
+          );
+          textWhere = { id: { in: ftsRows.map((r) => r.id) } };
+        } catch {
+          textWhere = this.buildTextWhereIlike(q);
+        }
+      } else {
+        textWhere = this.buildTextWhereIlike(q);
+      }
+    }
+
+    const where: Prisma.ItemWhereInput = {
+      ...this.buildBaseWhere(userId, options),
+      ...textWhere,
+    };
+
+    if (!client.item?.count) {
+      return 0;
+    }
+    return client.item.count({ where });
   }
 
   async computeFacets(

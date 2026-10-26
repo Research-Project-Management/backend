@@ -320,7 +320,8 @@ describe('Wave 9 — Metadata Ingestion, Extraction & Persistence Completeness &
       });
 
       expect(validated.demotedToExtra).toEqual({});
-      expect(validated.sanitizedItem.extra).toBe('');
+      // extra is only emitted when sent or when fields were demoted (avoids wiping it on PATCH).
+      expect(validated.sanitizedItem.extra).toBeUndefined();
       expect(validated.sanitizedItem.bookTitle).toBe('Handbook of AI');
 
       // Also verify CommandPayloadBuilder does not dump extraFields into metadata.extra plain text

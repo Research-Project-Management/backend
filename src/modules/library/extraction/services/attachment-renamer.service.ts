@@ -12,12 +12,15 @@ import {
   CATALOG_FACADE,
   ICatalogFacade,
   LIBRARY_REDIS_KEYS,
+  LIBRARY_EVENT_TYPES,
   normalizeProjectScopeId,
   formatAttachmentFilename,
   resolveFileExtension,
   sanitizeFilenameStem,
   DEFAULT_RENAME_PATTERN,
+  TransactionHelpers,
 } from '@/modules/library/core';
+import { TransactionService } from '@/modules/library/sync';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import type {
   RenameAttachmentDto,
@@ -40,6 +43,8 @@ export class AttachmentRenamerService {
     private readonly catalogGateway?: ICatalogFacade,
     @Optional()
     private readonly cache?: RedisCacheService,
+    @Optional()
+    private readonly libraryTx?: TransactionService,
   ) {}
 
   private async invalidateAttachmentCache(
@@ -96,10 +101,14 @@ export class AttachmentRenamerService {
     dto: RenameAttachmentDto,
     projectId?: ProjectId | string,
   ) {
+    const validProjectId = normalizeProjectScopeId(projectId);
     const attachment = await this.repo.findFirst(
       {
         id: attachmentId,
         deletedAt: null,
+        item: validProjectId
+          ? { projectId: validProjectId, deletedAt: null }
+          : { userId, projectId: null, deletedAt: null },
       },
       {
         item: {
@@ -151,10 +160,50 @@ export class AttachmentRenamerService {
     );
 
     const effectiveProjectId =
-      projectId ||
+      validProjectId ||
       (attachment.item as { projectId?: string | null } | undefined)
         ?.projectId ||
       undefined;
+
+    if (typeof this.libraryTx?.executeInTransaction === 'function') {
+      await this.libraryTx.executeInTransaction(
+        async (_tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+          const eventScope = { userId, projectId: effectiveProjectId };
+          await helpers.appendChange(eventScope, {
+            entityType: 'Attachment',
+            entityId: attachmentId,
+            action: 'update',
+            version: 1,
+            data: updated ?? {
+              id: attachmentId,
+              itemId: attachment.itemId,
+              filename: newFilename,
+            },
+          });
+          await helpers.publishOutbox(
+            eventScope,
+            attachmentId,
+            'library.attachment.updated',
+            updated ?? {
+              id: attachmentId,
+              itemId: attachment.itemId,
+              filename: newFilename,
+            },
+          );
+          await helpers.publishOutbox(
+            eventScope,
+            attachment.itemId,
+            LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+            {
+              id: attachment.itemId,
+              attachmentId,
+              filename: newFilename,
+            },
+          );
+        },
+      );
+    }
+
     await this.invalidateAttachmentCache(
       attachment.itemId,
       userId,
@@ -178,8 +227,12 @@ export class AttachmentRenamerService {
     }>;
   }> {
     const pattern = dto.pattern || DEFAULT_RENAME_PATTERN;
+    const validProjectId = normalizeProjectScopeId(projectId);
     const whereClause: Prisma.AttachmentWhereInput = {
       deletedAt: null,
+      item: validProjectId
+        ? { projectId: validProjectId, deletedAt: null }
+        : { userId, projectId: null, deletedAt: null },
     };
 
     if (dto.attachmentIds && dto.attachmentIds.length > 0) {
@@ -273,6 +326,47 @@ export class AttachmentRenamerService {
 
     if (updatesToPersist.length > 0) {
       await this.repo.batchRename(updatesToPersist);
+
+      if (typeof this.libraryTx?.executeInTransaction === 'function') {
+        await this.libraryTx.executeInTransaction(
+          async (_tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
+            const eventScope = { userId, projectId: validProjectId };
+            for (const u of updatesToPersist) {
+              const scope = { userId, projectId: u.projectId || validProjectId };
+              await helpers.appendChange(scope, {
+                entityType: 'Attachment',
+                entityId: u.id,
+                action: 'update',
+                version: 1,
+                data: {
+                  id: u.id,
+                  itemId: u.itemId,
+                  filename: u.filename,
+                },
+              });
+              await helpers.publishOutbox(
+                scope,
+                u.id,
+                'library.attachment.updated',
+                {
+                  id: u.id,
+                  itemId: u.itemId,
+                  filename: u.filename,
+                },
+              );
+            }
+            const uniqueItems = new Set(updatesToPersist.map((u) => u.itemId));
+            for (const itemId of uniqueItems) {
+              await helpers.publishOutbox(
+                eventScope,
+                itemId,
+                LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+                { id: itemId },
+              );
+            }
+          },
+        );
+      }
 
       const uniqueRenamedItemIds = new Map<string, string | undefined>();
       for (const u of updatesToPersist) {

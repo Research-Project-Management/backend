@@ -9,6 +9,12 @@ import {
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
+function transformOptionalBoolean(value: unknown): boolean | undefined {
+  if (value === 'true' || value === true || value === '1' || value === 1) return true;
+  if (value === 'false' || value === false || value === '0' || value === 0) return false;
+  return undefined;
+}
+
 export class CursorPaginationQueryDto {
   @IsOptional()
   @IsString()
@@ -25,6 +31,10 @@ export class CursorPaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsString()
+  searchMode?: 'title_creator_year' | 'fields_tags' | 'everything';
 
   @IsOptional()
   @IsString()
@@ -135,22 +145,49 @@ export class CursorPaginationQueryDto {
   readStatus?: string;
 
   @IsOptional()
-  @Transform(({ value }) => {
-    if (value === 'true' || value === true) return true;
-    if (value === 'false' || value === false) return false;
-    return undefined;
-  })
+  @Transform(({ value }) => transformOptionalBoolean(value))
   @IsBoolean()
   hasFile?: boolean;
 
   @IsOptional()
-  @Transform(({ value }) => {
-    if (value === 'true' || value === true) return true;
-    if (value === 'false' || value === false) return false;
-    return undefined;
-  })
+  @Transform(({ value }) => transformOptionalBoolean(value))
+  @IsBoolean()
+  hasPdf?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => transformOptionalBoolean(value))
   @IsBoolean()
   hasNotes?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => transformOptionalBoolean(value))
+  @IsBoolean()
+  isFavorite?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => transformOptionalBoolean(value))
+  @IsBoolean()
+  isStarred?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => transformOptionalBoolean(value))
+  @IsBoolean()
+  onlyFlagged?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => transformOptionalBoolean(value))
+  @IsBoolean()
+  isRead?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => transformOptionalBoolean(value))
+  @IsBoolean()
+  isRetracted?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => transformOptionalBoolean(value))
+  @IsBoolean()
+  unfiled?: boolean;
 
   @IsOptional()
   @IsString()
@@ -176,20 +213,12 @@ export class CursorPaginationQueryDto {
   collectionIds?: string[];
 
   @IsOptional()
-  @Transform(({ value }) => {
-    if (value === 'true' || value === true) return true;
-    if (value === 'false' || value === false) return false;
-    return undefined;
-  })
+  @Transform(({ value }) => transformOptionalBoolean(value))
   @IsBoolean()
   includeSubcollections?: boolean;
 
   @IsOptional()
-  @Transform(({ value }) => {
-    if (value === 'true' || value === true) return true;
-    if (value === 'false' || value === false) return false;
-    return undefined;
-  })
+  @Transform(({ value }) => transformOptionalBoolean(value))
   @IsBoolean()
   recursive?: boolean;
 }
@@ -279,4 +308,9 @@ export interface DocumentFulltextResponse {
   tables: DocumentTableDto[];
   formulas: DocumentFormulaDto[];
   references: DocumentReferenceDto[];
+  sectionCount?: number;
+  figureCount?: number;
+  tableCount?: number;
+  formulaCount?: number;
+  referenceCount?: number;
 }

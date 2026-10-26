@@ -154,7 +154,10 @@ export class OutboxWorker
    * Processes a single OutboxEvent by ID with atomic CAS claiming.
    * Idempotent: safe to run from BullMQ or in-memory runner.
    */
-  async processEventById(eventId: string): Promise<boolean> {
+  async processEventById(
+    eventId: string,
+    options?: { rethrowOnRetryableFailure?: boolean },
+  ): Promise<boolean> {
     const event = await this.repo.findById(eventId);
 
     if (!event || event.status === OutboxStatus.PUBLISHED) {
@@ -177,7 +180,13 @@ export class OutboxWorker
 
     const effectiveHandlers = this.getEffectiveHandlers(event.eventType);
     if (effectiveHandlers.length === 0) {
-      await this.handleMissingHandler(event);
+      const outcome = await this.handleMissingHandler(event);
+      if (outcome !== 'deadLettered' && options?.rethrowOnRetryableFailure) {
+        throw new SubsystemUnavailableException(
+          `No handler registered for outbox event type "${event.eventType}"`,
+          { eventType: event.eventType },
+        );
+      }
       return false;
     }
 
@@ -247,7 +256,10 @@ export class OutboxWorker
         return false;
       }
       const outcome = await this.handleDispatchFailure(event, err);
-      if (outcome !== 'deadLettered' && !this.bullQueue) {
+      if (
+        outcome !== 'deadLettered' &&
+        (options?.rethrowOnRetryableFailure || !this.bullQueue)
+      ) {
         throw err;
       }
       return false;

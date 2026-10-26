@@ -649,6 +649,22 @@ export class IngestionRepository {
     return updateRes.count;
   }
 
+  async releaseCapturePreview(
+    tokenHash: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const updateRes = await client.capturePreview.updateMany({
+      where: {
+        tokenHash,
+      },
+      data: {
+        claimedAt: null,
+      },
+    });
+    return updateRes.count;
+  }
+
   async findExpiredCapturePreviews(
     olderThan: Date = new Date(),
     tx?: Prisma.TransactionClient,

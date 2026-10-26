@@ -10,7 +10,11 @@ export class PdfTextMetadataExtractor {
   extractFromText(text: string): string | null {
     if (!text) return null;
 
-    const scannedText = text.slice(0, PdfTextMetadataExtractor.TEXT_SCAN_LIMIT);
+    // Restrict identifier scan to front-matter (first 4,000 chars, before References/Bibliography)
+    // so cited DOIs and arXiv IDs in the body or bibliography are never mistaken for the paper's own ID.
+    const refIdx = text.search(/(?:\n\s*(?:references|bibliography|literature\s+cited)\b)/i);
+    const frontLimit = refIdx !== -1 ? Math.min(4000, refIdx) : 4000;
+    const scannedText = text.slice(0, frontLimit);
     const joinedText = scannedText
       .replace(/(10\.\d{4,9})\s*\/\s*/g, '$1/')
       .replace(/(10\.\d{4,9}\/)\s+/g, '$1');
@@ -24,34 +28,42 @@ export class PdfTextMetadataExtractor {
     }
 
     const arxivMatch = scannedText.match(
-      /(?:arxiv:?\s*|\barxiv\.org\/(?:abs|pdf)\/|\b)([0-2][0-9]{3}\.[0-9]{4,5}(?:v[0-9]+)?|[a-zA-Z-]+(?:\.[a-zA-Z-]+)?\/\d{7}(?:v\d+)?)\b/i,
+      /(?:arxiv:\s*|\barxiv\.org\/(?:abs|pdf)\/)([0-2][0-9]{3}\.[0-9]{4,5}(?:v[0-9]+)?|[a-zA-Z-]+(?:\.[a-zA-Z-]+)?\/\d{7}(?:v\d+)?)\b/i,
     );
     return arxivMatch?.[1] ? `10.48550/arXiv.${arxivMatch[1]}` : null;
   }
 
   extractMetadataFromText(text: string): ExtractedPdfMetadata {
     const scannedText = text.slice(0, PdfTextMetadataExtractor.TEXT_SCAN_LIMIT);
+    const refIdx = scannedText.search(/(?:\n\s*(?:references|bibliography|literature\s+cited)\b)/i);
+    const frontMatter = scannedText.slice(0, refIdx !== -1 ? Math.min(4000, refIdx) : 4000);
     const metadata: ExtractedPdfMetadata = {};
     const doi = this.extractFromText(
-      scannedText
+      frontMatter
         .replace(/(10\.\d{4,9})\s*\/\s*/g, '$1/')
         .replace(/(10\.\d{4,9}\/)\s*\n\s*/g, '$1'),
     );
     if (doi) metadata.doi = doi;
 
-    const arxivMatch = scannedText.match(
-      /(?:arxiv[:\s._/-]+)([0-2]\d{3}\.\d{4,5}(?:v\d+)?|[a-zA-Z-]+(?:\.[a-zA-Z-]+)?\/\d{7}(?:v\d+)?)(?:\s*\[([a-zA-Z-]+(?:\.[a-zA-Z-]+)?)\])?/i,
-    );
+    // The arXiv margin watermark ("arXiv:1706.03762v7 [cs.CL] 2 Aug 2023") is emitted by PDF text
+    // layers after the page body, i.e. outside the 4,000-char front window. Its bracketed subject
+    // class is unique to the paper's own stamp (citations never carry one), so scan the whole
+    // pre-References text for that exact shape first.
+    const stampMatch = scannedText
+      .slice(0, refIdx !== -1 ? refIdx : undefined)
+      .match(
+        /arxiv:\s*([0-2]\d{3}\.\d{4,5}(?:v\d+)?|[a-zA-Z-]+(?:\.[a-zA-Z-]+)?\/\d{7}(?:v\d+)?)\s*\[([a-zA-Z-]+(?:\.[a-zA-Z-]+)?)\]/i,
+      );
+    const arxivMatch =
+      stampMatch ??
+      frontMatter.match(
+        /(?:arxiv[:\s._/-]+)([0-2]\d{3}\.\d{4,5}(?:v\d+)?|[a-zA-Z-]+(?:\.[a-zA-Z-]+)?\/\d{7}(?:v\d+)?)(?:\s*\[([a-zA-Z-]+(?:\.[a-zA-Z-]+)?)\])?/i,
+      );
     if (arxivMatch?.[1]) {
       metadata.arxivId = arxivMatch[1];
       if (arxivMatch[2]) {
         metadata.primaryCategory = arxivMatch[2];
       }
-    } else {
-      const standalone = scannedText
-        .slice(0, 2000)
-        .match(/\b([0-2][0-9]{3}\.[0-9]{4,5}(?:v[0-9]+)?)\b/);
-      if (standalone?.[1]) metadata.arxivId = standalone[1];
     }
 
     const isbnMatch = scannedText.match(

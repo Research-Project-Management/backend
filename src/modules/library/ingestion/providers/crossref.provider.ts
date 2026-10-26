@@ -41,7 +41,7 @@ export class CrossRefProvider implements MetadataProvider {
   private readonly logger = new Logger(CrossRefProvider.name);
 
   constructor(
-    private readonly httpClient: AcademicHttpClient,
+    @Optional() private readonly httpClient?: AcademicHttpClient,
     @Optional() private readonly configService?: LibraryConfigService,
   ) {}
 
@@ -78,10 +78,16 @@ export class CrossRefProvider implements MetadataProvider {
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
     const { query } = request;
+    if (/^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.48550\/arxiv\./i.test(query.trim())) {
+      return null;
+    }
     const cleanDoi = normalizeDoi(query);
 
     if (cleanDoi) {
       return this.resolveByDoi(cleanDoi, signal);
+    }
+    if (request.queryType && request.queryType !== 'TITLE') {
+      return null;
     }
     return this.searchByTitle(query, signal);
   }
@@ -614,6 +620,10 @@ export class CrossRefProvider implements MetadataProvider {
         publicationDate,
         date: publicationDate,
         journal: itemType === 'journalArticle' ? journal : undefined,
+        repository:
+          itemType === 'preprint'
+            ? institutionName || journal || rawPublisher
+            : undefined,
         publicationTitle:
           itemType === 'journalArticle'
             ? journal
@@ -621,7 +631,9 @@ export class CrossRefProvider implements MetadataProvider {
               ? proceedingsTitle || journal
               : itemType === 'bookSection'
                 ? journal || series
-                : journal,
+                : itemType === 'preprint'
+                  ? institutionName || journal || rawPublisher
+                  : journal,
         conferenceName:
           itemType === 'conferencePaper'
             ? conferenceName && conferenceName !== (proceedingsTitle || journal)

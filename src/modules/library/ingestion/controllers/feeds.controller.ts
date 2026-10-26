@@ -37,6 +37,14 @@ class SubscribeFeedDto {
   @IsOptional()
   @IsNumber()
   cleanupDays?: number;
+
+  @IsOptional()
+  @IsNumber()
+  cleanupReadAfter?: number;
+
+  @IsOptional()
+  @IsNumber()
+  cleanupUnreadAfter?: number;
 }
 
 class UpdateFeedSubDto {
@@ -48,6 +56,18 @@ class UpdateFeedSubDto {
   @IsOptional()
   @IsNumber()
   cleanupDays?: number;
+
+  @IsOptional()
+  @IsNumber()
+  cleanupReadAfter?: number;
+
+  @IsOptional()
+  @IsNumber()
+  cleanupUnreadAfter?: number;
+
+  @IsOptional()
+  @IsString()
+  url?: string;
 }
 
 class MarkItemReadDto {
@@ -88,6 +108,8 @@ export class FeedsController {
       dto.url,
       dto.customTitle,
       dto.cleanupDays,
+      dto.cleanupReadAfter,
+      dto.cleanupUnreadAfter,
     );
     return { data: sub };
   }

@@ -233,7 +233,11 @@ export class SavedSearchesService {
     );
     const [count, sampleResult] = await Promise.all([
       this.repo.countMatchingItems(where),
-      this.repo.findMatchingItems(where, { limit: 5 }),
+      this.repo.findMatchingItems(where, {
+        limit: 5,
+        sortBy: dto.sortBy as ExecuteSavedSearchOptions['sortBy'],
+        sortOrder: dto.sortOrder,
+      }),
     ]);
 
     return {

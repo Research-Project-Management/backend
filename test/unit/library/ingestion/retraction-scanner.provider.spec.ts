@@ -190,4 +190,52 @@ describe('RetractionScannerProvider', () => {
     expect(mockDbService.saveClean).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
+
+  it('should delegate to AcademicHttpClient without infinite recursion when injected via NestJS DI', async () => {
+    const mockHttpClient = {
+      request: jest.fn().mockResolvedValue({
+        response: {
+          ok: true,
+          json: async () => ({
+            is_retracted: true,
+            doi: '10.1038/retracted-via-httpclient',
+            publication_date: '2024-02-15',
+          }),
+        },
+        finalUrl: 'https://api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1038%2Fretracted-via-httpclient',
+      }),
+    };
+
+    const diProvider = new RetractionScannerProvider(
+      mockDbService as RetractionDatabaseService,
+      mockHttpClient as any,
+    );
+
+    const result = await diProvider.lookup('10.1038/retracted-via-httpclient');
+
+    expect(result.status).toBe('retracted');
+    expect((result as any).details?.source).toBe('openalex');
+    expect(mockHttpClient.request).toHaveBeenCalledTimes(1);
+    expect(mockDbService.saveRetraction).toHaveBeenCalledWith(
+      '10.1038/retracted-via-httpclient',
+      expect.objectContaining({ nature: 'retraction', source: 'openalex' }),
+      undefined,
+    );
+  });
+
+  it('should skip external HTTP lookups when localOnly: true is passed during bulk batch ingestion', async () => {
+    const fetchSpy = jest.spyOn(globalThis, 'fetch');
+
+    const result = await provider.lookup('10.1007/unindexed-batch-paper', undefined, {
+      localOnly: true,
+    });
+
+    expect(result.status).toBe('unknown');
+    expect(mockDbService.checkRetraction).toHaveBeenCalledWith(
+      '10.1007/unindexed-batch-paper',
+      undefined,
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
 });

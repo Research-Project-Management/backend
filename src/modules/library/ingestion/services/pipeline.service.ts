@@ -122,6 +122,7 @@ export class PipelineService {
         match,
         commit,
         this.sideEffects,
+        catalogGateway,
       );
   }
 
@@ -132,11 +133,20 @@ export class PipelineService {
     runId: string,
     scopeId: string,
     envelope: IngestionSubmissionEnvelope,
+    options?: { isFinalAttempt?: boolean },
   ): Promise<void> {
+    const isFinalAttempt =
+      options?.isFinalAttempt ?? envelope?.isFinalAttempt ?? true;
+    let succeeded = false;
     try {
-      await this.executePipelineStages(runId, scopeId, envelope);
+      await this.executePipelineStages(runId, scopeId, envelope, {
+        isFinalAttempt,
+      });
+      succeeded = true;
     } finally {
-      await this.cleanupOffloadedPayload(envelope);
+      if (succeeded || isFinalAttempt) {
+        await this.cleanupOffloadedPayload(envelope);
+      }
       if (
         Date.now() - this.lastGcRunAt >
         PipelineService.GC_THROTTLE_INTERVAL_MS
@@ -187,6 +197,7 @@ export class PipelineService {
     runId: string,
     scopeId: string,
     envelope: IngestionSubmissionEnvelope,
+    options?: { isFinalAttempt?: boolean },
   ): Promise<void> {
     const resolvedScope = resolveScope(scopeId, envelope);
 
@@ -224,7 +235,9 @@ export class PipelineService {
           totalItems: 1,
         });
 
-    const session = this.orchestrator.createSession(runId, scopeId, aggregate);
+    const session = this.orchestrator.createSession(runId, scopeId, aggregate, {
+      isFinalAttempt: options?.isFinalAttempt,
+    });
 
     // Stage 1: IDENTIFY & NORMALIZE
     const { initialCandidates: normalizedCandidates } =
@@ -400,12 +413,44 @@ export class PipelineService {
               },
             );
 
+            await this.sideEffects.autoCaptureWebAssets({
+              userId: resolvedScope.userId,
+              projectId: resolvedScope.projectId,
+              itemId: targetItemId,
+              payloadKind: envelope.payload.kind,
+              sourceUrl:
+                envelope.payload.kind === 'URL'
+                  ? envelope.payload.url
+                  : undefined,
+              proposedItem: {
+                ...(existingRec || {}),
+                ...(decision.proposedItem || {}),
+              },
+              existingFileId:
+                uploadedFileIdentifier ||
+                (typeof existingRec?.fileId === 'string'
+                  ? existingRec.fileId
+                  : undefined),
+              overrides: envelope.overrides,
+            });
+
             await this.sideEffects.materializeNotes(
               resolvedScope.userId,
               resolvedScope.projectId,
               targetItemId,
               decision.proposedItem?.notes,
             );
+
+            if (envelope.collectionIds && envelope.collectionIds.length > 0) {
+              for (const colId of envelope.collectionIds) {
+                await this.sideEffects.assignItemToCollection(
+                  resolvedScope.userId,
+                  colId,
+                  targetItemId,
+                  resolvedScope.projectId,
+                );
+              }
+            }
           }
 
           const exactSourceLabel =
@@ -530,6 +575,23 @@ export class PipelineService {
             ...(createdItem as unknown as Record<string, unknown>),
           },
         );
+
+        await this.sideEffects.autoCaptureWebAssets({
+          userId: resolvedScope.userId,
+          projectId: resolvedScope.projectId,
+          itemId: createdItem.id,
+          payloadKind: envelope.payload.kind,
+          sourceUrl:
+            envelope.payload.kind === 'URL'
+              ? envelope.payload.url
+              : undefined,
+          proposedItem: {
+            ...(decision.proposedItem || {}),
+            ...(createdItem as unknown as Record<string, unknown>),
+          },
+          existingFileId: uploadedFileIdentifier,
+          overrides: envelope.overrides,
+        });
 
         await this.sideEffects.materializeNotes(
           resolvedScope.userId,

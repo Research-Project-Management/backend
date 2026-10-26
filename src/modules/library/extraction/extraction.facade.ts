@@ -105,12 +105,16 @@ export class ExtractionFacade implements IExtractionFacade {
     duplicateItemIds: string[],
     primaryItemId: string,
     tx?: Prisma.TransactionClient,
-  ): Promise<void> {
-    await this.attachmentsService.reassignToItem(
+  ): Promise<string[]> {
+    return await this.attachmentsService.reassignToItem(
       duplicateItemIds,
       primaryItemId,
       tx,
     );
+  }
+
+  async cleanupOrphanedFiles(fileIds: string[]): Promise<void> {
+    await this.attachmentsService.cleanupOrphanedFiles(fileIds);
   }
 
   // Annotation delegation methods
@@ -195,4 +199,3 @@ export class ExtractionFacade implements IExtractionFacade {
     );
   }
 }
-

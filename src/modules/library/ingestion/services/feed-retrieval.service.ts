@@ -5,7 +5,11 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
-import { SsrfGuardService, ExternalProviderException } from '@/modules/library/core';
+import {
+  SsrfGuardService,
+  ExternalProviderException,
+  readSafeResponseText,
+} from '@/modules/library/core';
 import {
   parseAcademicFeedXml,
   ParsedAcademicFeed,
@@ -48,10 +52,15 @@ export class FeedRetrievalService {
       try {
         const cachedFeed = await this.feedsRepo.findFeedWithRecentItemsByUrl(
           trimmed,
-          50,
+          100,
         );
 
-        const cooldownMinutes = forceRefresh ? 3 : 15;
+        // Centralized 1-IP SaaS Protection:
+        // Academic journals/preprints update 1-4 times/day.
+        // Normal reads serve from the shared DB pool for up to 120 minutes (2 hours).
+        // Even explicit user "Refresh" requests enforce a strict 30-minute server-wide cooldown
+        // per unique feed URL so N users clicking refresh never trigger outbound IP rate limits.
+        const cooldownMinutes = forceRefresh ? 30 : 120;
         const cooldownThreshold = new Date(
           Date.now() - cooldownMinutes * 60 * 1000,
         );
@@ -64,7 +73,7 @@ export class FeedRetrievalService {
         ) {
           if (forceRefresh) {
             this.logger.log(
-              `User requested refresh for "${trimmed}", but feed was refreshed recently (< 3 min). Serving from DB to prevent publisher rate limit.`,
+              `User requested refresh for "${trimmed}", serving virtualized snapshot from shared DB pool (last fetched at ${cachedFeed.lastFetchedAt.toISOString()}) to protect server IP.`,
             );
           }
           return this.feedsRepo.mapCachedFeedToParsedFeed(cachedFeed);
@@ -163,7 +172,7 @@ export class FeedRetrievalService {
       return this.fallbackSearchFeed(trimmed);
     }
 
-    const xml = await response.text();
+    const xml = await readSafeResponseText(response);
     if (
       xml.includes('<!DOCTYPE html') ||
       xml.includes('challenge-running') ||

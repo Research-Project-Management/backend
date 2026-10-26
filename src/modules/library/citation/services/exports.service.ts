@@ -154,7 +154,8 @@ export class ExportsService {
         };
       }
 
-      case 'csl-json': {
+      case 'csl-json':
+      case 'csl_json': {
         const cslList = items.map((it) => CslJsonMapper.toCsl(it));
 
         return {

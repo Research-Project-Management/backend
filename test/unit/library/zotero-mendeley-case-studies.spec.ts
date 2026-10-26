@@ -760,7 +760,7 @@ ER  -
       // Year > 2020
       expect(jsonStr).toContain('{"year":{"gt":2020}}');
       // hasPdf -> attachments some {}
-      expect(jsonStr).toContain('{"attachments":{"some":{}}}');
+      expect(jsonStr).toContain('{"attachments":{"some":{"deletedAt":null}}}');
       // tag does_not_contain 'archived'
       expect(jsonStr).toContain(
         '"name":{"contains":"archived","mode":"insensitive"}',

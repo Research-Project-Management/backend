@@ -27,6 +27,7 @@ model State {
   @@index([userId, isStarred])
   @@index([userId, readStatus])
   @@index([userId, lastOpenedAt(sort: Desc)])
+  @@index([userId, lastReadAt(sort: Desc)])
   @@index([itemId])
   @@map("user_item_states")
 }
@@ -49,6 +50,8 @@ model Note {
 
   @@index([itemId, deletedAt])
   @@index([userId, deletedAt, updatedAt(sort: Desc)])
+  @@index([userId, projectId, deletedAt, updatedAt(sort: Desc)])
+  @@index([projectId, deletedAt, updatedAt(sort: Desc)])
   @@index([projectId, deletedAt])
   @@index([tags], type: Gin)
   @@map("notes")

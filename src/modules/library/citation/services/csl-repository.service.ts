@@ -366,11 +366,12 @@ export class CslRepositoryService implements OnModuleInit {
    * 3. Zotero Style Repository API (https://www.zotero.org/styles/:styleId)
    * 4. GitHub CSL Repository Raw Fallback
    */
-  public async fetchCslXml(styleId: string): Promise<string | null> {
+  public async fetchCslXml(styleId: string, scopeId?: string): Promise<string | null> {
     const normalized = styleId.trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9._-]{0,100}$/.test(normalized)) {
       return null;
     }
+    const cacheKey = "csl:xml:" + normalized;
 
     // 1. Built-in bundled high-performance styles
     if (normalized === 'ieee') return IEEE_CSL;
@@ -379,9 +380,19 @@ export class CslRepositoryService implements OnModuleInit {
       return CHICAGO_CSL;
     if (normalized === 'mla' || normalized === 'mla-9th') return MLA_CSL;
 
-    // 2. Cache lookup
-    const cacheKey = `csl:xml:${normalized}`;
+    // 2. Cache lookup (scoped custom style lookup first, then global official cache)
     if (this.redisCache) {
+      if (scopeId) {
+        const scoped = await this.redisCache.get<string>(`csl:xml:${scopeId}:${normalized}`);
+        if (scoped && typeof scoped === 'string' && scoped.includes('<style')) {
+          return scoped;
+        }
+      }
+      const customCached = await this.redisCache.get<string>(`csl:xml:custom:${normalized}`);
+      if (customCached && typeof customCached === 'string' && customCached.includes('<style')) {
+        return customCached;
+      }
+      const cacheKey = `csl:xml:${normalized}`;
       const cached = await this.redisCache.get<string>(cacheKey);
       if (cached && typeof cached === 'string' && cached.includes('<style')) {
         return cached;
@@ -495,6 +506,26 @@ export class CslRepositoryService implements OnModuleInit {
       .replace(/[^a-zA-Z0-9_-]/g, '-')
       .toLowerCase();
 
+    const RESERVED_OFFICIAL_STYLES = new Set([
+      'ieee',
+      'nature',
+      'chicago',
+      'chicago-author-date',
+      'mla',
+      'mla-9th',
+      'apa',
+      'apa-7th',
+      'vancouver',
+      'harvard1',
+      'bibtex',
+      'ris',
+    ]);
+    if (RESERVED_OFFICIAL_STYLES.has(slug)) {
+      throw new ExtractionProcessException(
+        `Cannot overwrite official built-in or standard CSL style ID: '${slug}'`,
+      );
+    }
+
     const formatMatch = cslXml.match(/citation-format="([^"]+)"/i);
     const category = parseCslCategory(formatMatch?.[1]);
 
@@ -509,7 +540,10 @@ export class CslRepositoryService implements OnModuleInit {
 
     // Cache XML and metadata with user/project scope isolation
     if (this.redisCache) {
-      await this.redisCache.set(`csl:xml:${slug}`, cslXml, 86400 * 365);
+      const xmlKey = scopeId
+        ? `csl:xml:${scopeId}:${slug}`
+        : `csl:xml:custom:${slug}`;
+      await this.redisCache.set(xmlKey, cslXml, 86400 * 365);
       const listKey = scopeId
         ? `csl:${scopeId}:custom-styles-list`
         : 'csl:custom-styles-list';

@@ -47,11 +47,15 @@ export class DuplicateService {
   private readonly detector: DuplicateDetectorService;
   private readonly merger: DuplicateMergerService;
 
+  private readonly libraryTx?: TransactionService;
+  private readonly catalogGateway?: ICatalogFacade;
+
   constructor(
-    private readonly libraryTx: TransactionService,
+    @Inject(TransactionService)
+    libraryTx: TransactionService | DuplicateDetectorService,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    catalogGateway?: ICatalogFacade | DuplicateMergerService,
     @Optional()
     @Inject(EXTRACTION_FACADE)
     private readonly extractionGateway?: IExtractionFacade,
@@ -67,10 +71,12 @@ export class DuplicateService {
       ((libraryTx as unknown as DuplicateDetectorService).detectDuplicates ||
         libraryTx instanceof DuplicateDetectorService)
     ) {
-      this.detector = libraryTx as unknown as DuplicateDetectorService;
+      this.detector = libraryTx as DuplicateDetectorService;
       this.merger = catalogGateway as unknown as DuplicateMergerService;
       return;
     }
+    this.libraryTx = libraryTx;
+    this.catalogGateway = catalogGateway as ICatalogFacade | undefined;
     this.detector =
       detector ??
       new DuplicateDetectorService(

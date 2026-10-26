@@ -161,15 +161,21 @@ export function convertAcademicHtmlToMarkdown(raw: string): string {
     .replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
     .replace(
       /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
-      '[$2]($1)',
+      (_, href: string, label: string) => {
+        const cleanHref = href.trim();
+        if (/^(https?:\/\/|mailto:)/i.test(cleanHref)) {
+          return `[${label}](${cleanHref})`;
+        }
+        return label;
+      },
     )
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&amp;/gi, '&')
     .replace(/&mdash;/gi, '—')
     .replace(/&ndash;/gi, '–')
     .split('\n')

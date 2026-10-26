@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { Prisma } from '@prisma/client';
-import { normalizeProjectScopeId } from '@/modules/library/core';
+import {
+  normalizeProjectScopeId,
+  VersionMismatchException,
+} from '@/modules/library/core';
 import {
   CreateSavedSearchDto,
   UpdateSavedSearchDto,
@@ -94,12 +97,14 @@ export class SavedSearchesRepository {
     const scopeWhere = effectiveProjectId
       ? { projectId: effectiveProjectId }
       : { userId, projectId: null };
+    const expectedVersion = dto.expectedVersion ?? dto.version;
     const where: Prisma.SavedSearchWhereInput = {
       id,
       deletedAt: null,
       ...scopeWhere,
+      ...(expectedVersion !== undefined ? { version: expectedVersion } : {}),
     };
-    return client.savedSearch.updateMany({
+    const res = await client.savedSearch.updateMany({
       where,
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
@@ -122,6 +127,21 @@ export class SavedSearchesRepository {
         version: { increment: 1 },
       },
     });
+    if (res.count === 0 && expectedVersion !== undefined) {
+      const current = await client.savedSearch?.findFirst?.({
+        where: { id, deletedAt: null, ...scopeWhere },
+      });
+      if (!current) {
+        throw new NotFoundException(`Saved search ${id} not found`);
+      }
+      throw new VersionMismatchException({
+        aggregateType: 'SavedSearch',
+        entityId: id,
+        currentVersion: current.version ?? 1,
+        providedVersion: expectedVersion,
+      });
+    }
+    return res;
   }
 
   async updateCachedCount(
@@ -174,18 +194,18 @@ export class SavedSearchesRepository {
     const limit = Math.min(options.limit ?? 50, 100);
 
     const sortDir = options.sortOrder || 'desc';
-    let orderBy: Prisma.ItemOrderByWithRelationInput;
+    let orderBy: Prisma.ItemOrderByWithRelationInput[];
 
     if (options.sortBy === 'year') {
-      orderBy = { year: sortDir };
+      orderBy = [{ year: sortDir }, { id: 'desc' }];
     } else if (options.sortBy === 'title') {
-      orderBy = { title: options.sortOrder || 'asc' };
+      orderBy = [{ title: options.sortOrder || 'asc' }, { id: 'desc' }];
     } else if (options.sortBy === 'creator' || options.sortBy === 'authors') {
-      orderBy = { firstAuthor: options.sortOrder || 'asc' };
+      orderBy = [{ firstAuthor: options.sortOrder || 'asc' }, { id: 'desc' }];
     } else if (options.sortBy === 'updatedAt') {
-      orderBy = { updatedAt: sortDir };
+      orderBy = [{ updatedAt: sortDir }, { id: 'desc' }];
     } else {
-      orderBy = { createdAt: sortDir };
+      orderBy = [{ createdAt: sortDir }, { id: 'desc' }];
     }
 
     const page = options.page && options.page > 0 ? options.page : 1;

@@ -19,6 +19,7 @@ import {
   isBotChallengePage,
   deriveDoiFromPublisherUrl,
   readSafeResponseBuffer,
+  readSafeResponseText,
 } from '@/modules/library/core';
 import {
   PublisherDomExtractor,
@@ -271,7 +272,7 @@ export class UrlMetadataScraperService {
     }
 
     try {
-      const htmlText = await response.text();
+      const htmlText = await readSafeResponseText(response);
       return this.processHtmlText(
         htmlText,
         finalUrl,

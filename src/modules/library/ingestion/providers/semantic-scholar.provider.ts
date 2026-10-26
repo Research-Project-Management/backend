@@ -75,17 +75,17 @@ export class SemanticScholarProvider implements MetadataProvider {
     let identifier = rawQuery;
     let isSpecificId = false;
 
+    const arxiv = normalizeArxivId(rawQuery, { stripVersion: true });
     const doi = normalizeDoi(rawQuery);
-    const arxiv = normalizeArxivId(rawQuery);
     const pmid = normalizePmid(rawQuery);
 
-    if (doi) {
-      targetUrl = `${this.baseUrl}/${encodeURIComponent(doi)}?fields=${this.FIELDS}`;
-      identifier = doi;
-      isSpecificId = true;
-    } else if (arxiv) {
+    if (arxiv) {
       targetUrl = `${this.baseUrl}/ARXIV:${encodeURIComponent(arxiv)}?fields=${this.FIELDS}`;
       identifier = arxiv;
+      isSpecificId = true;
+    } else if (doi) {
+      targetUrl = `${this.baseUrl}/DOI:${encodeURIComponent(doi)}?fields=${this.FIELDS}`;
+      identifier = doi;
       isSpecificId = true;
     } else if (pmid) {
       targetUrl = `${this.baseUrl}/PMID:${encodeURIComponent(pmid)}?fields=${this.FIELDS}`;

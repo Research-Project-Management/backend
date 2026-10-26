@@ -220,6 +220,7 @@ export class CatalogFacade {
       arxivId?: string | null;
       pmid?: string | null;
       isbn?: string | null;
+      year?: number | null;
       titleWords?: string[];
       titlePrefix?: string;
     },

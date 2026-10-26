@@ -300,10 +300,20 @@ export class CommandRepository {
         }
         return false;
       }
-      await client.note?.updateMany?.({
-        where: { itemId: id, deletedAt: null },
-        data: { deletedAt: deletedDate },
-      });
+      await Promise.all([
+        client.note?.updateMany?.({
+          where: { itemId: id, deletedAt: null },
+          data: { deletedAt: deletedDate },
+        }),
+        client.attachment?.updateMany?.({
+          where: { itemId: id, deletedAt: null },
+          data: { deletedAt: deletedDate },
+        }),
+        client.annotation?.updateMany?.({
+          where: { attachment: { itemId: id }, deletedAt: null },
+          data: { deletedAt: deletedDate },
+        }),
+      ]);
       return true;
     }
     const result = await client.item.updateMany({
@@ -314,10 +324,20 @@ export class CommandRepository {
       },
     });
     if (result.count > 0) {
-      await client.note?.updateMany?.({
-        where: { itemId: id, deletedAt: null },
-        data: { deletedAt: deletedDate },
-      });
+      await Promise.all([
+        client.note?.updateMany?.({
+          where: { itemId: id, deletedAt: null },
+          data: { deletedAt: deletedDate },
+        }),
+        client.attachment?.updateMany?.({
+          where: { itemId: id, deletedAt: null },
+          data: { deletedAt: deletedDate },
+        }),
+        client.annotation?.updateMany?.({
+          where: { attachment: { itemId: id }, deletedAt: null },
+          data: { deletedAt: deletedDate },
+        }),
+      ]);
     }
     return result.count > 0;
   }
@@ -393,33 +413,38 @@ export class CommandRepository {
         });
       }
     }
-    await client.note?.updateMany?.({
-      where: { itemId: id, deletedAt: { not: null } },
-      data: { deletedAt: null },
-    });
-    await client.attachment.updateMany({
-      where: { itemId: id, deletedAt: { not: null } },
-      data: { deletedAt: null },
-    });
-    const itemAttachments = await client.attachment.findMany({
-      where: { itemId: id },
-      select: { id: true },
-    });
-    if (itemAttachments.length > 0) {
-      await client.annotation.updateMany({
+    const cascadeCutoff = existing.deletedAt
+      ? new Date(existing.deletedAt.getTime() - 2000)
+      : undefined;
+    const deletedFilter = cascadeCutoff
+      ? { gte: cascadeCutoff }
+      : { not: null };
+
+    await Promise.all([
+      client.note?.updateMany?.({
+        where: { itemId: id, deletedAt: deletedFilter },
+        data: { deletedAt: null },
+      }),
+      client.attachment?.updateMany?.({
+        where: { itemId: id, deletedAt: deletedFilter },
+        data: { deletedAt: null },
+      }),
+      client.annotation?.updateMany?.({
         where: {
-          attachmentId: { in: itemAttachments.map((a) => a.id) },
-          deletedAt: { not: null },
+          attachment: { itemId: id },
+          deletedAt: deletedFilter,
         },
         data: { deletedAt: null },
-      });
-    }
-    const activeNoteCount = await client.note.count({
-      where: { itemId: id, deletedAt: null },
-    });
-    const activeAttCount = await client.attachment.count({
-      where: { itemId: id, deletedAt: null },
-    });
+      }),
+    ]);
+    const [activeNoteCount, activeAttCount] = await Promise.all([
+      client.note.count({
+        where: { itemId: id, deletedAt: null },
+      }),
+      client.attachment.count({
+        where: { itemId: id, deletedAt: null },
+      }),
+    ]);
     return client.item.update({
       where: { id },
       data: {
@@ -512,7 +537,11 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
     projectId?: string,
   ): Promise<{
-    restoredItems: Array<{ id: string; version: number; projectId: string | null }>;
+    restoredItems: Array<{
+      id: string;
+      version: number;
+      projectId: string | null;
+    }>;
     succeededIds: string[];
     failedIds: string[];
   }> {
@@ -550,6 +579,21 @@ export class CommandRepository {
     purgedNotes: number;
     purgedCollections: number;
     storagePaths: string[];
+    expiredItems: Array<{
+      id: string;
+      userId: string;
+      projectId: string | null;
+    }>;
+    expiredNotes: Array<{
+      id: string;
+      userId: string;
+      projectId: string | null;
+    }>;
+    expiredCollections: Array<{
+      id: string;
+      userId: string;
+      projectId: string | null;
+    }>;
   }> {
     const res = await CommandBulkOperations.purgeExpiredTrash(
       this.getClient(tx),
@@ -601,22 +645,11 @@ export class CommandRepository {
       select: { userId: true },
     });
     if (!source) return;
-    const rawType = String(relation.relationType || '')
-      .trim()
-      .toLowerCase();
+    const rawType = String(relation.relationType || '').trim().toLowerCase();
     const validRelationTypes = new Set<string>([
-      'cites',
-      'cited_by',
-      'replicates',
-      'extends',
-      'is_preprint_of',
-      'is_published_version_of',
-      'is_translation_of',
-      'supplements',
-      'related',
-      'rebuts',
-      'uses_dataset',
-      'survey_of',
+      'cites', 'cited_by', 'replicates', 'extends', 'is_preprint_of',
+      'is_published_version_of', 'is_translation_of', 'supplements',
+      'related', 'rebuts', 'uses_dataset', 'survey_of',
     ]);
     const relationType: RelationType = validRelationTypes.has(rawType)
       ? (rawType as RelationType)
@@ -630,15 +663,8 @@ export class CommandRepository {
           relationType,
         },
       },
-      create: {
-        sourceItemId: itemId,
-        targetItemId,
-        relationType,
-        description,
-      },
-      update: {
-        description,
-      },
+      create: { sourceItemId: itemId, targetItemId, relationType, description },
+      update: { description },
     });
   }
   async removeRelation(
@@ -647,8 +673,7 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     if (!isUuid(itemId) || !isUuid(targetItemId)) return;
-    const client = this.getClient(tx);
-    await client.itemRelation.deleteMany({
+    await this.getClient(tx).itemRelation.deleteMany({
       where: {
         OR: [
           { sourceItemId: itemId, targetItemId },
@@ -683,9 +708,7 @@ export class CommandRepository {
     const existing = await client.item.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
-    if (!existing) {
-      throw new NotFoundException(`CatalogItem ${id} not found`);
-    }
+    if (!existing) throw new NotFoundException(`CatalogItem ${id} not found`);
     if (isMyPublication) {
       const updatePayload = {
         ...(options?.contributorId !== undefined && { contributorId: options.contributorId }),
@@ -698,28 +721,12 @@ export class CommandRepository {
         update: updatePayload,
       });
     } else {
-      await client.userPublication.deleteMany({
-        where: { userId, itemId: id },
-      });
-    }
-    if (validProjectId) {
-      return client.item.findUniqueOrThrow({
-        where: { id },
-        include: {
-          collectionItems: { include: { collection: true } },
-          itemTags: { include: { tag: true } },
-          contributors: { orderBy: { orderIndex: 'asc' } },
-          attachments: true,
-        },
-      });
+      await client.userPublication.deleteMany({ where: { userId, itemId: id } });
     }
     const metadataObj = buildMyPublicationMetadata(existing.metadata, isMyPublication, options);
     return client.item.update({
       where: { id },
-      data: {
-        metadata: metadataObj as Prisma.InputJsonValue,
-        version: { increment: 1 },
-      },
+      data: { metadata: metadataObj as Prisma.InputJsonValue, version: { increment: 1 } },
       include: {
         collectionItems: { include: { collection: true } },
         itemTags: { include: { tag: true } },

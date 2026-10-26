@@ -19,11 +19,13 @@ import {
 } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
 import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
+import { XmlLegacyFormatsParser } from '@/modules/library/ingestion/parsers/xml-legacy-formats.parser';
 import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   normalizeArxivId,
   normalizePmid,
+  normalizePmcid,
   normalizeIsbn,
 } from '@/modules/library/core';
 import {
@@ -58,6 +60,9 @@ export class IdentifyStage implements IWorkflowStage<
   readonly stageName = 'IDENTIFY' as const;
   private readonly logger = new Logger(IdentifyStage.name);
 
+  private readonly cslParser: CslParser;
+  private readonly xmlLegacyParser: XmlLegacyFormatsParser;
+
   constructor(
     private readonly doiParser: DoiParser,
     private readonly bibtexParser: BibtexParser,
@@ -67,12 +72,17 @@ export class IdentifyStage implements IWorkflowStage<
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
     @Optional()
-    private readonly cslParser?: CslParser,
+    cslParser?: CslParser,
     @Optional()
     private readonly fileResolver?: IdentifyFileResolver,
     @Optional()
     private readonly urlResolver?: IdentifyUrlResolver,
-  ) {}
+    @Optional()
+    xmlLegacyParser?: XmlLegacyFormatsParser,
+  ) {
+    this.cslParser = cslParser ?? new CslParser();
+    this.xmlLegacyParser = xmlLegacyParser ?? new XmlLegacyFormatsParser();
+  }
 
   /**
    * Executes identification and initial format translation into candidate envelopes.
@@ -153,10 +163,32 @@ export class IdentifyStage implements IWorkflowStage<
               }),
             );
           }
-        } else if (format === 'ENDNOTE_XML' || format === 'MODS') {
-          throw new BadRequestException(
-            `Record format "${format}" is not supported by the ingestion parser`,
+        } else if (
+          format === 'ENDNOTE_XML' ||
+          format === 'MODS' ||
+          format === 'ZOTERO_RDF' ||
+          format === 'RDF' ||
+          format === 'MEDLINE' ||
+          format === 'NBIB' ||
+          format === 'CSV'
+        ) {
+          const detectedFormat =
+            this.xmlLegacyParser.detectFormat(recordContent, format) || format;
+          const parsedList = this.xmlLegacyParser.parse(
+            recordContent,
+            detectedFormat,
           );
+          for (const item of parsedList) {
+            candidates.push(
+              this.createCandidate({
+                sourceKind: 'RECORD',
+                sourceName: detectedFormat,
+                sourceRecordId: item.doi || item.citationKey || item.pmid,
+                rawMetadata: item as unknown as Record<string, unknown>,
+                confidenceScore: 0.93,
+              }),
+            );
+          }
         }
         break;
       }
@@ -240,7 +272,9 @@ export class IdentifyStage implements IWorkflowStage<
     } else if (type === 'PMID') {
       fieldKey = 'pmid';
       cleanValue =
-        normalizePmid(rawValue) || rawValue.replace(/^pmid:\s*/i, '').trim();
+        normalizePmcid(rawValue) ||
+        normalizePmid(rawValue) ||
+        rawValue.replace(/^(?:pmcid|pmc|pmid):\s*/i, '').trim();
     } else if (type === 'ISBN') {
       fieldKey = 'isbn';
       cleanValue =
@@ -288,7 +322,9 @@ export class IdentifyStage implements IWorkflowStage<
           fileId: payload.fileId,
         });
         if (file?.buffer) {
-          const decompressed = await gunzipAsync(file.buffer);
+          const decompressed = await gunzipAsync(file.buffer, {
+            maxOutputLength: 50 * 1024 * 1024,
+          });
           content = decompressed.toString('utf-8');
         }
       } catch (err: unknown) {

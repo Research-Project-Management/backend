@@ -245,6 +245,7 @@ export class ItemMatchQueryRepository {
       arxivId?: string | null;
       pmid?: string | null;
       isbn?: string | null;
+      year?: number | null;
       titleWords?: string[];
       titlePrefix?: string;
     },
@@ -388,10 +389,33 @@ export class ItemMatchQueryRepository {
       return { exactMatch: null, candidateItems: [] };
     }
 
+    const hasValidYear =
+      criteria.year !== undefined &&
+      criteria.year !== null &&
+      Number.isFinite(Number(criteria.year));
+    const targetYear = hasValidYear ? Number(criteria.year) : undefined;
+
     const items = await activeClient.item.findMany({
       where: {
         ...scopeWhere,
-        ...titleCondition,
+        ...(targetYear !== undefined
+          ? {
+              AND: [
+                titleCondition,
+                {
+                  OR: [
+                    { year: null },
+                    {
+                      year: {
+                        gte: targetYear - 1,
+                        lte: targetYear + 1,
+                      },
+                    },
+                  ],
+                },
+              ],
+            }
+          : titleCondition),
       },
       select: {
         id: true,

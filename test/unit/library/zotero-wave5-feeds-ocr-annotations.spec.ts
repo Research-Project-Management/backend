@@ -30,10 +30,8 @@ import { buildAnnotationSortIndex } from '@/modules/library/core';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { ItemTransformer } from '@/modules/library/catalog/domain/item.transformer';
 import type { PrismaService } from '@/core';
-import type {
-  TransactionService,
-  TransactionHelpers,
-} from '@/modules/library/core';
+import type { TransactionHelpers } from '@/modules/library/core';
+import type { TransactionService } from '@/modules/library/sync';
 import type { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import type { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import type { ExportsRepository } from '@/modules/library/citation/repositories/exports.repository';
@@ -1067,9 +1065,7 @@ describe('Wave 5 — Zotero 7 RSS/Atom Feeds, My Publications & License Guard, S
         ),
       } as unknown as NotesRepository;
 
-      const mockItemQueryService = fromPartial<
-        Pick<ItemQueryService, 'exists' | 'findById'>
-      >({
+      const mockItemQueryService = fromPartial<ItemQueryService>({
         exists: jest.fn(async () => true),
         findById: jest.fn(
           async (userId: string, itemId: string, projectId?: string) => {

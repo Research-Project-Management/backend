@@ -50,6 +50,15 @@ const IGNORED_EXTRA_FIELD_PROMOTION_KEYS = new Set([
   'keywordsList',
 ]);
 
+function escapeHtmlText(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function unpackMetadataAndExtraPartial(it: MutableItemPayload): void {
   const metaObj = parseJsonObject(it.metadata);
   const hasRelationalItemTags = Array.isArray(it.itemTags);
@@ -545,7 +554,7 @@ export function mapTagsCollectionsNotesPartial(it: MutableItemPayload): void {
           id: `comment-${it.id}`,
           content: formatted,
           contentMd: formatted,
-          note: `<p>${formatted}</p>`,
+          note: `<p>${escapeHtmlText(formatted)}</p>`,
           itemType: 'note',
           source: 'arXiv',
           createdAt: it.createdAt || new Date().toISOString(),

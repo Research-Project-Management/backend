@@ -97,7 +97,9 @@ export class MetadataRoutingPolicy {
     try {
       parsed = new URL(rawUrl);
     } catch {
-      return;
+      throw new SsrfBlockedDomainException(
+        `SSRF Protection: Malformed or invalid URL "${rawUrl}"`,
+      );
     }
 
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {

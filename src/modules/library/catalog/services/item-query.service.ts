@@ -199,19 +199,24 @@ export class ItemQueryService {
     const cacheKey = LIBRARY_REDIS_KEYS.counts(userId, projectId);
 
     const fetchCountsData = async () => {
-      const [total, unfiled, starred, trash, itemTypes] = await Promise.all([
-        this.query.count(userId, { view: 'all', projectId }),
+      const [unfiled, starred, trash, rawItemTypes] = await Promise.all([
         this.query.count(userId, { view: 'unfiled', projectId }),
         this.query.count(userId, { view: 'starred', projectId }),
         this.query.count(userId, { view: 'trash', projectId }),
-        this.query.countByItemType(userId, projectId),
+        this.query.countByItemType?.(userId, projectId),
       ]);
+      const itemTypes = rawItemTypes || {};
+      const typeCounts = Object.values(itemTypes);
+      const total =
+        typeCounts.length > 0
+          ? typeCounts.reduce((acc, count) => acc + count, 0)
+          : await this.query.count(userId, { view: 'all', projectId });
       return {
         total,
         unfiled,
         starred,
         trash,
-        itemTypes: itemTypes || {},
+        itemTypes,
       };
     };
 
@@ -316,6 +321,7 @@ export class ItemQueryService {
       tagId?: string;
       tag?: string;
       search?: string;
+      searchMode?: 'title_creator_year' | 'fields_tags' | 'everything' | string;
       limit?: number;
       cursor?: string;
       page?: number;
@@ -397,7 +403,7 @@ export class ItemQueryService {
     const preResolvedCollectionIds =
       options.collectionId &&
       (!options.collectionIds || options.collectionIds.length === 0)
-        ? await this.query.resolveTargetCollectionIds(userId, options)
+        ? await this.query.resolveTargetCollectionIds?.(userId, options)
         : undefined;
 
     const queryOptions = {
@@ -581,6 +587,7 @@ export class ItemQueryService {
       arxivId?: string | null;
       pmid?: string | null;
       isbn?: string | null;
+      year?: number | null;
       titleWords?: string[];
       titlePrefix?: string;
     },

@@ -91,6 +91,21 @@ export class SsrfGuardService {
       );
     }
 
+    // Block non-standard IPv4 notations (decimal integer, hex, octal)
+    if (
+      /^\d+$/.test(rawHostname) ||
+      /^0x[0-9a-f]+$/i.test(rawHostname) ||
+      rawHostname
+        .split('.')
+        .every((part) => /^\d+$/.test(part) || /^0x[0-9a-f]+$/i.test(part))
+    ) {
+      if (isIP(rawHostname) !== 4) {
+        throw new ForbiddenException(
+          `Non-standard IPv4 notation '${rawHostname}' is forbidden.`,
+        );
+      }
+    }
+
     // If direct IP literal
     if (isIP(rawHostname)) {
       if (this.isPrivateOrReservedIp(rawHostname)) {
@@ -156,8 +171,10 @@ export class SsrfGuardService {
         await options.beforeHop(currentUrl, init.signal);
       }
 
+      const effectiveSignal = init.signal ?? AbortSignal.timeout(15000);
       const res = await fetch(currentUrl, {
         ...init,
+        signal: effectiveSignal,
         redirect: 'manual',
       });
 
@@ -313,6 +330,71 @@ export class SsrfGuardService {
     // IPv6 Checks
     if (normalized === '::1' || normalized === '::') return true;
 
+    // Discard prefix (100::/64 RFC 6666)
+    if (normalized.startsWith('100:')) return true;
+
+    // Documentation prefix (2001:db8::/32 RFC 3849)
+    if (normalized.startsWith('2001:db8:') || normalized.startsWith('2001:0db8:')) return true;
+
+    // 6to4 prefix (2002::/16 RFC 3056) - extracts embedded IPv4 in 2nd and 3rd 16-bit blocks
+    if (normalized.startsWith('2002:')) {
+      const parts = normalized.split(':');
+      if (parts.length >= 3) {
+        const h1 = parseInt(parts[1], 16);
+        const h2 = parseInt(parts[2], 16);
+        if (!isNaN(h1) && !isNaN(h2)) {
+          const b1 = (h1 >> 8) & 0xff;
+          const b2 = h1 & 0xff;
+          const b3 = (h2 >> 8) & 0xff;
+          const b4 = h2 & 0xff;
+          if (this.isPrivateOrReservedIp(`${b1}.${b2}.${b3}.${b4}`)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    // NAT64 Well-Known Prefix (64:ff9b::/96 RFC 6052)
+    if (normalized.startsWith('64:ff9b::') || normalized.startsWith('0064:ff9b::')) {
+      const remainder = normalized.replace(/^(?:00)?64:ff9b::/i, '');
+      if (isIP(remainder) === 4) {
+        return this.isPrivateOrReservedIp(remainder);
+      }
+      const hexParts = remainder.split(':');
+      if (hexParts.length === 2) {
+        const h1 = parseInt(hexParts[0], 16);
+        const h2 = parseInt(hexParts[1], 16);
+        if (!isNaN(h1) && !isNaN(h2)) {
+          const b1 = (h1 >> 8) & 0xff;
+          const b2 = h1 & 0xff;
+          const b3 = (h2 >> 8) & 0xff;
+          const b4 = h2 & 0xff;
+          return this.isPrivateOrReservedIp(`${b1}.${b2}.${b3}.${b4}`);
+        }
+      }
+      return true; // Fail closed for NAT64 gateway prefix
+    }
+
+    // IPv4-compatible IPv6 (::x.x.x.x or ::hhhh:hhhh)
+    if (normalized.startsWith('::') && !normalized.startsWith('::ffff:')) {
+      const remainder = normalized.substring(2);
+      if (isIP(remainder) === 4) {
+        return this.isPrivateOrReservedIp(remainder);
+      }
+      const hexParts = remainder.split(':');
+      if (hexParts.length === 2) {
+        const h1 = parseInt(hexParts[0], 16);
+        const h2 = parseInt(hexParts[1], 16);
+        if (!isNaN(h1) && !isNaN(h2)) {
+          const b1 = (h1 >> 8) & 0xff;
+          const b2 = h1 & 0xff;
+          const b3 = (h2 >> 8) & 0xff;
+          const b4 = h2 & 0xff;
+          return this.isPrivateOrReservedIp(`${b1}.${b2}.${b3}.${b4}`);
+        }
+      }
+    }
+
     // IPv4-mapped IPv6 (::ffff:x.x.x.x or ::ffff:hhhh:hhhh in hex)
     if (normalized.startsWith('::ffff:')) {
       const remainder = normalized.substring(7);
@@ -348,6 +430,16 @@ export class SsrfGuardService {
       normalized.startsWith('fe9') ||
       normalized.startsWith('fea') ||
       normalized.startsWith('feb')
+    ) {
+      return true;
+    }
+
+    // Site-local (fec0::/10 RFC 3879 deprecated)
+    if (
+      normalized.startsWith('fec') ||
+      normalized.startsWith('fed') ||
+      normalized.startsWith('fee') ||
+      normalized.startsWith('fef')
     ) {
       return true;
     }

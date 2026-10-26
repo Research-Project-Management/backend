@@ -34,6 +34,7 @@ import {
   LibraryConfigService,
   libraryConfig,
   readSafeResponseBuffer,
+  readSafeResponseText,
 } from '@/modules/library/core';
 
 import { WebMirrorResolverService } from './web-mirror-resolver.service';
@@ -460,7 +461,7 @@ export class WebFetchLadderService implements IWebFetchPort {
 
         // HTML Response
         try {
-          const bodyText = await fetchRes.text();
+          const bodyText = await readSafeResponseText(fetchRes);
           const htmlBlocked = this.verifier?.detectBlockedStatus(
             finalUrl,
             bodyText,

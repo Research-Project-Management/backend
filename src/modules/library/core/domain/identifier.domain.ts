@@ -69,9 +69,23 @@ export function normalizeDoi(doi?: string | null): string | undefined {
   if (plosMatch && plosMatch[1])
     return decodeURIComponent(plosMatch[1]).replace(/[.,;:]+$/, '');
 
-  // Embedded /doi/ or /article/ in publisher URLs
+  // ACL Anthology URL: aclanthology.org/<id> -> 10.18653/v1/<id>
+  const aclMatch = clean.match(
+    /^https?:\/\/(?:www\.)?aclanthology\.org\/([a-zA-Z0-9.-]+?)(?:\.pdf)?\/?(?:[?#].*)?$/i,
+  );
+  if (
+    aclMatch &&
+    aclMatch[1] &&
+    !['anthology', 'events', 'venues', 'sigs', 'people', 'info'].includes(
+      aclMatch[1].toLowerCase(),
+    )
+  ) {
+    return `10.18653/v1/${aclMatch[1].replace(/[.,;:]+$/, '')}`;
+  }
+
+  // Embedded /doi/, /article/, /chapter/, or /book/ in publisher URLs
   const embeddedMatch = clean.match(
-    /^https?:\/\/[^/]+(?:\/[^/]+)*\/(?:doi\/|article\/)(?:abs\/|full\/|epdf\/|pdf\/)?(10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+)(?:[?#].*)?$/i,
+    /^https?:\/\/[^/]+(?:\/[^/]+)*\/(?:doi\/|article\/|chapter\/|book\/)(?:abs\/|full\/|epdf\/|pdf\/)?(10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+?)(?:\/(?:full|abstract|pdf|epdf|html|fulltext|meta))?(?:\.pdf)?\/?(?:[?#].*)?$/i,
   );
   if (embeddedMatch && embeddedMatch[1]) {
     clean = embeddedMatch[1];
@@ -85,14 +99,20 @@ export function normalizeDoi(doi?: string | null): string | undefined {
   if (!match) {
     const embedded = clean.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+/);
     if (!embedded) return undefined;
-    const extracted = stripSurroundingPunctuation(embedded[0]);
-    return extracted.startsWith('10.48550/arXiv.')
-      ? extracted
-      : extracted.toLowerCase();
+    const extracted = stripSurroundingPunctuation(embedded[0])
+      .replace(/\/(?:full|abstract|pdf|epdf|html|fulltext|meta)\/?$/i, '')
+      .replace(/\.pdf$/i, '');
+    if (/^10\.48550\/arXiv\./.test(extracted)) {
+      return `10.48550/arXiv.${extracted.slice('10.48550/arXiv.'.length)}`;
+    }
+    return extracted.toLowerCase();
   }
 
-  // Convert arXiv DOIs (10.48550/arXiv.2305.18290v2) to strip version if needed or preserve canonical case
-  return clean.startsWith('10.48550/arXiv.') ? clean : clean.toLowerCase();
+  if (/^10\.48550\/arXiv\./.test(clean)) {
+    return `10.48550/arXiv.${clean.slice('10.48550/arXiv.'.length)}`;
+  }
+
+  return clean.toLowerCase();
 }
 
 export function normalizeArxivId(
@@ -491,6 +511,7 @@ export function generateCitationKey(metadata: {
 
   const cleanFamily =
     family
+      .replace(/[đĐ]/g, 'd')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
@@ -502,6 +523,7 @@ export function generateCitationKey(metadata: {
       'nd';
 
   const rawTitle = (metadata.title || '')
+    .replace(/[đĐ]/g, 'd')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
@@ -512,3 +534,21 @@ export function generateCitationKey(metadata: {
   return `${cleanFamily}${yearStr}${titleWord}`;
 }
 
+/**
+ * Normalizes a 19-character NASA ADS Bibcode (e.g. `1974AJ.....79..819H` or `2020ApJ...891L..41S`).
+ */
+export function normalizeBibcode(bibcode?: string | null): string | undefined {
+  if (!bibcode || typeof bibcode !== 'string') return undefined;
+  const clean = stripSurroundingPunctuation(bibcode)
+    .replace(
+      /^(?:bibcode:\s*|https?:\/\/ui\.adsabs\.harvard\.edu\/abs\/)/i,
+      '',
+    )
+    .replace(/\/(?:abstract|citations|references|metrics)?\/?$/i, '')
+    .trim();
+  return /^\d{4}[A-Za-z0-9.&]{5}[A-Za-z0-9.]{4}[A-Za-z0-9.][A-Za-z0-9.]{4}[A-Za-z]$/.test(
+    clean,
+  )
+    ? clean
+    : undefined;
+}

@@ -52,6 +52,7 @@ model LibraryChange {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([userId, seq])
+  @@index([userId, projectId, seq])
   @@index([projectId, seq])
   @@index([entityType, entityId])
   @@index([createdAt])
@@ -69,8 +70,10 @@ model Tombstone {
   deletedAt   DateTime  @default(now()) @map("deleted_at") @db.Timestamptz(6)
 
   @@index([userId, seq])
+  @@index([userId, projectId, seq])
   @@index([projectId, seq])
   @@index([userId, entityType, entityId])
+  @@index([userId, projectId, entityType, entityId])
   @@index([projectId, entityType, entityId])
   @@index([deletedAt])
   @@map("tombstones")

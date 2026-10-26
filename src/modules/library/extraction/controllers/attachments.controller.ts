@@ -189,16 +189,21 @@ export class AttachmentController {
     @Param('projectId', new ParseUUIDPipe({ optional: true }))
     paramProjectId?: string,
   ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
     const resolvedItemId =
       paramItemId ||
       queryItemId ||
-      (await this.resolveAttachmentItemId(attachmentId, userId));
+      (await this.resolveAttachmentItemId(
+        attachmentId,
+        userId,
+        effectiveProjectId,
+      ));
 
     return this.attachmentsService.setPrimaryAttachment(
       userId,
       resolvedItemId,
       attachmentId,
-      paramProjectId || queryProjectId,
+      effectiveProjectId,
     );
   }
 
@@ -269,12 +274,14 @@ export class AttachmentController {
   private async resolveAttachmentItemId(
     attachmentId: string,
     userId?: string,
+    projectId?: string,
   ): Promise<string> {
     const att = await this.attachmentsService.assertAttachmentExists(
       attachmentId,
       userId,
+      undefined,
+      projectId,
     );
     return att?.itemId || '';
   }
 }
-

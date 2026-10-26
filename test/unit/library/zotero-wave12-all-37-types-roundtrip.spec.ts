@@ -15,7 +15,7 @@ import {
   CreateItemData,
   CreatorCreditInput,
   UpdateItemData,
-} from '@/modules/library/catalog/types/items.types';
+} from '@/modules/library/core/types/bibliographic.types';
 import { PrismaService } from '@/core';
 
 const CANONICAL_SAMPLE_VALUES: Record<string, string> = {

@@ -4,13 +4,13 @@ import {
   ReconciliationDecision,
   MetadataConflictDetail,
 } from '@/modules/library/ingestion/types/metadata-candidate.types';
-import { normalizeAcademicTags } from '@/modules/library/core/domain/tag.domain';
-import { resolveBidirectionalBaseFields } from '@/modules/library/core/domain/zotero-field-harmonizer.domain';
-import { parseCreatorString } from '@/modules/library/core/domain/author.domain';
 import {
   SOURCE_WEIGHTS,
-  FIELD_AUTHORITY_WEIGHTS,
   resolveProviderFieldWeight,
+  selectAuthoritativeCreatorVariant,
+  mergeReconciledTagArrays,
+  mergeReconciledNotesArrays,
+  finalizeReconciledBibliographicMetadata,
 } from '@/modules/library/ingestion/services/metadata-reconciliation.service';
 
 export class ReconciliationPolicy {
@@ -92,17 +92,9 @@ export class ReconciliationPolicy {
 
       // Special handling for array fields: Union tags/keywords and notes across providers
       if (field === 'tags' || field === 'keywords' || field === 'labels') {
-        const candidateTags: string[] = [];
-        for (const ev of evidences) {
-          if (Array.isArray(ev.normalizedValue)) {
-            for (const t of ev.normalizedValue) {
-              if (typeof t === 'string' && t.trim()) {
-                candidateTags.push(t.trim());
-              }
-            }
-          }
-        }
-        const mergedArray = normalizeAcademicTags(candidateTags);
+        const mergedArray = mergeReconciledTagArrays(
+          evidences.map((ev) => ev.normalizedValue),
+        );
         selectedFields[field] = {
           ...best,
           normalizedValue: mergedArray,
@@ -113,54 +105,10 @@ export class ReconciliationPolicy {
       }
 
       if (field === 'notes') {
-        const mergedNotes: Array<{
-          content: string;
-          title?: string;
-          source?: string;
-          tags?: string[];
-        }> = [];
-        const seen = new Set<string>();
-        for (const ev of evidences) {
-          if (Array.isArray(ev.normalizedValue)) {
-            for (const n of ev.normalizedValue) {
-              const noteObj =
-                n && typeof n === 'object'
-                  ? (n as Record<string, unknown>)
-                  : null;
-              const rawNoteContent =
-                noteObj?.content ?? noteObj?.contentMd ?? noteObj?.note;
-              const text =
-                typeof n === 'string'
-                  ? n.trim()
-                  : typeof rawNoteContent === 'string'
-                    ? rawNoteContent.trim()
-                    : '';
-              const dedupeKey = text.toLowerCase();
-              if (text && !seen.has(dedupeKey)) {
-                seen.add(dedupeKey);
-                mergedNotes.push(
-                  typeof n === 'string'
-                    ? { content: text }
-                    : {
-                        content: text,
-                        ...(typeof noteObj?.title === 'string' &&
-                        noteObj.title.trim()
-                          ? { title: noteObj.title.trim() }
-                          : {}),
-                        ...(typeof noteObj?.source === 'string' &&
-                        noteObj.source.trim()
-                          ? { source: noteObj.source.trim() }
-                          : {}),
-                        ...(Array.isArray(noteObj?.tags) &&
-                        noteObj.tags.length > 0
-                          ? { tags: noteObj.tags as string[] }
-                          : {}),
-                      },
-                );
-              }
-            }
-          }
-        }
+        const mergedNotes = mergeReconciledNotesArrays(
+          evidences.map((ev) => ev.normalizedValue),
+          true,
+        );
         selectedFields[field] = {
           ...best,
           normalizedValue: mergedNotes,
@@ -187,31 +135,13 @@ export class ReconciliationPolicy {
       }
 
       if (field === 'creators' || field === 'authors') {
-        // If an authoritative publisher registry (CrossRef/PubMed/arXiv/EnrichedProvider) provides
-        // a richer/more complete creator list than local PDF text extraction, prefer it.
-        const authoritative = sorted.find(
-          (e) =>
-            ['crossref', 'pubmed', 'arxiv', 'enrichedprovider'].includes(
-              (e.sourceProvider || '').toLowerCase(),
-            ) &&
-            Array.isArray(e.normalizedValue) &&
-            e.normalizedValue.length > 0,
-        );
-
-        const currentBest =
-          sorted.find(
-            (e) =>
-              Array.isArray(e.normalizedValue) && e.normalizedValue.length > 0,
-          ) || best;
-
-        const bestWithContent =
-          authoritative &&
-          Array.isArray(authoritative.normalizedValue) &&
-          Array.isArray(currentBest.normalizedValue) &&
-          authoritative.normalizedValue.length >
-            currentBest.normalizedValue.length
-            ? authoritative
-            : currentBest;
+        const bestWithContent = selectAuthoritativeCreatorVariant(
+          sorted.map((e) => ({
+            ev: e,
+            sourceProvider: e.sourceProvider,
+            val: e.normalizedValue,
+          })),
+        ).ev;
 
         selectedFields[field] = bestWithContent;
         proposedItem[field] = bestWithContent.normalizedValue;
@@ -249,73 +179,7 @@ export class ReconciliationPolicy {
       }
     }
 
-    // Ensure title exists
-    if (!proposedItem.title) {
-      proposedItem.title = 'Untitled Document';
-    }
-
-    // Ensure itemType exists
-    if (!proposedItem.itemType) {
-      proposedItem.itemType = 'journalArticle';
-    }
-
-    // Harmonize venue and publisher per Zotero itemType schema (DRY baseField mappings)
-    const itemType =
-      typeof proposedItem.itemType === 'string' && proposedItem.itemType
-        ? proposedItem.itemType
-        : 'journalArticle';
-    resolveBidirectionalBaseFields(proposedItem, itemType, undefined, false);
-    if (proposedItem.itemType === 'journalArticle' || !proposedItem.itemType) {
-      if (proposedItem.publicationTitle && !proposedItem.journal) {
-        proposedItem.journal = proposedItem.publicationTitle;
-      } else if (proposedItem.journal && !proposedItem.publicationTitle) {
-        proposedItem.publicationTitle = proposedItem.journal;
-      }
-    }
-
-    // Harmonize creators and authors
-    if (
-      Array.isArray(proposedItem.creators) &&
-      proposedItem.creators.length > 0
-    ) {
-      const creatorsList = proposedItem.creators as Array<{
-        creatorType?: string;
-        fullName?: string;
-        name?: string;
-        firstName?: string;
-        lastName?: string;
-      }>;
-      const authorsList = proposedItem.authors as unknown[] | undefined;
-      if (!authorsList || authorsList.length === 0) {
-        const authorCreators = creatorsList.filter(
-          (c) => c.creatorType === 'author' || !c.creatorType,
-        );
-        const effectiveList =
-          authorCreators.length > 0 ? authorCreators : creatorsList;
-        proposedItem.authors = effectiveList
-          .map(
-            (c) =>
-              c.fullName ||
-              c.name ||
-              `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-          )
-          .filter(Boolean);
-      }
-    } else if (
-      Array.isArray(proposedItem.authors) &&
-      proposedItem.authors.length > 0
-    ) {
-      if (
-        !Array.isArray(proposedItem.creators) ||
-        proposedItem.creators.length === 0
-      ) {
-        proposedItem.creators = proposedItem.authors
-          .map((authorName: string, idx: number) =>
-            parseCreatorString(authorName, idx, 'author'),
-          )
-          .filter((c): c is NonNullable<typeof c> => c !== null);
-      }
-    }
+    finalizeReconciledBibliographicMetadata(proposedItem);
 
     return {
       selectedFields,

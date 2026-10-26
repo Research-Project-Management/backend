@@ -1,15 +1,16 @@
-﻿import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { DoiParser } from '@/modules/library/ingestion/parsers/doi.parser';
 import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
+import { XmlLegacyFormatsParser } from '@/modules/library/ingestion/parsers/xml-legacy-formats.parser';
 import { IngestionValidationException } from '@/modules/library/ingestion/types/ingestion.errors';
 
-describe('Library Ingestion Parsers (DoiParser & BibtexParser)', () => {
+describe('Library Ingestion Parsers (DoiParser, BibtexParser & XmlLegacyFormatsParser)', () => {
   let doiParser: DoiParser;
   let bibtexParser: BibtexParser;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [DoiParser, BibtexParser],
+      providers: [DoiParser, BibtexParser, XmlLegacyFormatsParser],
     }).compile();
 
     doiParser = module.get<DoiParser>(DoiParser);
@@ -33,15 +34,12 @@ describe('Library Ingestion Parsers (DoiParser & BibtexParser)', () => {
     });
 
     it('should resolve publisher URLs to canonical DOI', () => {
-      // Nature URL
       expect(
         doiParser.normalize('https://www.nature.com/articles/nature12373'),
       ).toBe('10.1038/nature12373');
-      // Zenodo URL
       expect(doiParser.normalize('https://zenodo.org/records/5554321')).toBe(
         '10.5281/zenodo.5554321',
       );
-      // BioRxiv URL
       expect(
         doiParser.normalize(
           'https://www.biorxiv.org/content/10.1101/2020.01.01.123456v2',
@@ -102,7 +100,6 @@ describe('Library Ingestion Parsers (DoiParser & BibtexParser)', () => {
 }
       `;
 
-      // Test fallbackParse directly to ensure 100% test coverage of balanced brace scanner
       const fallbackResults = (bibtexParser as any).fallbackParse(
         nonStandardBibtex,
       );
@@ -117,6 +114,40 @@ describe('Library Ingestion Parsers (DoiParser & BibtexParser)', () => {
       expect(entry.authors).toContain('{Acme Scientific Corp}');
       expect(entry.url).toBe('https://flux.study/docs');
       expect(entry.notes).toEqual(['Internal Research Note']);
+    });
+
+    it('should parse EndNote XML, MODS XML, Zotero RDF, Medline NBIB and Bibliographic CSV via XmlLegacyFormatsParser', () => {
+      const parser = new XmlLegacyFormatsParser();
+      expect(
+        parser.parse(
+          `<xml><records><record><ref-type name="Journal Article">17</ref-type><titles><title>EndNote Quantum Computing</title></titles><contributors><authors><author>Feynman, Richard</author></authors></contributors><dates><year>1982</year></dates><electronic-resource-num>10.1007/BF02650179</electronic-resource-num></record></records></xml>`,
+          'ENDNOTE_XML',
+        )[0]?.title,
+      ).toBe('EndNote Quantum Computing');
+      expect(
+        parser.parse(
+          `<modsCollection><mods><titleInfo><title>MODS Digital Libraries</title></titleInfo><originInfo><dateIssued>2000</dateIssued></originInfo></mods></modsCollection>`,
+          'MODS',
+        )[0]?.title,
+      ).toBe('MODS Digital Libraries');
+      expect(
+        parser.parse(
+          `<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:bib="http://purl.org/net/biblio#" xmlns:dc="http://purl.org/dc/elements/1.1/"><bib:Article><dc:title>Zotero RDF Semantic Web</dc:title><dc:date>2001</dc:date></bib:Article></rdf:RDF>`,
+          'ZOTERO_RDF',
+        )[0]?.title,
+      ).toBe('Zotero RDF Semantic Web');
+      expect(
+        parser.parse(
+          `PMID- 31452104\nTI  - Deep learning in medicine\nFAU - Topol, Eric J\nDP  - 2019 Jan`,
+          'MEDLINE',
+        )[0]?.pmid,
+      ).toBe('31452104');
+      expect(
+        parser.parse(
+          `"Item Type","Publication Year","Author","Title"\n"journalArticle","2023","Hinton, Geoffrey","Forward-Forward Algorithm"`,
+          'CSV',
+        )[0]?.title,
+      ).toBe('Forward-Forward Algorithm');
     });
   });
 });
