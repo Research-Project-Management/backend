@@ -1,4 +1,10 @@
-import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Inject,
+  forwardRef,
+  Optional,
+} from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { RealtimeAccessService } from './realtime-access.service';
 import { ManuscriptsGateway } from './manuscripts.gateway';
@@ -87,7 +93,9 @@ export class AccessRevocationListener {
           );
 
           if (this.roomStore) {
-            await this.roomStore.removeProjectSession(projectId, socket.id).catch(() => null);
+            await this.roomStore
+              .removeProjectSession(projectId, socket.id)
+              .catch(() => null);
           }
 
           // Leave rooms

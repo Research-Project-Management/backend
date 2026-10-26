@@ -92,6 +92,16 @@ export class StructureRepository extends IStructureRepository {
     return raw ? this.mapToEntity(raw) : null;
   }
 
+  public async findByFileId(
+    projectId: string,
+    fileId: string,
+  ): Promise<ManuscriptNodeEntity | null> {
+    const raw = await this.prisma.manuscriptNode.findFirst({
+      where: { projectId, fileId },
+    });
+    return raw ? this.mapToEntity(raw) : null;
+  }
+
   public async getAllNodes(projectId: string): Promise<ManuscriptNodeEntity[]> {
     const nodes = await this.prisma.manuscriptNode.findMany({
       where: { projectId },
@@ -262,36 +272,62 @@ export class StructureRepository extends IStructureRepository {
       new Set(
         targets
           .map((t) => t.docId)
-          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+          .filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          ),
       ),
     );
     const fileIds = Array.from(
       new Set(
         targets
           .map((t) => t.fileId)
-          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+          .filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          ),
       ),
     );
 
+    const now = new Date();
+    const cleanupOps: Promise<unknown>[] = [];
+
     if (targetIds.length > 0) {
-      await this.prisma.manuscriptNode.deleteMany({
-        where: { id: { in: targetIds }, projectId },
-      });
+      cleanupOps.push(
+        this.prisma.manuscriptNode.deleteMany({
+          where: { id: { in: targetIds }, projectId },
+        }),
+      );
     }
 
-    const now = new Date();
     if (docIds.length > 0 && this.prisma.manuscriptDoc?.updateMany) {
-      await this.prisma.manuscriptDoc.updateMany({
-        where: { id: { in: docIds }, projectId, deleted: false },
-        data: { deleted: true, deletedAt: now },
-      });
+      cleanupOps.push(
+        this.prisma.manuscriptDoc.updateMany({
+          where: { id: { in: docIds }, projectId, deleted: false },
+          data: { deleted: true, deletedAt: now },
+        }),
+      );
     }
 
     if (fileIds.length > 0 && this.prisma.manuscriptFile?.updateMany) {
-      await this.prisma.manuscriptFile.updateMany({
-        where: { id: { in: fileIds }, projectId, deleted: false },
-        data: { deleted: true, deletedAt: now },
-      });
+      cleanupOps.push(
+        this.prisma.manuscriptFile.updateMany({
+          where: { id: { in: fileIds }, projectId, deleted: false },
+          data: { deleted: true, deletedAt: now },
+        }),
+      );
+    }
+
+    if (cleanupOps.length > 0) {
+      if (typeof this.prisma.$transaction === 'function') {
+        try {
+          await this.prisma.$transaction(
+            cleanupOps as Prisma.PrismaPromise<unknown>[],
+          );
+        } catch {
+          await Promise.all(cleanupOps);
+        }
+      } else {
+        await Promise.all(cleanupOps);
+      }
     }
 
     return targets.map((t) => this.mapToEntity(t));

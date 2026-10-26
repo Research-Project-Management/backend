@@ -225,4 +225,3 @@ export class HeuristicRootDocDetector {
     return FileTreeBuilder.detectRootDoc(nodes, docContents);
   }
 }
-

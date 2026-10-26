@@ -38,7 +38,23 @@ export class RemoteClsiClientAdapter {
   }
 
   private resolveUrl(baseUrl: string, targetUrl: string): string {
-    return targetUrl.startsWith('http') ? targetUrl : `${baseUrl}${targetUrl}`;
+    const normalizedBase = baseUrl.replace(/\/+$/, '');
+    if (targetUrl.startsWith('http://') || targetUrl.startsWith('https://')) {
+      try {
+        const parsedBase = new URL(normalizedBase);
+        const parsedTarget = new URL(targetUrl);
+        if (parsedTarget.origin !== parsedBase.origin) {
+          throw new Error('Cross-origin CLSI artifact URL rejected');
+        }
+        return targetUrl;
+      } catch {
+        throw new Error('Invalid remote CLSI target URL');
+      }
+    }
+    const normalizedTarget = targetUrl.startsWith('/')
+      ? targetUrl
+      : `/${targetUrl}`;
+    return `${normalizedBase}${normalizedTarget}`;
   }
 
   public async fetchRemoteText(
@@ -99,13 +115,21 @@ export class RemoteClsiClientAdapter {
         ? [`${baseUrl}/compile`]
         : [
             `${baseUrl}/api/clsi/compile`,
-            `${baseUrl}/project/${projectId}/compile`,
+            `${baseUrl}/project/${encodeURIComponent(projectId)}/compile`,
             `${baseUrl}/compile`,
           ];
 
       const serializedFiles: Record<string, string> = {};
       for (const [k, v] of Object.entries(mergedFiles)) {
-        serializedFiles[k] = Buffer.isBuffer(v) ? v.toString('utf8') : v;
+        if (Buffer.isBuffer(v)) {
+          const isBinaryAsset =
+            /\.(png|jpe?g|gif|webp|pdf|eps|ps|ttf|otf|woff2?)$/i.test(k);
+          serializedFiles[k] = isBinaryAsset
+            ? `base64:${v.toString('base64')}`
+            : v.toString('utf8');
+        } else {
+          serializedFiles[k] = v;
+        }
       }
 
       let response: Response | null = null;
@@ -135,7 +159,7 @@ export class RemoteClsiClientAdapter {
             break;
           }
         } catch (err: unknown) {
-      this.circuitBreaker.recordFailure(err);
+          this.circuitBreaker.recordFailure(err);
           lastError = err instanceof Error ? err : new Error(String(err));
         }
       }

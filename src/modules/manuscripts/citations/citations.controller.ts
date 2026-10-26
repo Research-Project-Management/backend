@@ -45,10 +45,7 @@ import {
   CitationValidationDto,
   SyncLibraryResultDto,
 } from './dto/citations.dto';
-import {
-  IdentifierNotFoundException,
-  InvalidBibtexException,
-} from './domain';
+import { IdentifierNotFoundException, InvalidBibtexException } from './domain';
 
 interface RequestWithUser {
   user?: { id?: string; sub?: string; userId?: string };

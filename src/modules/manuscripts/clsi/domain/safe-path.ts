@@ -136,4 +136,3 @@ export class SafePath {
     return resolvedTarget;
   }
 }
-

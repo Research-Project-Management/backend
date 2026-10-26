@@ -14,10 +14,7 @@ import {
   createPkZipStream,
   PkZipEntry,
 } from '../../core/utils/pkzip-builder.util';
-import {
-  IOutputFileFinder,
-  DiscoveredOutputFile,
-} from '../domain';
+import { IOutputFileFinder, DiscoveredOutputFile } from '../domain';
 
 // ─────────────────────────────────────────────────────────────────
 // Project Lock Manager (.project-lock)

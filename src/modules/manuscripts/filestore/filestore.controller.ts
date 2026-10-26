@@ -23,7 +23,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectAccessGuard, RequireRole, Role } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+} from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Readable } from 'node:stream';

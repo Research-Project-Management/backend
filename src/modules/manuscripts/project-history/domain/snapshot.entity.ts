@@ -61,7 +61,10 @@ export class Snapshot {
       }
     }
 
-    if (this._files.size === 0 && (this._fileCountOverride === undefined || this._fileCountOverride === 0)) {
+    if (
+      this._files.size === 0 &&
+      (this._fileCountOverride === undefined || this._fileCountOverride === 0)
+    ) {
       throw new EmptyProjectException(this._projectId);
     }
   }
@@ -92,7 +95,9 @@ export class Snapshot {
     return new Map(this._files);
   }
   public get fileCount(): number {
-    return this._fileCountOverride !== undefined ? this._fileCountOverride : this._files.size;
+    return this._fileCountOverride !== undefined
+      ? this._fileCountOverride
+      : this._files.size;
   }
   public get labels(): VersionLabel[] {
     return [...this._labels];

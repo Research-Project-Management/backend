@@ -140,7 +140,10 @@ export class LocalDiskBinaryStorageAdapter extends IBinaryStoragePort {
   private resolvePath(bucket: string, key: string): string {
     const resolved = path.resolve(this.baseDir, bucket, ...key.split('/'));
     const resolvedBase = path.resolve(this.baseDir);
-    if (!resolved.startsWith(resolvedBase)) {
+    if (
+      resolved !== resolvedBase &&
+      !resolved.startsWith(resolvedBase + path.sep)
+    ) {
       throw new FilestoreValidationException(
         `Invalid storage path traversal attempt: bucket="${bucket}", key="${key}"`,
       );

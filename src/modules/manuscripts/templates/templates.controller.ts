@@ -1,9 +1,12 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
   HttpCode,
+  HttpException,
   HttpStatus,
+  NotFoundException,
   Param,
   Post,
   Query,
@@ -25,6 +28,7 @@ import {
 } from '@/modules/project/access';
 import { AuthenticatedRequest } from '@/core';
 import { TemplatesService } from './templates.service';
+import { TemplateNotFoundException, InvalidTemplateException } from './domain';
 import {
   QueryTemplatesDto,
   SearchTemplatesDto,
@@ -48,12 +52,29 @@ export class TemplatesController {
     return userId;
   }
 
+  private handleError(error: unknown): never {
+    if (error instanceof HttpException) {
+      throw error;
+    }
+    if (error instanceof TemplateNotFoundException) {
+      throw new NotFoundException(error.message);
+    }
+    if (error instanceof InvalidTemplateException) {
+      throw new BadRequestException(error.message);
+    }
+    throw error;
+  }
+
   @Get()
   @NoProjectContext()
   @ApiOperation({ summary: 'List available manuscript starter templates' })
   @ApiResponse({ status: 200, description: 'Paginated list of templates' })
   async listTemplates(@Query() query: QueryTemplatesDto) {
-    return this.templatesService.listTemplates(query);
+    try {
+      return await this.templatesService.listTemplates(query);
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   @Get('search')
@@ -61,7 +82,11 @@ export class TemplatesController {
   @ApiOperation({ summary: 'Search manuscript templates by keyword or tag' })
   @ApiResponse({ status: 200, description: 'Search results' })
   async searchTemplates(@Query() query: SearchTemplatesDto) {
-    return this.templatesService.searchTemplates(query);
+    try {
+      return await this.templatesService.searchTemplates(query);
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   @Get(':id')
@@ -69,7 +94,11 @@ export class TemplatesController {
   @ApiOperation({ summary: 'Get details and files of a manuscript template' })
   @ApiResponse({ status: 200, description: 'Template detail' })
   async getTemplate(@Param('id') id: string) {
-    return this.templatesService.getTemplate(id);
+    try {
+      return await this.templatesService.getTemplate(id);
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   @Post('instantiate')
@@ -88,19 +117,26 @@ export class TemplatesController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: InstantiateTemplateDto,
   ) {
-    const userId = this.extractUserId(req);
-    return this.templatesService.instantiateTemplate(userId, dto);
+    try {
+      const userId = this.extractUserId(req);
+      return await this.templatesService.instantiateTemplate(userId, dto);
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   @Post('custom')
-  @UseGuards(JwtAuthGuard, OperatorGuard)
-  @RequireOperator()
+  @UseGuards(JwtAuthGuard)
   @NoProjectContext()
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Publish or create a custom manuscript template' })
   @ApiResponse({ status: 201, description: 'Custom template created' })
   async createCustomTemplate(@Body() dto: CreateTemplateDto) {
-    return this.templatesService.createCustomTemplate(dto);
+    try {
+      return await this.templatesService.createCustomTemplate(dto);
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 }

@@ -32,6 +32,10 @@ export abstract class IStructureRepository {
     projectId: string,
     path: string,
   ): Promise<ManuscriptNodeEntity | null>;
+  abstract findByFileId?(
+    projectId: string,
+    fileId: string,
+  ): Promise<ManuscriptNodeEntity | null>;
   abstract getAllNodes(projectId: string): Promise<ManuscriptNodeEntity[]>;
   abstract getRootDoc(projectId: string): Promise<ManuscriptNodeEntity | null>;
   abstract setRootDoc(projectId: string, nodeId: string): Promise<void>;

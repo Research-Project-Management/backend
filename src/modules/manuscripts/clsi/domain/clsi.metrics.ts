@@ -68,9 +68,7 @@ export class ClsiMetrics {
     }
 
     const rawKey = (sample.engine || 'other').toLowerCase().trim();
-    const engineKey = ClsiMetrics.KNOWN_ENGINES.has(rawKey)
-      ? rawKey
-      : 'other';
+    const engineKey = ClsiMetrics.KNOWN_ENGINES.has(rawKey) ? rawKey : 'other';
     const existing = this.durationsByEngine.get(engineKey) || {
       count: 0,
       totalMs: 0,

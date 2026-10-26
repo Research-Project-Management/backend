@@ -22,7 +22,11 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectAccessGuard, RequireRole, Role } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+} from '@/modules/project/access';
 import { TrackChangesService } from './track-changes.service';
 import {
   RecordChangeDto,
@@ -80,6 +84,7 @@ export class TrackChangesController {
   }
 
   @Post('changes')
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
     summary: 'Record a new proposed inline text mutation (insert or delete)',
   })
@@ -228,6 +233,7 @@ export class TrackChangesController {
   }
 
   @Patch(['threads/:threadId/resolve', 'comments/:threadId/resolve'])
+  @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({ summary: 'Resolve or reopen a comment thread' })
   @ApiResponse({ status: 200, type: CommentThreadResponseDto })
   async resolveCommentThread(

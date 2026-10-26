@@ -156,6 +156,26 @@ export class PagesDocController {
         });
       }
 
+      const live = this.getLiveCollaboration();
+      if (live && record.projectId) {
+        const flushed = await live
+          .flushDocs(record.projectId, [pageId])
+          .catch(() => []);
+        if (flushed.length > 0) {
+          const refreshed = await findPageRecordWithNode(
+            this.prisma,
+            pageId,
+            record.projectId,
+          );
+          if (refreshed && !refreshed.deleted) {
+            return await formatPageByIdResponse(
+              this.docstoreService,
+              refreshed,
+            );
+          }
+        }
+      }
+
       return await formatPageByIdResponse(this.docstoreService, record);
     } catch (err) {
       if (err instanceof NotFoundException) throw err;
@@ -203,14 +223,16 @@ export class PagesDocController {
       });
     }
 
-    assertExpectedVersionAndRev(
-      record,
-      body.expectedRev,
-      body.expectedVersion,
-    );
+    assertExpectedVersionAndRev(record, body.expectedRev, body.expectedVersion);
 
     const hasNewContent =
       body.lines !== undefined || typeof body.content === 'string';
+    if (!hasNewContent && record.projectId) {
+      const live = this.getLiveCollaboration();
+      if (live) {
+        await live.flushDocs(record.projectId, [pageId]).catch(() => []);
+      }
+    }
     const lines = hasNewContent
       ? body.lines ||
         (typeof body.content === 'string' ? body.content.split('\n') : [])
@@ -229,12 +251,7 @@ export class PagesDocController {
       : false;
 
     const { cleanTitle, existingRanges } =
-      await applyPageMetadataAndTitleUpdates(
-        this.prisma,
-        pageId,
-        record,
-        body,
-      );
+      await applyPageMetadataAndTitleUpdates(this.prisma, pageId, record, body);
 
     const updatedLines = result.doc.lines || [];
     const content = Array.isArray(updatedLines)
@@ -348,6 +365,13 @@ export class PagesDocController {
     try {
       if (!isUuid(pageId)) {
         return { files: [] };
+      }
+      const live = this.getLiveCollaboration();
+      if (live) {
+        const resolvedProjectId = await this.resolveProjectId(pageId);
+        if (resolvedProjectId) {
+          await live.flushDocs(resolvedProjectId, []).catch(() => []);
+        }
       }
       return await resolvePageFilesList(
         this.prisma,
@@ -497,6 +521,10 @@ export class PagesDocController {
       return { pages: [], total: 0, isEmpty: true };
     }
     try {
+      const live = this.getLiveCollaboration();
+      if (live) {
+        await live.flushDocs(projectId, []).catch(() => []);
+      }
       const [rootNodes, project] = await Promise.all([
         this.prisma.manuscriptNode.findMany({
           where: {
@@ -615,12 +643,14 @@ export class PagesDocController {
     if (!projectId && isUuid(pageId)) {
       const doc = await this.prisma.manuscriptDoc.findUnique({
         where: { id: pageId },
+        select: { projectId: true },
       });
       if (doc) {
         projectId = doc.projectId;
       } else {
         const project = await this.prisma.project.findUnique({
           where: { id: pageId },
+          select: { id: true },
         });
         if (project) projectId = project.id;
       }
@@ -630,17 +660,31 @@ export class PagesDocController {
       return { files: [] };
     }
 
-    const deletedDocs = await this.prisma.manuscriptDoc.findMany({
-      where: { projectId, deleted: true },
-      orderBy: { updatedAt: 'desc' },
-      take: 200,
-    });
-
-    const deletedFiles = await this.prisma.manuscriptFile.findMany({
-      where: { projectId, deleted: true },
-      orderBy: { updatedAt: 'desc' },
-      take: 200,
-    });
+    const [deletedDocs, deletedFiles] = await Promise.all([
+      this.prisma.manuscriptDoc.findMany({
+        where: { projectId, deleted: true },
+        select: {
+          id: true,
+          path: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 200,
+      }),
+      this.prisma.manuscriptFile.findMany({
+        where: { projectId, deleted: true },
+        select: {
+          id: true,
+          name: true,
+          sizeBytes: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 200,
+      }),
+    ]);
 
     const files = [
       ...deletedDocs.map((d) => ({
@@ -729,12 +773,24 @@ export class PagesDocController {
       });
     }
 
+    const live = this.getLiveCollaboration();
+    if (live && source.projectId) {
+      await live.flushDocs(source.projectId, [pageId]).catch(() => []);
+    }
+
+    const freshSource =
+      (source.projectId
+        ? await this.pageScopeRepo.findDocInProject(source.projectId, pageId)
+        : await this.prisma.manuscriptDoc.findUnique({
+            where: { id: pageId },
+          })) || source;
+
     return duplicateSourcePageAndNode(
       this.prisma,
       this.docstoreService,
       this.eventEmitter,
       pageId,
-      source,
+      freshSource,
     );
   }
 

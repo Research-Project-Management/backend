@@ -12,7 +12,10 @@ import {
 } from './diagnostic-item.entity';
 import { DiagnosticReport } from './diagnostic-report.entity';
 import { LogLineVo } from './log-line.vo';
-import { InvalidLogFormatException, ExplanationNotFoundException } from './diagnostics.exceptions';
+import {
+  InvalidLogFormatException,
+  ExplanationNotFoundException,
+} from './diagnostics.exceptions';
 import {
   CompilerDiagnostic,
   ILogParser,
@@ -553,7 +556,9 @@ export class CompileLogAnalyzer implements ILogParser {
           suggestion,
         });
       } else if (line.match(CompileLogAnalyzer.LATEX_WARNING_REGEX)) {
-        const warningMatch = line.match(CompileLogAnalyzer.LATEX_WARNING_REGEX)!;
+        const warningMatch = line.match(
+          CompileLogAnalyzer.LATEX_WARNING_REGEX,
+        )!;
         if (warningMatch[1]) {
           let warnMsg = warningMatch[1].trim();
           let lineNum: number | null = null;

@@ -13,6 +13,8 @@ import { mapWithConcurrency } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
+  ManuscriptDomainEventBus,
+  ProjectWorkspaceCollectorService,
 } from '@/modules/manuscripts/core';
 import {
   IManuscriptAggregatorPort,
@@ -64,6 +66,8 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly liveCollab?: LiveCollaborationPort,
+    @Optional()
+    private readonly workspaceCollector?: ProjectWorkspaceCollectorService,
   ) {
     super();
   }
@@ -79,14 +83,19 @@ export class ManuscriptAggregatorAdapter extends IManuscriptAggregatorPort {
     const nonFolderNodes = nodes.filter((n) => n.type !== 'FOLDER');
 
     try {
-      const live =
-        this.liveCollab ??
-        this.moduleRef?.get(LiveCollaborationPort, { strict: false });
-      if (live) {
-        const docIds = nonFolderNodes
-          .filter((n) => n.docId)
-          .map((n) => n.docId as string);
-        if (docIds.length > 0) {
+      const docIds = nonFolderNodes
+        .filter((n) => n.docId)
+        .map((n) => n.docId as string);
+      const collector =
+        this.workspaceCollector ??
+        this.moduleRef?.get(ProjectWorkspaceCollectorService, { strict: false });
+      if (collector) {
+        await collector.flushProjectWorkspace(projectId, docIds);
+      } else {
+        const live =
+          this.liveCollab ??
+          this.moduleRef?.get(LiveCollaborationPort, { strict: false });
+        if (live && docIds.length > 0) {
           await live.flushDocs(projectId, docIds);
         }
       }
@@ -305,6 +314,8 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly liveCollab?: LiveCollaborationPort,
+    @Optional()
+    private readonly domainEventBus?: ManuscriptDomainEventBus,
   ) {
     super();
   }
@@ -319,6 +330,12 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
     let totalFiles = 0;
     let totalFolders = 0;
     const docContentsMap = new Map<string, string[]>();
+
+    try {
+      await this.liveCollab?.flushDocs(projectId, []).catch(() => []);
+    } catch {
+      // non-blocking pre-hydration flush
+    }
 
     const wrapperPrefix = this.detectSingleWrapperFolder(entries);
 
@@ -366,20 +383,35 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
           const current = await this.docstoreService
             .getDoc(projectId, existingNode.docId)
             .catch(() => null);
+          const nextVersion = (current?.version ?? 0) + 1;
           await this.docstoreService.updateDoc(projectId, existingNode.docId, {
             lines,
-            version: (current?.version ?? 0) + 1,
+            version: nextVersion,
           });
-          await this.liveCollab
-            ?.applyExternalText(projectId, existingNode.docId, textContent)
-            .catch(() => {});
+          if (this.domainEventBus) {
+            await this.domainEventBus.publish({
+              type: 'manuscript.document.mutated',
+              projectId,
+              docId: existingNode.docId,
+              lines,
+              version: nextVersion,
+              source: 'template-hydration',
+              occurredAt: Date.now(),
+            });
+          } else {
+            await this.liveCollab
+              ?.applyExternalText(projectId, existingNode.docId, textContent)
+              .catch(() => {});
+          }
           docContentsMap.set(existingNode.docId, lines);
           totalDocs++;
           continue;
         }
 
         if (existingNode) {
-          await this.structureService.deleteNode(projectId, existingNode.id).catch(() => undefined);
+          await this.structureService
+            .deleteNode(projectId, existingNode.id)
+            .catch(() => undefined);
         }
 
         const doc = await this.docstoreService.createDoc(projectId, {
@@ -393,6 +425,18 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
           type: 'DOC',
           docId: doc._id,
         });
+
+        if (this.domainEventBus) {
+          await this.domainEventBus.publish({
+            type: 'manuscript.document.mutated',
+            projectId,
+            docId: doc._id,
+            lines,
+            version: doc.version ?? 1,
+            source: 'template-hydration',
+            occurredAt: Date.now(),
+          });
+        }
 
         docContentsMap.set(doc._id, lines);
         totalDocs++;
@@ -501,7 +545,9 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
       const rootLines = docContentsMap.get(rootDocId);
       if (rootLines) {
         const fullText = rootLines.join('\n');
-        const titleMatch = fullText.match(/\\title\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/);
+        const titleMatch = fullText.match(
+          /\\title\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/,
+        );
         if (titleMatch && titleMatch[1]) {
           const cleanTitle = titleMatch[1]
             .replace(/\\[a-zA-Z]+(?:\*|\b)?/g, '')
@@ -516,13 +562,25 @@ export class ManuscriptHydratorAdapter extends IManuscriptHydratorPort {
                 current.ranges && typeof current.ranges === 'object'
                   ? (current.ranges as Record<string, unknown>)
                   : {};
+              const nextVersion = (current.version ?? 0) + 1;
               await this.docstoreService
                 .updateDoc(projectId, rootDocId, {
                   lines: rootLines,
-                  version: (current.version ?? 0) + 1,
+                  version: nextVersion,
                   ranges: { ...currentRanges, title: cleanTitle },
                 })
                 .catch(() => undefined);
+              if (this.domainEventBus) {
+                await this.domainEventBus.publish({
+                  type: 'manuscript.document.mutated',
+                  projectId,
+                  docId: rootDocId,
+                  lines: rootLines,
+                  version: nextVersion,
+                  source: 'template-hydration',
+                  occurredAt: Date.now(),
+                });
+              }
             }
           }
         }

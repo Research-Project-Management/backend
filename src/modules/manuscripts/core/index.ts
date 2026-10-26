@@ -11,9 +11,9 @@ export * from './domain/latex-escape.util';
 export * from './domain/text-extensions';
 export * from './ports/live-collaboration.port';
 export * from './services/project-workspace-collector.service';
+export * from './events/manuscript-domain-event-bus.service';
 export * from './utils/pkzip-builder.util';
 export {
   ManuscriptUserResolverService,
   type ResolvedManuscriptUser,
 } from '@/modules/manuscripts/docstore/services/manuscript-user-resolver.service';
-

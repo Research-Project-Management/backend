@@ -132,7 +132,9 @@ export class ManuscriptPageScopeRepository {
     projectId: string,
     threadId: string,
     docId?: string,
-  ): Promise<(ManuscriptCommentThread & { replies: ManuscriptCommentReply[] }) | null> {
+  ): Promise<
+    (ManuscriptCommentThread & { replies: ManuscriptCommentReply[] }) | null
+  > {
     if (!isUUID(threadId)) return null;
 
     return this.prisma.manuscriptCommentThread.findFirst({

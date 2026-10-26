@@ -143,4 +143,3 @@ export function sanitizeCitationKey(raw: string): string {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^A-Za-z0-9_:.-]/g, '');
 }
-

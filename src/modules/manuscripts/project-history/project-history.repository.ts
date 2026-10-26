@@ -56,7 +56,9 @@ export class ManuscriptHistoryMapper {
     sizeBytes?: number;
     labels?: PrismaLabel[];
   }): Snapshot {
-    const labels = record.labels ? record.labels.map((l) => this.toDomainLabel(l)) : [];
+    const labels = record.labels
+      ? record.labels.map((l) => this.toDomainLabel(l))
+      : [];
     return Snapshot.create({
       id: record.id,
       projectId: record.projectId,
@@ -65,7 +67,10 @@ export class ManuscriptHistoryMapper {
       createdById: record.createdById,
       isAutomatic: record.isAutomatic,
       files: new Map(),
-      fileCount: record.sizeBytes !== undefined && record.sizeBytes > 0 ? 1 : 1,
+      fileCount:
+        record.sizeBytes !== undefined && record.sizeBytes > 0
+          ? record.sizeBytes
+          : 1,
       labels,
       createdAt: record.createdAt,
     });

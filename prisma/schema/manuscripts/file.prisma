@@ -23,6 +23,7 @@ model ManuscriptFile {
   node ManuscriptNode?
 
   @@index([projectId, deleted], map: "idx_manuscript_files_project_deleted")
+  @@index([projectId, deleted, updatedAt(sort: Desc)], map: "idx_manuscript_files_proj_del_updated")
   @@index([projectId, hash], map: "idx_manuscript_files_project_hash")
   @@index([hash], map: "idx_manuscript_files_hash")
   @@index([storageKey], map: "idx_manuscript_files_storage_key")

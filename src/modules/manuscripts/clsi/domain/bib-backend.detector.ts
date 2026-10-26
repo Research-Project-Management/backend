@@ -92,6 +92,27 @@ export class BibBackendDetector {
     return lines.join('\n') + '\n';
   }
 
+  /**
+   * Sanitizes user-supplied .latexmkrc content to prevent Perl RCE and shell-escape overrides.
+   * Strips any line containing Perl execution primitives (`system`, `exec`, `fork`, `open`,
+   * `eval`, `qx`, backticks, `require`, `use `, `unlink`, `syscall`) or attempts to re-enable
+   * `-shell-escape` / `--shell-escape` / `\write18`.
+   */
+  public static sanitizeUserLatexmkrc(raw: string): string {
+    const dangerousPattern =
+      /(`|\b(?:system|exec|fork|open|sysopen|pipe|eval|qx|require|do|unlink|rmdir|rename|chmod|chown|kill|syscall|socket|connect)\b|--?(?:enable-)?shell-escape|--?enable-write18|\\write18|\buse\s+(?!strict\b|warnings\b|utf8\b)[A-Za-z0-9_:]+)/i;
+
+    return raw
+      .split(/\r?\n/)
+      .filter((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return true;
+        return !dangerousPattern.test(trimmed);
+      })
+      .join('\n')
+      .trim();
+  }
+
   public static async writeLatexmkrc(
     scratchDir: string,
     options: LatexmkrcOptions,
@@ -100,7 +121,10 @@ export class BibBackendDetector {
     const filePath = path.join(scratchDir, '.latexmkrc');
     let content = this.generateLatexmkrc(options);
     if (userCustomContent && userCustomContent.trim().length > 0) {
-      content = `${content}\n# --- User-Defined .latexmkrc (Overleaf Parity) ---\n${userCustomContent.trim()}\n`;
+      const sanitized = this.sanitizeUserLatexmkrc(userCustomContent);
+      if (sanitized.length > 0) {
+        content = `${content}\n# --- User-Defined .latexmkrc (Overleaf Parity) ---\n${sanitized}\n`;
+      }
     }
     await fs.writeFile(filePath, content, 'utf8');
     return filePath;

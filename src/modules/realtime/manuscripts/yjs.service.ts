@@ -102,8 +102,9 @@ export class YjsService implements OnModuleDestroy {
 
     // Capacity overflow protection: evict least recently active docs if exceeding MAX_ACTIVE_DOCS
     if (this.activeDocs.size > this.MAX_ACTIVE_DOCS) {
-      const sorted = [...this.activeDocs.values()]
-        .sort((a, b) => a.lastActiveAt - b.lastActiveAt);
+      const sorted = [...this.activeDocs.values()].sort(
+        (a, b) => a.lastActiveAt - b.lastActiveAt,
+      );
 
       const targetEvictions = this.activeDocs.size - this.MAX_ACTIVE_DOCS;
       for (let i = 0; i < Math.min(targetEvictions, sorted.length); i++) {
@@ -493,42 +494,18 @@ export class YjsService implements OnModuleDestroy {
   ): Buffer | null {
     const session = this.activeDocs.get(this.docKey(projectId, docId));
     if (!session) return null;
+    if (session.flushTimeout) {
+      clearTimeout(session.flushTimeout);
+      session.flushTimeout = undefined;
+    }
+    session.firstUnflushedAt = undefined;
+    session.lastFlushedRev = undefined;
+
     const current = session.yText.toString();
     if (current === nextText) {
       session.lastFlushedText = nextText;
       return null;
     }
-
-    let prefix = 0;
-    const maxPrefix = Math.min(current.length, nextText.length);
-    while (prefix < maxPrefix && current[prefix] === nextText[prefix]) prefix++;
-    if (
-      prefix > 0 &&
-      current.charCodeAt(prefix - 1) >= 0xd800 &&
-      current.charCodeAt(prefix - 1) <= 0xdbff
-    ) {
-      prefix--;
-    }
-
-    let suffix = 0;
-    const maxSuffix = Math.min(current.length, nextText.length) - prefix;
-    while (
-      suffix < maxSuffix &&
-      current[current.length - 1 - suffix] ===
-        nextText[nextText.length - 1 - suffix]
-    ) {
-      suffix++;
-    }
-    if (
-      suffix > 0 &&
-      current.charCodeAt(current.length - suffix) >= 0xdc00 &&
-      current.charCodeAt(current.length - suffix) <= 0xdfff
-    ) {
-      suffix--;
-    }
-
-    const deleteLen = current.length - prefix - suffix;
-    const insertText = nextText.slice(prefix, nextText.length - suffix);
 
     let captured: Uint8Array | null = null;
     session.currentVersion = undefined;
@@ -538,8 +515,17 @@ export class YjsService implements OnModuleDestroy {
     session.doc.on('update', capture);
     try {
       session.doc.transact(() => {
-        if (deleteLen > 0) session.yText.delete(prefix, deleteLen);
-        if (insertText.length > 0) session.yText.insert(prefix, insertText);
+        const edits = this.computeCursorPreservingEdits(current, nextText);
+        // Apply in reverse order so character offsets remain valid
+        for (let i = edits.length - 1; i >= 0; i--) {
+          const edit = edits[i];
+          if (edit.deleteLen > 0) {
+            session.yText.delete(edit.index, edit.deleteLen);
+          }
+          if (edit.insertText.length > 0) {
+            session.yText.insert(edit.index, edit.insertText);
+          }
+        }
       }, 'rest-api');
     } finally {
       session.doc.off('update', capture);
@@ -551,17 +537,179 @@ export class YjsService implements OnModuleDestroy {
     return Buffer.from(encoding.toUint8Array(encoder));
   }
 
+  /**
+   * Computes minimal cursor-preserving character edits between `current` and `nextText`.
+   * Uses line-level LCS anchoring for multi-hunk mutations so unchanged middle lines
+   * are never deleted and re-inserted (preserving collaborator Yjs RelativePositions).
+   */
+  public computeCursorPreservingEdits(
+    current: string,
+    nextText: string,
+  ): Array<{ index: number; deleteLen: number; insertText: string }> {
+    if (current === nextText) return [];
+
+    const trimSpanToSingleEdit = (
+      baseOffset: number,
+      oldSpan: string,
+      newSpan: string,
+    ): { index: number; deleteLen: number; insertText: string } | null => {
+      if (oldSpan === newSpan) return null;
+      let prefix = 0;
+      const maxPrefix = Math.min(oldSpan.length, newSpan.length);
+      while (prefix < maxPrefix && oldSpan[prefix] === newSpan[prefix])
+        prefix++;
+      if (
+        prefix > 0 &&
+        oldSpan.charCodeAt(prefix - 1) >= 0xd800 &&
+        oldSpan.charCodeAt(prefix - 1) <= 0xdbff
+      ) {
+        prefix--;
+      }
+
+      let suffix = 0;
+      const maxSuffix = Math.min(oldSpan.length, newSpan.length) - prefix;
+      while (
+        suffix < maxSuffix &&
+        oldSpan[oldSpan.length - 1 - suffix] ===
+          newSpan[newSpan.length - 1 - suffix]
+      ) {
+        suffix++;
+      }
+      if (
+        suffix > 0 &&
+        oldSpan.charCodeAt(oldSpan.length - suffix) >= 0xdc00 &&
+        oldSpan.charCodeAt(oldSpan.length - suffix) <= 0xdfff
+      ) {
+        suffix--;
+      }
+
+      return {
+        index: baseOffset + prefix,
+        deleteLen: oldSpan.length - prefix - suffix,
+        insertText: newSpan.slice(prefix, newSpan.length - suffix),
+      };
+    };
+
+    const oldLines = current.match(/[^\n]*\n|[^\n]+/g) ?? [];
+    const newLines = nextText.match(/[^\n]*\n|[^\n]+/g) ?? [];
+
+    // Fallback to single-span diff for very large line counts or single-line docs
+    if (
+      oldLines.length <= 1 ||
+      newLines.length <= 1 ||
+      oldLines.length * newLines.length > 400_000
+    ) {
+      const single = trimSpanToSingleEdit(0, current, nextText);
+      return single ? [single] : [];
+    }
+
+    // Trim common leading and trailing lines first
+    let startLine = 0;
+    while (
+      startLine < oldLines.length &&
+      startLine < newLines.length &&
+      oldLines[startLine] === newLines[startLine]
+    ) {
+      startLine++;
+    }
+
+    let endOld = oldLines.length;
+    let endNew = newLines.length;
+    while (
+      endOld > startLine &&
+      endNew > startLine &&
+      oldLines[endOld - 1] === newLines[endNew - 1]
+    ) {
+      endOld--;
+      endNew--;
+    }
+
+    const midOld = oldLines.slice(startLine, endOld);
+    const midNew = newLines.slice(startLine, endNew);
+    const m = midOld.length;
+    const n = midNew.length;
+
+    if (m * n > 250_000) {
+      const single = trimSpanToSingleEdit(0, current, nextText);
+      return single ? [single] : [];
+    }
+
+    // DP LCS table on middle lines
+    const dp = new Int32Array((m + 1) * (n + 1));
+    const width = n + 1;
+    for (let i = m - 1; i >= 0; i--) {
+      for (let j = n - 1; j >= 0; j--) {
+        if (midOld[i] === midNew[j]) {
+          dp[i * width + j] = 1 + dp[(i + 1) * width + (j + 1)];
+        } else {
+          const down = dp[(i + 1) * width + j];
+          const right = dp[i * width + (j + 1)];
+          dp[i * width + j] = down >= right ? down : right;
+        }
+      }
+    }
+
+    // Walk LCS anchors to partition non-matching line hunks
+    let baseCharOffset = 0;
+    for (let k = 0; k < startLine; k++) {
+      baseCharOffset += oldLines[k].length;
+    }
+
+    const edits: Array<{
+      index: number;
+      deleteLen: number;
+      insertText: string;
+    }> = [];
+    let i = 0;
+    let j = 0;
+    let hunkOldStart = 0;
+    let hunkNewStart = 0;
+    let hunkCharOffset = baseCharOffset;
+
+    const flushHunk = (oldEndIdx: number, newEndIdx: number) => {
+      if (oldEndIdx === hunkOldStart && newEndIdx === hunkNewStart) return;
+      const oldSpan = midOld.slice(hunkOldStart, oldEndIdx).join('');
+      const newSpan = midNew.slice(hunkNewStart, newEndIdx).join('');
+      const edit = trimSpanToSingleEdit(hunkCharOffset, oldSpan, newSpan);
+      if (edit) edits.push(edit);
+      hunkCharOffset += oldSpan.length;
+    };
+
+    while (i < m && j < n) {
+      if (midOld[i] === midNew[j]) {
+        flushHunk(i, j);
+        hunkCharOffset += midOld[i].length;
+        i++;
+        j++;
+        hunkOldStart = i;
+        hunkNewStart = j;
+      } else if (dp[(i + 1) * width + j] >= dp[i * width + (j + 1)]) {
+        i++;
+      } else {
+        j++;
+      }
+    }
+    flushHunk(m, n);
+
+    return edits;
+  }
+
   public async applyExternalTextAndSyncRedis(
     projectId: string,
     docId: string,
     nextText: string,
   ): Promise<{ active: boolean; frame: Buffer | null }> {
+    const key = this.docKey(projectId, docId);
+    const inFlight = this.inFlightFlushes.get(key);
+    if (inFlight) {
+      await inFlight.catch(() => {});
+    }
     if (!this.isActive(projectId, docId)) {
       await this.deleteRedisSnapshot(projectId, docId);
       return { active: false, frame: null };
     }
     const frame = this.replaceTextIfActive(projectId, docId, nextText);
-    const session = this.activeDocs.get(this.docKey(projectId, docId));
+    const session = this.activeDocs.get(key);
     if (session) {
       await this.saveBinaryToRedis(projectId, docId, session.doc).catch(
         (err: unknown) => {
@@ -626,7 +774,10 @@ export class YjsService implements OnModuleDestroy {
 
       if (this.docstoreService) {
         const lines = LineArrayEngine.textToLines(flushedText);
-        if (session.currentVersion === undefined || session.lastFlushedRev === undefined) {
+        if (
+          session.currentVersion === undefined ||
+          session.lastFlushedRev === undefined
+        ) {
           const currentDoc = await this.docstoreService
             .getDoc(projectId, docId)
             .catch(() => null);
@@ -651,11 +802,18 @@ export class YjsService implements OnModuleDestroy {
               );
             })
             .catch(async (err: unknown) => {
-              if (err && typeof err === 'object' && 'name' in err && err.name === 'DocModifiedError') {
+              if (
+                err &&
+                typeof err === 'object' &&
+                'name' in err &&
+                err.name === 'DocModifiedError'
+              ) {
                 this.logger.warn(
                   `OCC conflict during Y.Doc flush for ${key}. Re-fetching base rev.`,
                 );
-                const fresh = await this.docstoreService?.getDoc(projectId, docId).catch(() => null);
+                const fresh = await this.docstoreService
+                  ?.getDoc(projectId, docId)
+                  .catch(() => null);
                 if (fresh) {
                   session.lastFlushedRev = fresh.rev;
                   session.currentVersion = fresh.version;
@@ -721,19 +879,36 @@ export class YjsService implements OnModuleDestroy {
     return flushed.length;
   }
 
-  public async evictDoc(projectId: string, docId: string): Promise<void> {
+  public async evictDoc(
+    projectId: string,
+    docId: string,
+    options?: { skipFlush?: boolean },
+  ): Promise<void> {
     const key = this.docKey(projectId, docId);
     const session = this.activeDocs.get(key);
-    if (!session) return;
-
-    try {
-      await this.flushDoc(projectId, docId);
-    } catch {
-      // Ignore flush errors on forced eviction
+    if (!session) {
+      if (options?.skipFlush) {
+        await this.deleteRedisSnapshot(projectId, docId);
+      }
+      return;
     }
-    if (session.flushTimeout) {
-      clearTimeout(session.flushTimeout);
-      session.flushTimeout = undefined;
+
+    if (options?.skipFlush) {
+      if (session.flushTimeout) {
+        clearTimeout(session.flushTimeout);
+        session.flushTimeout = undefined;
+      }
+      await this.deleteRedisSnapshot(projectId, docId);
+    } else {
+      try {
+        await this.flushDoc(projectId, docId);
+      } catch {
+        // Ignore flush errors on forced eviction
+      }
+      if (session.flushTimeout) {
+        clearTimeout(session.flushTimeout);
+        session.flushTimeout = undefined;
+      }
     }
     this.activeDocs.delete(key);
     const projSet = this.projectDocKeys.get(projectId);

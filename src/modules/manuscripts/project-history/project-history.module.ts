@@ -25,12 +25,7 @@ import {
 } from './domain';
 
 @Module({
-  imports: [
-    PrismaModule,
-    StructureModule,
-    DocstoreModule,
-    FilestoreModule,
-  ],
+  imports: [PrismaModule, StructureModule, DocstoreModule, FilestoreModule],
   controllers: [ProjectHistoryController],
   providers: [
     ProjectHistoryService,

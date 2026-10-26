@@ -36,7 +36,10 @@ export class RealtimeAccessService {
     access: RealtimeProjectAccess,
     now: number,
   ): void {
-    if (!this.cache.has(key) && this.cache.size >= RealtimeAccessService.MAX_CACHE_ENTRIES) {
+    if (
+      !this.cache.has(key) &&
+      this.cache.size >= RealtimeAccessService.MAX_CACHE_ENTRIES
+    ) {
       for (const [k, entry] of this.cache) {
         if (entry.expiresAt <= now) {
           this.cache.delete(k);

@@ -19,10 +19,7 @@ import {
   DiscoveredOutputFile,
 } from '../domain/clsi-ports';
 import { SafePath } from '../domain/safe-path';
-import {
-  createPkZipStream,
-  PkZipEntry,
-} from '@/modules/manuscripts/core';
+import { createPkZipStream, PkZipEntry } from '@/modules/manuscripts/core';
 import { mapWithConcurrency } from '@/core';
 
 export interface ProjectManifest {
@@ -133,8 +130,13 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
     // Parallelize file synchronization with bounded concurrency (16 workers)
     const syncResults = await mapWithConcurrency(files, 16, async (file) => {
       const sanitizedRelPath = SafePath.sanitizeRelativePath(file.path);
-      const targetPath = await SafePath.assertSafeWorkspacePath(scratchDir, sanitizedRelPath);
-      const contentBuffer = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content, 'utf8');
+      const targetPath = await SafePath.assertSafeWorkspacePath(
+        scratchDir,
+        sanitizedRelPath,
+      );
+      const contentBuffer = Buffer.isBuffer(file.content)
+        ? file.content
+        : Buffer.from(file.content, 'utf8');
       const contentHash = file.hash || this.computeHash(contentBuffer);
       const cachedHash = manifest.files[sanitizedRelPath];
       let fileExists = false;
@@ -147,11 +149,19 @@ export class OverleafIncrementalWorkspace implements IWorkspaceManager {
         }
       }
       if (cachedHash === contentHash && fileExists) {
-        return { path: sanitizedRelPath, hash: contentHash, status: 'unchanged' as const };
+        return {
+          path: sanitizedRelPath,
+          hash: contentHash,
+          status: 'unchanged' as const,
+        };
       } else {
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
         await fs.writeFile(targetPath, contentBuffer);
-        return { path: sanitizedRelPath, hash: contentHash, status: 'written' as const };
+        return {
+          path: sanitizedRelPath,
+          hash: contentHash,
+          status: 'written' as const,
+        };
       }
     });
 

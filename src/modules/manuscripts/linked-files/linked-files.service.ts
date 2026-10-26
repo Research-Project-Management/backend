@@ -31,6 +31,7 @@ import {
   TEXT_EXTENSIONS,
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
+  ManuscriptDomainEventBus,
 } from '@/modules/manuscripts/core';
 
 @Injectable()
@@ -48,6 +49,8 @@ export class LinkedFilesService {
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly liveCollab?: LiveCollaborationPort,
+    @Optional()
+    private readonly domainEventBus?: ManuscriptDomainEventBus,
   ) {}
 
   private broadcastFileTreeChange(
@@ -216,6 +219,9 @@ export class LinkedFilesService {
         const download = await this.downloadUrl(linkedFile.url);
 
         if (linkedFile.docId) {
+          await this.liveCollab
+            ?.flushDocs(projectId, [linkedFile.docId])
+            .catch(() => []);
           const textContent = download.buffer.toString('utf8');
           const lines = LineArrayEngine.textToLines(textContent);
           const currentDoc = await this.docstoreService!.getDoc(
@@ -227,9 +233,22 @@ export class LinkedFilesService {
             lines,
             version: nextVersion,
           });
-          await this.liveCollab
-            ?.applyExternalText(projectId, linkedFile.docId, textContent)
-            .catch(() => {});
+
+          if (this.domainEventBus) {
+            await this.domainEventBus.publish({
+              type: 'manuscript.document.mutated',
+              projectId,
+              docId: linkedFile.docId,
+              lines,
+              version: nextVersion,
+              source: 'linked-files',
+              occurredAt: Date.now(),
+            });
+          } else {
+            await this.liveCollab
+              ?.applyExternalText(projectId, linkedFile.docId, textContent)
+              .catch(() => {});
+          }
 
           this.eventEmitter?.emit('manuscripts.project.event', {
             projectId,
@@ -355,6 +374,42 @@ export class LinkedFilesService {
   }
 
   /**
+   * Refreshes all linked files belonging to a specific project.
+   */
+  public async refreshAllByProject(
+    projectId: string,
+    userId?: string,
+  ): Promise<{
+    refreshedCount: number;
+    total: number;
+    succeeded: number;
+    failed: number;
+  }> {
+    const items = await this.repository.findByProject(projectId);
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const item of items) {
+      try {
+        await this.refresh(projectId, item.id, userId);
+        succeeded++;
+      } catch (err: unknown) {
+        failed++;
+        this.logger.warn(
+          `Refresh failed for linked file ${item.id} (${item.name}): ${(err as Error)?.message}`,
+        );
+      }
+    }
+
+    return {
+      refreshedCount: succeeded,
+      total: items.length,
+      succeeded,
+      failed,
+    };
+  }
+
+  /**
    * Refreshes all linked files with autoRefresh enabled.
    * Called by background workers or schedulers.
    */
@@ -392,7 +447,11 @@ export class LinkedFilesService {
     let currentUrl = url;
     let response: Response | null = null;
 
-    for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
+    for (
+      let redirectCount = 0;
+      redirectCount <= MAX_REDIRECTS;
+      redirectCount++
+    ) {
       const validatedUrl = await assertSafeExternalUrl(currentUrl);
 
       response = await fetch(validatedUrl.toString(), {

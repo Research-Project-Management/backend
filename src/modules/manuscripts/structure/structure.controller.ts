@@ -25,7 +25,11 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectAccessGuard, RequireRole, Role } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+} from '@/modules/project/access';
 import { StructureService } from './structure.service';
 import {
   CreateNodeDto,

@@ -7,9 +7,14 @@
 import {
   Injectable,
   Optional,
+  Inject,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import {
+  LIVE_COLLABORATION_PORT,
+  LiveCollaborationPort,
+} from '@/modules/manuscripts/core';
 import { SpellingRepository } from './spelling.repository';
 import {
   AcademicSpellEngine,
@@ -41,6 +46,9 @@ export class SpellingService {
   constructor(
     @Optional() private readonly repository?: SpellingRepository,
     @Optional() private readonly docstoreService?: DocstoreService,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    private readonly liveCollab?: LiveCollaborationPort,
     @Optional() tokenizer?: LatexProseTokenizer,
     @Optional() spellEngine?: AcademicSpellEngine,
   ) {
@@ -69,6 +77,11 @@ export class SpellingService {
 
     let sourceText = query.text ?? '';
     if (!sourceText && query.projectId && query.docId && this.docstoreService) {
+      if (this.liveCollab) {
+        await this.liveCollab
+          .flushDoc(query.projectId, query.docId)
+          .catch(() => []);
+      }
       const doc = await this.docstoreService.getDoc(
         query.projectId,
         query.docId,

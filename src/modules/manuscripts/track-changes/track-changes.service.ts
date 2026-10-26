@@ -10,7 +10,9 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import { ManuscriptDomainEventBus } from '@/modules/manuscripts/core';
 import {
   ITrackChangesRepositoryPort,
   LinePatcher,
@@ -49,11 +51,17 @@ export class TrackChangesService {
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() docstorePatcher?: DocstorePatcherAdapter,
     @Optional() private readonly realtimeNotifier?: RealtimeNotifierAdapter,
+    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
   ) {
     this.docstorePatcher =
       docstorePatcher ??
       (docstoreService
-        ? new DocstorePatcherAdapter(docstoreService)
+        ? new DocstorePatcherAdapter(
+            docstoreService,
+            this.moduleRef,
+            this.domainEventBus,
+          )
         : undefined);
   }
 
@@ -184,7 +192,11 @@ export class TrackChangesService {
     );
 
     for (const change of sorted) {
-      this.realtimeNotifier?.notifyChangeResolved(resolvedProjId, docId, change);
+      this.realtimeNotifier?.notifyChangeResolved(
+        resolvedProjId,
+        docId,
+        change,
+      );
     }
 
     return {

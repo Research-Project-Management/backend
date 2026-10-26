@@ -27,6 +27,7 @@ import {
   WorkspaceFile,
   CompilationPayload,
   LiveCollaborationPort,
+  ManuscriptDomainEventBus,
 } from '@/modules/manuscripts/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
@@ -45,6 +46,7 @@ export class StructureService {
     @Optional() private readonly filestoreService?: FilestoreService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
   ) {}
 
   private get repo(): IStructureRepository {
@@ -116,7 +118,34 @@ export class StructureService {
 
     const existing = await this.repo.findByPath(projectId, computedPath);
     if (existing) {
+      if (dto.type === 'FILE' && dto.fileId && existing.fileId === dto.fileId) {
+        this.realtimeService?.broadcastFileTreeChange(projectId, {
+          action: 'create',
+          node: existing,
+        });
+        return existing;
+      }
       throw new DuplicateNodePathError(computedPath);
+    }
+
+    if (dto.type === 'FILE' && dto.fileId && this.repo.findByFileId) {
+      const preSyncedNode = await this.repo.findByFileId(projectId, dto.fileId);
+      if (preSyncedNode) {
+        await this.repo.moveSubtree(
+          projectId,
+          preSyncedNode.path,
+          computedPath,
+          parentNode ? parentNode.id : null,
+        );
+        const movedNode =
+          (await this.repo.findById(projectId, preSyncedNode.id)) ??
+          preSyncedNode;
+        this.realtimeService?.broadcastFileTreeChange(projectId, {
+          action: 'create',
+          node: movedNode,
+        });
+        return movedNode;
+      }
     }
 
     let resolvedDocId = dto.docId;
@@ -401,25 +430,61 @@ export class StructureService {
       new Set(
         deletedNodes
           .map((n) => n.docId)
-          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+          .filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          ),
       ),
     );
-    const liveCollab = this.getLiveCollab();
+    const fileIds = Array.from(
+      new Set(
+        deletedNodes
+          .map((n) => n.fileId)
+          .filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          ),
+      ),
+    );
+    const hadRootDoc = deletedNodes.some((n) => n.isRootDoc);
 
-    if (liveCollab) {
-      for (const docId of docIds) {
-        try {
-          await liveCollab.evictDoc(projectId, docId);
-        } catch {
-          // Ignore liveCollab cleanup errors
+    if (this.domainEventBus) {
+      await this.domainEventBus.publish({
+        type: 'manuscript.nodes.deleted',
+        projectId,
+        deletedDocIds: docIds,
+        deletedFileIds: fileIds,
+        hadRootDoc,
+        occurredAt: Date.now(),
+      });
+    } else {
+      const liveCollab = this.getLiveCollab();
+      if (liveCollab) {
+        for (const docId of docIds) {
+          try {
+            await liveCollab.evictDoc(projectId, docId);
+          } catch {
+            // Ignore liveCollab cleanup errors
+          }
         }
       }
     }
 
-    const hadRootDoc = deletedNodes.some((n) => n.isRootDoc);
     if (hadRootDoc) {
       await this.repo.unsetRootDoc(projectId);
-      await this.autoDetectRootDoc(projectId, new Map()).catch(() => null);
+      const docContentsMap = new Map<string, string[]>();
+      if (this.docstoreService) {
+        try {
+          const allDocs = await this.docstoreService.getAllDocs(projectId);
+          for (const d of allDocs) {
+            const dId = d.id || d._id;
+            if (dId && Array.isArray(d.lines)) {
+              docContentsMap.set(dId, d.lines);
+            }
+          }
+        } catch {
+          // non-blocking fallback to filename-based root detection
+        }
+      }
+      await this.autoDetectRootDoc(projectId, docContentsMap).catch(() => null);
     }
 
     this.realtimeService?.broadcastFileTreeChange(projectId, {

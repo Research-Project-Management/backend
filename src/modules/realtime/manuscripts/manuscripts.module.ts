@@ -6,7 +6,6 @@ import { AccessModule } from '@/modules/project/access';
 import { DocstoreModule } from '@/modules/manuscripts/docstore/docstore.module';
 import { LiveCollaborationPort } from '@/modules/manuscripts/core';
 
-
 import { CoreModule } from '../core/core.module';
 import { WsAccessGuard } from '../core/ws-access.guard';
 import { ManuscriptsGateway } from './manuscripts.gateway';

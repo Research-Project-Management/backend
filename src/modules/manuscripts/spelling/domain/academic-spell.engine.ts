@@ -4,7 +4,10 @@
  * Zero I/O, zero NestJS imports.
  */
 
-import { InvalidWordException, UnsupportedLanguageException } from './spelling.exceptions';
+import {
+  InvalidWordException,
+  UnsupportedLanguageException,
+} from './spelling.exceptions';
 import {
   ACADEMIC_SHARED_WORDS,
   ENGLISH_COMMON_WORDS,
@@ -352,6 +355,9 @@ export class AcademicSpellEngine {
     Map<number, string[]>
   >();
   private readonly tokenizer: LatexProseTokenizer;
+  private dpRow0 = new Int32Array(128);
+  private dpRow1 = new Int32Array(128);
+  private dpRow2 = new Int32Array(128);
 
   constructor(tokenizer?: LatexProseTokenizer) {
     this.englishDictionary = new Set<string>();
@@ -430,11 +436,7 @@ export class AcademicSpellEngine {
 
       let suggestions = suggestionsCache.get(lower);
       if (!suggestions) {
-        suggestions = this.getSuggestions(
-          token.word,
-          langVo,
-          maxSuggestions,
-        );
+        suggestions = this.getSuggestions(token.word, langVo, maxSuggestions);
         suggestionsCache.set(lower, suggestions);
       }
 
@@ -777,42 +779,99 @@ export class AcademicSpellEngine {
     return stems;
   }
 
-  private levenshteinDamerau(source: string, target: string): number {
-    const sLen = source.length;
-    const tLen = target.length;
+  private levenshteinDamerau(
+    source: string,
+    target: string,
+    maxDist = 2,
+  ): number {
+    let sStart = 0;
+    let sEnd = source.length;
+    let tEnd = target.length;
+
+    if (Math.abs(sEnd - tEnd) > maxDist) return maxDist + 1;
+
+    // Trim shared prefix
+    while (
+      sStart < sEnd &&
+      sStart < tEnd &&
+      source.charCodeAt(sStart) === target.charCodeAt(sStart)
+    ) {
+      sStart++;
+    }
+
+    // Trim shared suffix
+    while (
+      sEnd > sStart &&
+      tEnd > sStart &&
+      source.charCodeAt(sEnd - 1) === target.charCodeAt(tEnd - 1)
+    ) {
+      sEnd--;
+      tEnd--;
+    }
+
+    const sLen = sEnd - sStart;
+    const tLen = tEnd - sStart;
 
     if (sLen === 0) return tLen;
     if (tLen === 0) return sLen;
 
-    const d: number[][] = Array.from({ length: sLen + 1 }, () =>
-      new Array(tLen + 1).fill(0),
-    );
+    const requiredSize = tLen + 1;
+    if (this.dpRow0.length < requiredSize) {
+      const nextSize = Math.max(requiredSize, this.dpRow0.length * 2);
+      this.dpRow0 = new Int32Array(nextSize);
+      this.dpRow1 = new Int32Array(nextSize);
+      this.dpRow2 = new Int32Array(nextSize);
+    }
 
-    for (let i = 0; i <= sLen; i++) d[i][0] = i;
-    for (let j = 0; j <= tLen; j++) d[0][j] = j;
+    let prevPrev = this.dpRow0;
+    let prev = this.dpRow1;
+    let curr = this.dpRow2;
+
+    for (let j = 0; j <= tLen; j++) {
+      prev[j] = j;
+    }
 
     for (let i = 1; i <= sLen; i++) {
-      for (let j = 1; j <= tLen; j++) {
-        const cost = source[i - 1] === target[j - 1] ? 0 : 1;
+      curr[0] = i;
+      let rowMin = i;
+      const sChar = source.charCodeAt(sStart + i - 1);
+      const prevSChar = i > 1 ? source.charCodeAt(sStart + i - 2) : -1;
 
-        d[i][j] = Math.min(
-          d[i - 1][j] + 1,
-          d[i][j - 1] + 1,
-          d[i - 1][j - 1] + cost,
-        );
+      for (let j = 1; j <= tLen; j++) {
+        const tChar = target.charCodeAt(sStart + j - 1);
+        const cost = sChar === tChar ? 0 : 1;
+
+        let val = prev[j - 1] + cost;
+        const del = prev[j] + 1;
+        const ins = curr[j - 1] + 1;
+        if (del < val) val = del;
+        if (ins < val) val = ins;
 
         if (
           i > 1 &&
           j > 1 &&
-          source[i - 1] === target[j - 2] &&
-          source[i - 2] === target[j - 1]
+          sChar === target.charCodeAt(sStart + j - 2) &&
+          prevSChar === tChar
         ) {
-          d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+          const trans = prevPrev[j - 2] + 1;
+          if (trans < val) val = trans;
         }
+
+        curr[j] = val;
+        if (val < rowMin) rowMin = val;
       }
+
+      if (rowMin > maxDist) {
+        return maxDist + 1;
+      }
+
+      const tmp = prevPrev;
+      prevPrev = prev;
+      prev = curr;
+      curr = tmp;
     }
 
-    return d[sLen][tLen];
+    return prev[tLen];
   }
 
   private seedDictionaries(): void {

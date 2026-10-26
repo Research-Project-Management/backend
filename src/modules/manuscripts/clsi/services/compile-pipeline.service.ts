@@ -32,6 +32,14 @@ import { BibBackendDetector } from '../domain/bib-backend.detector';
 import { DraftModeManager } from '../domain/draft-mode.manager';
 import { SandboxPolicyViolationException } from '../domain/sandbox-errors';
 
+function hasControlChar(str: string): boolean {
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if ((code >= 0 && code <= 31) || code === 127) return true;
+  }
+  return false;
+}
+
 function assertSafeMainFile(mainFile: string): string {
   const clean = (mainFile || '')
     .trim()
@@ -42,7 +50,7 @@ function assertSafeMainFile(mainFile: string): string {
     !clean ||
     clean.startsWith('-') ||
     clean.includes('..') ||
-    /[\x00-\x1f\x7f]/.test(clean)
+    hasControlChar(clean)
   ) {
     throw new BadRequestException(
       `Invalid or unsafe mainFile path: "${mainFile}"`,
@@ -584,7 +592,7 @@ export class CompilePipeline {
       mainFile &&
       (mainFile.startsWith('-') ||
         mainFile.includes('..') ||
-        /[\x00-\x1f\x7f]/.test(mainFile))
+        hasControlChar(mainFile))
     ) {
       throw new BadRequestException(
         `Invalid or unsafe mainFile path: "${dto.mainFile}"`,
@@ -606,7 +614,7 @@ export class CompilePipeline {
       !mainFile ||
       mainFile.startsWith('-') ||
       mainFile.includes('..') ||
-      /[\x00-\x1f\x7f]/.test(mainFile)
+      hasControlChar(mainFile)
     ) {
       mainFile = 'main.tex';
     }
@@ -634,7 +642,7 @@ export class CompilePipeline {
         hinted &&
         !hinted.startsWith('-') &&
         !hinted.includes('..') &&
-        !/[\x00-\x1f\x7f]/.test(hinted)
+        !hasControlChar(hinted)
       ) {
         mainFile = hinted.endsWith('.tex') ? hinted : `${hinted}.tex`;
       }
@@ -1032,4 +1040,3 @@ export class CompilePipeline {
     }
   }
 }
-

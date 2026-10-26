@@ -54,11 +54,7 @@ export class DiffHunkVo {
 }
 
 export type FileDiffStatus =
-  | 'added'
-  | 'deleted'
-  | 'modified'
-  | 'renamed'
-  | 'unchanged';
+  'added' | 'deleted' | 'modified' | 'renamed' | 'unchanged';
 
 export interface FileDiffProps {
   path: string;

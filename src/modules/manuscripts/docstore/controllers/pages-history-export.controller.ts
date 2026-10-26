@@ -133,8 +133,7 @@ export class PagesHistoryExportController {
       }
       return '';
     }
-    const mainHit =
-      filesMap.get('/main.tex') ?? filesMap.values().next().value;
+    const mainHit = filesMap.get('/main.tex') ?? filesMap.values().next().value;
     return mainHit?.lines ? mainHit.lines.join('\n') : '';
   }
 
@@ -186,8 +185,10 @@ export class PagesHistoryExportController {
     if (!isUuid(pageId)) return { versions: [] };
     try {
       const activeProjectId = this.resolveActiveProjectId(project);
-    if (activeProjectId) {
-        await this.getLiveCollaboration()?.flushDoc(activeProjectId, pageId).catch(() => []);
+      if (activeProjectId) {
+        await this.getLiveCollaboration()
+          ?.flushDoc(activeProjectId, pageId)
+          .catch(() => []);
       }
       const doc = activeProjectId
         ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
@@ -295,7 +296,20 @@ export class PagesHistoryExportController {
       );
     }
 
-    const currentLines = doc ? await this.getHydratedDocLines(doc) : [];
+    if ((!snapFrom || !snapTo) && isUuid(pageId)) {
+      const live = this.getLiveCollaboration();
+      if (live) {
+        await live.flushDocs(targetProjectId, [pageId]).catch(() => []);
+      }
+    }
+
+    const freshDoc =
+      (!snapFrom || !snapTo) && isUuid(pageId)
+        ? (await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)) ||
+          doc
+        : doc;
+
+    const currentLines = freshDoc ? await this.getHydratedDocLines(freshDoc) : [];
     const currentText = currentLines.join('\n');
     const pick = (files: Record<string, unknown> | undefined | null) =>
       this.pickSnapshotText(files || {}, doc?.path);
@@ -387,10 +401,7 @@ export class PagesHistoryExportController {
         version: {
           id: s.id,
           title: `v${s.version} Snapshot`,
-          label:
-            s.labels?.[0]?.label ||
-            s.summary ||
-            `Version ${s.version}`,
+          label: s.labels?.[0]?.label || s.summary || `Version ${s.version}`,
           fileName,
           savedBy: {
             id: s.createdById || 'anonymous',
@@ -422,7 +433,7 @@ export class PagesHistoryExportController {
     let docPath = 'main.tex';
     let currentContent = '';
     if (isUuid(pageId)) {
-      const doc = projectId
+      const initialDoc = projectId
         ? await this.pageScopeRepo.findDocInProject(projectId, pageId)
         : await this.prisma.manuscriptDoc.findUnique({
             where: { id: pageId },
@@ -430,20 +441,32 @@ export class PagesHistoryExportController {
               id: true,
               projectId: true,
               path: true,
-              lines: true,
-              inStorage: true,
             },
           });
-      projectId = doc?.projectId || projectId;
-      if (doc?.path) docPath = doc.path.replace(/^\//, '') || docPath;
-      if (doc) {
-        const docLines = await this.getHydratedDocLines(doc);
-        currentContent = docLines.join('\n');
+      projectId = initialDoc?.projectId || projectId;
+      if (initialDoc?.path) {
+        docPath = initialDoc.path.replace(/^\//, '') || docPath;
       }
     }
 
     if (!projectId || !isUuid(projectId)) {
       throw new NotFoundException(`Project not found for doc ${pageId}`);
+    }
+
+    const live = this.getLiveCollaboration();
+    if (live) {
+      await live.flushDocs(projectId, []).catch(() => []);
+    }
+
+    if (isUuid(pageId) && typeof body.content !== 'string') {
+      const freshDoc = await this.pageScopeRepo.findDocInProject(
+        projectId,
+        pageId,
+      );
+      if (freshDoc) {
+        const docLines = await this.getHydratedDocLines(freshDoc);
+        currentContent = docLines.join('\n');
+      }
     }
 
     const content =
@@ -457,7 +480,13 @@ export class PagesHistoryExportController {
         }),
         this.prisma.manuscriptDoc.findMany({
           where: { projectId, deleted: false },
-          select: { id: true, projectId: true, path: true, lines: true, inStorage: true },
+          select: {
+            id: true,
+            projectId: true,
+            path: true,
+            lines: true,
+            inStorage: true,
+          },
         }),
         this.resolveUserNames([userId]),
       ]);
@@ -534,14 +563,19 @@ export class PagesHistoryExportController {
               where: { projectId },
               _max: { version: true },
             });
-            candidateVersion = Math.max(candidateVersion + 1, (latest?._max?.version ?? 0) + 1);
+            candidateVersion = Math.max(
+              candidateVersion + 1,
+              (latest?._max?.version ?? 0) + 1,
+            );
             continue;
           }
           throw err;
         }
       }
       if (!snap) {
-        throw new InternalServerErrorException('Failed to create snapshot version');
+        throw new InternalServerErrorException(
+          'Failed to create snapshot version',
+        );
       }
       return {
         version: {
@@ -774,13 +808,8 @@ export class PagesHistoryExportController {
       throw new NotFoundException(`Document ${pageId} not found`);
     }
 
-    const snaps = await this.prisma.manuscriptSnapshot.findMany({
-      where: { projectId: doc.projectId, createdAt: { lte: targetTime } },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
     const normalizedPath = `/${(doc.path || '').replace(/^\//, '')}`;
-    const snap = snaps.find((s) => {
+    const matchesTargetDoc = (s: { files?: unknown }) => {
       const files = s.files as Record<string, unknown> | null;
       if (!files || Object.keys(files).length === 0) return false;
       const filesMap = SnapshotNormalizer.parseSnapshotFiles(files);
@@ -788,7 +817,36 @@ export class PagesHistoryExportController {
         filesMap.has(normalizedPath) ||
         (filesMap.size === 1 && filesMap.has('/main.tex'))
       );
-    });
+    };
+
+    const PAGE_SIZE = 10;
+    const MAX_SCAN = 200;
+    let snap:
+      | {
+          id: string;
+          version: number;
+          createdAt: Date;
+          files: unknown;
+        }
+      | undefined;
+
+    for (let skip = 0; skip < MAX_SCAN; skip += PAGE_SIZE) {
+      const batch = await this.prisma.manuscriptSnapshot.findMany({
+        where: { projectId: doc.projectId, createdAt: { lte: targetTime } },
+        select: {
+          id: true,
+          version: true,
+          createdAt: true,
+          files: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: PAGE_SIZE,
+      });
+      if (batch.length === 0) break;
+      snap = batch.find(matchesTargetDoc);
+      if (snap || batch.length < PAGE_SIZE) break;
+    }
 
     if (!snap) {
       return { content: '', timestamp: targetTime.getTime(), found: false };
@@ -804,7 +862,6 @@ export class PagesHistoryExportController {
       found: true,
     };
   }
-
 
   // ─── 2. COMPILER INCREMENTAL SYNC ─────────────────────────────────────────────
 
@@ -915,13 +972,23 @@ export class PagesHistoryExportController {
     }
 
     const activeProjectId = this.resolveActiveProjectId(project);
-    const doc = activeProjectId
+    let doc = activeProjectId
       ? await this.pageScopeRepo.findDocInProject(activeProjectId, pageId)
       : await this.prisma.manuscriptDoc.findUnique({
           where: { id: pageId },
         });
     if (!doc || doc.deleted) {
       throw new NotFoundException(`Document ${pageId} not found`);
+    }
+
+    const live = this.getLiveCollaboration();
+    if (live && doc.projectId) {
+      const flushed = await live.flushDocs(doc.projectId, []).catch(() => []);
+      if (flushed.length > 0) {
+        doc =
+          (await this.pageScopeRepo.findDocInProject(doc.projectId, pageId)) ||
+          doc;
+      }
     }
 
     const format = (body?.format || queryFormat || 'tex').toLowerCase();

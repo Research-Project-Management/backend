@@ -13,6 +13,7 @@ import { ProjectHistoryService } from './project-history/project-history.service
 import { TrackChangesService } from './track-changes/track-changes.service';
 import { CitationsService } from './citations/citations.service';
 import { ProjectWorkspaceCollectorService } from './core/services/project-workspace-collector.service';
+import { ManuscriptDomainEventBus } from './core/events/manuscript-domain-event-bus.service';
 
 @Injectable()
 export class ManuscriptsFacade {
@@ -25,6 +26,7 @@ export class ManuscriptsFacade {
     public readonly trackChanges: TrackChangesService,
     public readonly citations: CitationsService,
     public readonly workspaceCollector: ProjectWorkspaceCollectorService,
+    public readonly domainEvents: ManuscriptDomainEventBus,
   ) {}
 
   /**
@@ -35,7 +37,10 @@ export class ManuscriptsFacade {
     projectId: string,
     docIds?: string[],
   ): Promise<string[]> {
-    return this.workspaceCollector.flushProjectWorkspace(projectId, docIds ?? []);
+    return this.workspaceCollector.flushProjectWorkspace(
+      projectId,
+      docIds ?? [],
+    );
   }
 
   /**

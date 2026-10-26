@@ -164,10 +164,12 @@ export class ManuscriptsService {
 
     if (this.docstoreService && (dto.lines || dto.splice)) {
       try {
+        if (this.yjsService) {
+          await this.yjsService
+            .flushDoc(dto.projectId, dto.docId)
+            .catch(() => false);
+        }
         if (!nextLines && dto.splice) {
-          if (this.yjsService) {
-            await this.yjsService.flushDoc(dto.projectId, dto.docId);
-          }
           const existing = await this.docstoreService.getDoc(
             dto.projectId,
             dto.docId,

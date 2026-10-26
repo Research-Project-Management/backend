@@ -27,7 +27,11 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
-import { ProjectAccessGuard, RequireRole, Role } from '@/modules/project/access';
+import {
+  ProjectAccessGuard,
+  RequireRole,
+  Role,
+} from '@/modules/project/access';
 import { ProjectHistoryService } from './project-history.service';
 import {
   CreateSnapshotDto,
@@ -71,9 +75,7 @@ export class ProjectHistoryController {
   @ApiOperation({
     summary: 'Get project history events and versions overview',
   })
-  async getProjectHistory(
-    @Param('projectId') projectId: string,
-  ) {
+  async getProjectHistory(@Param('projectId') projectId: string) {
     try {
       const versions = await this.historyService.listVersions(projectId);
       const events = versions.map((v) => ({

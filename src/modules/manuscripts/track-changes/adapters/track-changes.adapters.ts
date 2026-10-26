@@ -9,7 +9,10 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '@/core';
-import { LiveCollaborationPort } from '@/modules/manuscripts/core';
+import {
+  LiveCollaborationPort,
+  ManuscriptDomainEventBus,
+} from '@/modules/manuscripts/core';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
 import {
@@ -27,6 +30,7 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
   constructor(
     private readonly docstoreService: DocstoreService,
     @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
   ) {
     super();
   }
@@ -37,7 +41,9 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
     change: TrackChange,
   ): Promise<PatcherResult> {
     try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, { strict: false });
+      const live = this.moduleRef?.get(LiveCollaborationPort, {
+        strict: false,
+      });
       if (live) {
         await live.flushDocs(projectId, [docId]).catch(() => []);
       }
@@ -57,22 +63,35 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
 
     const updated = await this.docstoreService.updateDoc(projectId, docId, {
       lines,
-      version: doc.version,
+      version: (doc.version ?? 0) + 1,
     });
 
-    try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, {
-        strict: false,
+    if (this.domainEventBus) {
+      await this.domainEventBus.publish({
+        type: 'manuscript.document.mutated',
+        projectId,
+        docId,
+        lines: updated.doc.lines || [''],
+        rev: updated.doc.rev,
+        version: updated.doc.version,
+        source: 'track-changes',
+        occurredAt: Date.now(),
       });
-      if (live) {
-        await live.applyExternalText(
-          projectId,
-          docId,
-          (updated.doc.lines || ['']).join('\n'),
-        );
+    } else {
+      try {
+        const live = this.moduleRef?.get(LiveCollaborationPort, {
+          strict: false,
+        });
+        if (live) {
+          await live.applyExternalText(
+            projectId,
+            docId,
+            (updated.doc.lines || ['']).join('\n'),
+          );
+        }
+      } catch {
+        // non-blocking fallback
       }
-    } catch {
-      // non-blocking fallback
     }
 
     return {
@@ -87,7 +106,9 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
     change: TrackChange,
   ): Promise<PatcherResult> {
     try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, { strict: false });
+      const live = this.moduleRef?.get(LiveCollaborationPort, {
+        strict: false,
+      });
       if (live) {
         await live.flushDocs(projectId, [docId]).catch(() => []);
       }
@@ -97,22 +118,35 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
 
     const updated = await this.docstoreService.updateDoc(projectId, docId, {
       lines,
-      version: doc.version,
+      version: (doc.version ?? 0) + 1,
     });
 
-    try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, {
-        strict: false,
+    if (this.domainEventBus) {
+      await this.domainEventBus.publish({
+        type: 'manuscript.document.mutated',
+        projectId,
+        docId,
+        lines: updated.doc.lines || [''],
+        rev: updated.doc.rev,
+        version: updated.doc.version,
+        source: 'track-changes',
+        occurredAt: Date.now(),
       });
-      if (live) {
-        await live.applyExternalText(
-          projectId,
-          docId,
-          (updated.doc.lines || ['']).join('\n'),
-        );
+    } else {
+      try {
+        const live = this.moduleRef?.get(LiveCollaborationPort, {
+          strict: false,
+        });
+        if (live) {
+          await live.applyExternalText(
+            projectId,
+            docId,
+            (updated.doc.lines || ['']).join('\n'),
+          );
+        }
+      } catch {
+        // non-blocking fallback
       }
-    } catch {
-      // non-blocking fallback
     }
 
     return {
@@ -132,7 +166,9 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
     }
 
     try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, { strict: false });
+      const live = this.moduleRef?.get(LiveCollaborationPort, {
+        strict: false,
+      });
       if (live) {
         await live.flushDocs(projectId, [docId]).catch(() => []);
       }
@@ -163,22 +199,35 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
 
     const updated = await this.docstoreService.updateDoc(projectId, docId, {
       lines: currentLines,
-      version: doc.version,
+      version: (doc.version ?? 0) + 1,
     });
 
-    try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, {
-        strict: false,
+    if (this.domainEventBus) {
+      await this.domainEventBus.publish({
+        type: 'manuscript.document.mutated',
+        projectId,
+        docId,
+        lines: updated.doc.lines || [''],
+        rev: updated.doc.rev,
+        version: updated.doc.version,
+        source: 'track-changes',
+        occurredAt: Date.now(),
       });
-      if (live) {
-        await live.applyExternalText(
-          projectId,
-          docId,
-          (updated.doc.lines || ['']).join('\n'),
-        );
+    } else {
+      try {
+        const live = this.moduleRef?.get(LiveCollaborationPort, {
+          strict: false,
+        });
+        if (live) {
+          await live.applyExternalText(
+            projectId,
+            docId,
+            (updated.doc.lines || ['']).join('\n'),
+          );
+        }
+      } catch {
+        // non-blocking fallback
       }
-    } catch {
-      // non-blocking fallback
     }
 
     return {

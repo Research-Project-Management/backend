@@ -20,6 +20,7 @@ import {
   ErrorKnowledgeBase,
 } from './domain';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
+import { ProjectWorkspaceCollectorService } from '@/modules/manuscripts/core';
 import { RegexAstBibtexParser } from '@/modules/manuscripts/citations/domain';
 
 @Injectable()
@@ -34,6 +35,8 @@ export class DiagnosticsService {
     @Optional()
     private readonly docstoreService?: DocstoreService,
     @Optional()
+    private readonly workspaceCollector?: ProjectWorkspaceCollectorService,
+    @Optional()
     knowledgeBase?: ErrorKnowledgeBase,
     @Optional()
     logAnalyzer?: CompileLogAnalyzer,
@@ -41,8 +44,10 @@ export class DiagnosticsService {
     syntaxLinter?: FastSyntaxLinter,
   ) {
     this.knowledgeBase = knowledgeBase ?? new ErrorKnowledgeBase();
-    this.logAnalyzer = logAnalyzer ?? new CompileLogAnalyzer(this.knowledgeBase);
-    this.syntaxLinter = syntaxLinter ?? new FastSyntaxLinter(this.knowledgeBase);
+    this.logAnalyzer =
+      logAnalyzer ?? new CompileLogAnalyzer(this.knowledgeBase);
+    this.syntaxLinter =
+      syntaxLinter ?? new FastSyntaxLinter(this.knowledgeBase);
   }
 
   /**
@@ -80,6 +85,12 @@ export class DiagnosticsService {
   public async lintProject(projectId: string): Promise<DiagnosticReportDto> {
     const allItems: DiagnosticItem[] = [];
     const knownBibKeys = new Set<string>();
+
+    if (this.workspaceCollector) {
+      await this.workspaceCollector
+        .flushProjectWorkspace(projectId)
+        .catch(() => []);
+    }
 
     if (this.docstoreService) {
       try {

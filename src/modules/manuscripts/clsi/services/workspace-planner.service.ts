@@ -81,13 +81,14 @@ export class ClsiWorkspacePlannerService {
 
     if (this.prisma && projectId !== 'default') {
       try {
-        const [nodes, docs] = await Promise.all([
+        const [nodes, docs, binaryFiles] = await Promise.all([
           this.prisma.manuscriptNode.findMany({
             where: { projectId },
             orderBy: { sortOrder: 'asc' },
             select: {
               id: true,
               docId: true,
+              fileId: true,
               path: true,
               name: true,
               type: true,
@@ -105,10 +106,25 @@ export class ClsiWorkspacePlannerService {
               inStorage: true,
             },
           }),
+          this.prisma.manuscriptFile?.findMany
+            ? this.prisma.manuscriptFile
+                .findMany({
+                  where: { projectId, deleted: false, deletedAt: null },
+                  select: {
+                    id: true,
+                    name: true,
+                    sizeBytes: true,
+                    hash: true,
+                    updatedAt: true,
+                  },
+                })
+                .catch(() => [])
+            : Promise.resolve([]),
         ]);
         return planDbFileSet({
           nodes,
           docs,
+          binaryFiles,
           incomingFiles,
           source,
           mainFile,
@@ -215,13 +231,15 @@ export class ClsiWorkspacePlannerService {
               .replace(/^\/+/, '');
           if (!relPath || out[relPath] !== undefined) continue;
 
-          // Disk-cache hit optimization: if workspace already has the exact asset on disk, reuse it
+          // Disk-cache hit optimization: if workspace already has the exact asset on disk,
+          // read it directly from local scratch disk so syncFiles retains it in the manifest
+          // without re-streaming from remote object storage.
           if (scratchDir) {
             const localAssetPath = path.join(scratchDir, relPath);
             try {
               const stat = await fs.stat(localAssetPath);
               if (bf.sizeBytes && stat.size === bf.sizeBytes) {
-                // Asset is already on local disk with identical byte length; skip re-downloading to RAM
+                out[relPath] = await fs.readFile(localAssetPath);
                 continue;
               }
             } catch {
@@ -370,11 +388,12 @@ export class ClsiWorkspacePlannerService {
         } catch (err: unknown) {
           const code = (err as { code?: string })?.code;
           if (code === 'P2002' && attempt < maxAttempts - 1) {
-            const currentLatest = await this.prisma.manuscriptSnapshot.findFirst({
-              where: { projectId },
-              orderBy: { version: 'desc' },
-              select: { version: true },
-            });
+            const currentLatest =
+              await this.prisma.manuscriptSnapshot.findFirst({
+                where: { projectId },
+                orderBy: { version: 'desc' },
+                select: { version: true },
+              });
             candidateVersion = Math.max(
               candidateVersion + 1,
               (currentLatest?.version ?? 0) + 1,
@@ -386,7 +405,10 @@ export class ClsiWorkspacePlannerService {
       }
 
       // Bounded cache maintenance to prevent memory leaks across thousands of projects
-      if (this.lastAutoSnapshotTimes.size >= ClsiWorkspacePlannerService.MAX_TRACKED_PROJECTS) {
+      if (
+        this.lastAutoSnapshotTimes.size >=
+        ClsiWorkspacePlannerService.MAX_TRACKED_PROJECTS
+      ) {
         const oldestKey = this.lastAutoSnapshotTimes.keys().next().value;
         if (oldestKey) {
           this.lastAutoSnapshotTimes.delete(oldestKey);

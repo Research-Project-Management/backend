@@ -22,6 +22,7 @@ export interface UpdateDocData {
   ranges?: DocRanges;
   hash?: string;
   expectedRev?: number;
+  currentDoc?: TextDoc;
 }
 
 export interface PatchDocData {

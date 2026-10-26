@@ -280,12 +280,12 @@ export class MyersDiffEngine {
     const max = n + m;
     if (max === 0) return [];
 
-    const v: number[] = new Array(2 * max + 1);
+    const v = new Int32Array(2 * max + 1);
     v[1 + max] = 0;
-    const trace: Array<{ [k: number]: number }> = [];
+    const trace: Int32Array[] = [];
 
     for (let d = 0; d <= max; d++) {
-      const snap: { [k: number]: number } = {};
+      const snap = new Int32Array(2 * d + 1).fill(-1);
       for (let k = -d; k <= d; k += 2) {
         let x: number;
         if (k === -d || (k !== d && v[k - 1 + max] < v[k + 1 + max])) {
@@ -301,7 +301,7 @@ export class MyersDiffEngine {
         }
 
         v[k + max] = x;
-        snap[k] = x;
+        snap[k + d] = x;
 
         if (x >= n && y >= m) {
           trace.push(snap);
@@ -317,7 +317,7 @@ export class MyersDiffEngine {
   private backtrackMyers(
     a: string[],
     b: string[],
-    trace: Array<{ [k: number]: number }>,
+    trace: Int32Array[],
   ): Array<{ type: 'added' | 'deleted' | 'unchanged'; text: string }> {
     let x = a.length;
     let y = b.length;
@@ -328,30 +328,42 @@ export class MyersDiffEngine {
 
     for (let d = trace.length - 1; d > 0; d--) {
       const k = x - y;
+      const prevSnap = trace[d - 1];
+      const prevD = d - 1;
+      const leftVal =
+        k - 1 + prevD >= 0 && k - 1 + prevD < prevSnap.length
+          ? prevSnap[k - 1 + prevD]
+          : -1;
+      const rightVal =
+        k + 1 + prevD >= 0 && k + 1 + prevD < prevSnap.length
+          ? prevSnap[k + 1 + prevD]
+          : -1;
+
       let prevK: number;
-      if (
-        k === -d ||
-        (k !== d && (trace[d - 1][k - 1] ?? -1) < (trace[d - 1][k + 1] ?? -1))
-      ) {
+      if (k === -d || (k !== d && leftVal < rightVal)) {
         prevK = k + 1;
       } else {
         prevK = k - 1;
       }
 
-      const prevX = trace[d - 1][prevK] ?? 0;
+      const prevXRaw =
+        prevK + prevD >= 0 && prevK + prevD < prevSnap.length
+          ? prevSnap[prevK + prevD]
+          : -1;
+      const prevX = prevXRaw >= 0 ? prevXRaw : 0;
       const prevY = prevX - prevK;
 
       while (x > prevX && y > prevY) {
-        result.unshift({ type: 'unchanged', text: a[x - 1] });
+        result.push({ type: 'unchanged', text: a[x - 1] });
         x--;
         y--;
       }
 
       if (d > 0) {
         if (x === prevX) {
-          result.unshift({ type: 'added', text: b[prevY] });
+          result.push({ type: 'added', text: b[prevY] });
         } else if (y === prevY) {
-          result.unshift({ type: 'deleted', text: a[prevX] });
+          result.push({ type: 'deleted', text: a[prevX] });
         }
       }
 
@@ -360,11 +372,12 @@ export class MyersDiffEngine {
     }
 
     while (x > 0 && y > 0) {
-      result.unshift({ type: 'unchanged', text: a[x - 1] });
+      result.push({ type: 'unchanged', text: a[x - 1] });
       x--;
       y--;
     }
 
+    result.reverse();
     return result;
   }
 
@@ -450,18 +463,21 @@ export class MyersDiffEngine {
 
     while (i > 0 || j > 0) {
       if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
-        aResult.unshift({ type: 'unchanged', text: a[i - 1] });
-        bResult.unshift({ type: 'unchanged', text: b[j - 1] });
+        aResult.push({ type: 'unchanged', text: a[i - 1] });
+        bResult.push({ type: 'unchanged', text: b[j - 1] });
         i--;
         j--;
       } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-        bResult.unshift({ type: 'added', text: b[j - 1] });
+        bResult.push({ type: 'added', text: b[j - 1] });
         j--;
       } else if (i > 0) {
-        aResult.unshift({ type: 'deleted', text: a[i - 1] });
+        aResult.push({ type: 'deleted', text: a[i - 1] });
         i--;
       }
     }
+
+    aResult.reverse();
+    bResult.reverse();
 
     return {
       aTokens: this.mergeAdjacentTokens(aResult),

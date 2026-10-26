@@ -179,27 +179,34 @@ export class DocstoreRepository {
 
     // 1. Optimistic Concurrency Control (OCC) check if expectedRev specified
     if (data.expectedRev !== undefined) {
-      const current = await this.prisma.manuscriptDoc.findFirst({
-        where: { id: docId, projectId },
-      });
+      let baseDoc = data.currentDoc;
+      if (!baseDoc) {
+        const current = await this.prisma.manuscriptDoc.findFirst({
+          where: { id: docId, projectId },
+        });
 
-      if (!current) {
-        throw new DocNotFoundError(
-          `Document ${docId} not found in project ${projectId}`,
-        );
+        if (!current) {
+          throw new DocNotFoundError(
+            `Document ${docId} not found in project ${projectId}`,
+          );
+        }
+        baseDoc = this.mapToEntity(current);
       }
 
-      if (current.rev !== data.expectedRev) {
+      if (baseDoc.rev !== data.expectedRev) {
         DocstoreMetrics.recordOccConflict();
         throw new DocModifiedError(
-          `Optimistic concurrency conflict on doc ${docId}: expected rev ${data.expectedRev} but current is ${current.rev}`,
+          `Optimistic concurrency conflict on doc ${docId}: expected rev ${data.expectedRev} but current is ${baseDoc.rev}`,
           {
             docId,
             rev: data.expectedRev,
-            currentRev: current.rev,
+            currentRev: baseDoc.rev,
           },
         );
       }
+
+      const resolvedRanges = data.ranges || baseDoc.ranges;
+      const resolvedHash = data.hash || baseDoc.hash;
 
       // Atomic compare-and-swap (CAS) via updateMany to guarantee zero TOCTOU race condition
       const updateResult = await this.prisma.manuscriptDoc.updateMany({
@@ -211,9 +218,8 @@ export class DocstoreRepository {
         data: {
           lines: data.lines,
           version: data.version,
-          ranges: (data.ranges ||
-            current.ranges) as unknown as Prisma.InputJsonValue,
-          hash: data.hash || current.hash,
+          ranges: resolvedRanges as unknown as Prisma.InputJsonValue,
+          hash: resolvedHash,
           sizeBytes,
           inStorage: false,
           storageKey: null,
@@ -224,6 +230,7 @@ export class DocstoreRepository {
       if (updateResult.count === 0) {
         const recheck = await this.prisma.manuscriptDoc.findFirst({
           where: { id: docId, projectId },
+          select: { rev: true },
         });
         DocstoreMetrics.recordOccConflict();
         throw new DocModifiedError(
@@ -236,12 +243,26 @@ export class DocstoreRepository {
         );
       }
 
-      const updated = await this.prisma.manuscriptDoc.findFirst({
-        where: { id: docId, projectId },
+      const updatedDoc = new TextDoc({
+        id: baseDoc.id,
+        projectId: baseDoc.projectId,
+        path: baseDoc.path,
+        lines: data.lines,
+        rev: data.expectedRev + 1,
+        version: data.version,
+        ranges: resolvedRanges,
+        hash: resolvedHash,
+        sizeBytes,
+        inStorage: false,
+        storageKey: null,
+        deleted: baseDoc.deleted,
+        deletedAt: baseDoc.deletedAt,
+        createdAt: baseDoc.createdAt,
+        updatedAt: new Date(),
       });
 
       DocstoreMetrics.recordWrite(sizeBytes);
-      return { doc: this.mapToEntity(updated || current), modified: true };
+      return { doc: updatedDoc, modified: true };
     }
 
     // 2. Direct atomic update in 1 single roundtrip when OCC revision check is not requested

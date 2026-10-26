@@ -43,8 +43,9 @@ export function toDosDateTime(d: Date = new Date()): {
 export function sanitizePkZipPath(relPath: string): string {
   return relPath
     .replace(/\\/g, '/')
-    .replace(/^\/+/, '')
-    .replace(/\.\.\//g, '');
+    .split('/')
+    .filter((segment) => segment.length > 0 && !/^\.+$/.test(segment))
+    .join('/');
 }
 
 export interface PkZipEntry {

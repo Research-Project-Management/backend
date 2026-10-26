@@ -99,6 +99,21 @@ export class LinkedFilesController {
     await this.linkedFilesService.delete(projectId, id, deleteNode === 'true');
   }
 
+  @Post('projects/:projectId/linked-files/refresh-all')
+  @UseGuards(UserRateLimitGuard)
+  @RequireRole(Role.CONTRIBUTOR)
+  @UserRateLimit('linked-file')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Refresh all linked files in a manuscript project immediately',
+  })
+  public async refreshAllProjectLinkedFiles(
+    @Param('projectId') projectId: string,
+    @CurrentUser('id') userId?: string,
+  ) {
+    return await this.linkedFilesService.refreshAllByProject(projectId, userId);
+  }
+
   @Post('linked-files/refresh-all')
   @UseGuards(OperatorGuard, UserRateLimitGuard)
   @RequireOperator()

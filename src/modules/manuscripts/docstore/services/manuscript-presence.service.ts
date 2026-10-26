@@ -16,8 +16,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
 import { isOriginAllowed } from '@/core/http/setup/allowed-origins';
 import type { FastifyReply } from 'fastify';
-import { LiveCollaborationPort, LivePresenceUser } from '@/modules/manuscripts/core';
-
+import {
+  LiveCollaborationPort,
+  LivePresenceUser,
+} from '@/modules/manuscripts/core';
 
 export interface ActivePresenceUser {
   id: string;
@@ -45,7 +47,10 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
   private static readonly HTTP_PRESENCE_TTL_MS = 60_000;
   private static readonly MAX_HTTP_PRESENCE_ENTRIES = 5000;
   private static readonly httpPresence = new Map<string, ActivePresenceUser>();
-  private static readonly projectIdCache = new Map<string, { projectId: string | null; expiresAt: number }>();
+  private static readonly projectIdCache = new Map<
+    string,
+    { projectId: string | null; expiresAt: number }
+  >();
   private static readonly PROJECT_ID_CACHE_TTL_MS = 300_000; // 5 minutes
   private static readonly PRESENCE_CACHE_TTL_MS = 1_000; // 1 second single-flight + short TTL cache
   private readonly presenceCache = new Map<
@@ -208,7 +213,10 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
     if (!userId) {
       throw new BadRequestException('Authenticated user required');
     }
-    if (ManuscriptPresenceService.httpPresence.size >= ManuscriptPresenceService.MAX_HTTP_PRESENCE_ENTRIES) {
+    if (
+      ManuscriptPresenceService.httpPresence.size >=
+      ManuscriptPresenceService.MAX_HTTP_PRESENCE_ENTRIES
+    ) {
       // Evict expired entries or clear half
       const now = Date.now();
       for (const [k, v] of ManuscriptPresenceService.httpPresence) {
@@ -216,7 +224,10 @@ export class ManuscriptPresenceService implements OnModuleDestroy {
           ManuscriptPresenceService.httpPresence.delete(k);
         }
       }
-      if (ManuscriptPresenceService.httpPresence.size >= ManuscriptPresenceService.MAX_HTTP_PRESENCE_ENTRIES) {
+      if (
+        ManuscriptPresenceService.httpPresence.size >=
+        ManuscriptPresenceService.MAX_HTTP_PRESENCE_ENTRIES
+      ) {
         ManuscriptPresenceService.httpPresence.clear();
       }
     }

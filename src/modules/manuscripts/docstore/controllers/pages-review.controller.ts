@@ -39,6 +39,7 @@ import { DocstoreService } from '../docstore.service';
 import { ManuscriptUserResolverService } from '../services/manuscript-user-resolver.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LiveCollaborationPort } from '@/modules/manuscripts/core';
+import { NotificationsService } from '@/modules/notifications/notifications.service';
 import { ManuscriptPageScopeRepository } from '../repositories/manuscript-page-scope.repository';
 import {
   resolveActiveProjectId,
@@ -78,6 +79,7 @@ export interface CreateSuggestionBody {
 export class PagesReviewController {
   private readonly logger = new Logger(PagesReviewController.name);
   private liveCollab: LiveCollaborationPort | null | undefined;
+  private notificationsService: NotificationsService | null | undefined;
   private readonly pageScopeRepo: ManuscriptPageScopeRepository;
 
   constructor(
@@ -90,6 +92,78 @@ export class PagesReviewController {
   ) {
     this.pageScopeRepo =
       pageScopeRepo || new ManuscriptPageScopeRepository(prisma);
+  }
+
+  private getNotificationsService(): NotificationsService | null {
+    if (this.notificationsService !== undefined)
+      return this.notificationsService;
+    try {
+      this.notificationsService =
+        this.moduleRef?.get(NotificationsService, { strict: false }) ?? null;
+    } catch {
+      this.notificationsService = null;
+    }
+    return this.notificationsService;
+  }
+
+  private async resolveCollaboratorContext(
+    projectId: string | null | undefined,
+  ): Promise<{ collaboratorMap: Record<string, string>; projectName: string }> {
+    const collaboratorMap: Record<string, string> = {};
+    let projectName = 'Manuscript';
+    if (!projectId || !this.prisma?.project?.findUnique) {
+      return { collaboratorMap, projectName };
+    }
+    try {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        include: {
+          createdBy: {
+            select: {
+              id: true,
+              email: true,
+              profile: { select: { name: true } },
+            },
+          },
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  profile: { select: { name: true } },
+                },
+              },
+            },
+          },
+        },
+      });
+      if (project) {
+        projectName = project.name || projectName;
+        const owner = project.createdBy;
+        if (owner?.email) {
+          collaboratorMap[owner.email.toLowerCase()] = owner.id;
+          const ownerName = owner.profile?.name;
+          if (ownerName) {
+            collaboratorMap[ownerName.toLowerCase().replace(/\s+/g, '')] =
+              owner.id;
+          }
+        }
+        for (const member of project.members || []) {
+          if (member.user?.email) {
+            collaboratorMap[member.user.email.toLowerCase()] = member.user.id;
+            const memberName = member.user.profile?.name;
+            if (memberName) {
+              collaboratorMap[memberName.toLowerCase().replace(/\s+/g, '')] =
+                member.user.id;
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore collaborator map lookup error
+    }
+    return { collaboratorMap, projectName };
   }
 
   private broadcastEvent(
@@ -301,6 +375,25 @@ export class PagesReviewController {
       });
     }
 
+    const manuscriptsNotif = this.getNotificationsService()?.manuscripts;
+    if (manuscriptsNotif && projectId && body.content) {
+      this.resolveCollaboratorContext(projectId)
+        .then(async (ctx) => {
+          await manuscriptsNotif.parseAndNotifyMentions({
+            text: body.content,
+            actorId: userId || 'anonymous',
+            actorName: authorName,
+            projectId,
+            projectName: ctx.projectName,
+            docId: targetDocId || pageId,
+            threadId: thread.id,
+            commentId: thread.id,
+            collaboratorMap: ctx.collaboratorMap,
+          });
+        })
+        .catch(() => {});
+    }
+
     return { comment: commentPayload };
   }
 
@@ -373,6 +466,37 @@ export class PagesReviewController {
           docId: updated.docId,
           comment: commentPayload,
         });
+      }
+
+      const manuscriptsNotif = this.getNotificationsService()?.manuscripts;
+      const updatedProjectId = updated.projectId;
+      if (
+        manuscriptsNotif &&
+        updatedProjectId &&
+        body.status === 'resolved' &&
+        !thread.isResolved
+      ) {
+        const actorName =
+          (userId ? userMap.get(userId)?.name : undefined) ||
+          req?.user?.name ||
+          'Collaborator';
+        this.resolveCollaboratorContext(updatedProjectId)
+          .then(async (ctx) => {
+            await manuscriptsNotif.dismissThreadNotifications(updated.id);
+            if (updated.createdById && updated.createdById !== userId) {
+              await manuscriptsNotif.notifyThreadResolved({
+                recipientUserId: updated.createdById,
+                actorId: userId || 'anonymous',
+                actorName,
+                projectId: updatedProjectId,
+                projectName: ctx.projectName,
+                docId: updated.docId || pageId,
+                threadId: updated.id,
+                quote: updated.quote ?? undefined,
+              });
+            }
+          })
+          .catch(() => {});
       }
 
       return { comment: commentPayload };
@@ -475,7 +599,7 @@ export class PagesReviewController {
         );
       }
 
-      await this.prisma.manuscriptCommentReply.create({
+      const createdReply = await this.prisma.manuscriptCommentReply.create({
         data: {
           threadId: commentId,
           content: body.content,
@@ -504,6 +628,43 @@ export class PagesReviewController {
           commentId: thread.id,
           comment: commentPayload,
         });
+      }
+
+      const manuscriptsNotif = this.getNotificationsService()?.manuscripts;
+      const threadProjectId = thread.projectId;
+      if (manuscriptsNotif && threadProjectId && body.content) {
+        const actorName =
+          (userId ? userMap.get(userId)?.name : undefined) ||
+          req?.user?.name ||
+          'Collaborator';
+        this.resolveCollaboratorContext(threadProjectId)
+          .then(async (ctx) => {
+            if (thread.createdById && thread.createdById !== userId) {
+              await manuscriptsNotif.notifyCommentReply({
+                recipientUserId: thread.createdById,
+                actorId: userId || 'anonymous',
+                actorName,
+                projectId: threadProjectId,
+                projectName: ctx.projectName,
+                docId: thread.docId || pageId,
+                threadId: thread.id,
+                replyId: createdReply?.id || commentId,
+                snippet: body.content.slice(0, 140),
+              });
+            }
+            await manuscriptsNotif.parseAndNotifyMentions({
+              text: body.content,
+              actorId: userId || 'anonymous',
+              actorName,
+              projectId: threadProjectId,
+              projectName: ctx.projectName,
+              docId: thread.docId || pageId,
+              threadId: thread.id,
+              commentId: createdReply?.id || commentId,
+              collaboratorMap: ctx.collaboratorMap,
+            });
+          })
+          .catch(() => {});
       }
 
       return { comment: commentPayload };

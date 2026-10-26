@@ -182,10 +182,16 @@ export class GitBridgeController {
     const projectId = await this.authorize(req, reply, repo, 'git-upload-pack');
     if (!projectId) return;
     try {
-      const result = await this.gitBridgeService.serviceRpc(
+      const result = await this.gitBridgeService.withProjectLock(
         projectId,
-        'git-upload-pack',
-        this.requestBody(req),
+        async () => {
+          await this.gitBridgeService.materialize(projectId);
+          return this.gitBridgeService.serviceRpc(
+            projectId,
+            'git-upload-pack',
+            this.requestBody(req),
+          );
+        },
       );
       if (result.code !== 0 && result.stdout.length === 0) {
         throw new BadRequestException(result.stderr || `exit ${result.code}`);
@@ -226,7 +232,7 @@ export class GitBridgeController {
       );
 
       if ('rejected' in outcome) {
-        return this.fail(reply, 403, outcome.rejected as string);
+        return this.fail(reply, 403, outcome.rejected);
       }
       reply.raw.writeHead(200, {
         'Content-Type': 'application/x-git-receive-pack-result',

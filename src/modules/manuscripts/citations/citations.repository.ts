@@ -29,6 +29,7 @@ import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
+  ManuscriptDomainEventBus,
 } from '@/modules/manuscripts/core';
 
 import {
@@ -67,6 +68,8 @@ export class CitationsRepository
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly liveCollab?: LiveCollaborationPort,
+    @Optional()
+    private readonly domainEventBus?: ManuscriptDomainEventBus,
   ) {
     this.bibParser = bibParser ?? new RegexAstBibtexParser();
   }
@@ -86,23 +89,41 @@ export class CitationsRepository
           n.isDoc() && n.name.toLowerCase().endsWith('.bib'),
       );
 
-      for (const node of bibNodes) {
-        if (!node.docId) continue;
-        try {
-          const doc = await this.docstoreService.getDoc(projectId, node.docId);
-          const rawText = (doc.lines || []).join('\n');
-          const entries = this.bibParser.parse(rawText);
-          bibFiles.push(
-            new BibliographyFile({
+      const validBibNodes = bibNodes.filter(
+        (node): node is ManuscriptNodeEntity & { docId: string } =>
+          Boolean(node.docId),
+      );
+
+      // Read-your-writes consistency: flush active in-memory Yjs buffers for bib files before reading
+      if (this.liveCollab && validBibNodes.length > 0) {
+        const bibDocIds = validBibNodes.map((n) => n.docId);
+        await this.liveCollab.flushDocs(projectId, bibDocIds).catch(() => []);
+      }
+
+      const results = await Promise.all(
+        validBibNodes.map(async (node) => {
+          try {
+            const doc = await this.docstoreService!.getDoc(
+              projectId,
+              node.docId,
+            );
+            const rawText = (doc.lines || []).join('\n');
+            const entries = this.bibParser.parse(rawText);
+            return new BibliographyFile({
               path: node.path,
               entries,
-            }),
-          );
-        } catch (err: unknown) {
-          this.logger.warn(
-            `Failed to read doc ${node.docId} for ${node.path}: ${(err as Error)?.message}`,
-          );
-        }
+            });
+          } catch (err: unknown) {
+            this.logger.warn(
+              `Failed to read doc ${node.docId} for ${node.path}: ${(err as Error)?.message}`,
+            );
+            return null;
+          }
+        }),
+      );
+
+      for (const file of results) {
+        if (file) bibFiles.push(file);
       }
     } catch (err: unknown) {
       this.logger.error(
@@ -175,9 +196,21 @@ export class CitationsRepository
         expectedRev: doc.rev,
       });
 
-      await this.liveCollab
-        ?.applyExternalText(projectId, docId, nextLines.join('\n'))
-        .catch(() => {});
+      if (this.domainEventBus) {
+        await this.domainEventBus.publish({
+          type: 'manuscript.document.mutated',
+          projectId,
+          docId,
+          lines: nextLines,
+          version: (doc.version ?? 0) + 1,
+          source: 'citations',
+          occurredAt: Date.now(),
+        });
+      } else {
+        await this.liveCollab
+          ?.applyExternalText(projectId, docId, nextLines.join('\n'))
+          .catch(() => {});
+      }
 
       return targetNode.path;
     }

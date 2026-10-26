@@ -288,6 +288,24 @@ export class FilestoreRepository extends IManuscriptFileRepository {
         }
         return;
       }
+
+      if (this.prisma.manuscriptNode.create) {
+        await this.prisma.manuscriptNode.create({
+          data: {
+            projectId: data.projectId,
+            parentId,
+            type: 'FILE',
+            name: segments[segments.length - 1] || 'unnamed.bin',
+            path: normalizedPath,
+            depth: Math.max(0, segments.length - 1),
+            fileId: data.id,
+            isRootDoc: false,
+            sizeBytes: data.sizeBytes,
+            hash: data.hash,
+            sortOrder: 0,
+          },
+        });
+      }
     } catch (err) {
       this.logger.warn(
         `Failed to sync ManuscriptNode for file '${data.id}' in project '${data.projectId}': ${(err as Error).message}`,

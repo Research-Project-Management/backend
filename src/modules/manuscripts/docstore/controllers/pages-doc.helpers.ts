@@ -301,7 +301,7 @@ export async function applyPageMetadataAndTitleUpdates(
     await prisma.manuscriptDoc
       .update({
         where: { id: pageId },
-        data: { ranges: updatedRanges as Prisma.InputJsonValue },
+        data: { ranges: updatedRanges },
       })
       .catch(() => null);
   }
@@ -334,7 +334,7 @@ export async function updateProjectThumbnailSettings(
               ...manuscriptSettings,
               pdfThumbnail,
             },
-          } as Prisma.InputJsonValue,
+          },
         },
       })
       .catch(() => null);
@@ -413,13 +413,12 @@ export async function resolvePageFilesList(
 
   const files = await Promise.all(
     filteredNodes.map(async (node) => {
-      const cleanName =
-        node.path.replace(/^\//, '') || node.name || 'main.tex';
+      const cleanName = node.path.replace(/^\//, '') || node.name || 'main.tex';
       const targetDoc = node.docId ? docMap.get(node.docId) : null;
       const docLines = targetDoc
         ? await hydratePageDocLines(docstoreService, {
             id: targetDoc.id,
-            projectId: targetDoc.projectId || projectId!,
+            projectId: targetDoc.projectId || projectId,
             lines: targetDoc.lines,
             inStorage: targetDoc.inStorage,
           })
@@ -508,10 +507,8 @@ export async function formatRootNodesAsProjectPages(
         rootPageId: d?.id || node.docId || node.id,
         version: d?.version ?? 1,
         rev: d?.rev ?? 1,
-        createdAt:
-          d?.createdAt?.toISOString() ?? node.createdAt.toISOString(),
-        updatedAt:
-          d?.updatedAt?.toISOString() ?? node.updatedAt.toISOString(),
+        createdAt: d?.createdAt?.toISOString() ?? node.createdAt.toISOString(),
+        updatedAt: d?.updatedAt?.toISOString() ?? node.updatedAt.toISOString(),
       };
     }),
   );
@@ -778,7 +775,7 @@ export async function resolveAndAssignLabelsForDoc(
   }
 
   await pageScopeRepo.updateDocInProject(projectId, pageId, {
-    ranges: { labelIds, labels } as Prisma.InputJsonValue,
+    ranges: { labelIds, labels },
   });
 
   return { labels };

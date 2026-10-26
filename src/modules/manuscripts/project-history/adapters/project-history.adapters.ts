@@ -10,7 +10,10 @@ import { ModuleRef } from '@nestjs/core';
 import * as pathPosix from 'node:path/posix';
 import { Prisma } from '@prisma/client';
 import { PrismaService, mapWithConcurrency } from '@/core';
-import { LiveCollaborationPort } from '@/modules/manuscripts/core';
+import {
+  LiveCollaborationPort,
+  ManuscriptDomainEventBus,
+} from '@/modules/manuscripts/core';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
@@ -44,9 +47,13 @@ export class ManuscriptCollectorAdapter extends IProjectCollectorPort {
     const nodes = await this.structureService.getAllNodes(projectId);
 
     try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, { strict: false });
+      const live = this.moduleRef?.get(LiveCollaborationPort, {
+        strict: false,
+      });
       if (live) {
-        const docIds = nodes.filter((n) => n.docId).map((n) => n.docId as string);
+        const docIds = nodes
+          .filter((n) => n.docId)
+          .map((n) => n.docId as string);
         await live.flushDocs(projectId, docIds);
       }
     } catch {
@@ -121,6 +128,7 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     private readonly docstoreService: DocstoreService,
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
   ) {
     super();
   }
@@ -130,7 +138,9 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
     snapshot: Snapshot,
   ): Promise<RestoreResult> {
     try {
-      const live = this.moduleRef?.get(LiveCollaborationPort, { strict: false });
+      const live = this.moduleRef?.get(LiveCollaborationPort, {
+        strict: false,
+      });
       if (live) {
         await live.flushDocs(projectId, []);
       }
@@ -139,6 +149,8 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
         `Failed to flush project ${projectId} prior to restore: ${err}`,
       );
     }
+
+    const currentNodes = await this.structureService.getAllNodes(projectId);
 
     // Pre-Restore Safety Guard: Snapshot current state if prisma available to prevent partial restore data loss
     if (this.prisma) {
@@ -149,21 +161,57 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
           select: { version: true },
         });
         const backupVersion = (latestSnap?.version ?? 0) + 1;
+        const backupFiles: Record<string, unknown> = {};
+        for (const node of currentNodes) {
+          if (node.isFolder()) continue;
+          if (node.isDoc() && node.docId) {
+            try {
+              const doc = await this.docstoreService.getDoc(
+                projectId,
+                node.docId,
+              );
+              backupFiles[node.path] = {
+                path: node.path,
+                type: 'doc',
+                docId: node.docId,
+                lines: doc.lines || [''],
+                hash: doc.hash || '',
+                isRootDoc: node.isRootDoc,
+              };
+            } catch {
+              // ignore doc fetch errors during safety backup
+            }
+          } else if (node.type === 'FILE' && node.fileId) {
+            backupFiles[node.path] = {
+              path: node.path,
+              type: 'file',
+              fileId: node.fileId,
+              hash: node.hash || '',
+              sizeBytes: node.sizeBytes || 0,
+            };
+          }
+        }
         await this.prisma.manuscriptSnapshot.create({
           data: {
             projectId,
             version: backupVersion,
-            summary: 'Pre-restore automatic safety snapshot before restoring to v' + snapshot.version,
+            summary:
+              'Pre-restore automatic safety snapshot before restoring to v' +
+              snapshot.version,
             isAutomatic: true,
-            files: Prisma.JsonNull,
+            files:
+              Object.keys(backupFiles).length > 0
+                ? (backupFiles as Prisma.InputJsonValue)
+                : Prisma.JsonNull,
           },
         });
       } catch (backupErr) {
-        this.logger.warn('Could not create pre-restore safety snapshot: ' + String(backupErr));
+        this.logger.warn(
+          'Could not create pre-restore safety snapshot: ' + String(backupErr),
+        );
       }
     }
 
-    const currentNodes = await this.structureService.getAllNodes(projectId);
     const currentByPath = new Map<string, ManuscriptNodeEntity>(
       currentNodes.map((n: ManuscriptNodeEntity) => [n.path, n]),
     );
@@ -226,6 +274,8 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
 
       if (fileVo.type === 'doc') {
         let docIdToSync: string | null = null;
+        let syncedRev: number | undefined;
+        let syncedVersion: number | undefined;
         if (fileVo.docId && this.prisma?.manuscriptDoc?.updateMany) {
           await this.prisma.manuscriptDoc
             .updateMany({
@@ -243,9 +293,15 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
               })
               .catch(() => {});
           }
-          await this.docstoreService.updateDoc(projectId, existingNode.docId, {
-            lines: fileVo.lines || [''],
-          });
+          const updated = await this.docstoreService.updateDoc(
+            projectId,
+            existingNode.docId,
+            {
+              lines: fileVo.lines || [''],
+            },
+          );
+          syncedRev = updated?.rev ?? updated?.doc?.rev;
+          syncedVersion = updated?.doc?.version;
           docIdToSync = existingNode.docId;
           restoredDocIds.push(existingNode.docId);
 
@@ -259,17 +315,33 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
 
           let targetDocId: string | null = fileVo.docId ?? null;
           if (targetDocId) {
-            await this.docstoreService.updateDoc(projectId, targetDocId, {
-              lines: fileVo.lines || [''],
-            }).catch(() => { targetDocId = null; });
+            const updated = await this.docstoreService
+              .updateDoc(projectId, targetDocId, {
+                lines: fileVo.lines || [''],
+              })
+              .catch(() => {
+                targetDocId = null;
+                return null;
+              });
+            if (updated) {
+              syncedRev = updated.rev ?? updated.doc?.rev;
+              syncedVersion = updated.doc?.version;
+            }
           }
           if (!targetDocId) {
             const createdDoc = await this.docstoreService.createDoc(projectId, {
               path: filePath,
               lines: fileVo.lines || [''],
             });
-            const createdRef = createdDoc as { id?: string; _id?: string };
+            const createdRef = createdDoc as {
+              id?: string;
+              _id?: string;
+              rev?: number;
+              version?: number;
+            };
             targetDocId = createdRef.id || createdRef._id || null;
+            syncedRev = createdRef.rev;
+            syncedVersion = createdRef.version;
           }
           if (targetDocId) {
             docIdToSync = targetDocId;
@@ -290,19 +362,32 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
         }
 
         if (docIdToSync) {
-          try {
-            const live = this.moduleRef?.get(LiveCollaborationPort, {
-              strict: false,
+          if (this.domainEventBus) {
+            await this.domainEventBus.publish({
+              type: 'manuscript.document.mutated',
+              projectId,
+              docId: docIdToSync,
+              lines: fileVo.lines || [''],
+              rev: syncedRev,
+              version: syncedVersion,
+              source: 'history-restore',
+              occurredAt: Date.now(),
             });
-            if (live) {
-              await live.applyExternalText(
-                projectId,
-                docIdToSync,
-                (fileVo.lines || ['']).join('\n'),
-              );
+          } else {
+            try {
+              const live = this.moduleRef?.get(LiveCollaborationPort, {
+                strict: false,
+              });
+              if (live) {
+                await live.applyExternalText(
+                  projectId,
+                  docIdToSync,
+                  (fileVo.lines || ['']).join('\n'),
+                );
+              }
+            } catch {
+              // non-blocking fallback
             }
-          } catch {
-            // non-blocking fallback
           }
         }
       } else if (fileVo.type === 'file' && fileVo.fileId) {
@@ -336,6 +421,19 @@ export class ManuscriptRestorerAdapter extends IProjectRestorerPort {
           });
         }
       }
+    }
+
+    if (this.domainEventBus) {
+      await this.domainEventBus.publish({
+        type: 'manuscript.history.restored',
+        projectId,
+        version:
+          typeof snapshot.version === 'number'
+            ? snapshot.version
+            : ((snapshot.version as { value?: number } | undefined)?.value ?? 0),
+        restoredDocIds,
+        occurredAt: Date.now(),
+      });
     }
 
     return {

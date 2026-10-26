@@ -327,6 +327,7 @@ export class DocstoreService {
         ranges,
         hash,
         expectedRev,
+        currentDoc,
       },
     );
 

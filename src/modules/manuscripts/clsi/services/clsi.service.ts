@@ -93,7 +93,9 @@ export class ClsiService {
     @Optional() healthCheck?: ClsiHealthCheck,
     @Optional() pipeline?: CompilePipeline,
   ) {
-    const rawMode = this.configService.get<string>('CLSI_SANDBOX_MODE')?.toLowerCase();
+    const rawMode = this.configService
+      .get<string>('CLSI_SANDBOX_MODE')
+      ?.toLowerCase();
     const normalizedMode =
       rawMode === 'local-unsafe' || rawMode === 'local'
         ? 'local-unsafe'

@@ -6,7 +6,6 @@
 import { WorkspaceFile } from '@/modules/manuscripts/core';
 import { SandboxProfile } from './sandbox-profile';
 
-
 export interface CompilerDiagnostic {
   file?: string;
   line: number | null;

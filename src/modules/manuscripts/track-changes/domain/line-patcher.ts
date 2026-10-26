@@ -142,7 +142,10 @@ export class LinePatcher {
         useOneBased,
       );
       const currentLine = sourceLines[lineIdx] || '';
-      const startCol = Math.max(0, Math.min(range.startCol, currentLine.length));
+      const startCol = Math.max(
+        0,
+        Math.min(range.startCol, currentLine.length),
+      );
       if (
         change.text &&
         !currentLine.slice(startCol).startsWith(change.text.split('\n')[0])
@@ -182,7 +185,10 @@ export class LinePatcher {
   ): LinePatchComputation {
     if (change.type === 'insert') {
       const range = change.range;
-      if (range.startLine === range.endLine && range.startCol === range.endCol) {
+      if (
+        range.startLine === range.endLine &&
+        range.startCol === range.endCol
+      ) {
         return { lines: [...sourceLines], mutated: false };
       }
       return {
@@ -279,8 +285,12 @@ export function applySuggestionToLines(
   );
   const changeType = String(record.type);
   const isExplicitZero = rawStartLine === 0 && rawEndLine === 0;
-  const sIdx = isExplicitZero ? 0 : Math.max(0, rawStartLine > 0 ? rawStartLine - 1 : 0);
-  const eIdx = isExplicitZero ? 0 : Math.max(sIdx, rawEndLine > 0 ? rawEndLine - 1 : sIdx);
+  const sIdx = isExplicitZero
+    ? 0
+    : Math.max(0, rawStartLine > 0 ? rawStartLine - 1 : 0);
+  const eIdx = isExplicitZero
+    ? 0
+    : Math.max(sIdx, rawEndLine > 0 ? rawEndLine - 1 : sIdx);
 
   if (changeType === 'insert') {
     if (sIdx < lines.length) {

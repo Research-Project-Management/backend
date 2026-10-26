@@ -71,6 +71,9 @@ export class TextDoc {
   public get lines(): string[] {
     return [...this._lines];
   }
+  public getLinesReadonly(): readonly string[] {
+    return this._lines;
+  }
   public get rev(): number {
     return this._rev;
   }
@@ -106,12 +109,13 @@ export class TextDoc {
   }
 
   public calculateSizeBytes(): number {
-    if (this._lines.length === 0) return 0;
-    const bytes = this._lines.reduce(
-      (acc, line) => acc + Buffer.byteLength(line, 'utf8'),
-      0,
-    );
-    return bytes + Math.max(0, this._lines.length - 1);
+    const len = this._lines.length;
+    if (len === 0) return 0;
+    let bytes = 0;
+    for (let i = 0; i < len; i++) {
+      bytes += Buffer.byteLength(this._lines[i], 'utf8');
+    }
+    return bytes + Math.max(0, len - 1);
   }
 
   public toRawText(): string {
@@ -182,8 +186,8 @@ export interface DiffCheckResult {
 
 export class NoopDiffChecker {
   public static areLinesEqual(
-    currentLines: string[],
-    newLines: string[],
+    currentLines: readonly string[],
+    newLines: readonly string[],
   ): boolean {
     if (currentLines.length !== newLines.length) return false;
     for (let i = 0; i < currentLines.length; i++) {
@@ -198,7 +202,10 @@ export class NoopDiffChecker {
     newVersion: number,
     newRanges?: DocRanges,
   ): DiffCheckResult {
-    const updateLines = !this.areLinesEqual(currentDoc.lines, newLines);
+    const updateLines = !this.areLinesEqual(
+      currentDoc.getLinesReadonly(),
+      newLines,
+    );
     const updateVersion = currentDoc.version !== newVersion;
     const updateRanges =
       newRanges !== undefined &&

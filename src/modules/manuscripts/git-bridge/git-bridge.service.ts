@@ -17,7 +17,10 @@ import { Readable } from 'stream';
 import { DocstoreService } from '@/modules/manuscripts/docstore/docstore.service';
 import { FilestoreService } from '@/modules/manuscripts/filestore/filestore.service';
 import { StructureService } from '@/modules/manuscripts/structure/structure.service';
-import { LiveCollaborationPort } from '@/modules/manuscripts/core';
+import {
+  LiveCollaborationPort,
+  ManuscriptDomainEventBus,
+} from '@/modules/manuscripts/core';
 import { GitBridgeRepository, GitCliAdapter } from './git-bridge.repository';
 import {
   generateToken,
@@ -247,6 +250,16 @@ export class GitBridgeService {
     }
   }
 
+  private domainBus(): ManuscriptDomainEventBus | null {
+    try {
+      return (
+        this.moduleRef?.get(ManuscriptDomainEventBus, { strict: false }) ?? null
+      );
+    } catch {
+      return null;
+    }
+  }
+
   /** Commits the current project state to `main`; returns tip sha. Caller holds lock. */
   async materialize(projectId: string): Promise<string> {
     await this.gitCli.ensureRepo(projectId);
@@ -406,7 +419,7 @@ export class GitBridgeService {
           nodeId: existing.id,
           name: existing.name,
           parentId: existing.parentId ?? null,
-          type: existing.type as 'DOC' | 'FILE' | 'FOLDER',
+          type: existing.type,
           docId: existing.docId ?? null,
           fileId: existing.fileId ?? null,
           isRootDoc: existing.isRootDoc,
@@ -466,13 +479,26 @@ export class GitBridgeService {
                   version: (snap.docVersion ?? 0) + 1,
                 })
                 .catch(() => undefined);
-              await this.live()
-                ?.applyExternalText(
+              const bus = this.domainBus();
+              if (bus) {
+                await bus.publish({
+                  type: 'manuscript.document.mutated',
                   projectId,
-                  snap.docId,
-                  snap.docLines.join('\n'),
-                )
-                .catch(() => false);
+                  docId: snap.docId,
+                  lines: snap.docLines,
+                  version: (snap.docVersion ?? 0) + 1,
+                  source: 'git-bridge',
+                  occurredAt: Date.now(),
+                });
+              } else {
+                await this.live()
+                  ?.applyExternalText(
+                    projectId,
+                    snap.docId,
+                    snap.docLines.join('\n'),
+                  )
+                  .catch(() => false);
+              }
             }
           }
 
@@ -539,9 +565,22 @@ export class GitBridgeService {
         lines,
         version: (current.version ?? 0) + 1,
       });
-      await this.live()
-        ?.applyExternalText(projectId, existing.docId, lines.join('\n'))
-        .catch(() => false);
+      const bus = this.domainBus();
+      if (bus) {
+        await bus.publish({
+          type: 'manuscript.document.mutated',
+          projectId,
+          docId: existing.docId,
+          lines,
+          version: (current.version ?? 0) + 1,
+          source: 'git-bridge',
+          occurredAt: Date.now(),
+        });
+      } else {
+        await this.live()
+          ?.applyExternalText(projectId, existing.docId, lines.join('\n'))
+          .catch(() => false);
+      }
       return 'updated';
     }
 
@@ -558,20 +597,35 @@ export class GitBridgeService {
       dir === '/' ? null : await this.structure.mkdirp(projectId, dir);
 
     if (asText) {
+      const lines = splitLines(content.toString('utf8'));
       const doc = await this.docstore.createDoc(projectId, {
         path: projectPath,
-        lines: splitLines(content.toString('utf8')),
+        lines,
       });
+      const createdDocId = doc.id ?? doc._id;
       await this.structure.createNode(projectId, {
         name,
         parentId: parent?.id ?? null,
         type: 'DOC',
-        docId: doc.id ?? doc._id,
+        docId: createdDocId,
       });
+      const bus = this.domainBus();
+      if (bus && createdDocId) {
+        await bus.publish({
+          type: 'manuscript.document.mutated',
+          projectId,
+          docId: createdDocId,
+          lines,
+          version: doc.version ?? 1,
+          source: 'git-bridge',
+          occurredAt: Date.now(),
+        });
+      }
     } else {
+      const relativeFilePath = projectPath.replace(/^\/+/, '') || name;
       const file = await this.filestore.uploadFileFromBuffer(
         projectId,
-        name,
+        relativeFilePath,
         content,
       );
       await this.structure.createNode(projectId, {

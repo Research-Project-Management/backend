@@ -15,12 +15,11 @@ import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import { DocstoreService } from '../docstore.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { LiveCollaborationPort } from '@/modules/manuscripts/core';
 import {
-  buildSearchRegex,
-  replaceInText,
-} from '../domain';
-
+  LiveCollaborationPort,
+  ManuscriptDomainEventBus,
+} from '@/modules/manuscripts/core';
+import { buildSearchRegex, replaceInText } from '../domain';
 
 export interface SearchDocumentsParams {
   query: string;
@@ -50,6 +49,7 @@ export class ManuscriptSearchReplaceService {
     private readonly docstoreService: DocstoreService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly domainEventBus?: ManuscriptDomainEventBus,
   ) {}
 
   private getLiveCollaboration(): LiveCollaborationPort | null {
@@ -116,7 +116,6 @@ export class ManuscriptSearchReplaceService {
       };
     }
 
-    
     try {
       const re = buildSearchRegex(query, {
         caseSensitive: body?.caseSensitive,
@@ -130,6 +129,16 @@ export class ManuscriptSearchReplaceService {
       };
       if (Array.isArray(body?.fileIds) && body.fileIds.length > 0) {
         where.id = { in: body.fileIds.filter((id) => isUuid(id)) };
+      }
+
+      // Read-your-writes consistency: flush pending in-memory Yjs edits to Postgres before searching
+      const targetDocIds =
+        Array.isArray(body?.fileIds) && body.fileIds.length > 0
+          ? body.fileIds.filter((id) => isUuid(id))
+          : [];
+      const live = this.getLiveCollaboration();
+      if (live) {
+        await live.flushDocs(projectId, targetDocIds).catch(() => []);
       }
 
       const [docs, rootNodes] = await Promise.all([
@@ -286,6 +295,17 @@ export class ManuscriptSearchReplaceService {
           version: doc.version + 1,
         });
         await this.syncLiveDoc(projectId, doc.id, lines);
+        if (this.domainEventBus) {
+          await this.domainEventBus.publish({
+            type: 'manuscript.document.mutated',
+            projectId,
+            docId: doc.id,
+            lines,
+            version: result.doc?.version ?? doc.version + 1,
+            source: 'search-replace',
+            occurredAt: Date.now(),
+          });
+        }
         totalOccurrencesReplaced += count;
         affectedFileIds.push(doc.id);
 

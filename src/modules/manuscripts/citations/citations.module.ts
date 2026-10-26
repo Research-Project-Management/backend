@@ -17,10 +17,7 @@ import {
 } from './citations.controller';
 import { CitationsService } from './citations.service';
 import { CitationsRepository } from './citations.repository';
-import {
-  RegexAstBibtexParser,
-  CrossrefArxivResolverAdapter,
-} from './domain';
+import { RegexAstBibtexParser, CrossrefArxivResolverAdapter } from './domain';
 
 @Module({
   imports: [

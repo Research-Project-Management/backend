@@ -58,6 +58,7 @@ export class LocalProcessRunner implements ISandboxRunner {
     return new Promise((resolve) => {
       let stdout = '';
       let stderr = '';
+      const maxOutputBytes = options.maxOutputBytes ?? 10 * 1024 * 1024;
 
       const child = spawn(command, args, {
         cwd: options.cwd,
@@ -73,13 +74,17 @@ export class LocalProcessRunner implements ISandboxRunner {
 
       child.stdout?.on('data', (data) => {
         const str = data.toString();
-        stdout += str;
+        if (stdout.length < maxOutputBytes) {
+          stdout += str.slice(0, maxOutputBytes - stdout.length);
+        }
         options.onLogChunk?.(str);
       });
 
       child.stderr?.on('data', (data) => {
         const str = data.toString();
-        stderr += str;
+        if (stderr.length < maxOutputBytes) {
+          stderr += str.slice(0, maxOutputBytes - stderr.length);
+        }
         options.onLogChunk?.(str);
       });
 

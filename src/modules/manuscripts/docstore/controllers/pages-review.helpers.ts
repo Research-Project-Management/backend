@@ -452,10 +452,16 @@ export async function applyAcceptedSingleSuggestionToDocstore(params: {
   if (!record.docId) return;
 
   try {
-    if (live && (record.projectId || targetProjectId)) {
-      await live
-        .flushDocs(record.projectId || targetProjectId!, [record.docId])
-        .catch(() => []);
+    let flushProjectId = record.projectId || targetProjectId;
+    if (!flushProjectId && record.docId) {
+      const preDoc = await prisma.manuscriptDoc.findUnique({
+        where: { id: record.docId },
+        select: { projectId: true },
+      });
+      flushProjectId = preDoc?.projectId;
+    }
+    if (live && flushProjectId) {
+      await live.flushDocs(flushProjectId, [record.docId]).catch(() => []);
     }
 
     const doc = await prisma.manuscriptDoc.findUnique({
@@ -552,8 +558,16 @@ export async function applyAcceptedBatchSuggestionsToDocstore(params: {
   } = params;
 
   try {
-    if (live && targetProjectId) {
-      await live.flushDocs(targetProjectId, [pageId]).catch(() => []);
+    let flushProjectId = targetProjectId;
+    if (!flushProjectId && pageId) {
+      const preDoc = await prisma.manuscriptDoc.findUnique({
+        where: { id: pageId },
+        select: { projectId: true },
+      });
+      flushProjectId = preDoc?.projectId;
+    }
+    if (live && flushProjectId) {
+      await live.flushDocs(flushProjectId, [pageId]).catch(() => []);
     }
 
     const doc = await prisma.manuscriptDoc.findUnique({

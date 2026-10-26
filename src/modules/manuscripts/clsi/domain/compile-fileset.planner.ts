@@ -20,6 +20,7 @@ export type FileSource =
 export interface ManifestNode {
   id: string;
   docId: string | null;
+  fileId?: string | null;
   path: string | null;
   name: string | null;
   type: string;
@@ -35,9 +36,18 @@ export interface ManifestDoc {
   inStorage?: boolean;
 }
 
+export interface ManifestFile {
+  id: string;
+  name: string;
+  sizeBytes: number;
+  hash: string | null;
+  updatedAt?: Date;
+}
+
 export interface FileSetInput {
   nodes: ManifestNode[];
   docs: ManifestDoc[];
+  binaryFiles?: ManifestFile[];
   incomingFiles: Record<string, string>;
   source: string;
   mainFile?: string;
@@ -79,10 +89,19 @@ const dbSource = (doc: ManifestDoc): FileSource => ({
 const isEmpty = (s: FileSource | undefined): boolean =>
   !s || (s.kind === 'inline' ? s.content.length === 0 : s.sizeBytes === 0);
 
-export function fingerprintFileSet(files: Map<string, FileSource>): string {
+export function fingerprintFileSet(
+  files: Map<string, FileSource>,
+  binaryTokens?: Map<string, string>,
+): string {
   const lines = Array.from(files.entries())
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([p, s]) => `${p}\u0000${s.token}`);
+  if (binaryTokens && binaryTokens.size > 0) {
+    const binLines = Array.from(binaryTokens.entries())
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([p, tok]) => `bin:${p}\u0000${tok}`);
+    lines.push(...binLines);
+  }
   return sha256(lines.join('\n'));
 }
 
@@ -107,6 +126,7 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
 
   const docById = new Map(docs.map((d) => [d.id, d]));
   const idToPath = new Map<string, string>();
+  const fileIdToPath = new Map<string, string>();
   const files = new Map<string, FileSource>();
   let detectedRootPath: string | null = null;
 
@@ -115,6 +135,7 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
     const cleanPath =
       sanitizeRelativePath(node.path || '') || node.name || 'untitled.tex';
     if (node.docId) idToPath.set(node.docId, cleanPath);
+    if (node.fileId) fileIdToPath.set(node.fileId, cleanPath);
     idToPath.set(node.id, cleanPath);
 
     const doc = node.docId ? docById.get(node.docId) : undefined;
@@ -168,10 +189,22 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
     files.set(mainFile, inlineSource(source));
   }
 
+  const binaryTokens = new Map<string, string>();
+  for (const bf of input.binaryFiles || []) {
+    const cleanPath =
+      fileIdToPath.get(bf.id) || sanitizeRelativePath(bf.name || '');
+    if (cleanPath && !files.has(cleanPath)) {
+      binaryTokens.set(
+        cleanPath,
+        `f:${bf.id}:${bf.hash || ''}:${bf.sizeBytes}:${bf.updatedAt?.getTime() ?? 0}`,
+      );
+    }
+  }
+
   return {
     mainFile,
     files,
-    fingerprint: fingerprintFileSet(files),
+    fingerprint: fingerprintFileSet(files, binaryTokens),
     hasMainContent: !isEmpty(files.get(mainFile)),
   };
 }
