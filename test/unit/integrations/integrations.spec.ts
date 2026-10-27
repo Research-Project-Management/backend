@@ -231,6 +231,7 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
         upsertProjectLink: jest.fn(),
         updateProjectLinkLastSynced: jest.fn(),
         findProjectLink: jest.fn(),
+        assertUserProjectAccess: jest.fn().mockResolvedValue(undefined),
       } as any;
 
       zoteroProvider = new ZoteroProvider();
@@ -253,6 +254,12 @@ describe('Integrations Subsystem Unit Tests (Pragmatic Architecture)', () => {
         }),
       };
 
+      mockHydrator = {
+        hydrateProjectEntries: jest.fn().mockResolvedValue({
+          toJSON: () => ({ totalDocs: 1, totalFiles: 0, totalFolders: 0 }),
+        }),
+      };
+      mockAggregator.hydrateProjectEntries = mockHydrator.hydrateProjectEntries;
       service = new IntegrationsService(
         mockRepo,
         zoteroProvider,

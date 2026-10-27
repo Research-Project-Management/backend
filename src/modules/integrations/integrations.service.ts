@@ -75,6 +75,56 @@ export class IntegrationsService {
     this.providers.set(this.githubProvider.provider, this.githubProvider);
   }
 
+  private pruneExpiredOAuthStates(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.inMemoryOAuthState.entries()) {
+      if (entry.expiresAt <= now) {
+        this.inMemoryOAuthState.delete(key);
+      }
+    }
+    while (this.inMemoryOAuthState.size > 5000) {
+      const oldestKey = this.inMemoryOAuthState.keys().next().value;
+      if (!oldestKey) break;
+      this.inMemoryOAuthState.delete(oldestKey);
+    }
+  }
+
+  private validateRedirectUri(redirectUri: string): void {
+    if (!redirectUri) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(redirectUri);
+    } catch {
+      throw new BadRequestException('Invalid redirectUri URL format');
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new BadRequestException('Invalid redirectUri protocol');
+    }
+
+    const allowedOrigins = new Set<string>();
+    for (const envUrl of [process.env.CLIENT_URL, process.env.API_URL]) {
+      if (envUrl) {
+        try {
+          allowedOrigins.add(new URL(envUrl).origin);
+        } catch {
+          // ignore malformed env URL
+        }
+      }
+    }
+
+    if (
+      allowedOrigins.size > 0 &&
+      !allowedOrigins.has(parsed.origin) &&
+      parsed.hostname !== 'localhost' &&
+      parsed.hostname !== '127.0.0.1'
+    ) {
+      throw new BadRequestException(
+        `Disallowed redirectUri origin: ${parsed.origin}`,
+      );
+    }
+  }
+
   private getProvider(provider: IntegrationProviderType): IIntegrationProvider {
     const instance = this.providers.get(provider);
     if (!instance) {
@@ -162,6 +212,8 @@ export class IntegrationsService {
     provider: IntegrationProviderType,
     redirectUri: string,
   ): Promise<OAuthInitiationResult> {
+    this.validateRedirectUri(redirectUri);
+    this.pruneExpiredOAuthStates();
     const result = await this.getProvider(provider).initiateOAuth(userId, redirectUri);
     if (result.state) {
       if (this.redis) {
@@ -207,6 +259,7 @@ export class IntegrationsService {
         }
       }
       if (!stateUserId) {
+        this.pruneExpiredOAuthStates();
         const mem = this.inMemoryOAuthState.get(params.state);
         if (mem && mem.expiresAt > Date.now()) {
           if (mem.provider === params.provider) {
@@ -419,6 +472,11 @@ export class IntegrationsService {
     );
 
     const targetBibFile = dto.targetBibFile || 'references.bib';
+    if (!/^[\w.-]+\.bib$/.test(targetBibFile) || targetBibFile.includes('..')) {
+      throw new BadRequestException(
+        'targetBibFile must be a valid .bib filename without path traversal',
+      );
+    }
 
     // Sync .bib document cleanly as a text DOC in Docstore & Structure tree (no duplicate binary Filestore blob)
     if (this.docstoreService && this.structureService) {
@@ -442,9 +500,8 @@ export class IntegrationsService {
           );
         } else {
           if (existingNode) {
-            await this.structureService.deleteNode(
-              dto.projectId,
-              existingNode.id,
+            throw new BadRequestException(
+              `Target file "${targetBibFile}" already exists as a non-document node.`,
             );
           }
           const doc = await this.docstoreService.createDoc(dto.projectId, {
@@ -463,6 +520,7 @@ export class IntegrationsService {
         this.logger.warn(
           `Could not sync docstore node for ${targetBibFile}: ${errMsg}`,
         );
+        throw docErr;
       }
     } else if (
       this.filestoreService &&
@@ -579,6 +637,7 @@ export class IntegrationsService {
   }
 
   async linkProjectGithub(userId: string, dto: LinkGithubRepoDto) {
+    await this.repo.assertUserProjectAccess(userId, dto.projectId, true);
     const { connId } = await this.getDecryptedGithubToken(userId);
     const branch = dto.branch || 'main';
 
@@ -600,6 +659,7 @@ export class IntegrationsService {
   }
 
   async getProjectGithubLink(userId: string, projectId: string) {
+    await this.repo.assertUserProjectAccess(userId, projectId, false);
     const conn = await this.repo.findConnection(userId, 'github');
     if (!conn) {
       return { isConnected: false, link: null };
@@ -621,7 +681,7 @@ export class IntegrationsService {
   }
 
   async pushProjectToGithub(userId: string, dto: PushGithubDto) {
-    await this.repo.assertUserProjectAccess(userId, dto.projectId, false);
+    await this.repo.assertUserProjectAccess(userId, dto.projectId, true);
     const { token, connId } = await this.getDecryptedGithubToken(userId);
 
     const link = await this.repo.findProjectLink(dto.projectId, connId);

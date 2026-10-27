@@ -25,9 +25,12 @@ export class ProjectResourceResolver {
       const resolvedResourceProjects = new Map<string, string>(); // resourceType -> projectId
 
       // 1. Resolve from Document / Page IDs
+      let authoritativePageId: string | undefined;
       const pageId =
         (typeof request.params?.pageId === 'string' && request.params.pageId) ||
         (typeof request.params?.docId === 'string' && request.params.docId) ||
+        (typeof request.params?.rootPageId === 'string' &&
+          request.params.rootPageId) ||
         (typeof request.body?.pageId === 'string' && request.body.pageId) ||
         (typeof request.body?.page_id === 'string' && request.body.page_id) ||
         (typeof request.body?.docId === 'string' && request.body.docId) ||
@@ -38,18 +41,20 @@ export class ProjectResourceResolver {
       if (pageId && isUUID(pageId)) {
         const doc = await this.prisma.manuscriptDoc.findUnique({
           where: { id: pageId },
-          select: { projectId: true },
+          select: { id: true, projectId: true },
         });
         if (doc?.projectId) {
           resolvedResourceProjects.set(`doc:${pageId}`, doc.projectId);
+          authoritativePageId = doc.id;
         } else {
           // Check if the pageId is a ManuscriptNode ID
           const node = await this.prisma.manuscriptNode.findUnique({
             where: { id: pageId },
-            select: { projectId: true },
+            select: { id: true, projectId: true, docId: true },
           });
           if (node?.projectId) {
             resolvedResourceProjects.set(`node:${pageId}`, node.projectId);
+            authoritativePageId = node.docId || node.id;
           } else {
             // Legacy support: check if the pageId is actually a project ID
             const project = await this.prisma.project.findUnique({
@@ -347,45 +352,143 @@ export class ProjectResourceResolver {
           ? Array.from(resolvedResourceProjects.values())[0]
           : undefined;
 
-      // 7. Resolve and normalize client hints (header, query, body)
-      const rawClientHint =
-        request.headers?.['x-project-id'] ||
-        request.query?.projectId ||
-        (typeof request.body?.projectId === 'string'
-          ? request.body.projectId
-          : undefined) ||
-        (typeof request.body?.project_id === 'string'
-          ? request.body.project_id
-          : undefined);
+      const PERSONAL_ALIASES = new Set([
+        '',
+        'undefined',
+        'null',
+        'me',
+        'user',
+        'personal',
+        'global',
+        'default',
+      ]);
 
-      let normalizedClientHint: string | undefined;
-      if (rawClientHint && typeof rawClientHint === 'string') {
-        const trimmed = rawClientHint.trim();
-        if (isUUID(trimmed)) {
-          normalizedClientHint = trimmed;
-        } else if (
-          ![
-            'undefined',
-            'null',
-            'me',
-            'user',
-            'personal',
-            'global',
-            'default',
-          ].includes(trimmed.toLowerCase())
-        ) {
-          const project = await this.prisma.project.findFirst({
-            where: {
-              identifier: { equals: trimmed, mode: 'insensitive' },
-              deletedAt: null,
-            },
-            select: { id: true },
+      const resolveSingleHint = async (
+        raw: unknown,
+      ): Promise<{
+        provided: boolean;
+        isPersonal: boolean;
+        projectId?: string;
+      }> => {
+        if (raw === undefined || raw === null) {
+          return { provided: false, isPersonal: false };
+        }
+        if (typeof raw !== 'string') {
+          throw new ForbiddenException({
+            statusCode: 403,
+            code: 'PROJECT_CONTEXT_MISMATCH',
+            message: 'Invalid project context format',
           });
-          if (project?.id) {
-            normalizedClientHint = project.id;
-          }
+        }
+        const trimmed = raw.trim();
+        if (PERSONAL_ALIASES.has(trimmed.toLowerCase())) {
+          return { provided: true, isPersonal: true };
+        }
+        if (isUUID(trimmed)) {
+          return { provided: true, isPersonal: false, projectId: trimmed };
+        }
+        const project = await this.prisma.project?.findFirst?.({
+          where: {
+            identifier: { equals: trimmed, mode: 'insensitive' },
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+        if (project?.id) {
+          return { provided: true, isPersonal: false, projectId: project.id };
+        }
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'ACCESS_DENIED',
+          message: 'Invalid or unknown project identifier',
+        });
+      };
+
+      // 7. Resolve and cross-check all client hints (header, query, body)
+      const hintSources: Array<[string, unknown]> = [
+        ['header:x-project-id', request.headers?.['x-project-id']],
+        ['query:projectId', request.query?.projectId],
+        ['body:projectId', request.body?.projectId],
+        ['body:project_id', request.body?.project_id],
+      ];
+
+      const resolvedHints: Array<{ source: string; projectId: string }> = [];
+      for (const [source, rawVal] of hintSources) {
+        const res = await resolveSingleHint(rawVal);
+        if (res.provided && !res.isPersonal && res.projectId) {
+          resolvedHints.push({ source, projectId: res.projectId });
         }
       }
+
+      const distinctHintIds = Array.from(
+        new Set(resolvedHints.map((h) => h.projectId.toLowerCase())),
+      );
+      if (distinctHintIds.length > 1) {
+        this.logger.warn(
+          `Project context mismatch across client hints: ${resolvedHints
+            .map((h) => `${h.source}=${h.projectId}`)
+            .join(', ')}`,
+        );
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'PROJECT_CONTEXT_MISMATCH',
+          message:
+            'Conflicting project context hints between header, query, and body',
+        });
+      }
+
+      const normalizedClientHint = resolvedHints[0]?.projectId;
+
+      const synchronizeRequestProjectScope = (finalProjectId: string | null) => {
+        if (finalProjectId) {
+          request.resolvedProjectId = finalProjectId;
+          if (authoritativePageId) {
+            request.resolvedPageId = authoritativePageId;
+          } else if (pageId && isUUID(pageId)) {
+            request.resolvedPageId = pageId;
+          }
+          if (request.query && 'projectId' in request.query) {
+            request.query.projectId = finalProjectId;
+          }
+          if (
+            request.body &&
+            typeof request.body === 'object' &&
+            'projectId' in request.body
+          ) {
+            request.body.projectId = finalProjectId;
+          }
+          if (
+            request.body &&
+            typeof request.body === 'object' &&
+            'project_id' in request.body
+          ) {
+            request.body.project_id = finalProjectId;
+          }
+          if (request.params && 'projectId' in request.params) {
+            request.params.projectId = finalProjectId;
+          }
+        } else {
+          delete request.resolvedProjectId;
+          delete request.resolvedPageId;
+          if (request.query && 'projectId' in request.query) {
+            delete request.query.projectId;
+          }
+          if (
+            request.body &&
+            typeof request.body === 'object' &&
+            'projectId' in request.body
+          ) {
+            delete request.body.projectId;
+          }
+          if (
+            request.body &&
+            typeof request.body === 'object' &&
+            'project_id' in request.body
+          ) {
+            delete request.body.project_id;
+          }
+        }
+      };
 
       // 8. Cross-check client hint with authoritative resource project
       if (authoritativeResourceProjectId && normalizedClientHint) {
@@ -405,42 +508,36 @@ export class ProjectResourceResolver {
         }
       }
 
+      // 9. Resolve from route path parameter :projectId
+      const paramRes = await resolveSingleHint(request.params?.projectId);
+      const normalizedParamProject =
+        paramRes.provided && !paramRes.isPersonal
+          ? paramRes.projectId
+          : undefined;
+
+      if (authoritativeResourceProjectId && normalizedParamProject) {
+        if (
+          authoritativeResourceProjectId.toLowerCase() !==
+          normalizedParamProject.toLowerCase()
+        ) {
+          this.logger.warn(
+            `Project context mismatch: resource project (${authoritativeResourceProjectId}) disagrees with path param (${normalizedParamProject})`,
+          );
+          throw new ForbiddenException({
+            statusCode: 403,
+            code: 'PROJECT_CONTEXT_MISMATCH',
+            message:
+              'Resource does not belong to the requested project context',
+          });
+        }
+      }
+
       if (authoritativeResourceProjectId) {
+        synchronizeRequestProjectScope(authoritativeResourceProjectId);
         return {
           projectId: authoritativeResourceProjectId,
           source: 'resource',
         };
-      }
-
-      // 9. If no resource, resolve from route path parameter :projectId
-      const rawParamProject = request.params?.projectId;
-      let normalizedParamProject: string | undefined;
-      if (rawParamProject && typeof rawParamProject === 'string') {
-        const trimmed = rawParamProject.trim();
-        if (isUUID(trimmed)) {
-          normalizedParamProject = trimmed;
-        } else if (
-          ![
-            'undefined',
-            'null',
-            'me',
-            'user',
-            'personal',
-            'global',
-            'default',
-          ].includes(trimmed.toLowerCase())
-        ) {
-          const project = await this.prisma.project.findFirst({
-            where: {
-              identifier: { equals: trimmed, mode: 'insensitive' },
-              deletedAt: null,
-            },
-            select: { id: true },
-          });
-          if (project?.id) {
-            normalizedParamProject = project.id;
-          }
-        }
       }
 
       if (normalizedParamProject) {
@@ -459,6 +556,7 @@ export class ProjectResourceResolver {
               'Resource does not belong to the requested project context',
           });
         }
+        synchronizeRequestProjectScope(normalizedParamProject);
         return {
           projectId: normalizedParamProject,
           source: 'param',
@@ -467,12 +565,14 @@ export class ProjectResourceResolver {
 
       // 10. Fallback to client hint if no resource or path param was present
       if (normalizedClientHint) {
+        synchronizeRequestProjectScope(normalizedClientHint);
         return {
           projectId: normalizedClientHint,
           source: 'hint',
         };
       }
 
+      synchronizeRequestProjectScope(null);
       return null;
     } catch (error) {
       if (error instanceof ForbiddenException) {

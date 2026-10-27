@@ -22,7 +22,7 @@ import {
 
 @ApiTags('Chat')
 @ApiBearerAuth('JWT-auth')
-@Controller('chat')
+@Controller(['api/chat', 'chat'])
 @UseGuards(AuthGuard)
 export class ChatController {
   constructor(

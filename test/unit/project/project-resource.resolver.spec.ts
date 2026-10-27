@@ -59,6 +59,8 @@ describe('ProjectResourceResolver', () => {
       projectId: projectAId,
       source: 'resource',
     });
+    expect((req as any).resolvedProjectId).toBe(projectAId);
+    expect((req as any).resolvedPageId).toBe(pageAId);
   });
 
   it('should throw PROJECT_CONTEXT_MISMATCH if client project hint disagrees with resource project', async () => {
@@ -152,6 +154,33 @@ describe('ProjectResourceResolver', () => {
       params: { pageId: pageAId },
       headers: {},
       query: {},
+      body: {},
+    };
+
+    await expect(resolver.resolveAuthoritativeProjectId(req)).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('should throw PROJECT_CONTEXT_MISMATCH when header x-project-id conflicts with query.projectId', async () => {
+    const req = {
+      params: {},
+      headers: { 'x-project-id': projectAId },
+      query: { projectId: projectBId },
+      body: {},
+    };
+
+    await expect(resolver.resolveAuthoritativeProjectId(req)).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('should throw ACCESS_DENIED when non-UUID projectId hint does not match any existing project', async () => {
+    mockPrisma.project.findFirst.mockResolvedValue(null);
+    const req = {
+      params: {},
+      headers: {},
+      query: { projectId: 'unknown-slug' },
       body: {},
     };
 

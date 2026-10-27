@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 
 export class SyncCollectionDto {
   @IsNotEmpty()
@@ -15,6 +15,10 @@ export class SyncCollectionDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^[\w.-]+\.bib$/, {
+    message:
+      'targetBibFile must be a valid .bib filename without path traversal',
+  })
   targetBibFile?: string;
 }
 

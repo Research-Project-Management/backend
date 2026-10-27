@@ -170,47 +170,32 @@ export class ProjectAccessGuard implements CanActivate {
     request.accessContext = accessContext;
     request.permissions = accessContext.effectivePermissions;
 
-    // 8. Verify against Required Roles (if configured)
-    if (requiredRoles && requiredRoles.length > 0) {
-      const isRoleAllowed = requiredRoles.some((r) => {
-        const normalized = String(r).toLowerCase();
-        if (normalized === 'member') {
-          return (
-            accessContext.role === Role.OWNER ||
-            accessContext.role === Role.COORDINATOR ||
-            accessContext.role === Role.CONTRIBUTOR ||
-            accessContext.role === Role.REVIEWER
-          );
-        }
-        if (normalized === 'admin') {
-          return accessContext.role === Role.OWNER;
-        }
-        if (normalized === 'commenter' || normalized === 'viewer') {
-          return accessContext.role === Role.REVIEWER;
-        }
-        return normalized === accessContext.role.toLowerCase();
+    // 8. Verify against Required Roles (Specification Pattern)
+    if (
+      requiredRoles &&
+      requiredRoles.length > 0 &&
+      !ProjectRolePolicy.satisfiesRequiredRoles(
+        accessContext.role,
+        requiredRoles,
+      )
+    ) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'ROLE_INSUFFICIENT',
+        message: 'Insufficient role for this action',
       });
-
-      if (!isRoleAllowed) {
-        throw new ForbiddenException({
-          statusCode: 403,
-          code: 'ROLE_INSUFFICIENT',
-          message: 'Insufficient role for this action',
-        });
-      }
     }
 
-    // 9. Verify against Minimum Role Hierarchy (if configured)
-    if (minRole) {
-      const currentLevel = RoleHierarchy[accessContext.role] || 0;
-      const requiredLevel = RoleHierarchy[minRole] || 0;
-      if (currentLevel < requiredLevel) {
-        throw new ForbiddenException({
-          statusCode: 403,
-          code: 'ROLE_INSUFFICIENT',
-          message: 'Insufficient role for this action',
-        });
-      }
+    // 9. Verify against Minimum Role Hierarchy (Specification Pattern)
+    if (
+      minRole &&
+      !ProjectRolePolicy.satisfiesMinRole(accessContext.role, minRole)
+    ) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'ROLE_INSUFFICIENT',
+        message: 'Insufficient role for this action',
+      });
     }
 
     // 10. Verify against Required Permissions (with Granular Overrides + Owner Bypass)
@@ -233,6 +218,51 @@ export class ProjectAccessGuard implements CanActivate {
     }
 
     return true;
+  }
+}
+
+/**
+ * Specification / Policy Pattern: Pure role & alias evaluation rules for Project Access.
+ */
+export class ProjectRolePolicy {
+  public static matchesRoleOrAlias(
+    actualRole: Role | string,
+    requiredRoleOrAlias: Role | string,
+  ): boolean {
+    const normalizedReq = String(requiredRoleOrAlias).trim().toLowerCase();
+    const normalizedActual = String(actualRole).trim().toLowerCase();
+
+    if (normalizedReq === 'member') {
+      return (
+        normalizedActual === Role.OWNER ||
+        normalizedActual === Role.COORDINATOR ||
+        normalizedActual === Role.CONTRIBUTOR ||
+        normalizedActual === Role.REVIEWER
+      );
+    }
+    if (normalizedReq === 'admin') {
+      return normalizedActual === Role.OWNER;
+    }
+    if (normalizedReq === 'commenter' || normalizedReq === 'viewer') {
+      return normalizedActual === Role.REVIEWER;
+    }
+    return normalizedReq === normalizedActual;
+  }
+
+  public static satisfiesRequiredRoles(
+    actualRole: Role | string,
+    requiredRoles: ReadonlyArray<Role | string>,
+  ): boolean {
+    if (!requiredRoles || requiredRoles.length === 0) return true;
+    return requiredRoles.some((req) =>
+      this.matchesRoleOrAlias(actualRole, req),
+    );
+  }
+
+  public static satisfiesMinRole(actualRole: Role, minRole: Role): boolean {
+    const currentLevel = RoleHierarchy[actualRole] || 0;
+    const requiredLevel = RoleHierarchy[minRole] || 0;
+    return currentLevel >= requiredLevel;
   }
 }
 

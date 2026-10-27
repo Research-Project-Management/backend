@@ -10,9 +10,9 @@ export interface AccessConfig {
 }
 
 export const accessConfig = registerAs('access', (): AccessConfig => {
-  const modeRaw = (process.env.ACCESS_CONTROL_MODE || 'report').toLowerCase();
+  const modeRaw = (process.env.ACCESS_CONTROL_MODE || 'enforce').toLowerCase();
   const enforcementMode: AccessEnforcementMode =
-    modeRaw === 'enforce' ? 'enforce' : modeRaw === 'off' ? 'off' : 'report';
+    modeRaw === 'off' ? 'off' : modeRaw === 'report' ? 'report' : 'enforce';
 
   const rawOperatorIds = process.env.OPERATOR_USER_IDS || '';
   const operatorUserIds = rawOperatorIds

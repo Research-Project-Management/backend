@@ -335,62 +335,67 @@ export class GithubProvider implements IIntegrationProvider {
 }`;
     }
 
-    try {
-      const contentsRes = await fetch(
-        `https://api.github.com/repos/${collectionId}/contents/`,
-        {
-          headers: {
-            Authorization: `Bearer ${decryptedToken}`,
-            Accept: 'application/vnd.github.v3+json',
-            'User-Agent': 'FluxResearchPlatform/1.0',
-          },
+    const safeRepo = this.validateRepoFullName(collectionId);
+    const contentsRes = await fetch(
+      `https://api.github.com/repos/${safeRepo}/contents/`,
+      {
+        headers: {
+          Authorization: `Bearer ${decryptedToken}`,
+          Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'FluxResearchPlatform/1.0',
         },
-      );
+      },
+    );
 
-      if (contentsRes.ok) {
-        const contents = (await contentsRes.json()) as Array<{
-          name: string;
-          download_url?: string;
-          type: string;
-        }>;
-
-        if (Array.isArray(contents)) {
-          const bibFile = contents.find(
-            (c) => c.type === 'file' && c.name.toLowerCase().endsWith('.bib'),
-          );
-          if (bibFile && bibFile.download_url) {
-            const rawRes = await fetch(bibFile.download_url, {
-              headers: {
-                Authorization: `Bearer ${decryptedToken}`,
-                'User-Agent': 'FluxResearchPlatform/1.0',
-              },
-            });
-            if (rawRes.ok) {
-              return await rawRes.text();
-            }
-          }
-        }
-      }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Could not fetch bibtex from ${collectionId}: ${errMsg}`,
+    if (!contentsRes.ok) {
+      const errText = await contentsRes.text();
+      throw new Error(
+        `Failed to fetch repository contents for ${collectionId}: HTTP ${contentsRes.status} ${errText}`,
       );
     }
 
-    return `% GitHub Repository: ${collectionId}\n% Synced with Flux LaTeX Platform\n`;
+    const contents = (await contentsRes.json()) as Array<{
+      name: string;
+      download_url?: string;
+      type: string;
+    }>;
+
+    if (Array.isArray(contents)) {
+      const bibFile = contents.find(
+        (c) => c.type === 'file' && c.name.toLowerCase().endsWith('.bib'),
+      );
+      if (bibFile && bibFile.download_url) {
+        const rawRes = await fetch(bibFile.download_url, {
+          headers: {
+            Authorization: `Bearer ${decryptedToken}`,
+            'User-Agent': 'FluxResearchPlatform/1.0',
+          },
+        });
+        if (!rawRes.ok) {
+          throw new Error(
+            `Failed to download .bib file from ${collectionId}: HTTP ${rawRes.status}`,
+          );
+        }
+        return await rawRes.text();
+      }
+    }
+
+    throw new BadRequestException(
+      `No .bib file found in GitHub repository ${collectionId}`,
+    );
   }
 
   async listBranches(
     decryptedToken: string,
     repoFullName: string,
   ): Promise<string[]> {
+    const safeRepo = this.validateRepoFullName(repoFullName);
     if (this.isMockMode) {
       return ['main', 'dev', 'paper-revisions'];
     }
 
     const branchesRes = await fetch(
-      `https://api.github.com/repos/${repoFullName}/branches?per_page=100`,
+      `https://api.github.com/repos/${safeRepo}/branches?per_page=100`,
       {
         headers: {
           Authorization: `Bearer ${decryptedToken}`,
@@ -466,7 +471,9 @@ export class GithubProvider implements IIntegrationProvider {
     author?: { name: string; email: string };
   }): Promise<{ commitSha: string; commitUrl: string }> {
     const { decryptedToken, repoFullName, files } = params;
+    const safeRepo = this.validateRepoFullName(repoFullName);
     const branch = params.branch || 'main';
+    const encodedBranch = this.encodeGitRef(branch);
     const commitMessage =
       params.commitMessage || 'Update manuscript from Flux LaTeX Platform';
 
@@ -474,7 +481,7 @@ export class GithubProvider implements IIntegrationProvider {
       const mockSha = `commit_${randomBytes(10).toString('hex')}`;
       return {
         commitSha: mockSha,
-        commitUrl: `https://github.com/${repoFullName}/commit/${mockSha}`,
+        commitUrl: `https://github.com/${safeRepo}/commit/${mockSha}`,
       };
     }
 
@@ -487,7 +494,7 @@ export class GithubProvider implements IIntegrationProvider {
 
     // 1. Get current branch reference
     const refRes = await fetch(
-      `https://api.github.com/repos/${repoFullName}/git/ref/heads/${branch}`,
+      `https://api.github.com/repos/${safeRepo}/git/ref/heads/${encodedBranch}`,
       { headers },
     );
 
@@ -498,7 +505,7 @@ export class GithubProvider implements IIntegrationProvider {
     } else {
       // Check repository default branch if target branch ref not found
       const repoRes = await fetch(
-        `https://api.github.com/repos/${repoFullName}`,
+        `https://api.github.com/repos/${safeRepo}`,
         { headers },
       );
       if (!repoRes.ok) {
@@ -508,9 +515,10 @@ export class GithubProvider implements IIntegrationProvider {
       }
       const repoData = (await repoRes.json()) as { default_branch: string };
       const defaultBranch = repoData.default_branch || 'main';
+      const encodedDefaultBranch = this.encodeGitRef(defaultBranch);
 
       const defaultRefRes = await fetch(
-        `https://api.github.com/repos/${repoFullName}/git/ref/heads/${defaultBranch}`,
+        `https://api.github.com/repos/${safeRepo}/git/ref/heads/${encodedDefaultBranch}`,
         { headers },
       );
       if (!defaultRefRes.ok) {
@@ -526,7 +534,7 @@ export class GithubProvider implements IIntegrationProvider {
       // Create new branch pointer from default branch
       if (branch !== defaultBranch) {
         const createRefRes = await fetch(
-          `https://api.github.com/repos/${repoFullName}/git/refs`,
+          `https://api.github.com/repos/${safeRepo}/git/refs`,
           {
             method: 'POST',
             headers,
@@ -547,7 +555,7 @@ export class GithubProvider implements IIntegrationProvider {
 
     // 2. Get latest commit to find base_tree
     const commitRes = await fetch(
-      `https://api.github.com/repos/${repoFullName}/git/commits/${latestCommitSha}`,
+      `https://api.github.com/repos/${safeRepo}/git/commits/${latestCommitSha}`,
       { headers },
     );
     if (!commitRes.ok) {
@@ -568,11 +576,11 @@ export class GithubProvider implements IIntegrationProvider {
 
     for (const file of files) {
       const cleanPath = file.path.replace(/^\/+/, '');
-      if (!cleanPath || cleanPath.startsWith('.git/')) continue;
+      if (!cleanPath || cleanPath.startsWith('.git/') || !this.isSafeGitTreePath(cleanPath)) continue;
 
       const base64Content = file.data.toString('base64');
       const blobRes = await fetch(
-        `https://api.github.com/repos/${repoFullName}/git/blobs`,
+        `https://api.github.com/repos/${safeRepo}/git/blobs`,
         {
           method: 'POST',
           headers,
@@ -601,7 +609,7 @@ export class GithubProvider implements IIntegrationProvider {
 
     // 4. Create new Git Tree
     const treeRes = await fetch(
-      `https://api.github.com/repos/${repoFullName}/git/trees`,
+      `https://api.github.com/repos/${safeRepo}/git/trees`,
       {
         method: 'POST',
         headers,
@@ -635,7 +643,7 @@ export class GithubProvider implements IIntegrationProvider {
     }
 
     const newCommitRes = await fetch(
-      `https://api.github.com/repos/${repoFullName}/git/commits`,
+      `https://api.github.com/repos/${safeRepo}/git/commits`,
       {
         method: 'POST',
         headers,
@@ -656,7 +664,7 @@ export class GithubProvider implements IIntegrationProvider {
 
     // 6. Update reference heads to point to new commit
     const updateRefRes = await fetch(
-      `https://api.github.com/repos/${repoFullName}/git/refs/heads/${branch}`,
+      `https://api.github.com/repos/${safeRepo}/git/refs/heads/${encodedBranch}`,
       {
         method: 'PATCH',
         headers,
@@ -678,7 +686,7 @@ export class GithubProvider implements IIntegrationProvider {
       commitSha: newCommit.sha,
       commitUrl:
         newCommit.html_url ||
-        `https://github.com/${repoFullName}/commit/${newCommit.sha}`,
+        `https://github.com/${safeRepo}/commit/${newCommit.sha}`,
     };
   }
 
@@ -688,7 +696,9 @@ export class GithubProvider implements IIntegrationProvider {
     branch?: string;
   }): Promise<Array<{ path: string; data: Buffer }>> {
     const { decryptedToken, repoFullName } = params;
+    const safeRepo = this.validateRepoFullName(repoFullName);
     const branch = params.branch || 'main';
+    const encodedBranch = this.encodeGitRef(branch);
 
     if (this.isMockMode) {
       return [
@@ -717,7 +727,7 @@ export class GithubProvider implements IIntegrationProvider {
 
     // 1. Get branch head commit
     const refRes = await fetch(
-      `https://api.github.com/repos/${repoFullName}/git/ref/heads/${branch}`,
+      `https://api.github.com/repos/${safeRepo}/git/ref/heads/${encodedBranch}`,
       { headers },
     );
     if (!refRes.ok) {
@@ -730,7 +740,7 @@ export class GithubProvider implements IIntegrationProvider {
 
     // 2. Get commit tree
     const commitRes = await fetch(
-      `https://api.github.com/repos/${repoFullName}/git/commits/${latestCommitSha}`,
+      `https://api.github.com/repos/${safeRepo}/git/commits/${latestCommitSha}`,
       { headers },
     );
     if (!commitRes.ok) {
@@ -742,7 +752,7 @@ export class GithubProvider implements IIntegrationProvider {
 
     // 3. Fetch recursive tree
     const treeRes = await fetch(
-      `https://api.github.com/repos/${repoFullName}/git/trees/${commitData.tree.sha}?recursive=1`,
+      `https://api.github.com/repos/${safeRepo}/git/trees/${commitData.tree.sha}?recursive=1`,
       { headers },
     );
     if (!treeRes.ok) {
@@ -754,15 +764,18 @@ export class GithubProvider implements IIntegrationProvider {
 
     const pulledFiles: Array<{ path: string; data: Buffer }> = [];
 
-    // Filter blobs only, excluding git metadata and excessively large files
+    // Filter blobs only, excluding git metadata and unsafe paths
     const blobEntries = (treeData.tree || []).filter(
-      (item) => item.type === 'blob' && !item.path.startsWith('.git/'),
+      (item) =>
+        item.type === 'blob' &&
+        !item.path.startsWith('.git/') &&
+        this.isSafeGitTreePath(item.path),
     );
 
     for (const item of blobEntries) {
       try {
         const blobRes = await fetch(
-          `https://api.github.com/repos/${repoFullName}/git/blobs/${item.sha}`,
+          `https://api.github.com/repos/${safeRepo}/git/blobs/${item.sha}`,
           { headers },
         );
         if (!blobRes.ok) continue;

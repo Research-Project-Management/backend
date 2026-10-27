@@ -215,6 +215,8 @@ export class IntegrationsController {
 
       const clientUrl = resolvePublicUrl('CLIENT_URL', process.env.CLIENT_URL);
 
+      const safeClientUrl = JSON.stringify(clientUrl || '');
+
       const html = `<!DOCTYPE html>
 <html>
 <head><title>Authorization Successful</title></head>
@@ -225,13 +227,14 @@ export class IntegrationsController {
   </div>
   <script>
     try {
+      const targetOrigin = ${safeClientUrl} || window.location.origin;
       if (window.opener) {
-        window.opener.postMessage({ type: 'OAUTH_SUCCESS', provider: '${escapeHtml(provider)}' }, clientUrl || window.location.origin);
+        window.opener.postMessage({ type: 'OAUTH_SUCCESS', provider: '${escapeHtml(provider)}' }, targetOrigin);
       }
       setTimeout(() => {
         window.close();
         setTimeout(() => {
-          window.location.href = '${clientUrl}/settings/integrations';
+          window.location.href = targetOrigin + '/settings/integrations';
         }, 400);
       }, 400);
     } catch (e) {

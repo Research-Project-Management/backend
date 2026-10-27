@@ -13,7 +13,7 @@ import { FriendshipService } from '../services/friendship.service';
 
 @ApiTags('Chat')
 @ApiBearerAuth('JWT-auth')
-@Controller('friends')
+@Controller(['api/friends', 'friends'])
 @UseGuards(AuthGuard)
 export class FriendshipController {
   constructor(private readonly friendshipService: FriendshipService) {}

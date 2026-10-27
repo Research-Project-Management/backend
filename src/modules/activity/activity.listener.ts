@@ -141,6 +141,58 @@ export class ActivityListener {
     }
   }
 
+  @OnEvent('manuscripts.*', { async: true })
+  async handleManuscriptEvents(payload: {
+    projectId?: string;
+    event?: string;
+    eventName?: string;
+    payload?: Record<string, unknown>;
+    data?: Record<string, unknown>;
+    docId?: string;
+    actorId?: string;
+  }) {
+    const projectId = payload?.projectId;
+    if (!projectId) return;
+
+    const eventName = payload.event || payload.eventName || '';
+    const data = (payload.payload || payload.data || {}) as Record<string, unknown>;
+    const actorId = (data.userId || data.actorId || payload.actorId || '') as string;
+    const docId = (data.docId || payload.docId || '') as string;
+
+    let verb = 'updated';
+    let entityType: any = 'page';
+
+    if (eventName.includes('comment')) {
+      entityType = 'comment';
+      verb = eventName.includes('create')
+        ? 'commented'
+        : eventName.includes('resolve')
+          ? 'resolved'
+          : 'updated_comment';
+    } else if (eventName.includes('track-changes')) {
+      verb = eventName.includes('resolve')
+        ? 'resolved_suggestion'
+        : 'suggested_change';
+    } else if (eventName.includes('version') || eventName.includes('restore')) {
+      verb = 'restored_version';
+    } else if (eventName.includes('file-tree')) {
+      verb = 'file_tree_updated';
+    }
+
+    const activityEvent = new DomainActivityEvent({
+      entityType,
+      entityId: docId || projectId,
+      verb,
+      actorId,
+      projectId,
+      field: eventName || 'manuscript',
+      newValue:
+        typeof data.text === 'string' ? data.text.slice(0, 100) : undefined,
+    });
+
+    await this.handleGenericActivity(activityEvent);
+  }
+
   private async invalidateAnalyticsCache(
     projectId?: string | null,
     userId?: string | null,

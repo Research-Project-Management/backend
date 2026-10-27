@@ -2,6 +2,8 @@ import { resolveServiceUrl } from '../../utils/public-urls';
 import { ConfigService } from '@nestjs/config';
 import type { BullRootModuleOptions } from '@nestjs/bullmq';
 
+export const MANUSCRIPT_CLSI_QUEUE = 'MANUSCRIPT_CLSI_QUEUE';
+
 /**
  * Standard BullMQ & Redis connection provider for NestJS.
  * Shared across AppModule (Web API) and WorkerModule (Headless Workers)
